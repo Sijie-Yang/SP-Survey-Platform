@@ -1261,7 +1261,7 @@ export default function AdminApp() {
         </DialogTitle>
         <DialogContent>
           {surveyConfig ? (
-            <SurveyPreview config={surveyConfig} />
+            <SurveyPreview config={surveyConfig} currentProject={currentProject} />
           ) : (
             <Typography>No survey configuration available</Typography>
           )}

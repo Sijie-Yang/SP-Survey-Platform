@@ -70,19 +70,29 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const handleQuestionChange = (field, value) => {
     const updates = { [field]: value };
     
-    // Set default imageCount when question type changes
+    // Set default properties when question type changes to image type
     if (field === 'type') {
       // Types that should have 1 image by default
       if (value === 'imagerating' || value === 'imagematrix' || value === 'imageboolean' || value === 'image') {
         if (!editedQuestion.imageCount) {
           updates.imageCount = 1;
         }
+        // ✅ Auto-set Hugging Face random image selection for all image questions
+        // This ensures images are randomly selected from the Hugging Face dataset
+        updates.imageSelectionMode = 'huggingface_random';
+        updates.randomImageSelection = true;
+        updates.choices = updates.choices || [];
       }
       // Types that should have 4 images by default
       else if (value === 'imagepicker' || value === 'imageranking') {
         if (!editedQuestion.imageCount) {
           updates.imageCount = 4;
         }
+        // ✅ Auto-set Hugging Face random image selection for all image questions
+        // This ensures images are randomly selected from the Hugging Face dataset
+        updates.imageSelectionMode = 'huggingface_random';
+        updates.randomImageSelection = true;
+        updates.choices = updates.choices || [];
       }
     }
     
@@ -156,6 +166,24 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   useEffect(() => {
     if ((editedQuestion.type === 'imagepicker' || editedQuestion.type === 'imageranking' || editedQuestion.type === 'imagerating' || editedQuestion.type === 'imageboolean' || editedQuestion.type === 'image' || editedQuestion.type === 'imagematrix') && editedQuestion.selectedImageUrls) {
       setSelectedImages(editedQuestion.selectedImageUrls);
+    }
+  }, [editedQuestion.type]);
+
+  // ✅ Auto-initialize image questions with random selection mode if not set
+  useEffect(() => {
+    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix'];
+    
+    if (imageQuestionTypes.includes(editedQuestion.type)) {
+      // Check if imageSelectionMode is missing or undefined
+      if (!editedQuestion.imageSelectionMode) {
+        console.log('🔧 Auto-setting imageSelectionMode to huggingface_random for', editedQuestion.type);
+        setEditedQuestion(prev => ({
+          ...prev,
+          imageSelectionMode: 'huggingface_random',
+          randomImageSelection: true,
+          choices: prev.choices || []
+        }));
+      }
     }
   }, [editedQuestion.type]);
 
@@ -1258,8 +1286,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             } else if (questionToSave.imageSelectionMode === 'huggingface_random') {
               // Random selection: store config for runtime loading
               questionToSave.randomImageSelection = true;
-              questionToSave.imageSource = 'huggingface';
-              questionToSave.huggingFaceConfig = currentProject?.imageDatasetConfig || {};
+              // ✅ No need to save imageSource and huggingFaceConfig - they're global project settings
               // Images will be loaded at runtime and imageHtml will be generated then
             }
             
@@ -1291,9 +1318,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               questionToSave.imageFit = "cover";
               questionToSave.randomImageSelection = true;
               
-              // Store Hugging Face config
-              questionToSave.imageSource = 'huggingface';
-              questionToSave.huggingFaceConfig = currentProject?.imageDatasetConfig || {};
+              // ✅ No need to save imageSource and huggingFaceConfig - they're global project settings
               
               // Don't set choices - they'll be generated at runtime
               delete questionToSave.choices;

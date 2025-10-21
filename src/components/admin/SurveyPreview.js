@@ -7,7 +7,7 @@ import { convertToSurveyJS, generateCustomTheme } from '../../lib/surveyStorage'
 import { themeJson } from "../../theme";
 import registerImageRankingWidget, { registerImageRatingWidget, registerImageBooleanWidget } from '../SurveyCustomComponents';
 
-export default function SurveyPreview({ config }) {
+export default function SurveyPreview({ config, currentProject }) {
   const [processedConfig, setProcessedConfig] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -66,21 +66,29 @@ export default function SurveyPreview({ config }) {
                   }
                 
                 // Process random image selection for imagepicker, imageranking, imagerating, imageboolean, imagematrix, and image questions
-                if ((element.type === 'imagepicker' || element.type === 'imageranking' || element.type === 'imagerating' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imagematrix') && element.randomImageSelection) {
-                  console.log(`🔄 Preview: Loading images for ${element.type} question: ${element.name}`);
+                // ✅ Skip if manual selection mode - use existing choices
+                const isImageQuestion = (element.type === 'imagepicker' || element.type === 'imageranking' || element.type === 'imagerating' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imagematrix');
+                const isManualMode = (element.imageSelectionMode === 'huggingface_manual' || element.imageSelectionMode === 'manual');
+                
+                if (isImageQuestion && isManualMode && element.choices && element.choices.length > 0) {
+                  console.log(`✅ Preview: Skipping image loading for ${element.type} question "${element.name}" - using manually selected images (${element.choices.length} images)`);
+                }
+                
+                if (isImageQuestion && element.randomImageSelection && !isManualMode) {
+                  console.log(`🔄 Preview: Loading random images for ${element.type} question: ${element.name}`);
                   try {
                     let result;
                     
                     // PRIORITY 1: Check if project has preloaded images
-                    if (config.preloadedImages && config.preloadedImages.length > 0) {
-                      console.log(`📦 Preview: Using preloaded images from project (${config.preloadedImages.length} available)`);
+                    if (currentProject?.preloadedImages && currentProject.preloadedImages.length > 0) {
+                      console.log(`📦 Preview: Using preloaded images from project (${currentProject.preloadedImages.length} available)`);
                       
                       // Use type-specific defaults if imageCount is not set
                       const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       
                       // Randomly select from preloaded images
-                      const shuffled = [...config.preloadedImages].sort(() => 0.5 - Math.random());
+                      const shuffled = [...currentProject.preloadedImages].sort(() => 0.5 - Math.random());
                       const selectedImages = shuffled.slice(0, imageCount);
                       
                       result = {
@@ -90,13 +98,30 @@ export default function SurveyPreview({ config }) {
                       
                       console.log(`✅ Preview: Selected ${selectedImages.length} random images from preloaded pool`);
                     }
-                    // PRIORITY 2: Determine image source if no preloaded images
-                    else if (element.imageSource === 'huggingface' && element.huggingFaceConfig) {
-                      // Load from Hugging Face
+                    // PRIORITY 2: Use global imageDatasetConfig if available
+                    else if (currentProject?.imageDatasetConfig?.enabled && currentProject.imageDatasetConfig.datasetName) {
+                      // Load from Hugging Face using global config
                       // Use type-specific defaults if imageCount is not set
                       const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
-                      console.log(`📥 Preview: Fetching ${imageCount} images from Hugging Face dataset: ${element.huggingFaceConfig.datasetName}`);
+                      console.log(`📥 Preview: Fetching ${imageCount} images from Hugging Face dataset (global config): ${currentProject.imageDatasetConfig.datasetName}`);
+                      const { getRandomImagesFromHuggingFace } = await import('../../lib/huggingface');
+                      const { huggingFaceToken, datasetName } = currentProject.imageDatasetConfig;
+                      
+                      if (datasetName) {
+                        result = await getRandomImagesFromHuggingFace(huggingFaceToken, datasetName, imageCount);
+                        console.log(`✅ Preview: Successfully loaded ${result?.images?.length || 0} images from Hugging Face`);
+                      } else {
+                        console.warn(`Preview: Hugging Face dataset name missing for question: ${element.name}`);
+                        continue;
+                      }
+                    }
+                    // PRIORITY 3: Legacy - element-specific config (kept for backward compatibility)
+                    else if (element.imageSource === 'huggingface' && element.huggingFaceConfig) {
+                      // Load from Hugging Face using element config (deprecated)
+                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
+                      const imageCount = element.imageCount || defaultCount;
+                      console.log(`📥 Preview: [Legacy] Fetching ${imageCount} images from element config: ${element.huggingFaceConfig.datasetName}`);
                       const { getRandomImagesFromHuggingFace } = await import('../../lib/huggingface');
                       const { huggingFaceToken, datasetName } = element.huggingFaceConfig;
                       
@@ -356,7 +381,9 @@ export default function SurveyPreview({ config }) {
         }}>
           📋 Preview Mode - This shows exactly how your survey will appear to participants
         </Box>
-        <Survey model={model} />
+        <Box sx={{ maxWidth: 900, mx: 'auto', px: 2 }}>
+          <Survey model={model} />
+        </Box>
       </Box>
     );
   } catch (error) {

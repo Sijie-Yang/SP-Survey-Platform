@@ -23,7 +23,10 @@ import {
   ListItem,
   ListItemText,
   ListItemSecondaryAction,
-  Chip
+  Chip,
+  Alert,
+  CircularProgress,
+  InputAdornment
 } from '@mui/material';
 import {
   ExpandMore,
@@ -31,7 +34,10 @@ import {
   Delete,
   Edit,
   DragIndicator,
-  ContentCopy
+  ContentCopy,
+  AutoAwesome,
+  Psychology,
+  CheckCircle
 } from '@mui/icons-material';
 import {
   DndContext,
@@ -53,6 +59,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import PageEditor from './PageEditor';
 import QuestionEditor from './QuestionEditor';
+import { generateSurveyFromDescription, adjustSurvey, validateApiKey } from '../../lib/openai';
 
 // Sortable Page Item Component
 function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
@@ -171,6 +178,15 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
 export default function SurveyBuilder({ config, onChange, currentProject, onNextStep }) {
   const [selectedPage, setSelectedPage] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
+  
+  // AI Assistant states
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [apiKeyValid, setApiKeyValid] = useState(false);
+  const [aiDescription, setAiDescription] = useState('');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiSuccess, setAiSuccess] = useState('');
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -422,8 +438,340 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     }
   };
 
+  // ✅ Post-process AI-generated config to ensure all image questions have correct settings
+  const processAIGeneratedConfig = (surveyConfig) => {
+    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix'];
+    
+    const processedConfig = JSON.parse(JSON.stringify(surveyConfig)); // Deep clone
+    
+    if (processedConfig.pages && Array.isArray(processedConfig.pages)) {
+      processedConfig.pages.forEach(page => {
+        if (page.elements && Array.isArray(page.elements)) {
+          page.elements.forEach(element => {
+            if (imageQuestionTypes.includes(element.type)) {
+              // Ensure image questions have correct default settings
+              if (!element.imageSelectionMode || element.imageSelectionMode === 'random') {
+                element.imageSelectionMode = 'huggingface_random';
+              }
+              element.randomImageSelection = true;
+              if (!element.choices) {
+                element.choices = [];
+              }
+              if (element.type === 'imagematrix' && !element.imageLinks) {
+                element.imageLinks = [];
+              }
+              
+              // ✅ Remove unnecessary global config fields that should not be saved per question
+              delete element.imageSource;
+              delete element.huggingFaceConfig;
+              
+              console.log(`✅ Post-processed ${element.type} question: ${element.name}`);
+            }
+          });
+        }
+      });
+    }
+    
+    return processedConfig;
+  };
+
+  // AI Assistant handlers
+  const handleValidateApiKey = async () => {
+    setAiLoading(true);
+    setAiError('');
+    setAiSuccess('');
+    
+    const result = await validateApiKey(openaiApiKey);
+    
+    setAiLoading(false);
+    
+    if (result.success) {
+      setApiKeyValid(true);
+      setAiSuccess('✅ API key validated successfully!');
+      // Store API key in sessionStorage
+      sessionStorage.setItem('openai_api_key', openaiApiKey);
+    } else {
+      setApiKeyValid(false);
+      setAiError('❌ Invalid API key. Please check and try again.');
+    }
+  };
+
+  const handleGenerateSurvey = async () => {
+    if (!aiDescription.trim()) {
+      setAiError('Please enter a survey description');
+      return;
+    }
+    
+    if (!openaiApiKey || !apiKeyValid) {
+      setAiError('Please validate your OpenAI API key first');
+      return;
+    }
+    
+    setAiLoading(true);
+    setAiError('');
+    setAiSuccess('');
+    
+    const result = await generateSurveyFromDescription(aiDescription, openaiApiKey);
+    
+    setAiLoading(false);
+    
+    if (result.success) {
+      // ✅ Post-process the AI-generated config to ensure correct image settings
+      const processedConfig = processAIGeneratedConfig(result.surveyConfig);
+      onChange(processedConfig);
+      setAiSuccess('✅ Survey generated successfully!');
+      setAiDescription('');
+    } else {
+      setAiError(`❌ Failed to generate survey: ${result.error}`);
+    }
+  };
+
+  const handleAdjustSurvey = async () => {
+    if (!aiInstruction.trim()) {
+      setAiError('Please enter modification instructions');
+      return;
+    }
+    
+    if (!openaiApiKey || !apiKeyValid) {
+      setAiError('Please validate your OpenAI API key first');
+      return;
+    }
+    
+    setAiLoading(true);
+    setAiError('');
+    setAiSuccess('');
+    
+    const result = await adjustSurvey(config, aiInstruction, openaiApiKey);
+    
+    setAiLoading(false);
+    
+    if (result.success) {
+      // ✅ Post-process the AI-adjusted config to ensure correct image settings
+      const processedConfig = processAIGeneratedConfig(result.surveyConfig);
+      onChange(processedConfig);
+      setAiSuccess('✅ Survey adjusted successfully!');
+      setAiInstruction('');
+    } else {
+      setAiError(`❌ Failed to adjust survey: ${result.error}`);
+    }
+  };
+
   return (
     <Box>
+      {/* AI Assistant */}
+      <Accordion 
+        defaultExpanded={false}
+        sx={{ 
+          mb: 2,
+          border: 2,
+          borderColor: 'primary.main',
+          borderRadius: 2,
+          '&:before': { display: 'none' },
+          boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
+        }}
+      >
+        <AccordionSummary 
+          expandIcon={<ExpandMore />}
+          sx={{ 
+            bgcolor: 'primary.main', 
+            color: 'white',
+            '&:hover': { bgcolor: 'primary.dark' },
+            borderRadius: '8px 8px 0 0'
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Psychology sx={{ fontSize: 28 }} />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              🤖 AI Assistant (OpenAI)
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            
+            {/* API Key Section */}
+            <Card variant="outlined" sx={{ bgcolor: '#f8f9fa', border: '2px solid #e0e0e0' }}>
+              <CardContent>
+                <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  🔑 OpenAI API Key Configuration
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" style={{ color: '#1976d2' }}>OpenAI Platform</a>
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    label="OpenAI API Key"
+                    type="password"
+                    value={openaiApiKey}
+                    onChange={(e) => {
+                      setOpenaiApiKey(e.target.value);
+                      setApiKeyValid(false);
+                      setAiError('');
+                      setAiSuccess('');
+                    }}
+                    placeholder="sk-..."
+                    InputProps={{
+                      endAdornment: apiKeyValid && (
+                        <InputAdornment position="end">
+                          <CheckCircle color="success" />
+                        </InputAdornment>
+                      )
+                    }}
+                    sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={handleValidateApiKey}
+                    disabled={!openaiApiKey || aiLoading}
+                    sx={{ minWidth: 120, height: 56 }}
+                  >
+                    {aiLoading ? <CircularProgress size={24} color="inherit" /> : 'Validate'}
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+
+            {/* Error/Success Messages */}
+            {aiError && (
+              <Alert severity="error" onClose={() => setAiError('')}>
+                {aiError}
+              </Alert>
+            )}
+            {aiSuccess && (
+              <Alert severity="success" onClose={() => setAiSuccess('')}>
+                {aiSuccess}
+              </Alert>
+            )}
+
+            <Divider />
+
+            {/* Generate Survey Section */}
+            <Card variant="outlined" sx={{ border: '2px solid #e3f2fd' }}>
+              <CardContent>
+                <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <AutoAwesome sx={{ color: 'primary.main' }} />
+                  Generate Complete Survey
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Describe your survey in natural language, and AI will generate the complete structure with pages and questions.
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={4}
+                  variant="outlined"
+                  label="Survey Description"
+                  value={aiDescription}
+                  onChange={(e) => setAiDescription(e.target.value)}
+                  placeholder="Example: Create a streetscape perception survey with 3 pages: 1) Demographics (age, gender, city), 2) Visual Assessment (4 imagerating questions about thermal comfort, safety, aesthetics, walkability - each showing 1 random street scene), 3) Preference (1 imagepicker question to choose preferred street from 4 options, then 1 imageranking question to rank 4 street scenes by overall preference)."
+                  disabled={!apiKeyValid}
+                  sx={{ mb: 2, '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                />
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={aiLoading ? <CircularProgress size={20} color="inherit" /> : <AutoAwesome />}
+                  onClick={handleGenerateSurvey}
+                  disabled={!apiKeyValid || !aiDescription.trim() || aiLoading}
+                  fullWidth
+                  size="large"
+                  sx={{ fontWeight: 600 }}
+                >
+                  {aiLoading ? 'Generating Survey...' : 'Generate Survey'}
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Divider />
+
+            {/* Adjust Survey Section */}
+            <Card variant="outlined" sx={{ border: '2px solid #fff3e0' }}>
+              <CardContent>
+                <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Edit sx={{ color: 'secondary.main' }} />
+                  Adjust Current Survey
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Tell AI how to modify your existing survey (add questions, change wording, reorder pages, etc.)
+                </Typography>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={3}
+                  variant="outlined"
+                  label="Modification Instructions"
+                  value={aiInstruction}
+                  onChange={(e) => setAiInstruction(e.target.value)}
+                  placeholder="Example: Add an imagepicker question to choose favorite street type. Add an imageboolean question asking 'Would you bike here?' after the safety rating. Change all imagerating scales to 1-7. Add an imagematrix question comparing 3 streets on cleanliness, greenery, and accessibility."
+                  disabled={!apiKeyValid}
+                  sx={{ mb: 2, '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                />
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  startIcon={aiLoading ? <CircularProgress size={20} color="inherit" /> : <Edit />}
+                  onClick={handleAdjustSurvey}
+                  disabled={!apiKeyValid || !aiInstruction.trim() || aiLoading}
+                  fullWidth
+                  size="large"
+                  sx={{ fontWeight: 600 }}
+                >
+                  {aiLoading ? 'Adjusting Survey...' : 'Adjust Survey'}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Tips */}
+            <Alert severity="info" sx={{ mt: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                💡 Pro Tips:
+              </Typography>
+              <Typography variant="body2" component="div">
+                • <strong>For streetscape/visual perception surveys:</strong> AI will automatically use image-based questions (imagepicker, imagerating, imageranking, imageboolean, imagematrix)<br/>
+                • <strong>Available question types:</strong><br/>
+                &nbsp;&nbsp;- Text-based: rating, multiple choice, text input, Yes/No, ranking, matrix<br/>
+                &nbsp;&nbsp;- Image-based: image rating (1-5 scale), image ranking (order by preference), image Yes/No, image matrix<br/>
+                • Be specific about the number of pages and questions you want<br/>
+                • For adjustments, be clear about what should change and what should stay<br/>
+                • The AI uses GPT-4o model for best results<br/>
+                • You can always preview and manually edit the generated survey
+              </Typography>
+            </Alert>
+            
+            <Alert severity="success" sx={{ mt: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                🖼️ Image-Based Questions:
+              </Typography>
+              <Typography variant="body2" component="div">
+                • <strong>imagepicker:</strong> "Which street scene do you prefer?" (choose from multiple options)<br/>
+                • <strong>imagerating:</strong> "Rate the thermal comfort of this street (1-5 scale)"<br/>
+                • <strong>imageranking:</strong> "Rank 4 street scenes from most to least appealing"<br/>
+                • <strong>imageboolean:</strong> "Would you feel safe walking here at night? (Yes/No)"<br/>
+                • <strong>imagematrix:</strong> "Rate 3 streets on safety, aesthetics, and walkability"<br/>
+                <br/>
+                Images will be automatically loaded from your project's dataset!
+              </Typography>
+            </Alert>
+            
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                ⚠️ Important Logic:
+              </Typography>
+              <Typography variant="body2" component="div">
+                • <strong>Demographic questions</strong> (age, gender, education): Use text questions, NO images needed<br/>
+                • <strong>Visual perception assessments</strong>: Use image-based question types (imagepicker, imagerating, imageranking, etc.)<br/>
+                • <strong>Text questions about streetscape</strong>: Must add an "image" display question BEFORE the text question<br/>
+                &nbsp;&nbsp;Example: Show street image → then ask "Describe what you see"<br/>
+                <br/>
+                ✅ The AI will automatically follow these rules!
+              </Typography>
+            </Alert>
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
       {/* Basic Survey Information */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMore />}>

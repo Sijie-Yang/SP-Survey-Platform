@@ -13,7 +13,7 @@
 
 <strong>A professional, research-grade platform for conducting visual perception surveys.</strong>
 <br>
-No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, and cloud integration.
+No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, AI-powered generation (NEW 🤖), and cloud integration.
 
 🌐 <a href="https://streetscape-perception-survey.vercel.app/"><strong>Live Demo</strong></a> •
 📄 <a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>Research Paper</strong></a> •
@@ -74,6 +74,60 @@ The platform offers 16 specialized question types designed specifically for stre
 - **🟢 Real-time Backend Monitoring**: Live server status display with auto-restart capability - ensures uninterrupted survey development and data collection
 
 *These capabilities enable comprehensive streetscape perception research, from visual comfort assessments to walkability studies, supporting both quantitative analysis and qualitative insights essential for evidence-based urban design.*
+
+### 🤖 **AI-Powered Survey Generation (NEW)**
+
+**Leverage GPT-4o to create and refine surveys in natural language:**
+
+#### **✨ Intelligent Survey Design**
+- **Natural Language Input**: Describe your survey goals in plain English or Chinese
+- **Context-Aware Generation**: AI understands the difference between demographic questions, visual perception assessments, and open-ended feedback
+- **Professional Structure**: Automatically organizes questions into logical pages with appropriate types
+
+#### **🎯 Smart Question Type Selection**
+
+The AI follows research best practices:
+
+| Survey Purpose | AI Chooses | Example |
+|---------------|------------|---------|
+| **Demographic Data** | Text-based questions | Age, gender, education - NO images needed |
+| **Visual Assessment** | Image-based questions | `imagepicker`, `imagerating`, `imageranking`, `imageboolean`, `imagematrix` |
+| **Streetscape Feedback** | Image display + text | Shows street image → then asks open-ended question |
+
+#### **🔄 Iterative Refinement**
+- **Generate**: "Create a 3-page thermal comfort survey with demographics, visual ratings, and preference ranking"
+- **Adjust**: "Add an imagepicker question for street type preference. Change all rating scales to 1-7."
+- **Preview**: Real-time preview with actual images from your dataset
+- **Iterate**: Keep refining until perfect
+
+#### **⚙️ Automatic Configuration**
+- **Image Questions**: Automatically configured with:
+  - `imageSelectionMode: "huggingface_random"` - Random selection from your Hugging Face dataset
+  - `randomImageSelection: true` - Fresh images for each participant
+  - `choices: []` - Empty array (images loaded dynamically at runtime)
+- **No Manual Setup**: Images automatically pulled from your global project dataset
+- **Consistent Format**: AI-generated surveys follow the same structure as manually created ones
+
+#### **💡 Example Prompts**
+```
+Generate: "Create a streetscape perception survey with 3 pages: 
+1) Demographics (age, gender, city), 
+2) Visual Assessment (4 imagerating questions about thermal comfort, 
+   safety, aesthetics, walkability - each showing 1 random street scene), 
+3) Preference (1 imagepicker to choose favorite street from 4 options, 
+   then 1 imageranking to rank 4 street scenes by overall preference)."
+
+Adjust: "Add an imagepicker question to choose favorite street type. 
+Add an imageboolean question asking 'Would you bike here?' after the 
+safety rating. Change all imagerating scales to 1-7."
+```
+
+#### **🔒 Data Privacy**
+- Your OpenAI API key is stored in browser session only (never saved to disk)
+- Survey configurations are processed locally - no data sent to external servers
+- Full control over your research data
+
+*Perfect for rapid prototyping, exploring different survey designs, or getting started when you're new to survey design.*
 
 ### 📋 **Template System - Build Upon Published Research**
 
@@ -140,9 +194,17 @@ Build new studies 10x faster:
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Hugging Face Account** (https://huggingface.co) for your image dataset.
-- **Supabase Account** (https://supabase.com) for cloud storage of survey images and survey responses.
-- **Vercel Account** (https://vercel.com) for deploying your survey website.
+
+**Required:**
+- **Hugging Face Account** (https://huggingface.co) for your image dataset
+- **Supabase Account** (https://supabase.com) for cloud storage of survey images and survey responses
+- **Vercel Account** (https://vercel.com) for deploying your survey website
+
+**Optional (for AI features):**
+- **OpenAI API Key** (https://platform.openai.com/api-keys) for AI-powered survey generation
+  - Uses GPT-4o model
+  - Pay-as-you-go pricing (~$0.01-0.05 per survey generation)
+  - Stored in browser session only (never saved to disk)
 
 ### Installation
 ```bash
@@ -216,6 +278,47 @@ The admin panel includes a **real-time backend status monitor** in the header:
 6. **Save & Preview**
    - Click 💾 "Save" in the top bar (turns yellow when unsaved)
    - Click 👁️ "Preview" to test your survey
+
+### 🤖 Create Survey with AI (Alternative Method)
+
+**Skip manual setup - let AI build your survey in seconds:**
+
+1. **Setup Your Project**
+   - Create new project and complete Step 1 (Image Dataset configuration)
+   - Navigate to Step 2 (Survey Builder)
+
+2. **Use AI Assistant**
+   - Expand "🤖 AI Assistant (OpenAI)" panel at the top
+   - Enter your OpenAI API key → Click "Validate"
+   - Describe your survey in natural language:
+     ```
+     Example: "Create a streetscape perception survey with 3 pages: 
+     1) Demographics (age, gender, city), 
+     2) Visual Assessment (4 imagerating questions about safety, 
+        aesthetics, walkability, thermal comfort), 
+     3) Preference (1 imagepicker and 1 imageranking)"
+     ```
+   - Click "Generate Survey" → Wait 10-30 seconds
+
+3. **Refine & Adjust**
+   - Preview the generated survey
+   - Make adjustments using natural language:
+     ```
+     Example: "Add an imageboolean question 'Would you bike here?' 
+     Change all rating scales to 1-7"
+     ```
+   - Or manually edit using the drag-and-drop interface
+
+4. **Important Notes**
+   - ✅ AI automatically uses your global image dataset configuration
+   - ✅ Image questions are set to random selection mode
+   - ✅ All questions follow research best practices
+   - ⚠️ Manually selected images use existing choices (won't be randomized)
+
+**💡 When to Use AI vs Manual:**
+- **AI**: Quick prototyping, exploring designs, getting started
+- **Manual**: Fine-tuning, complex logic, specific customizations
+- **Hybrid**: Generate with AI, then refine manually (recommended)
 
 ---
 
