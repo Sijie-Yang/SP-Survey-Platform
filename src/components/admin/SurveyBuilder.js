@@ -206,6 +206,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const [apiKeyValid, setApiKeyValid] = useState(false);
   const [userMessage, setUserMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState(''); // e.g., "Thinking...", "Generating survey..."
   const [settingsOpen, setSettingsOpen] = useState(false);
   
   // Contextual Engineering states
@@ -618,6 +619,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     const currentUserMessage = userMessage;
     setUserMessage(''); // Clear input
     setIsLoading(true);
+    setLoadingStatus('Thinking...');
 
     try {
       // Build conversation history for API (last 10 messages)
@@ -648,7 +650,20 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         openaiApiKey
       );
 
+      // Update status based on intent
+      if (result.intent === 'generate') {
+        setLoadingStatus('Generating survey...');
+      } else if (result.intent === 'adjust') {
+        setLoadingStatus('Adjusting survey...');
+      } else {
+        setLoadingStatus('Processing...');
+      }
+
+      // Small delay to show the specific status
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       setIsLoading(false);
+      setLoadingStatus('');
 
       if (result.success) {
         // Add AI response to conversation
@@ -704,6 +719,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       }
     } catch (error) {
       setIsLoading(false);
+      setLoadingStatus('');
       console.error('Error sending message:', error);
       
       if (conversationHistoryRef.current) {
@@ -725,6 +741,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         messages={conversationMessages}
         userMessage={userMessage}
         isLoading={isLoading}
+        loadingStatus={loadingStatus}
         apiKeyValid={apiKeyValid}
         openaiApiKey={openaiApiKey}
         contextEnabled={contextEnabled}

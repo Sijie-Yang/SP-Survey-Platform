@@ -45,6 +45,7 @@ export default function ChatAssistant({
   messages = [],
   userMessage,
   isLoading,
+  loadingStatus = '',
   apiKeyValid,
   openaiApiKey,
   contextEnabled,
@@ -249,6 +250,56 @@ export default function ChatAssistant({
                   </Box>
                 </Box>
               ))}
+              
+              {/* Loading Status (like ChatGPT) */}
+              {loadingStatus && (
+                <Box 
+                  sx={{ 
+                    mb: 2,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 1.5
+                  }}
+                >
+                  <Avatar 
+                    sx={{ 
+                      width: 32, 
+                      height: 32,
+                      bgcolor: '#9c27b0'
+                    }}
+                  >
+                    <SmartToy />
+                  </Avatar>
+                  
+                  <Box sx={{ flex: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                      <Typography variant="caption" fontWeight="bold">
+                        AI Assistant
+                      </Typography>
+                    </Box>
+                    
+                    <Paper 
+                      sx={{ 
+                        p: 1.5,
+                        bgcolor: '#f3e5f5',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1
+                      }}
+                    >
+                      <CircularProgress size={16} />
+                      <Typography 
+                        variant="body2" 
+                        color="text.secondary"
+                        sx={{ fontStyle: 'italic' }}
+                      >
+                        {loadingStatus}
+                      </Typography>
+                    </Paper>
+                  </Box>
+                </Box>
+              )}
+              
               <div ref={chatEndRef} />
             </>
           )}
