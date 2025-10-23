@@ -1192,41 +1192,22 @@ Respond with ONLY ONE WORD: generate, adjust, or question`;
     
     // Step 2: Route based on intent
     if (intent === 'generate') {
-      // Generate new survey (use same detailed prompt as generate-survey endpoint)
+      // Generate new survey
       const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Generate a complete survey configuration in JSON format.
 
-═══════════════════════════════════════════════════════════
-THREE SURVEY SCENARIOS
-═══════════════════════════════════════════════════════════
+**CRITICAL RULE FOR STREETSCAPE SURVEYS:**
+No standalone text questions about streetscapes! All streetscape-related questions MUST be paired with images.
+Only demographics (age, gender, education, occupation) can be pure text.
 
-🔹 SCENARIO 1: Demographics/Socioeconomic → Pure text questions (NO images)
-🔹 SCENARIO 2: Visual Assessment → Image-based question types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
-🔹 SCENARIO 3: Show Image + Text Answer → "image" display type + text question
-   ⚠️ CRITICAL: Image and text question MUST be in SAME PAGE, never split across pages!
+GUIDELINES:
+1. Demographics ONLY: Pure text (age, gender, education, occupation)
+2. Streetscape questions: Use image-based types (imagerating, imagepicker, imageranking, imageboolean, imagematrix) OR "image" display + text (SAME page!)
+3. Image questions MUST include: imageSelectionMode: "huggingface_random", imageCount, randomImageSelection: true, choices: []
+4. imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
+5. NEVER: Standalone text questions about streets without images
+6. NEVER: Split "image" and text question across pages
 
-═══════════════════════════════════════════════════════════
-AVAILABLE QUESTION TYPES
-═══════════════════════════════════════════════════════════
-
-📝 TEXT: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
-🖼️ IMAGE DISPLAY: image (shows image without question)
-🎨 IMAGE-BASED: imagepicker, imageranking, imagerating, imageboolean, imagematrix
-
-═══════════════════════════════════════════════════════════
-CRITICAL RULES
-═══════════════════════════════════════════════════════════
-
-✓ ALL image questions MUST include:
-  - imageSelectionMode: "huggingface_random"
-  - imageCount: <number>
-  - For image-based types: randomImageSelection: true, choices: []
-  - For imagematrix: imageLinks: []
-
-✓ imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
-
-✗ NEVER use "manual" mode or provide imageLink URLs
-
-Pages must have: {"title": "...", "questions": [...]}
+Pages format: {"title": "...", "questions": [...]}
 
 Return ONLY valid JSON, no markdown.`;
 
@@ -1275,29 +1256,18 @@ Return ONLY valid JSON, no markdown.`;
       
       const systemPrompt = `You are an expert survey designer. Modify the provided survey configuration according to the user's instructions.
 
-═══════════════════════════════════════════════════════════
-THREE SCENARIOS (same as generate)
-═══════════════════════════════════════════════════════════
+**CRITICAL RULE FOR STREETSCAPE SURVEYS:**
+No standalone text questions about streetscapes! All streetscape-related questions MUST be paired with images.
+Only demographics (age, gender, education, occupation) can be pure text.
 
-SCENARIO 1: Demographics → Pure text questions (NO images)
-SCENARIO 2: Visual Assessment → Image-based types (imagerating, imagepicker, imageranking, etc.)
-SCENARIO 3: Show Image + Text → "image" display + text question (BOTH in SAME page!)
+GUIDELINES:
+1. Demographics ONLY: Pure text (age, gender, education, occupation)
+2. Streetscape questions: Use image-based types OR "image" display + text (SAME page!)
+3. Image questions MUST include: imageSelectionMode: "huggingface_random", imageCount, choices: []
+4. NEVER: Ask about streets without showing street images
+5. NEVER: Split "image" and text across pages
 
-═══════════════════════════════════════════════════════════
-CRITICAL RULES
-═══════════════════════════════════════════════════════════
-
-✓ ALL image questions MUST use:
-  - imageSelectionMode: "huggingface_random"
-  - imageCount: <number>
-  - For image-based types: randomImageSelection: true, choices: []
-  - For imagematrix: imageLinks: []
-
-✓ imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
-
-✗ NEVER use "manual" mode
-✗ Return COMPLETE modified survey configuration
-✗ Pages format: {"title": "...", "questions": [...]}
+Return COMPLETE modified survey configuration. Pages: {"title": "...", "questions": [...]}
 
 Return ONLY valid JSON, no markdown.`;
 
@@ -1338,26 +1308,21 @@ Return ONLY valid JSON, no markdown.`;
       // Answer question
       const systemPrompt = `You are a helpful assistant for a survey design platform. Answer the user's question concisely and provide actionable guidance.
 
-═══════════════════════════════════════════════════════════
-PLATFORM CAPABILITIES
-═══════════════════════════════════════════════════════════
+**KEY RULE FOR STREETSCAPE SURVEYS:**
+No standalone text questions about streetscapes! All streetscape-related questions MUST be paired with images.
+Only demographics (age, gender, education, occupation) can be pure text.
 
-📝 TEXT QUESTIONS: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
-🖼️ IMAGE DISPLAY: image (shows reference image)
-🎨 IMAGE-BASED QUESTIONS: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+PLATFORM CAPABILITIES:
+- TEXT QUESTIONS: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+- IMAGE DISPLAY: image (shows reference image)
+- IMAGE-BASED QUESTIONS: imagepicker, imageranking, imagerating, imageboolean, imagematrix
 
-═══════════════════════════════════════════════════════════
-THREE SURVEY SCENARIOS
-═══════════════════════════════════════════════════════════
+THREE SURVEY SCENARIOS:
+1. Demographics/Socioeconomic → Pure text questions (NO images)
+2. Streetscape Visual Assessment → Image-based question types (imagerating, imagepicker, etc.)
+3. Streetscape Description → "image" display + text question (BOTH in SAME page!)
 
-1. Demographics/Socioeconomic → Use pure text questions (NO images)
-2. Visual Perception/Assessment → Use image-based question types (imagerating, imagepicker, etc.)
-3. Show Image + Ask Text Question → Use "image" display type, then text question (both in SAME page!)
-
-═══════════════════════════════════════════════════════════
-OTHER FEATURES
-═══════════════════════════════════════════════════════════
-
+OTHER FEATURES:
 - Multi-page surveys
 - Custom themes and branding
 - AI-powered survey generation and adjustment
