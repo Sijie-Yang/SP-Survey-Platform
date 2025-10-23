@@ -746,10 +746,8 @@ Your response MUST follow this exact structure:
   "description": "Survey Description",
   "pages": [
     {
-      "name": "page_1",
       "title": "Page 1 Title",
-      "description": "Page 1 description",
-      "elements": [
+      "questions": [
         {
           "type": "text",
           "name": "question_1",
@@ -761,9 +759,9 @@ Your response MUST follow this exact structure:
 }
 
 IMPORTANT: 
-- Each page MUST have: "name", "title", "description", "elements"
-- Questions go in "elements" array, NOT "questions" array
-- Page names should be unique (e.g., "page_1", "page_2")
+- Each page MUST have: "title" and "questions" array
+- Questions go in "questions" array
+- Do NOT add "name" or "description" to pages
 
 Return ONLY valid JSON, no markdown or explanations.`;
 
@@ -801,6 +799,14 @@ Return ONLY valid JSON, no markdown or explanations.`;
         if (!surveyConfig.pages || !Array.isArray(surveyConfig.pages)) {
           throw new Error('Invalid survey structure: missing pages array');
         }
+        
+        // Convert SurveyJS format (questions) to Survey Builder format (elements)
+        surveyConfig.pages = surveyConfig.pages.map((page, index) => ({
+          name: page.name || `page_${index + 1}`,
+          title: page.title || `Page ${index + 1}`,
+          description: page.description || "",
+          elements: page.questions || page.elements || []
+        }));
         
         console.log('✅ Survey generated successfully');
         break; // Success, exit retry loop
@@ -895,11 +901,11 @@ IMPORTANT RULES:
 **CRITICAL: JSON Structure Format**
 Each page MUST have this structure:
 {
-  "name": "page_1",
   "title": "Page Title",
-  "description": "Page description",
-  "elements": [...]  // Questions go in "elements", NOT "questions"
+  "questions": [...]  // Questions go in "questions" array
 }
+
+Do NOT add "name" or "description" to pages, only "title" and "questions".
 
 Return the COMPLETE modified survey configuration in JSON format. Return ONLY valid JSON, no markdown or explanations.`;
 
@@ -944,6 +950,14 @@ Please return the complete modified survey configuration.`;
         if (!surveyConfig.pages || !Array.isArray(surveyConfig.pages)) {
           throw new Error('Invalid survey structure: missing pages array');
         }
+        
+        // Convert SurveyJS format (questions) to Survey Builder format (elements)
+        surveyConfig.pages = surveyConfig.pages.map((page, index) => ({
+          name: page.name || `page_${index + 1}`,
+          title: page.title || `Page ${index + 1}`,
+          description: page.description || "",
+          elements: page.questions || page.elements || []
+        }));
         
         console.log('✅ Survey adjusted successfully');
         break; // Success, exit retry loop
@@ -1096,7 +1110,7 @@ IMPORTANT RULES:
 - Follow-up text question? → Pure text, NO image
 - Only use "image" display when showing ONE reference image before a text question
 
-**FORMAT:** Return a JSON array of question objects (these will be placed in page "elements"):
+**FORMAT:** Return a JSON array of question objects (these will be placed in page "questions" array):
 [
   {
     "type": "text",
@@ -1290,6 +1304,16 @@ Return ONLY valid JSON, no markdown.`;
       const responseText = completion.choices[0].message.content.trim();
       let surveyConfig = JSON.parse(responseText);
       
+      // Convert SurveyJS format (questions) to Survey Builder format (elements)
+      if (surveyConfig.pages) {
+        surveyConfig.pages = surveyConfig.pages.map((page, index) => ({
+          name: page.name || `page_${index + 1}`,
+          title: page.title || `Page ${index + 1}`,
+          description: page.description || "",
+          elements: page.questions || page.elements || []
+        }));
+      }
+      
       res.json({ 
         success: true, 
         intent: 'generate',
@@ -1335,6 +1359,16 @@ Return ONLY valid JSON, no markdown.`;
       
       const responseText = completion.choices[0].message.content.trim();
       let surveyConfig = JSON.parse(responseText);
+      
+      // Convert SurveyJS format (questions) to Survey Builder format (elements)
+      if (surveyConfig.pages) {
+        surveyConfig.pages = surveyConfig.pages.map((page, index) => ({
+          name: page.name || `page_${index + 1}`,
+          title: page.title || `Page ${index + 1}`,
+          description: page.description || "",
+          elements: page.questions || page.elements || []
+        }));
+      }
       
       res.json({ 
         success: true, 
