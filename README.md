@@ -13,7 +13,7 @@
 
 <strong>A professional, research-grade platform for conducting visual perception surveys.</strong>
 <br>
-No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, AI-powered generation (NEW 🤖), and cloud integration.
+No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, AI-powered generation with ChatGPT-style interface (NEW 🤖💬), and cloud integration.
 
 🌐 <a href="https://streetscape-perception-survey.vercel.app/"><strong>Live Demo</strong></a> •
 📄 <a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>Research Paper</strong></a> •
@@ -120,6 +120,81 @@ Generate: "Create a streetscape perception survey with 3 pages:
 Adjust: "Add an imagepicker question to choose favorite street type. 
 Add an imageboolean question asking 'Would you bike here?' after the 
 safety rating. Change all imagerating scales to 1-7."
+```
+
+#### **💬 ChatGPT-Style Interface (NEW)**
+
+**Natural conversation with AI Assistant:**
+
+- **Single Chat Input**: No need to choose "Generate" or "Adjust" - AI automatically understands your intent
+- **Conversation History**: Full context awareness across multiple interactions
+- **Smart Status Display**: See exactly what AI is doing - "Thinking...", "Generating survey...", "Adjusting survey..."
+- **Integrated Settings**: All configuration in one convenient dialog
+- **Project-Specific Memory**: Each project maintains its own conversation history
+
+**Example Interaction:**
+```
+You: "Create a thermal comfort survey"
+AI: [Thinking...] → [Generating survey...] → "Generated 3-page survey"
+
+You: "Add more visual assessment questions"
+AI: [Adjusting survey...] → "Added imagepicker and imageboolean questions"
+
+You: "Make all rating scales 1-7"
+AI: [Adjusting survey...] → "Updated all rating scales to 1-7"
+```
+
+#### **🧠 Contextual Engineering (NEW)**
+
+**AI that remembers and learns from your workflow:**
+
+The platform implements a three-layer memory system for smarter AI interactions:
+
+1. **Conversation History** (Per-Project)
+   - Maintains full context of your survey design conversation
+   - Each project has independent memory
+   - Enables natural multi-turn refinement
+
+2. **Working Memory** (Per-Project)
+   - Tracks survey goals and design decisions
+   - Records iteration history
+   - Helps AI maintain consistency across changes
+
+3. **Session Learning** (Cross-Project)
+   - Learns your preferences over time
+   - Tracks expertise level
+   - Provides personalized recommendations
+   - Adapts to your survey design patterns
+
+**Benefits:**
+- More accurate AI responses based on previous interactions
+- No need to repeat context in every message
+- Intelligent suggestions based on your project history
+- Seamless workflow continuity
+
+#### **🎨 Intelligent Question Type Diversity (NEW)**
+
+**AI automatically creates varied, engaging surveys:**
+
+Instead of repetitive question types, the AI now:
+- **Mixes image-based questions**: `imagepicker`, `imageranking`, `imagerating`, `imageboolean`, `imagematrix`
+- **Varies text questions**: `radiogroup`, `dropdown`, `text`, `comment`, `checkbox`, `ranking`, `rating`
+- **Creates balanced surveys**: Avoids overusing any single question type
+- **Follows research best practices**: Appropriate type for each research goal
+
+**Example Variety:**
+```json
+Before (repetitive):
+- imagerating: comfort
+- imagerating: safety  
+- imagerating: aesthetics
+- imagerating: walkability
+
+After (diverse):
+- imagerating: comfort (1-5 scale)
+- imagepicker: preferred street type (choice)
+- imageranking: rank by preference (ordering)
+- imageboolean: would you walk here? (yes/no)
 ```
 
 #### **🔒 Data Privacy**
@@ -287,38 +362,37 @@ The admin panel includes a **real-time backend status monitor** in the header:
    - Create new project and complete Step 1 (Image Dataset configuration)
    - Navigate to Step 2 (Survey Builder)
 
-2. **Use AI Assistant**
-   - Expand "🤖 AI Assistant (OpenAI)" panel at the top
-   - Enter your OpenAI API key → Click "Validate"
-   - Describe your survey in natural language:
-     ```
-     Example: "Create a streetscape perception survey with 3 pages: 
-     1) Demographics (age, gender, city), 
-     2) Visual Assessment (4 imagerating questions about safety, 
-        aesthetics, walkability, thermal comfort), 
-     3) Preference (1 imagepicker and 1 imageranking)"
-     ```
-   - Click "Generate Survey" → Wait 10-30 seconds
+2. **Open AI Chat Assistant**
+   - Click the AI chat icon at the top of Survey Builder
+   - Enter your OpenAI API key in Settings → Click "Validate"
+   - Enable "Contextual Engineering" for smarter interactions (recommended)
 
-3. **Refine & Adjust**
-   - Preview the generated survey
-   - Make adjustments using natural language:
+3. **Chat with AI (Natural Conversation)**
+   - Just type what you want - AI automatically understands:
      ```
-     Example: "Add an imageboolean question 'Would you bike here?' 
-     Change all rating scales to 1-7"
+     Example: "Create a thermal comfort survey with demographics, 
+     visual ratings, and preference ranking"
+     
+     AI: [Thinking...] → [Generating survey...] → "Generated 3-page survey"
+     
+     You: "Add more variety - include imagepicker and imageboolean"
+     
+     AI: [Adjusting survey...] → "Added diverse question types"
      ```
-   - Or manually edit using the drag-and-drop interface
+   - Watch the status change in real-time: "Thinking..." → "Generating..." → "Adjusting..."
+   - AI remembers your conversation context (per-project memory)
 
-4. **Important Notes**
-   - ✅ AI automatically uses your global image dataset configuration
-   - ✅ Image questions are set to random selection mode
-   - ✅ All questions follow research best practices
-   - ⚠️ Manually selected images use existing choices (won't be randomized)
+4. **Smart Features**
+   - ✅ **Intent Detection**: No need to say "Generate" or "Adjust" - AI figures it out
+   - ✅ **Conversation History**: Full context from previous messages
+   - ✅ **Question Type Diversity**: AI automatically mixes different types
+   - ✅ **Project-Specific Memory**: Each project has independent conversation history
+   - ✅ **Image Dataset Integration**: Automatically uses your configured dataset
 
 **💡 When to Use AI vs Manual:**
-- **AI**: Quick prototyping, exploring designs, getting started
-- **Manual**: Fine-tuning, complex logic, specific customizations
-- **Hybrid**: Generate with AI, then refine manually (recommended)
+- **AI**: Quick prototyping, exploring designs, getting started, iterative refinement
+- **Manual**: Precise control, complex logic, specific customizations
+- **Hybrid**: Generate with AI, then fine-tune manually (recommended)
 
 ---
 
@@ -678,6 +752,9 @@ This work is licensed under a [Creative Commons Attribution 4.0 International Li
 
 - **SurveyJS**: Survey rendering engine
 - **Material-UI**: UI components
+- **React**: Frontend framework
+- **Node.js/Express**: Backend server
+- **OpenAI GPT-4o**: AI-powered survey generation
 - **Supabase**: Cloud database & storage
 - **Hugging Face**: Dataset hosting
 - **Vercel**: Deployment platform
