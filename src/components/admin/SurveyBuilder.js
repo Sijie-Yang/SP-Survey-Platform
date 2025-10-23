@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -26,7 +26,10 @@ import {
   Chip,
   Alert,
   CircularProgress,
-  InputAdornment
+  InputAdornment,
+  Paper,
+  Tooltip,
+  Badge
 } from '@mui/material';
 import {
   ExpandMore,
@@ -37,7 +40,13 @@ import {
   ContentCopy,
   AutoAwesome,
   Psychology,
-  CheckCircle
+  CheckCircle,
+  History,
+  TipsAndUpdates,
+  Clear,
+  Download,
+  SmartToy,
+  PersonOutline
 } from '@mui/icons-material';
 import {
   DndContext,
@@ -60,6 +69,9 @@ import { CSS } from '@dnd-kit/utilities';
 import PageEditor from './PageEditor';
 import QuestionEditor from './QuestionEditor';
 import { generateSurveyFromDescription, adjustSurvey, validateApiKey } from '../../lib/openai';
+import { getConversationHistory } from '../../lib/conversationHistory';
+import { getWorkingMemory } from '../../lib/workingMemory';
+import { getSessionLearning } from '../../lib/sessionLearning';
 
 // Sortable Page Item Component
 function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
@@ -187,6 +199,15 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiSuccess, setAiSuccess] = useState('');
+  
+  // Contextual Engineering states
+  const conversationHistoryRef = useRef(null);
+  const workingMemoryRef = useRef(null);
+  const sessionLearningRef = useRef(null);
+  const [conversationMessages, setConversationMessages] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [contextEnabled, setContextEnabled] = useState(true);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -194,6 +215,31 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  // Initialize Contextual Engineering modules
+  useEffect(() => {
+    if (currentProject?.id && contextEnabled) {
+      // Initialize modules
+      conversationHistoryRef.current = getConversationHistory(currentProject.id);
+      workingMemoryRef.current = getWorkingMemory(currentProject.id);
+      sessionLearningRef.current = getSessionLearning();
+      
+      // Load conversation history
+      const history = conversationHistoryRef.current.getAllMessages();
+      setConversationMessages(history);
+      
+      // Get recommendations
+      const surveyType = currentProject.category || 'general';
+      const recs = sessionLearningRef.current.getRecommendations(surveyType);
+      setRecommendations(recs);
+      
+      console.log('🧠 Contextual Engineering initialized:', {
+        projectId: currentProject.id,
+        historyMessages: history.length,
+        recommendations: recs.length
+      });
+    }
+  }, [currentProject?.id, contextEnabled]);
 
   const handleBasicInfoChange = (field, value) => {
     onChange({
@@ -511,7 +557,27 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     setAiError('');
     setAiSuccess('');
     
-    const result = await generateSurveyFromDescription(aiDescription, openaiApiKey);
+    // 🧠 Contextual Engineering: Add user message to history
+    if (contextEnabled && conversationHistoryRef.current) {
+      conversationHistoryRef.current.addMessage('user', aiDescription, {
+        actionType: 'generate',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // 🧠 Contextual Engineering: Build enriched prompt with context
+    let enrichedDescription = aiDescription;
+    
+    if (contextEnabled && workingMemoryRef.current && sessionLearningRef.current) {
+      const workingContext = workingMemoryRef.current.getContextForAI();
+      const sessionContext = sessionLearningRef.current.getContextForAI(currentProject?.category);
+      
+      enrichedDescription = `${sessionContext}\n${workingContext}\n=== USER REQUEST ===\n${aiDescription}`;
+      
+      console.log('🧠 Using contextual prompt with memory');
+    }
+    
+    const result = await generateSurveyFromDescription(enrichedDescription, openaiApiKey);
     
     setAiLoading(false);
     
@@ -519,10 +585,50 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       // ✅ Post-process the AI-generated config to ensure correct image settings
       const processedConfig = processAIGeneratedConfig(result.surveyConfig);
       onChange(processedConfig);
+      
+      // 🧠 Contextual Engineering: Record success
+      if (contextEnabled) {
+        // Add assistant message to history
+        if (conversationHistoryRef.current) {
+          conversationHistoryRef.current.addMessage('assistant', 
+            `Generated survey with ${processedConfig.pages?.length || 0} pages`,
+            {
+              actionType: 'generate',
+              configSnapshot: processedConfig
+            }
+          );
+          setConversationMessages(conversationHistoryRef.current.getAllMessages());
+        }
+        
+        // Update working memory
+        if (workingMemoryRef.current) {
+          workingMemoryRef.current.setSurveyGoal(aiDescription);
+          workingMemoryRef.current.addIteration(processedConfig, 'Generated from description');
+        }
+        
+        // Update session learning
+        if (sessionLearningRef.current) {
+          sessionLearningRef.current.recordProjectInteraction(
+            currentProject?.id,
+            currentProject?.category || 'general',
+            'generate_survey'
+          );
+        }
+      }
+      
       setAiSuccess('✅ Survey generated successfully!');
       setAiDescription('');
     } else {
       setAiError(`❌ Failed to generate survey: ${result.error}`);
+      
+      // 🧠 Contextual Engineering: Record failure
+      if (contextEnabled && conversationHistoryRef.current) {
+        conversationHistoryRef.current.addMessage('assistant', 
+          `Error: ${result.error}`,
+          { actionType: 'generate', error: true }
+        );
+        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+      }
     }
   };
 
@@ -541,7 +647,27 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     setAiError('');
     setAiSuccess('');
     
-    const result = await adjustSurvey(config, aiInstruction, openaiApiKey);
+    // 🧠 Contextual Engineering: Add user message to history
+    if (contextEnabled && conversationHistoryRef.current) {
+      conversationHistoryRef.current.addMessage('user', aiInstruction, {
+        actionType: 'adjust',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // 🧠 Contextual Engineering: Build enriched prompt with context
+    let enrichedInstruction = aiInstruction;
+    
+    if (contextEnabled && workingMemoryRef.current && sessionLearningRef.current) {
+      const workingContext = workingMemoryRef.current.getContextForAI();
+      const sessionContext = sessionLearningRef.current.getContextForAI(currentProject?.category);
+      
+      enrichedInstruction = `${sessionContext}\n${workingContext}\n=== USER INSTRUCTION ===\n${aiInstruction}`;
+      
+      console.log('🧠 Using contextual prompt with memory for adjustment');
+    }
+    
+    const result = await adjustSurvey(config, enrichedInstruction, openaiApiKey);
     
     setAiLoading(false);
     
@@ -549,10 +675,50 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       // ✅ Post-process the AI-adjusted config to ensure correct image settings
       const processedConfig = processAIGeneratedConfig(result.surveyConfig);
       onChange(processedConfig);
+      
+      // 🧠 Contextual Engineering: Record success
+      if (contextEnabled) {
+        // Add assistant message to history
+        if (conversationHistoryRef.current) {
+          conversationHistoryRef.current.addMessage('assistant', 
+            `Adjusted survey: ${aiInstruction}`,
+            {
+              actionType: 'adjust',
+              configSnapshot: processedConfig
+            }
+          );
+          setConversationMessages(conversationHistoryRef.current.getAllMessages());
+        }
+        
+        // Update working memory
+        if (workingMemoryRef.current) {
+          workingMemoryRef.current.addIteration(processedConfig, aiInstruction);
+          workingMemoryRef.current.addDesignDecision(aiInstruction, 'User requested adjustment');
+        }
+        
+        // Update session learning
+        if (sessionLearningRef.current) {
+          sessionLearningRef.current.recordProjectInteraction(
+            currentProject?.id,
+            currentProject?.category || 'general',
+            'adjust_survey'
+          );
+        }
+      }
+      
       setAiSuccess('✅ Survey adjusted successfully!');
       setAiInstruction('');
     } else {
       setAiError(`❌ Failed to adjust survey: ${result.error}`);
+      
+      // 🧠 Contextual Engineering: Record failure
+      if (contextEnabled && conversationHistoryRef.current) {
+        conversationHistoryRef.current.addMessage('assistant', 
+          `Error: ${result.error}`,
+          { actionType: 'adjust', error: true }
+        );
+        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+      }
     }
   };
 
@@ -588,6 +754,151 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         </AccordionSummary>
         <AccordionDetails sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            
+            {/* 🧠 Contextual Engineering Toggle */}
+            <Card variant="outlined" sx={{ bgcolor: '#fff3e0', border: '2px solid #ff9800' }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <SmartToy sx={{ color: '#ff9800' }} />
+                      🧠 Contextual Engineering (NEW)
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Enable multi-turn conversations, memory, and personalized recommendations
+                    </Typography>
+                  </Box>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={contextEnabled}
+                        onChange={(e) => setContextEnabled(e.target.checked)}
+                        color="primary"
+                      />
+                    }
+                    label={contextEnabled ? "Enabled" : "Disabled"}
+                  />
+                </Box>
+              </CardContent>
+            </Card>
+
+            {/* 🎯 Smart Recommendations */}
+            {contextEnabled && recommendations.length > 0 && (
+              <Card variant="outlined" sx={{ bgcolor: '#e8f5e9', border: '2px solid #4caf50' }}>
+                <CardContent>
+                  <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <TipsAndUpdates sx={{ color: '#4caf50' }} />
+                    Smart Recommendations
+                  </Typography>
+                  <List dense>
+                    {recommendations.map((rec, index) => (
+                      <ListItem key={index} sx={{ py: 1 }}>
+                        <ListItemText
+                          primary={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Chip 
+                                label={rec.type} 
+                                size="small" 
+                                color={
+                                  rec.priority === 'high' ? 'error' : 
+                                  rec.priority === 'medium' ? 'warning' : 'info'
+                                }
+                              />
+                              <Typography variant="body2">{rec.message}</Typography>
+                            </Box>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* 📜 Conversation History */}
+            {contextEnabled && conversationMessages.length > 0 && (
+              <Card variant="outlined" sx={{ bgcolor: '#f3e5f5', border: '2px solid #9c27b0' }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <History sx={{ color: '#9c27b0' }} />
+                      Conversation History ({conversationMessages.length} messages)
+                    </Typography>
+                    <Box>
+                      <Tooltip title="Download conversation">
+                        <IconButton 
+                          size="small"
+                          onClick={() => {
+                            const data = conversationHistoryRef.current?.export();
+                            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `conversation_${currentProject?.id}_${new Date().toISOString()}.json`;
+                            a.click();
+                          }}
+                        >
+                          <Download />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Clear history">
+                        <IconButton 
+                          size="small"
+                          onClick={() => {
+                            if (window.confirm('Clear conversation history?')) {
+                              conversationHistoryRef.current?.clear();
+                              setConversationMessages([]);
+                            }
+                          }}
+                        >
+                          <Clear />
+                        </IconButton>
+                      </Tooltip>
+                      <Button
+                        size="small"
+                        variant="text"
+                        onClick={() => setShowHistory(!showHistory)}
+                        endIcon={<ExpandMore sx={{ transform: showHistory ? 'rotate(180deg)' : 'none' }} />}
+                      >
+                        {showHistory ? 'Hide' : 'Show'}
+                      </Button>
+                    </Box>
+                  </Box>
+                  
+                  {showHistory && (
+                    <Paper sx={{ maxHeight: 400, overflow: 'auto', p: 2, bgcolor: '#fafafa' }}>
+                      {conversationMessages.map((msg, index) => (
+                        <Box 
+                          key={msg.id} 
+                          sx={{ 
+                            mb: 2, 
+                            display: 'flex', 
+                            alignItems: 'flex-start',
+                            gap: 1
+                          }}
+                        >
+                          {msg.role === 'user' ? (
+                            <PersonOutline sx={{ color: '#1976d2', mt: 0.5 }} />
+                          ) : (
+                            <SmartToy sx={{ color: '#9c27b0', mt: 0.5 }} />
+                          )}
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              {msg.role === 'user' ? 'You' : 'AI'} · {new Date(msg.timestamp).toLocaleString()}
+                            </Typography>
+                            <Paper sx={{ p: 1.5, mt: 0.5, bgcolor: msg.role === 'user' ? '#e3f2fd' : '#f3e5f5' }}>
+                              <Typography variant="body2">{msg.content}</Typography>
+                            </Paper>
+                          </Box>
+                        </Box>
+                      ))}
+                    </Paper>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            <Divider />
             
             {/* API Key Section */}
             <Card variant="outlined" sx={{ bgcolor: '#f8f9fa', border: '2px solid #e0e0e0' }}>
