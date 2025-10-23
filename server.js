@@ -814,41 +814,35 @@ THREE SURVEY DESIGN SCENARIOS
 🔹 SCENARIO 3: Streetscape Questions Requiring Text Answers
    USE: "image" display type FIRST, then text question
    
+   ⚠️ CRITICAL: Image and text question MUST be on the SAME PAGE
+   - NEVER split them across different pages
+   - If you need flexibility in paging, use SCENARIO 2 (image-based question types) instead
+   
    When you need to SHOW a street image, then ask for text description/opinion:
    
-   [
-     {
-       "type": "image",
-       "name": "street_reference_1",
-       "imageSelectionMode": "huggingface_random",
-       "imageCount": 1,
-       "choices": []
-     },
-     {
-       "type": "comment",
-       "name": "street_description",
-       "title": "Please describe what you see in this street scene",
-       "isRequired": true
-     }
-   ]
+   CORRECT (both in same page):
+   {
+     "title": "Street Description",
+     "questions": [
+       {
+         "type": "image",
+         "name": "street_reference_1",
+         "imageSelectionMode": "huggingface_random",
+         "imageCount": 1,
+         "choices": []
+       },
+       {
+         "type": "comment",
+         "name": "street_description",
+         "title": "Please describe what you see in this street scene",
+         "isRequired": true
+       }
+     ]
+   }
    
-   OR:
-   
-   [
-     {
-       "type": "image",
-       "name": "street_reference_2",
-       "imageSelectionMode": "huggingface_random",
-       "imageCount": 1,
-       "choices": []
-     },
-     {
-       "type": "radiogroup",
-       "name": "main_feature",
-       "title": "What is the most prominent feature in this street?",
-       "choices": ["Trees", "Buildings", "People", "Vehicles", "Street furniture"]
-     }
-   ]
+   WRONG ❌:
+   Page 1: {"questions": [{"type": "image", ...}]}
+   Page 2: {"questions": [{"type": "comment", ...}]}  // DON'T DO THIS!
 
 ═══════════════════════════════════════════════════════════
 CRITICAL RULES
@@ -881,8 +875,11 @@ Is this a demographic/socioeconomic question?
     ├─ YES → Need user to rate/rank/select images?
     │   ├─ YES → Use image-based question types (imagerating, imagepicker, imageranking, etc.)
     │   └─ NO → Need to show image then ask for text answer?
-    │       └─ YES → Use "image" display + text question
+    │       └─ YES → Use "image" display + text question (BOTH in SAME page!)
     └─ NO → Use text-based questions
+
+⚠️ PAGING RULE: If using "image" display + text question, they MUST be in the SAME page.
+   Don't put image on one page and text question on another page.
 
 **CRITICAL: JSON Structure Format**
 Your response MUST follow this exact structure:
@@ -1023,11 +1020,13 @@ SCENARIO 2 - Visual Perception/Assessment:
 
 SCENARIO 3 - Show Image + Text Answer:
 → Use "image" display type, THEN text question
-   Example:
+   ⚠️ CRITICAL: Image and text question MUST be in the SAME PAGE
+   Example (both in same page):
    [
      {"type": "image", "name": "ref_1", "imageSelectionMode": "huggingface_random", "imageCount": 1, "choices": []},
      {"type": "comment", "name": "description", "title": "Describe this street"}
    ]
+   NEVER split image and text question across different pages!
 
 ═══════════════════════════════════════════════════════════
 CRITICAL RULES (when adding/modifying image questions)
@@ -1238,6 +1237,7 @@ IMAGE-BASED QUESTION EXAMPLES:
 ]
 
 SHOW IMAGE + TEXT QUESTION EXAMPLE:
+⚠️ CRITICAL: Both questions MUST be returned together (for same page)
 [
   {
     "type": "image",
@@ -1253,6 +1253,7 @@ SHOW IMAGE + TEXT QUESTION EXAMPLE:
     "isRequired": true
   }
 ]
+NEVER return just the "image" without the text question - they must be together!
 
 ═══════════════════════════════════════════════════════════
 CRITICAL RULES
@@ -1420,6 +1421,7 @@ THREE SURVEY SCENARIOS
 🔹 SCENARIO 1: Demographics/Socioeconomic → Pure text questions (NO images)
 🔹 SCENARIO 2: Visual Assessment → Image-based question types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
 🔹 SCENARIO 3: Show Image + Text Answer → "image" display type + text question
+   ⚠️ CRITICAL: Image and text question MUST be in SAME PAGE, never split across pages!
 
 ═══════════════════════════════════════════════════════════
 AVAILABLE QUESTION TYPES
@@ -1498,7 +1500,7 @@ THREE SCENARIOS (same as generate)
 
 SCENARIO 1: Demographics → Pure text questions (NO images)
 SCENARIO 2: Visual Assessment → Image-based types (imagerating, imagepicker, imageranking, etc.)
-SCENARIO 3: Show Image + Text → "image" display + text question
+SCENARIO 3: Show Image + Text → "image" display + text question (BOTH in SAME page!)
 
 ═══════════════════════════════════════════════════════════
 CRITICAL RULES
@@ -1569,7 +1571,7 @@ THREE SURVEY SCENARIOS
 
 1. Demographics/Socioeconomic → Use pure text questions (NO images)
 2. Visual Perception/Assessment → Use image-based question types (imagerating, imagepicker, etc.)
-3. Show Image + Ask Text Question → Use "image" display type, then text question
+3. Show Image + Ask Text Question → Use "image" display type, then text question (both in SAME page!)
 
 ═══════════════════════════════════════════════════════════
 OTHER FEATURES
