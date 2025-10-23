@@ -599,34 +599,20 @@ The survey must follow this structure:
   "pages": [...]
 }
 
-═══════════════════════════════════════════════════════════
-AVAILABLE QUESTION TYPES
-═══════════════════════════════════════════════════════════
+Available question types:
 
-📝 TEXT-BASED QUESTIONS (for demographics, opinions, text input):
-- text: Single-line text input (e.g., "What is your occupation?")
-- comment: Multi-line text area (e.g., "Describe your ideal street")
-- radiogroup: Single choice - needs "choices" array (e.g., "What is your age group?")
-- checkbox: Multiple choice - needs "choices" array (e.g., "Which features do you value?")
-- dropdown: Dropdown selection - needs "choices" array (e.g., "Select your education level")
-- boolean: Yes/No question (e.g., "Do you own a car?")
-- rating: Rating scale - needs "rateMin" and "rateMax" (e.g., "Rate your satisfaction: 1-5")
-- ranking: Rank items in order - needs "choices" array (e.g., "Rank these priorities")
+TEXT-BASED QUESTIONS:
+- text: Single-line text input
+- comment: Multi-line text area
+- radiogroup: Single choice (radio buttons) - needs "choices" array
+- checkbox: Multiple choice (checkboxes) - needs "choices" array
+- dropdown: Dropdown selection - needs "choices" array
+- boolean: Yes/No question
+- rating: Rating scale - needs "rateMin" (default 1) and "rateMax" (default 5)
+- ranking: Rank items in order - needs "choices" array
 - matrix: Matrix/grid question - needs "rows" and "columns" arrays
 
-🖼️ IMAGE DISPLAY TYPE (for showing a reference image):
-- image: Display a single image WITHOUT asking a question
-  Example:
-  {
-    "type": "image",
-    "name": "reference_image_1",
-    "imageSelectionMode": "huggingface_random",
-    "imageCount": 1,
-    "choices": []
-  }
-  Use this BEFORE text questions when you need to show a street image first.
-
-🎨 IMAGE-BASED QUESTION TYPES (for visual perception/assessment):
+IMAGE-BASED QUESTIONS (for visual perception surveys):
 - imageranking: Rank multiple images in order of preference
   Example:
   {
@@ -712,200 +698,51 @@ AVAILABLE QUESTION TYPES
   }
   IMPORTANT: imageLinks array is empty [], images will be randomly selected from Hugging Face dataset
 
-═══════════════════════════════════════════════════════════
-THREE SURVEY DESIGN SCENARIOS
-═══════════════════════════════════════════════════════════
+IMPORTANT GUIDELINES:
+1. **For demographic/socioeconomic questions**: Use text-based questions (text, comment, radiogroup, dropdown, rating, etc.) WITHOUT images
+   Example: age, gender, income, education, occupation
 
-🔹 SCENARIO 1: Socioeconomic/Demographic Questions
-   USE: Pure text-based questions (NO images needed)
-   
-   Examples:
-   {
-     "type": "radiogroup",
-     "name": "age_group",
-     "title": "What is your age group?",
-     "choices": ["18-25", "26-35", "36-45", "46-55", "56+"]
-   }
-   {
-     "type": "text",
-     "name": "occupation",
-     "title": "What is your occupation?"
-   }
-   {
-     "type": "dropdown",
-     "name": "education",
-     "title": "What is your education level?",
-     "choices": ["High School", "Bachelor's", "Master's", "PhD"]
-   }
+2. **For visual perception/assessment questions**: PREFER image-based questions (imagepicker, imageranking, imagerating, imageboolean, imagematrix)
+   Example: "Pick your preferred street", "Rate the thermal comfort of this street", "Rank these streets by safety"
 
-🔹 SCENARIO 2: Visual Perception/Assessment Questions
-   USE: Image-based question types directly
-   
-   These question types DISPLAY images AND ask questions about them:
-   
-   2A. Rate images:
-   {
-     "type": "imagerating",
-     "name": "thermal_comfort",
-     "title": "How thermally comfortable does this street look?",
-     "imageCount": 1,
-     "imageSelectionMode": "huggingface_random",
-     "randomImageSelection": true,
-     "rateMin": 1,
-     "rateMax": 5,
-     "minRateDescription": "Very uncomfortable",
-     "maxRateDescription": "Very comfortable",
-     "choices": []
-   }
-   
-   2B. Pick preferred image(s):
-   {
-     "type": "imagepicker",
-     "name": "preferred_street",
-     "title": "Which street scene do you prefer?",
-     "imageCount": 4,
-     "imageSelectionMode": "huggingface_random",
-     "randomImageSelection": true,
-     "choices": []
-   }
-   
-   2C. Rank images:
-   {
-     "type": "imageranking",
-     "name": "safety_ranking",
-     "title": "Rank these streets from safest to least safe",
-     "imageCount": 3,
-     "imageSelectionMode": "huggingface_random",
-     "randomImageSelection": true,
-     "choices": []
-   }
-   
-   2D. Yes/No about image:
-   {
-     "type": "imageboolean",
-     "name": "would_walk",
-     "title": "Would you feel safe walking here at night?",
-     "imageCount": 1,
-     "imageSelectionMode": "huggingface_random",
-     "randomImageSelection": true,
-     "choices": []
-   }
-   
-   2E. Matrix rating for multiple images:
-   {
-     "type": "imagematrix",
-     "name": "multi_criteria_rating",
-     "title": "Rate these street scenes on multiple aspects",
-     "imageCount": 3,
-     "imageSelectionMode": "huggingface_random",
-     "imageLinks": [],
-     "rows": [
-       {"value": "safety", "text": "Safety"},
-       {"value": "beauty", "text": "Beauty"},
-       {"value": "walkability", "text": "Walkability"}
-     ],
-     "columns": [
-       {"value": "1", "text": "Poor"},
-       {"value": "3", "text": "Good"},
-       {"value": "5", "text": "Excellent"}
-     ]
-   }
+3. **For text-based streetscape questions**: If you must use text questions to ask about street/visual aspects, 
+   you MUST add an "image" type question BEFORE it to display the image, and BOTH must be on the SAME PAGE:
+   Example sequence (on same page):
+   [
+     {
+       "type": "image",
+       "name": "street_display_1",
+       "imageSelectionMode": "huggingface_random",
+       "imageCount": 1,
+       "choices": []
+     },
+     {
+       "type": "text",
+       "name": "street_description",
+       "title": "Describe what you see in this street scene",
+       "isRequired": true
+     }
+   ]
+   CRITICAL: NEVER split "image" and its corresponding text question across different pages!
 
-🔹 SCENARIO 3: Streetscape Questions Requiring Text Answers
-   USE: "image" display type FIRST, then text question
-   
-   ⚠️ CRITICAL: Image and text question MUST be on the SAME PAGE
-   - NEVER split them across different pages
-   - If you need flexibility in paging, use SCENARIO 2 (image-based question types) instead
-   
-   When you need to SHOW a street image, then ask for text description/opinion:
-   
-   CORRECT (both in same page):
-   {
-     "title": "Street Description",
-     "questions": [
-       {
-         "type": "image",
-         "name": "street_reference_1",
-         "imageSelectionMode": "huggingface_random",
-         "imageCount": 1,
-         "choices": []
-       },
-       {
-         "type": "comment",
-         "name": "street_description",
-         "title": "Please describe what you see in this street scene",
-         "isRequired": true
-       }
-     ]
-   }
-   
-   WRONG ❌:
-   Page 1: {"questions": [{"type": "image", ...}]}
-   Page 2: {"questions": [{"type": "comment", ...}]}  // DON'T DO THIS!
+4. All image-based questions MUST include:
+   - imageCount property (number of images to show)
+   - imageSelectionMode: "huggingface_random" (ALWAYS use huggingface_random)
+   - randomImageSelection: true (ALWAYS true)
+   - choices: [] (empty array, images automatically loaded from dataset)
+   - For imagematrix: use imageLinks: [] instead of choices
 
-═══════════════════════════════════════════════════════════
-CRITICAL RULES
-═══════════════════════════════════════════════════════════
+5. For imagerating, include minRateDescription and maxRateDescription
 
-✓ ALL image-based questions and "image" display MUST include:
-  - imageSelectionMode: "huggingface_random"
-  - randomImageSelection: true (for imageranking, imagerating, imagepicker, imageboolean)
-  - imageCount: <number> (how many images to show)
-  - choices: [] (empty array for imageranking/imagerating/imagepicker/imageboolean)
-  - imageLinks: [] (empty array for imagematrix)
+6. NEVER use "manual" mode or provide imageLink URLs - all images are randomly selected from the Hugging Face dataset
 
-✓ For imagerating questions, ALWAYS include:
-  - rateMin: 1
-  - rateMax: 5 (or 7, depending on scale)
-  - minRateDescription: "description"
-  - maxRateDescription: "description"
+**DECISION TREE:**
+- Demographic/background questions (age, gender, occupation, etc.)? → Pure text-based questions, NO image
+- Visual perception/assessment questions (rate/rank/select images)? → Use image-based question types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
+- Need to show street image then ask text question? → Use "image" display type + text question (BOTH on SAME page!)
+- Follow-up text questions (opinions, explanations, reflections)? → Pure text questions, NO image
 
-✗ NEVER use "manual" mode
-✗ NEVER provide actual imageLink URLs
-✗ Images are ALWAYS randomly selected from Hugging Face dataset
-
-═══════════════════════════════════════════════════════════
-DECISION TREE
-═══════════════════════════════════════════════════════════
-
-Is this a demographic/socioeconomic question?
-├─ YES → Use text-based questions (text, radiogroup, dropdown, etc.)
-└─ NO → Is this about visual perception?
-    ├─ YES → Need user to rate/rank/select images?
-    │   ├─ YES → Use image-based question types (imagerating, imagepicker, imageranking, etc.)
-    │   └─ NO → Need to show image then ask for text answer?
-    │       └─ YES → Use "image" display + text question (BOTH in SAME page!)
-    └─ NO → Use text-based questions
-
-⚠️ PAGING RULE: If using "image" display + text question, they MUST be in the SAME page.
-   Don't put image on one page and text question on another page.
-
-**CRITICAL: JSON Structure Format**
-Your response MUST follow this exact structure:
-{
-  "title": "Survey Title",
-  "description": "Survey Description",
-  "pages": [
-    {
-      "title": "Page 1 Title",
-      "questions": [
-        {
-          "type": "text",
-          "name": "question_1",
-          "title": "Question text"
-        }
-      ]
-    }
-  ]
-}
-
-IMPORTANT: 
-- Each page MUST have: "title" and "questions" array
-- Questions go in "questions" array
-- Do NOT add "name" or "description" to pages
-
-Return ONLY valid JSON, no markdown or explanations.`;
+Generate a professional, well-structured survey with appropriate question types. Return ONLY valid JSON, no markdown or explanations.`;
 
     console.log('🤖 Generating survey with OpenAI...');
     
