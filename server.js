@@ -599,20 +599,34 @@ The survey must follow this structure:
   "pages": [...]
 }
 
-Available question types:
+═══════════════════════════════════════════════════════════
+AVAILABLE QUESTION TYPES
+═══════════════════════════════════════════════════════════
 
-TEXT-BASED QUESTIONS:
-- text: Single-line text input
-- comment: Multi-line text area
-- radiogroup: Single choice (radio buttons) - needs "choices" array
-- checkbox: Multiple choice (checkboxes) - needs "choices" array
-- dropdown: Dropdown selection - needs "choices" array
-- boolean: Yes/No question
-- rating: Rating scale - needs "rateMin" (default 1) and "rateMax" (default 5)
-- ranking: Rank items in order - needs "choices" array
+📝 TEXT-BASED QUESTIONS (for demographics, opinions, text input):
+- text: Single-line text input (e.g., "What is your occupation?")
+- comment: Multi-line text area (e.g., "Describe your ideal street")
+- radiogroup: Single choice - needs "choices" array (e.g., "What is your age group?")
+- checkbox: Multiple choice - needs "choices" array (e.g., "Which features do you value?")
+- dropdown: Dropdown selection - needs "choices" array (e.g., "Select your education level")
+- boolean: Yes/No question (e.g., "Do you own a car?")
+- rating: Rating scale - needs "rateMin" and "rateMax" (e.g., "Rate your satisfaction: 1-5")
+- ranking: Rank items in order - needs "choices" array (e.g., "Rank these priorities")
 - matrix: Matrix/grid question - needs "rows" and "columns" arrays
 
-IMAGE-BASED QUESTIONS (for visual perception surveys):
+🖼️ IMAGE DISPLAY TYPE (for showing a reference image):
+- image: Display a single image WITHOUT asking a question
+  Example:
+  {
+    "type": "image",
+    "name": "reference_image_1",
+    "imageSelectionMode": "huggingface_random",
+    "imageCount": 1,
+    "choices": []
+  }
+  Use this BEFORE text questions when you need to show a street image first.
+
+🎨 IMAGE-BASED QUESTION TYPES (for visual perception/assessment):
 - imageranking: Rank multiple images in order of preference
   Example:
   {
@@ -698,46 +712,177 @@ IMAGE-BASED QUESTIONS (for visual perception surveys):
   }
   IMPORTANT: imageLinks array is empty [], images will be randomly selected from Hugging Face dataset
 
-IMPORTANT GUIDELINES:
-1. **For demographic/socioeconomic questions**: Use text-based questions (text, comment, radiogroup, dropdown, rating, etc.) WITHOUT images
-   Example: age, gender, income, education, occupation
+═══════════════════════════════════════════════════════════
+THREE SURVEY DESIGN SCENARIOS
+═══════════════════════════════════════════════════════════
 
-2. **For visual perception/assessment questions**: PREFER image-based questions (imagepicker, imageranking, imagerating, imageboolean, imagematrix)
-   Example: "Pick your preferred street", "Rate the thermal comfort of this street", "Rank these streets by safety"
+🔹 SCENARIO 1: Socioeconomic/Demographic Questions
+   USE: Pure text-based questions (NO images needed)
+   
+   Examples:
+   {
+     "type": "radiogroup",
+     "name": "age_group",
+     "title": "What is your age group?",
+     "choices": ["18-25", "26-35", "36-45", "46-55", "56+"]
+   }
+   {
+     "type": "text",
+     "name": "occupation",
+     "title": "What is your occupation?"
+   }
+   {
+     "type": "dropdown",
+     "name": "education",
+     "title": "What is your education level?",
+     "choices": ["High School", "Bachelor's", "Master's", "PhD"]
+   }
 
-3. **For text-based streetscape questions**: If you must use text questions to ask about street/visual aspects, 
-   you MUST add an "image" type question BEFORE it to display the image:
-   Example sequence:
+🔹 SCENARIO 2: Visual Perception/Assessment Questions
+   USE: Image-based question types directly
+   
+   These question types DISPLAY images AND ask questions about them:
+   
+   2A. Rate images:
+   {
+     "type": "imagerating",
+     "name": "thermal_comfort",
+     "title": "How thermally comfortable does this street look?",
+     "imageCount": 1,
+     "imageSelectionMode": "huggingface_random",
+     "randomImageSelection": true,
+     "rateMin": 1,
+     "rateMax": 5,
+     "minRateDescription": "Very uncomfortable",
+     "maxRateDescription": "Very comfortable",
+     "choices": []
+   }
+   
+   2B. Pick preferred image(s):
+   {
+     "type": "imagepicker",
+     "name": "preferred_street",
+     "title": "Which street scene do you prefer?",
+     "imageCount": 4,
+     "imageSelectionMode": "huggingface_random",
+     "randomImageSelection": true,
+     "choices": []
+   }
+   
+   2C. Rank images:
+   {
+     "type": "imageranking",
+     "name": "safety_ranking",
+     "title": "Rank these streets from safest to least safe",
+     "imageCount": 3,
+     "imageSelectionMode": "huggingface_random",
+     "randomImageSelection": true,
+     "choices": []
+   }
+   
+   2D. Yes/No about image:
+   {
+     "type": "imageboolean",
+     "name": "would_walk",
+     "title": "Would you feel safe walking here at night?",
+     "imageCount": 1,
+     "imageSelectionMode": "huggingface_random",
+     "randomImageSelection": true,
+     "choices": []
+   }
+   
+   2E. Matrix rating for multiple images:
+   {
+     "type": "imagematrix",
+     "name": "multi_criteria_rating",
+     "title": "Rate these street scenes on multiple aspects",
+     "imageCount": 3,
+     "imageSelectionMode": "huggingface_random",
+     "imageLinks": [],
+     "rows": [
+       {"value": "safety", "text": "Safety"},
+       {"value": "beauty", "text": "Beauty"},
+       {"value": "walkability", "text": "Walkability"}
+     ],
+     "columns": [
+       {"value": "1", "text": "Poor"},
+       {"value": "3", "text": "Good"},
+       {"value": "5", "text": "Excellent"}
+     ]
+   }
+
+🔹 SCENARIO 3: Streetscape Questions Requiring Text Answers
+   USE: "image" display type FIRST, then text question
+   
+   When you need to SHOW a street image, then ask for text description/opinion:
+   
    [
      {
        "type": "image",
-       "name": "street_display_1",
-       "imageLink": "https://example.com/street.jpg"
+       "name": "street_reference_1",
+       "imageSelectionMode": "huggingface_random",
+       "imageCount": 1,
+       "choices": []
      },
      {
-       "type": "text",
+       "type": "comment",
        "name": "street_description",
-       "title": "Describe what you see in this street scene",
+       "title": "Please describe what you see in this street scene",
        "isRequired": true
      }
    ]
+   
+   OR:
+   
+   [
+     {
+       "type": "image",
+       "name": "street_reference_2",
+       "imageSelectionMode": "huggingface_random",
+       "imageCount": 1,
+       "choices": []
+     },
+     {
+       "type": "radiogroup",
+       "name": "main_feature",
+       "title": "What is the most prominent feature in this street?",
+       "choices": ["Trees", "Buildings", "People", "Vehicles", "Street furniture"]
+     }
+   ]
 
-4. All image-based questions MUST include:
-   - imageCount property (number of images to show)
-   - imageSelectionMode: "huggingface_random" (ALWAYS use huggingface_random)
-   - randomImageSelection: true (ALWAYS true)
-   - choices: [] (empty array, images automatically loaded from dataset)
-   - For imagematrix: use imageLinks: [] instead of choices
+═══════════════════════════════════════════════════════════
+CRITICAL RULES
+═══════════════════════════════════════════════════════════
 
-5. For imagerating, include minRateDescription and maxRateDescription
+✓ ALL image-based questions and "image" display MUST include:
+  - imageSelectionMode: "huggingface_random"
+  - randomImageSelection: true (for imageranking, imagerating, imagepicker, imageboolean)
+  - imageCount: <number> (how many images to show)
+  - choices: [] (empty array for imageranking/imagerating/imagepicker/imageboolean)
+  - imageLinks: [] (empty array for imagematrix)
 
-6. NEVER use "manual" mode or provide imageLink URLs - all images are randomly selected from the Hugging Face dataset
+✓ For imagerating questions, ALWAYS include:
+  - rateMin: 1
+  - rateMax: 5 (or 7, depending on scale)
+  - minRateDescription: "description"
+  - maxRateDescription: "description"
 
-**DECISION TREE:**
-- Demographic/background questions (age, gender, occupation, etc.)? → Pure text questions, NO image
-- Visual perception/assessment questions (rate/rank/select images)? → Use image-based question types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
-- Follow-up text questions (opinions, explanations, reflections)? → Pure text questions, NO image
-- Only use "image" display type when you need to show ONE reference image before a text question
+✗ NEVER use "manual" mode
+✗ NEVER provide actual imageLink URLs
+✗ Images are ALWAYS randomly selected from Hugging Face dataset
+
+═══════════════════════════════════════════════════════════
+DECISION TREE
+═══════════════════════════════════════════════════════════
+
+Is this a demographic/socioeconomic question?
+├─ YES → Use text-based questions (text, radiogroup, dropdown, etc.)
+└─ NO → Is this about visual perception?
+    ├─ YES → Need user to rate/rank/select images?
+    │   ├─ YES → Use image-based question types (imagerating, imagepicker, imageranking, etc.)
+    │   └─ NO → Need to show image then ask for text answer?
+    │       └─ YES → Use "image" display + text question
+    └─ NO → Use text-based questions
 
 **CRITICAL: JSON Structure Format**
 Your response MUST follow this exact structure:
@@ -852,51 +997,54 @@ app.post('/api/openai/adjust-survey', async (req, res) => {
     
     const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Modify the provided survey configuration according to the user's instructions.
 
-AVAILABLE QUESTION TYPES:
-Text-based: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
-Image-based: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+═══════════════════════════════════════════════════════════
+AVAILABLE QUESTION TYPES (same as generate-survey)
+═══════════════════════════════════════════════════════════
 
-IMAGE-BASED QUESTION STRUCTURE:
-- imagepicker: Requires imageCount, imageSelectionMode: "huggingface_random", randomImageSelection: true, choices: []
-- imageranking: Requires imageCount, imageSelectionMode: "huggingface_random", randomImageSelection: true, choices: []
-- imagerating: Requires imageCount, imageSelectionMode: "huggingface_random", randomImageSelection: true, choices: [], rateMin, rateMax, minRateDescription, maxRateDescription
-- imageboolean: Requires imageCount, imageSelectionMode: "huggingface_random", randomImageSelection: true, choices: []
-- imagematrix: Requires imageCount, imageSelectionMode: "huggingface_random", imageLinks: [], rows, columns arrays
+📝 TEXT-BASED: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+🖼️ IMAGE DISPLAY: image (shows image without question)
+🎨 IMAGE-BASED: imagepicker, imageranking, imagerating, imageboolean, imagematrix
 
-IMPORTANT RULES:
-1. **Demographic questions**: Use text-based questions WITHOUT images (age, gender, education, etc.)
+═══════════════════════════════════════════════════════════
+THREE SCENARIOS
+═══════════════════════════════════════════════════════════
 
-2. **Visual perception questions**: Use image-based question types (imagepicker, imagerating, imageranking, imageboolean, imagematrix)
+SCENARIO 1 - Socioeconomic/Demographics:
+→ Use text-based questions ONLY (no images)
+   Example: age, gender, income, education, occupation
 
-3. **Text questions about streetscape**: Must have an "image" type display question BEFORE the text question
+SCENARIO 2 - Visual Perception/Assessment:
+→ Use image-based question types directly
+   - imagerating: Rate images on a scale
+   - imagepicker: Choose one/multiple images
+   - imageranking: Rank images in order
+   - imageboolean: Yes/No about an image
+   - imagematrix: Rate multiple images on multiple criteria
+
+SCENARIO 3 - Show Image + Text Answer:
+→ Use "image" display type, THEN text question
    Example:
-   {
-     "type": "image",
-     "name": "display_street",
-     "imageLink": "https://example.com/street.jpg"
-   }
-   followed by:
-   {
-     "type": "comment",
-     "name": "describe_street",
-     "title": "Describe this street"
-   }
+   [
+     {"type": "image", "name": "ref_1", "imageSelectionMode": "huggingface_random", "imageCount": 1, "choices": []},
+     {"type": "comment", "name": "description", "title": "Describe this street"}
+   ]
 
-4. When adding image questions, ALWAYS include:
-   - imageCount: (number of images)
-   - imageSelectionMode: "huggingface_random" (ALWAYS huggingface_random, never manual)
-   - randomImageSelection: true (ALWAYS true)
-   - choices: [] (empty array, images auto-loaded from Hugging Face dataset)
+═══════════════════════════════════════════════════════════
+CRITICAL RULES (when adding/modifying image questions)
+═══════════════════════════════════════════════════════════
 
-5. NEVER provide imageLink URLs or use manual mode
+✓ ALL image questions MUST include:
+  - imageSelectionMode: "huggingface_random" (NEVER "manual")
+  - imageCount: <number>
+  - For imageranking/imagerating/imagepicker/imageboolean: randomImageSelection: true, choices: []
+  - For imagematrix: imageLinks: []
 
-6. Maintain all existing properties unless specifically asked to change them
+✓ imagerating questions MUST include:
+  - rateMin, rateMax, minRateDescription, maxRateDescription
 
-**DECISION TREE:**
-- Adding demographic/background question? → Pure text, NO image
-- Adding visual perception/assessment question? → Use image-based question types (imagerating, imagepicker, etc.)
-- Adding follow-up text question? → Pure text, NO image
-- Only use "image" display type when showing ONE reference image before a text question
+✗ NEVER use "manual" mode
+✗ NEVER provide imageLink URLs
+✗ Maintain all existing properties unless asked to change
 
 **CRITICAL: JSON Structure Format**
 Each page MUST have this structure:
@@ -1003,15 +1151,25 @@ app.post('/api/openai/generate-questions', async (req, res) => {
     
     const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Generate survey questions in JSON array format based on the description.
 
-AVAILABLE QUESTION TYPES:
-Text-based: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
-Image-based: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+═══════════════════════════════════════════════════════════
+AVAILABLE QUESTION TYPES
+═══════════════════════════════════════════════════════════
 
-Each question must have:
-- type: Question type from above
-- name: Unique identifier (lowercase, underscores, no spaces)
-- title: Question text
-- isRequired: true/false
+📝 TEXT-BASED: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+🖼️ IMAGE DISPLAY: image (shows image without question)
+🎨 IMAGE-BASED: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+
+═══════════════════════════════════════════════════════════
+THREE SCENARIOS
+═══════════════════════════════════════════════════════════
+
+SCENARIO 1 - Demographics → Pure text questions
+SCENARIO 2 - Visual Assessment → Image-based question types
+SCENARIO 3 - Show Image + Text → "image" display + text question
+
+═══════════════════════════════════════════════════════════
+EXAMPLES
+═══════════════════════════════════════════════════════════
 
 IMAGE-BASED QUESTION EXAMPLES:
 [
@@ -1079,36 +1237,46 @@ IMAGE-BASED QUESTION EXAMPLES:
   }
 ]
 
-IMPORTANT: choices and imageLinks are ALWAYS empty arrays [], images are randomly loaded from Hugging Face dataset
+SHOW IMAGE + TEXT QUESTION EXAMPLE:
+[
+  {
+    "type": "image",
+    "name": "street_ref_1",
+    "imageSelectionMode": "huggingface_random",
+    "imageCount": 1,
+    "choices": []
+  },
+  {
+    "type": "comment",
+    "name": "describe_street",
+    "title": "Describe what you see in this street scene",
+    "isRequired": true
+  }
+]
 
-IMPORTANT RULES:
-1. **Demographic/background questions**: Use text-based questions WITHOUT images
-   Examples: age, gender, education level, occupation
+═══════════════════════════════════════════════════════════
+CRITICAL RULES
+═══════════════════════════════════════════════════════════
 
-2. **Visual perception/assessment**: Use image-based question types
-   Examples: imagepicker for choosing preferences, imagerating for comfort ratings, imageranking for preference ordering
+✓ ALL image-based questions MUST include:
+  - imageSelectionMode: "huggingface_random" (NEVER "manual")
+  - imageCount: <number>
+  - For image-based types: randomImageSelection: true, choices: []
+  - For imagematrix: imageLinks: []
 
-3. **Text questions about streetscape/visual content**: Must include "image" display type BEFORE the text question
-   Example:
-   [
-     {"type": "image", "name": "show_street", "imageLink": "https://example.com/street.jpg"},
-     {"type": "comment", "name": "describe", "title": "Describe what you see", "isRequired": true}
-   ]
+✓ imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
 
-4. Image-based questions MUST include:
-   - imageCount: (number of images to show)
-   - imageSelectionMode: "huggingface_random" (ALWAYS huggingface_random, never manual)
-   - randomImageSelection: true (ALWAYS true)
-   - choices: [] (ALWAYS empty array)
-   - For imagematrix: imageLinks: [] (ALWAYS empty array)
+✗ NEVER use "manual" mode
+✗ NEVER provide actual imageLink URLs
+✗ Images are ALWAYS randomly selected from Hugging Face dataset
 
-5. NEVER provide imageLink URLs - images are automatically loaded from the Hugging Face dataset
+═══════════════════════════════════════════════════════════
+DECISION TREE
+═══════════════════════════════════════════════════════════
 
-**DECISION TREE:**
-- Demographic/background question? → Pure text, NO image
-- Visual perception/assessment question? → Use image-based question types (imagerating, imagepicker, imageranking, etc.)
-- Follow-up text question? → Pure text, NO image
-- Only use "image" display when showing ONE reference image before a text question
+Demographics? → Pure text (text, radiogroup, dropdown, etc.)
+Visual assessment? → Image-based types (imagerating, imagepicker, imageranking, etc.)
+Show image + text answer? → "image" display + text question
 
 **FORMAT:** Return a JSON array of question objects (these will be placed in page "questions" array):
 [
@@ -1242,50 +1410,40 @@ Respond with ONLY ONE WORD: generate, adjust, or question`;
     
     // Step 2: Route based on intent
     if (intent === 'generate') {
-      // Generate new survey
-      const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Generate a complete survey configuration in JSON format based on the user's description.
+      // Generate new survey (use same detailed prompt as generate-survey endpoint)
+      const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Generate a complete survey configuration in JSON format.
 
-The survey must follow this structure:
-{
-  "title": "Survey Title",
-  "description": "Survey description",
-  "logo": "",
-  "logoPosition": "right",
-  "showQuestionNumbers": "off",
-  "showProgressBar": "aboveheader",
-  "progressBarType": "questions",
-  "autoGrowComment": true,
-  "theme": {
-    "primaryColor": "#474747",
-    "primaryLight": "#6a6a6a",
-    "primaryDark": "#2e2e2e",
-    "secondaryColor": "#ff9814",
-    "accentColor": "#e50a3e",
-    "successColor": "#19b394",
-    "backgroundColor": "#ffffff",
-    "cardBackground": "#f8f8f8",
-    "headerBackground": "#f3f3f3",
-    "textColor": "#000000",
-    "secondaryText": "#737373",
-    "disabledText": "#737373",
-    "borderColor": "#292929",
-    "focusBorder": "#437fd9"
-  },
-  "pages": [...]
-}
+═══════════════════════════════════════════════════════════
+THREE SURVEY SCENARIOS
+═══════════════════════════════════════════════════════════
 
-Available question types:
+🔹 SCENARIO 1: Demographics/Socioeconomic → Pure text questions (NO images)
+🔹 SCENARIO 2: Visual Assessment → Image-based question types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
+🔹 SCENARIO 3: Show Image + Text Answer → "image" display type + text question
 
-TEXT-BASED QUESTIONS:
-- text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+═══════════════════════════════════════════════════════════
+AVAILABLE QUESTION TYPES
+═══════════════════════════════════════════════════════════
 
-IMAGE-BASED QUESTIONS (for visual perception):
-- imagepicker, imageranking, imagerating, imageboolean, imagematrix
+📝 TEXT: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+🖼️ IMAGE DISPLAY: image (shows image without question)
+🎨 IMAGE-BASED: imagepicker, imageranking, imagerating, imageboolean, imagematrix
 
-IMPORTANT: All image questions MUST use:
+═══════════════════════════════════════════════════════════
+CRITICAL RULES
+═══════════════════════════════════════════════════════════
+
+✓ ALL image questions MUST include:
   - imageSelectionMode: "huggingface_random"
-  - randomImageSelection: true
-  - choices: []
+  - imageCount: <number>
+  - For image-based types: randomImageSelection: true, choices: []
+  - For imagematrix: imageLinks: []
+
+✓ imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
+
+✗ NEVER use "manual" mode or provide imageLink URLs
+
+Pages must have: {"title": "...", "questions": [...]}
 
 Return ONLY valid JSON, no markdown.`;
 
@@ -1334,13 +1492,29 @@ Return ONLY valid JSON, no markdown.`;
       
       const systemPrompt = `You are an expert survey designer. Modify the provided survey configuration according to the user's instructions.
 
-IMPORTANT RULES:
-1. All image questions MUST use:
-   - imageSelectionMode: "huggingface_random"
-   - randomImageSelection: true
-   - choices: []
+═══════════════════════════════════════════════════════════
+THREE SCENARIOS (same as generate)
+═══════════════════════════════════════════════════════════
 
-2. Return the COMPLETE modified survey configuration.
+SCENARIO 1: Demographics → Pure text questions (NO images)
+SCENARIO 2: Visual Assessment → Image-based types (imagerating, imagepicker, imageranking, etc.)
+SCENARIO 3: Show Image + Text → "image" display + text question
+
+═══════════════════════════════════════════════════════════
+CRITICAL RULES
+═══════════════════════════════════════════════════════════
+
+✓ ALL image questions MUST use:
+  - imageSelectionMode: "huggingface_random"
+  - imageCount: <number>
+  - For image-based types: randomImageSelection: true, choices: []
+  - For imagematrix: imageLinks: []
+
+✓ imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
+
+✗ NEVER use "manual" mode
+✗ Return COMPLETE modified survey configuration
+✗ Pages format: {"title": "...", "questions": [...]}
 
 Return ONLY valid JSON, no markdown.`;
 
@@ -1381,17 +1555,33 @@ Return ONLY valid JSON, no markdown.`;
       // Answer question
       const systemPrompt = `You are a helpful assistant for a survey design platform. Answer the user's question concisely and provide actionable guidance.
 
-Available question types:
-- Text-based: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
-- Image-based: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+═══════════════════════════════════════════════════════════
+PLATFORM CAPABILITIES
+═══════════════════════════════════════════════════════════
 
-The platform supports:
+📝 TEXT QUESTIONS: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+🖼️ IMAGE DISPLAY: image (shows reference image)
+🎨 IMAGE-BASED QUESTIONS: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+
+═══════════════════════════════════════════════════════════
+THREE SURVEY SCENARIOS
+═══════════════════════════════════════════════════════════
+
+1. Demographics/Socioeconomic → Use pure text questions (NO images)
+2. Visual Perception/Assessment → Use image-based question types (imagerating, imagepicker, etc.)
+3. Show Image + Ask Text Question → Use "image" display type, then text question
+
+═══════════════════════════════════════════════════════════
+OTHER FEATURES
+═══════════════════════════════════════════════════════════
+
 - Multi-page surveys
-- Custom themes
-- AI-powered generation
-- Hugging Face dataset integration for random image selection
+- Custom themes and branding
+- AI-powered survey generation and adjustment
+- Hugging Face dataset integration for automatic random image selection
+- Contextual Engineering for remembering user preferences
 
-Be helpful and encourage the user to try creating or modifying their survey.`;
+Be helpful and encourage the user to try creating or modifying their survey!`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
