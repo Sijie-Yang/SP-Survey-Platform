@@ -251,9 +251,13 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     }
   }, [currentProject?.id, contextEnabled]);
 
-  // Auto-scroll chat to bottom
+  // Auto-scroll chat to bottom (only within chat container, not whole page)
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    chatEndRef.current?.scrollIntoView({ 
+      behavior: 'smooth',
+      block: 'nearest',
+      inline: 'nearest'
+    });
   }, [conversationMessages]);
 
   const handleBasicInfoChange = (field, value) => {
