@@ -49,6 +49,7 @@ export default function ChatAssistant({
   openaiApiKey,
   contextEnabled,
   recommendations = [],
+  currentProject,
   onMessageChange,
   onSendMessage,
   onApiKeyChange,
@@ -295,7 +296,7 @@ export default function ChatAssistant({
           
           {contextEnabled && (
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              🧠 Contextual Engineering enabled • I remember our conversation and your preferences
+              🧠 Contextual Engineering enabled • Project: <strong>{currentProject?.name || 'Unnamed'}</strong> ({currentProject?.id?.slice(0, 8)}...) • Memory is project-specific
             </Typography>
           )}
         </Box>

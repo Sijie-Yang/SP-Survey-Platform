@@ -226,15 +226,17 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     })
   );
 
-  // Initialize Contextual Engineering modules
+  // Initialize Contextual Engineering modules (per-project)
   useEffect(() => {
     if (currentProject?.id && contextEnabled) {
-      // Initialize modules
+      console.log('🧠 Initializing Contextual Engineering for project:', currentProject.id);
+      
+      // Initialize modules with current project ID
       conversationHistoryRef.current = getConversationHistory(currentProject.id);
       workingMemoryRef.current = getWorkingMemory(currentProject.id);
       sessionLearningRef.current = getSessionLearning();
       
-      // Load conversation history
+      // Load conversation history for THIS project
       const history = conversationHistoryRef.current.getAllMessages();
       setConversationMessages(history);
       
@@ -243,11 +245,19 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       const recs = sessionLearningRef.current.getRecommendations(surveyType);
       setRecommendations(recs);
       
-      console.log('🧠 Contextual Engineering initialized:', {
+      console.log('✅ Contextual Engineering ready:', {
         projectId: currentProject.id,
+        projectName: currentProject.name,
         historyMessages: history.length,
         recommendations: recs.length
       });
+    } else {
+      // Clear refs when project changes or CE disabled
+      conversationHistoryRef.current = null;
+      workingMemoryRef.current = null;
+      sessionLearningRef.current = null;
+      setConversationMessages([]);
+      setRecommendations([]);
     }
   }, [currentProject?.id, contextEnabled]);
 
@@ -576,6 +586,13 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   // Send chat message (unified handler for generate/adjust/question)
   const handleSendMessage = async () => {
     if (!userMessage.trim()) return;
+    
+    // Safety check: Ensure we have a valid project
+    if (!currentProject?.id) {
+      alert('No project selected. Please select or create a project first.');
+      return;
+    }
+    
     if (!openaiApiKey || !apiKeyValid) {
       if (conversationHistoryRef.current) {
         conversationHistoryRef.current.addMessage('assistant', 
@@ -586,6 +603,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       }
       return;
     }
+    
+    console.log('💬 Sending message for project:', currentProject.id, currentProject.name);
 
     // Add user message to UI immediately
     if (conversationHistoryRef.current) {
@@ -646,15 +665,20 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
           const processedConfig = processAIGeneratedConfig(result.surveyConfig);
           onChange(processedConfig);
 
-          // Update contextual engineering memories
+          // Update contextual engineering memories for THIS project
           if (contextEnabled) {
+            console.log('📝 Updating memories for project:', currentProject?.id, currentProject?.name);
+            
             if (workingMemoryRef.current) {
               if (result.intent === 'generate') {
                 workingMemoryRef.current.setSurveyGoal(currentUserMessage);
+                console.log('  ✓ Set survey goal for project:', currentProject?.id);
               }
               workingMemoryRef.current.addIteration(processedConfig, currentUserMessage);
+              console.log('  ✓ Added iteration to working memory (project:', currentProject?.id, ')');
               if (result.intent === 'adjust') {
                 workingMemoryRef.current.addDesignDecision(currentUserMessage, 'User requested adjustment');
+                console.log('  ✓ Recorded design decision (project:', currentProject?.id, ')');
               }
             }
 
@@ -664,6 +688,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                 currentProject?.category || 'general',
                 result.intent === 'generate' ? 'generate_survey' : 'adjust_survey'
               );
+              console.log('  ✓ Recorded interaction in session learning');
             }
           }
         }
@@ -704,6 +729,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         openaiApiKey={openaiApiKey}
         contextEnabled={contextEnabled}
         recommendations={recommendations}
+        currentProject={currentProject}
         onMessageChange={setUserMessage}
         onSendMessage={handleSendMessage}
         onApiKeyChange={setOpenaiApiKey}
