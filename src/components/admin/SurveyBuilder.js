@@ -861,5 +861,3 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     </Box>
   );
 }
-
-export default SurveyBuilder;
