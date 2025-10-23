@@ -738,14 +738,30 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
               onChange={(e) => handleBasicInfoChange('title', e.target.value)}
               helperText="The main title that appears at the top of your survey"
               sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-              <Card variant="outlined" sx={{ bgcolor: '#e8f5e9', border: '2px solid #4caf50' }}>
-                <CardContent>
-                  <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <TipsAndUpdates sx={{ color: '#4caf50' }} />
-                    Smart Recommendations
-                  </Typography>
-                  <List dense>
-                    {recommendations.map((rec, index) => (
+            />
+            
+            <TextField
+              fullWidth
+              variant="outlined"
+              multiline
+              rows={3}
+              label="Survey Description"
+              value={config.description || ''}
+              onChange={(e) => handleBasicInfoChange('description', e.target.value)}
+              helperText="A brief description explaining the purpose of your survey"
+              sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+            />
+          </Box>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* Pages and Questions */}
+      <Accordion defaultExpanded>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="h6">Pages & Questions</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <ListItem key={index} sx={{ py: 1 }}>
                         <ListItemText
                           primary={
