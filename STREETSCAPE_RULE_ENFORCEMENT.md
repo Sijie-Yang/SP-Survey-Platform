@@ -10,12 +10,36 @@ This document describes the critical rule and flexible page composition guidelin
 
 **NO STANDALONE TEXT QUESTIONS ABOUT STREETSCAPES!**
 
-All streetscape-related questions MUST be paired with images.
-Only demographic/socioeconomic questions can be pure text.
+**ALL non-socioeconomic text questions MUST have "image" display before them.**
+
+Only demographic/socioeconomic questions (age, gender, education, occupation, income) can be pure text.
+
+Any text question about streets, visual perception, or observations MUST be preceded by an "image" display element.
 
 ---
 
-## 📄 Page Composition Rules (NEW)
+## 💡 Understanding the Rule
+
+**Key Question: What type of text question is this?**
+
+```
+Is this text question about age, gender, education, occupation, or income?
+├─ YES → Pure text question (NO image display needed)
+└─ NO → Is it about streets, visual perception, or observations?
+    └─ YES → MUST have "image" display before it!
+```
+
+**Examples:**
+- ✅ "What is your age?" → Pure text (socioeconomic)
+- ✅ "What is your occupation?" → Pure text (socioeconomic)
+- ❌ "Describe this street" → **WRONG!** Must have image display first
+- ✅ [image display] + "Describe this street" → **CORRECT!**
+- ❌ "What do you think about street lighting?" → **WRONG!** Must have image display first
+- ✅ [image display] + "What do you think about this street's lighting?" → **CORRECT!**
+
+---
+
+## 📄 Page Composition Rules
 
 **Each page can contain ONE OR MORE of the following:**
 
@@ -67,6 +91,9 @@ Only demographic/socioeconomic questions can be pure text.
 ---
 
 ### **Type 3: Image Display + Text Questions (Multiple Groups Allowed)**
+
+**This is the ONLY way to ask text questions about streets!**
+
 ```json
 {
   "title": "Street Description",
@@ -78,9 +105,10 @@ Only demographic/socioeconomic questions can be pure text.
   ]
 }
 ```
-✓ One `image` followed by one or MORE text questions  
+✓ One `image` display MUST be followed by one or MORE text questions  
 ✓ Multiple text questions can refer to the same image  
-✓ Forms a BINDING GROUP
+✓ Forms a BINDING GROUP  
+✓ **ALL non-socioeconomic text questions MUST use this pattern**
 
 ---
 
@@ -156,9 +184,20 @@ Only demographic/socioeconomic questions can be pure text.
 ## 🎯 Why This Rule?
 
 1. **User Experience**: Users cannot answer questions about street appearance without seeing the street
+   - ❌ "Describe the street's appearance" (without image) → User: "Which street?"
+   - ✅ [image] + "Describe this street's appearance" → User can see and respond
+
 2. **Data Quality**: Visual context is essential for meaningful responses about streetscapes
-3. **Logical Consistency**: All streetscape questions require visual reference
+   - Without images, users might imagine different scenarios
+   - With images, all responses refer to the same visual stimulus
+
+3. **Logical Consistency**: ALL streetscape questions require visual reference
+   - **Exception**: Only socioeconomic questions (age, gender, education, occupation, income)
+   - **Rule**: Everything else about streets needs an image display
+
 4. **Platform Design**: The system is built for visual perception surveys
+   - Streetscape = visual by definition
+   - Text questions about streets without images violate the core purpose
 
 ---
 
@@ -178,29 +217,43 @@ All 6 AI endpoints have been updated with flexible page composition rules:
 **Update History:**
 - **992ada6-76634f9**: Initial rule enforcement (no standalone streetscape text questions)
 - **3674050**: Flexible mixing support (Types 2 and 3 can intermix, multiple questions per type)
+- **022a253**: Critical clarification (ALL non-socioeconomic text questions MUST have image display)
 
 ---
 
 ## 🔄 Decision Tree (Updated)
 
 ```
-For each page:
+For EACH TEXT QUESTION, ask:
+
+Q1: What is this text question about?
+├─ About age, gender, education, occupation, or income?
+│  └─ YES → Type 1: Pure text question (NO image needed) ✅
+│
+└─ NO → About streets, visual perception, or observations?
+   └─ YES → Type 3: MUST use image display + text question ✅
+           [image, text1, text2, ...]
+   
+   ❌ NEVER: Standalone text question about streets without image display!
+
+
+For EACH PAGE, plan:
 
 1. What type(s) of questions do I need?
-   ├─ Only demographics? → Use Type 1 (multiple pure text questions)
-   ├─ Only streetscape assessment? → Use Type 2 (multiple image-based questions)
-   ├─ Only streetscape description? → Use Type 3 (image + multiple text questions)
+   ├─ Only demographics? → Type 1 (multiple pure text questions)
+   ├─ Only streetscape ratings/selections? → Type 2 (multiple image-based questions)
+   ├─ Only streetscape text questions? → Type 3 (image + multiple text questions)
    └─ Mixed streetscape questions? → Combine Type 2 and Type 3
-       Example: [imagerating, imagerating, image+text+text, imagepicker]
+       Example: [imagerating, image+text+text, imagepicker]
 
-2. If using Type 3 (image display), do I have text questions after it?
-   ├─ YES → ✓ Valid
-   └─ NO → ❌ Invalid! Must add at least ONE text question
-
-3. Are my Type 3 groups properly structured?
+2. If using Type 3, are the groups properly structured?
    ├─ [image, text, text, imagerating] → ✓ Valid (binding maintained)
    ├─ [image, imagerating, text] → ❌ Invalid (binding broken)
    └─ [image, text, text, image, text] → ✓ Valid (two separate groups)
+
+3. Double-check: Any text questions about streets without image display?
+   ├─ NO → ✓ Valid survey
+   └─ YES → ❌ Invalid! Add image display before those text questions
 ```
 
 ---
@@ -243,6 +296,6 @@ As part of this update, all prompts were also simplified:
 
 ---
 
-Last Updated: 2025-10-23 (Flexible Mixing Update)
+Last Updated: 2025-10-23 (Critical Clarification: ALL non-socioeconomic text questions need image display)
 Branch: `feature/contextual-engineering`
 
