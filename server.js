@@ -698,16 +698,21 @@ IMAGE-BASED QUESTIONS (for visual perception surveys):
   }
   IMPORTANT: imageLinks array is empty [], images will be randomly selected from Hugging Face dataset
 
-IMPORTANT GUIDELINES:
-1. **For demographic/socioeconomic questions**: Use text-based questions (text, comment, radiogroup, dropdown, rating, etc.) WITHOUT images
-   Example: age, gender, income, education, occupation
+IMPORTANT GUIDELINES FOR STREETSCAPE SURVEYS:
 
-2. **For visual perception/assessment questions**: PREFER image-based questions (imagepicker, imageranking, imagerating, imageboolean, imagematrix)
-   Example: "Pick your preferred street", "Rate the thermal comfort of this street", "Rank these streets by safety"
+**CRITICAL RULE: No standalone text questions about streetscapes!**
+All streetscape-related questions MUST be paired with images. Only socioeconomic/demographic questions can be pure text.
 
-3. **For text-based streetscape questions**: If you must use text questions to ask about street/visual aspects, 
-   you MUST add an "image" type question BEFORE it to display the image, and BOTH must be on the SAME PAGE:
-   Example sequence (on same page):
+1. **For demographic/socioeconomic questions ONLY**: Use pure text-based questions WITHOUT images
+   Example: age, gender, income, education, occupation, background
+   These are the ONLY questions that can be text-only.
+
+2. **For visual perception/assessment questions**: Use image-based question types (imagepicker, imageranking, imagerating, imageboolean, imagematrix)
+   Example: "Rate the thermal comfort of this street", "Rank these streets by safety", "Which street do you prefer?"
+   This is the PREFERRED method for streetscape questions.
+
+3. **For descriptive streetscape questions**: If you need text answers about streets, you MUST show the image WITH it
+   Use "image" display type + text question (BOTH on SAME PAGE):
    [
      {
        "type": "image",
@@ -717,13 +722,13 @@ IMPORTANT GUIDELINES:
        "choices": []
      },
      {
-       "type": "text",
+       "type": "comment",
        "name": "street_description",
        "title": "Describe what you see in this street scene",
        "isRequired": true
      }
    ]
-   CRITICAL: NEVER split "image" and its corresponding text question across different pages!
+   NEVER split image and text question across pages!
 
 4. All image-based questions MUST include:
    - imageCount property (number of images to show)
@@ -737,10 +742,10 @@ IMPORTANT GUIDELINES:
 6. NEVER use "manual" mode or provide imageLink URLs - all images are randomly selected from the Hugging Face dataset
 
 **DECISION TREE:**
-- Demographic/background questions (age, gender, occupation, etc.)? → Pure text-based questions, NO image
-- Visual perception/assessment questions (rate/rank/select images)? → Use image-based question types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
-- Need to show street image then ask text question? → Use "image" display type + text question (BOTH on SAME page!)
-- Follow-up text questions (opinions, explanations, reflections)? → Pure text questions, NO image
+- Is this a demographic/socioeconomic background question? → Pure text question (age, gender, education, etc.)
+- Is this about streetscape visual assessment? → Use image-based question types (imagerating, imagepicker, imageranking, etc.)
+- Is this asking for text description/opinion about a street? → Use "image" display + text question (SAME page!)
+- ❌ NEVER: Standalone text question about streets without showing the street image!
 
 Generate a professional, well-structured survey with appropriate question types. Return ONLY valid JSON, no markdown or explanations.`;
 
