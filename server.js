@@ -734,9 +734,10 @@ IMPORTANT GUIDELINES:
 6. NEVER use "manual" mode or provide imageLink URLs - all images are randomly selected from the Hugging Face dataset
 
 **DECISION TREE:**
-- Demographic/background question? → text-based, NO image
-- Visual assessment question? → image-based question type (imagepicker, imagerating, imageranking, etc.)
-- Text question about streetscape? → "image" type display FIRST, then text question
+- Demographic/background questions (age, gender, occupation, etc.)? → Pure text questions, NO image
+- Visual perception/assessment questions (rate/rank/select images)? → Use image-based question types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
+- Follow-up text questions (opinions, explanations, reflections)? → Pure text questions, NO image
+- Only use "image" display type when you need to show ONE reference image before a text question
 
 Generate a professional, well-structured survey with appropriate question types. Return ONLY valid JSON, no markdown or explanations.`;
 
@@ -860,9 +861,10 @@ IMPORTANT RULES:
 6. Maintain all existing properties unless specifically asked to change them
 
 **DECISION TREE:**
-- Adding demographic question? → text-based, NO image
-- Adding visual assessment? → image-based question type
-- Adding text question about street? → "image" display FIRST, then text question
+- Adding demographic/background question? → Pure text, NO image
+- Adding visual perception/assessment question? → Use image-based question types (imagerating, imagepicker, etc.)
+- Adding follow-up text question? → Pure text, NO image
+- Only use "image" display type when showing ONE reference image before a text question
 
 Return the COMPLETE modified survey configuration in JSON format. Return ONLY valid JSON, no markdown or explanations.`;
 
@@ -1054,9 +1056,10 @@ IMPORTANT RULES:
 5. NEVER provide imageLink URLs - images are automatically loaded from the Hugging Face dataset
 
 **DECISION TREE:**
-- Demographic question? → text-based, NO image
-- Visual assessment? → image-based question type (imagepicker, imagerating, imageranking, etc.)
-- Text question about street scene? → "image" display + text question
+- Demographic/background question? → Pure text, NO image
+- Visual perception/assessment question? → Use image-based question types (imagerating, imagepicker, imageranking, etc.)
+- Follow-up text question? → Pure text, NO image
+- Only use "image" display when showing ONE reference image before a text question
 
 Return ONLY a JSON array of questions, no markdown or explanations.`;
 
