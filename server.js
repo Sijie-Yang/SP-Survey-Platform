@@ -836,67 +836,28 @@ app.post('/api/openai/adjust-survey', async (req, res) => {
     
     const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Modify the provided survey configuration according to the user's instructions.
 
-═══════════════════════════════════════════════════════════
-AVAILABLE QUESTION TYPES (same as generate-survey)
-═══════════════════════════════════════════════════════════
+**CRITICAL RULE FOR STREETSCAPE SURVEYS:**
+No standalone text questions about streetscapes! All streetscape-related questions MUST be paired with images.
+Only demographics (age, gender, education, occupation) can be pure text.
 
-📝 TEXT-BASED: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
-🖼️ IMAGE DISPLAY: image (shows image without question)
-🎨 IMAGE-BASED: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+IMPORTANT GUIDELINES:
+1. **Demographics ONLY**: Pure text questions for age, gender, education, occupation, background
 
-═══════════════════════════════════════════════════════════
-THREE SCENARIOS
-═══════════════════════════════════════════════════════════
+2. **Streetscape questions**: MUST use image-based types (imagerating, imagepicker, imageranking, imageboolean, imagematrix)
+   OR use "image" display + text question (BOTH on SAME page!)
 
-SCENARIO 1 - Socioeconomic/Demographics:
-→ Use text-based questions ONLY (no images)
-   Example: age, gender, income, education, occupation
+3. **When adding/modifying image questions**:
+   - imageSelectionMode: "huggingface_random" (NEVER "manual")
+   - imageCount: <number>
+   - randomImageSelection: true, choices: []
+   - For imagematrix: imageLinks: []
+   - For imagerating: include rateMin, rateMax, minRateDescription, maxRateDescription
 
-SCENARIO 2 - Visual Perception/Assessment:
-→ Use image-based question types directly
-   - imagerating: Rate images on a scale
-   - imagepicker: Choose one/multiple images
-   - imageranking: Rank images in order
-   - imageboolean: Yes/No about an image
-   - imagematrix: Rate multiple images on multiple criteria
+4. **NEVER**: Ask about street appearance without showing street images
+5. **NEVER**: Split "image" display and text question across different pages
+6. **NEVER**: Use "manual" mode or provide imageLink URLs
 
-SCENARIO 3 - Show Image + Text Answer:
-→ Use "image" display type, THEN text question
-   ⚠️ CRITICAL: Image and text question MUST be in the SAME PAGE
-   Example (both in same page):
-   [
-     {"type": "image", "name": "ref_1", "imageSelectionMode": "huggingface_random", "imageCount": 1, "choices": []},
-     {"type": "comment", "name": "description", "title": "Describe this street"}
-   ]
-   NEVER split image and text question across different pages!
-
-═══════════════════════════════════════════════════════════
-CRITICAL RULES (when adding/modifying image questions)
-═══════════════════════════════════════════════════════════
-
-✓ ALL image questions MUST include:
-  - imageSelectionMode: "huggingface_random" (NEVER "manual")
-  - imageCount: <number>
-  - For imageranking/imagerating/imagepicker/imageboolean: randomImageSelection: true, choices: []
-  - For imagematrix: imageLinks: []
-
-✓ imagerating questions MUST include:
-  - rateMin, rateMax, minRateDescription, maxRateDescription
-
-✗ NEVER use "manual" mode
-✗ NEVER provide imageLink URLs
-✗ Maintain all existing properties unless asked to change
-
-**CRITICAL: JSON Structure Format**
-Each page MUST have this structure:
-{
-  "title": "Page Title",
-  "questions": [...]  // Questions go in "questions" array
-}
-
-Do NOT add "name" or "description" to pages, only "title" and "questions".
-
-Return the COMPLETE modified survey configuration in JSON format. Return ONLY valid JSON, no markdown or explanations.`;
+Return the COMPLETE modified survey configuration. Return ONLY valid JSON, no markdown.`;
 
     const userPrompt = `Current survey configuration:
 ${JSON.stringify(currentConfig, null, 2)}
@@ -992,21 +953,19 @@ app.post('/api/openai/generate-questions', async (req, res) => {
     
     const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Generate survey questions in JSON array format based on the description.
 
-═══════════════════════════════════════════════════════════
-AVAILABLE QUESTION TYPES
-═══════════════════════════════════════════════════════════
+**CRITICAL RULE FOR STREETSCAPE SURVEYS:**
+No standalone text questions about streetscapes! All streetscape-related questions MUST be paired with images.
+Only demographics (age, gender, education, occupation) can be pure text.
 
-📝 TEXT-BASED: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
-🖼️ IMAGE DISPLAY: image (shows image without question)
-🎨 IMAGE-BASED: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+AVAILABLE QUESTION TYPES:
+- TEXT-BASED: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+- IMAGE DISPLAY: image (shows image without question)
+- IMAGE-BASED: imagepicker, imageranking, imagerating, imageboolean, imagematrix
 
-═══════════════════════════════════════════════════════════
-THREE SCENARIOS
-═══════════════════════════════════════════════════════════
-
-SCENARIO 1 - Demographics → Pure text questions
-SCENARIO 2 - Visual Assessment → Image-based question types
-SCENARIO 3 - Show Image + Text → "image" display + text question
+THREE SCENARIOS:
+1. Demographics → Pure text questions (age, gender, education, occupation)
+2. Streetscape Visual Assessment → Image-based question types
+3. Streetscape Description → "image" display + text question (BOTH together!)
 
 ═══════════════════════════════════════════════════════════
 EXAMPLES
@@ -1095,42 +1054,22 @@ SHOW IMAGE + TEXT QUESTION EXAMPLE:
     "isRequired": true
   }
 ]
-NEVER return just the "image" without the text question - they must be together!
+CRITICAL: When generating streetscape descriptions, ALWAYS return BOTH "image" and text question together!
 
-═══════════════════════════════════════════════════════════
-CRITICAL RULES
-═══════════════════════════════════════════════════════════
+RULES:
+- ALL image questions MUST include: imageSelectionMode: "huggingface_random", imageCount, randomImageSelection: true, choices: []
+- imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
+- For imagematrix: use imageLinks: [] instead of choices
+- NEVER use "manual" mode or provide imageLink URLs
+- NEVER generate streetscape text questions without paired images
 
-✓ ALL image-based questions MUST include:
-  - imageSelectionMode: "huggingface_random" (NEVER "manual")
-  - imageCount: <number>
-  - For image-based types: randomImageSelection: true, choices: []
-  - For imagematrix: imageLinks: []
+DECISION TREE:
+- Demographics (age, gender, education)? → Pure text questions
+- Streetscape visual assessment? → Image-based question types (imagerating, imagepicker, etc.)
+- Streetscape description needed? → "image" display + text question (BOTH together!)
+- ❌ NEVER: Text question about streets without showing street images
 
-✓ imagerating MUST include: rateMin, rateMax, minRateDescription, maxRateDescription
-
-✗ NEVER use "manual" mode
-✗ NEVER provide actual imageLink URLs
-✗ Images are ALWAYS randomly selected from Hugging Face dataset
-
-═══════════════════════════════════════════════════════════
-DECISION TREE
-═══════════════════════════════════════════════════════════
-
-Demographics? → Pure text (text, radiogroup, dropdown, etc.)
-Visual assessment? → Image-based types (imagerating, imagepicker, imageranking, etc.)
-Show image + text answer? → "image" display + text question
-
-**FORMAT:** Return a JSON array of question objects (these will be placed in page "questions" array):
-[
-  {
-    "type": "text",
-    "name": "question_1",
-    "title": "Question text"
-  }
-]
-
-Return ONLY a JSON array of questions, no markdown or explanations.`;
+Return ONLY a JSON array of questions, no markdown.`;
 
     console.log('🤖 Generating questions with OpenAI...');
     
