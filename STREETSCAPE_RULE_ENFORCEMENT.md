@@ -2,7 +2,7 @@
 
 ## 📋 Overview
 
-This document describes the critical rule enforced across all AI endpoints to ensure proper question design for streetscape surveys.
+This document describes the critical rule and flexible page composition guidelines enforced across all AI endpoints to ensure proper question design for streetscape surveys.
 
 ---
 
@@ -15,69 +15,105 @@ Only demographic/socioeconomic questions can be pure text.
 
 ---
 
-## ✅ Correct Usage
+## 📄 Page Composition Rules (NEW)
 
-### **Scenario 1: Demographics (Text Only)**
+**Each page can contain ONE OR MORE of the following:**
+
+### **Type 1: Socioeconomic Questions (Multiple Allowed)**
 ```json
 {
-  "type": "radiogroup",
-  "name": "age",
-  "title": "What is your age group?",
-  "choices": ["18-24", "25-34", "35-44", "45+"]
+  "title": "Background Information",
+  "questions": [
+    {"type": "radiogroup", "name": "age", "title": "Age group?", "choices": ["18-24", "25-34", "35-44", "45+"]},
+    {"type": "radiogroup", "name": "gender", "title": "Gender?", "choices": ["Male", "Female", "Other"]},
+    {"type": "dropdown", "name": "education", "title": "Education level?", "choices": ["High school", "Bachelor", "Master", "PhD"]}
+  ]
 }
 ```
-✓ Pure text questions are ONLY for demographics: age, gender, education, occupation, income
+✓ Multiple socioeconomic questions on same page  
+✓ Pure text questions ONLY for: age, gender, education, occupation, income
 
 ---
 
-### **Scenario 2: Streetscape Visual Assessment (Image-Based Questions)**
+### **Type 2: Image-Based Streetscape Questions (Multiple Allowed)**
 ```json
 {
-  "type": "imagerating",
-  "name": "thermal_comfort",
-  "title": "How comfortable does this street look?",
-  "imageCount": 1,
-  "imageSelectionMode": "huggingface_random",
-  "randomImageSelection": true,
-  "rateMin": 1,
-  "rateMax": 5,
-  "minRateDescription": "Not comfortable",
-  "maxRateDescription": "Very comfortable",
-  "choices": []
-}
-```
-✓ Use image-based question types: `imagerating`, `imagepicker`, `imageranking`, `imageboolean`, `imagematrix`
-
----
-
-### **Scenario 3: Streetscape Description (Image Display + Text)**
-```json
-{
-  "title": "Street Description",
+  "title": "Street Assessment",
   "questions": [
     {
-      "type": "image",
-      "name": "street_ref_1",
-      "imageSelectionMode": "huggingface_random",
+      "type": "imagerating",
+      "name": "comfort",
+      "title": "Rate the comfort",
       "imageCount": 1,
+      "imageSelectionMode": "huggingface_random",
+      "rateMin": 1,
+      "rateMax": 5,
       "choices": []
     },
     {
-      "type": "comment",
-      "name": "street_description",
-      "title": "Describe what you see in this street scene",
-      "isRequired": true
+      "type": "imagepicker",
+      "name": "preference",
+      "title": "Which street do you prefer?",
+      "imageCount": 4,
+      "imageSelectionMode": "huggingface_random",
+      "choices": []
     }
   ]
 }
 ```
-✓ Image display and text question MUST be on the SAME PAGE
+✓ Multiple image-based questions on same page  
+✓ Use: `imagerating`, `imagepicker`, `imageranking`, `imageboolean`, `imagematrix`
+
+---
+
+### **Type 3: Image Display + Text Questions (Multiple Groups Allowed)**
+```json
+{
+  "title": "Street Description",
+  "questions": [
+    {"type": "image", "name": "street_1", "imageCount": 1, "imageSelectionMode": "huggingface_random", "choices": []},
+    {"type": "comment", "name": "description_1", "title": "Describe what you see"},
+    {"type": "text", "name": "impression_1", "title": "First impression?"},
+    {"type": "radiogroup", "name": "walkable_1", "title": "Is it walkable?", "choices": ["Yes", "No"]}
+  ]
+}
+```
+✓ One `image` followed by one or MORE text questions  
+✓ Multiple text questions can refer to the same image  
+✓ Forms a BINDING GROUP
+
+---
+
+## 🔄 Flexible Mixing (NEW)
+
+**Types 2 and 3 can intermix on the same page** (both are streetscape questions):
+
+```json
+{
+  "title": "Mixed Streetscape Assessment",
+  "questions": [
+    {"type": "imagerating", "name": "rate_1", "title": "Rate this street", "imageCount": 1, "imageSelectionMode": "huggingface_random", "choices": []},
+    
+    {"type": "image", "name": "ref_1", "imageCount": 1, "imageSelectionMode": "huggingface_random", "choices": []},
+    {"type": "comment", "name": "desc_1", "title": "Describe this street"},
+    {"type": "text", "name": "feel_1", "title": "How does it make you feel?"},
+    
+    {"type": "imagepicker", "name": "pick_1", "title": "Pick preferred street", "imageCount": 3, "imageSelectionMode": "huggingface_random", "choices": []},
+    
+    {"type": "image", "name": "ref_2", "imageCount": 1, "imageSelectionMode": "huggingface_random", "choices": []},
+    {"type": "comment", "name": "desc_2", "title": "Describe this different street"}
+  ]
+}
+```
+
+✓ Valid: `[imagerating, image+2texts, imagepicker, image+1text]`  
+✓ Both Type 2 and Type 3 are streetscape questions, so they can coexist on same page
 
 ---
 
 ## ❌ Incorrect Usage
 
-### **WRONG: Standalone streetscape text question**
+### **WRONG #1: Standalone streetscape text question**
 ```json
 {
   "type": "comment",
@@ -89,25 +125,31 @@ Only demographic/socioeconomic questions can be pure text.
 
 ---
 
-### **WRONG: Image and text question on different pages**
+### **WRONG #2: Image display without following text questions**
 ```json
-// Page 1
 {
   "title": "Street View",
   "questions": [
-    {"type": "image", "name": "street_1", ...}
-  ]
-}
-
-// Page 2
-{
-  "title": "Your Opinion",
-  "questions": [
-    {"type": "comment", "name": "opinion", "title": "Describe the street"}
+    {"type": "image", "name": "street_1", "imageCount": 1, "imageSelectionMode": "huggingface_random", "choices": []}
   ]
 }
 ```
-❌ Image and text question are split across pages!
+❌ Image display must be followed by at least ONE text question!
+
+---
+
+### **WRONG #3: Breaking the binding (inserting image-based question between image and its text)**
+```json
+{
+  "title": "Mixed (WRONG)",
+  "questions": [
+    {"type": "image", "name": "street_1", ...},
+    {"type": "imagerating", "name": "rate_1", ...},  // ❌ Breaks binding!
+    {"type": "comment", "name": "desc_1", "title": "Describe street_1"}  // ❌ Too late!
+  ]
+}
+```
+❌ Text questions must immediately follow their image display (before any image-based question)
 
 ---
 
@@ -122,28 +164,43 @@ Only demographic/socioeconomic questions can be pure text.
 
 ## 📊 Implementation Status
 
-All 6 AI endpoints have been updated with this rule:
+All 6 AI endpoints have been updated with flexible page composition rules:
 
-| Endpoint | Status | Commit |
-|----------|--------|--------|
-| `/api/openai/generate-survey` | ✅ Updated | 992ada6 |
-| `/api/openai/adjust-survey` | ✅ Updated | 489dfb9 |
-| `/api/openai/generate-questions` | ✅ Updated | 489dfb9 |
-| `/api/openai/chat` (generate) | ✅ Updated | 76634f9 |
-| `/api/openai/chat` (adjust) | ✅ Updated | 76634f9 |
-| `/api/openai/chat` (question) | ✅ Updated | 76634f9 |
+| Endpoint | Status | Initial | Flexible Mixing | Latest Commit |
+|----------|--------|---------|-----------------|---------------|
+| `/api/openai/generate-survey` | ✅ Updated | 992ada6 | 3674050 | Full detailed rules |
+| `/api/openai/adjust-survey` | ✅ Updated | 489dfb9 | 3674050 | Concise version |
+| `/api/openai/generate-questions` | ✅ Updated | 489dfb9 | 3674050 | Array-focused |
+| `/api/openai/chat` (generate) | ✅ Updated | 76634f9 | 3674050 | Concise version |
+| `/api/openai/chat` (adjust) | ✅ Updated | 76634f9 | 3674050 | Concise version |
+| `/api/openai/chat` (question) | ✅ Updated | 76634f9 | 3674050 | User-facing |
+
+**Update History:**
+- **992ada6-76634f9**: Initial rule enforcement (no standalone streetscape text questions)
+- **3674050**: Flexible mixing support (Types 2 and 3 can intermix, multiple questions per type)
 
 ---
 
-## 🔄 Decision Tree
+## 🔄 Decision Tree (Updated)
 
 ```
-Is this a demographic/socioeconomic question?
-├─ YES → Use pure text question (age, gender, education, occupation)
-└─ NO → Is this about streetscape?
-    └─ YES → MUST use images!
-        ├─ Option A: Image-based question type (imagerating, imagepicker, etc.)
-        └─ Option B: "image" display + text question (SAME page!)
+For each page:
+
+1. What type(s) of questions do I need?
+   ├─ Only demographics? → Use Type 1 (multiple pure text questions)
+   ├─ Only streetscape assessment? → Use Type 2 (multiple image-based questions)
+   ├─ Only streetscape description? → Use Type 3 (image + multiple text questions)
+   └─ Mixed streetscape questions? → Combine Type 2 and Type 3
+       Example: [imagerating, imagerating, image+text+text, imagepicker]
+
+2. If using Type 3 (image display), do I have text questions after it?
+   ├─ YES → ✓ Valid
+   └─ NO → ❌ Invalid! Must add at least ONE text question
+
+3. Are my Type 3 groups properly structured?
+   ├─ [image, text, text, imagerating] → ✓ Valid (binding maintained)
+   ├─ [image, imagerating, text] → ❌ Invalid (binding broken)
+   └─ [image, text, text, image, text] → ✓ Valid (two separate groups)
 ```
 
 ---
@@ -176,6 +233,16 @@ As part of this update, all prompts were also simplified:
 
 ---
 
-Last Updated: 2025-10-23
+## 🎉 Key Benefits of Flexible Mixing
+
+1. **Realistic Survey Design**: Mirrors actual research patterns where multiple question types coexist
+2. **Greater Flexibility**: Designers can organize questions more naturally
+3. **Maintains Quality**: Still enforces critical binding rules
+4. **Better AI Understanding**: Clear structure for binding relationships
+5. **Complex Multi-Topic Pages**: Supports sophisticated survey designs
+
+---
+
+Last Updated: 2025-10-23 (Flexible Mixing Update)
 Branch: `feature/contextual-engineering`
 
