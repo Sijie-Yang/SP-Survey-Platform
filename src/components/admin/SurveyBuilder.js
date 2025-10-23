@@ -723,67 +723,21 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         chatEndRef={chatEndRef}
       />
 
-      {/* Old Accordion - TO BE REMOVED */}
-      <Box sx={{ display: 'none' }}>
-      <Accordion 
-        defaultExpanded={false}
-        sx={{ 
-          mb: 2,
-          border: 2,
-          borderColor: 'primary.main',
-          borderRadius: 2,
-          '&:before': { display: 'none' },
-          boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
-        }}
-      >
-        <AccordionSummary 
-          expandIcon={<ExpandMore />}
-          sx={{ 
-            bgcolor: 'primary.main', 
-            color: 'white',
-            '&:hover': { bgcolor: 'primary.dark' },
-            borderRadius: '8px 8px 0 0'
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Psychology sx={{ fontSize: 28 }} />
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              🤖 AI Assistant (OpenAI)
-            </Typography>
-          </Box>
+      {/* Basic Survey Information */}
+      <Accordion defaultExpanded>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Typography variant="h6">Basic Information</Typography>
         </AccordionSummary>
-        <AccordionDetails sx={{ p: 3 }}>
+        <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            
-            {/* 🧠 Contextual Engineering Toggle */}
-            <Card variant="outlined" sx={{ bgcolor: '#fff3e0', border: '2px solid #ff9800' }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <SmartToy sx={{ color: '#ff9800' }} />
-                      🧠 Contextual Engineering (NEW)
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Enable multi-turn conversations, memory, and personalized recommendations
-                    </Typography>
-                  </Box>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={contextEnabled}
-                        onChange={(e) => setContextEnabled(e.target.checked)}
-                        color="primary"
-                      />
-                    }
-                    label={contextEnabled ? "Enabled" : "Disabled"}
-                  />
-                </Box>
-              </CardContent>
-            </Card>
-
-            {/* 🎯 Smart Recommendations */}
-            {contextEnabled && recommendations.length > 0 && (
+            <TextField
+              fullWidth
+              variant="outlined"
+              label="Survey Title"
+              value={config.title || ''}
+              onChange={(e) => handleBasicInfoChange('title', e.target.value)}
+              helperText="The main title that appears at the top of your survey"
+              sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               <Card variant="outlined" sx={{ bgcolor: '#e8f5e9', border: '2px solid #4caf50' }}>
                 <CardContent>
                   <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
