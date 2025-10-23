@@ -536,23 +536,153 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   };
 
   // AI Assistant handlers
+  // Validate API Key
   const handleValidateApiKey = async () => {
-    setAiLoading(true);
-    setAiError('');
-    setAiSuccess('');
+    setIsLoading(true);
     
-    const result = await validateApiKey(openaiApiKey);
+    const result = await validateChatApiKey(openaiApiKey);
     
-    setAiLoading(false);
+    setIsLoading(false);
     
     if (result.success) {
       setApiKeyValid(true);
-      setAiSuccess('✅ API key validated successfully!');
-      // Store API key in sessionStorage
       sessionStorage.setItem('openai_api_key', openaiApiKey);
+      
+      // Add system message
+      if (conversationHistoryRef.current) {
+        conversationHistoryRef.current.addMessage('assistant', 
+          '✅ API key validated! I\'m ready to help you create and modify surveys. Just type what you need!',
+          { actionType: 'system' }
+        );
+        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+      }
     } else {
       setApiKeyValid(false);
-      setAiError('❌ Invalid API key. Please check and try again.');
+      if (conversationHistoryRef.current) {
+        conversationHistoryRef.current.addMessage('assistant', 
+          '❌ Invalid API key. Please check and try again in settings.',
+          { actionType: 'system', error: true }
+        );
+        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+      }
+    }
+  };
+
+  // Send chat message (unified handler for generate/adjust/question)
+  const handleSendMessage = async () => {
+    if (!userMessage.trim()) return;
+    if (!openaiApiKey || !apiKeyValid) {
+      if (conversationHistoryRef.current) {
+        conversationHistoryRef.current.addMessage('assistant', 
+          '⚠️ Please configure and validate your OpenAI API key in settings first.',
+          { actionType: 'system', error: true }
+        );
+        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+      }
+      return;
+    }
+
+    // Add user message to UI immediately
+    if (conversationHistoryRef.current) {
+      conversationHistoryRef.current.addMessage('user', userMessage, {
+        actionType: 'chat',
+        timestamp: new Date().toISOString()
+      });
+      setConversationMessages(conversationHistoryRef.current.getAllMessages());
+    }
+
+    const currentUserMessage = userMessage;
+    setUserMessage(''); // Clear input
+    setIsLoading(true);
+
+    try {
+      // Build conversation history for API (last 10 messages)
+      const apiHistory = conversationHistoryRef.current
+        ?.getFormattedForOpenAI(10) || [];
+
+      // Enrich with contextual engineering context if enabled
+      let enrichedHistory = apiHistory;
+      if (contextEnabled && workingMemoryRef.current && sessionLearningRef.current) {
+        const workingContext = workingMemoryRef.current.getContextForAI();
+        const sessionContext = sessionLearningRef.current.getContextForAI(currentProject?.category);
+        
+        // Prepend context as system messages
+        enrichedHistory = [
+          { role: 'system', content: sessionContext },
+          { role: 'system', content: workingContext },
+          ...apiHistory
+        ];
+        
+        console.log('🧠 Using contextual prompt with memory');
+      }
+
+      // Call intelligent chat API
+      const result = await sendChatMessage(
+        currentUserMessage,
+        config,
+        enrichedHistory,
+        openaiApiKey
+      );
+
+      setIsLoading(false);
+
+      if (result.success) {
+        // Add AI response to conversation
+        if (conversationHistoryRef.current) {
+          conversationHistoryRef.current.addMessage('assistant', result.message, {
+            actionType: result.intent,
+            timestamp: new Date().toISOString()
+          });
+          setConversationMessages(conversationHistoryRef.current.getAllMessages());
+        }
+
+        // If survey config was generated/adjusted, apply it
+        if (result.surveyConfig) {
+          const processedConfig = processAIGeneratedConfig(result.surveyConfig);
+          onChange(processedConfig);
+
+          // Update contextual engineering memories
+          if (contextEnabled) {
+            if (workingMemoryRef.current) {
+              if (result.intent === 'generate') {
+                workingMemoryRef.current.setSurveyGoal(currentUserMessage);
+              }
+              workingMemoryRef.current.addIteration(processedConfig, currentUserMessage);
+              if (result.intent === 'adjust') {
+                workingMemoryRef.current.addDesignDecision(currentUserMessage, 'User requested adjustment');
+              }
+            }
+
+            if (sessionLearningRef.current) {
+              sessionLearningRef.current.recordProjectInteraction(
+                currentProject?.id,
+                currentProject?.category || 'general',
+                result.intent === 'generate' ? 'generate_survey' : 'adjust_survey'
+              );
+            }
+          }
+        }
+      } else {
+        // Error handling
+        if (conversationHistoryRef.current) {
+          conversationHistoryRef.current.addMessage('assistant', 
+            `❌ Error: ${result.error}`,
+            { actionType: 'error', error: true }
+          );
+          setConversationMessages(conversationHistoryRef.current.getAllMessages());
+        }
+      }
+    } catch (error) {
+      setIsLoading(false);
+      console.error('Error sending message:', error);
+      
+      if (conversationHistoryRef.current) {
+        conversationHistoryRef.current.addMessage('assistant', 
+          `❌ Unexpected error: ${error.message}`,
+          { actionType: 'error', error: true }
+        );
+        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+      }
     }
   };
 
