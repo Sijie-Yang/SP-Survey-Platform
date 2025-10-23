@@ -739,7 +739,33 @@ IMPORTANT GUIDELINES:
 - Follow-up text questions (opinions, explanations, reflections)? → Pure text questions, NO image
 - Only use "image" display type when you need to show ONE reference image before a text question
 
-Generate a professional, well-structured survey with appropriate question types. Return ONLY valid JSON, no markdown or explanations.`;
+**CRITICAL: JSON Structure Format**
+Your response MUST follow this exact structure:
+{
+  "title": "Survey Title",
+  "description": "Survey Description",
+  "pages": [
+    {
+      "name": "page_1",
+      "title": "Page 1 Title",
+      "description": "Page 1 description",
+      "elements": [
+        {
+          "type": "text",
+          "name": "question_1",
+          "title": "Question text"
+        }
+      ]
+    }
+  ]
+}
+
+IMPORTANT: 
+- Each page MUST have: "name", "title", "description", "elements"
+- Questions go in "elements" array, NOT "questions" array
+- Page names should be unique (e.g., "page_1", "page_2")
+
+Return ONLY valid JSON, no markdown or explanations.`;
 
     console.log('🤖 Generating survey with OpenAI...');
     
@@ -865,6 +891,15 @@ IMPORTANT RULES:
 - Adding visual perception/assessment question? → Use image-based question types (imagerating, imagepicker, etc.)
 - Adding follow-up text question? → Pure text, NO image
 - Only use "image" display type when showing ONE reference image before a text question
+
+**CRITICAL: JSON Structure Format**
+Each page MUST have this structure:
+{
+  "name": "page_1",
+  "title": "Page Title",
+  "description": "Page description",
+  "elements": [...]  // Questions go in "elements", NOT "questions"
+}
 
 Return the COMPLETE modified survey configuration in JSON format. Return ONLY valid JSON, no markdown or explanations.`;
 
@@ -1060,6 +1095,15 @@ IMPORTANT RULES:
 - Visual perception/assessment question? → Use image-based question types (imagerating, imagepicker, imageranking, etc.)
 - Follow-up text question? → Pure text, NO image
 - Only use "image" display when showing ONE reference image before a text question
+
+**FORMAT:** Return a JSON array of question objects (these will be placed in page "elements"):
+[
+  {
+    "type": "text",
+    "name": "question_1",
+    "title": "Question text"
+  }
+]
 
 Return ONLY a JSON array of questions, no markdown or explanations.`;
 
