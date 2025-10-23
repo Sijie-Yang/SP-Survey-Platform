@@ -1127,6 +1127,220 @@ Return ONLY a JSON array of questions, no markdown or explanations.`;
   }
 });
 
+// Intelligent routing for chat-style interaction
+app.post('/api/openai/chat', async (req, res) => {
+  try {
+    const { message, currentConfig, conversationHistory, apiKey } = req.body;
+    
+    if (!apiKey || !message) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'API key and message are required' 
+      });
+    }
+    
+    const openai = new OpenAI({ apiKey });
+    
+    // Step 1: Determine user intent
+    const intentPrompt = `You are analyzing user messages to determine their intent in a survey design tool.
+
+Current context:
+- User ${currentConfig && currentConfig.pages ? 'HAS' : 'DOES NOT HAVE'} an existing survey configuration
+- Existing survey has ${currentConfig?.pages?.length || 0} pages
+
+Possible intents:
+1. "generate" - User wants to create a NEW survey from scratch (e.g., "Create a thermal comfort survey", "Build a new questionnaire about...")
+2. "adjust" - User wants to MODIFY the existing survey (e.g., "Add a question", "Change the scale to 1-7", "Remove the demographics page")
+3. "question" - User is asking a QUESTION about surveys or needs help (e.g., "What question types are available?", "How do I...?", "What should I...")
+
+Rules:
+- If no existing survey AND user describes a survey → "generate"
+- If existing survey AND user requests changes → "adjust"  
+- If user is asking for information/help → "question"
+- If unclear and no existing survey → "generate"
+- If unclear and has existing survey → "adjust"
+
+User message: "${message}"
+
+Respond with ONLY ONE WORD: generate, adjust, or question`;
+
+    console.log('🧠 Analyzing user intent...');
+    
+    const intentCompletion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: intentPrompt },
+        { role: "user", content: message }
+      ],
+      temperature: 0.3,
+      max_tokens: 10
+    });
+    
+    const intent = intentCompletion.choices[0].message.content.trim().toLowerCase();
+    console.log(`🎯 Detected intent: ${intent}`);
+    
+    // Step 2: Route based on intent
+    if (intent === 'generate') {
+      // Generate new survey
+      const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Generate a complete survey configuration in JSON format based on the user's description.
+
+The survey must follow this structure:
+{
+  "title": "Survey Title",
+  "description": "Survey description",
+  "logo": "",
+  "logoPosition": "right",
+  "showQuestionNumbers": "off",
+  "showProgressBar": "aboveheader",
+  "progressBarType": "questions",
+  "autoGrowComment": true,
+  "theme": {
+    "primaryColor": "#474747",
+    "primaryLight": "#6a6a6a",
+    "primaryDark": "#2e2e2e",
+    "secondaryColor": "#ff9814",
+    "accentColor": "#e50a3e",
+    "successColor": "#19b394",
+    "backgroundColor": "#ffffff",
+    "cardBackground": "#f8f8f8",
+    "headerBackground": "#f3f3f3",
+    "textColor": "#000000",
+    "secondaryText": "#737373",
+    "disabledText": "#737373",
+    "borderColor": "#292929",
+    "focusBorder": "#437fd9"
+  },
+  "pages": [...]
+}
+
+Available question types:
+
+TEXT-BASED QUESTIONS:
+- text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+
+IMAGE-BASED QUESTIONS (for visual perception):
+- imagepicker, imageranking, imagerating, imageboolean, imagematrix
+
+IMPORTANT: All image questions MUST use:
+  - imageSelectionMode: "huggingface_random"
+  - randomImageSelection: true
+  - choices: []
+
+Return ONLY valid JSON, no markdown.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...(conversationHistory || []),
+          { role: "user", content: message }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
+        max_tokens: 4000
+      });
+      
+      const responseText = completion.choices[0].message.content.trim();
+      let surveyConfig = JSON.parse(responseText);
+      
+      res.json({ 
+        success: true, 
+        intent: 'generate',
+        surveyConfig,
+        message: `Generated new survey with ${surveyConfig.pages?.length || 0} pages`
+      });
+      
+    } else if (intent === 'adjust') {
+      // Adjust existing survey
+      if (!currentConfig || !currentConfig.pages) {
+        return res.json({
+          success: true,
+          intent: 'question',
+          message: "You don't have an existing survey yet. Would you like me to generate one? Please describe what kind of survey you need.",
+          requiresGenerate: true
+        });
+      }
+      
+      const systemPrompt = `You are an expert survey designer. Modify the provided survey configuration according to the user's instructions.
+
+IMPORTANT RULES:
+1. All image questions MUST use:
+   - imageSelectionMode: "huggingface_random"
+   - randomImageSelection: true
+   - choices: []
+
+2. Return the COMPLETE modified survey configuration.
+
+Return ONLY valid JSON, no markdown.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "system", content: `Current survey configuration:\n${JSON.stringify(currentConfig, null, 2)}` },
+          ...(conversationHistory || []),
+          { role: "user", content: message }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.5,
+        max_tokens: 4000
+      });
+      
+      const responseText = completion.choices[0].message.content.trim();
+      let surveyConfig = JSON.parse(responseText);
+      
+      res.json({ 
+        success: true, 
+        intent: 'adjust',
+        surveyConfig,
+        message: `Adjusted survey based on your request`
+      });
+      
+    } else {
+      // Answer question
+      const systemPrompt = `You are a helpful assistant for a survey design platform. Answer the user's question concisely and provide actionable guidance.
+
+Available question types:
+- Text-based: text, comment, radiogroup, checkbox, dropdown, boolean, rating, ranking, matrix
+- Image-based: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+
+The platform supports:
+- Multi-page surveys
+- Custom themes
+- AI-powered generation
+- Hugging Face dataset integration for random image selection
+
+Be helpful and encourage the user to try creating or modifying their survey.`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...(conversationHistory || []),
+          { role: "user", content: message }
+        ],
+        temperature: 0.7,
+        max_tokens: 500
+      });
+      
+      const answer = completion.choices[0].message.content.trim();
+      
+      res.json({ 
+        success: true, 
+        intent: 'question',
+        message: answer
+      });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error in chat routing:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || 'Failed to process chat message' 
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 File management server running on http://localhost:${PORT}`);
   console.log(`📁 Templates directory: ${TEMPLATES_PATH}`);

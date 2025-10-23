@@ -29,7 +29,12 @@ import {
   InputAdornment,
   Paper,
   Tooltip,
-  Badge
+  Badge,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Avatar
 } from '@mui/material';
 import {
   ExpandMore,
@@ -46,7 +51,10 @@ import {
   Clear,
   Download,
   SmartToy,
-  PersonOutline
+  PersonOutline,
+  Send,
+  Settings,
+  Close
 } from '@mui/icons-material';
 import {
   DndContext,
@@ -72,6 +80,7 @@ import { generateSurveyFromDescription, adjustSurvey, validateApiKey } from '../
 import { getConversationHistory } from '../../lib/conversationHistory';
 import { getWorkingMemory } from '../../lib/workingMemory';
 import { getSessionLearning } from '../../lib/sessionLearning';
+import { sendChatMessage, validateApiKey as validateChatApiKey } from '../../lib/chatApi';
 
 // Sortable Page Item Component
 function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
@@ -191,14 +200,12 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const [selectedPage, setSelectedPage] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   
-  // AI Assistant states
+  // Chat Assistant states
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [apiKeyValid, setApiKeyValid] = useState(false);
-  const [aiDescription, setAiDescription] = useState('');
-  const [aiInstruction, setAiInstruction] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
-  const [aiSuccess, setAiSuccess] = useState('');
+  const [userMessage, setUserMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   
   // Contextual Engineering states
   const conversationHistoryRef = useRef(null);
@@ -206,8 +213,10 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const sessionLearningRef = useRef(null);
   const [conversationMessages, setConversationMessages] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
-  const [showHistory, setShowHistory] = useState(false);
   const [contextEnabled, setContextEnabled] = useState(true);
+  
+  // Chat scroll reference
+  const chatEndRef = useRef(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -240,6 +249,11 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       });
     }
   }, [currentProject?.id, contextEnabled]);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [conversationMessages]);
 
   const handleBasicInfoChange = (field, value) => {
     onChange({
