@@ -734,23 +734,28 @@ Each page can contain ONE OR MORE of the following combinations:
 - Combination 1 (socioeconomic) typically forms separate pages, but can mix with 2/3 if contextually appropriate
 
 **CRITICAL BINDING RULE:**
-- Every "image" display type MUST be followed by at least ONE text question about that image
-- These questions must appear immediately after the image (before any other image-based question)
-- ❌ WRONG: [image display] with no following text questions
-- ❌ WRONG: [image display, imagerating, text] - breaks the binding
-- ✓ CORRECT: [image display, text, text, imagerating] - maintains binding
+- Every "image" display MUST be followed by at least ONE text question
+- ALL text questions about streets MUST have an "image" display before them
+- ❌ WRONG: [image] alone - missing text questions
+- ❌ WRONG: [text about street] alone - missing image display
+- ❌ WRONG: [image, imagerating, text] - breaks binding
+- ✓ CORRECT: [image, text, text] or [image, text, text, imagerating]
+
+**CRITICAL: What type of text question is this?**
+- Is it socioeconomic (age, gender, education, occupation, income)? → NO image needed
+- Is it about streets/visual perception? → MUST have "image" display before it!
 
 **TECHNICAL REQUIREMENTS:**
 - All image questions MUST include: imageSelectionMode: "huggingface_random", imageCount, choices: []
 - For imagematrix: use imageLinks: [] instead of choices
 - For imagerating: include rateMin, rateMax, minRateDescription, maxRateDescription
-- NEVER use "manual" mode or provide imageLink URLs
+- NEVER use "manual" mode
 
 **DECISION TREE:**
-- Demographics/socioeconomic? → Pure text questions (can have multiple)
-- Streetscape visual assessment? → Image-based question types (can have multiple, can mix with #3)
-- Need to show street then ask text questions? → Image display + text questions (can have multiple text questions per image, can have multiple groups, can mix with #2)
-- ❌ NEVER: Text question about streets without image display or image-based question type!
+- Socioeconomic text question? → Pure text (no image needed)
+- Streetscape rating/ranking/selection? → Image-based question types (imagerating, imagepicker, etc.)
+- Streetscape text question (description/opinion)? → MUST use: image display + text question(s)
+- ❌ NEVER: Text question about streets without image display in front!
 
 Generate a professional, well-structured survey with appropriate question types. Return ONLY valid JSON, no markdown or explanations.`;
 
@@ -844,27 +849,28 @@ app.post('/api/openai/adjust-survey', async (req, res) => {
 **CRITICAL RULE: No standalone streetscape text questions!**
 
 **PAGE COMPOSITION (each page can have one or more):**
-1. Socioeconomic questions (multiple allowed): Pure text for age, gender, education, occupation
+1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image needed
 2. Image-based streetscape questions (multiple allowed): imagerating, imagepicker, imageranking, imageboolean, imagematrix
-3. Image display + text questions (multiple groups allowed): One "image" followed by one or MORE text questions
+3. Image display + text questions (multiple groups allowed): "image" + one or MORE text questions
+
+**CRITICAL: ALL non-socioeconomic text questions MUST have "image" display before them!**
+- Socioeconomic text (age, gender, education, occupation) → NO image needed
+- Streetscape text (description, opinion, observation) → MUST have "image" before it
 
 **FLEXIBLE MIXING:**
-- Types 2 and 3 can intermix on same page (both are streetscape questions)
-- Example valid page: [imagerating, image+2texts, imagepicker, image+1text]
+- Types 2 and 3 can intermix on same page
+- Example: [imagerating, image+text+text, imagepicker, image+text]
 
 **BINDING RULE:**
-- Every "image" display MUST be followed by at least ONE text question
-- Text questions must immediately follow their image (before next image-based question)
-- ❌ WRONG: [image] with no text questions
-- ❌ WRONG: [image, imagerating, text] - breaks binding
+- Every "image" MUST be followed by at least ONE text question
+- ❌ WRONG: [image] alone or [text about street] alone or [image, imagerating, text]
 - ✓ CORRECT: [image, text, text, imagerating]
 
 **TECHNICAL:**
 - All image questions: imageSelectionMode: "huggingface_random", imageCount, choices: []
-- imagerating: include rateMin, rateMax, minRateDescription, maxRateDescription
-- NEVER use "manual" mode
+- imagerating: rateMin, rateMax, minRateDescription, maxRateDescription
 
-Return COMPLETE modified survey. Return ONLY valid JSON, no markdown.`;
+Return COMPLETE modified survey. ONLY valid JSON, no markdown.`;
 
     const userPrompt = `Current survey configuration:
 ${JSON.stringify(currentConfig, null, 2)}
@@ -963,18 +969,22 @@ app.post('/api/openai/generate-questions', async (req, res) => {
 **CRITICAL RULE: No standalone streetscape text questions!**
 
 **QUESTION COMBINATIONS (can generate one or more):**
-1. Socioeconomic questions (multiple allowed): Pure text for age, gender, education, occupation
+1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image needed
 2. Image-based streetscape questions (multiple allowed): imagerating, imagepicker, imageranking, imageboolean, imagematrix
-3. Image display + text questions (multiple groups allowed): One "image" followed by one or MORE text questions
+3. Image display + text questions (multiple groups allowed): "image" + one or MORE text questions
+
+**CRITICAL: ALL non-socioeconomic text questions MUST have "image" before them!**
+- Text about age/gender/education/occupation → NO image needed
+- Text about streets (description, opinion, observation) → MUST have "image" before it
 
 **FLEXIBLE MIXING:**
-- Types 2 and 3 can be returned together in the same array (both are streetscape questions)
+- Types 2 and 3 can be mixed in same array
 - Example: [imagerating, image, text, text, imagepicker, image, text]
 
 **BINDING RULE:**
-- Every "image" display MUST be followed by at least ONE text question
-- ❌ WRONG: Return just [image] without text questions
-- ✓ CORRECT: Return [image, text] or [image, text, text]
+- Every "image" MUST be followed by at least ONE text question
+- ❌ WRONG: [image] alone or [text about street] alone
+- ✓ CORRECT: [image, text] or [image, text, text]
 
 ═══════════════════════════════════════════════════════════
 EXAMPLES
@@ -1207,22 +1217,23 @@ Respond with ONLY ONE WORD: generate, adjust, or question`;
 **CRITICAL RULE: No standalone streetscape text questions!**
 
 **PAGE COMPOSITION (each page can have one or more):**
-1. Socioeconomic questions (multiple allowed): Pure text
+1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image
 2. Image-based streetscape questions (multiple allowed): imagerating, imagepicker, imageranking, etc.
 3. Image display + text questions (multiple groups allowed): "image" + one or MORE text questions
 
+**CRITICAL: ALL non-socioeconomic text questions MUST have "image" before them!**
+
 **FLEXIBLE MIXING:**
 - Types 2 and 3 can intermix on same page
-- Example: [imagerating, image+2texts, imagepicker]
+- Example: [imagerating, image+text+text, imagepicker]
 
 **BINDING RULE:**
-- Every "image" display MUST be followed by at least ONE text question
-- ❌ WRONG: [image] alone
+- Every "image" MUST be followed by at least ONE text question
+- ❌ WRONG: [image] alone or [text about street] alone
 - ✓ CORRECT: [image, text, text]
 
 **TECHNICAL:**
 - All image questions: imageSelectionMode: "huggingface_random", imageCount, choices: []
-- imagerating: include rateMin, rateMax, minRateDescription, maxRateDescription
 
 Pages: {"title": "...", "questions": [...]}
 
@@ -1276,21 +1287,23 @@ Return ONLY valid JSON, no markdown.`;
 **CRITICAL RULE: No standalone streetscape text questions!**
 
 **PAGE COMPOSITION (each page can have one or more):**
-1. Socioeconomic questions (multiple allowed)
+1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image
 2. Image-based streetscape questions (multiple allowed)
 3. Image display + text questions (multiple groups allowed): "image" + one or MORE texts
 
+**CRITICAL: ALL non-socioeconomic text questions MUST have "image" before them!**
+
 **FLEXIBLE MIXING:**
 - Types 2 and 3 can intermix on same page
-- Example: [imagerating, image+2texts, imagepicker]
+- Example: [imagerating, image+text+text, imagepicker]
 
 **BINDING RULE:**
 - Every "image" MUST be followed by at least ONE text question
-- ❌ WRONG: [image] alone or [image, imagerating, text]
+- ❌ WRONG: [image] alone or [text about street] alone or [image, imagerating, text]
 - ✓ CORRECT: [image, text, text, imagerating]
 
 Return COMPLETE modified survey. Pages: {"title": "...", "questions": [...]}
-Return ONLY valid JSON, no markdown.`;
+ONLY valid JSON, no markdown.`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
@@ -1332,16 +1345,20 @@ Return ONLY valid JSON, no markdown.`;
 **KEY RULE: No standalone streetscape text questions!**
 
 **PAGE COMPOSITION (each page can have one or more):**
-1. Socioeconomic questions (multiple allowed): age, gender, education, occupation
+1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image needed
 2. Image-based streetscape questions (multiple allowed): imagerating, imagepicker, imageranking, imageboolean, imagematrix
 3. Image display + text questions (multiple groups allowed): "image" + one or MORE text questions
 
+**CRITICAL: ALL non-socioeconomic text questions MUST have "image" display before them!**
+- Text about demographics → NO image needed
+- Text about streets (description, opinion, observation) → MUST have "image" display before it
+
 **FLEXIBLE MIXING:**
-- Types 2 and 3 can intermix on same page (both are streetscape questions)
-- Example valid page: [imagerating, image+2texts, imagepicker, image+1text]
+- Types 2 and 3 can intermix on same page
+- Example: [imagerating, image+text+text, imagepicker, image+text]
 
 **BINDING RULE:**
-- Every "image" display MUST be followed by at least ONE text question
+- Every "image" MUST be followed by at least ONE text question
 
 PLATFORM CAPABILITIES:
 - Multi-page surveys with flexible question mixing
