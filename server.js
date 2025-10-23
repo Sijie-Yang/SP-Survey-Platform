@@ -751,10 +751,24 @@ Each page can contain ONE OR MORE of the following combinations:
 - For imagerating: include rateMin, rateMax, minRateDescription, maxRateDescription
 - NEVER use "manual" mode
 
+**IMPORTANT: USE DIVERSE QUESTION TYPES!**
+Don't always use the same question types. Mix different types to create engaging surveys:
+
+TEXT-BASED OPTIONS (for socioeconomic):
+- text, comment, radiogroup, checkbox, dropdown, ranking, rating, boolean, matrix
+
+IMAGE-BASED OPTIONS (for streetscape assessment):
+- imagepicker (choice), imageranking (ranking), imagerating (rating), imageboolean (yes/no), imagematrix (multi-criteria)
+
+EXAMPLES OF VARIETY:
+- Instead of only imagerating, also use: imagepicker (preference), imageranking (ordering), imageboolean (safety)
+- For demographics: mix radiogroup (age), dropdown (education), text (occupation)
+- For streetscape text: use comment (description), text (impression), radiogroup (walkability)
+
 **DECISION TREE:**
-- Socioeconomic text question? → Pure text (no image needed)
-- Streetscape rating/ranking/selection? → Image-based question types (imagerating, imagepicker, etc.)
-- Streetscape text question (description/opinion)? → MUST use: image display + text question(s)
+- Socioeconomic text question? → Pure text (no image needed) - USE VARIETY
+- Streetscape rating/ranking/selection? → Image-based question types - USE VARIETY (not just imagerating!)
+- Streetscape text question (description/opinion)? → MUST use: image display + text question(s) - USE VARIETY
 - ❌ NEVER: Text question about streets without image display in front!
 
 Generate a professional, well-structured survey with appropriate question types. Return ONLY valid JSON, no markdown or explanations.`;
@@ -869,6 +883,11 @@ app.post('/api/openai/adjust-survey', async (req, res) => {
 **TECHNICAL:**
 - All image questions: imageSelectionMode: "huggingface_random", imageCount, choices: []
 - imagerating: rateMin, rateMax, minRateDescription, maxRateDescription
+
+**USE DIVERSE QUESTION TYPES:**
+- Don't always use imagerating - also consider: imagepicker, imageranking, imageboolean, imagematrix
+- For text questions: mix radiogroup, dropdown, text, comment, checkbox
+- Create variety to keep survey engaging
 
 Return COMPLETE modified survey. ONLY valid JSON, no markdown.`;
 
@@ -985,6 +1004,12 @@ app.post('/api/openai/generate-questions', async (req, res) => {
 - Every "image" MUST be followed by at least ONE text question
 - ❌ WRONG: [image] alone or [text about street] alone
 - ✓ CORRECT: [image, text] or [image, text, text]
+
+**USE DIVERSE QUESTION TYPES:**
+- Mix different types: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+- Don't generate only imagerating questions
+- For text: vary between comment, text, radiogroup, checkbox, dropdown
+- Create engaging variety in your questions
 
 ═══════════════════════════════════════════════════════════
 EXAMPLES
@@ -1235,6 +1260,11 @@ Respond with ONLY ONE WORD: generate, adjust, or question`;
 **TECHNICAL:**
 - All image questions: imageSelectionMode: "huggingface_random", imageCount, choices: []
 
+**USE DIVERSE QUESTION TYPES:**
+- Mix: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+- Don't overuse imagerating - vary your question types
+- For text: use radiogroup, dropdown, text, comment, checkbox
+
 Pages: {"title": "...", "questions": [...]}
 
 Return ONLY valid JSON, no markdown.`;
@@ -1302,6 +1332,10 @@ Return ONLY valid JSON, no markdown.`;
 - ❌ WRONG: [image] alone or [text about street] alone or [image, imagerating, text]
 - ✓ CORRECT: [image, text, text, imagerating]
 
+**USE DIVERSE QUESTION TYPES:**
+- Mix: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+- Vary text questions: radiogroup, dropdown, text, comment, checkbox
+
 Return COMPLETE modified survey. Pages: {"title": "...", "questions": [...]}
 ONLY valid JSON, no markdown.`;
 
@@ -1360,6 +1394,13 @@ ONLY valid JSON, no markdown.`;
 **BINDING RULE:**
 - Every "image" MUST be followed by at least ONE text question
 
+**QUESTION TYPE VARIETY:**
+The platform supports 16 question types! Encourage users to:
+- Use diverse image-based questions: imagepicker, imageranking, imagerating, imageboolean, imagematrix
+- Vary text questions: radiogroup, dropdown, text, comment, checkbox, ranking, rating
+- Mix question types to create engaging surveys
+- Don't just use imagerating - explore all options!
+
 PLATFORM CAPABILITIES:
 - Multi-page surveys with flexible question mixing
 - Custom themes and branding
@@ -1367,6 +1408,7 @@ PLATFORM CAPABILITIES:
 - Hugging Face dataset integration for automatic random image selection
 - Contextual Engineering for remembering user preferences
 - ChatGPT-style AI chat interface with intelligent intent detection
+- 16 different question types for maximum flexibility
 
 Be helpful and encourage the user to try creating or modifying their survey!`;
 
