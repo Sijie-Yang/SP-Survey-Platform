@@ -76,6 +76,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import PageEditor from './PageEditor';
 import QuestionEditor from './QuestionEditor';
+import ChatAssistant from './ChatAssistant';
 import { generateSurveyFromDescription, adjustSurvey, validateApiKey } from '../../lib/openai';
 import { getConversationHistory } from '../../lib/conversationHistory';
 import { getWorkingMemory } from '../../lib/workingMemory';
@@ -868,7 +869,40 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
   return (
     <Box>
-      {/* AI Assistant */}
+      {/* AI Chat Assistant */}
+      <ChatAssistant
+        messages={conversationMessages}
+        userMessage={userMessage}
+        isLoading={isLoading}
+        apiKeyValid={apiKeyValid}
+        openaiApiKey={openaiApiKey}
+        contextEnabled={contextEnabled}
+        recommendations={recommendations}
+        onMessageChange={setUserMessage}
+        onSendMessage={handleSendMessage}
+        onApiKeyChange={setOpenaiApiKey}
+        onValidateApiKey={handleValidateApiKey}
+        onContextToggle={setContextEnabled}
+        onClearHistory={() => {
+          if (window.confirm('Clear conversation history?')) {
+            conversationHistoryRef.current?.clear();
+            setConversationMessages([]);
+          }
+        }}
+        onDownloadHistory={() => {
+          const data = conversationHistoryRef.current?.export();
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `conversation_${currentProject?.id}_${new Date().toISOString()}.json`;
+          a.click();
+        }}
+        chatEndRef={chatEndRef}
+      />
+
+      {/* Old Accordion - TO BE REMOVED */}
+      <Box sx={{ display: 'none' }}>
       <Accordion 
         defaultExpanded={false}
         sx={{ 
@@ -1226,6 +1260,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
           </Box>
         </AccordionDetails>
       </Accordion>
+      </Box>
+      {/* End hidden old UI */}
 
       {/* Basic Survey Information */}
       <Accordion defaultExpanded>
