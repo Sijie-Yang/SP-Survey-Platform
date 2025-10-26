@@ -326,9 +326,17 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   }, [conversationMessages]);
 
   const handleBasicInfoChange = (field, value) => {
+    // Convert boolean values to SurveyJS expected string format
+    let finalValue = value;
+    if (field === 'showQuestionNumbers') {
+      finalValue = value ? 'on' : 'off';
+    } else if (field === 'showProgressBar') {
+      finalValue = value ? 'top' : 'off';
+    }
+    
     onChange({
       ...config,
-      [field]: value
+      [field]: finalValue
     });
   };
 
@@ -374,6 +382,22 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
   const handleThemePreset = (presetName) => {
     const presets = {
+      default: {
+        primaryColor: '#1976d2',
+        primaryLight: '#42a5f5',
+        primaryDark: '#1565c0',
+        secondaryColor: '#dc004e',
+        accentColor: '#ff9800',
+        successColor: '#4caf50',
+        backgroundColor: '#ffffff',
+        cardBackground: '#f8f9fa',
+        headerBackground: '#ffffff',
+        textColor: '#212121',
+        secondaryText: '#757575',
+        disabledText: '#bdbdbd',
+        borderColor: '#e0e0e0',
+        focusBorder: '#1976d2'
+      },
       research: {
         // Fully copy theme configuration from original research survey
         primaryColor: '#474747',
@@ -423,6 +447,38 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         borderColor: '#c8e6c9',
         focusBorder: '#4caf50'
       },
+      elegant: {
+        primaryColor: '#673ab7',
+        primaryLight: '#9575cd',
+        primaryDark: '#512da8',
+        secondaryColor: '#e91e63',
+        accentColor: '#f06292',
+        successColor: '#66bb6a',
+        backgroundColor: '#fafafa',
+        cardBackground: '#ffffff',
+        headerBackground: '#f3e5f5',
+        textColor: '#4a148c',
+        secondaryText: '#7b1fa2',
+        disabledText: '#ce93d8',
+        borderColor: '#e1bee7',
+        focusBorder: '#673ab7'
+      },
+      ocean: {
+        primaryColor: '#00acc1',
+        primaryLight: '#4dd0e1',
+        primaryDark: '#00838f',
+        secondaryColor: '#0288d1',
+        accentColor: '#29b6f6',
+        successColor: '#26a69a',
+        backgroundColor: '#e0f7fa',
+        cardBackground: '#ffffff',
+        headerBackground: '#b2ebf2',
+        textColor: '#006064',
+        secondaryText: '#00838f',
+        disabledText: '#80deea',
+        borderColor: '#b2ebf2',
+        focusBorder: '#00acc1'
+      },
       warm: {
         primaryColor: '#ff5722',
         primaryLight: '#ff8a65',
@@ -432,12 +488,44 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         successColor: '#4caf50',
         backgroundColor: '#fff8f0',
         cardBackground: '#ffffff',
-        headerBackground: '#ffeaa7',
+        headerBackground: '#ffe0b2',
         textColor: '#3e2723',
         secondaryText: '#6d4c41',
         disabledText: '#bcaaa4',
         borderColor: '#d7ccc8',
         focusBorder: '#ff5722'
+      },
+      dark: {
+        primaryColor: '#90caf9',
+        primaryLight: '#bbdefb',
+        primaryDark: '#64b5f6',
+        secondaryColor: '#f48fb1',
+        accentColor: '#ce93d8',
+        successColor: '#81c784',
+        backgroundColor: '#121212',
+        cardBackground: '#1e1e1e',
+        headerBackground: '#2c2c2c',
+        textColor: '#e0e0e0',
+        secondaryText: '#b0b0b0',
+        disabledText: '#757575',
+        borderColor: '#424242',
+        focusBorder: '#90caf9'
+      },
+      minimal: {
+        primaryColor: '#333333',
+        primaryLight: '#555555',
+        primaryDark: '#111111',
+        secondaryColor: '#888888',
+        accentColor: '#aaaaaa',
+        successColor: '#4caf50',
+        backgroundColor: '#ffffff',
+        cardBackground: '#fafafa',
+        headerBackground: '#f5f5f5',
+        textColor: '#1a1a1a',
+        secondaryText: '#666666',
+        disabledText: '#cccccc',
+        borderColor: '#e0e0e0',
+        focusBorder: '#333333'
       }
     };
 
@@ -446,6 +534,48 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         ...config,
         theme: presets[presetName]
       });
+    }
+  };
+
+  // Export theme configuration
+  const handleExportTheme = () => {
+    const themeData = {
+      theme: config.theme,
+      exportDate: new Date().toISOString(),
+      projectName: currentProject?.name || 'survey'
+    };
+    const blob = new Blob([JSON.stringify(themeData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `theme_${currentProject?.id || 'default'}_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Import theme configuration
+  const handleImportTheme = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const themeData = JSON.parse(e.target.result);
+          if (themeData.theme) {
+            onChange({
+              ...config,
+              theme: themeData.theme
+            });
+            alert('Theme imported successfully!');
+          } else {
+            alert('Invalid theme file format.');
+          }
+        } catch (error) {
+          console.error('Error importing theme:', error);
+          alert('Error importing theme file.');
+        }
+      };
+      reader.readAsText(file);
     }
   };
 
@@ -1049,34 +1179,590 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         chatEndRef={chatEndRef}
       />
 
-      {/* Basic Survey Information */}
+      {/* Survey Settings - Unified Panel */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMore />}>
-          <Typography variant="h6">Basic Information</Typography>
+          <Typography variant="h6">Survey Settings</Typography>
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <TextField
-              fullWidth
-              variant="outlined"
-              label="Survey Title"
-              value={config.title || ''}
-              onChange={(e) => handleBasicInfoChange('title', e.target.value)}
-              helperText="The main title that appears at the top of your survey"
-              sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-            />
-            
-            <TextField
-              fullWidth
-              variant="outlined"
-              multiline
-              rows={3}
-              label="Survey Description"
-              value={config.description || ''}
-              onChange={(e) => handleBasicInfoChange('description', e.target.value)}
-              helperText="A brief description explaining the purpose of your survey"
-              sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-            />
+            {/* Basic Information */}
+            <Box>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                📝 Basic Information
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  label="Survey Title"
+                  value={config.title || ''}
+                  onChange={(e) => handleBasicInfoChange('title', e.target.value)}
+                  helperText="The main title that appears at the top of your survey"
+                />
+                
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  multiline
+                  rows={3}
+                  label="Survey Description"
+                  value={config.description || ''}
+                  onChange={(e) => handleBasicInfoChange('description', e.target.value)}
+                  helperText="A brief description explaining the purpose of your survey"
+                />
+              </Box>
+            </Box>
+
+            <Divider />
+
+            {/* Logo Settings */}
+            <Box>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                🖼️ Logo Settings
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <TextField
+                  fullWidth
+                  label="Logo URL"
+                  value={config.logo || ''}
+                  onChange={(e) => handleBasicInfoChange('logo', e.target.value)}
+                  placeholder="https://example.com/logo.png"
+                  helperText="URL of your organization's logo"
+                />
+                
+                <FormControl fullWidth>
+                  <InputLabel>Logo Position</InputLabel>
+                  <Select
+                    value={config.logoPosition || 'top'}
+                    label="Logo Position"
+                    onChange={(e) => handleBasicInfoChange('logoPosition', e.target.value)}
+                  >
+                    <MenuItem value="top">Top</MenuItem>
+                    <MenuItem value="left">Left</MenuItem>
+                    <MenuItem value="right">Right</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+            </Box>
+
+            <Divider />
+
+            {/* Display Settings */}
+            <Box>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
+                ⚙️ Display Settings
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={config.showQuestionNumbers !== 'off' && config.showQuestionNumbers !== false}
+                      onChange={(e) => handleBasicInfoChange('showQuestionNumbers', e.target.checked)}
+                    />
+                  }
+                  label="Show Question Numbers"
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={config.showProgressBar !== 'off' && config.showProgressBar !== false}
+                      onChange={(e) => handleBasicInfoChange('showProgressBar', e.target.checked)}
+                    />
+                  }
+                  label="Show Progress Bar"
+                />
+              </Box>
+            </Box>
+
+            <Divider />
+
+            {/* Theme Customization */}
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  🎨 Theme Customization
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportTheme}
+                    style={{ display: 'none' }}
+                    id="theme-import-input"
+                  />
+                  <label htmlFor="theme-import-input">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      component="span"
+                      startIcon={<Download sx={{ transform: 'rotate(180deg)' }} />}
+                    >
+                      Import
+                    </Button>
+                  </label>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleExportTheme}
+                    startIcon={<Download />}
+                  >
+                    Export
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={handleThemeReset}
+                    startIcon={<Clear />}
+                  >
+                    Reset
+                  </Button>
+                </Box>
+              </Box>
+              
+              {/* Theme Presets */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1.5, color: 'text.secondary' }}>
+                  Quick Presets
+                </Typography>
+                <Grid container spacing={1.5}>
+                  {[
+                    { name: 'Default', emoji: '🔷', primaryColor: '#1976d2', secondaryColor: '#dc004e', bg: '#ffffff' },
+                    { name: 'Research', emoji: '🔬', primaryColor: '#474747', secondaryColor: '#ff9814', bg: '#f8f8f8' },
+                    { name: 'Professional', emoji: '💼', primaryColor: '#1976d2', secondaryColor: '#f57c00', bg: '#f8f9fa' },
+                    { name: 'Nature', emoji: '🌿', primaryColor: '#4caf50', secondaryColor: '#ff9800', bg: '#f1f8e9' },
+                    { name: 'Elegant', emoji: '💎', primaryColor: '#673ab7', secondaryColor: '#e91e63', bg: '#f3e5f5' },
+                    { name: 'Ocean', emoji: '🌊', primaryColor: '#00acc1', secondaryColor: '#0288d1', bg: '#e0f7fa' },
+                    { name: 'Warm', emoji: '🔥', primaryColor: '#ff5722', secondaryColor: '#ffc107', bg: '#fff8f0' },
+                    { name: 'Dark', emoji: '🌙', primaryColor: '#90caf9', secondaryColor: '#f48fb1', bg: '#121212' },
+                    { name: 'Minimal', emoji: '⚪', primaryColor: '#333333', secondaryColor: '#888888', bg: '#ffffff' }
+                  ].map((theme) => (
+                    <Grid item xs={6} sm={4} md={3} key={theme.name}>
+                      <Paper
+                        onClick={() => handleThemePreset(theme.name.toLowerCase())}
+                        sx={{
+                          cursor: 'pointer',
+                          border: 2,
+                          borderColor: config.theme?.primaryColor === theme.primaryColor ? 'primary.main' : 'divider',
+                          borderRadius: 1.5,
+                          p: 1.5,
+                          textAlign: 'center',
+                          transition: 'all 0.3s',
+                          '&:hover': { 
+                            borderColor: 'primary.main',
+                            transform: 'translateY(-4px)',
+                            boxShadow: 4
+                          }
+                        }}
+                      >
+                        <Box sx={{ 
+                          display: 'flex',
+                          height: 50,
+                          borderRadius: 1,
+                          overflow: 'hidden',
+                          mb: 1
+                        }}>
+                          <Box sx={{ flex: 1, bgcolor: theme.primaryColor }} />
+                          <Box sx={{ flex: 1, bgcolor: theme.secondaryColor }} />
+                          <Box sx={{ flex: 1, bgcolor: theme.bg }} />
+                        </Box>
+                        <Typography variant="caption" sx={{ fontWeight: 600, display: 'block' }}>
+                          {theme.emoji} {theme.name}
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Box>
+
+              <Divider sx={{ my: 3 }} />
+
+              {/* Custom Colors - Expanded */}
+              <Box>
+                <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 2, color: 'text.secondary' }}>
+                  Custom Color Palette
+                </Typography>
+                <Grid container spacing={2}>
+                  {/* Primary Colors */}
+                  <Grid item xs={12}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1, color: 'primary.main' }}>
+                      Primary Colors
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.primaryColor || '#1976d2'}
+                        onChange={(e) => handleThemeChange('primaryColor', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Primary
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.primaryColor || '#1976d2'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.primaryLight || '#42a5f5'}
+                        onChange={(e) => handleThemeChange('primaryLight', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Primary Light
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.primaryLight || '#42a5f5'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.primaryDark || '#1565c0'}
+                        onChange={(e) => handleThemeChange('primaryDark', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Primary Dark
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.primaryDark || '#1565c0'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+
+                  {/* Secondary & Accent Colors */}
+                  <Grid item xs={12} sx={{ mt: 2 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1, color: 'secondary.main' }}>
+                      Secondary & Accent Colors
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.secondaryColor || '#dc004e'}
+                        onChange={(e) => handleThemeChange('secondaryColor', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Secondary
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.secondaryColor || '#dc004e'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.accentColor || '#ff9800'}
+                        onChange={(e) => handleThemeChange('accentColor', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Accent
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.accentColor || '#ff9800'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.successColor || '#4caf50'}
+                        onChange={(e) => handleThemeChange('successColor', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Success
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.successColor || '#4caf50'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+
+                  {/* Background Colors */}
+                  <Grid item xs={12} sx={{ mt: 2 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1, color: 'text.secondary' }}>
+                      Background Colors
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.backgroundColor || '#ffffff'}
+                        onChange={(e) => handleThemeChange('backgroundColor', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Background
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.backgroundColor || '#ffffff'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.cardBackground || '#f8f9fa'}
+                        onChange={(e) => handleThemeChange('cardBackground', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Card Background
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.cardBackground || '#f8f9fa'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.headerBackground || '#ffffff'}
+                        onChange={(e) => handleThemeChange('headerBackground', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Header Background
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.headerBackground || '#ffffff'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+
+                  {/* Text Colors */}
+                  <Grid item xs={12} sx={{ mt: 2 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1, color: 'text.secondary' }}>
+                      Text Colors
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.textColor || '#212121'}
+                        onChange={(e) => handleThemeChange('textColor', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Text Color
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.textColor || '#212121'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.secondaryText || '#757575'}
+                        onChange={(e) => handleThemeChange('secondaryText', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Secondary Text
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.secondaryText || '#757575'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.disabledText || '#bdbdbd'}
+                        onChange={(e) => handleThemeChange('disabledText', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Disabled Text
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.disabledText || '#bdbdbd'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+
+                  {/* Border Colors */}
+                  <Grid item xs={12} sx={{ mt: 2 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1, color: 'text.secondary' }}>
+                      Border Colors
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.borderColor || '#e0e0e0'}
+                        onChange={(e) => handleThemeChange('borderColor', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Border
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.borderColor || '#e0e0e0'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TextField
+                        type="color"
+                        value={config.theme?.focusBorder || '#1976d2'}
+                        onChange={(e) => handleThemeChange('focusBorder', e.target.value)}
+                        sx={{ width: 60 }}
+                        InputProps={{ sx: { height: 50 } }}
+                      />
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="caption" sx={{ fontWeight: 500, display: 'block' }}>
+                          Focus Border
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                          {config.theme?.focusBorder || '#1976d2'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                </Grid>
+
+                {/* Color Preview Card */}
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1.5, color: 'text.secondary' }}>
+                    Theme Preview
+                  </Typography>
+                  <Paper 
+                    sx={{ 
+                      p: 3, 
+                      bgcolor: config.theme?.backgroundColor || '#ffffff',
+                      border: 1,
+                      borderColor: config.theme?.borderColor || '#e0e0e0'
+                    }}
+                  >
+                    <Box sx={{ 
+                      p: 2, 
+                      bgcolor: config.theme?.cardBackground || '#f8f9fa',
+                      borderRadius: 1,
+                      mb: 2
+                    }}>
+                      <Typography 
+                        variant="h6" 
+                        sx={{ 
+                          color: config.theme?.textColor || '#212121',
+                          mb: 1 
+                        }}
+                      >
+                        Sample Survey Question
+                      </Typography>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          color: config.theme?.secondaryText || '#757575',
+                          mb: 2 
+                        }}
+                      >
+                        This is how your survey will look with the current theme
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button 
+                          variant="contained" 
+                          sx={{ 
+                            bgcolor: config.theme?.primaryColor || '#1976d2',
+                            '&:hover': {
+                              bgcolor: config.theme?.primaryDark || '#1565c0'
+                            }
+                          }}
+                        >
+                          Primary Button
+                        </Button>
+                        <Button 
+                          variant="outlined" 
+                          sx={{ 
+                            color: config.theme?.secondaryColor || '#dc004e',
+                            borderColor: config.theme?.secondaryColor || '#dc004e',
+                            '&:hover': {
+                              borderColor: config.theme?.secondaryColor || '#dc004e',
+                              bgcolor: 'rgba(220, 0, 78, 0.04)'
+                            }
+                          }}
+                        >
+                          Secondary Button
+                        </Button>
+                      </Box>
+                    </Box>
+                    <Alert 
+                      severity="success" 
+                      sx={{ 
+                        '& .MuiAlert-icon': { 
+                          color: config.theme?.successColor || '#4caf50' 
+                        }
+                      }}
+                    >
+                      Your theme changes are applied in real-time!
+                    </Alert>
+                  </Paper>
+                </Box>
+              </Box>
+            </Box>
           </Box>
         </AccordionDetails>
       </Accordion>

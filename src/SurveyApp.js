@@ -526,20 +526,37 @@ export default function SurveyApp() {
         console.log('Using original configuration');
       }
 
+      // Fix any boolean values before creating model (double-check)
+      if (typeof finalSurveyJson.showQuestionNumbers === 'boolean') {
+        finalSurveyJson.showQuestionNumbers = finalSurveyJson.showQuestionNumbers ? 'on' : 'off';
+        console.log('🔧 Survey: Fixed showQuestionNumbers boolean to string');
+      }
+      if (typeof finalSurveyJson.showProgressBar === 'boolean') {
+        finalSurveyJson.showProgressBar = finalSurveyJson.showProgressBar ? 'top' : 'off';
+        console.log('🔧 Survey: Fixed showProgressBar boolean to string');
+      }
+      
       // Create survey model
       const model = new Model(finalSurveyJson);
       
-      // Apply theme
-      if (useAdminConfig && adminConfig && adminConfig.theme) {
-        // Use custom theme from admin config
-        const customTheme = generateCustomTheme(adminConfig);
-        if (customTheme) {
-          model.applyTheme(customTheme);
-          console.log('Applied custom theme:', customTheme);
+      // Apply theme - with error handling
+      try {
+        if (useAdminConfig && adminConfig && adminConfig.theme) {
+          // Use custom theme from admin config
+          const customTheme = generateCustomTheme(adminConfig);
+          if (customTheme) {
+            console.log('Survey: Applying custom theme...');
+            model.applyTheme(customTheme);
+            console.log('✅ Survey applied custom theme successfully');
+          }
+        } else if (themeJson) {
+          // Use default theme
+          console.log('Survey: Applying default theme...');
+          model.applyTheme(themeJson);
         }
-      } else if (themeJson) {
-        // Use default theme
-        model.applyTheme(themeJson);
+      } catch (themeError) {
+        console.error('⚠️ Error applying theme, using default styling:', themeError);
+        // Continue without theme - SurveyJS will use default styling
       }
       
       // Apply survey configuration based on which config we're using

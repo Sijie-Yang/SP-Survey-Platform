@@ -26,7 +26,19 @@ export const loadSurveyConfig = async (projectId) => {
       const data = await response.json();
       if (data.success && data.surveyConfig) {
         console.log(`✅ Loaded surveyConfig for project ${projectId}:`, data.surveyConfig.title);
-        return data.surveyConfig;
+        
+        // Fix boolean values that should be strings for SurveyJS
+        const config = data.surveyConfig;
+        if (typeof config.showQuestionNumbers === 'boolean') {
+          config.showQuestionNumbers = config.showQuestionNumbers ? 'on' : 'off';
+          console.log('🔧 Fixed showQuestionNumbers boolean to string');
+        }
+        if (typeof config.showProgressBar === 'boolean') {
+          config.showProgressBar = config.showProgressBar ? 'top' : 'off';
+          console.log('🔧 Fixed showProgressBar boolean to string');
+        }
+        
+        return config;
       }
     }
     
@@ -118,74 +130,113 @@ export const convertToSurveyJS = (adminConfig) => {
   };
 };
 
+// Helper function to ensure color value is a valid string
+const ensureColorString = (color, defaultColor) => {
+  if (!color || typeof color !== 'string') {
+    return defaultColor;
+  }
+  const trimmed = String(color).trim();
+  // Ensure it starts with # for hex colors or is a valid CSS color
+  if (!trimmed.startsWith('#') && !trimmed.startsWith('rgb') && !trimmed.startsWith('hsl')) {
+    return defaultColor;
+  }
+  return trimmed;
+};
+
 // Generate custom theme based on admin config
 export const generateCustomTheme = (adminConfig) => {
-  if (!adminConfig.theme) {
-    return null; // Use default theme
-  }
+  try {
+    if (!adminConfig || !adminConfig.theme || typeof adminConfig.theme !== 'object') {
+      console.log('⚠️ No valid theme config found, using default theme');
+      return null; // Use default theme
+    }
 
-  const theme = adminConfig.theme;
-  
-  return {
-    "cssVariables": {
-      // General background colors
-      "--sjs-general-backcolor": theme.backgroundColor || "#ffffff",
-      "--sjs-general-backcolor-dark": theme.cardBackground || "#f8f9fa",
-      "--sjs-general-backcolor-dim": theme.headerBackground || "#fafafa",
-      
-      // Text colors
-      "--sjs-general-forecolor": theme.textColor || "#212121",
-      "--sjs-general-forecolor-light": theme.secondaryText || "#757575",
-      "--sjs-general-dim-forecolor": theme.disabledText || "#bdbdbd",
-      
-      // Primary colors
-      "--sjs-primary-backcolor": theme.primaryColor || "#1976d2",
-      "--sjs-primary-backcolor-light": theme.primaryLight || "#42a5f5",
-      "--sjs-primary-backcolor-dark": theme.primaryDark || "#1565c0",
-      "--sjs-primary-forecolor": "#ffffff",
-      
-      // Secondary colors
-      "--sjs-secondary-backcolor": theme.secondaryColor || "#dc004e",
-      "--sjs-secondary-backcolor-light": theme.accentColor || "#ff9800",
-      "--sjs-secondary-backcolor-semi-light": theme.successColor || "#4caf50",
-      "--sjs-secondary-forecolor": "#ffffff",
-      
-      // Border colors
-      "--sjs-border-light": theme.borderColor || "#e0e0e0",
-      "--sjs-border-default": theme.borderColor || "#e0e0e0",
-      "--sjs-border-inside": theme.borderColor || "#e0e0e0",
-      
-      // Focus and active states
-      "--sjs-special-red": theme.accentColor || "#ff9800",
-      "--sjs-special-green": theme.successColor || "#4caf50",
-      "--sjs-special-blue": theme.focusBorder || theme.primaryColor || "#1976d2",
-      
-      // Shadows and effects
-      "--sjs-shadow-small": "0px 1px 2px 0px rgba(0, 0, 0, 0.15)",
-      "--sjs-shadow-medium": "0px 2px 6px 0px rgba(0, 0, 0, 0.1)",
-      "--sjs-shadow-large": "0px 8px 16px 0px rgba(0, 0, 0, 0.1)",
-      "--sjs-shadow-inner": "inset 0px 1px 2px 0px rgba(0, 0, 0, 0.15)",
-      
-      // Additional customizations for better appearance
-      "--sjs-header-backcolor": theme.headerBackground || "#ffffff",
-      "--sjs-corner-radius": "8px",
-      "--sjs-base-unit": "8px",
-      
-      // Input and form elements
-      "--sjs-editor-backcolor": theme.backgroundColor || "#ffffff",
-      "--sjs-editorpanel-backcolor": theme.cardBackground || "#f8f9fa",
-      "--sjs-editorpanel-hovercolor": theme.primaryLight || "#42a5f5",
-      
-      // Progress bar
-      "--sjs-progressbar-color": theme.primaryColor || "#1976d2",
-      
-      // Question panel
-      "--sjs-questionpanel-backcolor": theme.cardBackground || "#f8f9fa",
-      "--sjs-questionpanel-hovercolor": theme.headerBackground || "#fafafa",
-      "--sjs-questionpanel-cornerradius": "8px"
-    },
-    "themeName": "custom",
-    "colorPalette": "light",
-    "isPanelless": false
-  };
+    const theme = adminConfig.theme;
+    
+    // Ensure all color values are valid strings
+    const safeTheme = {
+      backgroundColor: ensureColorString(theme.backgroundColor, "#ffffff"),
+      cardBackground: ensureColorString(theme.cardBackground, "#f8f9fa"),
+      headerBackground: ensureColorString(theme.headerBackground, "#fafafa"),
+      textColor: ensureColorString(theme.textColor, "#212121"),
+      secondaryText: ensureColorString(theme.secondaryText, "#757575"),
+      disabledText: ensureColorString(theme.disabledText, "#bdbdbd"),
+      primaryColor: ensureColorString(theme.primaryColor, "#1976d2"),
+      primaryLight: ensureColorString(theme.primaryLight, "#42a5f5"),
+      primaryDark: ensureColorString(theme.primaryDark, "#1565c0"),
+      secondaryColor: ensureColorString(theme.secondaryColor, "#dc004e"),
+      accentColor: ensureColorString(theme.accentColor, "#ff9800"),
+      successColor: ensureColorString(theme.successColor, "#4caf50"),
+      borderColor: ensureColorString(theme.borderColor, "#e0e0e0"),
+      focusBorder: ensureColorString(theme.focusBorder, "#1976d2")
+    };
+    
+    console.log('✅ Generated safe theme:', safeTheme);
+    
+    return {
+      "cssVariables": {
+        // General background colors
+        "--sjs-general-backcolor": safeTheme.backgroundColor,
+        "--sjs-general-backcolor-dark": safeTheme.cardBackground,
+        "--sjs-general-backcolor-dim": safeTheme.headerBackground,
+        
+        // Text colors
+        "--sjs-general-forecolor": safeTheme.textColor,
+        "--sjs-general-forecolor-light": safeTheme.secondaryText,
+        "--sjs-general-dim-forecolor": safeTheme.disabledText,
+        
+        // Primary colors
+        "--sjs-primary-backcolor": safeTheme.primaryColor,
+        "--sjs-primary-backcolor-light": safeTheme.primaryLight,
+        "--sjs-primary-backcolor-dark": safeTheme.primaryDark,
+        "--sjs-primary-forecolor": "#ffffff",
+        
+        // Secondary colors
+        "--sjs-secondary-backcolor": safeTheme.secondaryColor,
+        "--sjs-secondary-backcolor-light": safeTheme.accentColor,
+        "--sjs-secondary-backcolor-semi-light": safeTheme.successColor,
+        "--sjs-secondary-forecolor": "#ffffff",
+        
+        // Border colors
+        "--sjs-border-light": safeTheme.borderColor,
+        "--sjs-border-default": safeTheme.borderColor,
+        "--sjs-border-inside": safeTheme.borderColor,
+        
+        // Focus and active states
+        "--sjs-special-red": safeTheme.accentColor,
+        "--sjs-special-green": safeTheme.successColor,
+        "--sjs-special-blue": safeTheme.focusBorder,
+        
+        // Shadows and effects
+        "--sjs-shadow-small": "0px 1px 2px 0px rgba(0, 0, 0, 0.15)",
+        "--sjs-shadow-medium": "0px 2px 6px 0px rgba(0, 0, 0, 0.1)",
+        "--sjs-shadow-large": "0px 8px 16px 0px rgba(0, 0, 0, 0.1)",
+        "--sjs-shadow-inner": "inset 0px 1px 2px 0px rgba(0, 0, 0, 0.15)",
+        
+        // Additional customizations for better appearance
+        "--sjs-header-backcolor": safeTheme.headerBackground,
+        "--sjs-corner-radius": "8px",
+        "--sjs-base-unit": "8px",
+        
+        // Input and form elements
+        "--sjs-editor-backcolor": safeTheme.backgroundColor,
+        "--sjs-editorpanel-backcolor": safeTheme.cardBackground,
+        "--sjs-editorpanel-hovercolor": safeTheme.primaryLight,
+        
+        // Progress bar
+        "--sjs-progressbar-color": safeTheme.primaryColor,
+        
+        // Question panel
+        "--sjs-questionpanel-backcolor": safeTheme.cardBackground,
+        "--sjs-questionpanel-hovercolor": safeTheme.headerBackground,
+        "--sjs-questionpanel-cornerradius": "8px"
+      },
+      "themeName": "custom",
+      "colorPalette": "light",
+      "isPanelless": false
+    };
+  } catch (error) {
+    console.error('❌ Error generating custom theme:', error);
+    return null; // Fall back to default theme
+  }
 };

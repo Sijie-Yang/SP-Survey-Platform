@@ -338,20 +338,40 @@ export default function SurveyPreview({ config, currentProject }) {
   }
 
   try {
-    // Directly use processed configuration (already in standard SurveyJS format)
-    const model = new Model(processedConfig || config);
+    // Fix config before creating model
+    const configToUse = processedConfig || config;
     
-    // Apply theme (same as Live Survey)
-    if (config.theme) {
-      // Use custom theme from admin config
-      const customTheme = generateCustomTheme(config);
-      if (customTheme) {
-        model.applyTheme(customTheme);
-        console.log('Preview applied custom theme:', customTheme);
+    // Ensure showQuestionNumbers and showProgressBar are strings, not booleans
+    if (typeof configToUse.showQuestionNumbers === 'boolean') {
+      configToUse.showQuestionNumbers = configToUse.showQuestionNumbers ? 'on' : 'off';
+      console.log('🔧 Preview: Fixed showQuestionNumbers boolean to string');
+    }
+    if (typeof configToUse.showProgressBar === 'boolean') {
+      configToUse.showProgressBar = configToUse.showProgressBar ? 'top' : 'off';
+      console.log('🔧 Preview: Fixed showProgressBar boolean to string');
+    }
+    
+    // Directly use processed configuration (already in standard SurveyJS format)
+    const model = new Model(configToUse);
+    
+    // Apply theme (same as Live Survey) - with error handling
+    try {
+      if (config.theme) {
+        // Use custom theme from admin config
+        const customTheme = generateCustomTheme(config);
+        if (customTheme) {
+          console.log('Preview: Applying custom theme...');
+          model.applyTheme(customTheme);
+          console.log('✅ Preview applied custom theme successfully');
+        }
+      } else if (themeJson) {
+        // Use default theme
+        console.log('Preview: Applying default theme...');
+        model.applyTheme(themeJson);
       }
-    } else if (themeJson) {
-      // Use default theme
-      model.applyTheme(themeJson);
+    } catch (themeError) {
+      console.error('⚠️ Error applying theme in preview, using default styling:', themeError);
+      // Continue without theme - SurveyJS will use default styling
     }
     
     // Configuration already applied directly to model (via new Model(config))
