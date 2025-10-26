@@ -77,11 +77,11 @@ import { CSS } from '@dnd-kit/utilities';
 import PageEditor from './PageEditor';
 import QuestionEditor from './QuestionEditor';
 import ChatAssistant from './ChatAssistant';
-import { generateSurveyFromDescription, adjustSurvey, validateApiKey } from '../../lib/openai';
+// Old API functions removed - now using chatApi.js
 import { getConversationHistory } from '../../lib/conversationHistory';
 import { getWorkingMemory } from '../../lib/workingMemory';
 import { getSessionLearning } from '../../lib/sessionLearning';
-import { sendChatMessage, validateApiKey as validateChatApiKey } from '../../lib/chatApi';
+import { sendChatMessage, validateApiKey as validateChatApiKey, triggerMultiAgentReviewStream } from '../../lib/chatApi';
 
 // Sortable Page Item Component
 function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
@@ -201,9 +201,13 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const [selectedPage, setSelectedPage] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   
-  // Chat Assistant states
-  const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [apiKeyValid, setApiKeyValid] = useState(false);
+  // Chat Assistant states - with localStorage persistence
+  const [openaiApiKey, setOpenaiApiKey] = useState(() => {
+    return localStorage.getItem('openaiApiKey') || '';
+  });
+  const [apiKeyValid, setApiKeyValid] = useState(() => {
+    return localStorage.getItem('apiKeyValid') === 'true';
+  });
   const [userMessage, setUserMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(''); // e.g., "Thinking...", "Generating survey..."
@@ -215,7 +219,25 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const sessionLearningRef = useRef(null);
   const [conversationMessages, setConversationMessages] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
-  const [contextEnabled, setContextEnabled] = useState(true);
+  const [contextEnabled, setContextEnabled] = useState(() => {
+    const stored = localStorage.getItem('contextEnabled');
+    return stored !== null ? stored === 'true' : true;
+  });
+  
+  // Multi-Agent Review states - with localStorage persistence
+  const [multiAgentReviewEnabled, setMultiAgentReviewEnabled] = useState(() => {
+    return localStorage.getItem('multiAgentReviewEnabled') === 'true';
+  });
+  const [reviewMode, setReviewMode] = useState(() => {
+    return localStorage.getItem('reviewMode') || '1v1';
+  });
+  const [maxReviewRounds, setMaxReviewRounds] = useState(() => {
+    const stored = localStorage.getItem('maxReviewRounds');
+    return stored ? parseInt(stored, 10) : 3;
+  });
+  
+  // Custom prompts state
+  const [customPrompts, setCustomPrompts] = useState(null);
   
   // Chat scroll reference
   const chatEndRef = useRef(null);
@@ -226,6 +248,38 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  // Persist settings to localStorage whenever they change
+  useEffect(() => {
+    if (openaiApiKey) {
+      localStorage.setItem('openaiApiKey', openaiApiKey);
+      console.log('💾 Saved API key to localStorage');
+    }
+  }, [openaiApiKey]);
+
+  useEffect(() => {
+    localStorage.setItem('apiKeyValid', apiKeyValid.toString());
+  }, [apiKeyValid]);
+
+  useEffect(() => {
+    localStorage.setItem('contextEnabled', contextEnabled.toString());
+    console.log('💾 Saved contextEnabled:', contextEnabled);
+  }, [contextEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('multiAgentReviewEnabled', multiAgentReviewEnabled.toString());
+    console.log('💾 Saved multiAgentReviewEnabled:', multiAgentReviewEnabled);
+  }, [multiAgentReviewEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('reviewMode', reviewMode);
+    console.log('💾 Saved reviewMode:', reviewMode);
+  }, [reviewMode]);
+
+  useEffect(() => {
+    localStorage.setItem('maxReviewRounds', maxReviewRounds.toString());
+    console.log('💾 Saved maxReviewRounds:', maxReviewRounds);
+  }, [maxReviewRounds]);
 
   // Initialize Contextual Engineering modules (per-project)
   useEffect(() => {
@@ -647,7 +701,10 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         currentUserMessage,
         config,
         enrichedHistory,
-        openaiApiKey
+        openaiApiKey,
+        multiAgentReviewEnabled,
+        reviewMode,
+        customPrompts
       );
 
       // Update status based on intent
@@ -666,12 +723,68 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       setLoadingStatus('');
 
       if (result.success) {
+        // Add Chain of Thoughts to conversation if available
+        if (result.chainOfThoughts && conversationHistoryRef.current) {
+          console.log('🧠 Displaying Chain of Thoughts...');
+          
+          // Step 1: Research/Understanding
+          const step1Key = result.chainOfThoughts.step1_research || result.chainOfThoughts.step1_understanding;
+          if (step1Key) {
+            conversationHistoryRef.current.addMessage('assistant', 
+              `**🧠 Step 1: ${result.intent === 'generate' ? 'Research Analysis' : 'Understanding Adjustment Goal'}**\n\n${step1Key}`,
+              { type: 'chain-of-thoughts', step: 1, intent: result.intent }
+            );
+          }
+          
+          // Step 2: Structure/Planning
+          const step2Key = result.chainOfThoughts.step2_structure || result.chainOfThoughts.step2_planning;
+          if (step2Key) {
+            conversationHistoryRef.current.addMessage('assistant', 
+              `**📐 Step 2: ${result.intent === 'generate' ? 'Survey Structure Planning' : 'Adjustment Planning'}**\n\n${step2Key}`,
+              { type: 'chain-of-thoughts', step: 2, intent: result.intent }
+            );
+          }
+          
+          // Step 3: Generation/Execution
+          const step3Key = result.chainOfThoughts.step3_generation || result.chainOfThoughts.step3_execution;
+          if (step3Key) {
+            conversationHistoryRef.current.addMessage('assistant', 
+              `**🔨 Step 3: ${result.intent === 'generate' ? 'Generation' : 'Execution'}**\n\n${step3Key}`,
+              { type: 'chain-of-thoughts', step: 3, intent: result.intent }
+            );
+          }
+        }
+        
         // Add AI response to conversation
         if (conversationHistoryRef.current) {
           conversationHistoryRef.current.addMessage('assistant', result.message, {
             actionType: result.intent,
             timestamp: new Date().toISOString()
           });
+        }
+
+        // If multi-agent review was conducted, add all agent messages to conversation
+        if (result.multiAgentReview && result.multiAgentReview.conversationMessages) {
+          console.log('🤖 Adding multi-agent review conversations to history...');
+          
+          // Add all agent conversations to the history
+          result.multiAgentReview.conversationMessages.forEach(msg => {
+            if (conversationHistoryRef.current && msg.content) {
+              conversationHistoryRef.current.addMessage(msg.role || 'assistant', msg.content, {
+                ...(msg.metadata || {}),
+                timestamp: msg.timestamp || new Date().toISOString(),
+                isMultiAgent: true
+              });
+            }
+          });
+          
+          console.log(`  ✓ Added ${result.multiAgentReview.conversationMessages.length} agent messages`);
+          console.log(`  ✓ Final verdict: ${result.multiAgentReview.finalVerdict}`);
+          console.log(`  ✓ Final rating: ${result.multiAgentReview.finalRating}/10`);
+        }
+
+        // Update conversation display
+        if (conversationHistoryRef.current) {
           setConversationMessages(conversationHistoryRef.current.getAllMessages());
         }
 
@@ -704,6 +817,162 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                 result.intent === 'generate' ? 'generate_survey' : 'adjust_survey'
               );
               console.log('  ✓ Recorded interaction in session learning');
+            }
+          }
+
+          // Trigger Multi-Agent Review if enabled (streaming version)
+          if (multiAgentReviewEnabled && (result.intent === 'generate' || result.intent === 'adjust')) {
+            console.log('🤖 Triggering Multi-Agent Review (streaming)...');
+            setLoadingStatus('Starting Multi-Agent Review...');
+            
+            try {
+              await triggerMultiAgentReviewStream(
+                processedConfig,
+                openaiApiKey,
+                reviewMode,
+                maxReviewRounds,
+                (eventType, data) => {
+                  // Handle each SSE event in real-time
+                  console.log(`📡 SSE Event: ${eventType}`, data);
+                  
+                  if (conversationHistoryRef.current) {
+                    switch (eventType) {
+                      case 'start':
+                        conversationHistoryRef.current.addMessage('system',
+                          `\n🔄 **Multi-Agent Review Started**\n\nMode: ${data.mode}\nExperts: ${data.totalAgents}\nMax Rounds: ${data.maxRounds}\n`,
+                          { type: 'review-start', isMultiAgent: true }
+                        );
+                        break;
+                      
+                      case 'round-start':
+                        conversationHistoryRef.current.addMessage('system',
+                          `\n📋 **Review Round ${data.round}**\n`,
+                          { type: 'round-header', isMultiAgent: true, round: data.round }
+                        );
+                        setLoadingStatus(`Review Round ${data.round}...`);
+                        break;
+                      
+                      case 'agent-start':
+                        setLoadingStatus(`${data.emoji} ${data.name} reviewing...`);
+                        break;
+                      
+                      case 'agent-review':
+                        conversationHistoryRef.current.addMessage('assistant',
+                          data.formatted,
+                          { 
+                            type: 'agent-review', 
+                            isMultiAgent: true, 
+                            agentId: data.agentId,
+                            round: data.round
+                          }
+                        );
+                        // Update UI immediately
+                        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+                        break;
+                      
+                      case 'round-summary':
+                        conversationHistoryRef.current.addMessage('assistant',
+                          data.formatted,
+                          { type: 'round-summary', isMultiAgent: true, round: data.round }
+                        );
+                        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+                        break;
+                      
+                      case 'revision-start':
+                        conversationHistoryRef.current.addMessage('system',
+                          `\n🔧 **Survey Designer**: Addressing feedback and revising survey...\n`,
+                          { type: 'revision-start', isMultiAgent: true, round: data.round }
+                        );
+                        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+                        setLoadingStatus('Revising survey...');
+                        break;
+                      
+                      case 'revision-thinking':
+                        // Display Chain of Thoughts during revision
+                        const stepTitle = data.step === 1 ? 'Understanding Expert Feedback' : 
+                                         data.step === 2 ? 'Planning Changes' : 'Executing Revision';
+                        conversationHistoryRef.current.addMessage('assistant',
+                          `**${'🧠📐🔨'[data.step - 1]} Revision Step ${data.step}: ${stepTitle}**\n\n${data.content}`,
+                          { type: 'revision-thinking', step: data.step, isMultiAgent: true }
+                        );
+                        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+                        break;
+                      
+                      case 'revision-complete':
+                        // Display Chain of Thoughts if available
+                        if (data.chainOfThoughts) {
+                          if (data.chainOfThoughts.step1_understanding) {
+                            conversationHistoryRef.current.addMessage('assistant',
+                              `**🧠 Revision Step 1: Understanding Expert Feedback**\n\n${data.chainOfThoughts.step1_understanding}`,
+                              { type: 'revision-cot', step: 1, isMultiAgent: true }
+                            );
+                          }
+                          if (data.chainOfThoughts.step2_planning) {
+                            conversationHistoryRef.current.addMessage('assistant',
+                              `**📐 Revision Step 2: Planning Changes**\n\n${data.chainOfThoughts.step2_planning}`,
+                              { type: 'revision-cot', step: 2, isMultiAgent: true }
+                            );
+                          }
+                          if (data.chainOfThoughts.step3_execution) {
+                            conversationHistoryRef.current.addMessage('assistant',
+                              `**🔨 Revision Step 3: Executing Revision**\n\n${data.chainOfThoughts.step3_execution}`,
+                              { type: 'revision-cot', step: 3, isMultiAgent: true }
+                            );
+                          }
+                        }
+                        
+                        conversationHistoryRef.current.addMessage('assistant',
+                          `🔧 **Survey Designer**: Survey revised based on expert feedback. Ready for next review round.`,
+                          { type: 'revision-complete', isMultiAgent: true, round: data.round }
+                        );
+                        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+                        // Update survey config with revised version
+                        if (data.surveyConfig) {
+                          const revisedConfig = processAIGeneratedConfig(data.surveyConfig);
+                          onChange(revisedConfig);
+                        }
+                        break;
+                      
+                      case 'complete':
+                        conversationHistoryRef.current.addMessage('system',
+                          `\n🎯 **Review Complete**\n\n${data.reason}\n\nFinal Rating: ${data.finalRating}/10\nFinal Verdict: ${data.finalVerdict?.toUpperCase()}\n`,
+                          { type: 'review-complete', isMultiAgent: true }
+                        );
+                        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+                        // Apply final survey config
+                        if (data.surveyConfig) {
+                          const finalConfig = processAIGeneratedConfig(data.surveyConfig);
+                          onChange(finalConfig);
+                        }
+                        break;
+                      
+                      case 'error':
+                      case 'agent-error':
+                      case 'revision-error':
+                        conversationHistoryRef.current.addMessage('system',
+                          `❌ Error: ${data.error || data.message}`,
+                          { type: 'error', isMultiAgent: true }
+                        );
+                        setConversationMessages(conversationHistoryRef.current.getAllMessages());
+                        break;
+                    }
+                  }
+                }
+              );
+              
+              console.log('✅ Multi-Agent Review completed');
+              
+            } catch (error) {
+              console.error('❌ Multi-Agent Review error:', error);
+              if (conversationHistoryRef.current) {
+                conversationHistoryRef.current.addMessage('system',
+                  `❌ Multi-Agent Review failed: ${error.message}`,
+                  { type: 'error', isMultiAgent: true }
+                );
+                setConversationMessages(conversationHistoryRef.current.getAllMessages());
+              }
+            } finally {
+              setLoadingStatus('');
             }
           }
         }
@@ -745,13 +1014,23 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         apiKeyValid={apiKeyValid}
         openaiApiKey={openaiApiKey}
         contextEnabled={contextEnabled}
+        multiAgentReviewEnabled={multiAgentReviewEnabled}
+        reviewMode={reviewMode}
+        maxReviewRounds={maxReviewRounds}
         recommendations={recommendations}
         currentProject={currentProject}
+        conversationHistoryRef={conversationHistoryRef}
+        workingMemoryRef={workingMemoryRef}
+        sessionLearningRef={sessionLearningRef}
         onMessageChange={setUserMessage}
+        onPromptsChange={setCustomPrompts}
         onSendMessage={handleSendMessage}
         onApiKeyChange={setOpenaiApiKey}
         onValidateApiKey={handleValidateApiKey}
         onContextToggle={setContextEnabled}
+        onMultiAgentReviewToggle={setMultiAgentReviewEnabled}
+        onReviewModeChange={setReviewMode}
+        onMaxReviewRoundsChange={setMaxReviewRounds}
         onClearHistory={() => {
           if (window.confirm('Clear conversation history?')) {
             conversationHistoryRef.current?.clear();

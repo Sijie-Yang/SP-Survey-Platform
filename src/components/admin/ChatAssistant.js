@@ -22,8 +22,16 @@ import {
   ListItemText,
   Divider,
   Tooltip,
-  InputAdornment
+  InputAdornment,
+  Tabs,
+  Tab,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Alert,
+  ButtonGroup
 } from '@mui/material';
+import { ExpandMore, Save, RestartAlt } from '@mui/icons-material';
 import {
   Send,
   Settings,
@@ -34,8 +42,14 @@ import {
   CheckCircle,
   TipsAndUpdates,
   History,
-  Close
+  Close,
+  Code,
+  Memory,
+  WorkHistory,
+  Chat,
+  Refresh
 } from '@mui/icons-material';
+import { PROMPTS } from '../../config/prompts';
 
 /**
  * ChatAssistant Component
@@ -49,23 +63,122 @@ export default function ChatAssistant({
   apiKeyValid,
   openaiApiKey,
   contextEnabled,
+  multiAgentReviewEnabled = false,
+  reviewMode = '1v1',
+  maxReviewRounds = 3,
   recommendations = [],
   currentProject,
+  conversationHistoryRef,
+  workingMemoryRef,
+  sessionLearningRef,
   onMessageChange,
   onSendMessage,
   onApiKeyChange,
   onValidateApiKey,
   onContextToggle,
+  onMultiAgentReviewToggle,
+  onReviewModeChange,
+  onMaxReviewRoundsChange,
   onClearHistory,
   onDownloadHistory,
+  onPromptsChange,
   chatEndRef
 }) {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState(0);
+  
+  // States for viewing/editing data
+  const [conversationData, setConversationData] = React.useState(null);
+  const [workingMemoryData, setWorkingMemoryData] = React.useState(null);
+  const [sessionLearningData, setSessionLearningData] = React.useState(null);
+  
+  // States for managing prompts
+  const [prompts, setPrompts] = React.useState(() => {
+    const stored = localStorage.getItem('customPrompts');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        // Validate that stored prompts have all required keys and non-empty values
+        if (parsed.generate && parsed.adjust && parsed.question && parsed.intentDetection &&
+            parsed.generate.length > 200 && parsed.adjust.length > 200) {
+          console.log('✅ Loaded custom prompts from localStorage');
+          return parsed;
+        } else {
+          console.log('⚠️ Stored prompts incomplete, using defaults');
+          localStorage.removeItem('customPrompts');
+          return PROMPTS;
+        }
+      } catch (e) {
+        console.log('⚠️ Failed to parse stored prompts, using defaults');
+        localStorage.removeItem('customPrompts');
+        return PROMPTS;
+      }
+    }
+    console.log('✅ Using default prompts');
+    return PROMPTS;
+  });
+  const [promptsModified, setPromptsModified] = React.useState(false);
+  
+  // Notify parent when prompts change
+  React.useEffect(() => {
+    if (onPromptsChange) {
+      onPromptsChange(prompts);
+    }
+    // Debug: log prompts length
+    console.log('📝 Current prompts:', {
+      generate: prompts.generate?.length || 0,
+      adjust: prompts.adjust?.length || 0,
+      question: prompts.question?.length || 0,
+      intentDetection: prompts.intentDetection?.length || 0
+    });
+  }, [prompts, onPromptsChange]);
+  
+  // Load data when settings dialog opens
+  React.useEffect(() => {
+    if (settingsOpen) {
+      // Load conversation history
+      if (conversationHistoryRef?.current) {
+        setConversationData(conversationHistoryRef.current.getAllMessages());
+      }
+      
+      // Load working memory
+      if (workingMemoryRef?.current) {
+        const wmData = workingMemoryRef.current.export ? workingMemoryRef.current.export() : null;
+        setWorkingMemoryData(wmData);
+      }
+      
+      // Load session learning
+      if (sessionLearningRef?.current) {
+        const slData = sessionLearningRef.current.export ? sessionLearningRef.current.export() : null;
+        setSessionLearningData(slData);
+      }
+    }
+  }, [settingsOpen, conversationHistoryRef, workingMemoryRef, sessionLearningRef]);
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       onSendMessage();
+    }
+  };
+  
+  const handlePromptChange = (key, value) => {
+    setPrompts(prev => ({ ...prev, [key]: value }));
+    setPromptsModified(true);
+  };
+  
+  const handleSavePrompts = () => {
+    localStorage.setItem('customPrompts', JSON.stringify(prompts));
+    setPromptsModified(false);
+    alert('✅ Prompts saved successfully!');
+  };
+  
+  const handleResetPrompts = () => {
+    if (window.confirm('Are you sure you want to reset all prompts to default values?')) {
+      setPrompts(PROMPTS);
+      localStorage.removeItem('customPrompts');
+      setPromptsModified(false);
+      alert('✅ Prompts reset to defaults!');
     }
   };
 
@@ -357,23 +470,40 @@ export default function ChatAssistant({
       <Dialog 
         open={settingsOpen} 
         onClose={() => setSettingsOpen(false)}
-        maxWidth="sm"
+        maxWidth="lg"
         fullWidth
       >
         <DialogTitle>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography variant="h6">AI Assistant Settings</Typography>
+            <Typography variant="h6">AI Assistant Settings & Data</Typography>
             <IconButton size="small" onClick={() => setSettingsOpen(false)}>
               <Close />
             </IconButton>
           </Box>
+          
+          <Tabs 
+            value={activeTab} 
+            onChange={(e, newValue) => setActiveTab(newValue)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ mt: 2, borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab icon={<Settings fontSize="small" />} label="Settings" iconPosition="start" />
+            <Tab icon={<Code fontSize="small" />} label="Prompts" iconPosition="start" />
+            <Tab icon={<Chat fontSize="small" />} label="Conversation" iconPosition="start" />
+            <Tab icon={<WorkHistory fontSize="small" />} label="Working Memory" iconPosition="start" />
+            <Tab icon={<Memory fontSize="small" />} label="Session Learning" iconPosition="start" />
+          </Tabs>
         </DialogTitle>
         
-        <DialogContent dividers>
-          {/* API Key Configuration */}
-          <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
-            🔑 OpenAI API Key
-          </Typography>
+        <DialogContent dividers sx={{ minHeight: 400, maxHeight: '70vh', overflow: 'auto' }}>
+          {/* Tab 0: Settings */}
+          {activeTab === 0 && (
+            <Box>
+              {/* API Key Configuration */}
+              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
+                🔑 OpenAI API Key
+              </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a>
           </Typography>
@@ -461,6 +591,485 @@ export default function ChatAssistant({
                   />
                 </ListItem>
               </List>
+            </Box>
+          )}
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* Multi-Agent Review */}
+          <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
+            🤖 Multi-Agent Review
+          </Typography>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={multiAgentReviewEnabled}
+                onChange={(e) => onMultiAgentReviewToggle && onMultiAgentReviewToggle(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2">
+                  Auto-trigger expert review after generate/adjust
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  5 expert agents will review and help improve your survey
+                </Typography>
+              </Box>
+            }
+          />
+
+          {multiAgentReviewEnabled && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+              <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <SmartToy fontSize="small" />
+                <strong>Review Mode:</strong>
+              </Typography>
+              
+              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                <Button
+                  variant={reviewMode === '1v1' ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => onReviewModeChange && onReviewModeChange('1v1')}
+                  sx={{ flex: 1 }}
+                >
+                  1v1 Reviews
+                </Button>
+                <Button
+                  variant={reviewMode === 'group' ? 'contained' : 'outlined'}
+                  size="small"
+                  onClick={() => onReviewModeChange && onReviewModeChange('group')}
+                  sx={{ flex: 1 }}
+                >
+                  Group Discussion
+                </Button>
+              </Box>
+
+              <Box sx={{ mb: 2 }}>
+                <TextField
+                  label="Maximum Review Rounds"
+                  type="number"
+                  size="small"
+                  fullWidth
+                  value={maxReviewRounds}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value, 10);
+                    if (value >= 1 && value <= 10) {
+                      onMaxReviewRoundsChange && onMaxReviewRoundsChange(value);
+                    }
+                  }}
+                  inputProps={{ min: 1, max: 10, step: 1 }}
+                  helperText="Number of review rounds before auto-termination (1-10)"
+                />
+              </Box>
+
+              <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <strong>Expert Agents:</strong>
+              </Typography>
+              <List dense>
+                <ListItem>
+                  <ListItemText 
+                    primary="🔬 Urban Scientist"
+                    secondary="Research design, methodology, scientific rigor"
+                    primaryTypographyProps={{ variant: 'body2' }}
+                    secondaryTypographyProps={{ variant: 'caption' }}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText 
+                    primary="🏙️ Urban Designer"
+                    secondary="Streetscape quality, design elements, placemaking"
+                    primaryTypographyProps={{ variant: 'body2' }}
+                    secondaryTypographyProps={{ variant: 'caption' }}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText 
+                    primary="🧠 Perception Psychologist"
+                    secondary="Question wording, cognitive load, response bias"
+                    primaryTypographyProps={{ variant: 'body2' }}
+                    secondaryTypographyProps={{ variant: 'caption' }}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText 
+                    primary="👤 Test Participant"
+                    secondary="User experience, survey usability, engagement"
+                    primaryTypographyProps={{ variant: 'body2' }}
+                    secondaryTypographyProps={{ variant: 'caption' }}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText 
+                    primary="📊 Data Analyst"
+                    secondary="Data quality, statistical analysis, measurement"
+                    primaryTypographyProps={{ variant: 'body2' }}
+                    secondaryTypographyProps={{ variant: 'caption' }}
+                  />
+                </ListItem>
+              </List>
+
+              <Divider sx={{ my: 1 }} />
+
+              <Typography variant="caption" color="text.secondary">
+                {reviewMode === '1v1' 
+                  ? '1v1 Mode: Each agent reviews independently and provides individual feedback'
+                  : 'Group Mode: Agents discuss together and build on each other\'s insights'}
+              </Typography>
+            </Box>
+          )}
+            </Box>
+          )}
+          
+          {/* Tab 1: Prompts */}
+          {activeTab === 1 && (
+            <Box>
+              <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+                <Alert severity="info" sx={{ flex: 1 }}>
+                  <strong>System Prompts</strong> - Edit these prompts to customize AI behavior. Changes are saved locally.
+                </Alert>
+                <ButtonGroup variant="contained" size="small">
+                  <Button 
+                    startIcon={<Save />} 
+                    onClick={handleSavePrompts}
+                    disabled={!promptsModified}
+                    color="primary"
+                  >
+                    Save
+                  </Button>
+                  <Button 
+                    startIcon={<RestartAlt />} 
+                    onClick={handleResetPrompts}
+                    color="secondary"
+                  >
+                    Reset
+                  </Button>
+                </ButtonGroup>
+              </Box>
+              
+              <Accordion defaultExpanded>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography variant="subtitle2">Generate Survey Prompt</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={20}
+                    value={prompts.generate}
+                    onChange={(e) => handlePromptChange('generate', e.target.value)}
+                    variant="outlined"
+                    sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                    📍 Used in: POST /api/openai/chat (intent: generate) | Model: GPT-4o
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
+              
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography variant="subtitle2">Adjust Survey Prompt</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={18}
+                    value={prompts.adjust}
+                    onChange={(e) => handlePromptChange('adjust', e.target.value)}
+                    variant="outlined"
+                    sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                    📍 Used in: POST /api/openai/chat (intent: adjust) | Model: GPT-4o | Includes current survey config
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
+              
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography variant="subtitle2">Intent Detection Prompt</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={8}
+                    value={prompts.intentDetection}
+                    onChange={(e) => handlePromptChange('intentDetection', e.target.value)}
+                    variant="outlined"
+                    sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                    📍 Used in: POST /api/openai/chat (before intent processing) | Model: GPT-4o-mini
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
+              
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography variant="subtitle2">Question Answering Prompt</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={25}
+                    value={prompts.question}
+                    onChange={(e) => handlePromptChange('question', e.target.value)}
+                    variant="outlined"
+                    sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                    📍 Used in: POST /api/openai/chat (intent: question) | Model: GPT-4o
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
+              
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Typography variant="subtitle2">Multi-Agent Review Agents</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <List dense>
+                    <ListItem>
+                      <ListItemText 
+                        primary="🔬 Urban Scientist"
+                        secondary="Expert in research design, methodology, and scientific rigor"
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemText 
+                        primary="🏙️ Urban Designer"
+                        secondary="Expert in streetscape quality and design elements"
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemText 
+                        primary="🧠 Perception Psychologist"
+                        secondary="Expert in question wording and cognitive load"
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemText 
+                        primary="👤 Test Participant"
+                        secondary="Represents user experience perspective"
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemText 
+                        primary="📊 Data Analyst"
+                        secondary="Expert in data quality and analysis"
+                      />
+                    </ListItem>
+                  </List>
+                  <Typography variant="caption" color="text.secondary">
+                    📍 Each agent has specialized prompts defined in src/lib/multiAgentReview.js | Triggered after generate/adjust
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
+            </Box>
+          )}
+          
+          {/* Tab 2: Conversation History */}
+          {activeTab === 2 && (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  💬 Conversation History
+                </Typography>
+                <Box>
+                  <IconButton size="small" onClick={() => {
+                    if (conversationHistoryRef?.current) {
+                      const data = conversationHistoryRef.current.getAllMessages();
+                      setConversationData(data);
+                    }
+                  }} title="Refresh">
+                    <Refresh />
+                  </IconButton>
+                  <IconButton size="small" onClick={onDownloadHistory} title="Download">
+                    <Download />
+                  </IconButton>
+                  <IconButton size="small" onClick={onClearHistory} title="Clear">
+                    <Clear />
+                  </IconButton>
+                </Box>
+              </Box>
+              
+              {conversationData && conversationData.length > 0 ? (
+                <Box>
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    <strong>{conversationData.length} messages</strong> in current session
+                    {currentProject && ` (Project: ${currentProject.name})`}
+                  </Alert>
+                  
+                  <Paper variant="outlined" sx={{ maxHeight: 400, overflow: 'auto', p: 2, bgcolor: '#f5f5f5' }}>
+                    {conversationData.map((msg, idx) => (
+                      <Box key={idx} sx={{ mb: 2, pb: 2, borderBottom: idx < conversationData.length - 1 ? 1 : 0, borderColor: 'divider' }}>
+                        <Typography variant="caption" color="text.secondary">
+                          {msg.role === 'user' ? '👤 User' : '🤖 Assistant'} • {new Date(msg.timestamp).toLocaleString()}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', fontFamily: msg.role === 'system' ? 'monospace' : 'inherit' }}>
+                          {msg.content}
+                        </Typography>
+                        {msg.metadata && (
+                          <Chip 
+                            label={msg.metadata.actionType || msg.metadata.type || 'message'} 
+                            size="small" 
+                            sx={{ mt: 1 }}
+                          />
+                        )}
+                      </Box>
+                    ))}
+                  </Paper>
+                </Box>
+              ) : (
+                <Alert severity="warning">
+                  No conversation history available. Start chatting to see messages here.
+                </Alert>
+              )}
+            </Box>
+          )}
+          
+          {/* Tab 3: Working Memory */}
+          {activeTab === 3 && (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  🧠 Working Memory
+                </Typography>
+                <Box>
+                  <IconButton size="small" onClick={() => {
+                    if (workingMemoryRef?.current) {
+                      const data = workingMemoryRef.current.export ? workingMemoryRef.current.export() : null;
+                      setWorkingMemoryData(data);
+                    }
+                  }} title="Refresh">
+                    <Refresh />
+                  </IconButton>
+                  <IconButton size="small" onClick={() => {
+                    if (workingMemoryRef?.current && workingMemoryRef.current.clear) {
+                      if (window.confirm('Clear working memory for this project?')) {
+                        workingMemoryRef.current.clear();
+                        setWorkingMemoryData(null);
+                      }
+                    }
+                  }} title="Clear">
+                    <Clear />
+                  </IconButton>
+                </Box>
+              </Box>
+              
+              {workingMemoryData ? (
+                <Box>
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    <strong>Project-specific memory</strong> - Resets when session ends
+                    {currentProject && ` (Project: ${currentProject.name})`}
+                  </Alert>
+                  
+                  <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f5f5f5', mb: 2 }}>
+                    <pre style={{ margin: 0, fontSize: '0.85rem', overflow: 'auto', maxHeight: 400 }}>
+                      {JSON.stringify(workingMemoryData, null, 2)}
+                    </pre>
+                  </Paper>
+                  
+                  {workingMemoryData.surveyGoal && (
+                    <Alert severity="success">
+                      <strong>Survey Goal:</strong> {workingMemoryData.surveyGoal}
+                    </Alert>
+                  )}
+                </Box>
+              ) : (
+                <Alert severity="warning">
+                  No working memory data available. Generate or adjust a survey to populate this.
+                </Alert>
+              )}
+            </Box>
+          )}
+          
+          {/* Tab 4: Session Learning */}
+          {activeTab === 4 && (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  🎓 Session Learning
+                </Typography>
+                <Box>
+                  <IconButton size="small" onClick={() => {
+                    if (sessionLearningRef?.current) {
+                      const data = sessionLearningRef.current.export ? sessionLearningRef.current.export() : null;
+                      setSessionLearningData(data);
+                    }
+                  }} title="Refresh">
+                    <Refresh />
+                  </IconButton>
+                  <IconButton size="small" onClick={() => {
+                    if (sessionLearningRef?.current) {
+                      const data = sessionLearningRef.current.export ? sessionLearningRef.current.export() : null;
+                      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `session-learning-${new Date().toISOString()}.json`;
+                      a.click();
+                    }
+                  }} title="Download">
+                    <Download />
+                  </IconButton>
+                </Box>
+              </Box>
+              
+              {sessionLearningData ? (
+                <Box>
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    <strong>Cross-session learning</strong> - Persists across browser sessions (localStorage)
+                  </Alert>
+                  
+                  {sessionLearningData.userExpertise !== undefined && (
+                    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>User Profile</Typography>
+                      <Typography variant="body2">
+                        <strong>Expertise Level:</strong> {sessionLearningData.userExpertise}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Completed Surveys:</strong> {sessionLearningData.stats?.totalProjects || 0}
+                      </Typography>
+                      <Typography variant="body2">
+                        <strong>Avg Iterations:</strong> {sessionLearningData.stats?.avgIterations?.toFixed(1) || 'N/A'}
+                      </Typography>
+                    </Paper>
+                  )}
+                  
+                  {sessionLearningData.preferences && Object.keys(sessionLearningData.preferences).length > 0 && (
+                    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom>Learned Preferences</Typography>
+                      <List dense>
+                        {Object.entries(sessionLearningData.preferences).map(([key, value]) => (
+                          <ListItem key={key}>
+                            <ListItemText 
+                              primary={key}
+                              secondary={typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Paper>
+                  )}
+                  
+                  <Paper variant="outlined" sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+                    <Typography variant="subtitle2" gutterBottom>Full Data</Typography>
+                    <pre style={{ margin: 0, fontSize: '0.85rem', overflow: 'auto', maxHeight: 300 }}>
+                      {JSON.stringify(sessionLearningData, null, 2)}
+                    </pre>
+                  </Paper>
+                </Box>
+              ) : (
+                <Alert severity="warning">
+                  No session learning data available. Use the system to populate this.
+                </Alert>
+              )}
             </Box>
           )}
         </DialogContent>

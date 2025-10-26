@@ -2,6 +2,21 @@ const express = require('express');
 const fs = require('fs-extra');
 const path = require('path');
 const cors = require('cors');
+const OpenAI = require('openai');
+
+// Import multi-agent review system
+const {
+  AGENTS,
+  REVIEW_CONFIG,
+  getAgentSystemPrompt,
+  generate1v1ReviewPrompt,
+  generateGroupDiscussionPrompt,
+  consolidateReviews,
+  generateRevisionPrompt,
+  shouldTerminateReview,
+  formatReviewForChat,
+  formatConsolidatedFeedback
+} = require('./src/lib/multiAgentReview');
 
 const app = express();
 const PORT = 3001;
@@ -530,7 +545,6 @@ app.post('/api/restart', async (req, res) => {
 });
 
 // ✅ OpenAI API endpoints for AI-powered survey generation
-const OpenAI = require('openai');
 
 // Validate OpenAI API key
 app.post('/api/openai/validate-key', async (req, res) => {
@@ -554,6 +568,9 @@ app.post('/api/openai/validate-key', async (req, res) => {
   }
 });
 
+// [DEPRECATED] Old API routes - no longer used, replaced by /api/openai/chat
+
+/*
 // Generate survey from natural language description
 app.post('/api/openai/generate-survey', async (req, res) => {
   try {
@@ -1181,50 +1198,300 @@ Return ONLY a JSON array of questions, no markdown.`;
     });
   }
 });
+*/
+
+/**
+ * Multi-Agent Review with SSE (Server-Sent Events) for streaming output
+ * Allows real-time display of each agent's feedback as it's generated
+ */
+app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  
+  const sendEvent = (eventType, data) => {
+    res.write(`event: ${eventType}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+  
+  try {
+    const { surveyConfig, apiKey, mode = '1v1', maxRounds: maxRoundsParam } = req.query;
+    
+    if (!apiKey || !surveyConfig) {
+      sendEvent('error', { message: 'Missing required parameters' });
+      res.end();
+      return;
+    }
+    
+    // Use custom maxRounds or default to REVIEW_CONFIG.maxRounds
+    const maxRounds = maxRoundsParam ? parseInt(maxRoundsParam, 10) : REVIEW_CONFIG.maxRounds;
+    
+    const config = JSON.parse(surveyConfig);
+    const openai = new OpenAI({ apiKey });
+    const agentIds = Object.keys(AGENTS);
+    const reviewHistory = [];
+    let currentRound = 1;
+    let currentConfig = config;
+    
+    sendEvent('start', { totalAgents: agentIds.length, mode, maxRounds });
+    
+    while (currentRound <= maxRounds) {
+      sendEvent('round-start', { round: currentRound });
+      
+      const roundReviews = [];
+      
+      // Stream each agent's review
+      for (const agentId of agentIds) {
+        const agent = AGENTS[agentId];
+        sendEvent('agent-start', { agentId, name: agent.name, emoji: agent.emoji });
+        
+        try {
+          const systemPrompt = getAgentSystemPrompt(agentId, currentConfig, mode === 'group' ? 'group' : 'individual');
+          const userPrompt = mode === '1v1' 
+            ? generate1v1ReviewPrompt(agentId, currentConfig, currentRound)
+            : generateGroupDiscussionPrompt(currentConfig, roundReviews, currentRound);
+          
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ],
+            response_format: { type: "json_object" },
+            temperature: mode === 'group' ? 0.8 : 0.7,
+            max_tokens: mode === 'group' ? 800 : 1000
+          });
+          
+          const review = JSON.parse(completion.choices[0].message.content.trim());
+          review.agentId = agentId;
+          roundReviews.push(review);
+          
+          // Stream the formatted review immediately
+          const formattedReview = formatReviewForChat(agentId, review, currentRound);
+          sendEvent('agent-review', {
+            agentId,
+            name: agent.name,
+            emoji: agent.emoji,
+            review,
+            formatted: formattedReview,
+            round: currentRound
+          });
+          
+        } catch (error) {
+          sendEvent('agent-error', { agentId, name: agent.name, error: error.message });
+        }
+      }
+      
+      // Consolidate and stream feedback
+      const consolidated = consolidateReviews(roundReviews);
+      reviewHistory.push({ round: currentRound, reviews: roundReviews, consolidated });
+      
+      const consolidatedFormatted = formatConsolidatedFeedback(consolidated, currentRound);
+      sendEvent('round-summary', {
+        round: currentRound,
+        consolidated,
+        formatted: consolidatedFormatted
+      });
+      
+      // Check termination
+      const termination = shouldTerminateReview(currentRound, consolidated, reviewHistory.map(h => h.consolidated), maxRounds);
+      
+      if (termination.terminate) {
+        sendEvent('complete', {
+          reason: termination.reason,
+          totalRounds: currentRound,
+          finalRating: consolidated.averageRating,
+          finalVerdict: consolidated.overallVerdict,
+          approved: consolidated.overallVerdict === 'approve',
+          surveyConfig: currentConfig
+        });
+        res.end();
+        return;
+      }
+      
+      // Need revision
+      if (consolidated.needsRevision) {
+        sendEvent('revision-start', { round: currentRound });
+        
+        console.log('🧠 Starting Chain of Thoughts revision...');
+        
+        // Step 1: Understand expert feedback
+        console.log('📋 Step 1: Understanding expert feedback...');
+        const feedbackSummary = roundReviews.map(r => `${AGENTS[r.agentId].name}: ${r.verdict}`).join(', ');
+        
+        const revStep1Prompt = `Analyze the expert feedback from multi-agent review:
+
+Experts: ${feedbackSummary}
+Top Concerns: ${consolidated.topConcerns.join('; ')}
+Top Suggestions: ${consolidated.topSuggestions.join('; ')}
+
+Summarize:
+1. What are the critical issues that multiple experts identified?
+2. What are the priorities for revision?
+3. What should be the revision strategy?`;
+
+        const revStep1Completion = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            { role: "system", content: "You are a survey revision strategist. Analyze expert feedback." },
+            { role: "user", content: revStep1Prompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 500
+        });
+        
+        const revStep1Analysis = revStep1Completion.choices[0].message.content.trim();
+        sendEvent('revision-thinking', { step: 1, content: revStep1Analysis });
+        console.log('✅ Revision Step 1 complete');
+        
+        // Step 2: Plan specific changes
+        console.log('📐 Step 2: Planning specific changes...');
+        const revStep2Prompt = `Based on this feedback analysis:
+
+${revStep1Analysis}
+
+Plan specific changes:
+1. Which pages/questions need modification?
+2. What specific changes to make?
+3. What is the priority order?`;
+
+        const revStep2Completion = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            { role: "system", content: "You are a survey revision planner. Plan specific changes." },
+            { role: "user", content: revStep2Prompt }
+          ],
+          temperature: 0.7,
+          max_tokens: 800
+        });
+        
+        const revStep2Plan = revStep2Completion.choices[0].message.content.trim();
+        sendEvent('revision-thinking', { step: 2, content: revStep2Plan });
+        console.log('✅ Revision Step 2 complete');
+        
+        // Step 3: Execute revision
+        console.log('🔨 Step 3: Executing revision...');
+        const revisionPrompt = generateRevisionPrompt(consolidated, roundReviews);
+        const revStep3Prompt = `Based on this analysis and plan:
+
+FEEDBACK ANALYSIS:
+${revStep1Analysis}
+
+REVISION PLAN:
+${revStep2Plan}
+
+DETAILED EXPERT FEEDBACK:
+${revisionPrompt}
+
+Now revise the survey configuration.`;
+        
+        try {
+          // Load prompts configuration
+          const { PROMPTS } = require('./prompts.config.js');
+          
+          const revisionCompletion = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+              { role: "system", content: PROMPTS.revision },
+              { role: "system", content: `Current survey:\n${JSON.stringify(currentConfig, null, 2)}` },
+              { role: "user", content: revStep3Prompt }
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.6,
+            max_tokens: 4000
+          });
+          
+          const revisedConfig = JSON.parse(revisionCompletion.choices[0].message.content.trim());
+          
+          if (revisedConfig.pages) {
+            revisedConfig.pages = revisedConfig.pages.map((page, index) => ({
+              name: page.name || `page_${index + 1}`,
+              title: page.title || `Page ${index + 1}`,
+              description: page.description || "",
+              elements: page.questions || page.elements || []
+            }));
+          }
+          
+          currentConfig = revisedConfig;
+          
+          console.log('✅ Revision Step 3 complete');
+          sendEvent('revision-complete', { 
+            round: currentRound, 
+            surveyConfig: currentConfig,
+            chainOfThoughts: {
+              step1_understanding: revStep1Analysis,
+              step2_planning: revStep2Plan,
+              step3_execution: 'Survey revised based on expert feedback'
+            }
+          });
+          
+        } catch (error) {
+          sendEvent('revision-error', { error: error.message });
+          sendEvent('complete', {
+            reason: 'Revision failed',
+            totalRounds: currentRound,
+            error: error.message,
+            surveyConfig: currentConfig
+          });
+          res.end();
+          return;
+        }
+      }
+      
+      currentRound++;
+    }
+    
+    // Max rounds reached
+    const lastConsolidated = reviewHistory[reviewHistory.length - 1]?.consolidated;
+    sendEvent('complete', {
+      reason: 'Maximum rounds reached',
+      totalRounds: currentRound - 1,
+      finalRating: lastConsolidated?.averageRating,
+      finalVerdict: lastConsolidated?.overallVerdict,
+      approved: false,
+      surveyConfig: currentConfig
+    });
+    
+  } catch (error) {
+    sendEvent('error', { message: error.message });
+  }
+  
+  res.end();
+});
 
 // Intelligent routing for chat-style interaction
 app.post('/api/openai/chat', async (req, res) => {
   try {
-    const { message, currentConfig, conversationHistory, apiKey } = req.body;
+    const { message, currentConfig, conversationHistory, apiKey, customPrompts } = req.body;
     
     if (!apiKey || !message) {
       return res.status(400).json({ 
         success: false, 
-        error: 'API key and message are required' 
+        error: 'API key and message are required'
       });
     }
     
+    // Load default prompts from shared config
+    const { PROMPTS: defaultPrompts } = require('./prompts.config.js');
+    
+    // Merge custom prompts with defaults
+    const prompts = customPrompts ? { ...defaultPrompts, ...customPrompts } : defaultPrompts;
+    
     const openai = new OpenAI({ apiKey });
     
-    // Step 1: Determine user intent
-    const intentPrompt = `You are analyzing user messages to determine their intent in a survey design tool.
-
-Current context:
-- User ${currentConfig && currentConfig.pages ? 'HAS' : 'DOES NOT HAVE'} an existing survey configuration
-- Existing survey has ${currentConfig?.pages?.length || 0} pages
-
-Possible intents:
-1. "generate" - User wants to create a NEW survey from scratch (e.g., "Create a thermal comfort survey", "Build a new questionnaire about...")
-2. "adjust" - User wants to MODIFY the existing survey (e.g., "Add a question", "Change the scale to 1-7", "Remove the demographics page")
-3. "question" - User is asking a QUESTION about surveys or needs help (e.g., "What question types are available?", "How do I...?", "What should I...")
-
-Rules:
-- If no existing survey AND user describes a survey → "generate"
-- If existing survey AND user requests changes → "adjust"  
-- If user is asking for information/help → "question"
-- If unclear and no existing survey → "generate"
-- If unclear and has existing survey → "adjust"
-
-User message: "${message}"
-
-Respond with ONLY ONE WORD: generate, adjust, or question`;
-
+    // Step 1: Determine user intent using configured prompt
     console.log('🧠 Analyzing user intent...');
+    
+    // Add context information to the intent detection
+    const contextInfo = `\n\nCurrent context:
+- User ${currentConfig && currentConfig.pages ? 'HAS' : 'DOES NOT HAVE'} an existing survey configuration
+- Existing survey has ${currentConfig?.pages?.length || 0} pages`;
     
     const intentCompletion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: intentPrompt },
+        { role: "system", content: prompts.intentDetection + contextInfo },
         { role: "user", content: message }
       ],
       temperature: 0.3,
@@ -1236,45 +1503,82 @@ Respond with ONLY ONE WORD: generate, adjust, or question`;
     
     // Step 2: Route based on intent
     if (intent === 'generate') {
-      // Generate new survey
-      const systemPrompt = `You are an expert survey designer specializing in visual perception and streetscape surveys. Generate a complete survey configuration in JSON format.
+      // Generate new survey with Chain of Thoughts (3 steps)
+      console.log('🧠 Starting Chain of Thoughts generation...');
+      
+      // Step 1: Think about research topic and questions
+      console.log('📋 Step 1: Analyzing research topic and questions...');
+      const step1Prompt = `Based on the user's request, first analyze:
+1. What is the core research topic?
+2. What are the main research questions to answer?
+3. What is the target audience?
 
-**CRITICAL RULE: No standalone streetscape text questions!**
+User request: "${message}"
 
-**PAGE COMPOSITION (each page can have one or more):**
-1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image
-2. Image-based streetscape questions (multiple allowed): imagerating, imagepicker, imageranking, etc.
-3. Image display + text questions (multiple groups allowed): "image" + one or MORE text questions
+Provide a brief analysis (2-3 sentences for each point).`;
 
-**CRITICAL: ALL non-socioeconomic text questions MUST have "image" before them!**
+      const step1Completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are an expert survey researcher. Analyze the research goals." },
+          { role: "user", content: step1Prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 500
+      });
+      
+      const step1Analysis = step1Completion.choices[0].message.content.trim();
+      console.log('✅ Step 1 complete');
+      
+      // Step 2: Plan survey structure
+      console.log('📐 Step 2: Planning survey structure...');
+      const step2Prompt = `Based on this research analysis:
 
-**FLEXIBLE MIXING:**
-- Types 2 and 3 can intermix on same page
-- Example: [imagerating, image+text+text, imagepicker]
+${step1Analysis}
 
-**BINDING RULE:**
-- Every "image" MUST be followed by at least ONE text question
-- ❌ WRONG: [image] alone or [text about street] alone
-- ✓ CORRECT: [image, text, text]
+Now plan the survey structure:
+1. How many pages should the survey have?
+2. What is the purpose of each page?
+3. What types of questions should be on each page?
+4. How many questions per page?
 
-**TECHNICAL:**
-- All image questions: imageSelectionMode: "huggingface_random", imageCount, choices: []
+Provide a structured plan with page-by-page breakdown.`;
 
-**USE DIVERSE QUESTION TYPES:**
-- Mix: imagepicker, imageranking, imagerating, imageboolean, imagematrix
-- Don't overuse imagerating - vary your question types
-- For text: use radiogroup, dropdown, text, comment, checkbox
+      const step2Completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are an expert survey designer. Plan the optimal survey structure." },
+          { role: "user", content: step2Prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 800
+      });
+      
+      const step2Plan = step2Completion.choices[0].message.content.trim();
+      console.log('✅ Step 2 complete');
+      
+      // Step 3: Generate actual survey configuration
+      console.log('🔨 Step 3: Generating survey configuration...');
+      const step3Prompt = `Based on this research analysis and survey plan:
 
-Pages: {"title": "...", "questions": [...]}
+RESEARCH ANALYSIS:
+${step1Analysis}
 
-Return ONLY valid JSON, no markdown.`;
+SURVEY STRUCTURE PLAN:
+${step2Plan}
+
+USER REQUEST:
+${message}
+
+Now generate the complete survey configuration following all the rules and examples provided.`;
+
+      const systemPrompt = prompts.generate;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
           { role: "system", content: systemPrompt },
-          ...(conversationHistory || []),
-          { role: "user", content: message }
+          { role: "user", content: step3Prompt }
         ],
         response_format: { type: "json_object" },
         temperature: 0.7,
@@ -1294,15 +1598,22 @@ Return ONLY valid JSON, no markdown.`;
         }));
       }
       
+      console.log('✅ Step 3 complete - Survey generated');
+      
       res.json({ 
         success: true, 
         intent: 'generate',
         surveyConfig,
-        message: `Generated new survey with ${surveyConfig.pages?.length || 0} pages`
+        message: `Generated new survey with ${surveyConfig.pages?.length || 0} pages`,
+        chainOfThoughts: {
+          step1_research: step1Analysis,
+          step2_structure: step2Plan,
+          step3_generation: 'Survey configuration generated'
+        }
       });
       
     } else if (intent === 'adjust') {
-      // Adjust existing survey
+      // Adjust existing survey with Chain of Thoughts (3 steps)
       if (!currentConfig || !currentConfig.pages) {
         return res.json({
           success: true,
@@ -1312,40 +1623,90 @@ Return ONLY valid JSON, no markdown.`;
         });
       }
       
-      const systemPrompt = `You are an expert survey designer. Modify the provided survey configuration according to the user's instructions.
+      console.log('🧠 Starting Chain of Thoughts adjustment...');
+      
+      // Step 1: Understand adjustment goal
+      console.log('📋 Step 1: Understanding adjustment goal...');
+      const currentSummary = `Current survey has ${currentConfig.pages.length} pages with ${currentConfig.pages.reduce((sum, p) => sum + (p.elements?.length || 0), 0)} total questions.`;
+      
+      const step1Prompt = `Analyze the user's adjustment request for an existing survey:
 
-**CRITICAL RULE: No standalone streetscape text questions!**
+Current Survey Summary: ${currentSummary}
 
-**PAGE COMPOSITION (each page can have one or more):**
-1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image
-2. Image-based streetscape questions (multiple allowed)
-3. Image display + text questions (multiple groups allowed): "image" + one or MORE texts
+User Request: "${message}"
 
-**CRITICAL: ALL non-socioeconomic text questions MUST have "image" before them!**
+Analyze:
+1. What is the user trying to achieve with this adjustment?
+2. What aspects of the survey need to change (structure, questions, content)?
+3. What should be preserved from the current survey?
 
-**FLEXIBLE MIXING:**
-- Types 2 and 3 can intermix on same page
-- Example: [imagerating, image+text+text, imagepicker]
+Provide a brief analysis.`;
 
-**BINDING RULE:**
-- Every "image" MUST be followed by at least ONE text question
-- ❌ WRONG: [image] alone or [text about street] alone or [image, imagerating, text]
-- ✓ CORRECT: [image, text, text, imagerating]
+      const step1Completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are an expert survey consultant. Understand the adjustment requirements." },
+          { role: "user", content: step1Prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 500
+      });
+      
+      const step1Analysis = step1Completion.choices[0].message.content.trim();
+      console.log('✅ Step 1 complete');
+      
+      // Step 2: Plan the adjustments
+      console.log('📐 Step 2: Planning adjustments...');
+      const step2Prompt = `Based on this analysis:
 
-**USE DIVERSE QUESTION TYPES:**
-- Mix: imagepicker, imageranking, imagerating, imageboolean, imagematrix
-- Vary text questions: radiogroup, dropdown, text, comment, checkbox
+${step1Analysis}
 
-Return COMPLETE modified survey. Pages: {"title": "...", "questions": [...]}
-ONLY valid JSON, no markdown.`;
+Current Survey: ${currentConfig.pages.length} pages
+
+Plan the specific adjustments:
+1. Which pages need to be modified, added, or removed?
+2. Which questions need to be changed, added, or removed?
+3. What is the new structure after adjustments?
+4. How many pages and questions in the final version?
+
+Provide a detailed adjustment plan.`;
+
+      const step2Completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are an expert survey designer. Plan the optimal adjustments." },
+          { role: "user", content: step2Prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 800
+      });
+      
+      const step2Plan = step2Completion.choices[0].message.content.trim();
+      console.log('✅ Step 2 complete');
+      
+      // Step 3: Execute the adjustments
+      console.log('🔨 Step 3: Executing adjustments...');
+      const step3Prompt = `Based on this analysis and adjustment plan:
+
+ADJUSTMENT ANALYSIS:
+${step1Analysis}
+
+ADJUSTMENT PLAN:
+${step2Plan}
+
+USER REQUEST:
+${message}
+
+Now adjust the survey configuration following all the rules and maintaining consistency.`;
+
+      const systemPrompt = prompts.adjust;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "system", content: `Current survey configuration:\n${JSON.stringify(currentConfig, null, 2)}` },
-          ...(conversationHistory || []),
-          { role: "user", content: message }
+          { role: "user", content: step3Prompt }
         ],
         response_format: { type: "json_object" },
         temperature: 0.5,
@@ -1365,52 +1726,23 @@ ONLY valid JSON, no markdown.`;
         }));
       }
       
+      console.log('✅ Step 3 complete - Survey adjusted');
+      
       res.json({ 
         success: true, 
         intent: 'adjust',
         surveyConfig,
-        message: `Adjusted survey based on your request`
+        message: `Adjusted survey based on your request`,
+        chainOfThoughts: {
+          step1_understanding: step1Analysis,
+          step2_planning: step2Plan,
+          step3_execution: 'Survey adjustments applied'
+        }
       });
       
     } else {
       // Answer question
-      const systemPrompt = `You are a helpful assistant for a survey design platform. Answer the user's question concisely and provide actionable guidance.
-
-**KEY RULE: No standalone streetscape text questions!**
-
-**PAGE COMPOSITION (each page can have one or more):**
-1. Socioeconomic text questions (multiple allowed): age, gender, education, occupation - NO image needed
-2. Image-based streetscape questions (multiple allowed): imagerating, imagepicker, imageranking, imageboolean, imagematrix
-3. Image display + text questions (multiple groups allowed): "image" + one or MORE text questions
-
-**CRITICAL: ALL non-socioeconomic text questions MUST have "image" display before them!**
-- Text about demographics → NO image needed
-- Text about streets (description, opinion, observation) → MUST have "image" display before it
-
-**FLEXIBLE MIXING:**
-- Types 2 and 3 can intermix on same page
-- Example: [imagerating, image+text+text, imagepicker, image+text]
-
-**BINDING RULE:**
-- Every "image" MUST be followed by at least ONE text question
-
-**QUESTION TYPE VARIETY:**
-The platform supports 16 question types! Encourage users to:
-- Use diverse image-based questions: imagepicker, imageranking, imagerating, imageboolean, imagematrix
-- Vary text questions: radiogroup, dropdown, text, comment, checkbox, ranking, rating
-- Mix question types to create engaging surveys
-- Don't just use imagerating - explore all options!
-
-PLATFORM CAPABILITIES:
-- Multi-page surveys with flexible question mixing
-- Custom themes and branding
-- AI-powered survey generation and adjustment
-- Hugging Face dataset integration for automatic random image selection
-- Contextual Engineering for remembering user preferences
-- ChatGPT-style AI chat interface with intelligent intent detection
-- 16 different question types for maximum flexibility
-
-Be helpful and encourage the user to try creating or modifying their survey!`;
+      const systemPrompt = prompts.question;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",

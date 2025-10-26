@@ -85,6 +85,7 @@ export default function AdminApp() {
   const [hasUnsavedImageDatasetChanges, setHasUnsavedImageDatasetChanges] = useState(false);
   const [latestImageDatasetConfig, setLatestImageDatasetConfig] = useState(null);
   const [lastSavedConfig, setLastSavedConfig] = useState(null);
+  const [githubStars, setGithubStars] = useState(null);
   
   // Project state management - save each project's editing state
   // ✅ Now using sessionStorage (session-only, no quota issues!)
@@ -148,6 +149,29 @@ export default function AdminApp() {
     
     // Initialize project system
     initializeProjectSystem();
+  }, []);
+
+  // Fetch GitHub stars count
+  useEffect(() => {
+    const fetchGithubStars = async () => {
+      try {
+        const response = await fetch('https://api.github.com/repos/Sijie-Yang/Streetscape-Perception-Survey');
+        if (response.ok) {
+          const data = await response.json();
+          setGithubStars(data.stargazers_count);
+        } else {
+          setGithubStars(null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch GitHub stars:', error);
+        setGithubStars(null);
+      }
+    };
+    
+    fetchGithubStars();
+    // Refresh every 5 minutes
+    const interval = setInterval(fetchGithubStars, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   // Monitor surveyConfig changes, detect unsaved changes
@@ -931,7 +955,7 @@ export default function AdminApp() {
                   lineHeight: 1
                 }}
               >
-                99
+                {githubStars !== null ? githubStars : '...'}
               </Typography>
             </Box>
             

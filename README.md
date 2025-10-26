@@ -2,7 +2,7 @@
 
 # 🏙️ SP-Survey (Streetscape Perception Survey)
 
-[![Stars](https://img.shields.io/github/stars/Sijie-Yang/Streetscape-Perception-Survey?style=social&cacheSeconds=3600)](https://github.com/Sijie-Yang/Streetscape-Perception-Survey)
+[![Stars](https://img.shields.io/github/stars/Sijie-Yang/Streetscape-Perception-Survey?style=social)](https://github.com/Sijie-Yang/Streetscape-Perception-Survey)
 [![Paper](https://img.shields.io/badge/📄-Published_Paper-9cf)](https://www.sciencedirect.com/science/article/pii/S0360132325000514)
 [![Website](https://img.shields.io/badge/🌐-Live_Demo-blue)](https://streetscape-perception-survey.vercel.app/)
 [![License](https://img.shields.io/badge/📄-CC_BY_4.0-green)](https://creativecommons.org/licenses/by/4.0/)
@@ -41,6 +41,15 @@ No coding required – build surveys through an intuitive admin panel with drag-
 ---
 
 ## ✨ Key Features
+
+### **⚡ Latest AI-Powered Features (NEW)**
+
+- 🧠 **Chain of Thoughts Generation**: 3-step transparent AI reasoning (analyze → plan → execute)
+- 🤖 **Multi-Agent Expert Review**: 5 specialized AI agents collaborate to review surveys
+- 💬 **ChatGPT-Style Interface**: Natural conversation with intelligent intent detection
+- 📝 **Contextual Engineering**: 3-layer memory system that learns your preferences
+- ⚙️ **Customizable Prompts**: Full control over AI behavior (2000+ lines editable)
+- 🔄 **Configurable Review Rounds**: Set 1-10 review iterations based on your needs
 
 ### 🔧 **Survey Capabilities**
 
@@ -171,6 +180,84 @@ The platform implements a three-layer memory system for smarter AI interactions:
 - No need to repeat context in every message
 - Intelligent suggestions based on your project history
 - Seamless workflow continuity
+
+#### **🧠 Chain of Thoughts Generation (NEW)**
+
+**Transparent AI thinking process:**
+
+Every Generate, Adjust, and Revise operation follows a three-step thinking process:
+
+```
+🧠 Step 1: Research Analysis
+   AI analyzes: What is the research topic? What are the questions? Who is the audience?
+
+📐 Step 2: Structure Planning
+   AI plans: How many pages? What questions on each page? How many questions?
+
+🔨 Step 3: Generation/Execution
+   AI generates: Complete survey configuration based on analysis and planning
+```
+
+**Benefits:**
+- See exactly how AI thinks and plans
+- Better quality through structured thinking
+- Learn survey design best practices
+- Easy to debug if something goes wrong
+
+#### **🤖 Multi-Agent Expert Review (NEW)**
+
+**5 AI experts collaborate to review your survey:**
+
+After generating or adjusting a survey, 5 specialized AI agents automatically review it:
+
+- **🔬 Urban Scientist**: Research methodology and scientific rigor
+- **🏙️ Urban Designer**: Streetscape design coverage
+- **🧠 Perception Psychologist**: Question wording and cognitive load
+- **👤 Test Participant**: User experience and survey usability
+- **📊 Data Analyst**: Data quality and analysis readiness
+
+**Review Process:**
+1. Each agent reviews independently and provides ratings (1-10)
+2. Agents identify strengths, concerns, and suggestions
+3. If not approved (≥70%), survey-designer revises based on feedback
+4. Process repeats until approved or max rounds reached (configurable 1-10)
+
+**Configuration:**
+- Enable/disable in AI Assistant Settings
+- Choose mode: "1v1 Reviews" or "Group Discussion"
+- Set maximum review rounds (1-10, default: 3)
+- All agent feedback appears in conversation history
+
+**Benefits:**
+- Automatic quality assurance from multiple expert perspectives
+- Iterative improvement without manual intervention
+- Transparent feedback visible in conversation
+- Smart termination when approved or no improvement
+
+#### **📝 Customizable Prompts (NEW)**
+
+**Full control over AI behavior:**
+
+All system prompts (2000+ lines of instructions) are now viewable and editable:
+
+- **Access**: AI Assistant Settings → Prompts tab
+- **Edit**: Modify prompts directly in the UI
+- **Save**: Persists to browser localStorage
+- **Reset**: Restore defaults anytime
+- **Export/Import**: Share prompt configurations
+
+**Available Prompts:**
+- Intent Detection (classify user requests)
+- Generate (create new surveys)
+- Adjust (modify existing surveys)
+- Question (answer user queries)
+- Revision (multi-agent feedback)
+
+**Use Cases:**
+- Researchers can customize AI for specific domains
+- Test different prompt strategies
+- Add domain-specific knowledge
+- Experiment with AI behavior
 
 #### **🎨 Intelligent Question Type Diversity (NEW)**
 
@@ -751,11 +838,16 @@ This work is licensed under a [Creative Commons Attribution 4.0 International Li
 ### Technology Stack
 
 - **SurveyJS**: Survey rendering engine
-- **Material-UI**: UI components
-- **React**: Frontend framework
-- **Node.js/Express**: Backend server
-- **OpenAI GPT-4o**: AI-powered survey generation
-- **Supabase**: Cloud database & storage
-- **Hugging Face**: Dataset hosting
-- **Vercel**: Deployment platform
+- **Material-UI (MUI)**: UI components with custom theming
+- **React 18.2**: Frontend framework with hooks
+- **Node.js/Express**: Backend server with REST APIs
+- **OpenAI GPT-4o**: AI-powered survey generation with:
+  - Chain of Thoughts reasoning
+  - Multi-Agent Review System (5 specialized experts)
+  - Contextual Engineering (3-layer memory)
+  - Customizable prompt management
+- **Supabase**: Cloud database & storage (PostgreSQL + S3-compatible)
+- **Hugging Face**: Dataset hosting and CDN
+- **Vercel**: Serverless deployment platform
+- **localStorage/sessionStorage**: Client-side persistence
 
