@@ -9,7 +9,8 @@
 [![React](https://img.shields.io/badge/React-18.2-61DAFB?logo=react)](https://reactjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-Backend-339933?logo=node.js)](https://nodejs.org/)
 
-<img src="./public/cover-image.png" alt="SP-Survey Interface" width="80%">
+<img src="./public/logo-long.png" alt="SP-Survey Interface" width="50%">
+<img src="./public/logo-poster.png" alt="SP-Survey Interface" width="80%">
 
 <strong>A professional, research-grade platform for conducting visual perception surveys.</strong>
 <br>
