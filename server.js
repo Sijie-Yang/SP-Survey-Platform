@@ -1216,7 +1216,7 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
   };
   
   try {
-    const { surveyConfig, apiKey, mode = '1v1', maxRounds: maxRoundsParam } = req.query;
+    const { surveyConfig, apiKey, mode = '1v1', maxRounds: maxRoundsParam, customAgents: customAgentsParam } = req.query;
     
     if (!apiKey || !surveyConfig) {
       sendEvent('error', { message: 'Missing required parameters' });
@@ -1227,9 +1227,12 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
     // Use custom maxRounds or default to REVIEW_CONFIG.maxRounds
     const maxRounds = maxRoundsParam ? parseInt(maxRoundsParam, 10) : REVIEW_CONFIG.maxRounds;
     
+    // Use custom agents if provided, otherwise use default AGENTS
+    const agentsConfig = customAgentsParam ? JSON.parse(customAgentsParam) : AGENTS;
+    
     const config = JSON.parse(surveyConfig);
     const openai = new OpenAI({ apiKey });
-    const agentIds = Object.keys(AGENTS);
+    const agentIds = Object.keys(agentsConfig);
     const reviewHistory = [];
     let currentRound = 1;
     let currentConfig = config;
@@ -1243,14 +1246,14 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
       
       // Stream each agent's review
       for (const agentId of agentIds) {
-        const agent = AGENTS[agentId];
+        const agent = agentsConfig[agentId];
         sendEvent('agent-start', { agentId, name: agent.name, emoji: agent.emoji });
         
         try {
-          const systemPrompt = getAgentSystemPrompt(agentId, currentConfig, mode === 'group' ? 'group' : 'individual');
+          const systemPrompt = getAgentSystemPrompt(agentId, currentConfig, mode === 'group' ? 'group' : 'individual', agentsConfig);
           const userPrompt = mode === '1v1' 
-            ? generate1v1ReviewPrompt(agentId, currentConfig, currentRound)
-            : generateGroupDiscussionPrompt(currentConfig, roundReviews, currentRound);
+            ? generate1v1ReviewPrompt(agentId, currentConfig, currentRound, agentsConfig)
+            : generateGroupDiscussionPrompt(currentConfig, roundReviews, currentRound, agentsConfig);
           
           const completion = await openai.chat.completions.create({
             model: "gpt-4o",
@@ -1318,7 +1321,7 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
         
         // Step 1: Understand expert feedback
         console.log('📋 Step 1: Understanding expert feedback...');
-        const feedbackSummary = roundReviews.map(r => `${AGENTS[r.agentId].name}: ${r.verdict}`).join(', ');
+        const feedbackSummary = roundReviews.map(r => `${agentsConfig[r.agentId].name}: ${r.verdict}`).join(', ');
         
         const revStep1Prompt = `Analyze the expert feedback from multi-agent review:
 
@@ -1372,7 +1375,7 @@ Plan specific changes:
         
         // Step 3: Execute revision
         console.log('🔨 Step 3: Executing revision...');
-        const revisionPrompt = generateRevisionPrompt(consolidated, roundReviews);
+        const revisionPrompt = generateRevisionPrompt(consolidated, roundReviews, agentsConfig);
         const revStep3Prompt = `Based on this analysis and plan:
 
 FEEDBACK ANALYSIS:

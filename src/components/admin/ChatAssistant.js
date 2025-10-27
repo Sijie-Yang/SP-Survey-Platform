@@ -50,6 +50,7 @@ import {
   Refresh
 } from '@mui/icons-material';
 import { PROMPTS } from '../../config/prompts';
+import AgentsEditor from './AgentsEditor';
 
 /**
  * ChatAssistant Component
@@ -489,6 +490,7 @@ export default function ChatAssistant({
             sx={{ mt: 2, borderBottom: 1, borderColor: 'divider' }}
           >
             <Tab icon={<Settings fontSize="small" />} label="Settings" iconPosition="start" />
+            <Tab icon={<SmartToy fontSize="small" />} label="Agents" iconPosition="start" />
             <Tab icon={<Code fontSize="small" />} label="Prompts" iconPosition="start" />
             <Tab icon={<Chat fontSize="small" />} label="Conversation" iconPosition="start" />
             <Tab icon={<WorkHistory fontSize="small" />} label="Working Memory" iconPosition="start" />
@@ -722,8 +724,22 @@ export default function ChatAssistant({
             </Box>
           )}
           
-          {/* Tab 1: Prompts */}
+          {/* Tab 1: Agents */}
           {activeTab === 1 && (
+            <Box>
+              <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <SmartToy />
+                Multi-Agent Review Agents
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Customize the AI expert agents that review your surveys. Add, edit, or remove agents to fit your specific needs.
+              </Typography>
+              <AgentsEditor />
+            </Box>
+          )}
+          
+          {/* Tab 2: Prompts */}
+          {activeTab === 2 && (
             <Box>
               <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
                 <Alert severity="info" sx={{ flex: 1 }}>
@@ -827,54 +843,11 @@ export default function ChatAssistant({
                   </Typography>
                 </AccordionDetails>
               </Accordion>
-              
-              <Accordion>
-                <AccordionSummary expandIcon={<ExpandMore />}>
-                  <Typography variant="subtitle2">Multi-Agent Review Agents</Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <List dense>
-                    <ListItem>
-                      <ListItemText 
-                        primary="🔬 Urban Scientist"
-                        secondary="Expert in research design, methodology, and scientific rigor"
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemText 
-                        primary="🏙️ Urban Designer"
-                        secondary="Expert in streetscape quality and design elements"
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemText 
-                        primary="🧠 Perception Psychologist"
-                        secondary="Expert in question wording and cognitive load"
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemText 
-                        primary="👤 Test Participant"
-                        secondary="Represents user experience perspective"
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemText 
-                        primary="📊 Data Analyst"
-                        secondary="Expert in data quality and analysis"
-                      />
-                    </ListItem>
-                  </List>
-                  <Typography variant="caption" color="text.secondary">
-                    📍 Each agent has specialized prompts defined in src/lib/multiAgentReview.js | Triggered after generate/adjust
-                  </Typography>
-                </AccordionDetails>
-              </Accordion>
             </Box>
           )}
           
-          {/* Tab 2: Conversation History */}
-          {activeTab === 2 && (
+          {/* Tab 3: Conversation History */}
+          {activeTab === 3 && (
             <Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" fontWeight={600}>
@@ -933,8 +906,8 @@ export default function ChatAssistant({
             </Box>
           )}
           
-          {/* Tab 3: Working Memory */}
-          {activeTab === 3 && (
+          {/* Tab 4: Working Memory */}
+          {activeTab === 4 && (
             <Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" fontWeight={600}>
@@ -989,8 +962,8 @@ export default function ChatAssistant({
             </Box>
           )}
           
-          {/* Tab 4: Session Learning */}
-          {activeTab === 4 && (
+          {/* Tab 5: Session Learning */}
+          {activeTab === 5 && (
             <Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" fontWeight={600}>

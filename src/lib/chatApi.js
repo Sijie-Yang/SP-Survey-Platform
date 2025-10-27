@@ -53,15 +53,23 @@ export async function sendChatMessage(message, currentConfig, conversationHistor
  * @param {Function} onEvent - Callback for each SSE event: (eventType, data) => void
  * @returns {Promise<Object>} - Final result
  */
-export async function triggerMultiAgentReviewStream(surveyConfig, apiKey, mode = '1v1', maxRounds = 3, onEvent) {
+export async function triggerMultiAgentReviewStream(surveyConfig, apiKey, mode = '1v1', maxRounds = 3, onEvent, customAgents = null) {
   return new Promise((resolve, reject) => {
     try {
+      // Load custom agents from localStorage if not provided
+      const agentsConfig = customAgents || JSON.parse(localStorage.getItem('customAgents') || 'null');
+      
       const params = new URLSearchParams({
         surveyConfig: JSON.stringify(surveyConfig),
         apiKey,
         mode,
         maxRounds: maxRounds.toString()
       });
+      
+      // Add custom agents if available
+      if (agentsConfig) {
+        params.append('customAgents', JSON.stringify(agentsConfig));
+      }
       
       const eventSource = new EventSource(`${API_BASE_URL}/api/openai/multi-agent-review-stream?${params}`);
       

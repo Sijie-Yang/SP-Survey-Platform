@@ -77,8 +77,9 @@ const REVIEW_CONFIG = {
 /**
  * Generate system prompt for an agent
  */
-function getAgentSystemPrompt(agentId, surveyConfig, reviewMode = 'individual') {
-  const agent = AGENTS[agentId];
+function getAgentSystemPrompt(agentId, surveyConfig, reviewMode = 'individual', customAgents = null) {
+  const agentsConfig = customAgents || AGENTS;
+  const agent = agentsConfig[agentId];
   
   const basePrompt = `You are an expert ${agent.name} (${agent.expertise}).
 
@@ -132,8 +133,9 @@ RESPONSE FORMAT:
 /**
  * Generate 1v1 review prompt
  */
-function generate1v1ReviewPrompt(agentId, surveyConfig, round) {
-  const agent = AGENTS[agentId];
+function generate1v1ReviewPrompt(agentId, surveyConfig, round, customAgents = null) {
+  const agentsConfig = customAgents || AGENTS;
+  const agent = agentsConfig[agentId];
   
   return `SURVEY REVIEW REQUEST
 
@@ -150,9 +152,10 @@ Provide your expert assessment and specific recommendations for improvement.`;
 /**
  * Generate group discussion prompt
  */
-function generateGroupDiscussionPrompt(surveyConfig, previousReviews, round) {
+function generateGroupDiscussionPrompt(surveyConfig, previousReviews, round, customAgents = null) {
+  const agentsConfig = customAgents || AGENTS;
   const reviewSummary = previousReviews.map(r => 
-    `${AGENTS[r.agentId].emoji} ${AGENTS[r.agentId].name}: ${r.summary || r.comments}`
+    `${agentsConfig[r.agentId].emoji} ${agentsConfig[r.agentId].name}: ${r.summary || r.comments}`
   ).join('\n\n');
   
   return `GROUP DISCUSSION - Round ${round}
@@ -230,9 +233,10 @@ function getMostMentioned(items, limit) {
 /**
  * Generate revision prompt for survey-designer
  */
-function generateRevisionPrompt(consolidatedFeedback, reviews) {
+function generateRevisionPrompt(consolidatedFeedback, reviews, customAgents = null) {
+  const agentsConfig = customAgents || AGENTS;
   const agentFeedback = reviews.map(review => {
-    const agent = AGENTS[review.agentId];
+    const agent = agentsConfig[review.agentId];
     return `
 ${agent.emoji} ${agent.name} (Rating: ${review.rating || 'N/A'}/10, Verdict: ${review.verdict})
 
@@ -304,8 +308,9 @@ function shouldTerminateReview(round, consolidatedFeedback, history, maxRounds =
 /**
  * Format review for display in chat UI
  */
-function formatReviewForChat(agentId, review, round) {
-  const agent = AGENTS[agentId];
+function formatReviewForChat(agentId, review, round, customAgents = null) {
+  const agentsConfig = customAgents || AGENTS;
+  const agent = agentsConfig[agentId];
   
   let message = `${agent.emoji} **${agent.name}** - Round ${round}\n\n`;
   

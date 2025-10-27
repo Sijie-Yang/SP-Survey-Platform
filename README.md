@@ -47,6 +47,7 @@ No coding required – build surveys through an intuitive admin panel with drag-
 
 - 🧠 **Chain of Thoughts Generation**: 3-step transparent AI reasoning (analyze → plan → execute)
 - 🤖 **Multi-Agent Expert Review**: 5 specialized AI agents collaborate to review surveys
+- 🎨 **Customizable Agents**: Add, edit, or remove review agents to fit your research domain
 - 💬 **ChatGPT-Style Interface**: Natural conversation with intelligent intent detection
 - 📝 **Contextual Engineering**: 3-layer memory system that learns your preferences
 - ⚙️ **Customizable Prompts**: Full control over AI behavior (2000+ lines editable)
@@ -217,6 +218,8 @@ After generating or adjusting a survey, 5 specialized AI agents automatically re
 - **👤 Test Participant**: User experience and survey usability
 - **📊 Data Analyst**: Data quality and analysis readiness
 
+**Customizable Agents (NEW 🎨)**: Fully customize review agents in AI Assistant Settings → Agents tab. Add domain-specific experts, edit agent expertise and focus areas, or remove agents you don't need. All changes auto-save and apply to future reviews.
+
 **Review Process:**
 1. Each agent reviews independently and provides ratings (1-10)
 2. Agents identify strengths, concerns, and suggestions
@@ -227,6 +230,7 @@ After generating or adjusting a survey, 5 specialized AI agents automatically re
 - Enable/disable in AI Assistant Settings
 - Choose mode: "1v1 Reviews" or "Group Discussion"
 - Set maximum review rounds (1-10, default: 3)
+- Customize agents with Add/Edit/Delete/Reset options
 - All agent feedback appears in conversation history
 
 **Benefits:**
