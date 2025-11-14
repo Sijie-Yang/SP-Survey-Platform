@@ -380,27 +380,100 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         console.log('✅ Bucket already exists');
       }
 
-      // Step 2: Get total image count from HF
+      // Step 2: Check existing images in Supabase (Smart Skip)
+      console.log('🔍 Checking for existing images in Supabase...');
+      const folderName = config.datasetName.replace('/', '_');
+      const folderPrefix = `${folderName}/`;
+      
+      const { data: existingFiles, error: listFilesError } = await supabase.storage
+        .from('survey-images')
+        .list(folderName, {  // ✅ Fixed: use folder name without trailing slash
+          limit: 10000, // List all files
+          sortBy: { column: 'name', order: 'asc' }
+        });
+
+      if (listFilesError && listFilesError.message !== 'Not found') {
+        console.warn('⚠️ Failed to list existing files:', listFilesError);
+      }
+
+      // Create a Set of existing filenames for fast lookup
+      const existingFileNames = new Set(
+        (existingFiles || []).map(file => file.name)
+      );
+      
+      console.log(`✅ Found ${existingFileNames.size} existing images in Supabase`);
+      if (existingFileNames.size > 0) {
+        console.log(`📋 Sample existing files: ${Array.from(existingFileNames).slice(0, 3).join(', ')}...`);
+      }
+      console.log(`🔍 Checking in folder: "${folderName}"`);
+      console.log(`📁 Full path prefix: "${folderPrefix}"`)
+
+      // Step 3: Get total image count from HF
       const countResult = await getImageCountFromDataset(config.huggingFaceToken, config.datasetName);
       const totalImages = countResult.imageCount || 1000;
       
-      console.log(`📊 Total images in dataset: ${totalImages}`);
+      console.log(`📊 Total images in HF dataset: ${totalImages}`);
       
       setPreloadStatus(prev => ({
         ...prev,
         total: totalImages
       }));
 
-      // Step 3: Fetch images from HF in batches
+      // Step 4: Build list of already existing images (for final result)
       const allSupabaseImages = [];
+      
+      // Add existing files to the result list
+      for (let i = 0; i < totalImages; i++) {
+        const paddedIndex = String(i).padStart(6, '0');
+        const simpleFileName = `image_${paddedIndex}.jpg`;
+        
+        if (existingFileNames.has(simpleFileName)) {
+          const { data: { publicUrl } } = supabase.storage
+            .from('survey-images')
+            .getPublicUrl(`${folderPrefix}${simpleFileName}`);
+          
+          allSupabaseImages.push({
+            url: publicUrl,
+            name: simpleFileName
+          });
+        }
+      }
+      
+      console.log(`✅ Reusing ${allSupabaseImages.length} existing images`);
+
+      // Step 5: Fetch and upload only missing images from HF in batches
       const batchSize = 100;
       const batches = Math.ceil(totalImages / batchSize);
+      let newImagesUploaded = 0;
+      let skippedCount = 0;
       
       for (let i = 0; i < batches; i++) {
         const offset = i * batchSize;
         const limit = Math.min(batchSize, totalImages - offset);
         
-        console.log(`📥 Batch ${i + 1}/${batches}: Fetching ${limit} images from Hugging Face...`);
+        // Check if any images in this batch need to be downloaded
+        const imagesToDownload = [];
+        for (let imageIndex = 0; imageIndex < limit; imageIndex++) {
+          const globalImageIndex = offset + imageIndex;
+          const paddedIndex = String(globalImageIndex).padStart(6, '0');
+          const simpleFileName = `image_${paddedIndex}.jpg`;
+          
+          if (!existingFileNames.has(simpleFileName)) {
+            imagesToDownload.push(globalImageIndex);
+          }
+        }
+        
+        if (imagesToDownload.length === 0) {
+          console.log(`⏭️  Batch ${i + 1}/${batches}: All ${limit} images already exist, skipping download`);
+          skippedCount += limit;
+          setPreloadStatus(prev => ({
+            ...prev,
+            progress: allSupabaseImages.length
+          }));
+          continue;
+        }
+        
+        console.log(`📥 Batch ${i + 1}/${batches}: Need to download ${imagesToDownload.length}/${limit} images from Hugging Face...`);
         
         const result = await getImagesFromHuggingFace(
           config.huggingFaceToken,
@@ -413,46 +486,88 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           throw new Error(result.error || 'Failed to fetch images from Hugging Face');
         }
 
-        // Step 4: Download and upload each image to Supabase
-        console.log(`☁️ Uploading ${result.images.length} images to Supabase...`);
+        // Step 6: Download and upload only missing images to Supabase
+        console.log(`☁️ Uploading ${imagesToDownload.length} new images to Supabase...`);
         
-        for (const hfImage of result.images) {
+        for (let imageIndex = 0; imageIndex < result.images.length; imageIndex++) {
+          const globalImageIndex = offset + imageIndex;
+          const paddedIndex = String(globalImageIndex).padStart(6, '0');
+          const simpleFileName = `image_${paddedIndex}.jpg`;
+          
+          // Skip if already exists
+          if (existingFileNames.has(simpleFileName)) {
+            skippedCount++;
+            continue;
+          }
+          
+          const hfImage = result.images[imageIndex];
+          
           try {
             // Download image from HF
             const response = await fetch(hfImage.url);
             if (!response.ok) {
-              console.warn(`⚠️ Failed to download ${hfImage.name}: ${response.statusText}`);
+              console.warn(`⚠️ [Image ${globalImageIndex}] Failed to download: ${response.statusText}`);
               continue;
             }
             
             const blob = await response.blob();
             
-            // Generate unique filename
-            const fileName = `${config.datasetName.replace('/', '_')}/${hfImage.name}.jpg`;
+            // Generate unique filename using global index to avoid collisions across batches
+            // Format: datasetName/image_000001.jpg (ensures unique names)
+            const fileName = `${config.datasetName.replace('/', '_')}/image_${paddedIndex}.jpg`;
             
-            // Upload to Supabase
-            const { data, error } = await supabase.storage
+            console.log(`📤 [${globalImageIndex + 1}/${totalImages}] Uploading new image: ${fileName}`);
+            
+            // Upload to Supabase (upsert: false to prevent overwriting)
+            const { error } = await supabase.storage
               .from('survey-images')
               .upload(fileName, blob, {
                 contentType: 'image/jpeg',
-                upsert: true
+                upsert: false // ✅ Prevent overwriting existing images
               });
 
             if (error) {
-              console.warn(`⚠️ Failed to upload ${fileName}: ${error.message}`);
+              // If file already exists, that's OK - just get its URL
+              if (error.message && error.message.includes('already exists')) {
+                console.log(`⏭️  [Image ${globalImageIndex}] Already exists, reusing: ${fileName}`);
+                skippedCount++;
+                
+                // Get public URL of existing file
+                const { data: { publicUrl } } = supabase.storage
+                  .from('survey-images')
+                  .getPublicUrl(fileName);
+
+                allSupabaseImages.push({
+                  url: publicUrl,
+                  name: simpleFileName
+                });
+                
+                // Update progress for existing files too
+                setPreloadStatus(prev => ({
+                  ...prev,
+                  progress: allSupabaseImages.length
+                }));
+              } else {
+                console.warn(`⚠️ [Image ${globalImageIndex}] Failed to upload ${fileName}: ${error.message}`);
+              }
               continue;
             }
+            
+            console.log(`✅ [Image ${globalImageIndex}] Uploaded successfully`);
+            newImagesUploaded++;
 
             // Get public URL
             const { data: { publicUrl } } = supabase.storage
               .from('survey-images')
               .getPublicUrl(fileName);
 
-            // ✅ Simplified: only store url and name
+            // ✅ Store only url and unique filename (no confusing duplicate names)
             allSupabaseImages.push({
               url: publicUrl,
-              name: hfImage.name
+              name: simpleFileName
             });
+            
+            console.log(`💾 Stored: { url: ${publicUrl.substring(publicUrl.length - 50)}, name: ${simpleFileName} }`);
 
             setPreloadStatus(prev => ({
               ...prev,
@@ -460,12 +575,23 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             }));
 
           } catch (err) {
-            console.warn(`⚠️ Error processing ${hfImage.name}:`, err);
+            console.warn(`⚠️ [Image ${globalImageIndex}] Error processing:`, err);
           }
         }
       }
+      
+      console.log(`📊 Summary: ${newImagesUploaded} new images uploaded, ${skippedCount} existing images skipped`);
+      
+      // Sort images by name to ensure consistent order
+      allSupabaseImages.sort((a, b) => a.name.localeCompare(b.name));
 
       console.log(`✅ Successfully uploaded ${allSupabaseImages.length} images to Supabase`);
+      
+      // Log first few images to verify naming
+      console.log('📋 Sample of stored images:');
+      allSupabaseImages.slice(0, 5).forEach((img, idx) => {
+        console.log(`  [${idx}] name: "${img.name}"`);
+      });
 
       // Step 5: Save Supabase URLs to project config (preserve imageDatasetConfig)
       const updatedProject = {
@@ -487,7 +613,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         progress: allSupabaseImages.length,
         total: totalImages,
         error: null,
-        success: `Successfully preloaded ${allSupabaseImages.length} images to Supabase! All images have permanent URLs.`
+        success: `Successfully completed! ${allSupabaseImages.length} total images available (${newImagesUploaded} newly uploaded, ${skippedCount} already existed). All images have permanent URLs.`
       });
 
     } catch (error) {
@@ -561,21 +687,23 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           for (let i = 0; i < pathsToDelete.length; i += batchSize) {
             const batch = pathsToDelete.slice(i, i + batchSize);
             
-            const { data, error } = await supabase.storage
+            const { error } = await supabase.storage
               .from('survey-images')
               .remove(batch);
 
             if (error) {
               console.warn(`⚠️ Error deleting batch ${i / batchSize + 1}:`, error);
             } else {
-              deletedCount += batch.length;
+              const newDeletedCount = deletedCount + batch.length;
+              deletedCount = newDeletedCount;
               console.log(`✓ Deleted batch ${i / batchSize + 1}: ${batch.length} files`);
+              
+              // Update progress after successful deletion
+              setPreloadStatus(prev => ({
+                ...prev,
+                progress: newDeletedCount
+              }));
             }
-
-            setPreloadStatus(prev => ({
-              ...prev,
-              progress: deletedCount
-            }));
           }
 
           console.log(`✅ Deleted ${deletedCount} files from Supabase Storage`);

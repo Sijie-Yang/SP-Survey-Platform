@@ -219,11 +219,11 @@ async function ensureSurveyImagesBucket() {
     if (!imagesBucket) {
       console.log('Survey-images bucket not found, creating...');
       
-      // Create the survey-images bucket
+      // Create the survey-images bucket with increased limits
       const { data, error: createError } = await supabase.storage.createBucket('survey-images', {
         public: true,
         allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
-        fileSizeLimit: 10485760 // 10MB
+        fileSizeLimit: 52428800 // 50MB per file (increased from 10MB)
       });
 
       if (createError) {
@@ -233,9 +233,29 @@ async function ensureSurveyImagesBucket() {
 
       console.log('Survey-images bucket created successfully:', data);
       return true;
+    } else {
+      // Bucket exists, try to update its configuration
+      console.log('Survey-images bucket exists, updating configuration...');
+      
+      try {
+        const { data: updateData, error: updateError } = await supabase.storage.updateBucket('survey-images', {
+          public: true,
+          allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
+          fileSizeLimit: 52428800 // 50MB per file
+        });
+
+        if (updateError) {
+          console.warn('Could not update bucket configuration:', updateError.message);
+          // Don't fail if update doesn't work, bucket still exists
+        } else {
+          console.log('Bucket configuration updated successfully');
+        }
+      } catch (updateErr) {
+        console.warn('Bucket update not supported or failed:', updateErr);
+      }
     }
 
-    return true; // Bucket already exists
+    return true; // Bucket exists
   } catch (error) {
     console.error('Error ensuring survey-images bucket:', error);
     return false;
@@ -342,7 +362,7 @@ export async function syncImagesFromSupabase() {
     const { data: files, error } = await supabase.storage
       .from('survey-images')
       .list('', {
-        limit: 1000,
+        limit: 10000, // Increased from 1000 to support more images
         sortBy: { column: 'created_at', order: 'desc' }
       })
 
@@ -405,7 +425,7 @@ export async function checkImageFolderStatus() {
     const { data: files, error: filesError } = await supabase.storage
       .from('survey-images')
       .list('', {
-        limit: 1000
+        limit: 10000 // Increased to support more images
       });
 
     if (filesError) throw filesError;
@@ -471,7 +491,7 @@ export const getAllImagesFromSupabase = async (bucketPath = 'survey-images', cus
     const { data: files, error: filesError } = await clientToUse.storage
       .from(bucketName)
       .list(folderPath, {
-        limit: 1000,
+        limit: 10000, // Increased to support more images
         sortBy: { column: 'name', order: 'asc' }
       });
 
