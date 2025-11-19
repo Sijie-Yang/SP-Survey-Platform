@@ -12,18 +12,18 @@
 <img src="./public/logo-long.png" alt="SP-Survey Interface" width="50%">
 <img src="./public/logo-poster.png" alt="SP-Survey Interface" width="80%">
 
-`<strong>`A professional, research-grade platform for conducting visual perception surveys.`</strong>`
-`<br>`
+<strong>A professional, research-grade platform for conducting visual perception surveys.</strong>
+<br>
 No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, AI-powered generation with ChatGPT-style interface (NEW 🤖💬), and cloud integration.
 
-🌐 `<a href="https://streetscape-perception-survey.vercel.app/"><strong>`Live Demo`</strong></a>` •
-📄 `<a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>`Research Paper`</strong></a>` •
-🔗 `<a href="https://thermal-affordance.ual.sg"><strong>`Project Website`</strong></a>` •
-📊 `<a href="https://github.com/Sijie-Yang/Thermal-Affordance"><strong>`Dataset`</strong></a>`
+🌐 <a href="https://streetscape-perception-survey.vercel.app/"><strong>Live Demo</strong></a> •
+📄 <a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>Research Paper</strong></a> •
+🔗 <a href="https://thermal-affordance.ual.sg"><strong>Project Website</strong></a> •
+📊 <a href="https://github.com/Sijie-Yang/Thermal-Affordance"><strong>Dataset</strong></a>
 
-`<img src="./public/UAL Logo.jpg" alt="Urban Analytics Lab" height="50">`
+<img src="./public/UAL Logo.jpg" alt="Urban Analytics Lab" height="50">
 &nbsp;&nbsp;&nbsp;&nbsp;
-`<img src="./public/DoA Logo.jpg" alt="Department of Architecture NUS" height="50">`
+<img src="./public/DoA Logo.jpg" alt="Department of Architecture NUS" height="50">
 
 </div>
 
