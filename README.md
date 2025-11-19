@@ -29,6 +29,50 @@ No coding required – build surveys through an intuitive admin panel with drag-
 
 ---
 
+## 📑 Table of Contents
+
+- [📸 Platform Overview](#-platform-overview)
+- [🚀 Quick Start](#-quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Access the Application](#access-the-application)
+  - [Backend Status Monitoring](#backend-status-monitoring)
+  - [Create Your First Survey (3 minutes)](#create-your-first-survey-3-minutes)
+  - [🤖 Create Survey with AI (Alternative Method)](#-create-survey-with-ai-alternative-method)
+- [✨ Key Features](#-key-features)
+  - [⚡ Latest AI-Powered Features (NEW)](#-latest-ai-powered-features-new)
+  - [🔧 Survey Capabilities](#-survey-capabilities)
+    - [Visual Perception Question Types](#visual-perception-question-types)
+    - [Research-Grade Features](#research-grade-features)
+  - [🤖 AI-Powered Survey Generation (NEW)](#-ai-powered-survey-generation-new)
+    - [💬 ChatGPT-Style Interface](#-chatgpt-style-interface-new)
+    - [🧠 Contextual Engineering](#-contextual-engineering-new)
+    - [🧠 Chain of Thoughts Generation](#-chain-of-thoughts-generation-new)
+    - [🤖 Multi-Agent Expert Review](#-multi-agent-expert-review-new)
+    - [📝 Customizable Prompts](#-customizable-prompts-new)
+  - [📋 Template System](#-template-system---build-upon-published-research)
+  - [💾 Data & Deployment](#-data--deployment)
+- [💡 Use Cases](#-use-cases)
+- [📊 Survey Data Collection](#-survey-data-collection)
+- [🎓 Academic Citation](#-academic-citation)
+- [🆘 Troubleshooting](#-troubleshooting)
+  - [🔴 Backend Server Offline](#-backend-server-offline)
+  - [🖼️ Images Not Loading](#️-images-not-loading)
+  - [💾 Cannot Save Projects](#-cannot-save-projects)
+  - [🎨 Theme Not Applying](#-theme-not-applying)
+  - [☁️ Supabase Connection Failed](#️-supabase-connection-failed)
+  - [🔄 Project Not Found in Survey View](#-project-not-found-in-survey-view)
+  - [🚀 Deployment Build Fails](#-deployment-build-fails)
+  - [📱 Survey Not Mobile Responsive](#-survey-not-mobile-responsive)
+  - [Getting Help](#getting-help)
+- [🤝 Contributing](#-contributing)
+  - [How to Contribute](#how-to-contribute)
+  - [Development Tips](#development-tips)
+- [📄 License](#-license)
+- [🌟 Acknowledgments](#-acknowledgments)
+
+---
+
 ## 📸 Platform Overview
 
 <p align="center">
@@ -38,6 +82,142 @@ No coding required – build surveys through an intuitive admin panel with drag-
 <p align="center">
   <em>Complete workflow: From image dataset management to survey deployment</em>
 </p>
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+**Required:**
+
+- **Hugging Face Account** (https://huggingface.co) for your image dataset
+- **Supabase Account** (https://supabase.com) for cloud storage of survey images and survey responses
+- **Vercel Account** (https://vercel.com) for deploying your survey website
+
+**Optional (for AI features):**
+
+- **OpenAI API Key** (https://platform.openai.com/api-keys) for AI-powered survey generation
+  - Uses GPT-4o model
+  - Pay-as-you-go pricing (~$0.01-0.05 per survey generation)
+  - Stored in browser session only (never saved to disk)
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/Sijie-Yang/Streetscape-Perception-Survey.git
+cd Streetscape-Perception-Survey
+
+# Install dependencies
+npm install
+
+# Start both frontend and backend simultaneously
+npm run dev
+
+# Or use safe mode with auto-restart (highly recommended for development)
+npm run dev:safe
+```
+
+**💡 Tip**: Use `npm run dev:safe` for development - it automatically restarts the backend server if it crashes, ensuring uninterrupted workflow.
+
+### Access the Application
+
+Once started, open your browser:
+
+- **🎨 Admin Panel**: http://localhost:3000/admin
+
+  - Create and manage surveys
+  - Configure image datasets (Hugging Face) and survey backends (Supabase)
+  - Preview surveys in real-time
+  - **🟢 Real-time Backend Status Monitor** - displays server status in header with auto-restart capability
+- **📋 Live Survey View**: http://localhost:3000/survey
+
+### Backend Status Monitoring
+
+The admin panel includes a **real-time backend status monitor** in the header:
+
+- **🟢 Backend Online** - Server is running normally
+- **🔴 Backend Offline** - Server is down (with pulsing animation and restart button)
+- Auto-checks server health every 5 seconds
+- One-click restart with automatic status recovery
+- Detailed status information available by clicking the status chip
+
+### Create Your First Survey (3 minutes)
+
+1. **Load a Template** or **Create New Project**
+
+   - Click "Load Template" → Select "Thermal Comfort in Sight" (Yang et al. 2025)
+   - Or click "New Project" for a blank survey
+2. **Step 1 - Image Dataset**
+
+   - Upload your images to Hugging Face as a Dataset, then fill in the dataset name in Admin Panel (e.g., `sijiey/Thermal-Affordance-Dataset`)
+   - Configure your Supabase account credentials in the connection settings
+   - After both steps are confirmed successful, click "Preload Images" to automatically transfer images from Hugging Face to Supabase storage and save stable URLs for your survey project
+   - Click "Next: Survey Builder →"
+3. **Step 2 - Survey Builder**
+
+   - Fill in survey basic information
+   - Set up survey display settings
+   - Add pages and questions with drag-and-drop
+   - Configure question types (image choice, image rating, text, etc.)
+   - Click "Next: Server Setup →"
+4. **Step 3 - Server Setup**
+
+   - Test Supabase database connection
+   - Create response table in supabase
+   - Click "Complete Setup" → auto-navigates to Step 4
+5. **Step 4 - Website Setup**
+
+   - Generate deployment files and automatically test locally
+   - Auto-upload to GitHub repository
+   - Manually deploy to Vercel (requires manual action)
+6. **Save & Preview**
+
+   - Click 💾 "Save" in the top bar (turns yellow when unsaved)
+   - Click 👁️ "Preview" to test your survey
+
+### 🤖 Create Survey with AI (Alternative Method)
+
+**Skip manual setup - let AI build your survey in seconds:**
+
+1. **Setup Your Project**
+
+   - Create new project and complete Step 1 (Image Dataset configuration)
+   - Navigate to Step 2 (Survey Builder)
+2. **Open AI Chat Assistant**
+
+   - Click the AI chat icon at the top of Survey Builder
+   - Enter your OpenAI API key in Settings → Click "Validate"
+   - Enable "Contextual Engineering" for smarter interactions (recommended)
+3. **Chat with AI (Natural Conversation)**
+
+   - Just type what you want - AI automatically understands:
+     ```
+     Example: "Create a thermal comfort survey with demographics, 
+     visual ratings, and preference ranking"
+
+     AI: [Thinking...] → [Generating survey...] → "Generated 3-page survey"
+
+     You: "Add more variety - include imagepicker and imageboolean"
+
+     AI: [Adjusting survey...] → "Added diverse question types"
+     ```
+   - Watch the status change in real-time: "Thinking..." → "Generating..." → "Adjusting..."
+   - AI remembers your conversation context (per-project memory)
+4. **Smart Features**
+
+   - ✅ **Intent Detection**: No need to say "Generate" or "Adjust" - AI figures it out
+   - ✅ **Conversation History**: Full context from previous messages
+   - ✅ **Question Type Diversity**: AI automatically mixes different types
+   - ✅ **Project-Specific Memory**: Each project has independent conversation history
+   - ✅ **Image Dataset Integration**: Automatically uses your configured dataset
+
+**💡 When to Use AI vs Manual:**
+
+- **AI**: Quick prototyping, exploring designs, getting started, iterative refinement
+- **Manual**: Precise control, complex logic, specific customizations
+- **Hybrid**: Generate with AI, then fine-tune manually (recommended)
 
 ---
 
@@ -294,19 +474,17 @@ Instead of repetitive question types, the AI now:
 
 **Example Variety:**
 
-```json
-Before (repetitive):
+**Before (repetitive):**
 - imagerating: comfort
 - imagerating: safety  
 - imagerating: aesthetics
 - imagerating: walkability
 
-After (diverse):
+**After (diverse):**
 - imagerating: comfort (1-5 scale)
 - imagepicker: preferred street type (choice)
 - imageranking: rank by preference (ordering)
 - imageboolean: would you walk here? (yes/no)
-```
 
 #### **🔒 Data Privacy**
 
@@ -375,142 +553,6 @@ Build new studies 10x faster:
 - **🤗 Hugging Face**: Host your image datasets
 - **☁️ Supabase**: Store images and survey responses
 - **🚀 Vercel**: Deploy your survey website with one click
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-**Required:**
-
-- **Hugging Face Account** (https://huggingface.co) for your image dataset
-- **Supabase Account** (https://supabase.com) for cloud storage of survey images and survey responses
-- **Vercel Account** (https://vercel.com) for deploying your survey website
-
-**Optional (for AI features):**
-
-- **OpenAI API Key** (https://platform.openai.com/api-keys) for AI-powered survey generation
-  - Uses GPT-4o model
-  - Pay-as-you-go pricing (~$0.01-0.05 per survey generation)
-  - Stored in browser session only (never saved to disk)
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/Sijie-Yang/Streetscape-Perception-Survey.git
-cd Streetscape-Perception-Survey
-
-# Install dependencies
-npm install
-
-# Start both frontend and backend simultaneously
-npm run dev
-
-# Or use safe mode with auto-restart (highly recommended for development)
-npm run dev:safe
-```
-
-**💡 Tip**: Use `npm run dev:safe` for development - it automatically restarts the backend server if it crashes, ensuring uninterrupted workflow.
-
-### Access the Application
-
-Once started, open your browser:
-
-- **🎨 Admin Panel**: http://localhost:3000/admin
-
-  - Create and manage surveys
-  - Configure image datasets (Hugging Face) and survey backends (Supabase)
-  - Preview surveys in real-time
-  - **🟢 Real-time Backend Status Monitor** - displays server status in header with auto-restart capability
-- **📋 Live Survey View**: http://localhost:3000/survey
-
-### Backend Status Monitoring
-
-The admin panel includes a **real-time backend status monitor** in the header:
-
-- **🟢 Backend Online** - Server is running normally
-- **🔴 Backend Offline** - Server is down (with pulsing animation and restart button)
-- Auto-checks server health every 5 seconds
-- One-click restart with automatic status recovery
-- Detailed status information available by clicking the status chip
-
-### Create Your First Survey (3 minutes)
-
-1. **Load a Template** or **Create New Project**
-
-   - Click "Load Template" → Select "Thermal Comfort in Sight" (Yang et al. 2025)
-   - Or click "New Project" for a blank survey
-2. **Step 1 - Image Dataset**
-
-   - Upload your images to Hugging Face as a Dataset, then fill in the dataset name in Admin Panel (e.g., `sijiey/Thermal-Affordance-Dataset`)
-   - Configure your Supabase account credentials in the connection settings
-   - After both steps are confirmed successful, click "Preload Images" to automatically transfer images from Hugging Face to Supabase storage and save stable URLs for your survey project
-   - Click "Next: Survey Builder →"
-3. **Step 2 - Survey Builder**
-
-   - Fill in survey basic information
-   - Set up survey display settings
-   - Add pages and questions with drag-and-drop
-   - Configure question types (image choice, image rating, text, etc.)
-   - Click "Next: Server Setup →"
-4. **Step 3 - Server Setup**
-
-   - Test Supabase database connection
-   - Create response table in supabase
-   - Click "Complete Setup" → auto-navigates to Step 4
-5. **Step 4 - Website Setup**
-
-   - Generate deployment files and automatically test locally
-   - Auto-upload to GitHub repository
-   - Manually deploy to Vercel (requires manual action)
-6. **Save & Preview**
-
-   - Click 💾 "Save" in the top bar (turns yellow when unsaved)
-   - Click 👁️ "Preview" to test your survey
-
-### 🤖 Create Survey with AI (Alternative Method)
-
-**Skip manual setup - let AI build your survey in seconds:**
-
-1. **Setup Your Project**
-
-   - Create new project and complete Step 1 (Image Dataset configuration)
-   - Navigate to Step 2 (Survey Builder)
-2. **Open AI Chat Assistant**
-
-   - Click the AI chat icon at the top of Survey Builder
-   - Enter your OpenAI API key in Settings → Click "Validate"
-   - Enable "Contextual Engineering" for smarter interactions (recommended)
-3. **Chat with AI (Natural Conversation)**
-
-   - Just type what you want - AI automatically understands:
-     ```
-     Example: "Create a thermal comfort survey with demographics, 
-     visual ratings, and preference ranking"
-
-     AI: [Thinking...] → [Generating survey...] → "Generated 3-page survey"
-
-     You: "Add more variety - include imagepicker and imageboolean"
-
-     AI: [Adjusting survey...] → "Added diverse question types"
-     ```
-   - Watch the status change in real-time: "Thinking..." → "Generating..." → "Adjusting..."
-   - AI remembers your conversation context (per-project memory)
-4. **Smart Features**
-
-   - ✅ **Intent Detection**: No need to say "Generate" or "Adjust" - AI figures it out
-   - ✅ **Conversation History**: Full context from previous messages
-   - ✅ **Question Type Diversity**: AI automatically mixes different types
-   - ✅ **Project-Specific Memory**: Each project has independent conversation history
-   - ✅ **Image Dataset Integration**: Automatically uses your configured dataset
-
-**💡 When to Use AI vs Manual:**
-
-- **AI**: Quick prototyping, exploring designs, getting started, iterative refinement
-- **Manual**: Precise control, complex logic, specific customizations
-- **Hybrid**: Generate with AI, then fine-tune manually (recommended)
 
 ---
 
