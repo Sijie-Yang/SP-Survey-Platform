@@ -305,6 +305,17 @@ export default function SurveyPreview({ config, currentProject }) {
                 }
               }
               page.elements = newElements;
+              
+              // ✅ FIX: If page has no questions, add a dummy HTML element so the page displays
+              // This ensures pages with only title/description are visible in the preview
+              // Note: SurveyJS will display page.description automatically, so we just need a minimal placeholder
+              if (page.elements.length === 0) {
+                page.elements = [{
+                  type: 'html',
+                  name: `${page.name}_placeholder`,
+                  html: '<div style="height: 1px;"></div>' // Minimal placeholder to make page visible
+                }];
+              }
             }
           }
         }

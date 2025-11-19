@@ -31,6 +31,7 @@ Examples:
   - Streetscape question page should use Type 2 OR Type 3, but not both together.
   - If the page is Type 2, it should have at least one image-based question, it is better to have more than three and more diverse question types.
   - If the page is Type 3, it should have only one image display element but one or more text questions, as we want participants to focus on the only image and the text questions.
+  - If the page is Type 2 or Type 3, all the questions should be tightly related to image evaluation, rather than general text questions.
   - If you are asking participants to refer to specific streetscapes, you should use Type 2 or Type 3. You cannot ask participants to assess streetscape in only text questions.
   - You need to have page title and page description for each page.
 
@@ -118,12 +119,15 @@ Examples:
    
    { "type": "text", "name": "describe_street", "title": "Describe what you see in this street:" }
 
-**PAGE STRUCTURE EXAMPLE:**
+**COMPLETE SURVEY STRUCTURE EXAMPLE:**
 {
+  "title": "Urban Streetscape Perception Survey",
+  "description": "This survey helps us understand how people perceive different street environments.",
   "pages": [
     {
       "name": "demographics",
       "title": "About You",
+      "description": "Please tell us a bit about yourself.",
       "elements": [
         { "type": "text", "name": "age", "title": "What is your age?" },
         { "type": "radiogroup", "name": "gender", "title": "Gender?", "choices": ["Male", "Female", "Other"] }
@@ -132,6 +136,7 @@ Examples:
     {
       "name": "safety_perception",
       "title": "Street Safety",
+      "description": "Please evaluate different street environments based on safety.",
       "elements": [
         { "type": "imagerating", "name": "safety", "title": "Rate safety:", 
           "imageSelectionMode": "huggingface_random", "imageCount": 4, "choices": [],
@@ -144,6 +149,7 @@ Examples:
   ]
 }
 
+**CRITICAL: Always include survey title and description at the top level!**
 Return ONLY valid JSON, no markdown.`,
 
   // Survey adjustment prompt
@@ -161,6 +167,7 @@ Return ONLY valid JSON, no markdown.`,
   - Streetscape question page should use Type 2 OR Type 3, but not both together.
   - If the page is Type 2, it should have at least one image-based question, it is better to have more than three and more diverse question types.
   - If the page is Type 3, it should have only one image display element but one or more text questions, as we want participants to focus on the only image and the text questions.
+  - If the page is Type 2 or Type 3, all the questions should be tightly related to image evaluation, rather than general text questions.
   - If you are asking participants to refer to specific streetscapes, you should use Type 2 or Type 3. You cannot ask participants to assess streetscape in only text questions.
   - You need to have page title and page description for each page.
 
@@ -248,12 +255,15 @@ Return ONLY valid JSON, no markdown.`,
    
    { "type": "text", "name": "describe_street", "title": "Describe what you see in this street:" }
 
-**PAGE STRUCTURE EXAMPLE:**
+**COMPLETE SURVEY STRUCTURE EXAMPLE:**
 {
+  "title": "Urban Streetscape Perception Survey",
+  "description": "This survey helps us understand how people perceive different street environments.",
   "pages": [
     {
       "name": "demographics",
       "title": "About You",
+      "description": "Please tell us a bit about yourself.",
       "elements": [
         { "type": "text", "name": "age", "title": "What is your age?" },
         { "type": "radiogroup", "name": "gender", "title": "Gender?", "choices": ["Male", "Female", "Other"] }
@@ -262,6 +272,7 @@ Return ONLY valid JSON, no markdown.`,
     {
       "name": "safety_perception",
       "title": "Street Safety",
+      "description": "Please evaluate different street environments based on safety.",
       "elements": [
         { "type": "imagerating", "name": "safety", "title": "Rate safety:", 
           "imageSelectionMode": "huggingface_random", "imageCount": 4, "choices": [],
@@ -274,6 +285,7 @@ Return ONLY valid JSON, no markdown.`,
   ]
 }
 
+**CRITICAL: Always include survey title and description at the top level!**
 Return ONLY valid JSON, no markdown.`,
 
   // Question answering prompt
@@ -291,6 +303,7 @@ Return ONLY valid JSON, no markdown.`,
   - Streetscape question page should use Type 2 OR Type 3, but not both together.
   - If the page is Type 2, it should have at least one image-based question, it is better to have more than three and more diverse question types.
   - If the page is Type 3, it should have only one image display element but one or more text questions, as we want participants to focus on the only image and the text questions.
+  - If the page is Type 2 or Type 3, all the questions should be tightly related to image evaluation, rather than general text questions.
   - If you are asking participants to refer to specific streetscapes, you should use Type 2 or Type 3. You cannot ask participants to assess streetscape in only text questions.
   - You need to have page title and page description for each page.
 
@@ -427,8 +440,9 @@ Be helpful and encourage the user to try creating or modifying their survey!`,
 - Maintain survey structure consistency
 - Ensure all image questions have proper configuration
 - Keep question types diverse and engaging
+- ALWAYS include survey title and description at the top level
 
-Return ONLY valid JSON: {"pages": [...]}`
+Return ONLY valid JSON with complete structure: {"title": "...", "description": "...", "pages": [...]}`
 };
 
 // Default export for easy importing

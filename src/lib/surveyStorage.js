@@ -92,11 +92,8 @@ export const convertToSurveyJS = (adminConfig) => {
     description: adminConfig.description,
     logo: adminConfig.logo,
     logoPosition: adminConfig.logoPosition,
-    pages: adminConfig.pages?.map(page => ({
-      name: page.name,
-      title: page.title,
-      description: page.description,
-      elements: page.elements?.map(element => {
+    pages: adminConfig.pages?.map(page => {
+      const mappedElements = page.elements?.map(element => {
         const question = { ...element };
         
         // Handle image questions
@@ -124,8 +121,26 @@ export const convertToSurveyJS = (adminConfig) => {
         }
         
         return question;
-      }) || []
-    })) || [],
+      }) || [];
+      
+      // ✅ FIX: If page has no questions, add a dummy HTML element so the page displays
+      // This ensures pages with only title/description are visible in the survey
+      // Note: SurveyJS will display page.description automatically, so we just need a minimal placeholder
+      const finalElements = mappedElements.length === 0
+        ? [{
+            type: 'html',
+            name: `${page.name}_placeholder`,
+            html: '<div style="height: 1px;"></div>' // Minimal placeholder to make page visible
+          }]
+        : mappedElements;
+      
+      return {
+        name: page.name,
+        title: page.title,
+        description: page.description,
+        elements: finalElements
+      };
+    }) || [],
     ...adminConfig.settings
   };
 };

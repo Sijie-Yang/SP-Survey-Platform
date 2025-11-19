@@ -892,9 +892,15 @@ export default function AdminApp() {
           </Tooltip>
           
           <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
-            <Typography variant="h6" component="div" sx={{ fontWeight: 'bold', letterSpacing: '0.5px' }}>
-              SP-Survey
-            </Typography>
+            <Box
+              component="img"
+              src="/logo-header.png"
+              alt="SP-Survey"
+              sx={{
+                height: '35px',
+                objectFit: 'contain'
+              }}
+            />
             
             {/* Custom GitHub Stars Badge */}
             <Box
@@ -1247,6 +1253,7 @@ export default function AdminApp() {
             <TabPanel value={tabValue} index={1}>
               {surveyConfig ? (
                 <SurveyBuilder 
+                  key={currentProject?.id || 'no-project'}
                   config={surveyConfig} 
                   onChange={handleSurveyConfigChange}
                   currentProject={currentProject}

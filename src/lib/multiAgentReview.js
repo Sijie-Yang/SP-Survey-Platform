@@ -133,14 +133,23 @@ RESPONSE FORMAT:
 /**
  * Generate 1v1 review prompt
  */
-function generate1v1ReviewPrompt(agentId, surveyConfig, round, customAgents = null) {
+function generate1v1ReviewPrompt(agentId, surveyConfig, round, customAgents = null, userRequest = null, researchContext = null) {
   const agentsConfig = customAgents || AGENTS;
   const agent = agentsConfig[agentId];
+  
+  const userRequestSection = userRequest 
+    ? `\n**USER'S ORIGINAL REQUEST:**\n"${userRequest}"\n\n**CRITICAL: The survey MUST fulfill the user's original request! Check if the current survey meets their needs.**\n\n` 
+    : '';
+  
+  const researchContextSection = (researchContext && (researchContext.topic || researchContext.requirements || researchContext.scenario))
+    ? `\n**RESEARCH CONTEXT:**\n${researchContext.topic ? `Research Topic: ${researchContext.topic}\n` : ''}${researchContext.requirements ? `Research Requirements: ${researchContext.requirements}\n` : ''}${researchContext.scenario ? `Survey Scenario Type: ${researchContext.scenario}\n` : ''}\n**CRITICAL: The survey MUST align with this research context!**\n\n`
+    : '';
   
   return `SURVEY REVIEW REQUEST
 
 As ${agent.name}, please review this streetscape perception survey:
-
+${userRequestSection}${researchContextSection}
+**CURRENT SURVEY:**
 ${JSON.stringify(surveyConfig, null, 2)}
 
 This is review round ${round}. Focus on:
@@ -152,18 +161,26 @@ Provide your expert assessment and specific recommendations for improvement.`;
 /**
  * Generate group discussion prompt
  */
-function generateGroupDiscussionPrompt(surveyConfig, previousReviews, round, customAgents = null) {
+function generateGroupDiscussionPrompt(surveyConfig, previousReviews, round, customAgents = null, userRequest = null, researchContext = null) {
   const agentsConfig = customAgents || AGENTS;
   const reviewSummary = previousReviews.map(r => 
     `${agentsConfig[r.agentId].emoji} ${agentsConfig[r.agentId].name}: ${r.summary || r.comments}`
   ).join('\n\n');
   
+  const userRequestSection = userRequest 
+    ? `**USER'S ORIGINAL REQUEST:**\n"${userRequest}"\n\n**CRITICAL: The survey MUST fulfill the user's original request! Check if the current survey meets their needs.**\n\n` 
+    : '';
+  
+  const researchContextSection = (researchContext && (researchContext.topic || researchContext.requirements || researchContext.scenario))
+    ? `**RESEARCH CONTEXT:**\n${researchContext.topic ? `Research Topic: ${researchContext.topic}\n` : ''}${researchContext.requirements ? `Research Requirements: ${researchContext.requirements}\n` : ''}${researchContext.scenario ? `Survey Scenario Type: ${researchContext.scenario}\n` : ''}\n**CRITICAL: The survey MUST align with this research context!**\n\n`
+    : '';
+  
   return `GROUP DISCUSSION - Round ${round}
-
-SURVEY UNDER REVIEW:
+${userRequestSection}${researchContextSection}
+**CURRENT SURVEY:**
 ${JSON.stringify(surveyConfig, null, 2)}
 
-PREVIOUS REVIEWS:
+**PREVIOUS REVIEWS:**
 ${reviewSummary}
 
 Now discuss as a group. Each expert should:
@@ -171,6 +188,7 @@ Now discuss as a group. Each expert should:
 2. Build on or challenge others' comments
 3. Identify consensus areas and disagreements
 4. Provide actionable recommendations
+5. **VERIFY that the survey fulfills the user's original request and aligns with research context**
 
 Work together to reach a collective decision on whether this survey is ready or needs revision.`;
 }
@@ -233,7 +251,7 @@ function getMostMentioned(items, limit) {
 /**
  * Generate revision prompt for survey-designer
  */
-function generateRevisionPrompt(consolidatedFeedback, reviews, customAgents = null) {
+function generateRevisionPrompt(consolidatedFeedback, reviews, customAgents = null, userRequest = null, researchContext = null) {
   const agentsConfig = customAgents || AGENTS;
   const agentFeedback = reviews.map(review => {
     const agent = agentsConfig[review.agentId];
@@ -250,24 +268,33 @@ ${review.summary || review.comments || ''}
 `.trim();
   }).join('\n\n---\n\n');
   
+  const userRequestSection = userRequest 
+    ? `\n**USER'S ORIGINAL REQUEST:**\n"${userRequest}"\n\n**CRITICAL: The revised survey MUST still fulfill the user's original request! Do not lose sight of what the user wanted.**\n\n` 
+    : '';
+  
+  const researchContextSection = (researchContext && (researchContext.topic || researchContext.requirements || researchContext.scenario))
+    ? `**RESEARCH CONTEXT:**\n${researchContext.topic ? `Research Topic: ${researchContext.topic}\n` : ''}${researchContext.requirements ? `Research Requirements: ${researchContext.requirements}\n` : ''}${researchContext.scenario ? `Survey Scenario Type: ${researchContext.scenario}\n` : ''}\n**CRITICAL: The revised survey MUST align with this research context!**\n\n`
+    : '';
+  
   return `MULTI-AGENT REVIEW FEEDBACK
-
+${userRequestSection}${researchContextSection}
+**REVIEW RESULTS:**
 Overall Rating: ${consolidatedFeedback.averageRating}/10
 Verdict: ${consolidatedFeedback.overallVerdict.toUpperCase()}
 Approval Status: ${consolidatedFeedback.verdictBreakdown.approve}/${reviews.length} agents approve
 
-TOP CONCERNS:
+**TOP CONCERNS:**
 ${consolidatedFeedback.topConcerns.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
-TOP SUGGESTIONS:
+**TOP SUGGESTIONS:**
 ${consolidatedFeedback.topSuggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 
-DETAILED AGENT FEEDBACK:
+**DETAILED AGENT FEEDBACK:**
 ${agentFeedback}
 
 ---
 
-Based on this expert feedback, please revise the survey to address the concerns and implement the suggestions. Focus especially on the top concerns and suggestions that multiple agents mentioned.`;
+Based on this expert feedback, please revise the survey to address the concerns and implement the suggestions. Focus especially on the top concerns and suggestions that multiple agents mentioned. **REMEMBER: Keep the survey aligned with the user's original request and research context!**`;
 }
 
 /**

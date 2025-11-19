@@ -90,7 +90,7 @@ const DEFAULT_AGENTS = {
   }
 };
 
-export default function AgentsEditor({ onAgentsChange }) {
+export default function AgentsEditor({ onAgentsChange, currentProject }) {
   const [agents, setAgents] = useState({});
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [currentAgent, setCurrentAgent] = useState(null);
@@ -98,12 +98,17 @@ export default function AgentsEditor({ onAgentsChange }) {
   const [isNewAgent, setIsNewAgent] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
 
-  // Load agents from localStorage or use defaults
+  // Load agents from localStorage or use defaults (per project)
   useEffect(() => {
-    const savedAgents = localStorage.getItem('customAgents');
+    if (!currentProject?.id) {
+      setAgents(DEFAULT_AGENTS);
+      return;
+    }
+    const savedAgents = localStorage.getItem(`customAgents_${currentProject.id}`);
     if (savedAgents) {
       try {
         setAgents(JSON.parse(savedAgents));
+        console.log('✅ Loaded agents for project:', currentProject.id);
       } catch (e) {
         console.error('Failed to load agents:', e);
         setAgents(DEFAULT_AGENTS);
@@ -111,16 +116,19 @@ export default function AgentsEditor({ onAgentsChange }) {
     } else {
       setAgents(DEFAULT_AGENTS);
     }
-  }, []);
+  }, [currentProject?.id]);
 
-  // Save agents to localStorage
+  // Save agents to localStorage (per project)
   const saveAgents = (newAgents) => {
     setAgents(newAgents);
-    localStorage.setItem('customAgents', JSON.stringify(newAgents));
+    if (currentProject?.id) {
+      localStorage.setItem(`customAgents_${currentProject.id}`, JSON.stringify(newAgents));
+      console.log('💾 Agents saved for project:', currentProject.id);
+    }
     if (onAgentsChange) {
       onAgentsChange(newAgents);
     }
-    setSaveMessage('Agents configuration saved!');
+    setSaveMessage('Agents configuration saved for this project!');
     setTimeout(() => setSaveMessage(''), 3000);
   };
 

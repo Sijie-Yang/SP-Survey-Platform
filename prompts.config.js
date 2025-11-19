@@ -117,12 +117,15 @@ Examples:
    
    { "type": "text", "name": "describe_street", "title": "Describe what you see in this street:" }
 
-**PAGE STRUCTURE EXAMPLE:**
+**COMPLETE SURVEY STRUCTURE EXAMPLE:**
 {
+  "title": "Urban Streetscape Perception Survey",
+  "description": "This survey helps us understand how people perceive different street environments.",
   "pages": [
     {
       "name": "demographics",
       "title": "About You",
+      "description": "Please tell us a bit about yourself.",
       "elements": [
         { "type": "text", "name": "age", "title": "What is your age?" },
         { "type": "radiogroup", "name": "gender", "title": "Gender?", "choices": ["Male", "Female", "Other"] }
@@ -131,6 +134,7 @@ Examples:
     {
       "name": "safety_perception",
       "title": "Street Safety",
+      "description": "Please evaluate different street environments based on safety.",
       "elements": [
         { "type": "imagerating", "name": "safety", "title": "Rate safety:", 
           "imageSelectionMode": "huggingface_random", "imageCount": 4, "choices": [],
@@ -143,6 +147,7 @@ Examples:
   ]
 }
 
+**CRITICAL: Always include survey title and description at the top level!**
 Return ONLY valid JSON, no markdown.`,
 
   // Survey adjustment prompt
@@ -223,8 +228,9 @@ Be helpful and encourage the user to try creating or modifying their survey!`,
 - Maintain survey structure consistency
 - Ensure all image questions have proper configuration
 - Keep question types diverse and engaging
+- ALWAYS include survey title and description at the top level
 
-Return ONLY valid JSON: {"pages": [...]}`
+Return ONLY valid JSON with complete structure: {"title": "...", "description": "...", "pages": [...]}`
 };
 
 // Export for both CommonJS (Node.js) and ES6 modules

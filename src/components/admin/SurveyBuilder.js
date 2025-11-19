@@ -219,22 +219,34 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const sessionLearningRef = useRef(null);
   const [conversationMessages, setConversationMessages] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
+  // Context enabled state (per project)
   const [contextEnabled, setContextEnabled] = useState(() => {
-    const stored = localStorage.getItem('contextEnabled');
+    if (!currentProject?.id) return true;
+    const stored = localStorage.getItem(`contextEnabled_${currentProject.id}`);
     return stored !== null ? stored === 'true' : true;
   });
   
-  // Multi-Agent Review states - with localStorage persistence
+  // Multi-Agent Review states (per project)
   const [multiAgentReviewEnabled, setMultiAgentReviewEnabled] = useState(() => {
-    return localStorage.getItem('multiAgentReviewEnabled') === 'true';
+    if (!currentProject?.id) return false;
+    const stored = localStorage.getItem(`multiAgentReviewEnabled_${currentProject.id}`);
+    return stored === 'true';
   });
+  
   const [reviewMode, setReviewMode] = useState(() => {
-    return localStorage.getItem('reviewMode') || '1v1';
+    if (!currentProject?.id) return '1v1';
+    const stored = localStorage.getItem(`reviewMode_${currentProject.id}`);
+    return stored || '1v1';
   });
+  
   const [maxReviewRounds, setMaxReviewRounds] = useState(() => {
-    const stored = localStorage.getItem('maxReviewRounds');
+    if (!currentProject?.id) return 3;
+    const stored = localStorage.getItem(`maxReviewRounds_${currentProject.id}`);
     return stored ? parseInt(stored, 10) : 3;
   });
+  
+  // Flag to prevent saving during project switch
+  const isLoadingProjectSettings = useRef(false);
   
   // Custom prompts state
   const [customPrompts, setCustomPrompts] = useState(null);
@@ -261,25 +273,62 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     localStorage.setItem('apiKeyValid', apiKeyValid.toString());
   }, [apiKeyValid]);
 
+  // Save settings to localStorage when they change (per project)
   useEffect(() => {
-    localStorage.setItem('contextEnabled', contextEnabled.toString());
-    console.log('💾 Saved contextEnabled:', contextEnabled);
-  }, [contextEnabled]);
+    if (currentProject?.id && !isLoadingProjectSettings.current) {
+      localStorage.setItem(`contextEnabled_${currentProject.id}`, contextEnabled.toString());
+      console.log('💾 Saved contextEnabled for project:', currentProject.id, contextEnabled);
+    }
+  }, [contextEnabled, currentProject?.id]);
 
   useEffect(() => {
-    localStorage.setItem('multiAgentReviewEnabled', multiAgentReviewEnabled.toString());
-    console.log('💾 Saved multiAgentReviewEnabled:', multiAgentReviewEnabled);
-  }, [multiAgentReviewEnabled]);
+    if (currentProject?.id && !isLoadingProjectSettings.current) {
+      localStorage.setItem(`multiAgentReviewEnabled_${currentProject.id}`, multiAgentReviewEnabled.toString());
+      console.log('💾 Saved multiAgentReviewEnabled for project:', currentProject.id, multiAgentReviewEnabled);
+    }
+  }, [multiAgentReviewEnabled, currentProject?.id]);
 
   useEffect(() => {
-    localStorage.setItem('reviewMode', reviewMode);
-    console.log('💾 Saved reviewMode:', reviewMode);
-  }, [reviewMode]);
+    if (currentProject?.id && !isLoadingProjectSettings.current) {
+      localStorage.setItem(`reviewMode_${currentProject.id}`, reviewMode);
+      console.log('💾 Saved reviewMode for project:', currentProject.id, reviewMode);
+    }
+  }, [reviewMode, currentProject?.id]);
 
   useEffect(() => {
-    localStorage.setItem('maxReviewRounds', maxReviewRounds.toString());
-    console.log('💾 Saved maxReviewRounds:', maxReviewRounds);
-  }, [maxReviewRounds]);
+    if (currentProject?.id && !isLoadingProjectSettings.current) {
+      localStorage.setItem(`maxReviewRounds_${currentProject.id}`, maxReviewRounds.toString());
+      console.log('💾 Saved maxReviewRounds for project:', currentProject.id, maxReviewRounds);
+    }
+  }, [maxReviewRounds, currentProject?.id]);
+
+  // Load settings when project changes
+  useEffect(() => {
+    if (currentProject?.id) {
+      isLoadingProjectSettings.current = true;
+      
+      // Load context enabled
+      const storedContext = localStorage.getItem(`contextEnabled_${currentProject.id}`);
+      setContextEnabled(storedContext !== null ? storedContext === 'true' : true);
+      
+      // Load multi-agent review settings
+      const storedReview = localStorage.getItem(`multiAgentReviewEnabled_${currentProject.id}`);
+      setMultiAgentReviewEnabled(storedReview === 'true');
+      
+      const storedMode = localStorage.getItem(`reviewMode_${currentProject.id}`);
+      setReviewMode(storedMode || '1v1');
+      
+      const storedRounds = localStorage.getItem(`maxReviewRounds_${currentProject.id}`);
+      setMaxReviewRounds(storedRounds ? parseInt(storedRounds, 10) : 3);
+      
+      console.log('✅ Loaded settings for project:', currentProject.id);
+      
+      // Re-enable saving after a brief delay to ensure all state updates complete
+      setTimeout(() => {
+        isLoadingProjectSettings.current = false;
+      }, 100);
+    }
+  }, [currentProject?.id]);
 
   // Initialize Contextual Engineering modules (per-project)
   useEffect(() => {
@@ -826,6 +875,12 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         console.log('🧠 Using contextual prompt with memory');
       }
 
+      // Load research context from localStorage (per project)
+      const researchContext = currentProject?.id 
+        ? JSON.parse(localStorage.getItem(`researchContext_${currentProject.id}`) || '{}')
+        : {};
+      console.log('🔬 Research context loaded for project:', currentProject?.id, researchContext);
+
       // Call intelligent chat API
       const result = await sendChatMessage(
         currentUserMessage,
@@ -834,7 +889,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         openaiApiKey,
         multiAgentReviewEnabled,
         reviewMode,
-        customPrompts
+        customPrompts,
+        researchContext
       );
 
       // Update status based on intent
@@ -918,6 +974,16 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
           setConversationMessages(conversationHistoryRef.current.getAllMessages());
         }
 
+        // Update research context if provided by AI (per project)
+        if (result.researchContext && currentProject?.id) {
+          console.log('🔬 Updating research context from AI for project:', currentProject.id, result.researchContext);
+          localStorage.setItem(`researchContext_${currentProject.id}`, JSON.stringify(result.researchContext));
+          // Dispatch custom event to notify ChatAssistant
+          window.dispatchEvent(new CustomEvent('researchContextUpdated', { 
+            detail: result.researchContext 
+          }));
+        }
+
         // If survey config was generated/adjusted, apply it
         if (result.surveyConfig) {
           const processedConfig = processAIGeneratedConfig(result.surveyConfig);
@@ -956,6 +1022,16 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
             setLoadingStatus('Starting Multi-Agent Review...');
             
             try {
+              // Load custom agents if available (per project)
+              const customAgents = currentProject?.id && localStorage.getItem(`customAgents_${currentProject.id}`) 
+                ? JSON.parse(localStorage.getItem(`customAgents_${currentProject.id}`)) 
+                : null;
+              
+              // Load research context for review alignment (per project)
+              const reviewResearchContext = currentProject?.id 
+                ? JSON.parse(localStorage.getItem(`researchContext_${currentProject.id}`) || '{}')
+                : {};
+              
               await triggerMultiAgentReviewStream(
                 processedConfig,
                 openaiApiKey,
@@ -1087,7 +1163,11 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                         break;
                     }
                   }
-                }
+                },
+                customAgents,
+                userMessage,  // Pass user's original request to keep review aligned with their needs
+                reviewResearchContext,  // Pass research context for alignment
+                currentProject?.id  // Pass project ID for per-project agent configuration
               );
               
               console.log('✅ Multi-Agent Review completed');
@@ -1137,6 +1217,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     <Box>
       {/* AI Chat Assistant */}
       <ChatAssistant
+        key={currentProject?.id || 'no-project'}
         messages={conversationMessages}
         userMessage={userMessage}
         isLoading={isLoading}

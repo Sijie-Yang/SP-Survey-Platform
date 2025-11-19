@@ -12,18 +12,18 @@
 <img src="./public/logo-long.png" alt="SP-Survey Interface" width="50%">
 <img src="./public/logo-poster.png" alt="SP-Survey Interface" width="80%">
 
-<strong>A professional, research-grade platform for conducting visual perception surveys.</strong>
-<br>
+`<strong>`A professional, research-grade platform for conducting visual perception surveys.`</strong>`
+`<br>`
 No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, AI-powered generation with ChatGPT-style interface (NEW 🤖💬), and cloud integration.
 
-🌐 <a href="https://streetscape-perception-survey.vercel.app/"><strong>Live Demo</strong></a> •
-📄 <a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>Research Paper</strong></a> •
-🔗 <a href="https://thermal-affordance.ual.sg"><strong>Project Website</strong></a> •
-📊 <a href="https://github.com/Sijie-Yang/Thermal-Affordance"><strong>Dataset</strong></a>
+🌐 `<a href="https://streetscape-perception-survey.vercel.app/"><strong>`Live Demo`</strong></a>` •
+📄 `<a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>`Research Paper`</strong></a>` •
+🔗 `<a href="https://thermal-affordance.ual.sg"><strong>`Project Website`</strong></a>` •
+📊 `<a href="https://github.com/Sijie-Yang/Thermal-Affordance"><strong>`Dataset`</strong></a>`
 
-<img src="./public/UAL Logo.jpg" alt="Urban Analytics Lab" height="50">
+`<img src="./public/UAL Logo.jpg" alt="Urban Analytics Lab" height="50">`
 &nbsp;&nbsp;&nbsp;&nbsp;
-<img src="./public/DoA Logo.jpg" alt="Department of Architecture NUS" height="50">
+`<img src="./public/DoA Logo.jpg" alt="Department of Architecture NUS" height="50">`
 
 </div>
 
@@ -56,9 +56,11 @@ No coding required – build surveys through an intuitive admin panel with drag-
 ### 🔧 **Survey Capabilities**
 
 #### **Visual Perception Question Types**
+
 The platform offers 16 specialized question types designed specifically for streetscape perception research:
 
 **🖼️ Image-Based Questions** (Critical for Visual Assessment):
+
 - **Image Choice** (imagepicker) - Essential for comparing different streetscape designs or features
 - **Image Ranking** (imageranking) - Crucial for understanding preference hierarchies in urban environments
 - **Image Rating** (imagerating) - Quantifies perceived comfort, safety, or aesthetic appeal (1-5 scale)
@@ -67,6 +69,7 @@ The platform offers 16 specialized question types designed specifically for stre
 - **Image Display** (image) - Present reference images or context for streetscape scenarios
 
 **📝 Contextual Data Collection**:
+
 - **Text Input** (text) - Capture demographic data, location familiarity, or specific observations
 - **Text Multi-line** (comment) - Detailed qualitative feedback about streetscape experiences
 - **Text Single Choice** (radiogroup) - Standardized responses for background variables
@@ -79,6 +82,7 @@ The platform offers 16 specialized question types designed specifically for stre
 - **Text Instruction** (expression) - Provide context, definitions, or survey guidance
 
 #### **Research-Grade Features**
+
 - **📄 Multi-Page Surveys**: Structure complex perception studies with logical flow and progress tracking
 - **📱 Fully Responsive**: Ensure consistent data quality across devices - critical for field studies and diverse participant access
 - **🔄 Drag & Drop**: Rapidly prototype and iterate survey designs based on pilot testing feedback
@@ -91,6 +95,7 @@ The platform offers 16 specialized question types designed specifically for stre
 **Leverage GPT-4o to create and refine surveys in natural language:**
 
 #### **✨ Intelligent Survey Design**
+
 - **Natural Language Input**: Describe your survey goals in plain English or Chinese
 - **Context-Aware Generation**: AI understands the difference between demographic questions, visual perception assessments, and open-ended feedback
 - **Professional Structure**: Automatically organizes questions into logical pages with appropriate types
@@ -99,19 +104,21 @@ The platform offers 16 specialized question types designed specifically for stre
 
 The AI follows research best practices:
 
-| Survey Purpose | AI Chooses | Example |
-|---------------|------------|---------|
-| **Demographic Data** | Text-based questions | Age, gender, education - NO images needed |
-| **Visual Assessment** | Image-based questions | `imagepicker`, `imagerating`, `imageranking`, `imageboolean`, `imagematrix` |
-| **Streetscape Feedback** | Image display + text | Shows street image → then asks open-ended question |
+| Survey Purpose                 | AI Chooses            | Example                                                                               |
+| ------------------------------ | --------------------- | ------------------------------------------------------------------------------------- |
+| **Demographic Data**     | Text-based questions  | Age, gender, education - NO images needed                                             |
+| **Visual Assessment**    | Image-based questions | `imagepicker`, `imagerating`, `imageranking`, `imageboolean`, `imagematrix` |
+| **Streetscape Feedback** | Image display + text  | Shows street image → then asks open-ended question                                   |
 
 #### **🔄 Iterative Refinement**
+
 - **Generate**: "Create a 3-page thermal comfort survey with demographics, visual ratings, and preference ranking"
 - **Adjust**: "Add an imagepicker question for street type preference. Change all rating scales to 1-7."
 - **Preview**: Real-time preview with actual images from your dataset
 - **Iterate**: Keep refining until perfect
 
 #### **⚙️ Automatic Configuration**
+
 - **Image Questions**: Automatically configured with:
   - `imageSelectionMode: "huggingface_random"` - Random selection from your Hugging Face dataset
   - `randomImageSelection: true` - Fresh images for each participant
@@ -120,6 +127,7 @@ The AI follows research best practices:
 - **Consistent Format**: AI-generated surveys follow the same structure as manually created ones
 
 #### **💡 Example Prompts**
+
 ```
 Generate: "Create a streetscape perception survey with 3 pages: 
 1) Demographics (age, gender, city), 
@@ -144,6 +152,7 @@ safety rating. Change all imagerating scales to 1-7."
 - **Project-Specific Memory**: Each project maintains its own conversation history
 
 **Example Interaction:**
+
 ```
 You: "Create a thermal comfort survey"
 AI: [Thinking...] → [Generating survey...] → "Generated 3-page survey"
@@ -162,22 +171,24 @@ AI: [Adjusting survey...] → "Updated all rating scales to 1-7"
 The platform implements a three-layer memory system for smarter AI interactions:
 
 1. **Conversation History** (Per-Project)
+
    - Maintains full context of your survey design conversation
    - Each project has independent memory
    - Enables natural multi-turn refinement
-
 2. **Working Memory** (Per-Project)
+
    - Tracks survey goals and design decisions
    - Records iteration history
    - Helps AI maintain consistency across changes
-
 3. **Session Learning** (Cross-Project)
+
    - Learns your preferences over time
    - Tracks expertise level
    - Provides personalized recommendations
    - Adapts to your survey design patterns
 
 **Benefits:**
+
 - More accurate AI responses based on previous interactions
 - No need to repeat context in every message
 - Intelligent suggestions based on your project history
@@ -201,6 +212,7 @@ Every Generate, Adjust, and Revise operation follows a three-step thinking proce
 ```
 
 **Benefits:**
+
 - See exactly how AI thinks and plans
 - Better quality through structured thinking
 - Learn survey design best practices
@@ -221,12 +233,14 @@ After generating or adjusting a survey, 5 specialized AI agents automatically re
 **Customizable Agents (NEW 🎨)**: Fully customize review agents in AI Assistant Settings → Agents tab. Add domain-specific experts, edit agent expertise and focus areas, or remove agents you don't need. All changes auto-save and apply to future reviews.
 
 **Review Process:**
+
 1. Each agent reviews independently and provides ratings (1-10)
 2. Agents identify strengths, concerns, and suggestions
 3. If not approved (≥70%), survey-designer revises based on feedback
 4. Process repeats until approved or max rounds reached (configurable 1-10)
 
 **Configuration:**
+
 - Enable/disable in AI Assistant Settings
 - Choose mode: "1v1 Reviews" or "Group Discussion"
 - Set maximum review rounds (1-10, default: 3)
@@ -234,6 +248,7 @@ After generating or adjusting a survey, 5 specialized AI agents automatically re
 - All agent feedback appears in conversation history
 
 **Benefits:**
+
 - Automatic quality assurance from multiple expert perspectives
 - Iterative improvement without manual intervention
 - Transparent feedback visible in conversation
@@ -252,6 +267,7 @@ All system prompts (2000+ lines of instructions) are now viewable and editable:
 - **Export/Import**: Share prompt configurations
 
 **Available Prompts:**
+
 - Intent Detection (classify user requests)
 - Generate (create new surveys)
 - Adjust (modify existing surveys)
@@ -259,6 +275,7 @@ All system prompts (2000+ lines of instructions) are now viewable and editable:
 - Revision (multi-agent feedback)
 
 **Use Cases:**
+
 - Researchers can customize AI for specific domains
 - Test different prompt strategies
 - Add domain-specific knowledge
@@ -269,12 +286,14 @@ All system prompts (2000+ lines of instructions) are now viewable and editable:
 **AI automatically creates varied, engaging surveys:**
 
 Instead of repetitive question types, the AI now:
+
 - **Mixes image-based questions**: `imagepicker`, `imageranking`, `imagerating`, `imageboolean`, `imagematrix`
 - **Varies text questions**: `radiogroup`, `dropdown`, `text`, `comment`, `checkbox`, `ranking`, `rating`
 - **Creates balanced surveys**: Avoids overusing any single question type
 - **Follows research best practices**: Appropriate type for each research goal
 
 **Example Variety:**
+
 ```json
 Before (repetitive):
 - imagerating: comfort
@@ -290,6 +309,7 @@ After (diverse):
 ```
 
 #### **🔒 Data Privacy**
+
 - Your OpenAI API key is stored in browser session only (never saved to disk)
 - Survey configurations are processed locally - no data sent to external servers
 - Full control over your research data
@@ -306,17 +326,16 @@ Start with peer-reviewed survey designs from published research:
 
 <small>
 
-| Template | Description | Authors | Publication | Dataset |
-|----------|-------------|---------|-------------|---------|
-| **Thermal Comfort in Sight**<br/>`2025-thermal` | Thermal comfort assessment using SVI. 50+ validated questions. | Yang et al. (2025) | [Building and Environment](https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514) | ✅ `sijiey/Thermal-Affordance-Dataset` |
-| **SPECS**<br/>`2025-specs` | Street perception evaluation considering demographics and personality (1,000+ participants, 5 countries). | Quintana et al. (2025) | [arXiv](https://arxiv.org/abs/2505.12758) | 📖 [Wiki](https://github.com/matqr/specs/wiki) |
-| **Building Exterior Perception**<br/>`2025-building` | Evaluate human perception of building exteriors using ML techniques (250,000+ building images). | Liang et al. (2025) | [Building and Environment](https://doi.org/10.1016/j.buildenv.2024.111875) | 📖 - |
-| **Street Multi-Activity Potential**<br/>`2025-street` | Graph-based community detection to evaluate street multi-activity potential (SMAP). | Li et al. (2025) | [CEUS](https://www.sciencedirect.com/science/article/pii/S0198971525001036) | 📖 - |
-| **Effective Perception Survey**<br/>`2025-effective` | Comprehensive framework for image-based survey design in outdoor urban environments. | Gu et al. (2025) | [Landscape and Urban Planning](https://doi.org/10.1016/j.landurbplan.2025.105368) | 📖 - |
-
-</small>
+| Template                                                  | Description                                                                                               | Authors                | Publication                                                                                      | Dataset                                    |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| **Thermal Comfort in Sight** `2025-thermal`       | Thermal comfort assessment using SVI. 50+ validated questions.                                            | Yang et al. (2025)     | [Building and Environment](https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514) | ✅`sijiey/Thermal-Affordance-Dataset`    |
+| **SPECS** `2025-specs`                            | Street perception evaluation considering demographics and personality (1,000+ participants, 5 countries). | Quintana et al. (2025) | [arXiv](https://arxiv.org/abs/2505.12758)                                                           | 📖[Wiki](https://github.com/matqr/specs/wiki) |
+| **Building Exterior Perception** `2024-building`  | Evaluate human perception of building exteriors using ML techniques (250,000+ building images).           | Liang et al. (2024)    | [Building and Environment](https://doi.org/10.1016/j.buildenv.2024.111875)                          | 📖 -                                       |
+| **Street Multi-Activity Potential** `2025-street` | Graph-based community detection to evaluate street multi-activity potential (SMAP).                       | Li et al. (2025)       | [CEUS](https://www.sciencedirect.com/science/article/pii/S0198971525001036)                         | 📖 -                                       |
+| **Effective Perception Survey** `2025-effective`  | Comprehensive framework for image-based survey design in outdoor urban environments.                      | Gu et al. (2025)       | [Landscape and Urban Planning](https://doi.org/10.1016/j.landurbplan.2025.105368)                   | 📖 -                                       |
 
 **How to Use Templates:**
+
 1. Open Admin Panel → Project Sidebar
 2. Click **"Load Template"** button
 3. Select a template from the list
@@ -352,6 +371,7 @@ Build new studies 10x faster:
 *Perfect for replication studies, cross-cultural comparisons, or adapting validated instruments to new research questions.*
 
 ### 💾 **Data & Deployment**
+
 - **🤗 Hugging Face**: Host your image datasets
 - **☁️ Supabase**: Store images and survey responses
 - **🚀 Vercel**: Deploy your survey website with one click
@@ -363,17 +383,20 @@ Build new studies 10x faster:
 ### Prerequisites
 
 **Required:**
+
 - **Hugging Face Account** (https://huggingface.co) for your image dataset
 - **Supabase Account** (https://supabase.com) for cloud storage of survey images and survey responses
 - **Vercel Account** (https://vercel.com) for deploying your survey website
 
 **Optional (for AI features):**
+
 - **OpenAI API Key** (https://platform.openai.com/api-keys) for AI-powered survey generation
   - Uses GPT-4o model
   - Pay-as-you-go pricing (~$0.01-0.05 per survey generation)
   - Stored in browser session only (never saved to disk)
 
 ### Installation
+
 ```bash
 # Clone the repository
 git clone https://github.com/Sijie-Yang/Streetscape-Perception-Survey.git
@@ -396,11 +419,11 @@ npm run dev:safe
 Once started, open your browser:
 
 - **🎨 Admin Panel**: http://localhost:3000/admin
+
   - Create and manage surveys
   - Configure image datasets (Hugging Face) and survey backends (Supabase)
   - Preview surveys in real-time
   - **🟢 Real-time Backend Status Monitor** - displays server status in header with auto-restart capability
-  
 - **📋 Live Survey View**: http://localhost:3000/survey
 
 ### Backend Status Monitoring
@@ -416,33 +439,34 @@ The admin panel includes a **real-time backend status monitor** in the header:
 ### Create Your First Survey (3 minutes)
 
 1. **Load a Template** or **Create New Project**
+
    - Click "Load Template" → Select "Thermal Comfort in Sight" (Yang et al. 2025)
    - Or click "New Project" for a blank survey
-
 2. **Step 1 - Image Dataset**
+
    - Upload your images to Hugging Face as a Dataset, then fill in the dataset name in Admin Panel (e.g., `sijiey/Thermal-Affordance-Dataset`)
    - Configure your Supabase account credentials in the connection settings
    - After both steps are confirmed successful, click "Preload Images" to automatically transfer images from Hugging Face to Supabase storage and save stable URLs for your survey project
    - Click "Next: Survey Builder →"
-
 3. **Step 2 - Survey Builder**
+
    - Fill in survey basic information
    - Set up survey display settings
    - Add pages and questions with drag-and-drop
    - Configure question types (image choice, image rating, text, etc.)
    - Click "Next: Server Setup →"
-
 4. **Step 3 - Server Setup**
+
    - Test Supabase database connection
    - Create response table in supabase
    - Click "Complete Setup" → auto-navigates to Step 4
-
 5. **Step 4 - Website Setup**
+
    - Generate deployment files and automatically test locally
    - Auto-upload to GitHub repository
    - Manually deploy to Vercel (requires manual action)
-
 6. **Save & Preview**
+
    - Click 💾 "Save" in the top bar (turns yellow when unsaved)
    - Click 👁️ "Preview" to test your survey
 
@@ -451,30 +475,31 @@ The admin panel includes a **real-time backend status monitor** in the header:
 **Skip manual setup - let AI build your survey in seconds:**
 
 1. **Setup Your Project**
+
    - Create new project and complete Step 1 (Image Dataset configuration)
    - Navigate to Step 2 (Survey Builder)
-
 2. **Open AI Chat Assistant**
+
    - Click the AI chat icon at the top of Survey Builder
    - Enter your OpenAI API key in Settings → Click "Validate"
    - Enable "Contextual Engineering" for smarter interactions (recommended)
-
 3. **Chat with AI (Natural Conversation)**
+
    - Just type what you want - AI automatically understands:
      ```
      Example: "Create a thermal comfort survey with demographics, 
      visual ratings, and preference ranking"
-     
+
      AI: [Thinking...] → [Generating survey...] → "Generated 3-page survey"
-     
+
      You: "Add more variety - include imagepicker and imageboolean"
-     
+
      AI: [Adjusting survey...] → "Added diverse question types"
      ```
    - Watch the status change in real-time: "Thinking..." → "Generating..." → "Adjusting..."
    - AI remembers your conversation context (per-project memory)
-
 4. **Smart Features**
+
    - ✅ **Intent Detection**: No need to say "Generate" or "Adjust" - AI figures it out
    - ✅ **Conversation History**: Full context from previous messages
    - ✅ **Question Type Diversity**: AI automatically mixes different types
@@ -482,6 +507,7 @@ The admin panel includes a **real-time backend status monitor** in the header:
    - ✅ **Image Dataset Integration**: Automatically uses your configured dataset
 
 **💡 When to Use AI vs Manual:**
+
 - **AI**: Quick prototyping, exploring designs, getting started, iterative refinement
 - **Manual**: Precise control, complex logic, specific customizations
 - **Hybrid**: Generate with AI, then fine-tune manually (recommended)
@@ -502,6 +528,7 @@ The admin panel includes a **real-time backend status monitor** in the header:
 ## 📊 Survey Data Collection
 
 ### **View Responses:**
+
 1. Supabase Dashboard → Table Editor
 2. Export as CSV or JSON
 3. Real-time monitoring
@@ -536,6 +563,7 @@ This platform was developed for the Thermal Affordance research:
 **Problem**: Red "Backend Offline" status in admin panel header
 
 **Solutions**:
+
 ```bash
 # Method 1: Use safe mode with auto-restart (recommended)
 npm run dev:safe
@@ -552,6 +580,7 @@ node server.js
 ```
 
 **Features**:
+
 - ✅ Real-time status monitoring (checks every 5 seconds)
 - ✅ Visual alerts with pulsing animation when offline
 - ✅ One-click restart button in admin panel
@@ -565,6 +594,7 @@ node server.js
 **Problem**: Images don't display in survey or preview
 
 **Solutions**:
+
 ```javascript
 1. Check Supabase bucket is public
    - Go to Supabase Storage → street-images → Settings
@@ -588,6 +618,7 @@ node server.js
 **Problem**: "Save" button doesn't work, or projects disappear after refresh
 
 **Solutions**:
+
 ```bash
 1. Ensure backend server is running
    ✅ Should see: "🚀 File management server running on http://localhost:3001"
@@ -611,6 +642,7 @@ node server.js
 **Problem**: Theme selection doesn't change colors
 
 **Solutions**:
+
 ```javascript
 1. Hard refresh browser
    - Windows/Linux: Ctrl + Shift + R
@@ -628,6 +660,7 @@ node server.js
 **Problem**: "Connection failed" when testing Supabase
 
 **Solutions**:
+
 ```javascript
 1. Verify credentials
    - URL format: https://xxxxx.supabase.co (not ...supabase.com)
@@ -651,6 +684,7 @@ node server.js
 **Problem**: `/survey?project=xxx` shows "Project not found"
 
 **Solutions**:
+
 ```javascript
 1. Check project ID is correct
    - Admin panel → Project list → Copy exact ID
@@ -669,6 +703,7 @@ node server.js
 **Problem**: `npm run build` fails with errors
 
 **Solutions**:
+
 ```bash
 1. Clear npm cache and node_modules
    rm -rf node_modules package-lock.json
@@ -691,6 +726,7 @@ node server.js
 **Problem**: Survey looks broken on mobile devices
 
 **Solutions**:
+
 ```javascript
 1. Check viewport meta tag (should be in public/index.html)
    <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -719,6 +755,7 @@ We welcome contributions from the community! Whether it's bug fixes, new feature
 ### How to Contribute
 
 #### 1. **Report Bugs**
+
 - Check [existing issues](https://github.com/Sijie-Yang/Streetscape-Perception-Survey/issues) first
 - Create a new issue with:
   - Clear title and description
@@ -728,6 +765,7 @@ We welcome contributions from the community! Whether it's bug fixes, new feature
   - Browser/OS version
 
 #### 2. **Suggest Features**
+
 - Open a [discussion](https://github.com/Sijie-Yang/Streetscape-Perception-Survey/discussions) or issue
 - Explain the use case and benefits
 - Provide examples or mockups if possible
@@ -815,14 +853,17 @@ npx source-map-explorer 'build/static/js/*.js'
 This work is licensed under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
 
 **You are free to:**
+
 - ✅ Share — copy and redistribute the material
 - ✅ Adapt — remix, transform, and build upon the material
 - ✅ Commercial use allowed
 
 **Under the following terms:**
+
 - 📝 **Attribution** — You must give appropriate credit and cite the original paper
 
 **How to cite:**
+
 ```bibtex
 @article{yang2025thermal,
   title={Thermal comfort in sight: Thermal affordance and its visual assessment for sustainable streetscape design},
@@ -855,4 +896,3 @@ This work is licensed under a [Creative Commons Attribution 4.0 International Li
 - **Hugging Face**: Dataset hosting and CDN
 - **Vercel**: Serverless deployment platform
 - **localStorage/sessionStorage**: Client-side persistence
-

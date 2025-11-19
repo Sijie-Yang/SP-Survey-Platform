@@ -1216,13 +1216,16 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
   };
   
   try {
-    const { surveyConfig, apiKey, mode = '1v1', maxRounds: maxRoundsParam, customAgents: customAgentsParam } = req.query;
+    const { surveyConfig, apiKey, mode = '1v1', maxRounds: maxRoundsParam, customAgents: customAgentsParam, userRequest, researchContext: researchContextParam } = req.query;
     
     if (!apiKey || !surveyConfig) {
       sendEvent('error', { message: 'Missing required parameters' });
       res.end();
       return;
     }
+    
+    // Parse research context if provided
+    const researchContext = researchContextParam ? JSON.parse(researchContextParam) : null;
     
     // Use custom maxRounds or default to REVIEW_CONFIG.maxRounds
     const maxRounds = maxRoundsParam ? parseInt(maxRoundsParam, 10) : REVIEW_CONFIG.maxRounds;
@@ -1236,6 +1239,9 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
     const reviewHistory = [];
     let currentRound = 1;
     let currentConfig = config;
+    
+    // Decode and store user's original request for reference throughout review rounds
+    const userOriginalRequest = userRequest ? decodeURIComponent(userRequest) : null;
     
     sendEvent('start', { totalAgents: agentIds.length, mode, maxRounds });
     
@@ -1252,8 +1258,8 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
         try {
           const systemPrompt = getAgentSystemPrompt(agentId, currentConfig, mode === 'group' ? 'group' : 'individual', agentsConfig);
           const userPrompt = mode === '1v1' 
-            ? generate1v1ReviewPrompt(agentId, currentConfig, currentRound, agentsConfig)
-            : generateGroupDiscussionPrompt(currentConfig, roundReviews, currentRound, agentsConfig);
+            ? generate1v1ReviewPrompt(agentId, currentConfig, currentRound, agentsConfig, userOriginalRequest, researchContext)
+            : generateGroupDiscussionPrompt(currentConfig, roundReviews, currentRound, agentsConfig, userOriginalRequest, researchContext);
           
           const completion = await openai.chat.completions.create({
             model: "gpt-4o",
@@ -1375,7 +1381,7 @@ Plan specific changes:
         
         // Step 3: Execute revision
         console.log('🔨 Step 3: Executing revision...');
-        const revisionPrompt = generateRevisionPrompt(consolidated, roundReviews, agentsConfig);
+        const revisionPrompt = generateRevisionPrompt(consolidated, roundReviews, agentsConfig, userOriginalRequest, researchContext);
         const revStep3Prompt = `Based on this analysis and plan:
 
 FEEDBACK ANALYSIS:
@@ -1466,7 +1472,7 @@ Now revise the survey configuration.`;
 // Intelligent routing for chat-style interaction
 app.post('/api/openai/chat', async (req, res) => {
   try {
-    const { message, currentConfig, conversationHistory, apiKey, customPrompts } = req.body;
+    const { message, currentConfig, conversationHistory, apiKey, customPrompts, researchContext } = req.body;
     
     if (!apiKey || !message) {
       return res.status(400).json({ 
@@ -1480,6 +1486,23 @@ app.post('/api/openai/chat', async (req, res) => {
     
     // Merge custom prompts with defaults
     const prompts = customPrompts ? { ...defaultPrompts, ...customPrompts } : defaultPrompts;
+    
+    // Build research context section if available
+    let researchContextSection = '';
+    if (researchContext && (researchContext.topic || researchContext.requirements || researchContext.scenario)) {
+      researchContextSection = '\n\n**RESEARCH CONTEXT:**\n';
+      if (researchContext.topic) {
+        researchContextSection += `Research Topic: ${researchContext.topic}\n`;
+      }
+      if (researchContext.requirements) {
+        researchContextSection += `Research Requirements: ${researchContext.requirements}\n`;
+      }
+      if (researchContext.scenario) {
+        researchContextSection += `Survey Scenario Type: ${researchContext.scenario}\n`;
+      }
+      researchContextSection += '\n**CRITICAL: The survey MUST align with this research context!**\n';
+      console.log('🔬 Research context will be included:', researchContext);
+    }
     
     const openai = new OpenAI({ apiKey });
     
@@ -1504,6 +1527,75 @@ app.post('/api/openai/chat', async (req, res) => {
     const intent = intentCompletion.choices[0].message.content.trim().toLowerCase();
     console.log(`🎯 Detected intent: ${intent}`);
     
+    // Step 1.5: Extract/Update Research Context from user message
+    console.log('🔬 Extracting research context...');
+    let updatedResearchContext = researchContext || {};
+    
+    try {
+      const extractPrompt = `Analyze this user message and extract research context information:
+
+User Message: "${message}"
+${researchContext && researchContext.topic ? `\nCurrent Research Topic: ${researchContext.topic}` : ''}
+${researchContext && researchContext.requirements ? `\nCurrent Research Requirements: ${researchContext.requirements}` : ''}
+${researchContext && researchContext.scenario ? `\nCurrent Survey Scenario: ${researchContext.scenario}` : ''}
+
+Extract or update:
+1. Research Topic (main research subject, 1 sentence)
+2. Research Requirements (key requirements for survey design, 1-2 sentences)
+3. Survey Scenario (one of: general purpose, street view, building facade, window view, aerial view, or identify a new scenario type)
+
+Return JSON:
+{
+  "topic": "...",
+  "requirements": "...",
+  "scenario": "...",
+  "hasResearchInfo": true/false
+}
+
+If the user message doesn't contain research information, set hasResearchInfo to false and keep existing values.`;
+
+      const extractCompletion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are an expert at extracting research context from user requests. Be concise and accurate." },
+          { role: "user", content: extractPrompt }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+        max_tokens: 300
+      });
+      
+      const extractedContext = JSON.parse(extractCompletion.choices[0].message.content.trim());
+      
+      if (extractedContext.hasResearchInfo) {
+        // Update research context
+        updatedResearchContext = {
+          topic: extractedContext.topic || updatedResearchContext.topic || '',
+          requirements: extractedContext.requirements || updatedResearchContext.requirements || '',
+          scenario: extractedContext.scenario || updatedResearchContext.scenario || 'street view',
+          customScenarios: updatedResearchContext.customScenarios || []
+        };
+        console.log('✅ Research context extracted:', updatedResearchContext);
+        
+        // Rebuild research context section with updated info
+        researchContextSection = '\n\n**RESEARCH CONTEXT:**\n';
+        if (updatedResearchContext.topic) {
+          researchContextSection += `Research Topic: ${updatedResearchContext.topic}\n`;
+        }
+        if (updatedResearchContext.requirements) {
+          researchContextSection += `Research Requirements: ${updatedResearchContext.requirements}\n`;
+        }
+        if (updatedResearchContext.scenario) {
+          researchContextSection += `Survey Scenario Type: ${updatedResearchContext.scenario}\n`;
+        }
+        researchContextSection += '\n**CRITICAL: The survey MUST align with this research context!**\n';
+      } else {
+        console.log('ℹ️  No new research information in this message');
+      }
+    } catch (extractError) {
+      console.warn('⚠️  Research context extraction failed:', extractError.message);
+    }
+    
     // Step 2: Route based on intent
     if (intent === 'generate') {
       // Generate new survey with Chain of Thoughts (3 steps)
@@ -1523,7 +1615,7 @@ Provide a brief analysis (2-3 sentences for each point).`;
       const step1Completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
-          { role: "system", content: "You are an expert survey researcher. Analyze the research goals." },
+          { role: "system", content: prompts.generate },
           { role: "user", content: step1Prompt }
         ],
         temperature: 0.7,
@@ -1550,7 +1642,7 @@ Provide a structured plan with page-by-page breakdown.`;
       const step2Completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
-          { role: "system", content: "You are an expert survey designer. Plan the optimal survey structure." },
+          { role: "system", content: prompts.generate },
           { role: "user", content: step2Prompt }
         ],
         temperature: 0.7,
@@ -1575,7 +1667,7 @@ ${message}
 
 Now generate the complete survey configuration following all the rules and examples provided.`;
 
-      const systemPrompt = prompts.generate;
+      const systemPrompt = prompts.generate + researchContextSection;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
@@ -1608,6 +1700,7 @@ Now generate the complete survey configuration following all the rules and examp
         intent: 'generate',
         surveyConfig,
         message: `Generated new survey with ${surveyConfig.pages?.length || 0} pages`,
+        researchContext: updatedResearchContext,
         chainOfThoughts: {
           step1_research: step1Analysis,
           step2_structure: step2Plan,
@@ -1648,7 +1741,7 @@ Provide a brief analysis.`;
       const step1Completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
-          { role: "system", content: "You are an expert survey consultant. Understand the adjustment requirements." },
+          { role: "system", content: prompts.adjust },
           { role: "user", content: step1Prompt }
         ],
         temperature: 0.7,
@@ -1677,7 +1770,7 @@ Provide a detailed adjustment plan.`;
       const step2Completion = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: [
-          { role: "system", content: "You are an expert survey designer. Plan the optimal adjustments." },
+          { role: "system", content: prompts.adjust },
           { role: "user", content: step2Prompt }
         ],
         temperature: 0.7,
@@ -1702,7 +1795,7 @@ ${message}
 
 Now adjust the survey configuration following all the rules and maintaining consistency.`;
 
-      const systemPrompt = prompts.adjust;
+      const systemPrompt = prompts.adjust + researchContextSection;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
@@ -1736,6 +1829,7 @@ Now adjust the survey configuration following all the rules and maintaining cons
         intent: 'adjust',
         surveyConfig,
         message: `Adjusted survey based on your request`,
+        researchContext: updatedResearchContext,
         chainOfThoughts: {
           step1_understanding: step1Analysis,
           step2_planning: step2Plan,
@@ -1745,7 +1839,7 @@ Now adjust the survey configuration following all the rules and maintaining cons
       
     } else {
       // Answer question
-      const systemPrompt = prompts.question;
+      const systemPrompt = prompts.question + researchContextSection;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
@@ -1763,7 +1857,8 @@ Now adjust the survey configuration following all the rules and maintaining cons
       res.json({ 
         success: true, 
         intent: 'question',
-        message: answer
+        message: answer,
+        researchContext: updatedResearchContext
       });
     }
     

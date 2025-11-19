@@ -93,32 +93,91 @@ export default function ChatAssistant({
   const [workingMemoryData, setWorkingMemoryData] = React.useState(null);
   const [sessionLearningData, setSessionLearningData] = React.useState(null);
   
-  // States for managing prompts
+  // States for managing prompts (per project)
   const [prompts, setPrompts] = React.useState(() => {
-    const stored = localStorage.getItem('customPrompts');
+    if (!currentProject?.id) return PROMPTS;
+    const stored = localStorage.getItem(`customPrompts_${currentProject.id}`);
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
         // Validate that stored prompts have all required keys and non-empty values
         if (parsed.generate && parsed.adjust && parsed.question && parsed.intentDetection &&
             parsed.generate.length > 200 && parsed.adjust.length > 200) {
-          console.log('✅ Loaded custom prompts from localStorage');
+          console.log('✅ Loaded custom prompts for project:', currentProject.id);
           return parsed;
         } else {
           console.log('⚠️ Stored prompts incomplete, using defaults');
-          localStorage.removeItem('customPrompts');
+          localStorage.removeItem(`customPrompts_${currentProject.id}`);
           return PROMPTS;
         }
       } catch (e) {
         console.log('⚠️ Failed to parse stored prompts, using defaults');
-        localStorage.removeItem('customPrompts');
+        localStorage.removeItem(`customPrompts_${currentProject.id}`);
         return PROMPTS;
       }
     }
-    console.log('✅ Using default prompts');
+    console.log('✅ Using default prompts for project:', currentProject.id);
     return PROMPTS;
   });
   const [promptsModified, setPromptsModified] = React.useState(false);
+  
+  // States for Research Context (per project)
+  const [researchContext, setResearchContext] = React.useState(() => {
+    if (!currentProject?.id) {
+      return {
+        topic: '',
+        requirements: '',
+        scenario: 'street view',
+        customScenarios: []
+      };
+    }
+    const stored = localStorage.getItem(`researchContext_${currentProject.id}`);
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (e) {
+        return {
+          topic: '',
+          requirements: '',
+          scenario: 'street view',
+          customScenarios: []
+        };
+      }
+    }
+    return {
+      topic: '',
+      requirements: '',
+      scenario: 'street view',
+      customScenarios: []
+    };
+  });
+  const [newScenario, setNewScenario] = React.useState('');
+  
+  // Flag to prevent saving during project switch
+  const isLoadingProjectData = React.useRef(false);
+  
+  // Predefined scenario options
+  const predefinedScenarios = [
+    'general purpose',
+    'street view',
+    'building facade',
+    'window view',
+    'aerial view'
+  ];
+
+  // Listen for research context updates from AI
+  React.useEffect(() => {
+    const handleResearchContextUpdate = (event) => {
+      console.log('🔬 Research context updated from AI:', event.detail);
+      setResearchContext(event.detail);
+    };
+
+    window.addEventListener('researchContextUpdated', handleResearchContextUpdate);
+    
+    return () => {
+      window.removeEventListener('researchContextUpdated', handleResearchContextUpdate);
+    };
+  }, []);
   
   // Notify parent when prompts change
   React.useEffect(() => {
@@ -133,6 +192,69 @@ export default function ChatAssistant({
       intentDetection: prompts.intentDetection?.length || 0
     });
   }, [prompts, onPromptsChange]);
+  
+  // Save research context to localStorage when it changes (per project)
+  React.useEffect(() => {
+    if (currentProject?.id && !isLoadingProjectData.current) {
+      localStorage.setItem(`researchContext_${currentProject.id}`, JSON.stringify(researchContext));
+      console.log('💾 Research context saved for project:', currentProject.id, researchContext);
+    }
+  }, [researchContext, currentProject?.id]);
+
+  // Reload settings when project changes
+  React.useEffect(() => {
+    if (currentProject?.id) {
+      isLoadingProjectData.current = true;
+      
+      // Load prompts for this project
+      const storedPrompts = localStorage.getItem(`customPrompts_${currentProject.id}`);
+      if (storedPrompts) {
+        try {
+          const parsed = JSON.parse(storedPrompts);
+          if (parsed.generate && parsed.adjust && parsed.question && parsed.intentDetection) {
+            setPrompts(parsed);
+            console.log('✅ Loaded prompts for project:', currentProject.id);
+          } else {
+            setPrompts(PROMPTS);
+          }
+        } catch (e) {
+          setPrompts(PROMPTS);
+        }
+      } else {
+        setPrompts(PROMPTS);
+      }
+
+      // Load research context for this project
+      const storedResearch = localStorage.getItem(`researchContext_${currentProject.id}`);
+      if (storedResearch) {
+        try {
+          setResearchContext(JSON.parse(storedResearch));
+          console.log('✅ Loaded research context for project:', currentProject.id);
+        } catch (e) {
+          setResearchContext({
+            topic: '',
+            requirements: '',
+            scenario: 'street view',
+            customScenarios: []
+          });
+        }
+      } else {
+        setResearchContext({
+          topic: '',
+          requirements: '',
+          scenario: 'street view',
+          customScenarios: []
+        });
+      }
+      
+      setPromptsModified(false);
+      
+      // Re-enable saving after a brief delay to ensure all state updates complete
+      setTimeout(() => {
+        isLoadingProjectData.current = false;
+      }, 100);
+    }
+  }, [currentProject?.id]);
   
   // Load data when settings dialog opens
   React.useEffect(() => {
@@ -169,15 +291,21 @@ export default function ChatAssistant({
   };
   
   const handleSavePrompts = () => {
-    localStorage.setItem('customPrompts', JSON.stringify(prompts));
-    setPromptsModified(false);
-    alert('✅ Prompts saved successfully!');
+    if (currentProject?.id) {
+      localStorage.setItem(`customPrompts_${currentProject.id}`, JSON.stringify(prompts));
+      setPromptsModified(false);
+      alert('✅ Prompts saved successfully for this project!');
+    } else {
+      alert('⚠️ No project selected');
+    }
   };
   
   const handleResetPrompts = () => {
-    if (window.confirm('Are you sure you want to reset all prompts to default values?')) {
+    if (window.confirm('Are you sure you want to reset all prompts to default values for this project?')) {
       setPrompts(PROMPTS);
-      localStorage.removeItem('customPrompts');
+      if (currentProject?.id) {
+        localStorage.removeItem(`customPrompts_${currentProject.id}`);
+      }
       setPromptsModified(false);
       alert('✅ Prompts reset to defaults!');
     }
@@ -490,6 +618,7 @@ export default function ChatAssistant({
             sx={{ mt: 2, borderBottom: 1, borderColor: 'divider' }}
           >
             <Tab icon={<Settings fontSize="small" />} label="Settings" iconPosition="start" />
+            <Tab icon={<TipsAndUpdates fontSize="small" />} label="Research" iconPosition="start" />
             <Tab icon={<SmartToy fontSize="small" />} label="Agents" iconPosition="start" />
             <Tab icon={<Code fontSize="small" />} label="Prompts" iconPosition="start" />
             <Tab icon={<Chat fontSize="small" />} label="Conversation" iconPosition="start" />
@@ -724,8 +853,117 @@ export default function ChatAssistant({
             </Box>
           )}
           
-          {/* Tab 1: Agents */}
+          {/* Tab 1: Research Context */}
           {activeTab === 1 && (
+            <Box>
+              <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <TipsAndUpdates />
+                Research Context
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Define your research topic and requirements to keep AI generation aligned with your goals.
+              </Typography>
+              
+              {/* Research Topic */}
+              <TextField
+                fullWidth
+                label="Research Topic"
+                placeholder="e.g., Thermal comfort in urban streetscapes"
+                value={researchContext.topic}
+                onChange={(e) => setResearchContext({ ...researchContext, topic: e.target.value })}
+                sx={{ mb: 3 }}
+                helperText="A brief description of your main research topic"
+              />
+              
+              {/* Research Requirements */}
+              <TextField
+                fullWidth
+                multiline
+                rows={4}
+                label="Research Requirements for Survey Design"
+                placeholder="e.g., Survey should focus on people's thermal perception of street environments, including subjective thermal comfort ratings, preference assessments, and demographic information."
+                value={researchContext.requirements}
+                onChange={(e) => setResearchContext({ ...researchContext, requirements: e.target.value })}
+                sx={{ mb: 3 }}
+                helperText="Detailed requirements and objectives for your survey design"
+              />
+              
+              {/* Survey Scenario */}
+              <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
+                Survey Scenario Type
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Select the type of visual content your survey will focus on
+              </Typography>
+              
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                {[...predefinedScenarios, ...researchContext.customScenarios].map((scenario) => (
+                  <Chip
+                    key={scenario}
+                    label={scenario}
+                    onClick={() => setResearchContext({ ...researchContext, scenario })}
+                    color={researchContext.scenario === scenario ? 'primary' : 'default'}
+                    variant={researchContext.scenario === scenario ? 'filled' : 'outlined'}
+                    onDelete={
+                      researchContext.customScenarios.includes(scenario)
+                        ? () => setResearchContext({
+                            ...researchContext,
+                            customScenarios: researchContext.customScenarios.filter(s => s !== scenario),
+                            scenario: researchContext.scenario === scenario ? 'street view' : researchContext.scenario
+                          })
+                        : undefined
+                    }
+                  />
+                ))}
+              </Box>
+              
+              {/* Add Custom Scenario */}
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <TextField
+                  size="small"
+                  placeholder="Add custom scenario..."
+                  value={newScenario}
+                  onChange={(e) => setNewScenario(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && newScenario.trim()) {
+                      if (![...predefinedScenarios, ...researchContext.customScenarios].includes(newScenario.trim().toLowerCase())) {
+                        setResearchContext({
+                          ...researchContext,
+                          customScenarios: [...researchContext.customScenarios, newScenario.trim().toLowerCase()]
+                        });
+                        setNewScenario('');
+                      }
+                    }
+                  }}
+                  sx={{ flexGrow: 1 }}
+                />
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    if (newScenario.trim() && ![...predefinedScenarios, ...researchContext.customScenarios].includes(newScenario.trim().toLowerCase())) {
+                      setResearchContext({
+                        ...researchContext,
+                        customScenarios: [...researchContext.customScenarios, newScenario.trim().toLowerCase()]
+                      });
+                      setNewScenario('');
+                    }
+                  }}
+                  disabled={!newScenario.trim()}
+                >
+                  Add
+                </Button>
+              </Box>
+              
+              <Alert severity="info" sx={{ mt: 3 }}>
+                <Typography variant="body2">
+                  💡 This information will be included in all AI operations (generate, adjust, revision, and review) to ensure consistency with your research goals.
+                </Typography>
+              </Alert>
+            </Box>
+          )}
+          
+          {/* Tab 2: Agents */}
+          {activeTab === 2 && (
             <Box>
               <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                 <SmartToy />
@@ -734,12 +972,12 @@ export default function ChatAssistant({
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 Customize the AI expert agents that review your surveys. Add, edit, or remove agents to fit your specific needs.
               </Typography>
-              <AgentsEditor />
+              <AgentsEditor currentProject={currentProject} />
             </Box>
           )}
           
-          {/* Tab 2: Prompts */}
-          {activeTab === 2 && (
+          {/* Tab 3: Prompts */}
+          {activeTab === 3 && (
             <Box>
               <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
                 <Alert severity="info" sx={{ flex: 1 }}>
@@ -846,8 +1084,8 @@ export default function ChatAssistant({
             </Box>
           )}
           
-          {/* Tab 3: Conversation History */}
-          {activeTab === 3 && (
+          {/* Tab 4: Conversation History */}
+          {activeTab === 4 && (
             <Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" fontWeight={600}>
@@ -906,8 +1144,8 @@ export default function ChatAssistant({
             </Box>
           )}
           
-          {/* Tab 4: Working Memory */}
-          {activeTab === 4 && (
+          {/* Tab 5: Working Memory */}
+          {activeTab === 5 && (
             <Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" fontWeight={600}>
@@ -962,8 +1200,8 @@ export default function ChatAssistant({
             </Box>
           )}
           
-          {/* Tab 5: Session Learning */}
-          {activeTab === 5 && (
+          {/* Tab 6: Session Learning */}
+          {activeTab === 6 && (
             <Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="subtitle1" fontWeight={600}>
