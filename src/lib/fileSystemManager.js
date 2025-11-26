@@ -333,7 +333,24 @@ export const saveProjectAsTemplate = async (project, surveyConfig) => {
     // Generate template ID: year + first word of name (lowercase)
     const year = project.year || new Date().getFullYear().toString();
     const firstWord = project.name.trim().split(/\s+/)[0].toLowerCase();
-    const templateId = `${year}-${firstWord}`;
+    let baseTemplateId = `${year}-${firstWord}`;
+    
+    // Check for duplicate IDs and increment if necessary
+    const existingTemplates = await loadTemplatesFromFiles();
+    const existingIds = existingTemplates.map(t => t.id);
+    
+    let templateId = baseTemplateId;
+    let counter = 1;
+    
+    // If ID exists, append incrementing number
+    while (existingIds.includes(templateId)) {
+      templateId = `${baseTemplateId}-${counter}`;
+      counter++;
+    }
+    
+    if (templateId !== baseTemplateId) {
+      console.log(`⚠️ Template ID "${baseTemplateId}" already exists, using "${templateId}" instead`);
+    }
     
     console.log('🧹 Cleaning project data for template creation...');
     
