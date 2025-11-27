@@ -702,12 +702,16 @@
                 let templateFiles = [];
                 
                 // Method 1: Use GitHub API to dynamically list all template files (public API, no token needed)
+                // Add timestamp to force fresh data on every load
                 try {
-                    const githubApiUrl = 'https://api.github.com/repos/Sijie-Yang/SP-Survey/contents/public/project_templates?ref=main';
+                    const timestamp = Date.now();
+                    const githubApiUrl = `https://api.github.com/repos/Sijie-Yang/SP-Survey/contents/public/project_templates?ref=main&_=${timestamp}`;
                     const response = await fetch(githubApiUrl, {
-                        cache: 'no-cache',
+                        cache: 'no-store',
                         headers: {
-                            'Accept': 'application/vnd.github.v3+json'
+                            'Accept': 'application/vnd.github.v3+json',
+                            'Cache-Control': 'no-cache, no-store, must-revalidate',
+                            'Pragma': 'no-cache'
                         }
                     });
                     if (response.ok) {
@@ -787,10 +791,15 @@
                         let template = null;
                         for (const path of paths) {
                             try {
-                                // Add cache busting for template files
-                                const cacheBuster = path.includes('raw.githubusercontent.com') ? `?t=${Date.now()}` : '';
+                                // Add cache busting for template files - use unique timestamp per file
+                                const timestamp = Date.now() + Math.random();
+                                const cacheBuster = path.includes('raw.githubusercontent.com') ? `?t=${timestamp}` : `?t=${timestamp}`;
                                 const response = await fetch(path + cacheBuster, {
-                                    cache: 'no-cache'
+                                    cache: 'no-store',
+                                    headers: {
+                                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                                        'Pragma': 'no-cache'
+                                    }
                                 });
                                 if (response.ok) {
                                     template = await response.json();
@@ -1284,8 +1293,24 @@
             }
         }
         
-        // Load templates when page loads
-        loadTemplates();
+        // Load templates when page loads - force fresh data every time
+        // Use both DOMContentLoaded and window.onload to ensure it runs
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                loadTemplates();
+            });
+        } else {
+            // DOM already loaded, load immediately
+            loadTemplates();
+        }
+        
+        // Also reload on page visibility change (when user switches back to tab)
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                // Reload templates when page becomes visible again
+                loadTemplates();
+            }
+        });
     </script>
 </body>
 </html>
