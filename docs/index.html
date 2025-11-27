@@ -566,29 +566,6 @@
             return match ? match[1] : null;
         }
         
-        // Helper function to get publication name from website URL
-        function getPublicationName(website) {
-            if (!website) return null;
-            
-            // Extract domain or publication name from URL
-            try {
-                const url = new URL(website);
-                const hostname = url.hostname;
-                
-                if (hostname.includes('sciencedirect.com')) return 'Building and Environment';
-                if (hostname.includes('nature.com')) return 'Nature Cities';
-                if (hostname.includes('doi.org')) {
-                    // Try to extract from path
-                    if (url.pathname.includes('landurbplan')) return 'Landscape and Urban Planning';
-                    if (url.pathname.includes('buildenv')) return 'Building and Environment';
-                    if (url.pathname.includes('CEUS') || url.pathname.includes('01989715')) return 'CEUS';
-                }
-                
-                return null;
-            } catch (e) {
-                return null;
-            }
-        }
         
         let generatedTemplate = null;
         let currentMode = null; // null, 'form', or 'upload'
@@ -917,7 +894,6 @@
                                 const badgeText = isAI ? 'AI Generated' : (template.category || 'Academic Research');
                                 
                                 const datasetName = extractDatasetName(template.huggingfaceDataset);
-                                const publicationName = getPublicationName(template.website);
                                 
                                 return `
                                     <tr>
@@ -929,7 +905,7 @@
                                         <td><span class="${badgeClass}">${badgeText}</span></td>
                                         <td>
                                             ${template.website ? 
-                                                `<a href="${template.website}" target="_blank">${publicationName || 'View Publication'}</a>` : 
+                                                `<a href="${template.website}" target="_blank">View Publication</a>` : 
                                                 isAI ? 'AI Template' : 'N/A'}
                                         </td>
                                         <td>
