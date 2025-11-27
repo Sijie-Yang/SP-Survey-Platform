@@ -9,7 +9,7 @@
     "official"
   ],
   "website": "https://doi.org/10.1016/j.landurbplan.2025.105368",
-  "huggingfaceDataset": "Reubengyl/EffectivePerceptionSurvey",
+  "huggingfaceDataset": "Not provided.",
   "createdAt": "2025-10-17T13:30:51.187Z",
   "config": {
     "title": "Effective perception survey",

@@ -9,7 +9,7 @@
     "official"
   ],
   "website": "https://arxiv.org/abs/2505.12758",
-  "huggingfaceDataset": "matiasqr/specs",
+  "huggingfaceDataset": "Need to self-organise a dataset to huggingface: https://github.com/matqr/specs/wiki",
   "createdAt": "2025-10-17T11:20:14.818Z",
   "config": {
     "title": "Street Perception Evaluation Considering Socioeconomics (SPECS)",

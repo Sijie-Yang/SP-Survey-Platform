@@ -8,7 +8,6 @@
   "tags": [
     "official"
   ],
-  "huggingfaceDataset": "koito19960406/sp_survey_bikeability",
   "createdAt": "2025-11-26T09:00:27.351Z",
   "config": {
     "title": "Urban Streetscape Bikeability Survey: Design Interventions and Socio-Economic Impacts",
