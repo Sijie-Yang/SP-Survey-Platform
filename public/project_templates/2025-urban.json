@@ -8,6 +8,7 @@
   "tags": [
     "official"
   ],
+  "huggingfaceDataset": "Jusba/Greenery_Survey_Helsinki_Mapillary",
   "createdAt": "2025-11-26T08:53:17.200Z",
   "config": {
     "title": "Urban Greenery Perception Survey",
