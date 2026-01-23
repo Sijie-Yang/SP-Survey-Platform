@@ -9,7 +9,7 @@
     "official"
   ],
   "website": "https://doi.org/10.1016/j.buildenv.2024.111875",
-  "huggingfaceDataset": "Not provided.",
+  "huggingfaceDataset": "seshing/sp-survey-building-facades-examples",
   "createdAt": "2025-10-17T12:19:12.096Z",
   "config": {
     "title": "Building Exterior Perception",
