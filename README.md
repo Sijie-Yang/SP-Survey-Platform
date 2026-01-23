@@ -130,16 +130,27 @@ npm run dev
 
 Start with peer-reviewed survey designs from published research:
 
-| Template | Description | Authors | Publication | Dataset |
-|----------|-------------|---------|-------------|---------|
-| **Thermal Comfort in Sight** `2025-thermal` | Thermal comfort assessment using SVI. 50+ validated questions. | Yang et al. (2025) | [Building and Environment](https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514) | ✅`sijiey/Thermal-Affordance-Dataset` |
-| **SPECS** `2025-specs` | Street perception evaluation considering demographics and personality (1,000+ participants, 5 countries). | Quintana et al. (2025) | [Nature Cities](https://www.nature.com/articles/s44284-025-00330-x) | ✅`matiasqr/specs` |
-| **Building Exterior Perception** `2024-building` | Evaluate human perception of building exteriors using ML techniques (250,000+ building images). | Liang et al. (2024) | [Building and Environment](https://doi.org/10.1016/j.buildenv.2024.111875) | 📖 - |
-| **Street Multi-Activity Potential** `2025-street` | Graph-based community detection to evaluate street multi-activity potential (SMAP). | Li et al. (2025) | [CEUS](https://www.sciencedirect.com/science/article/pii/S0198971525001036) | ✅`lajitong424/SMAP_svi` |
-| **Effective Perception Survey** `2025-effective` | Comprehensive framework for image-based survey design in outdoor urban environments. | Gu et al. (2025) | [Landscape and Urban Planning](https://doi.org/10.1016/j.landurbplan.2025.105368) | ✅`Reubengyl/EffectivePerceptionSurvey` |
-| **City Landmark** `2025-city` | Perception of urban landmarks through street view images, focusing on visibility, accessibility, and recognition. | AI Generated | AI Template | ✅`Zicheng00/Landmark_visibility` |
-| **Street Bikeability** `2025-street-1` | Urban streetscape bikeability survey examining design interventions and socio-economic impacts on cycling environments. | AI Generated | AI Template | ✅`koito19960406/sp_survey_bikeability` |
-| **Urban Greenery** `2025-urban` | Psychological, aesthetic, and functional impacts of urban greenery in streetscapes. | AI Generated | AI Template | 📖 - |
+#### 2025
+- **Thermal Comfort in Sight** | Yang et al. | [Paper](https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514) | [Image](https://huggingface.co/datasets/sijiey/Thermal-Affordance-Dataset)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Thermal affordance assessment through street view imagery with 50+ validated questions  
+- **SPECS** | Quintana et al. | [Paper](https://www.nature.com/articles/s44284-025-00330-x) | [Image](https://huggingface.co/datasets/matiasqr/specs)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Street perception evaluation integrating demographics and personality across 5 countries  
+- **Street Multi-Activity Potential** | Li et al. | [Paper](https://www.sciencedirect.com/science/article/pii/S0198971525001036) | [Image](https://huggingface.co/datasets/lajitong424/SMAP_svi)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Graph-based community detection for evaluating street multi-activity potential (SMAP)  
+- **Effective Perception Survey** | Gu et al. | [Paper](https://doi.org/10.1016/j.landurbplan.2025.105368) | [Image](https://huggingface.co/datasets/Reubengyl/EffectivePerceptionSurvey)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Comprehensive framework for image-based survey design in outdoor urban environments  
+
+#### 2024
+- **Building Exterior Perception** | Liang et al. | [Paper](https://doi.org/10.1016/j.buildenv.2024.111875) | -  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Human perception evaluation of building exteriors using machine learning techniques
+
+#### AI Template
+- **City Landmark** | AI Generated Template | [Image](https://huggingface.co/datasets/Zicheng00/Landmark_visibility)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Urban landmark perception focusing on visibility, accessibility, and recognition  
+- **Street Bikeability** | AI Generated Template | [Image](https://huggingface.co/datasets/koito19960406/sp_survey_bikeability)  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Streetscape bikeability assessment examining design interventions and socio-economic impacts  
+- **Urban Greenery** | AI Generated Template | -  
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Psychological, aesthetic, and functional impacts of urban greenery in streetscapes
 
 **How to Use:**
 1. Open Admin Panel → Project Sidebar
