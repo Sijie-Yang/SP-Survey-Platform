@@ -19,10 +19,10 @@
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 900px;
             margin: 0 auto;
             background: white;
-            padding: 30px;
+            padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
@@ -143,13 +143,14 @@
         }
         
         thead {
-            background: #f8f9fa;
+            display: none;
         }
         
         th, td {
-            padding: 12px;
+            padding: 6px 8px;
             text-align: left;
             border-bottom: 1px solid #e0e0e0;
+            font-size: 0.9em;
         }
         
         th {
@@ -161,20 +162,26 @@
             background: #f8f9fa;
         }
         
+        tbody tr td {
+            padding: 4px 8px;
+            white-space: nowrap;
+        }
+        
         .template-id {
             font-family: 'Courier New', monospace;
-            font-size: 0.9em;
+            font-size: 0.85em;
             color: #666;
             background: #f5f5f5;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin: 0 4px;
         }
         
         .badge {
             display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.85em;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.8em;
             font-weight: 600;
         }
         
@@ -556,14 +563,49 @@
         // Template metadata mapping
         // Helper function to extract dataset name from huggingfaceDataset field
         function extractDatasetName(huggingfaceDataset) {
-            if (!huggingfaceDataset) return null;
+            if (!huggingfaceDataset || typeof huggingfaceDataset !== 'string') return null;
             
-            // Handle different formats:
-            // "Dataset can be applied directly: sijiey/Thermal-Affordance-Dataset"
-            // "sijiey/Thermal-Affordance-Dataset"
-            // "Need to self-organise a dataset to huggingface: https://github.com/matqr/specs/wiki"
-            const match = huggingfaceDataset.match(/([a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)/);
-            return match ? match[1] : null;
+            const trimmed = huggingfaceDataset.trim();
+            if (!trimmed) return null;
+            
+            // Skip if it's clearly not a dataset
+            const lower = trimmed.toLowerCase();
+            if (lower.includes('not provided') || 
+                lower.includes('none') ||
+                lower === '-' ||
+                lower === '') {
+                return null;
+            }
+            
+            // If it's already a clean dataset name (username/dataset-name format), return it directly
+            // This handles most cases like "matiasqr/specs", "sijiey/Thermal-Affordance-Dataset"
+            const cleanPattern = /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/;
+            if (cleanPattern.test(trimmed)) {
+                return trimmed;
+            }
+            
+            // Try to extract from text like "Dataset can be applied directly: username/dataset"
+            // Extract pattern: username/dataset-name (no dots, no http, no www)
+            const extractPattern = /(?:^|:\s*|dataset[:\s]+)([a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)/i;
+            const match = trimmed.match(extractPattern);
+            
+            if (match) {
+                const candidate = match[1];
+                const parts = candidate.split('/');
+                // Validate: exactly two parts, no dots, no URL keywords
+                if (parts.length === 2 && 
+                    parts[0].length > 0 && 
+                    parts[1].length > 0 &&
+                    !candidate.includes('.') &&
+                    !candidate.includes('http') &&
+                    !candidate.includes('www') &&
+                    !candidate.includes('github') &&
+                    !candidate.includes('huggingface')) {
+                    return candidate;
+                }
+            }
+            
+            return null;
         }
         
         
@@ -887,40 +929,32 @@
                 <div class="templates-section">
                     <h2 class="section-title">📋 All Templates (${templates.length})</h2>
                     <table>
-                        <thead>
-                            <tr>
-                                <th>Template</th>
-                                <th>Author</th>
-                                <th>Type</th>
-                                <th>Publication</th>
-                                <th>Dataset</th>
-                            </tr>
-                        </thead>
                         <tbody>
                             ${templates.map(template => {
                                 const isAI = template.category === 'AI Generated' || template.author === 'AI Generated' || template.author === 'Admin AI';
                                 const badgeClass = isAI ? 'badge ai' : 'badge academic';
-                                const badgeText = isAI ? 'AI Generated' : (template.category || 'Academic Research');
+                                const badgeText = isAI ? 'AI' : 'Academic';
                                 
-                                const datasetName = extractDatasetName(template.huggingfaceDataset);
+                                // Use huggingfaceDataset field directly - no validation, just use as-is
+                                const datasetName = template.huggingfaceDataset && 
+                                                    String(template.huggingfaceDataset).trim() && 
+                                                    String(template.huggingfaceDataset).trim() !== '-' &&
+                                                    !String(template.huggingfaceDataset).toLowerCase().includes('not provided')
+                                                    ? String(template.huggingfaceDataset).trim() 
+                                                    : null;
+                                
+                                const paperLink = template.website ? `<a href="${template.website}" target="_blank">Paper</a>` : (isAI ? 'AI Template' : '');
+                                const datasetLink = datasetName ? `<a href="https://huggingface.co/datasets/${datasetName}" target="_blank">✅ ${datasetName}</a>` : '📖 -';
                                 
                                 return `
                                     <tr>
-                                        <td>
-                                            <strong>${template.name}</strong><br>
-                                            <span class="template-id">${template.id}</span>
-                                        </td>
-                                        <td>${template.author || 'N/A'}</td>
-                                        <td><span class="${badgeClass}">${badgeText}</span></td>
-                                        <td>
-                                            ${template.website ? 
-                                                `<a href="${template.website}" target="_blank">View Publication</a>` : 
-                                                isAI ? 'AI Template' : 'N/A'}
-                                        </td>
-                                        <td>
-                                            ${datasetName ? 
-                                                `<a href="https://huggingface.co/datasets/${datasetName}" target="_blank" class="dataset-link">✅ ${datasetName}</a>` : 
-                                                '📖 -'}
+                                        <td style="width: 100%;">
+                                            <strong>${template.name}</strong> 
+                                            <span class="template-id">${template.id}</span> | 
+                                            ${template.author || 'N/A'} | 
+                                            <span class="${badgeClass}">${badgeText}</span> | 
+                                            ${paperLink} | 
+                                            ${datasetLink}
                                         </td>
                                     </tr>
                                 `;
