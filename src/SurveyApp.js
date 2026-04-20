@@ -112,6 +112,27 @@ export default function SurveyApp() {
       let finalSurveyJson;
       let finalDisplayedImages = displayedImages;
       const imageTracker = {}; // Track displayed images for each question
+      const globallyUsedImageKeys = new Set();
+      const getImageKey = (image) => image?.name || image?.url;
+      const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
+      const pickRandomImagesFromPool = (pool, imageCount, excludeUsed) => {
+        const shuffled = [...pool].sort(() => 0.5 - Math.random());
+        if (!excludeUsed) {
+          return shuffled.slice(0, imageCount);
+        }
+        const filtered = shuffled.filter((image) => {
+          const key = getImageKey(image);
+          return key && !globallyUsedImageKeys.has(key);
+        });
+        return filtered.slice(0, imageCount);
+      };
+      const trackGloballyUsedImages = (selectedImages, excludeUsed) => {
+        if (!excludeUsed) return;
+        selectedImages.forEach((image) => {
+          const key = getImageKey(image);
+          if (key) globallyUsedImageKeys.add(key);
+        });
+      };
 
       // Get project ID from URL parameters
       const urlParams = new URLSearchParams(window.location.search);
@@ -132,14 +153,34 @@ export default function SurveyApp() {
       // Load survey configuration
       const adminConfig = await loadSurveyConfig(projectId);
       
-      // If project has Supabase configuration, set it to global supabase_config
-      if (projectData && projectData.supabaseConfig && projectData.supabaseConfig.enabled) {
+      // Build runtime Supabase config from project sources.
+      // Priority: project.supabaseConfig (legacy/system status) -> imageDatasetConfig (current UI flow)
+      const runtimeSupabaseConfig = (() => {
+        if (projectData?.supabaseConfig?.enabled && projectData?.supabaseConfig?.url && projectData?.supabaseConfig?.secretKey) {
+          return {
+            enabled: true,
+            url: projectData.supabaseConfig.url,
+            secretKey: projectData.supabaseConfig.secretKey
+          };
+        }
+        if (projectData?.imageDatasetConfig?.supabaseUrl && projectData?.imageDatasetConfig?.supabaseKey) {
+          return {
+            enabled: true,
+            url: projectData.imageDatasetConfig.supabaseUrl,
+            secretKey: projectData.imageDatasetConfig.supabaseKey
+          };
+        }
+        return null;
+      })();
+
+      // If runtime config exists, set it to global supabase_config
+      if (runtimeSupabaseConfig) {
         console.log('🔗 Loading Supabase config for project:', projectId);
-        console.log('📍 Supabase URL:', projectData.supabaseConfig.url);
-        console.log('🔑 Has Secret Key:', !!projectData.supabaseConfig.secretKey);
+        console.log('📍 Supabase URL:', runtimeSupabaseConfig.url);
+        console.log('🔑 Has Secret Key:', !!runtimeSupabaseConfig.secretKey);
         try {
           // ✅ Save to sessionStorage (session-only)
-          sessionStorage.setItem('supabase_config', JSON.stringify(projectData.supabaseConfig));
+          sessionStorage.setItem('supabase_config', JSON.stringify(runtimeSupabaseConfig));
           console.log('✅ Supabase config saved to sessionStorage');
           
           // Re-initialize Supabase client
@@ -156,7 +197,7 @@ export default function SurveyApp() {
       } else {
         console.warn('⚠️ No Supabase config found or not enabled for project:', projectId);
         if (projectData) {
-          console.log('📊 Project exists but supabaseConfig:', projectData.supabaseConfig);
+          console.log('📊 Project exists but no usable Supabase settings in supabaseConfig/imageDatasetConfig');
         } else {
           console.log('❌ Project data is null - project may not exist');
         }
@@ -225,6 +266,7 @@ export default function SurveyApp() {
                   console.log(`🔄 Loading random images for ${element.type} question: ${element.name}`);
                   try {
                     let result;
+                    const excludeUsed = shouldExcludePreviouslyUsedImages(element);
                     
                     // PRIORITY 1: Check if project has preloaded images
                     if (projectData?.preloadedImages && projectData.preloadedImages.length > 0) {
@@ -234,9 +276,8 @@ export default function SurveyApp() {
                       const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       
-                      // Randomly select from preloaded images
-                      const shuffled = [...projectData.preloadedImages].sort(() => 0.5 - Math.random());
-                      const selectedImages = shuffled.slice(0, imageCount);
+                      // Randomly select from preloaded images with optional cross-question uniqueness
+                      const selectedImages = pickRandomImagesFromPool(projectData.preloadedImages, imageCount, excludeUsed);
                       
                       result = {
                         success: true,
@@ -290,12 +331,11 @@ export default function SurveyApp() {
                       const supabaseResult = await getAllImagesFromSupabase(element.bucketPath, projectSupabase);
                       
                       if (supabaseResult.success && supabaseResult.images.length > 0) {
-                        // Randomly select images
+                        // Randomly select images with optional cross-question uniqueness
                         // Use type-specific defaults if imageCount is not set
                         const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
                         const imageCount = element.imageCount || defaultCount;
-                        const shuffled = [...supabaseResult.images].sort(() => 0.5 - Math.random());
-                        const selectedImages = shuffled.slice(0, imageCount);
+                        const selectedImages = pickRandomImagesFromPool(supabaseResult.images, imageCount, excludeUsed);
                         result = { success: true, images: selectedImages };
                       } else {
                         result = supabaseResult;
@@ -306,7 +346,18 @@ export default function SurveyApp() {
                     }
                     
                     if (result.success && result.images.length > 0) {
-                      const selectedImages = result.images;
+                      // Apply cross-question uniqueness for sources that may return pre-randomized subsets (e.g. Hugging Face API).
+                      let selectedImages = result.images;
+                      if (excludeUsed) {
+                        const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
+                        const imageCount = element.imageCount || defaultCount;
+                        const uniqueImages = selectedImages.filter((image) => {
+                          const key = getImageKey(image);
+                          return key && !globallyUsedImageKeys.has(key);
+                        });
+                        selectedImages = uniqueImages.slice(0, imageCount);
+                      }
+                      trackGloballyUsedImages(selectedImages, excludeUsed);
                       
                       // Track displayed images for this question (store names, not URLs)
                       const imageNames = selectedImages.map(img => img.name);
@@ -606,6 +657,39 @@ export default function SurveyApp() {
       model.onComplete.add(async (survey, options) => {
         console.log("=== SURVEY COMPLETION STARTED ===");
         const responses = survey.data;
+        const displayedImages = displayedImagesRef.current || {};
+        const surveyQuestionTypeMap = {};
+        survey.getAllQuestions().forEach((question) => {
+          surveyQuestionTypeMap[question.name] = question.getType();
+        });
+
+        const mapImageChoiceAnswerToNames = (answerValue, shownImages) => {
+          if (!shownImages || shownImages.length === 0) return answerValue;
+
+          const mapSingleValue = (value) => {
+            if (typeof value !== 'string') return value;
+            const match = value.match(/^image_(\d+)$/);
+            if (!match) return value;
+            const imageIndex = parseInt(match[1], 10);
+            return shownImages[imageIndex] || value;
+          };
+
+          if (Array.isArray(answerValue)) {
+            return answerValue.map(mapSingleValue);
+          }
+          return mapSingleValue(answerValue);
+        };
+
+        const enrichedResponses = Object.entries(responses).reduce((acc, [questionName, answerValue]) => {
+          const shownImages = displayedImages[questionName] || [];
+          const mappedAnswer = mapImageChoiceAnswerToNames(answerValue, shownImages);
+          acc[questionName] = {
+            type: surveyQuestionTypeMap[questionName] || null,
+            answer: mappedAnswer,
+            shown_images: shownImages
+          };
+          return acc;
+        }, {});
         
         // Check Supabase configuration before saving
         const currentSupabaseConfig = sessionStorage.getItem('supabase_config');
@@ -613,8 +697,9 @@ export default function SurveyApp() {
         
         // Combine user responses with displayed images information
         const completeData = {
-          responses: responses,
-          displayed_images: displayedImagesRef.current, // Use ref to get latest value
+          responses: enrichedResponses,
+          raw_responses: responses,
+          displayed_images: displayedImages,
           survey_metadata: {
             completion_time: new Date().toISOString(),
             user_agent: navigator.userAgent,
@@ -625,7 +710,7 @@ export default function SurveyApp() {
         };
         
         console.log("Survey completed with complete data:", completeData);
-        console.log("📸 Displayed images in response:", displayedImagesRef.current);
+        console.log("📸 Displayed images in response:", displayedImages);
         console.log("Attempting to save to Supabase...");
         
         // Save to Supabase
@@ -749,7 +834,7 @@ export default function SurveyApp() {
       </Box>
       
       {surveyModel && (
-        <Box sx={{ maxWidth: 900, mx: 'auto', px: 2, py: 3 }}>
+        <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }}>
           <Survey model={surveyModel} />
         </Box>
       )}

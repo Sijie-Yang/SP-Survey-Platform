@@ -607,7 +607,16 @@ export default function SystemStatus({ surveyConfig, currentProject, onProjectUp
 );
 
 CREATE INDEX IF NOT EXISTS idx_survey_responses_created_at ON survey_responses(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_survey_responses_participant_id ON survey_responses(participant_id);`;
+CREATE INDEX IF NOT EXISTS idx_survey_responses_participant_id ON survey_responses(participant_id);
+
+ALTER TABLE survey_responses ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow anonymous inserts to survey_responses" ON survey_responses;
+CREATE POLICY "Allow anonymous inserts to survey_responses"
+ON survey_responses
+FOR INSERT
+TO anon, authenticated
+WITH CHECK (true);`;
   };
 
   const testSurveyResponse = async () => {
@@ -718,18 +727,29 @@ CREATE INDEX IF NOT EXISTS idx_survey_responses_participant_id ON survey_respons
             {/* survey_responses Table Status */}
             <Card variant="outlined">
               <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-                  <Storage color={tableStatus.exists ? 'success' : 'action'} />
-                  <Typography variant="subtitle1">
-                    survey_responses Table
-                  </Typography>
-                  {tableStatus.exists && (
-                    <Chip 
-                      label={`${tableStatus.responseCount} responses`} 
-                      size="small" 
-                      color="primary"
-                    />
-                  )}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Storage color={tableStatus.exists ? 'success' : 'action'} />
+                    <Typography variant="subtitle1">
+                      survey_responses Table
+                    </Typography>
+                    {tableStatus.exists && (
+                      <Chip 
+                        label={`${tableStatus.responseCount} responses`} 
+                        size="small" 
+                        color="primary"
+                      />
+                    )}
+                  </Box>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={tableStatus.checking ? <CircularProgress size={14} color="inherit" /> : <Refresh />}
+                    onClick={checkTableStatus}
+                    disabled={tableStatus.checking}
+                  >
+                    {tableStatus.checking ? 'Refreshing...' : 'Refresh Status'}
+                  </Button>
                 </Box>
 
                 {tableStatus.checking ? (

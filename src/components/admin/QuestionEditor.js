@@ -81,6 +81,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         // This ensures images are randomly selected from the Hugging Face dataset
         updates.imageSelectionMode = 'huggingface_random';
         updates.randomImageSelection = true;
+        updates.excludePreviouslyUsedImages = true;
         updates.choices = updates.choices || [];
       }
       // Types that should have 4 images by default
@@ -92,6 +93,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         // This ensures images are randomly selected from the Hugging Face dataset
         updates.imageSelectionMode = 'huggingface_random';
         updates.randomImageSelection = true;
+        updates.excludePreviouslyUsedImages = true;
         updates.choices = updates.choices || [];
       }
     }
@@ -181,6 +183,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           ...prev,
           imageSelectionMode: 'huggingface_random',
           randomImageSelection: true,
+          excludePreviouslyUsedImages: true,
           choices: prev.choices || []
         }));
       }
@@ -349,6 +352,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 Image Settings
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={editedQuestion.excludePreviouslyUsedImages !== false}
+                      onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
+                    />
+                  }
+                  label="Ensure images in this question have not been used earlier in this survey"
+                />
 
                 {editedQuestion.type === 'imagepicker' && (
                   <>

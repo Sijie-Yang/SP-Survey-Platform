@@ -33,7 +33,9 @@ import {
   Security,
   Speed,
   FolderZip,
-  Refresh
+  Refresh,
+  Warning,
+  ContentCopy
 } from '@mui/icons-material';
 import { prepareDeploymentFolder, getDeploymentStatus, testDeployment, uploadToGitHub } from '../../lib/deploymentManager';
 
@@ -62,6 +64,18 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
   const [githubRepoUrl, setGithubRepoUrl] = useState('');
   const [existingDeployments, setExistingDeployments] = useState([]);
   const stepperRef = useRef(null);
+  const supabaseUrlForVercel = currentProject?.imageDatasetConfig?.supabaseUrl || 'https://<project-id>.supabase.co';
+  const supabaseAnonForVercel = currentProject?.imageDatasetConfig?.supabaseAnonKey || 'your-supabase-anon-key';
+
+  const copyToClipboard = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(`✅ Copied ${label}`);
+    } catch (error) {
+      console.error(`Failed to copy ${label}:`, error);
+      alert(`❌ Failed to copy ${label}. Please copy it manually.`);
+    }
+  };
 
   const handleNext = () => {
     setActiveStep((prevActiveStep) => prevActiveStep + 1);
@@ -706,8 +720,8 @@ git push -u origin main`}
                       </Typography>
                     </ListItemIcon>
                     <ListItemText 
-                      primary="Configure Build Settings" 
-                      secondary="Vercel auto-detects React apps. Build Command: 'npm run build', Output Directory: 'build'"
+                      primary="Configure Build & Environment Variables" 
+                      secondary="Keep React defaults, then manually set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY in Vercel Project Settings → Environment Variables"
                     />
                   </ListItem>
                   <ListItem>
@@ -755,9 +769,49 @@ git push -u origin main`}
               </CardActions>
             </Card>
 
+            <Card sx={{ mb: 3 }}>
+              <CardContent>
+                <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
+                  📋 Copy These to Vercel Environment Variables
+                </Typography>
+
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <Typography variant="body2" sx={{ mb: 1 }}><strong>Name</strong>: REACT_APP_SUPABASE_URL</Typography>
+                    <Typography variant="body2" sx={{ mb: 1, wordBreak: 'break-all' }}><strong>Value</strong>: {supabaseUrlForVercel}</Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button size="small" variant="outlined" startIcon={<ContentCopy />} onClick={() => copyToClipboard('REACT_APP_SUPABASE_URL', 'variable name')}>
+                        Copy Name
+                      </Button>
+                      <Button size="small" variant="contained" startIcon={<ContentCopy />} onClick={() => copyToClipboard(supabaseUrlForVercel, 'URL value')}>
+                        Copy Value
+                      </Button>
+                    </Box>
+                  </Box>
+
+                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <Typography variant="body2" sx={{ mb: 1 }}><strong>Name</strong>: REACT_APP_SUPABASE_ANON_KEY</Typography>
+                    <Typography variant="body2" sx={{ mb: 1, wordBreak: 'break-all' }}><strong>Value</strong>: {supabaseAnonForVercel}</Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button size="small" variant="outlined" startIcon={<ContentCopy />} onClick={() => copyToClipboard('REACT_APP_SUPABASE_ANON_KEY', 'variable name')}>
+                        Copy Name
+                      </Button>
+                      <Button size="small" variant="contained" startIcon={<ContentCopy />} onClick={() => copyToClipboard(supabaseAnonForVercel, 'anon key value')}>
+                        Copy Value
+                      </Button>
+                    </Box>
+                  </Box>
+                </Box>
+              </CardContent>
+            </Card>
+
             <Alert severity="warning" sx={{ mb: 2 }}>
               <Typography variant="body2">
-                <strong>Important:</strong> Make sure your project builds successfully locally before deploying to Vercel.
+                <strong>Important:</strong> Vercel will not reliably auto-populate all environment variables from your repository. Always verify
+                <strong> REACT_APP_SUPABASE_URL </strong>
+                and
+                <strong> REACT_APP_SUPABASE_ANON_KEY </strong>
+                manually before deploy/redeploy.
               </Typography>
             </Alert>
           </Box>
@@ -770,10 +824,9 @@ git push -u origin main`}
               ⚙️ Step 3: Configure Vercel Project
             </Typography>
             
-            <Alert severity="success" sx={{ mb: 3 }}>
+            <Alert severity="warning" sx={{ mb: 3 }}>
               <Typography variant="body2">
-                ✅ <strong>Good news!</strong> Your survey configuration and database settings are already embedded in the deployment files.
-                No additional environment variables needed!
+                ⚠️ <strong>Action required:</strong> Survey config is embedded, but Vercel environment variables still need manual verification.
               </Typography>
             </Alert>
 
@@ -794,11 +847,11 @@ git push -u origin main`}
                   </ListItem>
                   <ListItem>
                     <ListItemIcon>
-                      <CheckCircle color="success" />
+                      <Warning color="warning" />
                     </ListItemIcon>
                     <ListItemText 
-                      primary="Database Connection" 
-                      secondary="Supabase configuration (from System Status) is embedded in deploymentConfig.js"
+                      primary="Database Connection (manual check required)" 
+                      secondary="In Vercel, confirm REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY are present and non-placeholder."
                     />
                   </ListItem>
                   <ListItem>
@@ -831,14 +884,16 @@ git push -u origin main`}
                 1. In Vercel, click <strong>"Import Project"</strong><br/>
                 2. Select your GitHub repository<br/>
                 3. Keep default settings (Framework Preset: Create React App)<br/>
-                4. Click <strong>"Deploy"</strong> - that's it! 🎉
+                4. Open <strong>Project Settings → Environment Variables</strong><br/>
+                5. Ensure <strong>REACT_APP_SUPABASE_URL</strong> and <strong>REACT_APP_SUPABASE_ANON_KEY</strong> are set correctly<br/>
+                6. Click <strong>"Deploy"</strong> (or Redeploy if you updated env vars)
               </Typography>
             </Alert>
 
             <Alert severity="warning">
               <Typography variant="body2">
-                <strong>Note:</strong> Make sure you've configured Supabase in the <strong>System Status</strong> tab 
-                before deploying, so survey responses can be saved to your database.
+                <strong>Note:</strong> If either env var is missing/placeholder, deployed surveys will show:
+                <em> "There was an error saving your responses: Supabase not configured..."</em>
               </Typography>
             </Alert>
           </Box>

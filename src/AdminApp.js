@@ -339,29 +339,36 @@ export default function AdminApp() {
         saveCurrentProjectState();
       }
 
-      // 2. Load full project data from file system if it's a lightweight version
+      // 2. Always load latest project data from file system.
+      // Sidebar list may be stale until polling catches up, so re-fetch on selection.
       let fullProject = project;
-      if (project.imageDatasetConfig?.preloadedImagesCount && !project.imageDatasetConfig?.preloadedImages) {
-        console.log(`🔍 Project is lightweight version (${project.imageDatasetConfig.preloadedImagesCount} images excluded). Loading full data from file system...`);
-        try {
-          const response = await fetch(`http://localhost:3001/api/projects/${project.id}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.project) {
+      let fileSurveyConfig = preloadedConfig;
+      try {
+        const response = await fetch(`http://localhost:3001/api/projects/${project.id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            if (data.project) {
               fullProject = data.project;
-              console.log('✅ Loaded full project data with preloaded images');
             }
+            if (!fileSurveyConfig && data.surveyConfig) {
+              fileSurveyConfig = data.surveyConfig;
+            }
+            console.log('✅ Loaded latest project data from file system');
           }
-        } catch (error) {
-          console.warn('⚠️ Could not load full project data, using lightweight version:', error);
+        } else {
+          console.warn(`⚠️ Failed to fetch latest project data: ${response.status}`);
         }
+      } catch (error) {
+        console.warn('⚠️ Could not load latest project data, using sidebar snapshot:', error);
       }
 
       // 3. Set new project
       setCurrentProject(fullProject);
       
-      // 3. Try to restore project state
-      const stateRestored = restoreProjectState(project.id);
+      // 3. Restore cached editing state only when there are unsaved edits.
+      // Otherwise prefer latest file-system state to avoid stale cross-project UI state.
+      const stateRestored = restoreProjectState(project.id, { onlyWhenUnsaved: true });
       
       if (stateRestored) {
         console.log('🔍 Restored saved project state');
@@ -374,9 +381,9 @@ export default function AdminApp() {
         // 4. If no saved state, load from file or preloaded config
         console.log('🔍 Loading fresh project state');
         
-        if (preloadedConfig) {
-          setSurveyConfig(preloadedConfig);
-          setLastSavedConfig(JSON.parse(JSON.stringify(preloadedConfig)));
+        if (fileSurveyConfig) {
+          setSurveyConfig(fileSurveyConfig);
+          setLastSavedConfig(JSON.parse(JSON.stringify(fileSurveyConfig)));
         } else {
           const config = await loadSurveyConfig(project.id);
           const finalConfig = config || createDefaultConfig();
@@ -495,12 +502,17 @@ export default function AdminApp() {
   };
 
   // Restore project state
-  const restoreProjectState = (projectId) => {
+  const restoreProjectState = (projectId, options = {}) => {
+    const { onlyWhenUnsaved = false } = options;
     // Always read from localStorage directly to avoid stale state issues
     const allStates = loadProjectStatesFromStorage();
     const savedState = allStates[projectId];
     
     if (savedState) {
+      if (onlyWhenUnsaved && !savedState.hasUnsavedChanges) {
+        console.log('🔍 Skip restore for clean state, load fresh from file:', projectId);
+        return false;
+      }
       console.log('🔍 Restoring project state for:', projectId, savedState);
       console.log('🔍 Restoring tabValue:', savedState.tabValue);
       

@@ -763,6 +763,9 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                 element.imageSelectionMode = 'huggingface_random';
               }
               element.randomImageSelection = true;
+              if (element.excludePreviouslyUsedImages === undefined) {
+                element.excludePreviouslyUsedImages = true;
+              }
               if (!element.choices) {
                 element.choices = [];
               }

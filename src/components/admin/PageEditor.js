@@ -258,7 +258,6 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
       // Name doesn't end with _number, add _1
       duplicatedQuestion.name = `${originalName}_1`;
     }
-    
     // Smart title generation: check if title ends with _number
     const originalTitle = questionToDuplicate.title || 'New Question';
     const titleMatch = originalTitle.match(underscoreNumberPattern);

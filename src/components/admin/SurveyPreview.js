@@ -27,6 +27,27 @@ export default function SurveyPreview({ config, currentProject }) {
         registerImageBooleanWidget();
         
         const configCopy = JSON.parse(JSON.stringify(config));
+        const globallyUsedImageKeys = new Set();
+        const getImageKey = (image) => image?.name || image?.url;
+        const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
+        const pickRandomImagesFromPool = (pool, imageCount, excludeUsed) => {
+          const shuffled = [...pool].sort(() => 0.5 - Math.random());
+          if (!excludeUsed) {
+            return shuffled.slice(0, imageCount);
+          }
+          const filtered = shuffled.filter((image) => {
+            const key = getImageKey(image);
+            return key && !globallyUsedImageKeys.has(key);
+          });
+          return filtered.slice(0, imageCount);
+        };
+        const trackGloballyUsedImages = (selectedImages, excludeUsed) => {
+          if (!excludeUsed) return;
+          selectedImages.forEach((image) => {
+            const key = getImageKey(image);
+            if (key) globallyUsedImageKeys.add(key);
+          });
+        };
         
         // Process image questions and convert imageranking to ranking for SurveyJS
         if (configCopy.pages) {
@@ -78,6 +99,7 @@ export default function SurveyPreview({ config, currentProject }) {
                   console.log(`🔄 Preview: Loading random images for ${element.type} question: ${element.name}`);
                   try {
                     let result;
+                    const excludeUsed = shouldExcludePreviouslyUsedImages(element);
                     
                     // PRIORITY 1: Check if project has preloaded images
                     if (currentProject?.preloadedImages && currentProject.preloadedImages.length > 0) {
@@ -87,9 +109,8 @@ export default function SurveyPreview({ config, currentProject }) {
                       const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       
-                      // Randomly select from preloaded images
-                      const shuffled = [...currentProject.preloadedImages].sort(() => 0.5 - Math.random());
-                      const selectedImages = shuffled.slice(0, imageCount);
+                      // Randomly select from preloaded images with optional cross-question uniqueness
+                      const selectedImages = pickRandomImagesFromPool(currentProject.preloadedImages, imageCount, excludeUsed);
                       
                       result = {
                         success: true,
@@ -144,12 +165,11 @@ export default function SurveyPreview({ config, currentProject }) {
                       const supabaseResult = await getAllImagesFromSupabase(element.bucketPath, projectSupabase);
                       
                       if (supabaseResult.success && supabaseResult.images.length > 0) {
-                        // Randomly select images
+                        // Randomly select images with optional cross-question uniqueness
                         // Use type-specific defaults if imageCount is not set
                         const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
                         const imageCount = element.imageCount || defaultCount;
-                        const shuffled = [...supabaseResult.images].sort(() => 0.5 - Math.random());
-                        const selectedImages = shuffled.slice(0, imageCount);
+                        const selectedImages = pickRandomImagesFromPool(supabaseResult.images, imageCount, excludeUsed);
                         result = { success: true, images: selectedImages };
                       } else {
                         result = supabaseResult;
@@ -160,7 +180,18 @@ export default function SurveyPreview({ config, currentProject }) {
                     }
                     
                     if (result.success && result.images.length > 0) {
-                      const selectedImages = result.images;
+                      // Apply cross-question uniqueness for sources that may return pre-randomized subsets.
+                      let selectedImages = result.images;
+                      if (excludeUsed) {
+                        const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
+                        const imageCount = element.imageCount || defaultCount;
+                        const uniqueImages = selectedImages.filter((image) => {
+                          const key = getImageKey(image);
+                          return key && !globallyUsedImageKeys.has(key);
+                        });
+                        selectedImages = uniqueImages.slice(0, imageCount);
+                      }
+                      trackGloballyUsedImages(selectedImages, excludeUsed);
                       
                       // Set image data for SurveyJS
                       if (element.type === 'image') {

@@ -29,12 +29,17 @@ import {
 } from '../../lib/huggingface';
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
-  const [config, setConfig] = useState({
+  const defaultConfig = {
     huggingFaceToken: '',
     datasetName: '',
     enabled: false,
+    supabaseProjectId: '',
     supabaseUrl: '',
-    supabaseKey: ''
+    supabaseKey: '',
+    supabaseAnonKey: ''
+  };
+  const [config, setConfig] = useState({
+    ...defaultConfig
   });
   const [initialConfig, setInitialConfig] = useState(null); // Track the initial saved config
   const [status, setStatus] = useState({
@@ -81,7 +86,18 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   useEffect(() => {
     if (currentProject?.imageDatasetConfig) {
-      const projectConfig = currentProject.imageDatasetConfig;
+      const projectConfig = {
+        ...defaultConfig,
+        ...currentProject.imageDatasetConfig
+      };
+      if (!projectConfig.supabaseProjectId && projectConfig.supabaseUrl) {
+        try {
+          const parsedUrl = new URL(projectConfig.supabaseUrl);
+          projectConfig.supabaseProjectId = parsedUrl.hostname.replace('.supabase.co', '');
+        } catch (error) {
+          console.warn('Failed to parse Supabase URL for project ID:', error);
+        }
+      }
       setConfig(projectConfig);
       setInitialConfig(JSON.parse(JSON.stringify(projectConfig))); // Save initial config for comparison
       
@@ -107,9 +123,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         });
       }
     } else {
-      const defaultConfig = { enabled: false, huggingFaceToken: '', datasetName: '', datasetInfo: null };
-      setConfig(defaultConfig);
-      setInitialConfig(JSON.parse(JSON.stringify(defaultConfig)));
+      const initialDefaultConfig = { ...defaultConfig, datasetInfo: null };
+      setConfig(initialDefaultConfig);
+      setInitialConfig(JSON.parse(JSON.stringify(initialDefaultConfig)));
     }
   }, [currentProject]);
 
@@ -128,6 +144,16 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   }, [config, initialConfig, onConfigChange]);
 
   const handleConfigChange = (field, value) => {
+    if (field === 'supabaseProjectId') {
+      const normalizedProjectId = (value || '').trim();
+      const autoUrl = normalizedProjectId ? `https://${normalizedProjectId}.supabase.co` : '';
+      setConfig(prev => ({
+        ...prev,
+        supabaseProjectId: normalizedProjectId,
+        supabaseUrl: autoUrl
+      }));
+      return;
+    }
     setConfig(prev => ({ ...prev, [field]: value }));
   };
 
@@ -950,11 +976,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             </Typography>
             <Typography variant="body2" component="div">
               1. Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Supabase Dashboard</a><br/>
-              2. Create a new project or select existing one<br/>
-              3. Go to Settings → API<br/>
-              4. Copy "Project URL" and "service_role key" (not anon key!)<br/>
-              5. Paste them below and click "Test Connection"<br/>
-              6. The system will automatically create a "survey-images" bucket when you preload
+              2. Click <strong>Project Settings</strong> in the left sidebar<br/>
+              3. Click <strong>General</strong>, copy your <strong>Project ID</strong><br/>
+              4. Click <strong>API Keys</strong>, then open tab <strong>"Legacy anon, service_role API keys"</strong><br/>
+              5. Copy <strong>anon key</strong> and <strong>service_role (secret) key</strong><br/>
+              6. Paste them below and click "Test Connection"<br/>
+              7. The system will automatically create a "survey-images" bucket when you preload
             </Typography>
           </Alert>
 
@@ -985,11 +1012,31 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               <TextField
                 fullWidth
                 variant="outlined"
-                label="Supabase Project URL"
+                label="Supabase Project ID"
+                value={config.supabaseProjectId || ''}
+                onChange={(e) => handleConfigChange('supabaseProjectId', e.target.value)}
+                placeholder="abcdefghijklmnopqrstuvwx"
+                helperText="From Project Settings → General. URL is auto-built as https://<project-id>.supabase.co"
+              />
+
+              <TextField
+                fullWidth
+                variant="outlined"
+                label="Supabase Project URL (auto-generated)"
                 value={config.supabaseUrl}
-                onChange={(e) => handleConfigChange('supabaseUrl', e.target.value)}
-                placeholder="https://xxxxx.supabase.co"
-                helperText="Your Supabase project URL from Settings → API"
+                InputProps={{ readOnly: true }}
+                helperText="Auto-generated from Project ID"
+              />
+
+              <TextField
+                fullWidth
+                variant="outlined"
+                label="Supabase Anon Key (for deployed survey)"
+                type="password"
+                value={config.supabaseAnonKey || ''}
+                onChange={(e) => handleConfigChange('supabaseAnonKey', e.target.value)}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                helperText="Public anon key from API Keys → Legacy tab. Used in deployment .env for Vercel."
               />
 
               <TextField
@@ -1000,7 +1047,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                 value={config.supabaseKey}
                 onChange={(e) => handleConfigChange('supabaseKey', e.target.value)}
                 placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                helperText="Service role key (NOT anon key) from Settings → API. Required for bucket creation."
+                helperText="service_role (secret) key from API Keys → Legacy tab. Required for bucket creation."
               />
 
               <Box sx={{ display: 'flex', gap: 2 }}>

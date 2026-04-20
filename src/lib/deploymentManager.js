@@ -87,8 +87,19 @@ const preloadHuggingFaceImages = async (imageDatasetConfig) => {
       }
     }
     
-    console.log(`✅ Successfully preloaded ${allImages.length} images from Hugging Face`);
-    return allImages;
+    // Normalize image names for deployment so response records are stable and readable.
+    // This avoids inconsistent provider-specific names like dataset_row_column variants.
+    const normalizedImages = allImages.map((image, index) => {
+      const normalizedName = `image_${String(index).padStart(6, '0')}.jpg`;
+      return {
+        ...image,
+        originalName: image.name || null,
+        name: normalizedName
+      };
+    });
+
+    console.log(`✅ Successfully preloaded ${normalizedImages.length} images from Hugging Face`);
+    return normalizedImages;
     
   } catch (error) {
     console.error('❌ Failed to preload Hugging Face images:', error);
@@ -98,6 +109,15 @@ const preloadHuggingFaceImages = async (imageDatasetConfig) => {
 
 const generateDeploymentFiles = async (deploymentData) => {
   const files = {};
+  const projectSupabase = deploymentData?.config?.supabaseConfig || {};
+  const imageDatasetSupabaseUrl = deploymentData?.config?.imageDatasetConfig?.supabaseUrl || '';
+  const imageDatasetSupabaseAnonKey = deploymentData?.config?.imageDatasetConfig?.supabaseAnonKey || '';
+  const resolvedSupabaseUrl = projectSupabase.url || imageDatasetSupabaseUrl || 'your-supabase-project-url';
+  const resolvedAnonKey =
+    imageDatasetSupabaseAnonKey ||
+    projectSupabase.anonKey ||
+    projectSupabase.publicKey ||
+    'your-supabase-anon-key';
   
   // 1. Package.json for deployment (survey-only, minimal dependencies)
   files['package.json'] = JSON.stringify({
@@ -120,7 +140,7 @@ const generateDeploymentFiles = async (deploymentData) => {
     },
     "scripts": {
       "start": "react-scripts start",
-      "build": "react-scripts build",
+      "build": "CI=false react-scripts build",
       "test": "react-scripts test",
       "eject": "react-scripts eject"
     },
@@ -146,6 +166,7 @@ const generateDeploymentFiles = async (deploymentData) => {
 
   // 2. Vercel configuration (survey-only SPA)
   files['vercel.json'] = JSON.stringify({
+    "buildCommand": "CI=false npm run build",
     "rewrites": [
       {
         "source": "/(.*)",
@@ -158,6 +179,20 @@ const generateDeploymentFiles = async (deploymentData) => {
   files['.env.example'] = `# Supabase Configuration
 REACT_APP_SUPABASE_URL=your-supabase-project-url
 REACT_APP_SUPABASE_ANON_KEY=your-supabase-anon-key
+
+# Hugging Face Configuration (Optional)
+REACT_APP_HUGGINGFACE_TOKEN=your-huggingface-token
+
+# Production Settings
+REACT_APP_ENVIRONMENT=production
+GENERATE_SOURCEMAP=false`;
+
+  // 3b. Generate .env directly to reduce deployment setup errors.
+  // Important: frontend builds should use ANON/public key, never service_role key.
+  files['.env'] = `# Auto-generated from deployment setup
+# Please verify values before publishing.
+REACT_APP_SUPABASE_URL=${resolvedSupabaseUrl}
+REACT_APP_SUPABASE_ANON_KEY=${resolvedAnonKey}
 
 # Hugging Face Configuration (Optional)
 REACT_APP_HUGGINGFACE_TOKEN=your-huggingface-token
@@ -259,7 +294,7 @@ import { Box, Alert, CircularProgress, Typography } from '@mui/material';
 import { saveSurveyResponse } from './lib/supabase';
 import { deploymentConfig, getPreloadedImages } from './config/deploymentConfig';
 import { generateCustomTheme } from './lib/surveyStorage';
-import registerImageRankingWidget, { registerImageRatingWidget, registerImageBooleanWidget } from './components/SurveyCustomComponents';
+import registerImageRankingWidget, { registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget } from './components/SurveyCustomComponents';
 
 export default function SurveyAppClean() {
   const [surveyModel, setSurveyModel] = useState(null);
@@ -274,11 +309,13 @@ export default function SurveyAppClean() {
     try {
       setLoading(true);
       console.log('Starting survey initialization...');
+      const imageTracker = {};
       
       // Register custom components
       registerImageRankingWidget();
       registerImageRatingWidget();
       registerImageBooleanWidget();
+      registerImageMatrixWidget();
       console.log('Custom widgets registered');
       
       // Deep clone deployment configuration to avoid mutations
@@ -315,6 +352,7 @@ export default function SurveyAppClean() {
                   
                   if (element.type === 'image') {
                     element.imageLink = selectedImages[0].url;
+                    element.imageName = selectedImages[0].name || selectedImages[0].url;
                   } else if (element.type === 'imageboolean' || element.type === 'imagerating' || element.type === 'imagematrix') {
                     // For imageboolean, imagerating, and imagematrix questions, store imageHtml
                     let imagesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;">';
@@ -324,12 +362,16 @@ export default function SurveyAppClean() {
                     imagesHtml += '</div>';
                     
                     element.imageHtml = imagesHtml;
+                    element.imageNames = selectedImages.map((img) => img.name || img.url);
                   } else {
                     element.choices = selectedImages.map((image, index) => ({
                       value: \`image_\${index}\`,
-                      imageLink: image.url
+                      imageLink: image.url,
+                      imageName: image.name || image.url
                     }));
+                    element.imageNames = selectedImages.map((img) => img.name || img.url);
                   }
+                  imageTracker[element.name] = selectedImages.map((img) => img.name || img.url);
                   element.imageFit = "cover";
                 }
               }
@@ -459,9 +501,36 @@ export default function SurveyAppClean() {
       // Handle survey completion
       model.onComplete.add(async (survey, options) => {
         const responses = survey.data;
+        const mapImageChoiceAnswerToNames = (answerValue, shownImages) => {
+          if (!shownImages || shownImages.length === 0) return answerValue;
+          const mapSingleValue = (value) => {
+            if (typeof value !== 'string') return value;
+            const match = value.match(/^image_(\\d+)$/);
+            if (!match) return value;
+            const imageIndex = parseInt(match[1], 10);
+            return shownImages[imageIndex] || value;
+          };
+          if (Array.isArray(answerValue)) return answerValue.map(mapSingleValue);
+          return mapSingleValue(answerValue);
+        };
+        const surveyQuestionTypeMap = {};
+        survey.getAllQuestions().forEach((question) => {
+          surveyQuestionTypeMap[question.name] = question.getType();
+        });
+        const enrichedResponses = Object.entries(responses).reduce((acc, [questionName, answerValue]) => {
+          const shownImages = imageTracker[questionName] || [];
+          acc[questionName] = {
+            type: surveyQuestionTypeMap[questionName] || null,
+            answer: mapImageChoiceAnswerToNames(answerValue, shownImages),
+            shown_images: shownImages
+          };
+          return acc;
+        }, {});
         
         const completeData = {
-          responses: responses,
+          responses: enrichedResponses,
+          raw_responses: responses,
+          displayed_images: imageTracker,
           survey_metadata: {
             completion_time: new Date().toISOString(),
             user_agent: navigator.userAgent,
@@ -477,13 +546,14 @@ export default function SurveyAppClean() {
         const result = await saveSurveyResponse(completeData);
         
         if (result.success) {
-          const storageMessage = result.storage === 'localStorage' 
-            ? "Thank you for completing the survey! Your responses have been saved locally."
-            : "Thank you for completing the survey! Your responses have been saved.";
+          const storageMessage = result.storage === 'supabase'
+            ? "Thank you for completing the survey! Your responses have been saved to the database."
+            : "Thank you for completing the survey! Your responses have been saved locally.";
           alert(storageMessage);
         } else {
           console.error("Failed to save survey response:", result.error);
-          alert("There was an error saving your responses. Please try again.");
+          const errorMessage = result?.error?.message || result?.error || 'Unknown error';
+          alert(\`There was an error saving your responses: \${errorMessage}\`);
         }
       });
 
@@ -530,7 +600,7 @@ export default function SurveyAppClean() {
   }
 
   return (
-    <Box>
+    <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }}>
       <Survey model={surveyModel} />
     </Box>
   );
@@ -624,6 +694,7 @@ git push -u origin main
 2. Import your GitHub repository
 3. Configure environment variables:
    - Copy values from \`.env.example\`
+   - Use Supabase **anon/public** key for \`REACT_APP_SUPABASE_ANON_KEY\` (never service_role key)
    - Set them in Vercel dashboard under Settings → Environment Variables
 4. Deploy!
 
