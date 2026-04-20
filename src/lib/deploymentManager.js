@@ -320,6 +320,27 @@ export default function SurveyAppClean() {
       setLoading(true);
       console.log('Starting survey initialization...');
       const imageTracker = {};
+      const globallyUsedImageKeys = new Set();
+      const getImageKey = (image) => image?.name || image?.url;
+      const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
+      const pickRandomImagesFromPool = (pool, imageCount, excludeUsed) => {
+        const shuffled = [...pool].sort(() => 0.5 - Math.random());
+        if (!excludeUsed) {
+          return shuffled.slice(0, imageCount);
+        }
+        const filtered = shuffled.filter((image) => {
+          const key = getImageKey(image);
+          return key && !globallyUsedImageKeys.has(key);
+        });
+        return filtered.slice(0, imageCount);
+      };
+      const trackGloballyUsedImages = (selectedImages, excludeUsed) => {
+        if (!excludeUsed) return;
+        selectedImages.forEach((image) => {
+          const key = getImageKey(image);
+          if (key) globallyUsedImageKeys.add(key);
+        });
+      };
       
       // Register custom components
       registerImageRankingWidget();
@@ -357,8 +378,9 @@ export default function SurveyAppClean() {
                   // Use type-specific defaults if imageCount is not set
                   const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
                   const imageCount = element.imageCount || defaultCount;
-                  const shuffled = [...preloadedImages].sort(() => 0.5 - Math.random());
-                  const selectedImages = shuffled.slice(0, imageCount);
+                  const excludeUsed = shouldExcludePreviouslyUsedImages(element);
+                  const selectedImages = pickRandomImagesFromPool(preloadedImages, imageCount, excludeUsed);
+                  trackGloballyUsedImages(selectedImages, excludeUsed);
                   
                   if (element.type === 'image') {
                     element.imageLink = selectedImages[0].url;
