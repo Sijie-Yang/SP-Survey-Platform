@@ -382,50 +382,83 @@ app.post('/api/upload-to-github', async (req, res) => {
       });
     }
     
-    if (!await fs.pathExists(deploymentPath)) {
+    const repoRoot = path.resolve(deploymentPath);
+    if (!await fs.pathExists(repoRoot)) {
       return res.status(404).json({ success: false, error: 'Deployment folder not found' });
     }
     
     console.log(`📤 Uploading to GitHub: ${githubRepoUrl}`);
     
-    const { exec } = require('child_process');
+    const { execFile } = require('child_process');
     const util = require('util');
-    const execPromise = util.promisify(exec);
+    const execFileAsync = util.promisify(execFile);
+    
+    const gitOpts = {
+      maxBuffer: 50 * 1024 * 1024,
+      windowsHide: true
+    };
+    
+    const runGit = (args) =>
+      execFileAsync('git', args, { ...gitOpts, cwd: repoRoot });
     
     try {
-      // Check if .git already exists
-      const gitPath = path.join(deploymentPath, '.git');
-      const gitExists = await fs.pathExists(gitPath);
+      // Isolated repo under deployments/ must have its own .git. If git walks up to the
+      // parent repo, "git add" tries to stage deployments/... which is ignored by the root .gitignore.
+      console.log('🔧 Initializing git repository in deployment folder...');
+      await runGit(['init']);
+      await runGit(['branch', '-M', 'main']);
       
-      const execOptions = { 
-        cwd: deploymentPath,
-        maxBuffer: 50 * 1024 * 1024 // Increase buffer to 50MB for large repos
-      };
+      const gitDotPath = path.join(repoRoot, '.git');
+      if (!await fs.pathExists(gitDotPath)) {
+        return res.json({
+          success: false,
+          error:
+            'git init did not create a .git directory in the deployment folder. Check disk permissions.'
+        });
+      }
       
-      if (!gitExists) {
-        // Initialize git repository
-        console.log('🔧 Initializing git repository...');
-        await execPromise('git init', execOptions);
-        await execPromise('git branch -M main', execOptions);
+      const { stdout: topRaw } = await runGit(['rev-parse', '--show-toplevel']);
+      const gitTop = path.resolve(String(topRaw).trim());
+      if (gitTop !== repoRoot) {
+        return res.json({
+          success: false,
+          error:
+            `Git is using the parent repository (${gitTop}) instead of the deployment folder (${repoRoot}). ` +
+            'The parent project ignores /deployments/*, so uploads must use a separate git repository inside the deployment folder. ' +
+            'Remove any stray .git file in that folder if present, then try again.'
+        });
       }
       
       // Add all files
       console.log('📝 Adding files to git...');
-      await execPromise('git add .', execOptions);
+      await runGit(['add', '.']);
       
       // Commit with --quiet flag to reduce output
       console.log('💾 Committing changes...');
       const message = commitMessage || 'Initial deployment setup';
-      await execPromise(`git commit --quiet -m "${message}"`, execOptions);
+      try {
+        await runGit(['commit', '--quiet', '-m', message]);
+      } catch (commitErr) {
+        const msg = commitErr.message || '';
+        if (/nothing to commit|no changes added to commit/i.test(msg)) {
+          console.log('ℹ️  No new changes to commit; continuing with push.');
+        } else {
+          throw commitErr;
+        }
+      }
       
-      // Add remote if not exists
-      if (!gitExists) {
+      let originMissing = false;
+      try {
+        await runGit(['remote', 'get-url', 'origin']);
+      } catch (_) {
+        originMissing = true;
+      }
+      if (originMissing) {
         console.log('🔗 Adding remote origin...');
-        await execPromise(`git remote add origin ${githubRepoUrl}`, execOptions);
+        await runGit(['remote', 'add', 'origin', githubRepoUrl]);
       } else {
-        // Try to set the remote URL
         try {
-          await execPromise(`git remote set-url origin ${githubRepoUrl}`, execOptions);
+          await runGit(['remote', 'set-url', 'origin', githubRepoUrl]);
         } catch (e) {
           console.log('Remote already set correctly');
         }
@@ -434,13 +467,13 @@ app.post('/api/upload-to-github', async (req, res) => {
       // Push to GitHub with --quiet flag
       console.log('🚀 Pushing to GitHub...');
       try {
-        await execPromise('git push --quiet -u origin main', execOptions);
+        await runGit(['push', '--quiet', '-u', 'origin', 'main']);
         console.log('✅ Successfully uploaded to GitHub!');
       } catch (pushError) {
         // If push fails due to remote having changes, force push
         if (pushError.message.includes('rejected') || pushError.message.includes('fetch first')) {
           console.log('⚠️  Remote has changes, force pushing...');
-          await execPromise('git push --quiet --force -u origin main', execOptions);
+          await runGit(['push', '--quiet', '--force', '-u', 'origin', 'main']);
           console.log('✅ Force push successful!');
         } else {
           throw pushError;
@@ -461,6 +494,11 @@ app.post('/api/upload-to-github', async (req, res) => {
         errorMessage = 'Git push failed: Permission denied. Please make sure you have set up SSH keys or use a personal access token.';
       } else if (error.message.includes('remote: Repository not found')) {
         errorMessage = 'GitHub repository not found. Please create the repository first on GitHub.';
+      } else if (error.message.includes('ignored by one of your .gitignore')) {
+        errorMessage =
+          'Git tried to add files using the parent project repository, and those paths are listed in the root .gitignore. ' +
+          'Upload again after restarting the dev server so the deployment folder gets its own .git. ' +
+          'If it keeps happening, open the deployment folder in a terminal, run "git init" and "git rev-parse --show-toplevel" — it must print that folder path, not the parent repo.';
       }
       
       return res.json({ 

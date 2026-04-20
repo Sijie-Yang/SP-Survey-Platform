@@ -28,13 +28,17 @@
     "survey-react-ui": "^1.9.105",
     "web-vitals": "^2.1.4"
   },
+  "devDependencies": {
+    "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
+    "cross-env": "^7.0.3"
+  },
   "scripts": {
     "start": "react-scripts start",
     "server": "node server.js",
     "server:watch": "./server-auto-restart.sh",
     "dev": "concurrently \"npm run server\" \"npm start\"",
     "dev:safe": "concurrently \"npm run server:watch\" \"npm start\"",
-    "build": "react-scripts build",
+    "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

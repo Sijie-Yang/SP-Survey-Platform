@@ -138,9 +138,12 @@ const generateDeploymentFiles = async (deploymentData) => {
       "survey-core": "^1.9.131",
       "survey-react-ui": "^1.9.131"
     },
+    "devDependencies": {
+      "cross-env": "^7.0.3"
+    },
     "scripts": {
       "start": "react-scripts start",
-      "build": "CI=false react-scripts build",
+      "build": "cross-env CI=false react-scripts build",
       "test": "react-scripts test",
       "eject": "react-scripts eject"
     },
@@ -166,7 +169,7 @@ const generateDeploymentFiles = async (deploymentData) => {
 
   // 2. Vercel configuration (survey-only SPA)
   files['vercel.json'] = JSON.stringify({
-    "buildCommand": "CI=false npm run build",
+    "buildCommand": "npm run build",
     "build": {
       "env": {
         "REACT_APP_SUPABASE_URL": resolvedSupabaseUrl,
