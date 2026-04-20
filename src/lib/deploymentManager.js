@@ -167,6 +167,16 @@ const generateDeploymentFiles = async (deploymentData) => {
   // 2. Vercel configuration (survey-only SPA)
   files['vercel.json'] = JSON.stringify({
     "buildCommand": "CI=false npm run build",
+    "build": {
+      "env": {
+        "REACT_APP_SUPABASE_URL": resolvedSupabaseUrl,
+        "REACT_APP_SUPABASE_ANON_KEY": resolvedAnonKey
+      }
+    },
+    "env": {
+      "REACT_APP_SUPABASE_URL": resolvedSupabaseUrl,
+      "REACT_APP_SUPABASE_ANON_KEY": resolvedAnonKey
+    },
     "rewrites": [
       {
         "source": "/(.*)",
