@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'public/project_templates/**'
+      - 'public/logo-long.png'
       - 'docs/**'
   workflow_dispatch:
 
@@ -32,6 +33,7 @@ jobs:
         run: |
           mkdir -p docs/public/project_templates
           cp -r public/project_templates/*.json docs/public/project_templates/
+          cp public/logo-long.png docs/public/logo-long.png
       
       - name: Setup Pages
         uses: actions/configure-pages@v4
