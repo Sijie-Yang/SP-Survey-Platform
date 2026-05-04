@@ -43,38 +43,6 @@ No coding required – build surveys through an intuitive admin panel with drag-
 
 ---
 
-## 🪜 Step-by-Step Workflow
-
-**Step 1 — Image Dataset**
-Connect your Hugging Face dataset and preload street-view images into Supabase cloud storage.
-
-<p align="center">
-  <img src="./public/step-1.jpg" alt="Step 1 - Image Dataset" width="90%">
-</p>
-
-**Step 2 — Survey Builder**
-Design your survey with image-based question types using a drag-and-drop editor or AI-powered generation.
-
-<p align="center">
-  <img src="./public/step-2.jpg" alt="Step 2 - Survey Builder" width="90%">
-</p>
-
-**Steps 3 & 4 — Server Setup & Website Deployment**
-Configure your Supabase backend and deploy the survey website to Vercel with a single click.
-
-<p align="center">
-  <img src="./public/step-3-4.jpg" alt="Steps 3 & 4 - Server Setup and Website Deployment" width="90%">
-</p>
-
-**Step 5 — Results Analysis**
-Analyze survey responses per question with automatic image–response pairing and export to CSV.
-
-<p align="center">
-  <img src="./public/step-5.jpg" alt="Step 5 - Results Analysis" width="90%">
-</p>
-
----
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -126,6 +94,38 @@ npm run dev
    - Test Supabase connection
    - Generate deployment files
    - Deploy to Vercel
+
+---
+
+## 🪜 Step-by-Step Workflow
+
+**Step 1 — Image Dataset**
+Connect your Hugging Face dataset and preload street-view images into Supabase cloud storage.
+
+<p align="center">
+  <img src="./public/step-1.jpg" alt="Step 1 - Image Dataset" width="90%">
+</p>
+
+**Step 2 — Survey Builder**
+Design your survey with image-based question types using a drag-and-drop editor or AI-powered generation.
+
+<p align="center">
+  <img src="./public/step-2.jpg" alt="Step 2 - Survey Builder" width="90%">
+</p>
+
+**Steps 3 & 4 — Server Setup & Website Deployment**
+Configure your Supabase backend and deploy the survey website to Vercel with a single click.
+
+<p align="center">
+  <img src="./public/step-3-4.jpg" alt="Steps 3 & 4 - Server Setup and Website Deployment" width="90%">
+</p>
+
+**Step 5 — Results Analysis**
+Analyze survey responses per question with automatic image–response pairing and export to CSV.
+
+<p align="center">
+  <img src="./public/step-5.jpg" alt="Step 5 - Results Analysis" width="90%">
+</p>
 
 ---
 
