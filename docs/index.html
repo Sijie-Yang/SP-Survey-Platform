@@ -905,15 +905,15 @@
                     }
                 }
                 
-                // Sort: Academic templates first, then by year (newest first)
+                // Sort: Academic templates first, then by year (oldest first)
                 templates.sort((a, b) => {
                     const aIsAI = a.category === 'AI Generated' || a.author === 'AI Generated' || a.author === 'Admin AI';
                     const bIsAI = b.category === 'AI Generated' || b.author === 'AI Generated' || b.author === 'Admin AI';
                     if (aIsAI && !bIsAI) return 1;
                     if (!aIsAI && bIsAI) return -1;
-                    // If same type, sort by year (newest first)
+                    // If same type, sort by year (oldest first)
                     if (a.year && b.year) {
-                        return b.year.localeCompare(a.year);
+                        return a.year.localeCompare(b.year);
                     }
                     return 0;
                 });
@@ -948,7 +948,7 @@
         
         function populateYearFilter(templates) {
             const yearFilter = document.getElementById('yearFilter');
-            const years = [...new Set(templates.map(t => t.year || '').filter(y => y))].sort((a, b) => b.localeCompare(a));
+            const years = [...new Set(templates.map(t => t.year || '').filter(y => y))].sort((a, b) => a.localeCompare(b));
             
             // Clear existing options except "All Years"
             yearFilter.innerHTML = '<option value="all">All Years</option>';
