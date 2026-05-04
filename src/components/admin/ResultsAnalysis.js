@@ -665,7 +665,7 @@ function ImageQuestionAnalysis({ answers, type, question }) {
 // ─── Question Card ────────────────────────────────────────────────────────────
 
 function QuestionCard({ question, answers, totalResponses, index }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const type = question.type || 'text';
   const responseCount = answers.length;
 
@@ -798,17 +798,51 @@ function exportToCSV(responses, allQuestions) {
   if (!responses.length) return;
 
   const questionNames = allQuestions.map(q => q.name);
-  const headers = ['participant_id', 'created_at', ...questionNames];
+
+  // For each image question, add a companion "shown_images" column
+  const imageTypes = new Set([
+    'imagerating', 'image_rating',
+    'imageranking', 'image_ranking',
+    'imageboolean', 'image_boolean',
+    'imagematrix', 'image_matrix',
+    'imagepicker'
+  ]);
+  const isImageQuestion = q => imageTypes.has(q.type);
+
+  // Build header columns: answer column + shown_images column (for image questions)
+  const headerCols = [];
+  for (const q of allQuestions) {
+    headerCols.push(q.name);
+    if (isImageQuestion(q)) headerCols.push(`${q.name}__shown_images`);
+  }
+
+  const headers = ['participant_id', 'created_at', ...headerCols];
 
   const rows = responses.map(row => {
     const cols = [
       row.participant_id || '',
       row.created_at || row.survey_metadata?.completion_time || ''
     ];
-    for (const qName of questionNames) {
+    for (const q of allQuestions) {
+      const qName = q.name;
       const qData = row.responses?.[qName];
-      const ans = qData?.answer ?? qData ?? '';
-      cols.push(typeof ans === 'object' ? JSON.stringify(ans) : String(ans));
+
+      // Answer value
+      let ans, shownImgs;
+      if (qData !== null && qData !== undefined && typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
+        ans = qData.answer;
+        shownImgs = qData.shown_images?.length ? qData.shown_images : (row.displayed_images?.[qName] || []);
+      } else {
+        ans = qData ?? '';
+        shownImgs = row.displayed_images?.[qName] || [];
+      }
+
+      cols.push(typeof ans === 'object' ? JSON.stringify(ans) : String(ans ?? ''));
+
+      // Shown images column (only for image questions)
+      if (isImageQuestion(q)) {
+        cols.push(Array.isArray(shownImgs) ? shownImgs.join('|') : String(shownImgs ?? ''));
+      }
     }
     return cols.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');
   });
