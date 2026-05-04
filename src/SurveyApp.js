@@ -359,44 +359,40 @@ export default function SurveyApp() {
                       }
                       trackGloballyUsedImages(selectedImages, excludeUsed);
                       
-                      // Track displayed images for this question (store names, not URLs)
-                      const imageNames = selectedImages.map(img => img.name);
-                      imageTracker[element.name] = imageNames;
-                      console.log(`✅ Tracked ${imageNames.length} image names for question: ${element.name}`, imageNames);
+                      // Track displayed image URLs for this question (used in results analysis)
+                      const imageUrls = selectedImages.map(img => img.url);
+                      imageTracker[element.name] = imageUrls;
+                      console.log(`✅ Tracked ${imageUrls.length} image URLs for question: ${element.name}`, imageUrls);
                       
                       // Set image data for SurveyJS
                       if (element.type === 'image') {
-                        // For image display questions, set imageLink directly
                         if (selectedImages.length > 0) {
-                          element.imageLink = selectedImages[0].url; // Use first image for single display
-                          element.imageName = selectedImages[0].name; // Store name for tracking
+                          element.imageLink = selectedImages[0].url;
+                          element.imageName = selectedImages[0].name;
                         }
-                        // For multiple images, we could set up an array, but SurveyJS image type typically shows one
                         if (selectedImages.length > 1) {
-                          // Store all images in a custom property for potential future use
                           element.imageLinks = selectedImages.map(img => img.url);
                           element.imageNames = selectedImages.map(img => img.name);
                         }
                       } else if (element.type === 'imageboolean' || element.type === 'imagerating' || element.type === 'imagematrix') {
-                        // For imageboolean, imagerating, and imagematrix questions, store imageHtml
+                        // Store both URLs and HTML for display
+                        element.imageLinks = selectedImages.map(img => img.url);
+                        element.imageNames = selectedImages.map(img => img.name);
                         let imagesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;">';
                         selectedImages.forEach((image) => {
-                          imagesHtml += `<img src="${image.url}" data-image-name="${image.name}" style="max-width: 300px; height: auto; border-radius: 4px;" />`;
+                          imagesHtml += `<img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name}" style="max-width: 300px; height: auto; border-radius: 4px;" />`;
                         });
                         imagesHtml += '</div>';
-                        
                         element.imageHtml = imagesHtml;
-                        // Store image names separately for tracking
-                        element.imageNames = selectedImages.map(img => img.name);
-                        console.log(`Stored imageHtml for ${element.type} question with ${selectedImages.length} images`);
+                        console.log(`Stored imageLinks/imageHtml for ${element.type} question with ${selectedImages.length} images`);
                       } else {
-                        // For other image question types, use choices
+                        // imageranking, imagepicker: use choices
                         element.choices = selectedImages.map((image, index) => ({
                           value: `image_${index}`,
                           imageLink: image.url,
-                          imageName: image.name // Store name for tracking
+                          imageName: image.name
                         }));
-                        // Also store names in a separate array for easier tracking
+                        element.imageUrls = selectedImages.map(img => img.url);
                         element.imageNames = selectedImages.map(img => img.name);
                       }
                       element.imageFit = "cover";
@@ -420,42 +416,46 @@ export default function SurveyApp() {
             if (page.elements) {
               const newElements = [];
               for (const element of page.elements) {
-                // Extract and track images from imageNames (for manually or randomly selected images)
-                if (element.imageNames && !imageTracker[element.name]) {
-                  imageTracker[element.name] = element.imageNames;
-                  console.log(`✅ Tracked ${element.imageNames.length} image names from imageNames for question: ${element.name}`, element.imageNames);
+                // Prefer URLs over names for results display (fallback chain)
+                if (element.imageUrls?.length && !imageTracker[element.name]) {
+                  imageTracker[element.name] = element.imageUrls;
+                  console.log(`✅ Tracked ${element.imageUrls.length} image URLs from imageUrls for question: ${element.name}`);
+                } else if (element.imageLinks?.length && !imageTracker[element.name]) {
+                  imageTracker[element.name] = element.imageLinks;
+                  console.log(`✅ Tracked ${element.imageLinks.length} image URLs from imageLinks for question: ${element.name}`);
                 } else if (element.imageHtml && !imageTracker[element.name]) {
-                  // Fallback: extract names from data-image-name attributes
-                  const imgRegex = /data-image-name="([^"]+)"/g;
-                  const names = [];
-                  let match;
-                  while ((match = imgRegex.exec(element.imageHtml)) !== null) {
-                    names.push(match[1]);
+                  // Try URL attribute first, then name
+                  const urlRegex = /data-image-url="([^"]+)"/g;
+                  const urls = [];
+                  let m;
+                  while ((m = urlRegex.exec(element.imageHtml)) !== null) urls.push(m[1]);
+                  if (urls.length > 0) {
+                    imageTracker[element.name] = urls;
+                    console.log(`✅ Tracked ${urls.length} image URLs from imageHtml for question: ${element.name}`);
+                  } else {
+                    const nameRegex = /data-image-name="([^"]+)"/g;
+                    const names = [];
+                    while ((m = nameRegex.exec(element.imageHtml)) !== null) names.push(m[1]);
+                    if (names.length > 0) {
+                      imageTracker[element.name] = names;
+                      console.log(`✅ Tracked ${names.length} image names from imageHtml for question: ${element.name}`);
+                    }
                   }
-                  if (names.length > 0) {
-                    imageTracker[element.name] = names;
-                    console.log(`✅ Tracked ${names.length} image names from imageHtml data attributes for question: ${element.name}`, names);
+                } else if (element.choices?.length && !imageTracker[element.name]) {
+                  // Manually configured choices: extract imageLink URLs
+                  const urls = element.choices.map(c =>
+                    c.imageLink || c.getPropertyValue?.('imageLink') || c.propertyHash?.imageLink || ''
+                  ).filter(Boolean);
+                  if (urls.length > 0) {
+                    imageTracker[element.name] = urls;
+                    console.log(`✅ Tracked ${urls.length} image URLs from choices for question: ${element.name}`);
                   }
-                }
-                
-                // Extract and track images from choices (for imagepicker, imageranking)
-                if (element.choices && !imageTracker[element.name]) {
-                  const names = element.choices
-                    .map(choice => choice.imageName)
-                    .filter(name => name);
-                  if (names.length > 0) {
-                    imageTracker[element.name] = names;
-                    console.log(`✅ Tracked ${names.length} image names from choices for question: ${element.name}`, names);
-                  }
-                }
-                
-                // Extract and track images from imageName/imageNames (for image display)
-                if (element.imageName && !imageTracker[element.name]) {
-                  imageTracker[element.name] = [element.imageName];
-                  console.log(`✅ Tracked 1 image name from imageName for question: ${element.name}`, [element.imageName]);
-                } else if (element.imageNames && !imageTracker[element.name]) {
+                } else if (element.imageNames?.length && !imageTracker[element.name]) {
                   imageTracker[element.name] = element.imageNames;
-                  console.log(`✅ Tracked ${element.imageNames.length} image names from imageNames for question: ${element.name}`, element.imageNames);
+                  console.log(`✅ Tracked ${element.imageNames.length} image names (fallback) for question: ${element.name}`);
+                } else if (element.imageName && !imageTracker[element.name]) {
+                  imageTracker[element.name] = [element.imageName];
+                  console.log(`✅ Tracked 1 image name from imageName for question: ${element.name}`);
                 }
                 
                 // Check if element should be converted to panel (has imageHtml from manual or random selection)
