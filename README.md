@@ -41,6 +41,10 @@ No coding required – build surveys through an intuitive admin panel with drag-
   <em>Complete workflow: From image dataset management to survey deployment</em>
 </p>
 
+<p align="center">
+  <img src="./public/fig_question.png" alt="Image-based question types" width="90%">
+</p>
+
 ---
 
 ## 🚀 Quick Start
