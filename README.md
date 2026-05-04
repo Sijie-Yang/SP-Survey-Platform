@@ -164,6 +164,10 @@ Analyze survey responses per question with automatic image–response pairing an
 
 ### 📋 Template System
 
+<p align="center">
+  <img src="./public/template-library.jpg" alt="Template Library" width="90%">
+</p>
+
 Start with peer-reviewed survey designs from published research:
 
 #### 2025
