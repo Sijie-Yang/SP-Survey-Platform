@@ -4,8 +4,11 @@
   "description": "Perceived scenic beauty assessment of outdoor environments using deep learning-aligned human judgments. Participants rate street scenes and outdoor places on beauty, naturalness, and green quality. Based on Seresinhe et al. (2017) using the Scenic-Or-Not dataset.",
   "author": "Seresinhe et al.",
   "year": "2017",
-  "category": "Academic Research",
-  "tags": ["official"],
+  "category": "Reference Template",
+  "tags": [
+    "reference",
+    "ai-generated"
+  ],
   "website": "https://doi.org/10.1098/rsos.170170",
   "createdAt": "2026-05-04T00:00:00.000Z",
   "config": {
@@ -50,18 +53,48 @@
             "title": "Rate the following qualities of this scene (1 = Very Low, 5 = Very High):",
             "isRequired": false,
             "rows": [
-              {"value": "naturalness", "text": "Naturalness (presence of nature)"},
-              {"value": "greenery", "text": "Greenery (trees, plants, grass)"},
-              {"value": "openness", "text": "Openness / spaciousness"},
-              {"value": "maintenance", "text": "Maintenance / cleanliness"},
-              {"value": "human_scale", "text": "Human scale (comfortable for pedestrians)"}
+              {
+                "value": "naturalness",
+                "text": "Naturalness (presence of nature)"
+              },
+              {
+                "value": "greenery",
+                "text": "Greenery (trees, plants, grass)"
+              },
+              {
+                "value": "openness",
+                "text": "Openness / spaciousness"
+              },
+              {
+                "value": "maintenance",
+                "text": "Maintenance / cleanliness"
+              },
+              {
+                "value": "human_scale",
+                "text": "Human scale (comfortable for pedestrians)"
+              }
             ],
             "columns": [
-              {"value": "1", "text": "1"},
-              {"value": "2", "text": "2"},
-              {"value": "3", "text": "3"},
-              {"value": "4", "text": "4"},
-              {"value": "5", "text": "5"}
+              {
+                "value": "1",
+                "text": "1"
+              },
+              {
+                "value": "2",
+                "text": "2"
+              },
+              {
+                "value": "3",
+                "text": "3"
+              },
+              {
+                "value": "4",
+                "text": "4"
+              },
+              {
+                "value": "5",
+                "text": "5"
+              }
             ]
           }
         ]
@@ -98,18 +131,48 @@
             "title": "Rate the following qualities of this scene (1 = Very Low, 5 = Very High):",
             "isRequired": false,
             "rows": [
-              {"value": "naturalness", "text": "Naturalness (presence of nature)"},
-              {"value": "greenery", "text": "Greenery (trees, plants, grass)"},
-              {"value": "openness", "text": "Openness / spaciousness"},
-              {"value": "maintenance", "text": "Maintenance / cleanliness"},
-              {"value": "human_scale", "text": "Human scale (comfortable for pedestrians)"}
+              {
+                "value": "naturalness",
+                "text": "Naturalness (presence of nature)"
+              },
+              {
+                "value": "greenery",
+                "text": "Greenery (trees, plants, grass)"
+              },
+              {
+                "value": "openness",
+                "text": "Openness / spaciousness"
+              },
+              {
+                "value": "maintenance",
+                "text": "Maintenance / cleanliness"
+              },
+              {
+                "value": "human_scale",
+                "text": "Human scale (comfortable for pedestrians)"
+              }
             ],
             "columns": [
-              {"value": "1", "text": "1"},
-              {"value": "2", "text": "2"},
-              {"value": "3", "text": "3"},
-              {"value": "4", "text": "4"},
-              {"value": "5", "text": "5"}
+              {
+                "value": "1",
+                "text": "1"
+              },
+              {
+                "value": "2",
+                "text": "2"
+              },
+              {
+                "value": "3",
+                "text": "3"
+              },
+              {
+                "value": "4",
+                "text": "4"
+              },
+              {
+                "value": "5",
+                "text": "5"
+              }
             ]
           }
         ]
@@ -160,13 +223,34 @@
             "title": "Age group",
             "isRequired": false,
             "choices": [
-              {"value": "under_18", "text": "Under 18"},
-              {"value": "18_24", "text": "18–24"},
-              {"value": "25_34", "text": "25–34"},
-              {"value": "35_44", "text": "35–44"},
-              {"value": "45_54", "text": "45–54"},
-              {"value": "55_64", "text": "55–64"},
-              {"value": "65_plus", "text": "65 or older"}
+              {
+                "value": "under_18",
+                "text": "Under 18"
+              },
+              {
+                "value": "18_24",
+                "text": "18–24"
+              },
+              {
+                "value": "25_34",
+                "text": "25–34"
+              },
+              {
+                "value": "35_44",
+                "text": "35–44"
+              },
+              {
+                "value": "45_54",
+                "text": "45–54"
+              },
+              {
+                "value": "55_64",
+                "text": "55–64"
+              },
+              {
+                "value": "65_plus",
+                "text": "65 or older"
+              }
             ]
           },
           {
@@ -175,11 +259,26 @@
             "title": "How often do you visit parks or green spaces?",
             "isRequired": false,
             "choices": [
-              {"value": "daily", "text": "Daily"},
-              {"value": "weekly", "text": "A few times a week"},
-              {"value": "monthly", "text": "A few times a month"},
-              {"value": "rarely", "text": "Rarely"},
-              {"value": "never", "text": "Never"}
+              {
+                "value": "daily",
+                "text": "Daily"
+              },
+              {
+                "value": "weekly",
+                "text": "A few times a week"
+              },
+              {
+                "value": "monthly",
+                "text": "A few times a month"
+              },
+              {
+                "value": "rarely",
+                "text": "Rarely"
+              },
+              {
+                "value": "never",
+                "text": "Never"
+              }
             ]
           },
           {
@@ -188,9 +287,18 @@
             "title": "Current living environment",
             "isRequired": false,
             "choices": [
-              {"value": "urban", "text": "Urban (city centre)"},
-              {"value": "suburban", "text": "Suburban"},
-              {"value": "rural", "text": "Rural"}
+              {
+                "value": "urban",
+                "text": "Urban (city centre)"
+              },
+              {
+                "value": "suburban",
+                "text": "Suburban"
+              },
+              {
+                "value": "rural",
+                "text": "Rural"
+              }
             ]
           }
         ]

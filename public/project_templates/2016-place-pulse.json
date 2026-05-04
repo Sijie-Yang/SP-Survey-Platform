@@ -4,8 +4,11 @@
   "description": "Pairwise comparison survey measuring six perceptual dimensions of street scenes: safety, liveliness, beauty, wealth, depressingness, and boringness. Replicates the crowdsourcing methodology of the Place Pulse 2.0 dataset (1.17M comparisons, 56 cities).",
   "author": "Dubey et al.",
   "year": "2016",
-  "category": "Academic Research",
-  "tags": ["official"],
+  "category": "Reference Template",
+  "tags": [
+    "reference",
+    "ai-generated"
+  ],
   "website": "https://arxiv.org/abs/1608.01769",
   "createdAt": "2026-05-04T00:00:00.000Z",
   "config": {
@@ -137,13 +140,34 @@
             "title": "Age group",
             "isRequired": false,
             "choices": [
-              {"value": "under_18", "text": "Under 18"},
-              {"value": "18_24", "text": "18–24"},
-              {"value": "25_34", "text": "25–34"},
-              {"value": "35_44", "text": "35–44"},
-              {"value": "45_54", "text": "45–54"},
-              {"value": "55_64", "text": "55–64"},
-              {"value": "65_plus", "text": "65 or older"}
+              {
+                "value": "under_18",
+                "text": "Under 18"
+              },
+              {
+                "value": "18_24",
+                "text": "18–24"
+              },
+              {
+                "value": "25_34",
+                "text": "25–34"
+              },
+              {
+                "value": "35_44",
+                "text": "35–44"
+              },
+              {
+                "value": "45_54",
+                "text": "45–54"
+              },
+              {
+                "value": "55_64",
+                "text": "55–64"
+              },
+              {
+                "value": "65_plus",
+                "text": "65 or older"
+              }
             ]
           },
           {
@@ -152,10 +176,22 @@
             "title": "Gender",
             "isRequired": false,
             "choices": [
-              {"value": "male", "text": "Male"},
-              {"value": "female", "text": "Female"},
-              {"value": "non_binary", "text": "Non-binary / third gender"},
-              {"value": "prefer_not", "text": "Prefer not to say"}
+              {
+                "value": "male",
+                "text": "Male"
+              },
+              {
+                "value": "female",
+                "text": "Female"
+              },
+              {
+                "value": "non_binary",
+                "text": "Non-binary / third gender"
+              },
+              {
+                "value": "prefer_not",
+                "text": "Prefer not to say"
+              }
             ]
           },
           {
@@ -164,9 +200,18 @@
             "title": "Which best describes where you grew up?",
             "isRequired": false,
             "choices": [
-              {"value": "urban", "text": "Urban (city centre)"},
-              {"value": "suburban", "text": "Suburban"},
-              {"value": "rural", "text": "Rural"}
+              {
+                "value": "urban",
+                "text": "Urban (city centre)"
+              },
+              {
+                "value": "suburban",
+                "text": "Suburban"
+              },
+              {
+                "value": "rural",
+                "text": "Rural"
+              }
             ]
           }
         ]

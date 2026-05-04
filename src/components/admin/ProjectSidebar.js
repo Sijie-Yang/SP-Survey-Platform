@@ -39,6 +39,7 @@ import {
   ExpandMore,
   Science,
   Article,
+  AutoAwesome,
   Close,
   ContentCopy,
   Download,
@@ -573,6 +574,8 @@ export default function ProjectSidebar({
         return <Science />;
       case 'General':
         return <Article />;
+      case 'Reference Template':
+        return <AutoAwesome />;
       default:
         return <Description />;
     }
