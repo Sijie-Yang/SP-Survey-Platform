@@ -41,6 +41,7 @@ import SurveyPreview from './components/admin/SurveyPreview';
 import SystemStatus from './components/admin/SystemStatus';
 import ImageDataset from './components/admin/ImageDataset';
 import WebsiteSetup from './components/admin/WebsiteSetup';
+import ResultsAnalysis from './components/admin/ResultsAnalysis';
 import ProjectSidebar from './components/admin/ProjectSidebar';
 import BackendStatus from './components/admin/BackendStatus';
 import { saveSurveyConfig, loadSurveyConfig } from './lib/surveyStorage';
@@ -469,7 +470,7 @@ export default function AdminApp() {
   };
 
   const handleNextStep = () => {
-    const nextTab = Math.min(tabValue + 1, 3); // Max to Step 4 (index 3)
+    const nextTab = Math.min(tabValue + 1, 4); // Max to Step 5 (index 4)
     setTabValue(nextTab);
     if (currentProject) {
       saveCurrentProjectState({ tabValue: nextTab });
@@ -1238,11 +1239,12 @@ export default function AdminApp() {
           // Project content
           <Paper sx={{ width: '100%' }}>
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <Tabs value={tabValue} onChange={handleTabChange} aria-label="admin tabs">
+              <Tabs value={tabValue} onChange={handleTabChange} aria-label="admin tabs" variant="scrollable" scrollButtons="auto">
                 <Tab label="Step 1 - Image Dataset" />
                 <Tab label="Step 2 - Survey Builder" />
                 <Tab label="Step 3 - Server Setup" />
                 <Tab label="Step 4 - Website Setup" />
+                <Tab label="Step 5 - Results Analysis" />
               </Tabs>
             </Box>
 
@@ -1289,6 +1291,13 @@ export default function AdminApp() {
 
             <TabPanel value={tabValue} index={3}>
               <WebsiteSetup 
+                currentProject={currentProject}
+                surveyConfig={surveyConfig}
+              />
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={4}>
+              <ResultsAnalysis
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
               />

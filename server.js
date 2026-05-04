@@ -536,6 +536,33 @@ async function getFolderSize(folderPath) {
   return totalSize;
 }
 
+// ✅ List all local response files (for Results Analysis fallback)
+app.get('/api/responses', async (req, res) => {
+  try {
+    const RESPONSES_PATH = path.join(__dirname, 'public', 'responses');
+    await fs.ensureDir(RESPONSES_PATH);
+    const files = (await fs.readdir(RESPONSES_PATH))
+      .filter(f => f.endsWith('.json'))
+      .sort()
+      .reverse();
+
+    const responses = [];
+    for (const file of files) {
+      try {
+        const content = await fs.readFile(path.join(RESPONSES_PATH, file), 'utf8');
+        responses.push(JSON.parse(content));
+      } catch (e) {
+        console.error(`Error reading response file ${file}:`, e);
+      }
+    }
+
+    res.json({ success: true, responses, count: responses.length });
+  } catch (error) {
+    console.error('Error listing responses:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ✅ Survey response endpoint (saves to file instead of localStorage!)
 app.post('/api/responses', async (req, res) => {
   try {
