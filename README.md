@@ -114,7 +114,7 @@ Connect your Hugging Face dataset and preload street-view images into Supabase c
 Design your survey with image-based question types using a drag-and-drop editor or AI-powered generation.
 
 <p align="center">
-  <img src="./public/step-2.jpg" alt="Step 2 - Survey Builder" width="90%">
+  <img src="./public/step-2-simple.jpg" alt="Step 2 - Survey Builder" width="90%">
 </p>
 
 **Steps 3 & 4 — Server Setup & Website Deployment**
