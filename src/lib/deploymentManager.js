@@ -12,10 +12,15 @@ export const prepareDeploymentFolder = async (currentProject) => {
       preloadedImages: null
     };
 
-    // 2. Pre-fetch all Hugging Face images if configured
-    if (currentProject?.imageDatasetConfig?.enabled && currentProject?.imageDatasetConfig?.datasetName) {
-      console.log('📸 Pre-fetching Hugging Face images...');
+    // 2. Pre-fetch all Hugging Face images only when Supabase images are not already available.
+    // If the user already transferred images to Supabase Storage (preloadedImages contains
+    // Supabase URLs), skip the HuggingFace fetch so the deployment uses those stable URLs.
+    const hasSupabaseImages = currentProject?.preloadedImages?.length > 0;
+    if (!hasSupabaseImages && currentProject?.imageDatasetConfig?.enabled && currentProject?.imageDatasetConfig?.datasetName) {
+      console.log('📸 Pre-fetching Hugging Face images (no Supabase images found)...');
       deploymentData.preloadedImages = await preloadHuggingFaceImages(currentProject.imageDatasetConfig);
+    } else if (hasSupabaseImages) {
+      console.log(`📦 Using ${currentProject.preloadedImages.length} existing Supabase images for deployment (skipping HuggingFace fetch)`);
     }
 
     // 3. Generate deployment files
@@ -249,9 +254,14 @@ Generated on: ${new Date(deploymentData.timestamp).toLocaleString()}
   if (deploymentData.config) {
     const configWithPreloadedImages = { ...deploymentData.config };
     
-    // Add preloaded images to the configuration
+    // Add preloaded images to the configuration.
+    // deploymentData.preloadedImages is set only when images were re-fetched from HuggingFace.
+    // Otherwise, configWithPreloadedImages.preloadedImages already carries the Supabase URLs
+    // from currentProject, so we just stamp the deployment timestamp.
     if (deploymentData.preloadedImages) {
       configWithPreloadedImages.preloadedImages = deploymentData.preloadedImages;
+      configWithPreloadedImages.imagePreloadTimestamp = deploymentData.timestamp;
+    } else if (configWithPreloadedImages.preloadedImages?.length > 0) {
       configWithPreloadedImages.imagePreloadTimestamp = deploymentData.timestamp;
     }
     
@@ -741,10 +751,11 @@ git push -u origin main
 
 ## Preloaded Images
 
-${deploymentData.preloadedImages ? 
-  `✅ This deployment includes ${deploymentData.preloadedImages.length} preloaded images from Hugging Face.
-This will significantly improve loading speed for survey participants.` : 
-  `ℹ️ No images were preloaded. Images will be loaded dynamically during the survey.`}
+${deploymentData.preloadedImages
+  ? `✅ This deployment includes ${deploymentData.preloadedImages.length} preloaded images fetched from Hugging Face.\nThey are embedded in deploymentConfig.js and served from Hugging Face URLs.`
+  : deploymentData.config?.preloadedImages?.length > 0
+    ? `✅ This deployment includes ${deploymentData.config.preloadedImages.length} preloaded images from Supabase Storage.\nThese are permanent, stable URLs — no HuggingFace dependency at runtime.`
+    : `ℹ️ No images were preloaded. Images will be loaded dynamically during the survey.`}
 
 ---
 Generated on: ${new Date(deploymentData.timestamp).toLocaleString()}
