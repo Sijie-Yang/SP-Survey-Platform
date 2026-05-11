@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { RegionProvider, useRegion } from './contexts/RegionContext';
+import RegionSwitcher from './components/admin/RegionSwitcher';
 import {
   AppBar,
   Toolbar,
@@ -880,6 +882,7 @@ export default function AdminApp() {
   }
 
   return (
+    <RegionProvider>
     <ThemeProvider theme={theme}>
     <Box sx={{ flexGrow: 1 }}>
         <AppBar 
@@ -991,6 +994,11 @@ export default function AdminApp() {
           {/* Backend Server Status Monitor */}
           <Box sx={{ mr: 2 }}>
             <BackendStatus />
+          </Box>
+
+          {/* Region / Language Switcher */}
+          <Box sx={{ mr: 1 }}>
+            <RegionSwitcher />
           </Box>
           
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
@@ -1340,5 +1348,6 @@ export default function AdminApp() {
       </Snackbar>
     </Box>
     </ThemeProvider>
+    </RegionProvider>
   );
 }

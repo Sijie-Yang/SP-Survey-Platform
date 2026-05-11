@@ -38,8 +38,10 @@ import {
   ContentCopy
 } from '@mui/icons-material';
 import { prepareDeploymentFolder, getDeploymentStatus, testDeployment, uploadToGitHub } from '../../lib/deploymentManager';
+import { useRegion } from '../../contexts/RegionContext';
 
 export default function WebsiteSetup({ currentProject, surveyConfig }) {
+  const { isChinaMode, t } = useRegion();
   const [activeStep, setActiveStep] = useState(0);
   const [deploymentStatus, setDeploymentStatus] = useState({
     preparing: false,
@@ -285,28 +287,51 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const steps = [
-    {
-      label: 'Prepare Your Repository',
-      description: 'Set up GitHub repository for deployment',
-      icon: <GitHub />
-    },
-    {
-      label: 'Connect to Vercel',
-      description: 'Import repository to Vercel',
-      icon: <CloudUpload />
-    },
-    {
-      label: 'Configure & Deploy',
-      description: 'Simple setup (no env vars needed!)',
-      icon: <Settings />
-    },
-    {
-      label: 'Deploy & Test',
-      description: 'Launch your survey online',
-      icon: <Language />
-    }
-  ];
+  const steps = isChinaMode
+    ? [
+        {
+          label: '准备 GitHub 仓库',
+          description: '为 Zeabur 部署准备代码仓库',
+          icon: <GitHub />,
+        },
+        {
+          label: '连接到 Zeabur',
+          description: '在 Zeabur 导入项目（国内可访问）',
+          icon: <CloudUpload />,
+        },
+        {
+          label: '配置环境变量',
+          description: '填写 Supabase / 阿里云 OSS 配置',
+          icon: <Settings />,
+        },
+        {
+          label: '部署 & 测试',
+          description: '上线问卷，中国访客可正常访问',
+          icon: <Language />,
+        },
+      ]
+    : [
+        {
+          label: 'Prepare Your Repository',
+          description: 'Set up GitHub repository for deployment',
+          icon: <GitHub />,
+        },
+        {
+          label: 'Connect to Vercel',
+          description: 'Import repository to Vercel',
+          icon: <CloudUpload />,
+        },
+        {
+          label: 'Configure & Deploy',
+          description: 'Simple setup (no env vars needed!)',
+          icon: <Settings />,
+        },
+        {
+          label: 'Deploy & Test',
+          description: 'Launch your survey online',
+          icon: <Language />,
+        },
+      ];
 
   const getStepContent = (step) => {
     switch (step) {
@@ -646,16 +671,92 @@ git push -u origin main`}
         return (
           <Box>
             <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-              ☁️ Step 2: Configure Vercel Project
+              {isChinaMode ? '🚀 第二步：连接到 Zeabur' : '☁️ Step 2: Configure Vercel Project'}
             </Typography>
-            
-            <Alert severity="success" sx={{ mb: 3 }}>
-              <Typography variant="body2">
-                Vercel provides free hosting for React applications with automatic deployments.
-              </Typography>
-            </Alert>
 
-            <Card sx={{ mb: 3 }}>
+            {isChinaMode ? (
+              <>
+                <Alert severity="info" sx={{ mb: 3 }}>
+                  <Typography variant="body2">
+                    Zeabur 是一个对中国友好的部署平台，支持 Node.js + React，亚洲节点延迟低。
+                    免费额度可满足小型研究项目需求。
+                  </Typography>
+                </Alert>
+
+                <Card sx={{ mb: 3 }}>
+                  <CardContent>
+                    <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
+                      🇨🇳 Zeabur 部署步骤：
+                    </Typography>
+                    <List dense>
+                      {[
+                        { step: '1', text: '访问 zeabur.com，用 GitHub 账户注册免费账号' },
+                        { step: '2', text: '点击 "New Project" → "Deploy from GitHub"' },
+                        { step: '3', text: '选择你在上一步上传的 GitHub 仓库' },
+                        { step: '4', text: 'Zeabur 会自动检测 React 应用并配置构建命令' },
+                        { step: '5', text: '在 Variables 面板填入 Supabase 或阿里云 OSS 配置' },
+                        { step: '6', text: '点击 Deploy，几分钟后获得可访问的链接' },
+                      ].map(({ step, text }) => (
+                        <ListItem key={step}>
+                          <ListItemIcon>
+                            <Typography variant="body2" sx={{
+                              bgcolor: 'error.main', color: 'white', borderRadius: '50%',
+                              width: 24, height: 24, display: 'flex', alignItems: 'center',
+                              justifyContent: 'center', fontSize: '0.75rem', flexShrink: 0,
+                            }}>
+                              {step}
+                            </Typography>
+                          </ListItemIcon>
+                          <ListItemText primary={text} primaryTypographyProps={{ variant: 'body2' }} />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </CardContent>
+                  <CardActions>
+                    <Button
+                      variant="contained"
+                      color="error"
+                      startIcon={<Launch />}
+                      href="https://zeabur.com"
+                      target="_blank"
+                      size="small"
+                    >
+                      打开 Zeabur
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<Launch />}
+                      href="https://zeabur.com/docs"
+                      target="_blank"
+                      size="small"
+                    >
+                      Zeabur 文档
+                    </Button>
+                  </CardActions>
+                </Card>
+
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 0.5 }}>⚙️ 中国区环境变量参考</Typography>
+                  <Typography variant="body2" component="div">
+                    在 Zeabur Variables 面板填入以下变量（如已配置）：<br />
+                    <code>REACT_APP_SUPABASE_URL</code> — Supabase 项目 URL<br />
+                    <code>REACT_APP_SUPABASE_ANON_KEY</code> — Supabase anon key<br />
+                    <code>ALIYUN_OSS_REGION</code> — 如 oss-cn-shanghai<br />
+                    <code>ALIYUN_OSS_BUCKET</code> — Bucket 名称<br />
+                    <code>ALIYUN_OSS_ACCESS_KEY_ID</code><br />
+                    <code>ALIYUN_OSS_ACCESS_KEY_SECRET</code>
+                  </Typography>
+                </Alert>
+              </>
+            ) : (
+              <Alert severity="success" sx={{ mb: 3 }}>
+                <Typography variant="body2">
+                  Vercel provides free hosting for React applications with automatic deployments.
+                </Typography>
+              </Alert>
+            )}
+
+            {!isChinaMode && <Card sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
                   🚀 Vercel Deployment Steps:
@@ -767,9 +868,9 @@ git push -u origin main`}
                   Documentation
                 </Button>
               </CardActions>
-            </Card>
+            </Card>}
 
-            <Card sx={{ mb: 3 }}>
+            {!isChinaMode && <Card sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
                   📋 Copy These to Vercel Environment Variables
@@ -803,15 +904,18 @@ git push -u origin main`}
                   </Box>
                 </Box>
               </CardContent>
-            </Card>
+            </Card>}
 
             <Alert severity="warning" sx={{ mb: 2 }}>
               <Typography variant="body2">
-                <strong>Important:</strong> Vercel will not reliably auto-populate all environment variables from your repository. Always verify
-                <strong> REACT_APP_SUPABASE_URL </strong>
-                and
-                <strong> REACT_APP_SUPABASE_ANON_KEY </strong>
-                manually before deploy/redeploy.
+                {isChinaMode
+                  ? <><strong>提示：</strong>请在 Zeabur Variables 面板手动填入环境变量，确保 Supabase 或阿里云 OSS 配置正确后再部署。</>
+                  : <><strong>Important:</strong> Vercel will not reliably auto-populate all environment variables from your repository. Always verify
+                      <strong> REACT_APP_SUPABASE_URL </strong>
+                      and
+                      <strong> REACT_APP_SUPABASE_ANON_KEY </strong>
+                      manually before deploy/redeploy.</>
+                }
               </Typography>
             </Alert>
           </Box>

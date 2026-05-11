@@ -10,7 +10,9 @@ import {
   CircularProgress,
   LinearProgress,
   Chip,
-  Divider
+  Divider,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import {
   Refresh,
@@ -20,15 +22,78 @@ import {
   Save,
   CloudDownload,
   Delete,
-  Image as ImageIcon
+  Image as ImageIcon,
 } from '@mui/icons-material';
 import { 
   testHuggingFaceConnection,
   getImagesFromHuggingFace,
   getImageCountFromDataset 
 } from '../../lib/huggingface';
+import {
+  testModelScopeConnection,
+  getImagesFromModelScope,
+  getImageCountFromModelScope,
+} from '../../lib/modelscope';
+import {
+  testOssConnection,
+  saveOssConfig,
+  loadOssConfig,
+  isOssConfigured,
+} from '../../lib/aliyun-oss';
+import { useRegion } from '../../contexts/RegionContext';
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
+  const { isChinaMode, t } = useRegion();
+
+  // Dataset provider: 'huggingface' | 'modelscope'
+  const [datasetProvider, setDatasetProvider] = useState(
+    () => localStorage.getItem('sp-survey-dataset-provider') || 'huggingface'
+  );
+
+  // Alibaba Cloud OSS config (China mode storage)
+  const [ossConfig, setOssConfig] = useState(() => loadOssConfig() || {
+    enabled: false,
+    region: 'oss-cn-shanghai',
+    bucket: '',
+    accessKeyId: '',
+    accessKeySecret: '',
+  });
+  const [ossStatus, setOssStatus] = useState({ loading: false, connected: false, error: null, success: null });
+
+  // Sync provider with region
+  useEffect(() => {
+    if (isChinaMode && datasetProvider === 'huggingface') {
+      setDatasetProvider('modelscope');
+      localStorage.setItem('sp-survey-dataset-provider', 'modelscope');
+    }
+  }, [isChinaMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleProviderChange = (_, newProvider) => {
+    if (!newProvider) return;
+    setDatasetProvider(newProvider);
+    localStorage.setItem('sp-survey-dataset-provider', newProvider);
+  };
+
+  const handleOssConfigChange = (field, value) => {
+    setOssConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveOssConfig = () => {
+    saveOssConfig(ossConfig);
+    setOssStatus({ loading: false, connected: false, error: null, success: '✅ OSS configuration saved.' });
+  };
+
+  const handleTestOssConnection = async () => {
+    setOssStatus({ loading: true, connected: false, error: null, success: null });
+    const result = await testOssConnection(ossConfig);
+    if (result.success) {
+      saveOssConfig(ossConfig);
+      setOssStatus({ loading: false, connected: true, error: null, success: `✅ Connected! ${result.imageCount} images found.` });
+    } else {
+      setOssStatus({ loading: false, connected: false, error: result.error, success: null });
+    }
+  };
+
   const defaultConfig = {
     huggingFaceToken: '',
     datasetName: '',
@@ -197,7 +262,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }));
 
     try {
-      const result = await testHuggingFaceConnection(config.huggingFaceToken, config.datasetName);
+      const result = datasetProvider === 'modelscope'
+        ? await testModelScopeConnection(config.huggingFaceToken, config.datasetName)
+        : await testHuggingFaceConnection(config.huggingFaceToken, config.datasetName);
       
       if (result.success) {
         setStatus({
@@ -434,11 +501,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       console.log(`🔍 Checking in folder: "${folderName}"`);
       console.log(`📁 Full path prefix: "${folderPrefix}"`)
 
-      // Step 3: Get total image count from HF
-      const countResult = await getImageCountFromDataset(config.huggingFaceToken, config.datasetName);
+      // Step 3: Get total image count from dataset provider
+      const countResult = datasetProvider === 'modelscope'
+        ? await getImageCountFromModelScope(config.huggingFaceToken, config.datasetName)
+        : await getImageCountFromDataset(config.huggingFaceToken, config.datasetName);
       const totalImages = countResult.imageCount || 1000;
       
-      console.log(`📊 Total images in HF dataset: ${totalImages}`);
+      console.log(`📊 Total images in dataset: ${totalImages}`);
       
       setPreloadStatus(prev => ({
         ...prev,
@@ -499,14 +568,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           continue;
         }
         
-        console.log(`📥 Batch ${i + 1}/${batches}: Need to download ${imagesToDownload.length}/${limit} images from Hugging Face...`);
+        console.log(`📥 Batch ${i + 1}/${batches}: Need to download ${imagesToDownload.length}/${limit} images from ${datasetProvider === 'modelscope' ? 'ModelScope' : 'HuggingFace'}...`);
         
-        const result = await getImagesFromHuggingFace(
-          config.huggingFaceToken,
-          config.datasetName,
-          limit,
-          offset
-        );
+        const result = datasetProvider === 'modelscope'
+          ? await getImagesFromModelScope(config.huggingFaceToken, config.datasetName, limit, offset)
+          : await getImagesFromHuggingFace(config.huggingFaceToken, config.datasetName, limit, offset);
 
         if (!result.success || !result.images) {
           throw new Error(result.error || 'Failed to fetch images from Hugging Face');
@@ -836,8 +902,42 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           🤗 Hugging Face Dataset Integration
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          Configure your Hugging Face dataset connection to use images in your surveys.
+          {isChinaMode
+            ? '配置 ModelScope 数据集，为问卷提供图片。中国区已启用，访问速度更快。'
+            : 'Configure your Hugging Face dataset connection to use images in your surveys.'}
         </Typography>
+
+        {/* China mode banner */}
+        {isChinaMode && (
+          <Alert severity="warning" icon="🇨🇳" sx={{ mb: 2 }}>
+            {t.chinaModeBanner}
+          </Alert>
+        )}
+
+        {/* Dataset Provider Selector */}
+        <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>
+            {t.datasetProvider}
+          </Typography>
+          <ToggleButtonGroup
+            value={datasetProvider}
+            exclusive
+            onChange={handleProviderChange}
+            size="small"
+          >
+            <ToggleButton value="huggingface" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
+              🤗 {t.huggingface}
+            </ToggleButton>
+            <ToggleButton value="modelscope" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
+              🔮 {t.modelscope}
+            </ToggleButton>
+          </ToggleButtonGroup>
+          {datasetProvider === 'modelscope' && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              ModelScope 由阿里巴巴达摩院维护，国内访问无需翻墙。数据集格式与 HuggingFace 兼容。
+            </Typography>
+          )}
+        </Box>
 
         {/* Setup Instructions */}
         <Alert severity="info" sx={{ mb: 3 }}>
@@ -847,8 +947,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           <Typography variant="body2" component="div">
             1. <strong>For public datasets:</strong> Leave access token empty - no authentication needed<br/>
             2. <strong>For private datasets:</strong> Get token from <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Hugging Face Settings → Access Tokens</a><br/>
-            3. Create a new token with "Read" permissions and paste it below<br/>
-            4. Browse <a href="https://huggingface.co/datasets" target="_blank" rel="noopener noreferrer">Hugging Face Datasets</a> to find your dataset<br/>
+            3. {datasetProvider === 'modelscope' ? '创建一个具有读取权限的令牌并粘贴到下方' : 'Create a new token with "Read" permissions and paste it below'}<br/>
+            4. {datasetProvider === 'modelscope'
+              ? <><a href="https://modelscope.cn/datasets" target="_blank" rel="noopener noreferrer">浏览 ModelScope 数据集</a> 找到您的数据集</>
+              : <><a href="https://huggingface.co/datasets" target="_blank" rel="noopener noreferrer">Browse HuggingFace Datasets</a> to find your dataset</>
+            }<br/>
             5. Use format: "username/dataset-name" (e.g., "sijiey/Thermal-Affordance-Dataset")<br/>
             6. Enable integration and click "Save Configuration"<br/>
             7. Click "Test Connection" to verify dataset access
@@ -868,7 +971,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         {/* Configuration Form */}
         <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
           <Typography variant="subtitle2" sx={{ mb: 2 }}>
-            🔧 Hugging Face Configuration:
+            {datasetProvider === 'modelscope' ? '🔮 ModelScope（魔搭）配置：' : '🔧 Hugging Face Configuration:'}
           </Typography>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -880,29 +983,31 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   color="primary"
                 />
               }
-              label="Enable Hugging Face Dataset Integration"
+              label={datasetProvider === 'modelscope' ? '启用 ModelScope 数据集集成' : 'Enable Hugging Face Dataset Integration'}
             />
 
             <TextField
               fullWidth
               variant="outlined"
-              label="Hugging Face Access Token (Optional)"
+              label={datasetProvider === 'modelscope' ? t.msToken : t.hfToken}
               type="password"
               value={config.huggingFaceToken}
               onChange={(e) => handleConfigChange('huggingFaceToken', e.target.value)}
-              placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              helperText="Optional: Only required for private datasets. Leave empty for public datasets."
+              placeholder={datasetProvider === 'modelscope' ? 'ms_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' : 'hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+              helperText={datasetProvider === 'modelscope' ? t.msTokenHelp : t.hfTokenHelp}
               disabled={!config.enabled}
             />
 
             <TextField
               fullWidth
               variant="outlined"
-              label="Dataset Name"
+              label={datasetProvider === 'modelscope' ? t.msDatasetName : t.hfDatasetName}
               value={config.datasetName}
               onChange={(e) => handleConfigChange('datasetName', e.target.value)}
-              placeholder="sijiey/Thermal-Affordance-Dataset"
-              helperText="Format: 'username/dataset-name' (e.g., 'imagenet-1k', 'cifar10' for public datasets)"
+              placeholder={datasetProvider === 'modelscope' ? t.msPlaceholder : t.hfPlaceholder}
+              helperText={datasetProvider === 'modelscope'
+                ? "格式：'用户名/数据集名'，与 HuggingFace 格式相同"
+                : "Format: 'username/dataset-name' (e.g., 'imagenet-1k', 'cifar10' for public datasets)"}
               disabled={!config.enabled}
             />
 
@@ -964,11 +1069,114 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         {/* Supabase Storage Configuration */}
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-            ☁️ Supabase Storage Configuration
+            ☁️ {isChinaMode ? t.storageProvider : 'Supabase Storage Configuration'}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Configure Supabase to store images permanently. Preloaded images will be uploaded to Supabase Storage.
+            {isChinaMode
+              ? '中国区可选择阿里云 OSS 作为图片存储，或继续使用 Supabase（新加坡节点，国内可访问）。'
+              : 'Configure Supabase to store images permanently. Preloaded images will be uploaded to Supabase Storage.'}
           </Typography>
+
+          {/* China mode: Storage provider selector */}
+          {isChinaMode && (
+            <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>{t.storageProvider}</Typography>
+              <ToggleButtonGroup
+                value={ossConfig.enabled ? 'aliyun' : 'supabase'}
+                exclusive
+                onChange={(_, v) => v && handleOssConfigChange('enabled', v === 'aliyun')}
+                size="small"
+              >
+                <ToggleButton value="supabase" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
+                  🗄 {t.supabase}
+                </ToggleButton>
+                <ToggleButton value="aliyun" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
+                  ☁️ {t.aliyunOss}
+                </ToggleButton>
+              </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                {ossConfig.enabled
+                  ? '使用阿里云 OSS 存储图片，国内上传/读取速度更快。'
+                  : 'Supabase（新加坡节点）在国内可正常访问，速度稍慢但无需额外配置。'}
+              </Typography>
+            </Box>
+          )}
+
+          {/* Alibaba Cloud OSS Config (China mode, OSS selected) */}
+          {isChinaMode && ossConfig.enabled && (
+            <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'warning.light' }}>
+              <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 700 }}>
+                ☁️ 阿里云 OSS 配置
+              </Typography>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2" component="div">
+                  1. 前往 <a href="https://oss.console.aliyun.com" target="_blank" rel="noopener noreferrer">阿里云 OSS 控制台</a> 创建 Bucket<br/>
+                  2. Bucket 设为<strong>公共读</strong>（Public Read），以便问卷图片可被访问<br/>
+                  3. 在 <a href="https://ram.console.aliyun.com" target="_blank" rel="noopener noreferrer">RAM 访问控制</a> 创建 AccessKey（建议使用子账号）<br/>
+                  4. 填写下方配置后点击"测试连接"
+                </Typography>
+              </Alert>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    label="OSS Region（地域）"
+                    value={ossConfig.region}
+                    onChange={(e) => handleOssConfigChange('region', e.target.value)}
+                    placeholder="oss-cn-shanghai"
+                    helperText="如 oss-cn-shanghai、oss-cn-beijing"
+                    size="small"
+                  />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    label="Bucket 名称"
+                    value={ossConfig.bucket}
+                    onChange={(e) => handleOssConfigChange('bucket', e.target.value)}
+                    placeholder="my-survey-images"
+                    size="small"
+                  />
+                </Box>
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  label="AccessKey ID"
+                  value={ossConfig.accessKeyId}
+                  onChange={(e) => handleOssConfigChange('accessKeyId', e.target.value)}
+                  placeholder="LTAI5t..."
+                  size="small"
+                />
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  label="AccessKey Secret"
+                  type="password"
+                  value={ossConfig.accessKeySecret}
+                  onChange={(e) => handleOssConfigChange('accessKeySecret', e.target.value)}
+                  placeholder="••••••••••••••••••••••••••••••••"
+                  size="small"
+                />
+                {ossStatus.error && <Alert severity="error">{ossStatus.error}</Alert>}
+                {ossStatus.success && <Alert severity="success">{ossStatus.success}</Alert>}
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Button variant="contained" onClick={handleSaveOssConfig} startIcon={<Save />} size="small">
+                    保存 OSS 配置
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={handleTestOssConnection}
+                    disabled={ossStatus.loading || !ossConfig.region || !ossConfig.bucket || !ossConfig.accessKeyId}
+                    startIcon={ossStatus.loading ? <CircularProgress size={16} /> : <Refresh />}
+                    size="small"
+                  >
+                    测试连接
+                  </Button>
+                </Box>
+              </Box>
+            </Box>
+          )}
+
 
           <Alert severity="info" sx={{ mb: 3 }}>
             <Typography variant="subtitle2" sx={{ mb: 1 }}>
