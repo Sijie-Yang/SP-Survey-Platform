@@ -46,6 +46,7 @@ import WebsiteSetup from './components/admin/WebsiteSetup';
 import ResultsAnalysis from './components/admin/ResultsAnalysis';
 import ProjectSidebar from './components/admin/ProjectSidebar';
 import BackendStatus from './components/admin/BackendStatus';
+import { isSupabaseConfigured } from './lib/supabase';
 import { loadSurveyConfig } from './lib/surveyStorage';
 import { demoSurveyConfig } from './lib/demoConfig';
 import {
@@ -938,10 +939,12 @@ export default function AdminApp() {
             )}
           </Box>
           
-          {/* Backend Server Status Monitor */}
-          <Box sx={{ mr: 2 }}>
-            <BackendStatus />
-          </Box>
+          {/* Backend Server Status Monitor — only shown in self-hosted mode */}
+          {!process.env.REACT_APP_SUPABASE_URL && (
+            <Box sx={{ mr: 2 }}>
+              <BackendStatus />
+            </Box>
+          )}
 
           {/* Region / Language Switcher */}
           <Box sx={{ mr: 1 }}>
