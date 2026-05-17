@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import SurveyApp from './SurveyApp';
 import AdminApp from './AdminApp';
 import LoginPage from './pages/LoginPage';
+import LandingPage from './pages/LandingPage';
 
 const theme = createTheme({
   palette: {
@@ -41,10 +42,10 @@ export default function App() {
       <AuthProvider>
         <Router>
           <Routes>
+            <Route path="/" element={<LandingPage />} />
             <Route path="/survey" element={<SurveyApp />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/admin" element={<ProtectedAdmin />} />
-            <Route path="/" element={<Navigate to="/admin" replace />} />
           </Routes>
         </Router>
       </AuthProvider>
