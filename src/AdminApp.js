@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RegionProvider, useRegion } from './contexts/RegionContext';
+import { RegionProvider } from './contexts/RegionContext';
 import RegionSwitcher from './components/admin/RegionSwitcher';
 import {
   AppBar,
@@ -21,13 +21,11 @@ import {
   Tooltip,
   Menu,
   MenuItem,
-  ListItemIcon,
-  ListItemText,
   Divider
 } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
-import { 
-  Preview, 
+import {
+  Preview,
   Menu as MenuIcon,
   FolderOpen,
   Save,
@@ -35,7 +33,9 @@ import {
   Star,
   GitHub,
   Palette,
-  Check
+  Check,
+  Logout,
+  AccountCircle,
 } from '@mui/icons-material';
 import { themes, createCustomTheme } from './themes/themeConfig';
 import SurveyBuilder from './components/admin/SurveyBuilder';
@@ -46,13 +46,16 @@ import WebsiteSetup from './components/admin/WebsiteSetup';
 import ResultsAnalysis from './components/admin/ResultsAnalysis';
 import ProjectSidebar from './components/admin/ProjectSidebar';
 import BackendStatus from './components/admin/BackendStatus';
-import { saveSurveyConfig, loadSurveyConfig } from './lib/surveyStorage';
+import { loadSurveyConfig } from './lib/surveyStorage';
 import { demoSurveyConfig } from './lib/demoConfig';
-import { 
-  migrateExistingConfig, 
+import {
+  migrateExistingConfig,
   getActiveProject,
-  setActiveProject
+  setActiveProject,
+  saveProjectFull,
 } from './lib/projectManager';
+import { useAuth } from './contexts/AuthContext';
+import { supabase } from './lib/supabase';
 
 function TabPanel({ children, value, index, ...other }) {
   return (
@@ -73,6 +76,8 @@ function TabPanel({ children, value, index, ...other }) {
 }
 
 export default function AdminApp() {
+  const { user, logout } = useAuth();
+
   // Theme state
   const [currentTheme, setCurrentTheme] = useState(() => {
     return localStorage.getItem('sp-survey-theme') || 'default';
@@ -326,44 +331,41 @@ export default function AdminApp() {
 
   const handleProjectSelect = async (project, preloadedConfig = null) => {
     if (!project) {
-      // Save current project state (if any)
-      if (currentProject) {
-        saveCurrentProjectState();
-      }
+      if (currentProject) saveCurrentProjectState();
       setCurrentProject(null);
       setSurveyConfig(null);
       return;
     }
 
     try {
-      // 1. Save current project's state (if any)
       if (currentProject && currentProject.id !== project.id) {
-        console.log('🔍 Saving current project state before switching...');
         saveCurrentProjectState();
       }
 
-      // 2. Always load latest project data from file system.
-      // Sidebar list may be stale until polling catches up, so re-fetch on selection.
       let fullProject = project;
       let fileSurveyConfig = preloadedConfig;
       try {
-        const response = await fetch(`http://localhost:3001/api/projects/${project.id}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.success) {
-            if (data.project) {
-              fullProject = data.project;
-            }
-            if (!fileSurveyConfig && data.surveyConfig) {
-              fileSurveyConfig = data.surveyConfig;
-            }
-            console.log('✅ Loaded latest project data from file system');
+        // Try to load latest project data
+        if (supabase) {
+          // Platform mode: survey config is inside project._surveyConfig
+          const { getProjectById } = await import('./lib/projectManager');
+          const latest = await getProjectById(project.id);
+          if (latest) {
+            fullProject = latest;
+            if (!fileSurveyConfig) fileSurveyConfig = latest._surveyConfig;
           }
         } else {
-          console.warn(`⚠️ Failed to fetch latest project data: ${response.status}`);
+          const response = await fetch(`http://localhost:3001/api/projects/${project.id}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+              if (data.project) fullProject = data.project;
+              if (!fileSurveyConfig && data.surveyConfig) fileSurveyConfig = data.surveyConfig;
+            }
+          }
         }
       } catch (error) {
-        console.warn('⚠️ Could not load latest project data, using sidebar snapshot:', error);
+        console.warn('Could not load latest project data:', error);
       }
 
       // 3. Set new project
@@ -472,7 +474,7 @@ export default function AdminApp() {
   };
 
   const handleNextStep = () => {
-    const nextTab = Math.min(tabValue + 1, 4); // Max to Step 5 (index 4)
+    const nextTab = Math.min(tabValue + 1, 3); // Max to Step 4 (index 3)
     setTabValue(nextTab);
     if (currentProject) {
       saveCurrentProjectState({ tabValue: nextTab });
@@ -613,29 +615,12 @@ export default function AdminApp() {
     }
     
     setCurrentProject(updatedProject);
-    
-    // ✅ Save directly to file system (no localStorage!)
+
     try {
-      const response = await fetch('http://localhost:3001/api/projects', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          project: updatedProject,
-          surveyConfig: surveyConfig, // Use current surveyConfig
-          supabaseConfig: updatedProject.supabaseConfig,
-        }),
-      });
-      
-      const result = await response.json();
-      if (result.success) {
-        console.log('✅ Project configuration saved to file system');
-      } else {
-        console.error('⚠️ Failed to save project to file system:', result.error);
-      }
+      await saveProjectFull(updatedProject, surveyConfig);
+      console.log('✅ Project configuration saved');
     } catch (error) {
-      console.error('❌ Error saving project to file system:', error);
+      console.error('Error saving project:', error);
     }
   };
 
@@ -733,45 +718,7 @@ export default function AdminApp() {
       const totalSize = surveyConfigSize + projectSize;
       console.log(`📊 Data size: surveyConfig=${(surveyConfigSize/1024).toFixed(2)}KB, project=${(projectSize/1024).toFixed(2)}KB, total=${(totalSize/1024).toFixed(2)}KB`);
       
-      console.log('🔍 Attempting file system save...');
-      // Each project uses its own Supabase configuration, not global configuration
-      const projectSupabaseConfig = projectToSave.supabaseConfig || null;
-      
-      // Add timeout for large files
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        console.error('❌ File save timeout after 30 seconds');
-      }, 30000); // 30 second timeout
-      
-      let response, result;
-      try {
-        response = await fetch('http://localhost:3001/api/projects', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            project: projectToSave,  // Save the entire project including latest imageDatasetConfig
-            surveyConfig: latestSurveyConfig,  // Use the latest survey config
-            supabaseConfig: projectSupabaseConfig, // Use project-specific configuration
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        
-        result = await response.json();
-        console.log('🔍 File system save result:', result);
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          console.error('❌ File save timed out');
-          result = { success: false, error: 'Request timed out (file may be too large)' };
-        } else {
-          console.error('❌ File save fetch error:', fetchError);
-          result = { success: false, error: fetchError.message };
-        }
-      }
+      const result = await saveProjectFull(projectToSave, latestSurveyConfig);
       
       if (result.success) {
         console.log('✅ Save completed successfully to file system!');
@@ -1096,8 +1043,8 @@ export default function AdminApp() {
             </Tooltip>
           </Box>
           
-          <Button 
-            color="inherit" 
+          <Button
+            color="inherit"
             onClick={() => {
               if (currentProject) {
                 window.open(`/survey?project=${currentProject.id}`, '_blank');
@@ -1106,15 +1053,35 @@ export default function AdminApp() {
               }
             }}
             disabled={!currentProject || !surveyConfig}
-            sx={{ 
-              bgcolor: 'rgba(255,255,255,0.1)', 
+            sx={{
+              bgcolor: 'rgba(255,255,255,0.1)',
               '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' },
               fontWeight: 'bold',
-              px: 2
+              px: 2,
+              mr: 1,
             }}
           >
             🚀 View Live Survey
           </Button>
+
+          {/* User info & logout */}
+          {user && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Tooltip title={user.email}>
+                <AccountCircle sx={{ opacity: 0.8 }} />
+              </Tooltip>
+              <Tooltip title="Sign out">
+                <IconButton
+                  color="inherit"
+                  onClick={logout}
+                  size="small"
+                  sx={{ border: 1, borderColor: 'rgba(255,255,255,0.4)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
+                >
+                  <Logout fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
         </Toolbar>
       </AppBar>
 
@@ -1250,9 +1217,8 @@ export default function AdminApp() {
               <Tabs value={tabValue} onChange={handleTabChange} aria-label="admin tabs" variant="scrollable" scrollButtons="auto">
                 <Tab label="Step 1 - Image Dataset" />
                 <Tab label="Step 2 - Survey Builder" />
-                <Tab label="Step 3 - Server Setup" />
-                <Tab label="Step 4 - Website Setup" />
-                <Tab label="Step 5 - Results Analysis" />
+                <Tab label="Step 3 - Share Survey" />
+                <Tab label="Step 4 - Results Analysis" />
               </Tabs>
             </Box>
 
@@ -1289,22 +1255,13 @@ export default function AdminApp() {
             </TabPanel>
 
             <TabPanel value={tabValue} index={2}>
-              <SystemStatus 
-                surveyConfig={surveyConfig} 
-                currentProject={currentProject}
-                onProjectUpdate={handleProjectUpdate}
-                onNextStep={handleNextStep}
-              />
-            </TabPanel>
-
-            <TabPanel value={tabValue} index={3}>
-              <WebsiteSetup 
+              <WebsiteSetup
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
               />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={4}>
+            <TabPanel value={tabValue} index={3}>
               <ResultsAnalysis
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}

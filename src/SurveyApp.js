@@ -150,7 +150,7 @@ export default function SurveyApp() {
         console.error('❌ Error loading project data:', error);
       }
       
-      // Load survey configuration
+      // Load survey configuration (platform mode: Supabase, self-hosted: local server)
       const adminConfig = await loadSurveyConfig(projectId);
       
       // Build runtime Supabase config from project sources.
@@ -697,6 +697,7 @@ export default function SurveyApp() {
         
         // Combine user responses with displayed images information
         const completeData = {
+          project_id: projectId,
           responses: enrichedResponses,
           raw_responses: responses,
           displayed_images: displayedImages,

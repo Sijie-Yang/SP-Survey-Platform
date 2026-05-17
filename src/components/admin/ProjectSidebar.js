@@ -158,11 +158,12 @@ export default function ProjectSidebar({
 
   const loadProjects = async () => {
     try {
-      const fileProjects = await loadProjectsFromFiles();
-      setProjects(fileProjects);
+      // Platform mode: load from Supabase (filtered by current user via RLS)
+      // Self-hosted mode: load from local file system
+      const loadedProjects = await getUserProjects();
+      setProjects(loadedProjects);
     } catch (error) {
-      console.error('Error loading projects from files:', error);
-      // ✅ No fallback needed - all data is in files
+      console.error('Error loading projects:', error);
       setProjects([]);
     }
   };

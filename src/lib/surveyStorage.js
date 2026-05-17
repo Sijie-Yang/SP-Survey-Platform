@@ -18,37 +18,44 @@ export const saveSurveyConfig = async (name, config, options = {}) => {
 
 export const loadSurveyConfig = async (projectId) => {
   try {
-    // ✅ Load surveyConfig from project file via API
-    console.log(`📂 loadSurveyConfig called for ${projectId} (loading from file system)`);
-    
+    // Platform mode: load from Supabase via projectManager
+    const { supabase } = await import('./supabase');
+    if (supabase) {
+      const { loadSurveyConfigForProject } = await import('./projectManager');
+      const config = await loadSurveyConfigForProject(projectId);
+      if (config) {
+        fixBooleanFields(config);
+        return config;
+      }
+      return null;
+    }
+
+    // Self-hosted mode: load from local Express server
     const response = await fetch(`http://localhost:3001/api/projects/${projectId}`);
     if (response.ok) {
       const data = await response.json();
       if (data.success && data.surveyConfig) {
-        console.log(`✅ Loaded surveyConfig for project ${projectId}:`, data.surveyConfig.title);
-        
-        // Fix boolean values that should be strings for SurveyJS
         const config = data.surveyConfig;
-        if (typeof config.showQuestionNumbers === 'boolean') {
-          config.showQuestionNumbers = config.showQuestionNumbers ? 'on' : 'off';
-          console.log('🔧 Fixed showQuestionNumbers boolean to string');
-        }
-        if (typeof config.showProgressBar === 'boolean') {
-          config.showProgressBar = config.showProgressBar ? 'top' : 'off';
-          console.log('🔧 Fixed showProgressBar boolean to string');
-        }
-        
+        fixBooleanFields(config);
         return config;
       }
     }
-    
-    console.warn(`⚠️ No surveyConfig found for project ${projectId}`);
+
     return null;
   } catch (error) {
     console.error('Error loading survey config:', error);
     return null;
   }
 };
+
+function fixBooleanFields(config) {
+  if (typeof config.showQuestionNumbers === 'boolean') {
+    config.showQuestionNumbers = config.showQuestionNumbers ? 'on' : 'off';
+  }
+  if (typeof config.showProgressBar === 'boolean') {
+    config.showProgressBar = config.showProgressBar ? 'top' : 'off';
+  }
+}
 
 export const deleteSurveyConfig = async (name) => {
   try {

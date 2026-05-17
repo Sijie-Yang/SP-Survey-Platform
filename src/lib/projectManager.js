@@ -1,28 +1,167 @@
-// Project management system for handling multiple survey projects
-// ✅ No localStorage - all data via API
-import { saveSurveyConfig, loadSurveyConfig, deleteSurveyConfig, getSavedConfigList } from './surveyStorage';
-import { saveProjectToProjectsFolder } from './fileSystemManager';
-import { projectTemplates, getTemplateById } from './projectTemplates';
+/**
+ * Project management — Supabase-first, falls back to local Express server.
+ *
+ * Platform mode  (REACT_APP_SUPABASE_URL set):
+ *   Projects stored in Supabase `projects` table (per-user via RLS).
+ *
+ * Self-hosted dev mode (no env vars):
+ *   Projects stored on local file system via Express server on port 3001.
+ *
+ * Required Supabase SQL (run once in your project's SQL editor):
+ * ─────────────────────────────────────────────────────────────────
+ * CREATE TABLE projects (
+ *   id           TEXT PRIMARY KEY,
+ *   user_id      UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+ *   name         TEXT NOT NULL,
+ *   description  TEXT DEFAULT '',
+ *   survey_config        JSONB DEFAULT '{}',
+ *   image_dataset_config JSONB DEFAULT '{}',
+ *   preloaded_images     JSONB DEFAULT '[]',
+ *   preloaded_at         TIMESTAMPTZ,
+ *   preloaded_source     TEXT,
+ *   template_id          TEXT,
+ *   created_at   TIMESTAMPTZ DEFAULT now(),
+ *   updated_at   TIMESTAMPTZ DEFAULT now()
+ * );
+ * ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ * CREATE POLICY "Users manage their own projects" ON projects
+ *   FOR ALL USING (auth.uid() = user_id)
+ *   WITH CHECK (auth.uid() = user_id);
+ * ─────────────────────────────────────────────────────────────────
+ */
 
-// Active project is now stored in sessionStorage (session-only)
+import { supabase } from './supabase';
+import { saveSurveyConfig, loadSurveyConfig, deleteSurveyConfig } from './surveyStorage';
+import { getTemplateById } from './projectTemplates';
+
 const ACTIVE_PROJECT_KEY = 'active_project_id';
+const isPlatformMode = () => !!supabase;
 
-// Project structure:
-// {
-//   id: string,
-//   name: string,
-//   description: string,
-//   createdAt: string,
-//   lastModified: string,
-//   templateId: string | null,  // null for custom projects
-//   supabaseConfig: object | null
-// }
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const generateProjectId = () =>
+  'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+const createDefaultSurveyConfig = (title) => ({
+  title,
+  description: 'This survey helps us understand user preferences and opinions.',
+  logo: '',
+  logoPosition: 'right',
+  showQuestionNumbers: 'off',
+  showProgressBar: 'aboveheader',
+  progressBarType: 'questions',
+  autoGrowComment: true,
+  showPreviewBeforeComplete: 'showAllQuestions',
+  pages: [
+    {
+      name: 'page1',
+      title: 'Survey Questions',
+      description: 'Please answer the following questions.',
+      elements: [],
+    },
+  ],
+});
+
+async function getCurrentUserId() {
+  if (!supabase) return null;
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id || null;
+}
+
+// ── Supabase helpers ──────────────────────────────────────────────────────────
+
+async function sbSaveProject(project, surveyConfig) {
+  const userId = await getCurrentUserId();
+  const row = {
+    id: project.id,
+    user_id: userId,
+    name: project.name,
+    description: project.description || '',
+    survey_config: surveyConfig || {},
+    image_dataset_config: project.imageDatasetConfig || {},
+    preloaded_images: project.preloadedImages || [],
+    preloaded_at: project.preloadedAt || null,
+    preloaded_source: project.preloadedSource || null,
+    template_id: project.templateId || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+async function sbLoadProject(projectId) {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .eq('id', projectId)
+    .single();
+  if (error) return null;
+  return rowToProject(data);
+}
+
+async function sbListProjects() {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*')
+    .order('updated_at', { ascending: false });
+  if (error) return [];
+  return (data || []).map(rowToProject);
+}
+
+async function sbDeleteProject(projectId) {
+  const { error } = await supabase.from('projects').delete().eq('id', projectId);
+  if (error) throw error;
+}
+
+function rowToProject(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || '',
+    createdAt: row.created_at,
+    lastModified: row.updated_at,
+    templateId: row.template_id || null,
+    imageDatasetConfig: row.image_dataset_config || {},
+    preloadedImages: row.preloaded_images || [],
+    preloadedAt: row.preloaded_at || null,
+    preloadedSource: row.preloaded_source || null,
+    // surveyConfig lives inside the row but is kept separate for callers
+    _surveyConfig: row.survey_config || {},
+  };
+}
+
+// ── Local server helpers ──────────────────────────────────────────────────────
+
+async function localSaveProject(project, surveyConfig) {
+  const res = await fetch('http://localhost:3001/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project, surveyConfig }),
+  });
+  const result = await res.json();
+  if (!result.success) throw new Error(result.error || 'Save failed');
+}
+
+async function localLoadProject(projectId) {
+  const res = await fetch(`http://localhost:3001/api/projects/${projectId}`);
+  const data = await res.json();
+  if (!data.success || !data.project) return null;
+  return data.project;
+}
+
+async function localListProjects() {
+  const res = await fetch('http://localhost:3001/api/projects');
+  const data = await res.json();
+  return data.projects || [];
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export const createProject = async (projectData) => {
   try {
     const projectId = generateProjectId();
     const now = new Date().toISOString();
-    
+
     const project = {
       id: projectId,
       name: projectData.name,
@@ -30,92 +169,61 @@ export const createProject = async (projectData) => {
       createdAt: now,
       lastModified: now,
       templateId: projectData.templateId || null,
-      supabaseConfig: projectData.supabaseConfig || null,
       imageDatasetConfig: projectData.imageDatasetConfig || {
-        enabled: true, // Default to enabled for new projects
+        enabled: true,
         huggingFaceToken: '',
         datasetName: '',
-        supabaseUrl: '',
-        supabaseKey: ''
-      }
+      },
     };
-    
-    // Save survey configuration
+
     let surveyConfig;
-    
-    // ✅ Priority 1: Use provided surveyConfig (from file-based templates)
     if (projectData.surveyConfig) {
-      console.log('✅ Using provided surveyConfig from template');
-      surveyConfig = { ...projectData.surveyConfig };
-      surveyConfig.title = projectData.name; // Override title with project name
-    }
-    // Priority 2: Try to load from static template by ID
-    else if (projectData.templateId) {
+      surveyConfig = { ...projectData.surveyConfig, title: projectData.name };
+    } else if (projectData.templateId) {
       const template = getTemplateById(projectData.templateId);
-      if (!template) {
-        console.warn(`⚠️ Template ${projectData.templateId} not found in static templates`);
-        throw new Error('Template not found');
-      }
-      console.log('✅ Using surveyConfig from static template:', projectData.templateId);
-      surveyConfig = { ...template.config };
-      surveyConfig.title = projectData.name; // Override title with project name
-    }
-    // Priority 3: Create default config for custom project
-    else {
-      console.log('✅ Creating default surveyConfig for custom project');
+      if (!template) throw new Error('Template not found');
+      surveyConfig = { ...template.config, title: projectData.name };
+    } else {
       surveyConfig = createDefaultSurveyConfig(projectData.name);
     }
-    
-    await saveSurveyConfig(projectId, surveyConfig);
-    
-    // ✅ Save directly to file system via API (no localStorage!)
-    const fileResult = await saveProjectToProjectsFolder(project, surveyConfig);
-    if (!fileResult.success) {
-      console.error('Failed to create project file:', fileResult.error);
-      throw new Error('Failed to create project file: ' + fileResult.error);
+
+    if (isPlatformMode()) {
+      await sbSaveProject(project, surveyConfig);
     } else {
-      console.log('✅ Project file created successfully');
+      await saveSurveyConfig(projectId, surveyConfig);
+      const { saveProjectToProjectsFolder } = await import('./fileSystemManager');
+      const fileResult = await saveProjectToProjectsFolder(project, surveyConfig);
+      if (!fileResult.success) throw new Error('Failed to create project file: ' + fileResult.error);
     }
-    
+
     return { success: true, project, surveyConfig };
   } catch (error) {
-    console.error('Error creating project:', error);
+    console.error('createProject:', error);
     return { success: false, error: error.message };
   }
 };
 
 export const duplicateProject = async (sourceProjectId, newName, sourceProject) => {
   try {
-    const sourceConfig = await loadSurveyConfig(sourceProjectId);
-    if (!sourceConfig) {
-      throw new Error('Source project not found');
+    let sourceConfig;
+    if (isPlatformMode()) {
+      const src = await sbLoadProject(sourceProjectId);
+      sourceConfig = src?._surveyConfig || {};
+    } else {
+      sourceConfig = await loadSurveyConfig(sourceProjectId);
     }
-    
-    // ✅ sourceProject is now passed as parameter (from API)
+    if (!sourceConfig) throw new Error('Source project not found');
+
     const result = await createProject({
       name: newName,
       description: `Copy of ${sourceProject?.name || 'Unknown Project'}`,
-      templateId: null, // Duplicated projects are always custom
-      supabaseConfig: sourceProject?.supabaseConfig || null,
-      imageDatasetConfig: sourceProject?.imageDatasetConfig || {
-        enabled: true,
-        huggingFaceToken: '',
-        datasetName: '',
-        supabaseUrl: '',
-        supabaseKey: ''
-      }
+      surveyConfig: { ...sourceConfig, title: newName },
+      imageDatasetConfig: sourceProject?.imageDatasetConfig || {},
     });
-    
-    if (result.success) {
-      // Override the survey config with the source config
-      const modifiedConfig = { ...sourceConfig };
-      modifiedConfig.title = newName;
-      await saveSurveyConfig(result.project.id, modifiedConfig);
-    }
-    
+
     return result;
   } catch (error) {
-    console.error('Error duplicating project:', error);
+    console.error('duplicateProject:', error);
     return { success: false, error: error.message };
   }
 };
@@ -123,158 +231,114 @@ export const duplicateProject = async (sourceProjectId, newName, sourceProject) 
 export const createProjectFromTemplate = async (templateId, projectName) => {
   try {
     const template = getTemplateById(templateId);
-    if (!template) {
-      throw new Error('Template not found');
-    }
-    
+    if (!template) throw new Error('Template not found');
     return await createProject({
       name: projectName,
       description: `Based on ${template.name}`,
-      templateId: templateId
+      templateId,
     });
   } catch (error) {
-    console.error('Error creating project from template:', error);
+    console.error('createProjectFromTemplate:', error);
     return { success: false, error: error.message };
   }
 };
 
 export const deleteProject = async (projectId) => {
   try {
-    // Delete survey configuration
-    await deleteSurveyConfig(projectId);
-    
-    // ✅ Project deletion now handled by API (no localStorage!)
-    
-    // If this was the active project, clear active project
+    if (isPlatformMode()) {
+      await sbDeleteProject(projectId);
+    } else {
+      await deleteSurveyConfig(projectId);
+    }
     const activeProjectId = getActiveProjectId();
     if (activeProjectId === projectId) {
       sessionStorage.removeItem(ACTIVE_PROJECT_KEY);
     }
-    
     return { success: true };
   } catch (error) {
-    console.error('Error deleting project:', error);
+    console.error('deleteProject:', error);
     return { success: false, error: error.message };
   }
 };
 
 export const updateProject = async (projectId, updates) => {
   try {
-    console.log(`📝 Updating project ${projectId}...`);
-    
-    // Step 1: Load the current project from file system
-    const response = await fetch(`http://localhost:3001/api/projects/${projectId}`);
-    if (!response.ok) {
-      throw new Error('Failed to load project');
+    if (isPlatformMode()) {
+      const existing = await sbLoadProject(projectId);
+      if (!existing) throw new Error('Project not found');
+      const merged = { ...existing, ...updates, id: projectId, lastModified: new Date().toISOString() };
+      await sbSaveProject(merged, merged._surveyConfig || {});
+      return { success: true, project: merged };
+    } else {
+      const res = await fetch(`http://localhost:3001/api/projects/${projectId}`);
+      const data = await res.json();
+      if (!data.success || !data.project) throw new Error('Project not found');
+      const updatedProject = { ...data.project, ...updates, id: projectId, lastModified: new Date().toISOString() };
+      await localSaveProject(updatedProject, data.surveyConfig);
+      return { success: true, project: updatedProject };
     }
-    
-    const data = await response.json();
-    if (!data.success || !data.project) {
-      throw new Error('Project not found');
-    }
-    
-    // Step 2: Merge updates with existing project data
-    const updatedProject = {
-      ...data.project,
-      ...updates,
-      id: projectId, // Ensure ID is preserved
-      lastModified: new Date().toISOString()
-    };
-    
-    // Step 3: Save back to file system
-    const saveResponse = await fetch('http://localhost:3001/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        project: updatedProject,
-        surveyConfig: data.surveyConfig // Preserve existing surveyConfig
-      })
-    });
-    
-    if (!saveResponse.ok) {
-      const errorData = await saveResponse.json();
-      throw new Error(errorData.error || 'Failed to save project');
-    }
-    
-    const saveResult = await saveResponse.json();
-    console.log('✅ Project updated successfully:', updatedProject.name);
-    
-    return { success: true, project: updatedProject };
   } catch (error) {
-    console.error('Error updating project:', error);
+    console.error('updateProject:', error);
     return { success: false, error: error.message };
   }
 };
 
-// ✅ getUserProjects now fetches from API (see ProjectSidebar.js)
 export const getUserProjects = async () => {
   try {
-    const response = await fetch('http://localhost:3001/api/projects');
-    const data = await response.json();
-    return data.projects || [];
+    if (isPlatformMode()) return await sbListProjects();
+    return await localListProjects();
   } catch (error) {
-    console.error('Error getting user projects from API:', error);
+    console.error('getUserProjects:', error);
     return [];
   }
 };
 
-// ✅ getProjectById now fetches from API
 export const getProjectById = async (projectId) => {
   try {
-    const response = await fetch(`http://localhost:3001/api/projects/${projectId}`);
-    const data = await response.json();
-    return data.project || null;
+    if (isPlatformMode()) return await sbLoadProject(projectId);
+    return await localLoadProject(projectId);
   } catch (error) {
-    console.error('Error getting project by ID from API:', error);
+    console.error('getProjectById:', error);
     return null;
   }
 };
 
-// ✅ Active project is now stored in sessionStorage (session-only)
+export const saveProjectFull = async (project, surveyConfig) => {
+  try {
+    if (isPlatformMode()) {
+      await sbSaveProject(project, surveyConfig);
+    } else {
+      await localSaveProject(project, surveyConfig);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('saveProjectFull:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const loadSurveyConfigForProject = async (projectId) => {
+  try {
+    if (isPlatformMode()) {
+      const project = await sbLoadProject(projectId);
+      return project?._surveyConfig || null;
+    }
+    return await loadSurveyConfig(projectId);
+  } catch (error) {
+    console.error('loadSurveyConfigForProject:', error);
+    return null;
+  }
+};
+
 export const setActiveProject = (projectId) => {
   sessionStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
 };
 
-export const getActiveProjectId = () => {
-  return sessionStorage.getItem(ACTIVE_PROJECT_KEY);
-};
+export const getActiveProjectId = () => sessionStorage.getItem(ACTIVE_PROJECT_KEY);
 
 export const getActiveProject = async () => {
   const activeId = getActiveProjectId();
   return activeId ? await getProjectById(activeId) : null;
 };
 
-const generateProjectId = () => {
-  return 'proj_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-};
-
-const createDefaultSurveyConfig = (title) => {
-  return {
-    title: title,
-    description: "This survey helps us understand user preferences and opinions.",
-    logo: "",
-    logoPosition: "right",
-    settings: {
-      showQuestionNumbers: "off",
-      showProgressBar: "aboveheader",
-      progressBarType: "questions",
-      autoGrowComment: true,
-      showPreviewBeforeComplete: "showAllQuestions"
-    },
-    images: [],
-    pages: [
-      {
-        name: "page1",
-        title: "Survey Questions",
-        description: "Please answer the following questions.",
-        elements: []
-      }
-    ]
-  };
-};
-
-// ✅ Migration function no longer needed (no localStorage to migrate from)
-export const migrateExistingConfig = async () => {
-  console.log('📝 Migration skipped (no longer using localStorage)');
-  return null;
-};
+export const migrateExistingConfig = async () => null;

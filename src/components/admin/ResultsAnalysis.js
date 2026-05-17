@@ -42,7 +42,7 @@ import {
   LinearScale,
   TableChart
 } from '@mui/icons-material';
-import { createClient } from '@supabase/supabase-js';
+import { supabase as platformSupabase } from '../../lib/supabase';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -866,40 +866,29 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
   const [dataSource, setDataSource] = useState(null);
   const [searchText, setSearchText] = useState('');
 
-  // Build project-specific Supabase client
-  const projectSupabase = useMemo(() => {
-    const cfg = currentProject?.imageDatasetConfig;
-    if (cfg?.supabaseUrl && cfg?.supabaseKey) {
-      try {
-        return createClient(cfg.supabaseUrl, cfg.supabaseKey);
-      } catch (e) {
-        console.error('Failed to create Supabase client for results:', e);
-        return null;
-      }
-    }
-    return null;
-  }, [currentProject?.imageDatasetConfig?.supabaseUrl, currentProject?.imageDatasetConfig?.supabaseKey]);
-
   const fetchResponses = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      if (projectSupabase) {
-        const { data, error: sbError } = await projectSupabase
+      if (platformSupabase && currentProject?.id) {
+        // Platform mode: query responses for this specific project
+        const { data, error: sbError } = await platformSupabase
           .from('survey_responses')
           .select('*')
+          .eq('project_id', currentProject.id)
           .order('created_at', { ascending: false });
         if (sbError) throw sbError;
         setResponses(data || []);
         setDataSource('supabase');
       } else {
+        // Self-hosted fallback: local file server
         const resp = await fetch('http://localhost:3001/api/responses');
         if (resp.ok) {
           const json = await resp.json();
           setResponses(json.responses || []);
           setDataSource('file');
         } else {
-          setError('Supabase not configured. Please set up the database connection in Step 1 - Image Dataset.');
+          setError('No data source available. Configure Supabase environment variables.');
           setDataSource(null);
         }
       }
@@ -908,7 +897,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
     } finally {
       setLoading(false);
     }
-  }, [projectSupabase]);
+  }, [currentProject?.id]);
 
   useEffect(() => {
     if (currentProject) fetchResponses();

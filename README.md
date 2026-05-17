@@ -4,11 +4,9 @@
 
 [![Stars](https://img.shields.io/github/stars/Sijie-Yang/Streetscape-Perception-Survey?style=social)](https://github.com/Sijie-Yang/Streetscape-Perception-Survey)
 [![Paper](https://img.shields.io/badge/📄-Published_Paper-9cf)](https://www.sciencedirect.com/science/article/pii/S0360132325000514)
-[![Website](https://img.shields.io/badge/🌐-Live_Demo-blue)](https://streetscape-perception-survey.vercel.app/)
+[![Website](https://img.shields.io/badge/🌐-Live_Platform-blue)](https://streetscape-perception-survey.pages.dev/)
 [![License](https://img.shields.io/badge/📄-CC_BY_4.0-green)](https://creativecommons.org/licenses/by/4.0/)
 [![React](https://img.shields.io/badge/React-18.2-61DAFB?logo=react)](https://reactjs.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-Backend-339933?logo=node.js)](https://nodejs.org/)
-
 
 <img src="./public/fig_introduction.png" alt="SP-Survey Interface" width="100%">
 
@@ -16,7 +14,7 @@
 <br>
 No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, AI-powered generation, and cloud integration.
 
-🌐 <a href="https://streetscape-perception-survey.vercel.app/"><strong>Live Demo</strong></a> •
+🌐 <a href="https://streetscape-perception-survey.pages.dev/"><strong>Use the Hosted Platform</strong></a> •
 📄 <a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>Research Paper</strong></a> •
 🔗 <a href="https://thermal-affordance.ual.sg"><strong>Project Website</strong></a> •
 📊 <a href="https://github.com/Sijie-Yang/Thermal-Affordance"><strong>Dataset</strong></a>
@@ -31,35 +29,32 @@ No coding required – build surveys through an intuitive admin panel with drag-
 
 ---
 
-## 📸 Platform Overview
+## 🚀 Two Ways to Use SP-Survey
 
-<p align="center">
-  <img src="./public/overview.png" alt="SP-Survey Platform Overview" width="90%">
-</p>
+### Option A — Use the Hosted Platform (Recommended)
 
-<p align="center">
-  <em>Complete workflow: From image dataset management to survey deployment</em>
-</p>
+**No setup required.** Create an account and start building surveys immediately.
 
-<p align="center">
-  <img src="./public/fig_question.png" alt="Image-based question types" width="90%">
-</p>
+👉 **[streetscape-perception-survey.pages.dev](https://streetscape-perception-survey.pages.dev/)**
+
+- ✅ No server, no deployment, no configuration
+- ✅ Your projects and data are stored securely in the cloud
+- ✅ Share survey links directly with participants — no hosting needed
+- ✅ Access from anywhere, including mainland China
 
 ---
 
-## 🚀 Quick Start
+### Option B — Self-Host (Open Source)
 
-### Prerequisites
+Run your own instance with your own Supabase database.
 
-**Required:**
-- **Hugging Face Account** (https://huggingface.co) for your image dataset
-- **Supabase Account** (https://supabase.com) for cloud storage
-- **Vercel Account** (https://vercel.com) for deployment
+#### Prerequisites
 
-**Optional:**
-- **OpenAI API Key** (https://platform.openai.com/api-keys) for AI-powered survey generation
+- **Supabase Account** — [supabase.com](https://supabase.com) (free tier available)
+- **Node.js 18+**
+- **OpenAI API Key** (optional — for AI survey generation)
 
-### Installation
+#### Installation
 
 ```bash
 # Clone the repository
@@ -69,42 +64,97 @@ cd Streetscape-Perception-Survey
 # Install dependencies
 npm install
 
-# Start both frontend and backend
+# Copy the environment template
+cp .env.example .env
+```
+
+#### Configure Environment Variables
+
+Edit `.env` with your Supabase credentials:
+
+```env
+REACT_APP_SUPABASE_URL=https://your-project-id.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=your-anon-key-here
+
+# Optional
+REACT_APP_OPENAI_API_KEY=sk-...
+```
+
+Get these from: **Supabase Dashboard → Project → Settings → API**
+
+#### Set Up the Database
+
+Run the following SQL in your **Supabase SQL Editor**:
+
+```sql
+-- Projects table (stores survey configs per user)
+CREATE TABLE projects (
+  id                   TEXT PRIMARY KEY,
+  user_id              UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  name                 TEXT NOT NULL,
+  description          TEXT DEFAULT '',
+  survey_config        JSONB DEFAULT '{}',
+  image_dataset_config JSONB DEFAULT '{}',
+  preloaded_images     JSONB DEFAULT '[]',
+  preloaded_at         TIMESTAMPTZ,
+  preloaded_source     TEXT,
+  template_id          TEXT,
+  created_at           TIMESTAMPTZ DEFAULT now(),
+  updated_at           TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage their own projects" ON projects
+  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Survey responses table
+CREATE TABLE survey_responses (
+  id               BIGSERIAL PRIMARY KEY,
+  participant_id   TEXT NOT NULL,
+  project_id       TEXT,
+  responses        JSONB DEFAULT '{}',
+  displayed_images JSONB DEFAULT '[]',
+  survey_metadata  JSONB DEFAULT '{}',
+  created_at       TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE survey_responses ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Anyone can submit" ON survey_responses FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public read" ON survey_responses FOR SELECT USING (true);
+```
+
+Also create a **Storage bucket** named `survey-images` (public) and add these policies:
+
+```sql
+CREATE POLICY "Users access own folder" ON storage.objects FOR ALL TO authenticated
+  USING (bucket_id = 'survey-images' AND split_part(name, '/', 1) = auth.uid()::text)
+  WITH CHECK (bucket_id = 'survey-images' AND split_part(name, '/', 1) = auth.uid()::text);
+
+CREATE POLICY "Public read images" ON storage.objects FOR SELECT TO public
+  USING (bucket_id = 'survey-images');
+```
+
+#### Start the Application
+
+```bash
 npm run dev
 ```
 
-### Access the Application
+- **Admin Panel**: http://localhost:3000/admin
+- **Live Survey**: http://localhost:3000/survey?project=YOUR_PROJECT_ID
 
-- **🎨 Admin Panel**: http://localhost:3000/admin
-- **📋 Live Survey**: http://localhost:3000/survey
+#### Deploy to Cloudflare Pages (Recommended)
 
-### Create Your First Survey
-
-1. **Load Template** or **Create New Project**
-   - Click "Load Template" → Select a template
-   - Or click "New Project" for a blank survey
-
-2. **Configure Image Dataset**
-   - Upload images to Hugging Face Dataset
-   - Configure Supabase credentials
-   - Click "Preload Images" to transfer images
-
-3. **Build Survey**
-   - Add pages and questions with drag-and-drop
-   - Configure question types (image rating, choice, ranking, etc.)
-   - Use **AI Assistant** (🤖) for automatic generation
-
-4. **Deploy**
-   - Test Supabase connection
-   - Generate deployment files
-   - Deploy to Vercel
+1. Push your repo to GitHub
+2. Connect to [Cloudflare Pages](https://pages.cloudflare.com) → Build command: `npm run build` → Output: `build`
+3. Add environment variables in Cloudflare Pages → Settings → Environment Variables
+4. Add your Cloudflare Pages domain to Supabase → Authentication → URL Configuration → Redirect URLs
 
 ---
 
-## 🪜 Step-by-Step Workflow
+## 🪜 Workflow
 
 **Step 1 — Image Dataset**
-Connect your Hugging Face dataset and preload street-view images into Supabase cloud storage.
+Upload images directly to Supabase Storage (auto-compressed to ≤300 KB in your browser).
+Optionally batch-import from a HuggingFace dataset.
 
 <p align="center">
   <img src="./public/step-1.jpg" alt="Step 1 - Image Dataset" width="90%">
@@ -117,18 +167,14 @@ Design your survey with image-based question types using a drag-and-drop editor 
   <img src="./public/step-2-simple.jpg" alt="Step 2 - Survey Builder" width="90%">
 </p>
 
-**Steps 3 & 4 — Server Setup & Website Deployment**
-Configure your Supabase backend and deploy the survey website to Vercel with a single click.
+**Step 3 — Share Survey**
+Copy your survey link and share it with participants. No deployment needed — the survey is already live.
+
+**Step 4 — Results Analysis**
+Analyze responses per question with automatic image–response pairing and export to CSV.
 
 <p align="center">
-  <img src="./public/step-3-4.jpg" alt="Steps 3 & 4 - Server Setup and Website Deployment" width="90%">
-</p>
-
-**Step 5 — Results Analysis**
-Analyze survey responses per question with automatic image–response pairing and export to CSV.
-
-<p align="center">
-  <img src="./public/step-5.jpg" alt="Step 5 - Results Analysis" width="90%">
+  <img src="./public/step-5.jpg" alt="Step 4 - Results Analysis" width="90%">
 </p>
 
 ---
@@ -145,12 +191,12 @@ Analyze survey responses per question with automatic image–response pairing an
 ### 🔧 Survey Capabilities
 
 **Image-Based Questions:**
-- Image Choice (imagepicker) - Compare streetscape designs
-- Image Ranking (imageranking) - Preference hierarchies
-- Image Rating (imagerating) - Quantify comfort, safety, aesthetics (1-5 scale)
-- Image Yes/No (imageboolean) - Binary assessments
-- Image Matrix (imagematrix) - Multi-criteria evaluation
-- Image Display (image) - Reference images
+- Image Choice (imagepicker) — Compare streetscape designs
+- Image Ranking (imageranking) — Preference hierarchies
+- Image Rating (imagerating) — Quantify comfort, safety, aesthetics (1–5 scale)
+- Image Yes/No (imageboolean) — Binary assessments
+- Image Matrix (imagematrix) — Multi-criteria evaluation
+- Image Display (image) — Reference images
 
 **Text Questions:**
 - Text input, multi-line comments, single/multiple choice
@@ -159,8 +205,8 @@ Analyze survey responses per question with automatic image–response pairing an
 **Research Features:**
 - Multi-page surveys with progress tracking
 - Fully responsive design
-- Drag-and-drop builder
-- Real-time preview
+- Drag-and-drop builder with real-time preview
+- Multi-language support (English / 中文)
 
 ### 📋 Template System
 
@@ -185,32 +231,9 @@ Start with peer-reviewed survey designs from published research:
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Human perception evaluation of building exteriors using machine learning techniques
 
 #### AI Template
-- **City Landmark** | AI Generated Template | [Image](https://huggingface.co/datasets/Zicheng00/Landmark_visibility)  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Urban landmark perception focusing on visibility, accessibility, and recognition  
-- **Street Bikeability** | AI Generated Template | [Image](https://huggingface.co/datasets/koito19960406/sp_survey_bikeability)  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Streetscape bikeability assessment examining design interventions and socio-economic impacts  
-- **Urban Greenery** | AI Generated Template | -  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Psychological, aesthetic, and functional impacts of urban greenery in streetscapes
-
-**How to Use:**
-1. Open Admin Panel → Project Sidebar
-2. Click **"Load Template"** button
-3. Select a template and customize
-
-### 💾 Data & Deployment
-
-- **🤗 Hugging Face**: Host your image datasets
-- **☁️ Supabase**: Store images and survey responses
-- **🚀 Vercel**: Deploy your survey website with one click
-
----
-
-## 📊 Survey Data Collection
-
-**View Responses:**
-1. Supabase Dashboard → Table Editor
-2. Export as CSV or JSON
-3. Real-time monitoring
+- **City Landmark** | AI Generated | [Image](https://huggingface.co/datasets/Zicheng00/Landmark_visibility)  
+- **Street Bikeability** | AI Generated | [Image](https://huggingface.co/datasets/koito19960406/sp_survey_bikeability)  
+- **Urban Greenery** | AI Generated  
 
 ---
 
@@ -233,33 +256,23 @@ Start with peer-reviewed survey designs from published research:
 
 ## 🆘 Troubleshooting
 
-### Backend Server Offline
-```bash
-# Use safe mode with auto-restart (recommended)
-npm run dev:safe
-
-# Or manual restart
-npm run dev
-```
-
 ### Images Not Loading
-1. Check Supabase bucket is public (Storage → Settings → Public bucket)
-2. Verify image URLs are accessible
-3. Preload images from Hugging Face to Supabase for stable URLs
+1. Check the `survey-images` Supabase bucket is set to **Public**
+2. Verify storage RLS policies are applied
+3. Images are auto-compressed to ≤300 KB on upload
 
-### Cannot Save Projects
-1. Ensure backend server is running (`node server.js`)
-2. Check http://localhost:3001/api/projects returns JSON
-3. Verify folder permissions
+### Cannot Sign In
+1. Check `REACT_APP_SUPABASE_URL` and `REACT_APP_SUPABASE_ANON_KEY` in `.env`
+2. Restart dev server after changing `.env`
+3. Make sure email confirmation is disabled (for development) or SMTP is configured
 
-### Supabase Connection Failed
-1. Verify credentials (URL format: `https://xxxxx.supabase.co`)
-2. Use "anon/public" key, not "service_role" key
-3. Ensure project is active in Supabase dashboard
+### Survey Shows Wrong Content
+1. Make sure the URL includes `?project=YOUR_PROJECT_ID`
+2. Save your project in the Admin Panel before sharing the link
 
 **Getting Help:**
-- **GitHub Issues**: [Report a bug](https://github.com/Sijie-Yang/SP-Survey/issues)
-- **Discussions**: [Ask questions](https://github.com/Sijie-Yang/SP-Survey/discussions)
+- **GitHub Issues**: [Report a bug](https://github.com/Sijie-Yang/Streetscape-Perception-Survey/issues)
+- **Discussions**: [Ask questions](https://github.com/Sijie-Yang/Streetscape-Perception-Survey/discussions)
 
 ---
 
@@ -275,15 +288,10 @@ We welcome contributions! Please open an issue or pull request to discuss your i
 
 This work is licensed under a [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
 
-**You are free to:**
 - ✅ Share — copy and redistribute the material
 - ✅ Adapt — remix, transform, and build upon the material
 - ✅ Commercial use allowed
-
-**Under the following terms:**
 - 📝 **Attribution** — You must give appropriate credit and cite the original paper
-
-
 
 ---
 
@@ -292,8 +300,8 @@ This work is licensed under a [Creative Commons Attribution 4.0 International Li
 **Developed by Urban Analytics Lab, Department of Architecture, National University of Singapore**
 
 **Technology Stack:**
-- SurveyJS, Material-UI, React 18.2, Node.js/Express
+- SurveyJS, Material-UI, React 18.2
 - OpenAI GPT-4o (AI features)
-- Supabase (Database & Storage)
+- Supabase (Database, Storage & Auth)
 - Hugging Face (Dataset hosting)
-- Vercel (Deployment)
+- Cloudflare Pages (Deployment)

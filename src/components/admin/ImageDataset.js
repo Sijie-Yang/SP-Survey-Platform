@@ -2,1529 +2,604 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
-  TextField,
   Button,
   Alert,
-  Switch,
-  FormControlLabel,
   CircularProgress,
   LinearProgress,
   Chip,
   Divider,
-  ToggleButton,
-  ToggleButtonGroup,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  TextField,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import {
   Refresh,
   CheckCircle,
   Error as ErrorIcon,
   Warning,
-  Save,
   CloudDownload,
   Delete,
-  Image as ImageIcon,
+  ExpandMore,
+  CloudUpload,
 } from '@mui/icons-material';
-import { 
+import {
   testHuggingFaceConnection,
   getImagesFromHuggingFace,
-  getImageCountFromDataset 
+  getImageCountFromDataset,
 } from '../../lib/huggingface';
-import {
-  testModelScopeConnection,
-  getImagesFromModelScope,
-  getImageCountFromModelScope,
-} from '../../lib/modelscope';
-import {
-  testOssConnection,
-  saveOssConfig,
-  loadOssConfig,
-  isOssConfigured,
-} from '../../lib/aliyun-oss';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useRegion } from '../../contexts/RegionContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
-  const { isChinaMode, t } = useRegion();
+  useRegion();
+  const { user } = useAuth();
 
-  // Dataset provider: 'huggingface' | 'modelscope'
-  const [datasetProvider, setDatasetProvider] = useState(
-    () => localStorage.getItem('sp-survey-dataset-provider') || 'huggingface'
-  );
-
-  // Alibaba Cloud OSS config (China mode storage)
-  const [ossConfig, setOssConfig] = useState(() => loadOssConfig() || {
-    enabled: false,
-    region: 'oss-cn-shanghai',
-    bucket: '',
-    accessKeyId: '',
-    accessKeySecret: '',
+  // Direct upload state
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [directUploadStatus, setDirectUploadStatus] = useState({
+    loading: false, progress: 0, total: 0, error: null, success: null,
   });
-  const [ossStatus, setOssStatus] = useState({ loading: false, connected: false, error: null, success: null });
+  const fileInputRef = useRef(null);
 
-  // Sync provider with region
+  // HuggingFace optional section
+  const [hfExpanded, setHfExpanded] = useState(false);
+  const [hfConfig, setHfConfig] = useState({ enabled: false, token: '', datasetName: '' });
+  const [hfStatus, setHfStatus] = useState({ loading: false, connected: false, error: null, datasetInfo: null });
+  const [preloadStatus, setPreloadStatus] = useState({ loading: false, progress: 0, total: 0, error: null, success: null });
+
+  // Scroll position restore
+  const scrollRef = useRef(0);
+  const restoreScrollRef = useRef(false);
   useEffect(() => {
-    if (isChinaMode && datasetProvider === 'huggingface') {
-      setDatasetProvider('modelscope');
-      localStorage.setItem('sp-survey-dataset-provider', 'modelscope');
-    }
-  }, [isChinaMode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleProviderChange = (_, newProvider) => {
-    if (!newProvider) return;
-    setDatasetProvider(newProvider);
-    localStorage.setItem('sp-survey-dataset-provider', newProvider);
-  };
-
-  const handleOssConfigChange = (field, value) => {
-    setOssConfig((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleSaveOssConfig = () => {
-    saveOssConfig(ossConfig);
-    setOssStatus({ loading: false, connected: false, error: null, success: '✅ OSS configuration saved.' });
-  };
-
-  const handleTestOssConnection = async () => {
-    setOssStatus({ loading: true, connected: false, error: null, success: null });
-    const result = await testOssConnection(ossConfig);
-    if (result.success) {
-      saveOssConfig(ossConfig);
-      setOssStatus({ loading: false, connected: true, error: null, success: `✅ Connected! ${result.imageCount} images found.` });
-    } else {
-      setOssStatus({ loading: false, connected: false, error: result.error, success: null });
-    }
-  };
-
-  const defaultConfig = {
-    huggingFaceToken: '',
-    datasetName: '',
-    enabled: false,
-    supabaseProjectId: '',
-    supabaseUrl: '',
-    supabaseKey: '',
-    supabaseAnonKey: ''
-  };
-  const [config, setConfig] = useState({
-    ...defaultConfig
-  });
-  const [initialConfig, setInitialConfig] = useState(null); // Track the initial saved config
-  const [status, setStatus] = useState({
-    connected: false,
-    loading: false,
-    error: null,
-    success: null,
-    datasetInfo: null
-  });
-
-  // Ref to preserve scroll position during updates
-  const scrollPositionRef = useRef(0);
-  const shouldRestoreScrollRef = useRef(false);
-
-  // Effect to restore scroll position after render
-  useEffect(() => {
-    if (shouldRestoreScrollRef.current) {
-      const scrollPos = scrollPositionRef.current;
-      // Use multiple methods to ensure scroll restoration
-      window.scrollTo(0, scrollPos);
-      document.documentElement.scrollTop = scrollPos;
-      document.body.scrollTop = scrollPos;
-      
-      console.log('📍 Restored scroll position:', scrollPos);
-      shouldRestoreScrollRef.current = false;
+    if (restoreScrollRef.current) {
+      window.scrollTo(0, scrollRef.current);
+      restoreScrollRef.current = false;
     }
   });
 
-  const [supabaseStatus, setSupabaseStatus] = useState({
-    connected: false,
-    loading: false,
-    error: null,
-    success: null,
-    projectInfo: null
-  });
-
-  const [preloadStatus, setPreloadStatus] = useState({
-    loading: false,
-    progress: 0,
-    total: 0,
-    error: null,
-    success: null
-  });
-
+  // Sync hfConfig from project
   useEffect(() => {
     if (currentProject?.imageDatasetConfig) {
-      const projectConfig = {
-        ...defaultConfig,
-        ...currentProject.imageDatasetConfig
-      };
-      if (!projectConfig.supabaseProjectId && projectConfig.supabaseUrl) {
-        try {
-          const parsedUrl = new URL(projectConfig.supabaseUrl);
-          projectConfig.supabaseProjectId = parsedUrl.hostname.replace('.supabase.co', '');
-        } catch (error) {
-          console.warn('Failed to parse Supabase URL for project ID:', error);
-        }
-      }
-      setConfig(projectConfig);
-      setInitialConfig(JSON.parse(JSON.stringify(projectConfig))); // Save initial config for comparison
-      
-      // Restore Hugging Face connection status if previously successful
-      if (projectConfig.datasetInfo) {
-        setStatus({
-          loading: false,
-          connected: true,
-          error: null,
-          success: 'Connection verified (from saved state)',
-          datasetInfo: projectConfig.datasetInfo
-        });
-      }
-      
-      // Restore Supabase connection status if previously successful
-      if (projectConfig.supabaseConnectionStatus) {
-        setSupabaseStatus({
-          loading: false,
-          connected: true,
-          error: null,
-          success: 'Connection verified (from saved state)',
-          projectInfo: projectConfig.supabaseConnectionStatus.projectInfo
-        });
-      }
-    } else {
-      const initialDefaultConfig = { ...defaultConfig, datasetInfo: null };
-      setConfig(initialDefaultConfig);
-      setInitialConfig(JSON.parse(JSON.stringify(initialDefaultConfig)));
-    }
-  }, [currentProject]);
-
-  // Monitor config changes and notify parent
-  useEffect(() => {
-    if (initialConfig && onConfigChange) {
-      const hasChanges = JSON.stringify(config) !== JSON.stringify(initialConfig);
-      console.log('🔍 ImageDataset config changed:', {
-        hasChanges,
-        currentDataset: config.datasetName,
-        initialDataset: initialConfig.datasetName
+      const c = currentProject.imageDatasetConfig;
+      setHfConfig({
+        enabled: c.enabled || false,
+        token: c.huggingFaceToken || '',
+        datasetName: c.datasetName || '',
       });
-      // Pass both hasChanges and the latest config to parent
-      onConfigChange(hasChanges, config);
+      if (c.datasetInfo && onConfigChange) {
+        setHfStatus(prev => ({ ...prev, connected: true, datasetInfo: c.datasetInfo }));
+      }
     }
-  }, [config, initialConfig, onConfigChange]);
+  }, [currentProject]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleConfigChange = (field, value) => {
-    if (field === 'supabaseProjectId') {
-      const normalizedProjectId = (value || '').trim();
-      const autoUrl = normalizedProjectId ? `https://${normalizedProjectId}.supabase.co` : '';
-      setConfig(prev => ({
-        ...prev,
-        supabaseProjectId: normalizedProjectId,
-        supabaseUrl: autoUrl
-      }));
-      return;
-    }
-    setConfig(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleSaveConfig = () => {
+  const saveHfConfig = () => {
     if (!currentProject) return;
-
-    // Save current scroll position using ref
-    scrollPositionRef.current = window.scrollY || document.documentElement.scrollTop;
-    shouldRestoreScrollRef.current = true;
-    console.log('💾 Saving scroll position:', scrollPositionRef.current);
-
-    const updatedProject = {
+    const updated = {
       ...currentProject,
-      imageDatasetConfig: config
+      imageDatasetConfig: {
+        ...currentProject.imageDatasetConfig,
+        enabled: hfConfig.enabled,
+        huggingFaceToken: hfConfig.token,
+        datasetName: hfConfig.datasetName,
+      },
     };
-    onProjectUpdate(updatedProject);
-    
-    // Update initial config to match saved config (clear unsaved changes indicator)
-    setInitialConfig(JSON.parse(JSON.stringify(config)));
-    
-    if (config.enabled && config.datasetName) {
-      testConnection();
-    }
+    onProjectUpdate(updated);
+    if (onConfigChange) onConfigChange(true, updated.imageDatasetConfig);
   };
 
-  const testConnection = async () => {
-    if (!config.datasetName) {
-      setStatus(prev => ({
-        ...prev,
-        error: 'Please provide dataset name'
-      }));
-      return;
-    }
-
-    setStatus(prev => ({
-      ...prev,
-      loading: true,
-      error: null,
-      success: null,
-      connected: false
-    }));
-
+  const testHfConnection = async () => {
+    setHfStatus({ loading: true, connected: false, error: null, datasetInfo: null });
     try {
-      const result = datasetProvider === 'modelscope'
-        ? await testModelScopeConnection(config.huggingFaceToken, config.datasetName)
-        : await testHuggingFaceConnection(config.huggingFaceToken, config.datasetName);
-      
+      const result = await testHuggingFaceConnection(hfConfig.token, hfConfig.datasetName);
       if (result.success) {
-        setStatus({
-          loading: false,
-          connected: true,
-          error: null,
-          success: 'Connection successful! (Click "Save Configuration" to persist)',
-          datasetInfo: result.datasetInfo
-        });
-        
-        // Update config state with datasetInfo (will be saved when user clicks Save)
-        setConfig(prev => ({
-          ...prev,
-          datasetInfo: result.datasetInfo
-        }));
-        
-        console.log('✅ Hugging Face connection test successful');
+        setHfStatus({ loading: false, connected: true, error: null, datasetInfo: result.datasetInfo });
       } else {
-        setStatus({
-          loading: false,
-          connected: false,
-          error: result.error || 'Connection failed',
-          success: null,
-          datasetInfo: null
-        });
-        
-        setConfig(prev => ({
-          ...prev,
-          datasetInfo: null
-        }));
+        setHfStatus({ loading: false, connected: false, error: result.error || 'Connection failed', datasetInfo: null });
       }
-    } catch (error) {
-      console.error('Connection test error:', error);
-      setStatus({
-        loading: false,
-        connected: false,
-        error: `Error testing connection: ${error.message}`,
-        success: null,
-        datasetInfo: null
-      });
-      
-      setConfig(prev => ({
-        ...prev,
-        datasetInfo: null
-      }));
+    } catch (e) {
+      setHfStatus({ loading: false, connected: false, error: e.message, datasetInfo: null });
     }
   };
 
-  const testSupabaseConnection = async () => {
-    if (!config.supabaseUrl || !config.supabaseKey) {
-      setSupabaseStatus(prev => ({
-        ...prev,
-        error: 'Please provide both Supabase URL and Service Role Key'
-      }));
-      return;
-    }
+  // ── Direct upload to platform Supabase ────────────────────────────────────
 
-    setSupabaseStatus({
-      loading: true,
-      connected: false,
-      error: null,
-      success: null,
-      projectInfo: null
-    });
-
-    try {
-      console.log('Testing Supabase connection...');
-      
-      // Import Supabase client
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(config.supabaseUrl, config.supabaseKey);
-
-      // Test 1: List buckets (tests authentication and permissions)
-      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
-      
-      if (listError) {
-        throw new Error(`Failed to connect: ${listError.message}`);
-      }
-
-      console.log('✓ Successfully connected to Supabase');
-      console.log(`✓ Found ${buckets?.length || 0} storage buckets`);
-
-      // Test 2: Check if survey-images bucket exists
-      const surveyBucketExists = buckets?.some(b => b.name === 'survey-images');
-      
-      // Gather project info
-      const projectInfo = {
-        url: config.supabaseUrl,
-        bucketsCount: buckets?.length || 0,
-        surveyBucketExists: surveyBucketExists,
-        buckets: buckets?.map(b => b.name) || []
+  // Compress image to stay under maxBytes using Canvas
+  const compressImage = (file, maxBytes = 300 * 1024, quality = 0.85) => {
+    return new Promise((resolve) => {
+      if (file.size <= maxBytes) { resolve(file); return; }
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        // Scale down if very large
+        const maxDim = 1920;
+        if (width > maxDim || height > maxDim) {
+          const scale = Math.min(maxDim / width, maxDim / height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        // Try progressively lower quality until under maxBytes
+        const tryQuality = (q) => {
+          canvas.toBlob((blob) => {
+            if (!blob) { resolve(file); return; }
+            if (blob.size <= maxBytes || q <= 0.3) {
+              resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+            } else {
+              tryQuality(Math.max(q - 0.1, 0.3));
+            }
+          }, 'image/jpeg', q);
+        };
+        tryQuality(quality);
       };
-
-      setSupabaseStatus({
-        loading: false,
-        connected: true,
-        error: null,
-        success: 'Supabase connection successful! (Click "Save Configuration" to persist)',
-        projectInfo: projectInfo
-      });
-
-      console.log('Supabase project info:', projectInfo);
-      
-      // Update config state with connection status (will be saved when user clicks Save)
-      setConfig(prev => ({
-        ...prev,
-        supabaseConnectionStatus: {
-          connected: true,
-          projectInfo: projectInfo,
-          lastTested: new Date().toISOString()
-        }
-      }));
-      
-      console.log('✅ Supabase connection test successful');
-
-    } catch (error) {
-      console.error('Supabase connection test error:', error);
-      
-      let errorMessage = error.message;
-      
-      // Provide helpful error messages
-      if (error.message.includes('Invalid API key')) {
-        errorMessage = 'Invalid Service Role Key. Please check your key from Supabase Settings → API.';
-      } else if (error.message.includes('Invalid URL')) {
-        errorMessage = 'Invalid Supabase URL. Please check your Project URL from Supabase Settings → API.';
-      }
-      
-      setSupabaseStatus({
-        loading: false,
-        connected: false,
-        error: errorMessage,
-        success: null,
-        projectInfo: null
-      });
-      
-      // Update config state with error status (will be saved when user clicks Save)
-      setConfig(prev => ({
-        ...prev,
-        supabaseConnectionStatus: {
-          connected: false,
-          error: errorMessage,
-          lastTested: new Date().toISOString()
-        }
-      }));
-    }
+      img.onerror = () => resolve(file);
+      img.src = url;
+    });
   };
 
-  const handlePreloadAllImages = async () => {
-    // Save scroll position using ref
-    scrollPositionRef.current = window.scrollY || document.documentElement.scrollTop;
-    shouldRestoreScrollRef.current = true;
-    
-    if (!config.datasetName) {
-      setPreloadStatus(prev => ({
-        ...prev,
-        error: 'Please configure and test dataset connection first'
-      }));
+  const handleDirectUpload = async () => {
+    if (!selectedFiles.length) return;
+    if (!isSupabaseConfigured()) {
+      setDirectUploadStatus(prev => ({ ...prev, error: 'Supabase is not configured. Please set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY.' }));
       return;
     }
 
-    if (!config.supabaseUrl || !config.supabaseKey) {
-      setPreloadStatus(prev => ({
-        ...prev,
-        error: 'Please configure Supabase connection first'
-      }));
-      return;
-    }
-
-    setPreloadStatus({
-      loading: true,
-      progress: 0,
-      total: 0,
-      error: null,
-      success: null
-    });
+    setDirectUploadStatus({ loading: true, progress: 0, total: selectedFiles.length, error: null, success: null });
 
     try {
-      console.log('🚀 Starting image preload: Download from HF → Upload to Supabase');
 
-      // Import Supabase
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(config.supabaseUrl, config.supabaseKey);
+      const uploadedImages = [...(currentProject?.preloadedImages || [])];
+      let successCount = 0;
+      let failCount = 0;
 
-      // Step 1: Ensure bucket exists
-      console.log('📦 Checking/creating survey-images bucket...');
-      const { data: buckets, error: listError } = await supabase.storage.listBuckets();
-      
-      if (listError) {
-        throw new Error(`Failed to list buckets: ${listError.message}`);
-      }
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const raw = selectedFiles[i];
+        const file = await compressImage(raw); // compress to ≤300KB client-side
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const userId = user?.id || 'anonymous';
+        const fileName = `${userId}/${currentProject?.id || 'default'}/${Date.now()}_${safeName}`;
 
-      const bucketExists = buckets?.some(b => b.name === 'survey-images');
-      
-      if (!bucketExists) {
-        console.log('🆕 Creating survey-images bucket...');
-        const { error: createError } = await supabase.storage.createBucket('survey-images', {
-          public: true,
-          fileSizeLimit: 10485760 // 10MB
-        });
-        
-        if (createError) {
-          throw new Error(`Failed to create bucket: ${createError.message}`);
-        }
-        console.log('✅ Bucket created successfully');
-      } else {
-        console.log('✅ Bucket already exists');
-      }
+        const { error: uploadError } = await supabase.storage
+          .from('survey-images')
+          .upload(fileName, file, { contentType: file.type, upsert: true });
 
-      // Step 2: Check existing images in Supabase (Smart Skip)
-      console.log('🔍 Checking for existing images in Supabase...');
-      const folderName = config.datasetName.replace('/', '_');
-      const folderPrefix = `${folderName}/`;
-      
-      const { data: existingFiles, error: listFilesError } = await supabase.storage
-        .from('survey-images')
-        .list(folderName, {  // ✅ Fixed: use folder name without trailing slash
-          limit: 10000, // List all files
-          sortBy: { column: 'name', order: 'asc' }
-        });
-
-      if (listFilesError && listFilesError.message !== 'Not found') {
-        console.warn('⚠️ Failed to list existing files:', listFilesError);
-      }
-
-      // Create a Set of existing filenames for fast lookup
-      const existingFileNames = new Set(
-        (existingFiles || []).map(file => file.name)
-      );
-      
-      console.log(`✅ Found ${existingFileNames.size} existing images in Supabase`);
-      if (existingFileNames.size > 0) {
-        console.log(`📋 Sample existing files: ${Array.from(existingFileNames).slice(0, 3).join(', ')}...`);
-      }
-      console.log(`🔍 Checking in folder: "${folderName}"`);
-      console.log(`📁 Full path prefix: "${folderPrefix}"`)
-
-      // Step 3: Get total image count from dataset provider
-      const countResult = datasetProvider === 'modelscope'
-        ? await getImageCountFromModelScope(config.huggingFaceToken, config.datasetName)
-        : await getImageCountFromDataset(config.huggingFaceToken, config.datasetName);
-      const totalImages = countResult.imageCount || 1000;
-      
-      console.log(`📊 Total images in dataset: ${totalImages}`);
-      
-      setPreloadStatus(prev => ({
-        ...prev,
-        total: totalImages
-      }));
-
-      // Step 4: Build list of already existing images (for final result)
-      const allSupabaseImages = [];
-      
-      // Add existing files to the result list
-      for (let i = 0; i < totalImages; i++) {
-        const paddedIndex = String(i).padStart(6, '0');
-        const simpleFileName = `image_${paddedIndex}.jpg`;
-        
-        if (existingFileNames.has(simpleFileName)) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('survey-images')
-            .getPublicUrl(`${folderPrefix}${simpleFileName}`);
-          
-          allSupabaseImages.push({
-            url: publicUrl,
-            name: simpleFileName
-          });
-        }
-      }
-      
-      console.log(`✅ Reusing ${allSupabaseImages.length} existing images`);
-
-      // Step 5: Fetch and upload only missing images from HF in batches
-      const batchSize = 100;
-      const batches = Math.ceil(totalImages / batchSize);
-      let newImagesUploaded = 0;
-      let skippedCount = 0;
-      
-      for (let i = 0; i < batches; i++) {
-        const offset = i * batchSize;
-        const limit = Math.min(batchSize, totalImages - offset);
-        
-        // Check if any images in this batch need to be downloaded
-        const imagesToDownload = [];
-        for (let imageIndex = 0; imageIndex < limit; imageIndex++) {
-          const globalImageIndex = offset + imageIndex;
-          const paddedIndex = String(globalImageIndex).padStart(6, '0');
-          const simpleFileName = `image_${paddedIndex}.jpg`;
-          
-          if (!existingFileNames.has(simpleFileName)) {
-            imagesToDownload.push(globalImageIndex);
+        if (!uploadError) {
+          const { data: { publicUrl } } = supabase.storage.from('survey-images').getPublicUrl(fileName);
+          uploadedImages.push({ url: publicUrl, name: file.name });
+          successCount++;
+        } else {
+          console.error('Upload error:', uploadError);
+          failCount++;
+          if (i === 0) {
+            // Show first error to help diagnose
+            setDirectUploadStatus(prev => ({ ...prev, error: `Upload failed: ${uploadError.message}` }));
           }
         }
-        
-        if (imagesToDownload.length === 0) {
-          console.log(`⏭️  Batch ${i + 1}/${batches}: All ${limit} images already exist, skipping download`);
-          skippedCount += limit;
-          setPreloadStatus(prev => ({
-            ...prev,
-            progress: allSupabaseImages.length
-          }));
-          continue;
-        }
-        
-        console.log(`📥 Batch ${i + 1}/${batches}: Need to download ${imagesToDownload.length}/${limit} images from ${datasetProvider === 'modelscope' ? 'ModelScope' : 'HuggingFace'}...`);
-        
-        const result = datasetProvider === 'modelscope'
-          ? await getImagesFromModelScope(config.huggingFaceToken, config.datasetName, limit, offset)
-          : await getImagesFromHuggingFace(config.huggingFaceToken, config.datasetName, limit, offset);
 
-        if (!result.success || !result.images) {
-          throw new Error(result.error || 'Failed to fetch images from Hugging Face');
-        }
-
-        // Step 6: Download and upload only missing images to Supabase
-        console.log(`☁️ Uploading ${imagesToDownload.length} new images to Supabase...`);
-        
-        for (let imageIndex = 0; imageIndex < result.images.length; imageIndex++) {
-          const globalImageIndex = offset + imageIndex;
-          const paddedIndex = String(globalImageIndex).padStart(6, '0');
-          const simpleFileName = `image_${paddedIndex}.jpg`;
-          
-          // Skip if already exists
-          if (existingFileNames.has(simpleFileName)) {
-            skippedCount++;
-            continue;
-          }
-          
-          const hfImage = result.images[imageIndex];
-          
-          try {
-            // Download image from HF
-            const response = await fetch(hfImage.url);
-            if (!response.ok) {
-              console.warn(`⚠️ [Image ${globalImageIndex}] Failed to download: ${response.statusText}`);
-              continue;
-            }
-            
-            const blob = await response.blob();
-            
-            // Generate unique filename using global index to avoid collisions across batches
-            // Format: datasetName/image_000001.jpg (ensures unique names)
-            const fileName = `${config.datasetName.replace('/', '_')}/image_${paddedIndex}.jpg`;
-            
-            console.log(`📤 [${globalImageIndex + 1}/${totalImages}] Uploading new image: ${fileName}`);
-            
-            // Upload to Supabase (upsert: false to prevent overwriting)
-            const { error } = await supabase.storage
-              .from('survey-images')
-              .upload(fileName, blob, {
-                contentType: 'image/jpeg',
-                upsert: false // ✅ Prevent overwriting existing images
-              });
-
-            if (error) {
-              // If file already exists, that's OK - just get its URL
-              if (error.message && error.message.includes('already exists')) {
-                console.log(`⏭️  [Image ${globalImageIndex}] Already exists, reusing: ${fileName}`);
-                skippedCount++;
-                
-                // Get public URL of existing file
-                const { data: { publicUrl } } = supabase.storage
-                  .from('survey-images')
-                  .getPublicUrl(fileName);
-
-                allSupabaseImages.push({
-                  url: publicUrl,
-                  name: simpleFileName
-                });
-                
-                // Update progress for existing files too
-                setPreloadStatus(prev => ({
-                  ...prev,
-                  progress: allSupabaseImages.length
-                }));
-              } else {
-                console.warn(`⚠️ [Image ${globalImageIndex}] Failed to upload ${fileName}: ${error.message}`);
-              }
-              continue;
-            }
-            
-            console.log(`✅ [Image ${globalImageIndex}] Uploaded successfully`);
-            newImagesUploaded++;
-
-            // Get public URL
-            const { data: { publicUrl } } = supabase.storage
-              .from('survey-images')
-              .getPublicUrl(fileName);
-
-            // ✅ Store only url and unique filename (no confusing duplicate names)
-            allSupabaseImages.push({
-              url: publicUrl,
-              name: simpleFileName
-            });
-            
-            console.log(`💾 Stored: { url: ${publicUrl.substring(publicUrl.length - 50)}, name: ${simpleFileName} }`);
-
-            setPreloadStatus(prev => ({
-              ...prev,
-              progress: allSupabaseImages.length
-            }));
-
-          } catch (err) {
-            console.warn(`⚠️ [Image ${globalImageIndex}] Error processing:`, err);
-          }
-        }
+        setDirectUploadStatus(prev => ({ ...prev, progress: i + 1 }));
       }
-      
-      console.log(`📊 Summary: ${newImagesUploaded} new images uploaded, ${skippedCount} existing images skipped`);
-      
-      // Sort images by name to ensure consistent order
-      allSupabaseImages.sort((a, b) => a.name.localeCompare(b.name));
 
-      console.log(`✅ Successfully uploaded ${allSupabaseImages.length} images to Supabase`);
-      
-      // Log first few images to verify naming
-      console.log('📋 Sample of stored images:');
-      allSupabaseImages.slice(0, 5).forEach((img, idx) => {
-        console.log(`  [${idx}] name: "${img.name}"`);
-      });
-
-      // Step 5: Save Supabase URLs to project config (preserve imageDatasetConfig)
       const updatedProject = {
         ...currentProject,
-        preloadedImages: allSupabaseImages,
+        preloadedImages: uploadedImages,
         preloadedAt: new Date().toISOString(),
         preloadedSource: 'supabase',
         supabaseBucket: 'survey-images',
-        imageDatasetConfig: {
-          ...currentProject.imageDatasetConfig,
-          ...config // Ensure Supabase config is preserved
-        }
       };
-      
       onProjectUpdate(updatedProject);
+      if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
 
-      setPreloadStatus({
-        loading: false,
-        progress: allSupabaseImages.length,
-        total: totalImages,
-        error: null,
-        success: `Successfully completed! ${allSupabaseImages.length} total images available (${newImagesUploaded} newly uploaded, ${skippedCount} already existed). All images have permanent URLs.`
+      setDirectUploadStatus({
+        loading: false, progress: selectedFiles.length, total: selectedFiles.length,
+        error: failCount > 0 ? `${failCount} file(s) failed to upload.` : null,
+        success: `Successfully uploaded ${successCount} image(s) to Supabase!`,
       });
-
+      setSelectedFiles([]);
     } catch (error) {
-      console.error('❌ Error preloading images:', error);
-      setPreloadStatus({
-        loading: false,
-        progress: 0,
-        total: 0,
-        error: error.message || 'Failed to preload images',
-        success: null
-      });
+      setDirectUploadStatus({ loading: false, progress: 0, total: 0, error: error.message, success: null });
     }
   };
 
-  const handleClearPreloadedImages = async () => {
-    if (!currentProject) return;
+  // ── HuggingFace batch preload ─────────────────────────────────────────────
 
-    // Save scroll position using ref
-    scrollPositionRef.current = window.scrollY || document.documentElement.scrollTop;
-    shouldRestoreScrollRef.current = true;
+  const handlePreloadAllImages = async () => {
+    scrollRef.current = window.scrollY;
+    restoreScrollRef.current = true;
 
-    // Confirm deletion
-    const confirmDelete = window.confirm(
-      `Are you sure you want to clear all preloaded images?\n\n` +
-      `This will:\n` +
-      `• Delete ${currentProject.preloadedImages?.length || 0} images from Supabase Storage\n` +
-      `• Clear image references from project JSON\n\n` +
-      `This action cannot be undone.`
-    );
+    if (!hfConfig.datasetName) {
+      setPreloadStatus(prev => ({ ...prev, error: 'Please configure and test dataset connection first.' }));
+      return;
+    }
+    if (!isSupabaseConfigured()) {
+      setPreloadStatus(prev => ({ ...prev, error: 'Supabase is not configured.' }));
+      return;
+    }
 
-    if (!confirmDelete) return;
-
-    setPreloadStatus({
-      loading: true,
-      progress: 0,
-      total: currentProject.preloadedImages?.length || 0,
-      error: null,
-      success: null
-    });
+    setPreloadStatus({ loading: true, progress: 0, total: 0, error: null, success: null });
 
     try {
-      // Step 1: Delete from Supabase Storage (if configured and images exist)
-      if (config.supabaseUrl && config.supabaseKey && currentProject.preloadedImages?.length > 0) {
-        console.log('🗑️ Deleting images from Supabase Storage...');
-        
-        const { createClient } = await import('@supabase/supabase-js');
-        const supabase = createClient(config.supabaseUrl, config.supabaseKey);
+      const folderName = hfConfig.datasetName.replace('/', '_');
+      const { data: existingFiles } = await supabase.storage
+        .from('survey-images')
+        .list(folderName, { limit: 10000, sortBy: { column: 'name', order: 'asc' } });
 
-        // ✅ Extract file paths from Supabase URLs
-        // URL format: https://{project}.supabase.co/storage/v1/object/public/survey-images/{filename}
-        const pathsToDelete = currentProject.preloadedImages
-          .map(img => {
-            try {
-              const url = new URL(img.url);
-              const pathParts = url.pathname.split('/');
-              return pathParts[pathParts.length - 1]; // Get filename from URL
-            } catch (e) {
-              console.warn('Failed to parse URL:', img.url);
-              return null;
-            }
-          })
-          .filter(path => path); // Filter out null paths
+      const existingFileNames = new Set((existingFiles || []).map(f => f.name));
 
-        console.log(`Found ${pathsToDelete.length} files to delete from Supabase`);
+      const countResult = await getImageCountFromDataset(hfConfig.token, hfConfig.datasetName);
+      const totalImages = countResult.imageCount || 1000;
+      setPreloadStatus(prev => ({ ...prev, total: totalImages }));
 
-        if (pathsToDelete.length > 0) {
-          // Delete files in batches
-          const batchSize = 50; // Supabase recommends batching deletes
-          let deletedCount = 0;
-
-          for (let i = 0; i < pathsToDelete.length; i += batchSize) {
-            const batch = pathsToDelete.slice(i, i + batchSize);
-            
-            const { error } = await supabase.storage
-              .from('survey-images')
-              .remove(batch);
-
-            if (error) {
-              console.warn(`⚠️ Error deleting batch ${i / batchSize + 1}:`, error);
-            } else {
-              const newDeletedCount = deletedCount + batch.length;
-              deletedCount = newDeletedCount;
-              console.log(`✓ Deleted batch ${i / batchSize + 1}: ${batch.length} files`);
-              
-              // Update progress after successful deletion
-              setPreloadStatus(prev => ({
-                ...prev,
-                progress: newDeletedCount
-              }));
-            }
-          }
-
-          console.log(`✅ Deleted ${deletedCount} files from Supabase Storage`);
+      const allImages = [];
+      for (let i = 0; i < totalImages; i++) {
+        const padded = String(i).padStart(6, '0');
+        const fname = `image_${padded}.jpg`;
+        if (existingFileNames.has(fname)) {
+          const { data: { publicUrl } } = supabase.storage
+            .from('survey-images')
+            .getPublicUrl(`${folderName}/${fname}`);
+          allImages.push({ url: publicUrl, name: fname });
         }
       }
 
-      // Step 2: Clear from project JSON (preserve imageDatasetConfig)
+      const batchSize = 100;
+      const batches = Math.ceil(totalImages / batchSize);
+      let newCount = 0;
+      let skipCount = 0;
+
+      for (let b = 0; b < batches; b++) {
+        const offset = b * batchSize;
+        const limit = Math.min(batchSize, totalImages - offset);
+        const toDownload = [];
+        for (let j = 0; j < limit; j++) {
+          const padded = String(offset + j).padStart(6, '0');
+          if (!existingFileNames.has(`image_${padded}.jpg`)) toDownload.push(offset + j);
+        }
+        if (!toDownload.length) { skipCount += limit; setPreloadStatus(prev => ({ ...prev, progress: allImages.length })); continue; }
+
+        const result = await getImagesFromHuggingFace(hfConfig.token, hfConfig.datasetName, limit, offset);
+        if (!result.success || !result.images) throw new Error(result.error || 'Failed to fetch images');
+
+        for (let k = 0; k < result.images.length; k++) {
+          const gi = offset + k;
+          const padded = String(gi).padStart(6, '0');
+          const fname = `image_${padded}.jpg`;
+          if (existingFileNames.has(fname)) { skipCount++; continue; }
+
+          try {
+            const resp = await fetch(result.images[k].url);
+            if (!resp.ok) continue;
+            const blob = await resp.blob();
+            const filePath = `${folderName}/${fname}`;
+            const { error } = await supabase.storage
+              .from('survey-images')
+              .upload(filePath, blob, { contentType: 'image/jpeg', upsert: false });
+            if (error && !error.message?.includes('already exists')) continue;
+            const { data: { publicUrl } } = supabase.storage.from('survey-images').getPublicUrl(filePath);
+            allImages.push({ url: publicUrl, name: fname });
+            newCount++;
+            setPreloadStatus(prev => ({ ...prev, progress: allImages.length }));
+          } catch {}
+        }
+      }
+
+      allImages.sort((a, b) => a.name.localeCompare(b.name));
       const updatedProject = {
         ...currentProject,
-        preloadedImages: [],
-        preloadedAt: null,
-        preloadedSource: null,
-        supabaseBucket: null,
-        imageDatasetConfig: {
-          ...currentProject.imageDatasetConfig,
-          ...config // Preserve Supabase config
-        }
+        preloadedImages: allImages,
+        preloadedAt: new Date().toISOString(),
+        preloadedSource: 'supabase',
+        supabaseBucket: 'survey-images',
       };
-      
       onProjectUpdate(updatedProject);
 
       setPreloadStatus({
-        loading: false,
-        progress: 0,
-        total: 0,
-        error: null,
-        success: 'Successfully cleared all preloaded images from Supabase and project JSON!'
+        loading: false, progress: allImages.length, total: totalImages, error: null,
+        success: `Completed! ${allImages.length} images available (${newCount} new, ${skipCount} skipped).`,
       });
-
     } catch (error) {
-      console.error('❌ Error clearing preloaded images:', error);
-      setPreloadStatus({
-        loading: false,
-        progress: 0,
-        total: 0,
-        error: `Failed to clear images: ${error.message}`,
-        success: null
-      });
+      setPreloadStatus({ loading: false, progress: 0, total: 0, error: error.message, success: null });
     }
   };
 
-  const getStatusIcon = () => {
-    if (status.loading) return <CircularProgress size={20} />;
-    if (status.connected) return <CheckCircle color="success" />;
-    if (status.error) return <ErrorIcon color="error" />;
-    return <Warning color="action" />;
-  };
+  const handleClearImages = async () => {
+    if (!currentProject) return;
+    scrollRef.current = window.scrollY;
+    restoreScrollRef.current = true;
 
-  const getStatusMessage = () => {
-    if (!config.enabled) {
-      return {
-        type: 'error',
-        message: 'Hugging Face dataset integration is not enabled. Please enable it below.'
-      };
+    const count = currentProject.preloadedImages?.length || 0;
+    if (!window.confirm(`Clear all ${count} uploaded images from Supabase Storage? This cannot be undone.`)) return;
+
+    // Delete files from Supabase Storage
+    if (supabase && currentProject.preloadedImages?.length > 0) {
+      const userId = user?.id;
+      const projectId = currentProject.id;
+      try {
+        // List all files in this project's folder
+        const { data: files, error: listError } = await supabase.storage
+          .from('survey-images')
+          .list(`${userId}/${projectId}`, { limit: 10000 });
+
+        if (!listError && files?.length > 0) {
+          const paths = files.map(f => `${userId}/${projectId}/${f.name}`);
+          const { error: removeError } = await supabase.storage
+            .from('survey-images')
+            .remove(paths);
+          if (removeError) console.error('Error deleting files:', removeError);
+        }
+      } catch (e) {
+        console.error('Error clearing images from storage:', e);
+      }
     }
-    
-    if (!config.datasetName) {
-      return {
-        type: 'info',
-        message: 'Enter your dataset configuration below and click "Save Configuration" to get started.'
-      };
-    }
-    
-    if (!status.connected && !status.error && !status.loading) {
-      return {
-        type: 'info',
-        message: 'Configuration saved. Click "Test Connection" to verify dataset access.'
-      };
-    }
-    
-    if (status.loading) {
-      return {
-        type: 'info',
-        message: 'Testing connection to Hugging Face dataset...'
-      };
-    }
-    
-    if (status.connected) {
-      return {
-        type: 'success',
-        message: status.success || 'Successfully connected to Hugging Face dataset!'
-      };
-    }
-    
-    if (status.error) {
-      return {
-        type: 'error',
-        message: status.error
-      };
-    }
-    
-    return {
-      type: 'info',
-      message: 'Ready to configure Hugging Face dataset integration.'
+
+    const updatedProject = {
+      ...currentProject,
+      preloadedImages: [],
+      preloadedAt: null,
+      preloadedSource: null,
+      supabaseBucket: null,
     };
+    onProjectUpdate(updatedProject);
+    if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
   };
 
-  const statusInfo = getStatusMessage();
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const preloadedCount = currentProject?.preloadedImages?.length || 0;
 
   return (
     <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h5" sx={{ mb: 2, color: 'primary.main' }}>
-          🤗 Hugging Face Dataset Integration
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-          {isChinaMode
-            ? '配置 ModelScope 数据集，为问卷提供图片。中国区已启用，访问速度更快。'
-            : 'Configure your Hugging Face dataset connection to use images in your surveys.'}
-        </Typography>
+      <Typography variant="h5" sx={{ mb: 1, color: 'primary.main' }}>
+        🖼️ Image Dataset
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Upload images to Supabase Storage. They will be served to survey participants.
+        HuggingFace batch import is available as an optional tool.
+      </Typography>
 
-        {/* China mode banner */}
-        {isChinaMode && (
-          <Alert severity="warning" icon="🇨🇳" sx={{ mb: 2 }}>
-            {t.chinaModeBanner}
-          </Alert>
+      {!isSupabaseConfigured() && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          Supabase is not configured. Set <code>REACT_APP_SUPABASE_URL</code> and{' '}
+          <code>REACT_APP_SUPABASE_ANON_KEY</code> environment variables to enable image uploads.
+        </Alert>
+      )}
+
+      {/* ── Current Status ── */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+        {preloadedCount > 0 ? (
+          <>
+            <Chip icon={<CheckCircle />} label={`${preloadedCount} images uploaded`} color="success" variant="outlined" />
+            {currentProject?.preloadedSource && (
+              <Chip label="☁️ Supabase Storage" color="primary" size="small" variant="outlined" />
+            )}
+            {currentProject?.preloadedAt && (
+              <Typography variant="body2" color="text.secondary">
+                Last upload: {new Date(currentProject.preloadedAt).toLocaleString()}
+              </Typography>
+            )}
+          </>
+        ) : (
+          <Chip icon={<Warning />} label="No images uploaded yet" color="default" variant="outlined" />
         )}
+      </Box>
 
-        {/* Dataset Provider Selector */}
-        <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-          <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>
-            {t.datasetProvider}
-          </Typography>
-          <ToggleButtonGroup
-            value={datasetProvider}
-            exclusive
-            onChange={handleProviderChange}
-            size="small"
-          >
-            <ToggleButton value="huggingface" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
-              🤗 {t.huggingface}
-            </ToggleButton>
-            <ToggleButton value="modelscope" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
-              🔮 {t.modelscope}
-            </ToggleButton>
-          </ToggleButtonGroup>
-          {datasetProvider === 'modelscope' && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              ModelScope 由阿里巴巴达摩院维护，国内访问无需翻墙。数据集格式与 HuggingFace 兼容。
+      {/* ── Direct Upload ── */}
+      <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'primary.light' }}>
+        <Typography variant="subtitle1" sx={{ mb: 1.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <CloudUpload fontSize="small" color="primary" />
+          Upload Images to Supabase
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Select image files to upload to Supabase Storage.
+          Images over 300 KB are automatically compressed in your browser before upload — no server processing needed.
+        </Typography>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          style={{ display: 'none' }}
+          onChange={(e) => setSelectedFiles(Array.from(e.target.files))}
+        />
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+          <Button variant="outlined" onClick={() => fileInputRef.current?.click()} disabled={directUploadStatus.loading}>
+            Choose Image Files
+          </Button>
+          {selectedFiles.length > 0 && (
+            <Typography variant="body2" color="text.secondary">
+              {selectedFiles.length} file(s) selected
             </Typography>
           )}
         </Box>
 
-        {/* Setup Instructions */}
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            📋 Complete Setup Instructions:
-          </Typography>
-          <Typography variant="body2" component="div">
-            1. <strong>For public datasets:</strong> Leave access token empty - no authentication needed<br/>
-            2. <strong>For private datasets:</strong> Get token from <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Hugging Face Settings → Access Tokens</a><br/>
-            3. {datasetProvider === 'modelscope' ? '创建一个具有读取权限的令牌并粘贴到下方' : 'Create a new token with "Read" permissions and paste it below'}<br/>
-            4. {datasetProvider === 'modelscope'
-              ? <><a href="https://modelscope.cn/datasets" target="_blank" rel="noopener noreferrer">浏览 ModelScope 数据集</a> 找到您的数据集</>
-              : <><a href="https://huggingface.co/datasets" target="_blank" rel="noopener noreferrer">Browse HuggingFace Datasets</a> to find your dataset</>
-            }<br/>
-            5. Use format: "username/dataset-name" (e.g., "sijiey/Thermal-Affordance-Dataset")<br/>
-            6. Enable integration and click "Save Configuration"<br/>
-            7. Click "Test Connection" to verify dataset access
-          </Typography>
-        </Alert>
-
-        {/* Status Alert */}
-        <Alert severity={statusInfo.type} sx={{ mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {getStatusIcon()}
-            <Typography variant="body2">
-              {statusInfo.message}
-            </Typography>
+        {directUploadStatus.loading && (
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography variant="body2">Uploading...</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {directUploadStatus.progress} / {directUploadStatus.total}
+              </Typography>
+            </Box>
+            <LinearProgress
+              variant="determinate"
+              value={directUploadStatus.total > 0 ? (directUploadStatus.progress / directUploadStatus.total) * 100 : 0}
+              sx={{ height: 8, borderRadius: 4 }}
+            />
           </Box>
-        </Alert>
+        )}
 
-        {/* Configuration Form */}
+        {directUploadStatus.success && <Alert severity="success" sx={{ mb: 2 }}>{directUploadStatus.success}</Alert>}
+        {directUploadStatus.error && <Alert severity="error" sx={{ mb: 2 }}>{directUploadStatus.error}</Alert>}
+
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleDirectUpload}
+          disabled={!selectedFiles.length || directUploadStatus.loading || !isSupabaseConfigured()}
+          startIcon={directUploadStatus.loading ? <CircularProgress size={20} color="inherit" /> : <CloudUpload />}
+        >
+          Upload {selectedFiles.length > 0 ? `${selectedFiles.length} Image(s)` : ''} to Supabase
+        </Button>
+      </Box>
+
+      {/* ── Image Preview ── */}
+      {preloadedCount > 0 && (
         <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
           <Typography variant="subtitle2" sx={{ mb: 2 }}>
-            {datasetProvider === 'modelscope' ? '🔮 ModelScope（魔搭）配置：' : '🔧 Hugging Face Configuration:'}
+            🖼️ Uploaded Images (preview — first 10):
           </Typography>
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={config.enabled}
-                  onChange={(e) => handleConfigChange('enabled', e.target.checked)}
-                  color="primary"
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+            {currentProject.preloadedImages.slice(0, 10).map((img, i) => (
+              <Box key={i} sx={{ width: 100, height: 100, borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
+                <img
+                  src={img.url} alt={img.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10px;color:#999;">Failed</div>';
+                  }}
                 />
-              }
-              label={datasetProvider === 'modelscope' ? '启用 ModelScope 数据集集成' : 'Enable Hugging Face Dataset Integration'}
-            />
-
-            <TextField
-              fullWidth
-              variant="outlined"
-              label={datasetProvider === 'modelscope' ? t.msToken : t.hfToken}
-              type="password"
-              value={config.huggingFaceToken}
-              onChange={(e) => handleConfigChange('huggingFaceToken', e.target.value)}
-              placeholder={datasetProvider === 'modelscope' ? 'ms_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' : 'hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
-              helperText={datasetProvider === 'modelscope' ? t.msTokenHelp : t.hfTokenHelp}
-              disabled={!config.enabled}
-            />
-
-            <TextField
-              fullWidth
-              variant="outlined"
-              label={datasetProvider === 'modelscope' ? t.msDatasetName : t.hfDatasetName}
-              value={config.datasetName}
-              onChange={(e) => handleConfigChange('datasetName', e.target.value)}
-              placeholder={datasetProvider === 'modelscope' ? t.msPlaceholder : t.hfPlaceholder}
-              helperText={datasetProvider === 'modelscope'
-                ? "格式：'用户名/数据集名'，与 HuggingFace 格式相同"
-                : "Format: 'username/dataset-name' (e.g., 'imagenet-1k', 'cifar10' for public datasets)"}
-              disabled={!config.enabled}
-            />
-
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button
-                variant="contained"
-                onClick={handleSaveConfig}
-                disabled={!config.enabled || !config.datasetName}
-                startIcon={<Save />}
-              >
-                Save Configuration
-              </Button>
-              
-              <Button
-                variant="outlined"
-                onClick={testConnection}
-                disabled={!config.enabled || !config.datasetName || status.loading}
-                startIcon={status.loading ? <CircularProgress size={20} /> : <Refresh />}
-              >
-                Test Connection
-              </Button>
-            </Box>
-          </Box>
-        </Box>
-
-        {/* Dataset Details */}
-        {config.datasetInfo && status.connected && (
-          <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle2" sx={{ mb: 2 }}>
-              📊 Dataset Details:
-            </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Typography variant="body2">
-                <strong>Name:</strong> {config.datasetInfo.id}
-              </Typography>
-              {config.datasetInfo.description && (
-                <Typography variant="body2">
-                  <strong>Description:</strong> {config.datasetInfo.description}
-                </Typography>
-              )}
-              <Typography variant="body2">
-                <strong>Images Found:</strong> {config.datasetInfo.imageCount || 0} images
-              </Typography>
-              <Typography variant="body2">
-                <strong>Private:</strong> {config.datasetInfo.private ? 'Yes' : 'No'}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Last Modified:</strong> {new Date(config.datasetInfo.lastModified).toLocaleDateString()}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Viewer:</strong> <a href={`https://huggingface.co/datasets/${config.datasetName}/viewer`} target="_blank" rel="noopener noreferrer">Open Dataset Viewer</a>
-              </Typography>
-            </Box>
-          </Box>
-        )}
-
-        <Divider sx={{ my: 4 }} />
-
-        {/* Supabase Storage Configuration */}
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-            ☁️ {isChinaMode ? t.storageProvider : 'Supabase Storage Configuration'}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            {isChinaMode
-              ? '中国区可选择阿里云 OSS 作为图片存储，或继续使用 Supabase（新加坡节点，国内可访问）。'
-              : 'Configure Supabase to store images permanently. Preloaded images will be uploaded to Supabase Storage.'}
-          </Typography>
-
-          {/* China mode: Storage provider selector */}
-          {isChinaMode && (
-            <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>{t.storageProvider}</Typography>
-              <ToggleButtonGroup
-                value={ossConfig.enabled ? 'aliyun' : 'supabase'}
-                exclusive
-                onChange={(_, v) => v && handleOssConfigChange('enabled', v === 'aliyun')}
-                size="small"
-              >
-                <ToggleButton value="supabase" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
-                  🗄 {t.supabase}
-                </ToggleButton>
-                <ToggleButton value="aliyun" sx={{ textTransform: 'none', fontWeight: 600, px: 2 }}>
-                  ☁️ {t.aliyunOss}
-                </ToggleButton>
-              </ToggleButtonGroup>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                {ossConfig.enabled
-                  ? '使用阿里云 OSS 存储图片，国内上传/读取速度更快。'
-                  : 'Supabase（新加坡节点）在国内可正常访问，速度稍慢但无需额外配置。'}
-              </Typography>
-            </Box>
-          )}
-
-          {/* Alibaba Cloud OSS Config (China mode, OSS selected) */}
-          {isChinaMode && ossConfig.enabled && (
-            <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'warning.light' }}>
-              <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 700 }}>
-                ☁️ 阿里云 OSS 配置
-              </Typography>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                <Typography variant="body2" component="div">
-                  1. 前往 <a href="https://oss.console.aliyun.com" target="_blank" rel="noopener noreferrer">阿里云 OSS 控制台</a> 创建 Bucket<br/>
-                  2. Bucket 设为<strong>公共读</strong>（Public Read），以便问卷图片可被访问<br/>
-                  3. 在 <a href="https://ram.console.aliyun.com" target="_blank" rel="noopener noreferrer">RAM 访问控制</a> 创建 AccessKey（建议使用子账号）<br/>
-                  4. 填写下方配置后点击"测试连接"
-                </Typography>
-              </Alert>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    variant="outlined"
-                    label="OSS Region（地域）"
-                    value={ossConfig.region}
-                    onChange={(e) => handleOssConfigChange('region', e.target.value)}
-                    placeholder="oss-cn-shanghai"
-                    helperText="如 oss-cn-shanghai、oss-cn-beijing"
-                    size="small"
-                  />
-                  <TextField
-                    fullWidth
-                    variant="outlined"
-                    label="Bucket 名称"
-                    value={ossConfig.bucket}
-                    onChange={(e) => handleOssConfigChange('bucket', e.target.value)}
-                    placeholder="my-survey-images"
-                    size="small"
-                  />
-                </Box>
-                <TextField
-                  fullWidth
-                  variant="outlined"
-                  label="AccessKey ID"
-                  value={ossConfig.accessKeyId}
-                  onChange={(e) => handleOssConfigChange('accessKeyId', e.target.value)}
-                  placeholder="LTAI5t..."
-                  size="small"
-                />
-                <TextField
-                  fullWidth
-                  variant="outlined"
-                  label="AccessKey Secret"
-                  type="password"
-                  value={ossConfig.accessKeySecret}
-                  onChange={(e) => handleOssConfigChange('accessKeySecret', e.target.value)}
-                  placeholder="••••••••••••••••••••••••••••••••"
-                  size="small"
-                />
-                {ossStatus.error && <Alert severity="error">{ossStatus.error}</Alert>}
-                {ossStatus.success && <Alert severity="success">{ossStatus.success}</Alert>}
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <Button variant="contained" onClick={handleSaveOssConfig} startIcon={<Save />} size="small">
-                    保存 OSS 配置
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={handleTestOssConnection}
-                    disabled={ossStatus.loading || !ossConfig.region || !ossConfig.bucket || !ossConfig.accessKeyId}
-                    startIcon={ossStatus.loading ? <CircularProgress size={16} /> : <Refresh />}
-                    size="small"
-                  >
-                    测试连接
-                  </Button>
-                </Box>
               </Box>
-            </Box>
-          )}
-
-
-          <Alert severity="info" sx={{ mb: 3 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              📋 Setup Instructions:
+            ))}
+          </Box>
+          {preloadedCount > 10 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              ... and {preloadedCount - 10} more images
             </Typography>
+          )}
+          <Button variant="outlined" color="error" onClick={handleClearImages} startIcon={<Delete />} size="small">
+            Clear All Images
+          </Button>
+        </Box>
+      )}
+
+      <Divider sx={{ my: 4 }} />
+
+      {/* ── HuggingFace (Optional) ── */}
+      <Accordion
+        expanded={hfExpanded}
+        onChange={(_, v) => setHfExpanded(v)}
+        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, '&:before': { display: 'none' } }}
+      >
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              🤗 HuggingFace Dataset Import (Optional)
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Batch-import images from a HuggingFace dataset into Supabase Storage
+            </Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Alert severity="info" sx={{ mb: 2 }}>
             <Typography variant="body2" component="div">
-              1. Go to <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer">Supabase Dashboard</a><br/>
-              2. Click <strong>Project Settings</strong> in the left sidebar<br/>
-              3. Click <strong>General</strong>, copy your <strong>Project ID</strong><br/>
-              4. Click <strong>API Keys</strong>, then open tab <strong>"Legacy anon, service_role API keys"</strong><br/>
-              5. Copy <strong>anon key</strong> and <strong>service_role (secret) key</strong><br/>
-              6. Paste them below and click "Test Connection"<br/>
-              7. The system will automatically create a "survey-images" bucket when you preload
+              1. <strong>Public datasets:</strong> Leave token empty<br />
+              2. <strong>Private datasets:</strong> Get token from{' '}
+              <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">
+                HuggingFace Settings → Access Tokens
+              </a><br />
+              3. Format: "username/dataset-name" (e.g. "sijiey/Thermal-Affordance-Dataset")<br />
+              4. Enable, save, test connection, then click Preload
             </Typography>
           </Alert>
 
-          {/* Supabase Status Alert */}
-          {(supabaseStatus.connected || supabaseStatus.error) && (
-            <Alert severity={supabaseStatus.connected ? 'success' : 'error'} sx={{ mb: 3 }}>
+          {(hfStatus.connected || hfStatus.error) && (
+            <Alert severity={hfStatus.connected ? 'success' : 'error'} sx={{ mb: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                {supabaseStatus.loading ? (
-                  <CircularProgress size={20} />
-                ) : supabaseStatus.connected ? (
-                  <CheckCircle />
-                ) : (
-                  <ErrorIcon />
-                )}
+                {hfStatus.loading ? <CircularProgress size={18} /> : hfStatus.connected ? <CheckCircle /> : <ErrorIcon />}
                 <Typography variant="body2">
-                  {supabaseStatus.connected ? supabaseStatus.success : supabaseStatus.error}
+                  {hfStatus.connected ? 'Connection successful!' : hfStatus.error}
                 </Typography>
               </Box>
             </Alert>
           )}
 
-          <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle2" sx={{ mb: 2 }}>
-              🔧 Supabase Settings:
-            </Typography>
-
+          <Box sx={{ p: 2.5, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider', mb: 2 }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <TextField
-                fullWidth
-                variant="outlined"
-                label="Supabase Project ID"
-                value={config.supabaseProjectId || ''}
-                onChange={(e) => handleConfigChange('supabaseProjectId', e.target.value)}
-                placeholder="abcdefghijklmnopqrstuvwx"
-                helperText="From Project Settings → General. URL is auto-built as https://<project-id>.supabase.co"
+              <FormControlLabel
+                control={<Switch checked={hfConfig.enabled} onChange={(e) => setHfConfig(p => ({ ...p, enabled: e.target.checked }))} />}
+                label="Enable HuggingFace Dataset Integration"
               />
-
               <TextField
-                fullWidth
-                variant="outlined"
-                label="Supabase Project URL (auto-generated)"
-                value={config.supabaseUrl}
-                InputProps={{ readOnly: true }}
-                helperText="Auto-generated from Project ID"
+                fullWidth label="Access Token (optional)" type="password"
+                value={hfConfig.token}
+                onChange={(e) => setHfConfig(p => ({ ...p, token: e.target.value }))}
+                placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx"
+                helperText="Leave empty for public datasets"
+                disabled={!hfConfig.enabled} size="small"
               />
-
               <TextField
-                fullWidth
-                variant="outlined"
-                label="Supabase Anon Key (for deployed survey)"
-                type="password"
-                value={config.supabaseAnonKey || ''}
-                onChange={(e) => handleConfigChange('supabaseAnonKey', e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                helperText="Public anon key from API Keys → Legacy tab. Used in deployment .env for Vercel."
+                fullWidth label="Dataset Name" value={hfConfig.datasetName}
+                onChange={(e) => setHfConfig(p => ({ ...p, datasetName: e.target.value }))}
+                placeholder="username/dataset-name"
+                helperText="Format: 'username/dataset-name'"
+                disabled={!hfConfig.enabled} size="small"
               />
-
-              <TextField
-                fullWidth
-                variant="outlined"
-                label="Supabase Service Role Key"
-                type="password"
-                value={config.supabaseKey}
-                onChange={(e) => handleConfigChange('supabaseKey', e.target.value)}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                helperText="service_role (secret) key from API Keys → Legacy tab. Required for bucket creation."
-              />
-
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <Button
-                  variant="contained"
-                  onClick={handleSaveConfig}
-                  startIcon={<Save />}
-                  disabled={!config.supabaseUrl || !config.supabaseKey}
-                >
-                  Save Configuration
+                <Button variant="contained" size="small" onClick={saveHfConfig} disabled={!hfConfig.enabled || !hfConfig.datasetName}>
+                  Save
                 </Button>
-                
-                <Button
-                  variant="outlined"
-                  onClick={testSupabaseConnection}
-                  disabled={!config.supabaseUrl || !config.supabaseKey || supabaseStatus.loading}
-                  startIcon={supabaseStatus.loading ? <CircularProgress size={20} /> : <Refresh />}
-                >
+                <Button variant="outlined" size="small" onClick={testHfConnection}
+                  disabled={!hfConfig.enabled || !hfConfig.datasetName || hfStatus.loading}
+                  startIcon={hfStatus.loading ? <CircularProgress size={16} /> : <Refresh />}>
                   Test Connection
                 </Button>
               </Box>
             </Box>
           </Box>
 
-          {/* Supabase Project Details */}
-          {supabaseStatus.projectInfo && supabaseStatus.connected && (
-            <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="subtitle2" sx={{ mb: 2 }}>
-                📊 Supabase Project Details:
+          {hfStatus.datasetInfo && hfStatus.connected && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                <strong>{hfStatus.datasetInfo.id}</strong> — {hfStatus.datasetInfo.imageCount || 0} images found
               </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Typography variant="body2">
-                  <strong>Project URL:</strong> {supabaseStatus.projectInfo.url}
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Storage Buckets:</strong> {supabaseStatus.projectInfo.bucketsCount} bucket(s)
-                </Typography>
-                {supabaseStatus.projectInfo.bucketsCount > 0 && (
-                  <Typography variant="body2">
-                    <strong>Buckets:</strong> {supabaseStatus.projectInfo.buckets.join(', ')}
-                  </Typography>
-                )}
-                <Typography variant="body2">
-                  <strong>survey-images bucket:</strong> {supabaseStatus.projectInfo.surveyBucketExists ? (
-                    <span style={{ color: 'green' }}>✓ Already exists</span>
-                  ) : (
-                    <span style={{ color: 'orange' }}>○ Will be created on first preload</span>
-                  )}
-                </Typography>
+            </Alert>
+          )}
+
+          {preloadStatus.loading && (
+            <Box sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="body2">Downloading from HuggingFace → Uploading to Supabase...</Typography>
+                <Typography variant="body2" color="text.secondary">{preloadStatus.progress} / {preloadStatus.total}</Typography>
               </Box>
+              <LinearProgress variant="determinate"
+                value={preloadStatus.total > 0 ? (preloadStatus.progress / preloadStatus.total) * 100 : 0}
+                sx={{ height: 8, borderRadius: 4 }} />
             </Box>
           )}
-        </Box>
+          {preloadStatus.success && <Alert severity="success" sx={{ mb: 2 }}>{preloadStatus.success}</Alert>}
+          {preloadStatus.error && <Alert severity="error" sx={{ mb: 2 }}>{preloadStatus.error}</Alert>}
 
-        <Divider sx={{ my: 4 }} />
+          <Button
+            variant="contained" color="primary"
+            onClick={handlePreloadAllImages}
+            disabled={!hfStatus.connected || !isSupabaseConfigured() || preloadStatus.loading}
+            startIcon={preloadStatus.loading ? <CircularProgress size={20} /> : <CloudDownload />}
+          >
+            {preloadedCount > 0 ? 'Re-preload All Images to Supabase' : 'Preload All Images to Supabase'}
+          </Button>
 
-        {/* Image Preload Management */}
-        <Box sx={{ mb: 3 }}>
-          <Typography variant="h6" sx={{ mb: 2, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
-            <ImageIcon /> Image Preload Management
-          </Typography>
-          
-          <Alert severity="info" sx={{ mb: 3 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              💡 How Image Preload Works:
-            </Typography>
-            <Typography variant="body2" component="div">
-              1. <strong>Downloads</strong> all images from Hugging Face dataset<br/>
-              2. <strong>Uploads</strong> them to your Supabase Storage (survey-images bucket)<br/>
-              3. <strong>Saves</strong> permanent Supabase URLs to project JSON<br/>
-              4. <strong>Result:</strong> Images never expire, load instantly, work offline<br/>
-              <br/>
-              ✅ <strong>True permanent URLs</strong> - Supabase URLs never expire!<br/>
-              ✅ <strong>No API limits</strong> - Images stored in your own storage<br/>
-              ✅ <strong>Production ready</strong> - Perfect for deployed surveys
-            </Typography>
-          </Alert>
-
-          {/* Current Preload Status */}
-          <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle2" sx={{ mb: 2 }}>
-              📦 Current Status:
-            </Typography>
-            
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
-              {currentProject?.preloadedImages && currentProject.preloadedImages.length > 0 ? (
-                <>
-                  <Chip 
-                    icon={<CheckCircle />} 
-                    label={`${currentProject.preloadedImages.length} images in Supabase`}
-                    color="success"
-                    variant="outlined"
-                  />
-                  {currentProject.preloadedSource === 'supabase' && (
-                    <Chip 
-                      label="☁️ Supabase Storage"
-                      color="primary"
-                      size="small"
-                      variant="outlined"
-                    />
-                  )}
-                  {currentProject.supabaseBucket && (
-                    <Chip 
-                      label={`📦 ${currentProject.supabaseBucket}`}
-                      size="small"
-                      variant="outlined"
-                    />
-                  )}
-                  {currentProject.preloadedAt && (
-                    <Typography variant="body2" color="text.secondary">
-                      Uploaded: {new Date(currentProject.preloadedAt).toLocaleString()}
-                    </Typography>
-                  )}
-                </>
-              ) : (
-                <Chip 
-                  icon={<Warning />} 
-                  label="No images preloaded to Supabase"
-                  color="default"
-                  variant="outlined"
-                />
-              )}
-            </Box>
-
-            {/* Preload/Delete Progress */}
-            {preloadStatus.loading && (
-              <Box sx={{ mb: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">
-                    {preloadStatus.progress === 0 && preloadStatus.total > 0 
-                      ? 'Downloading from HF → Uploading to Supabase...'
-                      : preloadStatus.total > 0 && currentProject?.preloadedImages?.length === preloadStatus.total
-                      ? '🗑️ Deleting images from Supabase...'
-                      : 'Downloading from HF → Uploading to Supabase...'
-                    }
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {preloadStatus.progress} / {preloadStatus.total}
-                  </Typography>
-                </Box>
-                <LinearProgress 
-                  variant="determinate" 
-                  value={preloadStatus.total > 0 ? (preloadStatus.progress / preloadStatus.total) * 100 : 0}
-                  sx={{ height: 8, borderRadius: 4 }}
-                />
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  {preloadStatus.total > 0 && currentProject?.preloadedImages?.length === preloadStatus.total
-                    ? 'Deleting files from Storage...'
-                    : 'This may take a few minutes depending on dataset size...'
-                  }
-                </Typography>
-              </Box>
-            )}
-
-            {/* Success/Error Messages */}
-            {preloadStatus.success && (
-              <Alert severity="success" sx={{ mb: 2 }}>
-                {preloadStatus.success}
-              </Alert>
-            )}
-            {preloadStatus.error && (
-              <Alert severity="error" sx={{ mb: 2 }}>
-                {preloadStatus.error}
-              </Alert>
-            )}
-
-            {/* Action Buttons */}
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handlePreloadAllImages}
-                disabled={!status.connected || !config.supabaseUrl || !config.supabaseKey || preloadStatus.loading}
-                startIcon={preloadStatus.loading ? <CircularProgress size={20} /> : <CloudDownload />}
-              >
-                {currentProject?.preloadedImages && currentProject.preloadedImages.length > 0 
-                  ? 'Re-preload All Images to Supabase'
-                  : 'Preload All Images to Supabase'
-                }
-              </Button>
-              
-              <Button
-                variant="outlined"
-                color="error"
-                onClick={handleClearPreloadedImages}
-                disabled={!currentProject?.preloadedImages || currentProject.preloadedImages.length === 0 || preloadStatus.loading}
-                startIcon={<Delete />}
-              >
-                Clear Preloaded Images
-              </Button>
-            </Box>
-
-            {/* Configuration warnings */}
-            {!status.connected && (
-              <Alert severity="warning" sx={{ mt: 2 }}>
-                ⚠️ Please configure Hugging Face dataset and test connection first.
-              </Alert>
-            )}
-            {status.connected && (!config.supabaseUrl || !config.supabaseKey) && (
-              <Alert severity="warning" sx={{ mt: 2 }}>
-                ⚠️ Please configure Supabase Storage above to enable image preload.
-              </Alert>
-            )}
-            {status.connected && config.supabaseUrl && config.supabaseKey && !supabaseStatus.connected && (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                💡 Please test Supabase connection before preloading images.
-              </Alert>
-            )}
-          </Box>
-
-          {/* Image List Preview (if preloaded) */}
-          {currentProject?.preloadedImages && currentProject.preloadedImages.length > 0 && (
-            <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-              <Typography variant="subtitle2" sx={{ mb: 2 }}>
-                🖼️ Images in Supabase Storage (preview - first 10):
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {currentProject.preloadedImages.slice(0, 10).map((img, index) => (
-                  <Box 
-                    key={index}
-                    sx={{ 
-                      width: 100, 
-                      height: 100, 
-                      borderRadius: 1, 
-                      overflow: 'hidden',
-                      border: '1px solid',
-                      borderColor: 'divider'
-                    }}
-                  >
-                    <img 
-                      src={img.url} 
-                      alt={img.name}
-                      style={{ 
-                        width: '100%', 
-                        height: '100%', 
-                        objectFit: 'cover' 
-                      }}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10px;color:#999;">Failed</div>';
-                      }}
-                    />
-                  </Box>
-                ))}
-              </Box>
-              {currentProject.preloadedImages.length > 10 && (
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-                  ... and {currentProject.preloadedImages.length - 10} more images
-                </Typography>
-              )}
-            </Box>
+          {!hfStatus.connected && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              Configure HuggingFace dataset and test connection first.
+            </Alert>
           )}
-        </Box>
-      </Box>
-      
-      {/* Next Step Button */}
+        </AccordionDetails>
+      </Accordion>
+
       {onNextStep && (
         <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            variant="contained"
-            color="primary"
-            size="large"
-            onClick={onNextStep}
-            sx={{
-              px: 4,
-              py: 1.5,
-              fontWeight: 600
-            }}
-          >
+          <Button variant="contained" color="primary" size="large" onClick={onNextStep} sx={{ px: 4, py: 1.5, fontWeight: 600 }}>
             Next: Survey Builder →
           </Button>
         </Box>
