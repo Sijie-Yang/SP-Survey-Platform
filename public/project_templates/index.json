@@ -1,0 +1,17 @@
+{
+  "templates": [
+    "1995-art-restoration.json",
+    "2010-gehl-street-quality.json",
+    "2014-streetscore.json",
+    "2016-place-pulse.json",
+    "2017-seresinhe.json",
+    "2024-building.json",
+    "2025-city.json",
+    "2025-effective.json",
+    "2025-specs.json",
+    "2025-street-1.json",
+    "2025-street.json",
+    "2025-thermal.json",
+    "2025-urban.json"
+  ]
+}

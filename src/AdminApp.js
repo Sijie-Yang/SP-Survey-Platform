@@ -36,6 +36,7 @@ import {
   Check,
   Logout,
   AccountCircle,
+  AdminPanelSettings,
 } from '@mui/icons-material';
 import { themes, createCustomTheme } from './themes/themeConfig';
 import SurveyBuilder from './components/admin/SurveyBuilder';
@@ -57,6 +58,8 @@ import {
 } from './lib/projectManager';
 import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
+import { checkIsAdmin } from './lib/templateManager';
+import { useNavigate } from 'react-router-dom';
 
 function TabPanel({ children, value, index, ...other }) {
   return (
@@ -78,6 +81,8 @@ function TabPanel({ children, value, index, ...other }) {
 
 export default function AdminApp() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [isAdminUser, setIsAdminUser] = useState(false);
 
   // Theme state
   const [currentTheme, setCurrentTheme] = useState(() => {
@@ -149,6 +154,9 @@ export default function AdminApp() {
 
 
   useEffect(() => {
+    // Check admin status for showing admin dashboard button
+    checkIsAdmin().then(ok => setIsAdminUser(ok));
+
     // Clean up any old demo images from saved configurations
     cleanupDemoImages();
     
@@ -1066,6 +1074,20 @@ export default function AdminApp() {
           >
             🚀 View Live Survey
           </Button>
+
+          {/* Admin Dashboard button — only visible to admin users */}
+          {isAdminUser && (
+            <Tooltip title="Admin Dashboard (Template & Project Management)">
+              <IconButton
+                color="inherit"
+                onClick={() => navigate('/admin-dashboard')}
+                size="small"
+                sx={{ mr: 1, border: 1, borderColor: 'rgba(255,255,255,0.4)', '&:hover': { bgcolor: 'rgba(255,255,255,0.15)' } }}
+              >
+                <AdminPanelSettings fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
 
           {/* User info & logout */}
           {user && (

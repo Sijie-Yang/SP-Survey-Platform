@@ -25,7 +25,9 @@ import {
   Select,
   FormControl,
   InputLabel,
-  Grid
+  Grid,
+  InputAdornment,
+  Stack,
 } from '@mui/material';
 import {
   Folder,
@@ -46,7 +48,9 @@ import {
   Upload,
   Preview,
   Info,
-  InfoOutlined
+  InfoOutlined,
+  Search,
+  FilterList,
 } from '@mui/icons-material';
 import { 
   getUserProjects, 
@@ -71,6 +75,12 @@ import {
   importProjectFromFile,
   deleteProjectFile
 } from '../../lib/fileSystemManager';
+import {
+  listTemplates,
+  saveTemplateToSupabase,
+  deleteTemplate as deleteTemplateFromSupabase,
+} from '../../lib/templateManager';
+import { supabase } from '../../lib/supabase';
 
 export default function ProjectSidebar({ 
   open, 
@@ -85,7 +95,8 @@ export default function ProjectSidebar({
   const [projects, setProjects] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState(null);
-  
+  const [currentUserId, setCurrentUserId] = useState(null);
+
   // Dialog states
   const [createDialog, setCreateDialog] = useState(false);
   const [templateDialog, setTemplateDialog] = useState(false);
@@ -118,43 +129,22 @@ export default function ProjectSidebar({
   const [expandedProjectMetadata, setExpandedProjectMetadata] = useState({});
   const [error, setError] = useState('');
 
+  // Template search / filter / sort
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateCategory, setTemplateCategory] = useState('');
+  const [templateSort, setTemplateSort] = useState('name');
+
   useEffect(() => {
+    // Capture current user id once (needed for pending-badge logic)
+    if (supabase) {
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) setCurrentUserId(user.id);
+      });
+    }
     loadProjects();
     loadTemplates();
     setActiveProjectId(getActiveProjectId());
-
-    // Set up file system monitoring (only when sidebar is open)
-    const interval = setInterval(async () => {
-      try {
-        // Only check when sidebar is open to reduce unnecessary checks
-        if (!open) return;
-        
-        const [newTemplates, newProjects] = await Promise.all([
-          loadTemplatesFromFiles(),
-          loadProjectsFromFiles()
-        ]);
-        
-        // Stricter change detection to avoid unnecessary updates
-        const templatesChanged = newTemplates.length !== templates.length || 
-          newTemplates.some((t, i) => !templates[i] || t.id !== templates[i].id);
-        const projectsChanged = newProjects.length !== projects.length ||
-          newProjects.some((p, i) => !projects[i] || p.id !== projects[i].id);
-        
-        if (templatesChanged || projectsChanged) {
-          console.log('📁 File changes detected, updating panel...');
-          setTemplates(newTemplates);
-          setProjects(newProjects);
-        }
-      } catch (error) {
-        console.error('Error checking file system changes:', error);
-      }
-    }, 10000); // Increased to 10 seconds to further reduce check frequency
-
-    // Cleanup on unmount
-    return () => {
-      clearInterval(interval);
-    };
-  }, [templates.length, projects.length, open]);
+  }, []);
 
   const loadProjects = async () => {
     try {
@@ -170,13 +160,20 @@ export default function ProjectSidebar({
 
   const loadTemplates = async () => {
     try {
-      console.log('Loading templates from files...');
-
-      // Load all templates from files (including user-created ones)
-      const fileTemplates = await loadTemplatesFromFiles();
-      console.log('Templates loaded:', fileTemplates);
-
-      setTemplates(fileTemplates);
+      if (supabase) {
+        // Platform mode: load from Supabase
+        // (is_approved=true for all users + user's own pending submissions)
+        const { data: { user } } = await supabase.auth.getUser();
+        const userId = user?.id || null;
+        const sbTemplates = await listTemplates(userId);
+        console.log('Templates loaded from Supabase:', sbTemplates.length);
+        setTemplates(sbTemplates);
+      } else {
+        // Self-hosted mode: load from local file system
+        const fileTemplates = await loadTemplatesFromFiles();
+        console.log('Templates loaded from files:', fileTemplates.length);
+        setTemplates(fileTemplates);
+      }
     } catch (error) {
       console.error('Error loading templates:', error);
       setTemplates([]);
@@ -395,22 +392,20 @@ export default function ProjectSidebar({
 
     try {
       console.log('📝 Creating template from project:', projectToTemplate.name);
-      
-      // Load the project's surveyConfig from file system
+
+      // Load the project's surveyConfig
       const projectConfig = await loadSurveyConfig(projectToTemplate.id);
       if (!projectConfig) {
-        console.error('Failed to load survey config for project:', projectToTemplate.id);
         setError('Failed to load project configuration');
         return;
       }
-      
+
       // Parse tags
       const tagsArray = newProjectTags
         .split(',')
         .map(tag => tag.trim())
         .filter(tag => tag.length > 0);
-      
-      // Create modified project with updated metadata
+
       const modifiedProject = {
         ...projectToTemplate,
         name: newProjectName.trim(),
@@ -420,24 +415,57 @@ export default function ProjectSidebar({
         category: newProjectCategory.trim() || 'Custom',
         tags: tagsArray.length > 0 ? tagsArray : ['custom', 'user-created'],
         website: newProjectWebsite.trim() || undefined,
-        huggingfaceDataset: newProjectDataset.trim() || undefined
+        huggingfaceDataset: newProjectDataset.trim() || undefined,
       };
-      
-      const result = await saveProjectAsTemplate(modifiedProject, projectConfig);
+
+      let result;
+      if (supabase) {
+        // Platform mode: save to Supabase (is_approved=false, awaiting review)
+        // Strip sensitive fields from config before storing
+        const cleanedConfig = stripSensitiveFields(projectConfig);
+        result = await saveTemplateToSupabase({
+          ...modifiedProject,
+          config: cleanedConfig,
+        });
+      } else {
+        // Self-hosted mode: save to local file system
+        result = await saveProjectAsTemplate(modifiedProject, projectConfig);
+      }
+
       if (result.success) {
-        // Template is automatically saved, reload immediately
         await loadTemplates();
-        console.log('✅ Template created and panel refreshed');
+        console.log('✅ Template submitted for review');
         setError('');
         setSaveAsTemplateDialog(false);
         setProjectToTemplate(null);
       } else {
-        setError('Failed to create template: ' + result.error);
+        setError('Failed to create template: ' + (result.error || 'Unknown error'));
       }
     } catch (error) {
       console.error('Error creating template:', error);
       setError('Error creating template: ' + error.message);
     }
+  };
+
+  // Strip Supabase credentials and preloaded images from config before saving as template
+  const stripSensitiveFields = (config) => {
+    const cleaned = JSON.parse(JSON.stringify(config));
+    const rootRemove = [
+      'preloadedImages', 'preloadedAt', 'preloadedSource', 'supabaseBucket',
+      'supabaseConfig', 'imageDatasetConfig', 'supabaseUrl', 'supabaseKey',
+      'supabaseConnectionStatus', 'datasetInfo', 'huggingFaceToken',
+    ];
+    rootRemove.forEach(f => { if (cleaned[f]) delete cleaned[f]; });
+    (cleaned.pages || []).forEach(page => {
+      ['supabaseConfig', 'supabaseUrl', 'supabaseKey', 'bucketPath',
+       'huggingFaceConfig', 'imageDatasetConfig'].forEach(f => { if (page[f]) delete page[f]; });
+      (page.elements || []).forEach(el => {
+        ['supabaseConfig', 'supabaseUrl', 'supabaseKey', 'bucketPath',
+         'preloadedImages', 'huggingFaceToken', 'datasetInfo',
+         'imageDatasetConfig', 'huggingFaceConfig'].forEach(f => { if (el[f]) delete el[f]; });
+      });
+    });
+    return cleaned;
   };
 
   const handleImportProject = async (event) => {
@@ -633,19 +661,83 @@ export default function ProjectSidebar({
             </ListItemButton>
             
             <Collapse in={templatesExpanded} timeout="auto" unmountOnExit>
+              {/* Search / Filter / Sort controls */}
+              {templates.length > 0 && (
+                <Box sx={{ px: 1, pt: 0.5, pb: 1 }}>
+                  <TextField
+                    size="small"
+                    placeholder="Search templates..."
+                    fullWidth
+                    value={templateSearch}
+                    onChange={e => setTemplateSearch(e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Search sx={{ fontSize: 16, color: 'text.secondary' }} />
+                        </InputAdornment>
+                      ),
+                      sx: { fontSize: '0.8rem' },
+                    }}
+                    sx={{ mb: 0.75 }}
+                  />
+                  <Stack direction="row" spacing={0.75}>
+                    <FormControl size="small" sx={{ flex: 1 }}>
+                      <Select
+                        value={templateCategory}
+                        onChange={e => setTemplateCategory(e.target.value)}
+                        displayEmpty
+                        renderValue={v => v || 'All Categories'}
+                        sx={{ fontSize: '0.75rem' }}
+                      >
+                        <MenuItem value=""><em>All Categories</em></MenuItem>
+                        <MenuItem value="Academic Research">Academic Research</MenuItem>
+                        <MenuItem value="Urban Theory">Urban Theory</MenuItem>
+                        <MenuItem value="AI Template">AI Template</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <FormControl size="small" sx={{ flex: 1 }}>
+                      <Select
+                        value={templateSort}
+                        onChange={e => setTemplateSort(e.target.value)}
+                        sx={{ fontSize: '0.75rem' }}
+                      >
+                        <MenuItem value="name">Name A–Z</MenuItem>
+                        <MenuItem value="name_desc">Name Z–A</MenuItem>
+                        <MenuItem value="year_desc">Newest</MenuItem>
+                        <MenuItem value="year_asc">Oldest</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                </Box>
+              )}
               <List sx={{ pl: 1 }}>
-                {templates.length === 0 ? (
-                  <ListItem sx={{ py: 0.5 }}>
-                    <ListItemText 
-                      secondary={
+                {(() => {
+                  const q = templateSearch.toLowerCase();
+                  let list = templates.filter(t => {
+                    const matchSearch = !q || [t.name, t.author, t.description, t.id]
+                      .some(v => v?.toLowerCase().includes(q));
+                    const matchCat = !templateCategory || t.category === templateCategory;
+                    return matchSearch && matchCat;
+                  });
+                  list = [...list].sort((a, b) => {
+                    if (templateSort === 'name')      return (a.name || '').localeCompare(b.name || '');
+                    if (templateSort === 'name_desc') return (b.name || '').localeCompare(a.name || '');
+                    if (templateSort === 'year_desc') return (b.year || '').localeCompare(a.year || '');
+                    if (templateSort === 'year_asc')  return (a.year || '').localeCompare(b.year || '');
+                    return 0;
+                  });
+                  if (list.length === 0) return (
+                    <ListItem sx={{ py: 0.5 }}>
+                      <ListItemText secondary={
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
-                          No templates found. Create one from a project.
+                          {templates.length === 0
+                            ? 'No templates found. Create one from a project.'
+                            : 'No templates match your search.'}
                         </Typography>
-                      } 
-                    />
-                  </ListItem>
-                ) : (
-                  templates.map((template) => (
+                      } />
+                    </ListItem>
+                  );
+                  return list.map((template) => (
                     <ListItem key={template.id} disablePadding sx={{ flexDirection: 'column', alignItems: 'stretch' }}>
                       <ListItemButton
                         sx={{ 
@@ -672,9 +764,21 @@ export default function ProjectSidebar({
                         </ListItemIcon>
                         <ListItemText
                           primary={
-                            <Typography variant="body2" sx={{ fontSize: '0.875rem', lineHeight: 1.3 }}>
-                              {template.name}
-                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                              <Typography variant="body2" sx={{ fontSize: '0.875rem', lineHeight: 1.3 }}>
+                                {template.name}
+                              </Typography>
+                              {/* Show "Pending Review" badge for user's own pending templates */}
+                              {supabase && !template.is_approved && template.user_id === currentUserId && (
+                                <Chip
+                                  label="Pending Review"
+                                  size="small"
+                                  color="warning"
+                                  variant="outlined"
+                                  sx={{ height: 16, fontSize: '0.6rem', '& .MuiChip-label': { px: 0.5 } }}
+                                />
+                              )}
+                            </Box>
                           }
                           secondary={
                             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', lineHeight: 1.2 }}>
@@ -729,13 +833,17 @@ export default function ProjectSidebar({
                           </Tooltip>
                           {isUserTemplate(template) && (
                             <Tooltip title="Delete Template">
-                              <IconButton 
+                              <IconButton
                                 size="small"
                                 onClick={async (e) => {
                                   e.stopPropagation();
                                   try {
-                                    await deleteTemplateFile(template.id);
-                                    await loadTemplates(); // Refresh templates
+                                    if (supabase) {
+                                      await deleteTemplateFromSupabase(template.id);
+                                    } else {
+                                      await deleteTemplateFile(template.id);
+                                    }
+                                    await loadTemplates();
                                     console.log('✅ Template deleted and panel refreshed');
                                   } catch (error) {
                                     console.error('Error deleting template:', error);
@@ -795,8 +903,8 @@ export default function ProjectSidebar({
                         </Box>
                       </Collapse>
                     </ListItem>
-                  ))
-                )}
+                  ));
+                })()}
               </List>
             </Collapse>
           </Box>
@@ -1189,8 +1297,8 @@ export default function ProjectSidebar({
                 >
                   <MenuItem value="">None</MenuItem>
                   <MenuItem value="Academic Research">Academic Research</MenuItem>
-                  <MenuItem value="General">General</MenuItem>
-                  <MenuItem value="Custom">Custom</MenuItem>
+                  <MenuItem value="Urban Theory">Urban Theory</MenuItem>
+                  <MenuItem value="AI Template">AI Template</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
@@ -1245,7 +1353,9 @@ export default function ProjectSidebar({
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           
           <Alert severity="info" sx={{ mb: 2 }}>
-            Please confirm or modify the template metadata. Sensitive data (Supabase credentials, tokens) will be automatically removed.
+            {supabase
+              ? 'Your template will be submitted for review. Sensitive data (credentials, tokens) will be removed automatically. Once approved by an admin, it will appear in the template library.'
+              : 'Please confirm or modify the template metadata. Sensitive data (Supabase credentials, tokens) will be automatically removed.'}
           </Alert>
           
           {/* Template Information */}
@@ -1313,8 +1423,8 @@ export default function ProjectSidebar({
                 >
                   <MenuItem value="">None</MenuItem>
                   <MenuItem value="Academic Research">Academic Research</MenuItem>
-                  <MenuItem value="General">General</MenuItem>
-                  <MenuItem value="Custom">Custom</MenuItem>
+                  <MenuItem value="Urban Theory">Urban Theory</MenuItem>
+                  <MenuItem value="AI Template">AI Template</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
