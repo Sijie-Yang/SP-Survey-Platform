@@ -4,7 +4,7 @@
 
 [![Stars](https://img.shields.io/github/stars/Sijie-Yang/Streetscape-Perception-Survey?style=social)](https://github.com/Sijie-Yang/Streetscape-Perception-Survey)
 [![Paper](https://img.shields.io/badge/📄-Published_Paper-9cf)](https://www.sciencedirect.com/science/article/pii/S0360132325000514)
-[![Website](https://img.shields.io/badge/🌐-Live_Platform-blue)](https://streetscape-perception-survey.pages.dev/)
+[![Website](https://img.shields.io/badge/🌐-Live_Platform-blue)](https://sp-survey.sijieyangyang.workers.dev)
 [![License](https://img.shields.io/badge/📄-CC_BY_4.0-green)](https://creativecommons.org/licenses/by/4.0/)
 [![React](https://img.shields.io/badge/React-18.2-61DAFB?logo=react)](https://reactjs.org/)
 
@@ -14,7 +14,7 @@
 <br>
 No coding required – build surveys through an intuitive admin panel with drag-and-drop, real-time preview, AI-powered generation, and cloud integration.
 
-🌐 <a href="https://streetscape-perception-survey.pages.dev/"><strong>Use the Hosted Platform</strong></a> •
+🌐 <a href="https://sp-survey.sijieyangyang.workers.dev"><strong>Use the Hosted Platform</strong></a> •
 📄 <a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"><strong>Research Paper</strong></a> •
 🔗 <a href="https://thermal-affordance.ual.sg"><strong>Project Website</strong></a> •
 📊 <a href="https://github.com/Sijie-Yang/Thermal-Affordance"><strong>Dataset</strong></a>
@@ -35,7 +35,7 @@ No coding required – build surveys through an intuitive admin panel with drag-
 
 **No setup required.** Create an account and start building surveys immediately.
 
-👉 **[streetscape-perception-survey.pages.dev](https://streetscape-perception-survey.pages.dev/)**
+👉 **[sp-survey.sijieyangyang.workers.dev](https://sp-survey.sijieyangyang.workers.dev)**
 
 - ✅ No server, no deployment, no configuration
 - ✅ Your projects and data are stored securely in the cloud
