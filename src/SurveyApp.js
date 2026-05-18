@@ -380,7 +380,7 @@ export default function SurveyApp() {
                         element.imageNames = selectedImages.map(img => img.name);
                         let imagesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;">';
                         selectedImages.forEach((image) => {
-                          imagesHtml += `<img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name}" style="max-width: 300px; height: auto; border-radius: 4px;" />`;
+                          imagesHtml += `<img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name}" alt="${image.name}" style="max-width: 300px; height: auto; border-radius: 4px;" onerror="this.onerror=null;this.alt='Image unavailable';this.style.cssText='max-width:300px;min-height:150px;background:#f0f0f0;border:2px dashed #ccc;border-radius:4px;display:flex;align-items:center;justify-content:center'" />`;
                         });
                         imagesHtml += '</div>';
                         element.imageHtml = imagesHtml;

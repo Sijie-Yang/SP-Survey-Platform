@@ -2066,6 +2066,26 @@ app.get('/api/r2/status', async (req, res) => {
   }
 });
 
+// ── Serve React production build (production mode only) ───────────────────────
+// When NODE_ENV=production the React app sets SERVER_URL='' so all /api/* calls
+// hit the same origin.  Serve the built React app from this Express server so
+// that both the API routes and the frontend are available from a single process.
+
+const BUILD_PATH = path.join(__dirname, 'build');
+if (fs.existsSync(BUILD_PATH)) {
+  app.use(express.static(BUILD_PATH));
+
+  // React Router catch-all: serve index.html for every non-API path.
+  // Use a regex to stay compatible with Express 5's updated wildcard syntax.
+  app.get(/(.*)/, (req, res) => {
+    res.sendFile(path.join(BUILD_PATH, 'index.html'));
+  });
+} else {
+  // In development the React dev server (port 3000) serves the frontend.
+  // The Express server only handles API routes.
+  console.log('ℹ️  No build/ directory found – running in API-only (dev) mode.');
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
@@ -2076,5 +2096,9 @@ app.listen(PORT, () => {
   console.log(`🤖 OpenAI integration enabled`);
   if (isR2Configured()) {
     console.log(`☁️  Cloudflare R2 storage enabled (bucket: ${r2BucketName})`);
+  }
+  if (fs.existsSync(BUILD_PATH)) {
+    console.log(`📦 Serving React production build from ${BUILD_PATH}`);
+    console.log(`   → Open http://localhost:${PORT} in your browser`);
   }
 });

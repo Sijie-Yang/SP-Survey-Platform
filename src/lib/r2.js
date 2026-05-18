@@ -34,6 +34,7 @@ export async function uploadImageToR2(file, key) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, data: base64, contentType }),
     });
+    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Upload failed');
     return { success: true, url: json.url, key: json.key };
@@ -54,6 +55,7 @@ export async function deleteImagesFromR2(keys) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keys }),
     });
+    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Delete failed');
     return { success: true };
@@ -73,6 +75,7 @@ export async function listImagesFromR2(prefix = '') {
     const res = await fetch(
       `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}`
     );
+    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'List failed');
     return { success: true, images: json.images };
@@ -89,6 +92,7 @@ export async function listImagesFromR2(prefix = '') {
 export async function checkR2Status() {
   try {
     const res = await fetch(`${SERVER_URL}/api/r2/status`);
+    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
     return await res.json();
   } catch (error) {
     return { configured: false, connected: false, error: error.message };
