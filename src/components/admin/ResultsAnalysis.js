@@ -217,6 +217,83 @@ function ChoiceDistribution({ answers, choices }) {
   );
 }
 
+// ── imagepicker distribution ──────────────────────────────────────────────────
+// Choices: { value, imageLink?, text? }. Answer = value (may be a URL or filename).
+function ImagePickerDistribution({ answers, choices }) {
+  const resolvedUrl = useContext(ImageResolverContext);
+  const freq = frequencyMap(answers);
+  const total = answers.length;
+  const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+
+  // Build a map: value → { label, imageUrl }
+  const choiceMap = {};
+  if (choices) {
+    for (const c of choices) {
+      const val = typeof c === 'object' ? String(c.value ?? '') : String(c);
+      const imgLink = typeof c === 'object' ? (c.imageLink || c.value || '') : c;
+      const text = typeof c === 'object' ? (c.text || c.value || '') : c;
+      choiceMap[val] = { label: text, imageUrl: imgLink };
+    }
+  }
+
+  const getImageUrl = (value) => {
+    if (choiceMap[value]?.imageUrl) return choiceMap[value].imageUrl;
+    // If the value itself looks like a URL or can be resolved from preloadedImages
+    if (value && (value.startsWith('http') || value.startsWith('/'))) return value;
+    if (resolvedUrl?.has(value)) return resolvedUrl.get(value);
+    return null;
+  };
+
+  const getLabel = (value) => {
+    if (choiceMap[value]?.label && choiceMap[value].label !== value) return choiceMap[value].label;
+    // Extract filename from URL
+    return value ? value.split('?')[0].split('/').pop() : value;
+  };
+
+  return (
+    <Box>
+      {sorted.map(([value, count], idx) => {
+        const imgUrl = getImageUrl(value);
+        const label = getLabel(value);
+        const w = total > 0 ? pct(count, total) : 0;
+        return (
+          <Box key={value} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
+            {imgUrl ? (
+              <Box
+                component="img"
+                src={imgUrl}
+                alt={label}
+                sx={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 1, flexShrink: 0, border: '1px solid', borderColor: 'divider' }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            ) : (
+              <Box sx={{ width: 56, height: 56, bgcolor: 'grey.100', borderRadius: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Typography variant="caption" color="text.disabled">?</Typography>
+              </Box>
+            )}
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.4 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '75%' }}>
+                  {label}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                  {count} ({w.toFixed(0)}%)
+                </Typography>
+              </Box>
+              <Box sx={{ height: 6, bgcolor: 'grey.100', borderRadius: 3 }}>
+                <Box sx={{ height: '100%', width: `${w}%`, bgcolor: idx === 0 ? 'primary.main' : 'primary.light', borderRadius: 3, transition: 'width 0.4s' }} />
+              </Box>
+            </Box>
+          </Box>
+        );
+      })}
+      {sorted.length === 0 && (
+        <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
+      )}
+    </Box>
+  );
+}
+
 function TextAnswers({ answers, maxVisible = 5 }) {
   const [showAll, setShowAll] = useState(false);
   const texts = answers.map(a => String(a.answer)).filter(Boolean);
@@ -703,6 +780,9 @@ function QuestionCard({ question, answers, totalResponses, index }) {
           />
         );
 
+      case 'imagepicker':
+        return <ImagePickerDistribution answers={answers} choices={question.choices} />;
+
       case 'image_rating':
       case 'imagerating':
       case 'image_ranking':
@@ -837,11 +917,21 @@ function exportToCSV(responses, allQuestions) {
         shownImgs = row.displayed_images?.[qName] || [];
       }
 
-      cols.push(typeof ans === 'object' ? JSON.stringify(ans) : String(ans ?? ''));
-
-      // Shown images column (only for image questions)
+      // For image questions, convert URL answers to filenames
+      let ansForCsv = ans;
       if (isImageQuestion(q)) {
-        cols.push(Array.isArray(shownImgs) ? shownImgs.join('|') : String(shownImgs ?? ''));
+        const urlToName = v => (v && typeof v === 'string') ? v.split('?')[0].split('/').pop() : v;
+        if (Array.isArray(ans)) ansForCsv = ans.map(urlToName);
+        else if (typeof ans === 'string') ansForCsv = urlToName(ans);
+      }
+      cols.push(typeof ansForCsv === 'object' ? JSON.stringify(ansForCsv) : String(ansForCsv ?? ''));
+
+      // Shown images column (only for image questions) — use filenames, not full URLs
+      if (isImageQuestion(q)) {
+        const imgNames = Array.isArray(shownImgs)
+          ? shownImgs.map(v => v ? v.split('?')[0].split('/').pop() : v)
+          : [shownImgs ?? ''];
+        cols.push(imgNames.join('|'));
       }
     }
     return cols.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');

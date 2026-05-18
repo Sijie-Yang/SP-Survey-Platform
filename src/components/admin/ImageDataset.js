@@ -30,7 +30,7 @@ import {
   getImagesFromHuggingFace,
   getImageCountFromDataset,
 } from '../../lib/huggingface';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2 } from '../../lib/r2';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -50,6 +50,36 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const [hfConfig, setHfConfig] = useState({ enabled: false, token: '', datasetName: '' });
   const [hfStatus, setHfStatus] = useState({ loading: false, connected: false, error: null, datasetInfo: null });
   const [preloadStatus, setPreloadStatus] = useState({ loading: false, progress: 0, total: 0, error: null, success: null });
+
+  // R2 sync state
+  const [r2Syncing, setR2Syncing] = useState(false);
+
+  // On mount / project change: sync actual image count from R2
+  useEffect(() => {
+    if (!isR2Configured() || !currentProject?.id || !user?.id) return;
+    let cancelled = false;
+    const userId = user.id;
+    const prefix = `${userId}/${currentProject.id}/`;
+
+    setR2Syncing(true);
+    listImagesFromR2(prefix).then((result) => {
+      if (cancelled) return;
+      setR2Syncing(false);
+      if (!result.success || result.images.length === 0) return;
+      // If R2 has more images than stored locally, update the project record
+      const storedCount = currentProject.preloadedImages?.length || 0;
+      if (result.images.length !== storedCount) {
+        const images = result.images.map((img) => ({ url: img.url, name: img.name }));
+        onProjectUpdate({
+          ...currentProject,
+          preloadedImages: images,
+          preloadedSource: 'r2',
+          preloadedAt: currentProject.preloadedAt || new Date().toISOString(),
+        });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [currentProject?.id, user?.id]); // eslint-disable-line
 
   // Scroll position restore
   const scrollRef = useRef(0);
@@ -105,7 +135,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
   };
 
-  // ── Direct upload to platform Supabase ────────────────────────────────────
+  // ── Direct upload to Cloudflare R2 ────────────────────────────────────────
 
   // Compress image to stay under maxBytes using Canvas
   const compressImage = (file, maxBytes = 300 * 1024, quality = 0.85) => {
@@ -147,15 +177,14 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   const handleDirectUpload = async () => {
     if (!selectedFiles.length) return;
-    if (!isSupabaseConfigured()) {
-      setDirectUploadStatus(prev => ({ ...prev, error: 'Supabase is not configured. Please set REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY.' }));
+    if (!isR2Configured()) {
+      setDirectUploadStatus(prev => ({ ...prev, error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.' }));
       return;
     }
 
     setDirectUploadStatus({ loading: true, progress: 0, total: selectedFiles.length, error: null, success: null });
 
     try {
-
       const uploadedImages = [...(currentProject?.preloadedImages || [])];
       let successCount = 0;
       let failCount = 0;
@@ -165,34 +194,39 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         const file = await compressImage(raw); // compress to ≤300KB client-side
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const userId = user?.id || 'anonymous';
-        const fileName = `${userId}/${currentProject?.id || 'default'}/${Date.now()}_${safeName}`;
+        const key = `${userId}/${currentProject?.id || 'default'}/${safeName}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('survey-images')
-          .upload(fileName, file, { contentType: file.type, upsert: true });
+        const result = await uploadImageToR2(file, key);
 
-        if (!uploadError) {
-          const { data: { publicUrl } } = supabase.storage.from('survey-images').getPublicUrl(fileName);
-          uploadedImages.push({ url: publicUrl, name: file.name });
+        if (result.success) {
+          uploadedImages.push({ url: result.url, name: raw.name });
           successCount++;
         } else {
-          console.error('Upload error:', uploadError);
+          console.error('Upload error:', result.error);
           failCount++;
           if (i === 0) {
-            // Show first error to help diagnose
-            setDirectUploadStatus(prev => ({ ...prev, error: `Upload failed: ${uploadError.message}` }));
+            setDirectUploadStatus(prev => ({ ...prev, error: `Upload failed: ${result.error}` }));
           }
         }
 
         setDirectUploadStatus(prev => ({ ...prev, progress: i + 1 }));
+
+        // Save progress every 10 files so interruption doesn't lose all work
+        if ((i + 1) % 10 === 0) {
+          onProjectUpdate({
+            ...currentProject,
+            preloadedImages: [...uploadedImages],
+            preloadedAt: new Date().toISOString(),
+            preloadedSource: 'r2',
+          });
+        }
       }
 
       const updatedProject = {
         ...currentProject,
         preloadedImages: uploadedImages,
         preloadedAt: new Date().toISOString(),
-        preloadedSource: 'supabase',
-        supabaseBucket: 'survey-images',
+        preloadedSource: 'r2',
       };
       onProjectUpdate(updatedProject);
       if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
@@ -200,7 +234,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setDirectUploadStatus({
         loading: false, progress: selectedFiles.length, total: selectedFiles.length,
         error: failCount > 0 ? `${failCount} file(s) failed to upload.` : null,
-        success: `Successfully uploaded ${successCount} image(s) to Supabase!`,
+        success: `Successfully uploaded ${successCount} image(s) to Cloudflare R2!`,
       });
       setSelectedFiles([]);
     } catch (error) {
@@ -218,8 +252,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setPreloadStatus(prev => ({ ...prev, error: 'Please configure and test dataset connection first.' }));
       return;
     }
-    if (!isSupabaseConfigured()) {
-      setPreloadStatus(prev => ({ ...prev, error: 'Supabase is not configured.' }));
+    if (!isR2Configured()) {
+      setPreloadStatus(prev => ({ ...prev, error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.' }));
       return;
     }
 
@@ -227,26 +261,19 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
     try {
       const folderName = hfConfig.datasetName.replace('/', '_');
-      const { data: existingFiles } = await supabase.storage
-        .from('survey-images')
-        .list(folderName, { limit: 10000, sortBy: { column: 'name', order: 'asc' } });
 
-      const existingFileNames = new Set((existingFiles || []).map(f => f.name));
+      // Check which images already exist in R2
+      const existingResult = await listImagesFromR2(folderName);
+      const existingFileNames = new Set((existingResult.images || []).map(img => img.name));
 
       const countResult = await getImageCountFromDataset(hfConfig.token, hfConfig.datasetName);
       const totalImages = countResult.imageCount || 1000;
       setPreloadStatus(prev => ({ ...prev, total: totalImages }));
 
+      // Collect public URLs for already-existing images
       const allImages = [];
-      for (let i = 0; i < totalImages; i++) {
-        const padded = String(i).padStart(6, '0');
-        const fname = `image_${padded}.jpg`;
-        if (existingFileNames.has(fname)) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('survey-images')
-            .getPublicUrl(`${folderName}/${fname}`);
-          allImages.push({ url: publicUrl, name: fname });
-        }
+      for (const img of (existingResult.images || [])) {
+        allImages.push({ url: img.url, name: img.name });
       }
 
       const batchSize = 100;
@@ -277,15 +304,22 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             const resp = await fetch(result.images[k].url);
             if (!resp.ok) continue;
             const blob = await resp.blob();
-            const filePath = `${folderName}/${fname}`;
-            const { error } = await supabase.storage
-              .from('survey-images')
-              .upload(filePath, blob, { contentType: 'image/jpeg', upsert: false });
-            if (error && !error.message?.includes('already exists')) continue;
-            const { data: { publicUrl } } = supabase.storage.from('survey-images').getPublicUrl(filePath);
-            allImages.push({ url: publicUrl, name: fname });
+            const r2Key = `${folderName}/${fname}`;
+            const uploadResult = await uploadImageToR2(blob, r2Key);
+            if (!uploadResult.success) continue;
+            allImages.push({ url: uploadResult.url, name: fname });
             newCount++;
             setPreloadStatus(prev => ({ ...prev, progress: allImages.length }));
+
+            // Save progress every 10 new uploads
+            if (newCount % 10 === 0) {
+              onProjectUpdate({
+                ...currentProject,
+                preloadedImages: [...allImages],
+                preloadedAt: new Date().toISOString(),
+                preloadedSource: 'r2',
+              });
+            }
           } catch {}
         }
       }
@@ -295,8 +329,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         ...currentProject,
         preloadedImages: allImages,
         preloadedAt: new Date().toISOString(),
-        preloadedSource: 'supabase',
-        supabaseBucket: 'survey-images',
+        preloadedSource: 'r2',
       };
       onProjectUpdate(updatedProject);
 
@@ -315,27 +348,20 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     restoreScrollRef.current = true;
 
     const count = currentProject.preloadedImages?.length || 0;
-    if (!window.confirm(`Clear all ${count} uploaded images from Supabase Storage? This cannot be undone.`)) return;
+    if (!window.confirm(`Clear all ${count} uploaded images from Cloudflare R2? This cannot be undone.`)) return;
 
-    // Delete files from Supabase Storage
-    if (supabase && currentProject.preloadedImages?.length > 0) {
-      const userId = user?.id;
-      const projectId = currentProject.id;
+    // Delete files from R2
+    if (isR2Configured() && currentProject.preloadedImages?.length > 0) {
       try {
-        // List all files in this project's folder
-        const { data: files, error: listError } = await supabase.storage
-          .from('survey-images')
-          .list(`${userId}/${projectId}`, { limit: 10000 });
-
-        if (!listError && files?.length > 0) {
-          const paths = files.map(f => `${userId}/${projectId}/${f.name}`);
-          const { error: removeError } = await supabase.storage
-            .from('survey-images')
-            .remove(paths);
-          if (removeError) console.error('Error deleting files:', removeError);
+        const userId = user?.id || 'anonymous';
+        const projectId = currentProject.id;
+        const listResult = await listImagesFromR2(`${userId}/${projectId}`);
+        if (listResult.success && listResult.images.length > 0) {
+          const keys = listResult.images.map(img => img.key);
+          await deleteImagesFromR2(keys);
         }
       } catch (e) {
-        console.error('Error clearing images from storage:', e);
+        console.error('Error clearing images from R2:', e);
       }
     }
 
@@ -344,7 +370,6 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       preloadedImages: [],
       preloadedAt: null,
       preloadedSource: null,
-      supabaseBucket: null,
     };
     onProjectUpdate(updatedProject);
     if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
@@ -360,25 +385,30 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         🖼️ Image Dataset
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Upload images to Supabase Storage. They will be served to survey participants.
+        Upload images to Cloudflare R2. They will be served to survey participants.
         HuggingFace batch import is available as an optional tool.
       </Typography>
 
-      {!isSupabaseConfigured() && (
+      {!isR2Configured() && (
         <Alert severity="warning" sx={{ mb: 3 }}>
-          Supabase is not configured. Set <code>REACT_APP_SUPABASE_URL</code> and{' '}
-          <code>REACT_APP_SUPABASE_ANON_KEY</code> environment variables to enable image uploads.
+          Cloudflare R2 is not configured. Set <code>REACT_APP_R2_PUBLIC_URL</code> (client) and the
+          server-side <code>R2_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>,{' '}
+          <code>R2_SECRET_ACCESS_KEY</code>, <code>R2_BUCKET_NAME</code>, <code>R2_PUBLIC_URL</code>{' '}
+          environment variables to enable image uploads.
         </Alert>
       )}
 
       {/* ── Current Status ── */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        {preloadedCount > 0 ? (
+        {r2Syncing ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CircularProgress size={16} />
+            <Typography variant="body2" color="text.secondary">Checking R2 for existing images…</Typography>
+          </Box>
+        ) : preloadedCount > 0 ? (
           <>
-            <Chip icon={<CheckCircle />} label={`${preloadedCount} images uploaded`} color="success" variant="outlined" />
-            {currentProject?.preloadedSource && (
-              <Chip label="☁️ Supabase Storage" color="primary" size="small" variant="outlined" />
-            )}
+            <Chip icon={<CheckCircle />} label={`${preloadedCount} images in R2`} color="success" variant="outlined" />
+            <Chip label="☁️ Cloudflare R2" color="primary" size="small" variant="outlined" />
             {currentProject?.preloadedAt && (
               <Typography variant="body2" color="text.secondary">
                 Last upload: {new Date(currentProject.preloadedAt).toLocaleString()}
@@ -394,11 +424,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'primary.light' }}>
         <Typography variant="subtitle1" sx={{ mb: 1.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
           <CloudUpload fontSize="small" color="primary" />
-          Upload Images to Supabase
+          Upload Images to Cloudflare R2
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Select image files to upload to Supabase Storage.
-          Images over 300 KB are automatically compressed in your browser before upload — no server processing needed.
+          Select image files to upload to Cloudflare R2.
+          Images over 300 KB are automatically compressed in your browser before upload.
         </Typography>
 
         <input
@@ -444,10 +474,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           variant="contained"
           color="primary"
           onClick={handleDirectUpload}
-          disabled={!selectedFiles.length || directUploadStatus.loading || !isSupabaseConfigured()}
+          disabled={!selectedFiles.length || directUploadStatus.loading || !isR2Configured()}
           startIcon={directUploadStatus.loading ? <CircularProgress size={20} color="inherit" /> : <CloudUpload />}
         >
-          Upload {selectedFiles.length > 0 ? `${selectedFiles.length} Image(s)` : ''} to Supabase
+          Upload {selectedFiles.length > 0 ? `${selectedFiles.length} Image(s)` : ''} to R2
         </Button>
       </Box>
 
@@ -496,7 +526,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               🤗 HuggingFace Dataset Import (Optional)
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Batch-import images from a HuggingFace dataset into Supabase Storage
+              Batch-import images from a HuggingFace dataset into Cloudflare R2
             </Typography>
           </Box>
         </AccordionSummary>
@@ -569,7 +599,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           {preloadStatus.loading && (
             <Box sx={{ mb: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                <Typography variant="body2">Downloading from HuggingFace → Uploading to Supabase...</Typography>
+                <Typography variant="body2">Downloading from HuggingFace → Uploading to Cloudflare R2...</Typography>
                 <Typography variant="body2" color="text.secondary">{preloadStatus.progress} / {preloadStatus.total}</Typography>
               </Box>
               <LinearProgress variant="determinate"
@@ -583,10 +613,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           <Button
             variant="contained" color="primary"
             onClick={handlePreloadAllImages}
-            disabled={!hfStatus.connected || !isSupabaseConfigured() || preloadStatus.loading}
+            disabled={!hfStatus.connected || !isR2Configured() || preloadStatus.loading}
             startIcon={preloadStatus.loading ? <CircularProgress size={20} /> : <CloudDownload />}
           >
-            {preloadedCount > 0 ? 'Re-preload All Images to Supabase' : 'Preload All Images to Supabase'}
+            {preloadedCount > 0 ? 'Re-preload All Images to R2' : 'Preload All Images to R2'}
           </Button>
 
           {!hfStatus.connected && (

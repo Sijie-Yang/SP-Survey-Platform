@@ -1,8 +1,11 @@
+require('dotenv').config();
+
 const express = require('express');
 const fs = require('fs-extra');
 const path = require('path');
 const cors = require('cors');
 const OpenAI = require('openai');
+const { S3Client, PutObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 
 // Import multi-agent review system
 const {
@@ -1936,10 +1939,142 @@ Now adjust the survey configuration following all the rules and maintaining cons
   }
 });
 
+// ── Cloudflare R2 image storage ───────────────────────────────────────────────
+
+const r2BucketName = process.env.R2_BUCKET_NAME || 'survey-images';
+const r2PublicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+
+function createR2Client() {
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  if (!accountId || !accessKeyId || !secretAccessKey) return null;
+  return new S3Client({
+    region: 'auto',
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: { accessKeyId, secretAccessKey },
+  });
+}
+
+function isR2Configured() {
+  return !!(
+    process.env.R2_ACCOUNT_ID &&
+    process.env.R2_ACCESS_KEY_ID &&
+    process.env.R2_SECRET_ACCESS_KEY &&
+    r2PublicUrl
+  );
+}
+
+// POST /api/r2/upload  – body: { key, data (base64), contentType }
+app.post('/api/r2/upload', async (req, res) => {
+  try {
+    if (!isR2Configured()) {
+      return res.status(503).json({ success: false, error: 'Cloudflare R2 is not configured on the server.' });
+    }
+    const { key, data, contentType } = req.body;
+    if (!key || !data) {
+      return res.status(400).json({ success: false, error: '"key" and "data" fields are required.' });
+    }
+    const r2 = createR2Client();
+    const buffer = Buffer.from(data, 'base64');
+    await r2.send(new PutObjectCommand({
+      Bucket: r2BucketName,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType || 'image/jpeg',
+    }));
+    const publicUrl = `${r2PublicUrl}/${key}`;
+    console.log(`☁️  R2 upload: ${key} (${buffer.byteLength} bytes)`);
+    res.json({ success: true, url: publicUrl, key });
+  } catch (error) {
+    console.error('R2 upload error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/r2/list?prefix=xxx
+app.get('/api/r2/list', async (req, res) => {
+  try {
+    if (!isR2Configured()) {
+      return res.status(503).json({ success: false, error: 'Cloudflare R2 is not configured on the server.' });
+    }
+    const prefix = req.query.prefix || '';
+    const r2 = createR2Client();
+    const result = await r2.send(new ListObjectsV2Command({
+      Bucket: r2BucketName,
+      Prefix: prefix,
+      MaxKeys: 10000,
+    }));
+    const images = (result.Contents || [])
+      .filter(obj => /\.(jpg|jpeg|png|gif|webp)$/i.test(obj.Key))
+      .map(obj => ({
+        name: obj.Key.split('/').pop(),
+        key: obj.Key,
+        url: `${r2PublicUrl}/${obj.Key}`,
+        size: obj.Size,
+        lastModified: obj.LastModified,
+      }));
+    res.json({ success: true, images });
+  } catch (error) {
+    console.error('R2 list error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/r2/delete  – body: { keys: string[] }
+app.delete('/api/r2/delete', async (req, res) => {
+  try {
+    if (!isR2Configured()) {
+      return res.status(503).json({ success: false, error: 'Cloudflare R2 is not configured on the server.' });
+    }
+    const { keys } = req.body;
+    if (!keys || !keys.length) {
+      return res.status(400).json({ success: false, error: '"keys" array is required.' });
+    }
+    const r2 = createR2Client();
+    await r2.send(new DeleteObjectsCommand({
+      Bucket: r2BucketName,
+      Delete: { Objects: keys.map(k => ({ Key: k })) },
+    }));
+    console.log(`🗑️  R2 deleted ${keys.length} object(s)`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('R2 delete error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/r2/status
+app.get('/api/r2/status', async (req, res) => {
+  if (!isR2Configured()) {
+    return res.json({ configured: false, connected: false });
+  }
+  try {
+    const r2 = createR2Client();
+    const result = await r2.send(new ListObjectsV2Command({
+      Bucket: r2BucketName,
+      MaxKeys: 1,
+    }));
+    res.json({
+      configured: true,
+      connected: true,
+      bucketName: r2BucketName,
+      imageCount: result.KeyCount,
+    });
+  } catch (error) {
+    res.json({ configured: true, connected: false, error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 app.listen(PORT, () => {
   console.log(`🚀 File management server running on http://localhost:${PORT}`);
   console.log(`📁 Templates directory: ${TEMPLATES_PATH}`);
   console.log(`📁 Projects directory: ${PROJECTS_PATH}`);
   console.log(`📁 Deployments directory: ${DEPLOYMENTS_PATH}`);
   console.log(`🤖 OpenAI integration enabled`);
+  if (isR2Configured()) {
+    console.log(`☁️  Cloudflare R2 storage enabled (bucket: ${r2BucketName})`);
+  }
 });

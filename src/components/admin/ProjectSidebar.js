@@ -81,6 +81,7 @@ import {
   deleteTemplate as deleteTemplateFromSupabase,
 } from '../../lib/templateManager';
 import { supabase } from '../../lib/supabase';
+import { isR2Configured, deleteImagesFromR2, listImagesFromR2 } from '../../lib/r2';
 
 export default function ProjectSidebar({ 
   open, 
@@ -550,10 +551,36 @@ export default function ProjectSidebar({
     if (!deletingProject) return;
 
     try {
+      // Delete R2 images for this project
+      if (isR2Configured()) {
+        const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
+        const keysToDelete = new Set();
+
+        // 1. Collect keys from preloadedImages URLs
+        if (deletingProject.preloadedImages?.length > 0 && r2PublicUrl) {
+          for (const img of deletingProject.preloadedImages) {
+            if (img.url && img.url.startsWith(r2PublicUrl + '/')) {
+              keysToDelete.add(img.url.slice(r2PublicUrl.length + 1).split('?')[0]);
+            }
+          }
+        }
+
+        // 2. Also list the direct-upload folder to catch any orphaned files
+        const prefix = `${currentUserId || 'anonymous'}/${deletingProject.id}/`;
+        const listResult = await listImagesFromR2(prefix);
+        if (listResult.success) {
+          for (const img of listResult.images) keysToDelete.add(img.key);
+        }
+
+        if (keysToDelete.size > 0) {
+          await deleteImagesFromR2([...keysToDelete]);
+          console.log(`🗑️ Deleted ${keysToDelete.size} R2 image(s) for project ${deletingProject.id}`);
+        }
+      }
+
       // Delete the actual file using deleteProjectFile
       const result = await deleteProjectFile(deletingProject.id);
       if (result.success) {
-        // ✅ File deletion only (no localStorage to clean)
         await deleteProject(deletingProject.id);
         
         // Reload projects to update panel

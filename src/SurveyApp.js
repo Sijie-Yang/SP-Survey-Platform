@@ -772,8 +772,13 @@ export default function SurveyApp() {
     );
   }
 
+  // Hide the dev panel when opened via a project survey link (participant view)
+  const urlParams = new URLSearchParams(window.location.search);
+  const isParticipantView = !!urlParams.get('project');
+
   return (
     <Box>
+      {!isParticipantView && (
       <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
           <Button
@@ -833,6 +838,7 @@ export default function SurveyApp() {
           </Button>
         </Box>
       </Box>
+      )}
       
       {surveyModel && (
         <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }}>

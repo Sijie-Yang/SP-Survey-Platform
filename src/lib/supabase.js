@@ -75,21 +75,18 @@ export async function saveSurveyResponse(completeData) {
   }
 }
 
-// ── Image storage ─────────────────────────────────────────────────────────────
+// ── Image storage (Cloudflare R2) ─────────────────────────────────────────────
+// These helpers delegate to R2 via the server API.
+// The old Supabase Storage bucket ("survey-images") is no longer used.
 
 export async function uploadImage(file) {
   try {
-    if (!supabase) throw new Error('Supabase is not configured.');
+    const { uploadImageToR2 } = await import('./r2');
     const ext = file.name.split('.').pop();
-    const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${ext}`;
-    const { error } = await supabase.storage
-      .from('survey-images')
-      .upload(fileName, file, { cacheControl: '3600', upsert: false });
-    if (error) throw error;
-    const { data: { publicUrl } } = supabase.storage
-      .from('survey-images')
-      .getPublicUrl(fileName);
-    return { success: true, url: publicUrl, path: fileName, isLocal: false };
+    const key = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${ext}`;
+    const result = await uploadImageToR2(file, key);
+    if (!result.success) throw new Error(result.error);
+    return { success: true, url: result.url, path: result.key, isLocal: false };
   } catch (error) {
     console.error('uploadImage:', error);
     return { success: false, error, isLocal: false, message: error.message };
@@ -98,10 +95,8 @@ export async function uploadImage(file) {
 
 export async function deleteImage(imagePath) {
   try {
-    if (!supabase) throw new Error('Supabase is not configured.');
-    const { error } = await supabase.storage.from('survey-images').remove([imagePath]);
-    if (error) throw error;
-    return { success: true };
+    const { deleteImagesFromR2 } = await import('./r2');
+    return await deleteImagesFromR2([imagePath]);
   } catch (error) {
     return { success: false, error };
   }
@@ -109,57 +104,43 @@ export async function deleteImage(imagePath) {
 
 export async function syncImagesFromSupabase() {
   try {
-    if (!supabase) throw new Error('Supabase is not configured.');
-    const { data: files, error } = await supabase.storage
-      .from('survey-images')
-      .list('', { limit: 10000, sortBy: { column: 'created_at', order: 'desc' } });
-    if (error) throw error;
-    const images = files.map((file) => {
-      const { data: { publicUrl } } = supabase.storage
-        .from('survey-images')
-        .getPublicUrl(file.name);
-      return {
-        id: file.id || Date.now() + Math.random(),
-        name: file.name,
-        url: publicUrl,
-        path: file.name,
-        size: file.metadata?.size || 0,
-        type: 'cloud',
-        uploadDate: file.created_at || new Date().toISOString(),
-        tags: [],
-        isLocal: false,
-      };
-    });
+    const { listImagesFromR2 } = await import('./r2');
+    const result = await listImagesFromR2('');
+    if (!result.success) throw new Error(result.error);
+    const images = result.images.map((img) => ({
+      id: img.key,
+      name: img.name,
+      url: img.url,
+      path: img.key,
+      size: img.size || 0,
+      type: 'cloud',
+      uploadDate: img.lastModified || new Date().toISOString(),
+      tags: [],
+      isLocal: false,
+    }));
     return { success: true, images };
   } catch (error) {
     return { success: false, error, images: [] };
   }
 }
 
-export async function getAllImagesFromSupabase(bucketPath = 'survey-images') {
+// bucketPath here is used as a folder prefix (the bucket-name segment is ignored
+// since R2 uses a single bucket configured on the server).
+export async function getAllImagesFromSupabase(bucketPath = '') {
   try {
-    if (!supabase) return { success: false, images: [], message: 'Supabase not configured' };
+    const { listImagesFromR2 } = await import('./r2');
+    // Strip leading bucket-name segment (legacy format: "bucketName/folder/...")
     const parts = bucketPath.split('/');
-    const bucketName = parts[0];
-    const folderPath = parts.slice(1).join('/');
-    const { data: files, error } = await supabase.storage
-      .from(bucketName)
-      .list(folderPath, { limit: 10000, sortBy: { column: 'name', order: 'asc' } });
-    if (error) return { success: false, images: [], message: error.message };
-    const imageFiles = files.filter(
-      (f) => f.name && !f.name.endsWith('/') && /\.(jpg|jpeg|png|gif|webp)$/i.test(f.name)
-    );
-    const images = imageFiles.map((file) => {
-      const filePath = folderPath ? `${folderPath}/${file.name}` : file.name;
-      const { data: urlData } = supabase.storage.from(bucketName).getPublicUrl(filePath);
-      return {
-        name: file.name,
-        path: filePath,
-        url: urlData.publicUrl,
-        size: file.metadata?.size || 0,
-        lastModified: file.updated_at || file.created_at,
-      };
-    });
+    const prefix = parts.length > 1 ? parts.slice(1).join('/') : bucketPath;
+    const result = await listImagesFromR2(prefix);
+    if (!result.success) return { success: false, images: [], message: result.error };
+    const images = result.images.map((img) => ({
+      name: img.name,
+      path: img.key,
+      url: img.url,
+      size: img.size || 0,
+      lastModified: img.lastModified,
+    }));
     return { success: true, images, message: `Found ${images.length} images` };
   } catch (error) {
     return { success: false, images: [], message: error.message };
@@ -168,19 +149,18 @@ export async function getAllImagesFromSupabase(bucketPath = 'survey-images') {
 
 export async function checkImageFolderStatus() {
   try {
-    if (!supabase) throw new Error('Supabase is not configured.');
-    const { data: buckets, error: be } = await supabase.storage.listBuckets();
-    if (be) throw be;
-    const bucket = buckets.find((b) => b.name === 'survey-images');
-    if (!bucket) return { success: true, connected: true, bucketExists: false, imageCount: 0 };
-    const { data: files, error: fe } = await supabase.storage
-      .from('survey-images')
-      .list('', { limit: 10000 });
-    if (fe) throw fe;
-    const imageFiles = files.filter(
-      (f) => f.name && !f.name.endsWith('/') && /\.(jpg|jpeg|png|gif|webp)$/i.test(f.name)
-    );
-    return { success: true, connected: true, bucketExists: true, imageCount: imageFiles.length };
+    const { checkR2Status } = await import('./r2');
+    const status = await checkR2Status();
+    if (!status.configured) {
+      return { success: false, connected: false, bucketExists: false, imageCount: 0, error: 'R2 not configured' };
+    }
+    return {
+      success: status.connected,
+      connected: status.connected,
+      bucketExists: status.connected,
+      imageCount: status.imageCount || 0,
+      error: status.error,
+    };
   } catch (error) {
     return { success: false, connected: false, bucketExists: false, imageCount: 0, error: error.message };
   }
