@@ -1,38 +1,32 @@
 // Cloudflare Pages Function: GET /api/r2/status
-// Returns: { configured, connected, bucketName?, imageCount?, error? }
+// Returns: { configured, connected, bucketName?, mode?, error? }
 
-const json = (data, init = {}) =>
-  new Response(JSON.stringify(data), {
-    ...init,
-    headers: { 'content-type': 'application/json', ...(init.headers || {}) },
-  });
+import { json, getR2Backend, r2NotConfiguredError, publicBaseUrl } from '../../_lib/r2.js';
 
 export const onRequestGet = async ({ env }) => {
-  const configured = !!env.R2_BUCKET && !!env.R2_PUBLIC_URL;
+  const backend = getR2Backend(env);
+  const configured = !!backend && !!publicBaseUrl(env);
   if (!configured) {
     return json({
       configured: false,
       connected: false,
-      error:
-        !env.R2_BUCKET
-          ? 'Missing R2_BUCKET binding. Add it in Pages → Settings → Functions → R2 bucket bindings.'
-          : 'Missing R2_PUBLIC_URL environment variable.',
+      error: !backend ? r2NotConfiguredError(env) : 'Missing R2_PUBLIC_URL environment variable.',
     });
   }
 
   try {
-    // A light list call confirms the binding actually reaches the bucket.
-    const probe = await env.R2_BUCKET.list({ limit: 1 });
+    await backend.probe();
     return json({
       configured: true,
       connected: true,
-      bucketName: env.R2_BUCKET_NAME || undefined,
-      imageCount: probe.objects?.length ?? 0,
+      mode: backend.kind,
+      bucketName: backend.bucketName || env.R2_BUCKET_NAME || undefined,
     });
   } catch (error) {
     return json({
       configured: true,
       connected: false,
+      mode: backend.kind,
       error: error.message || String(error),
     });
   }
