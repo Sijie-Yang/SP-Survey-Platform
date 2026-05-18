@@ -112,9 +112,15 @@ async function sbLoadProject(projectId) {
 }
 
 async function sbListProjects() {
+  // Always scope the regular project list to the currently signed-in user,
+  // even for admins. Admins who want to see everyone's projects use the
+  // dedicated AdminDashboard → Project Overview tab (listAllProjects()).
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
   const { data, error } = await supabase
     .from('projects')
     .select('*')
+    .eq('user_id', userId)
     .order('updated_at', { ascending: false });
   if (error) return [];
   return (data || []).map(rowToProject);
