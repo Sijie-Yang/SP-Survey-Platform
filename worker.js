@@ -1,13 +1,15 @@
 // Cloudflare Workers entry script for the deployed SP-Survey app.
 //
-// Why this lives in `public/`: Create React App copies everything in `public/`
-// verbatim into `build/`. Cloudflare Workers (with Static Assets) recognises a
-// `_worker.js` file at the *root of the assets directory* as the dynamic entry
-// point — anything not matched by this script falls through to the static
-// assets binding (the built React app).
+// Why this lives at the project root (NOT in `public/` or `build/`):
+// Wrangler refuses to upload a `_worker.js` file that sits inside the assets
+// directory, because that would expose server-side code as a static download.
+// Instead, `wrangler.jsonc` references this file via `main`, esbuild bundles
+// it (resolving npm imports like `aws4fetch`), and Cloudflare wires it up as
+// the dynamic entry — anything this script doesn't handle falls through to
+// the static assets binding (the built React app under `build/`).
 //
-// This file is self-contained so it bundles cleanly without reaching into
-// `functions/_lib/r2.js`, which would break paths during esbuild.
+// This file is self-contained so esbuild can bundle it without reaching into
+// other source paths.
 
 import { AwsClient } from 'aws4fetch';
 

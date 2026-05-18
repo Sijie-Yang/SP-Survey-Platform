@@ -1,12 +1,15 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sp-survey",
+  "main": "./worker.js",
   "compatibility_date": "2026-05-18",
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": "build"
+    "directory": "build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
   },
   "compatibility_flags": [
     "nodejs_compat"
