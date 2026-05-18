@@ -90,13 +90,25 @@ async function sbSaveProject(project, surveyConfig) {
 }
 
 async function sbLoadProject(projectId) {
+  // First try a direct table read — succeeds for project owners and admins
+  // under the strict RLS policies (auth.uid() = user_id, or admins.user_id).
   const { data, error } = await supabase
     .from('projects')
     .select('*')
     .eq('id', projectId)
-    .single();
-  if (error) return null;
-  return rowToProject(data);
+    .maybeSingle();
+  if (!error && data) return rowToProject(data);
+
+  // Fallback: anonymous (survey participant) or authenticated-but-not-owner
+  // users get the project through a SECURITY DEFINER RPC that only exposes
+  // the columns needed to render the survey (no user_id, no timestamps,
+  // no per-row metadata that would leak ownership).
+  const { data: rpcRows, error: rpcError } = await supabase.rpc(
+    'get_survey_project',
+    { p_id: projectId }
+  );
+  if (rpcError || !rpcRows || rpcRows.length === 0) return null;
+  return rowToProject(rpcRows[0]);
 }
 
 async function sbListProjects() {
@@ -118,8 +130,10 @@ function rowToProject(row) {
     id: row.id,
     name: row.name,
     description: row.description || '',
-    createdAt: row.created_at,
-    lastModified: row.updated_at,
+    // created_at / updated_at are absent on the survey-RPC payload; that's
+    // fine — those callers (survey participants) never read these fields.
+    createdAt: row.created_at || null,
+    lastModified: row.updated_at || null,
     templateId: row.template_id || null,
     imageDatasetConfig: row.image_dataset_config || {},
     preloadedImages: row.preloaded_images || [],
