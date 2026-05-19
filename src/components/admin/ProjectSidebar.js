@@ -79,9 +79,11 @@ import {
   listTemplates,
   saveTemplateToSupabase,
   deleteTemplate as deleteTemplateFromSupabase,
+  buildTemplateIdBase,
+  findAvailableTemplateId,
 } from '../../lib/templateManager';
 import { supabase } from '../../lib/supabase';
-import { isR2Configured, deleteImagesFromR2, listImagesFromR2 } from '../../lib/r2';
+import { isR2Configured, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
 
 export default function ProjectSidebar({ 
   open, 
@@ -233,31 +235,44 @@ export default function ProjectSidebar({
       console.log('📋 Template config exists:', !!selectedTemplate.config);
       console.log('📋 Template config keys:', Object.keys(selectedTemplate.config));
       console.log('📋 Template config pages:', selectedTemplate.config.pages?.length || 0);
-      
+
+      // Inherit the template's image folder so the new project can preview /
+      // run the survey out of the box. URLs continue to point at the
+      // template's R2 prefix until the user uploads their own images, which
+      // is exactly the desired behaviour for "templates own their images".
+      const inheritedImages = Array.isArray(selectedTemplate.preloadedImages)
+        ? selectedTemplate.preloadedImages.map(({ url, name }) => ({ url, name }))
+        : [];
+
       // ✅ Pass surveyConfig directly to createProject
       // This works for both static templates and file-based templates
       const projectData = {
         name: newProjectName.trim(),
         description: `Based on ${selectedTemplate.name}`,
         templateId: selectedTemplate.id,
-        surveyConfig: selectedTemplate.config // ✅ Pass config directly
+        surveyConfig: selectedTemplate.config, // ✅ Pass config directly
+        preloadedImages: inheritedImages,
+        preloadedAt: inheritedImages.length > 0 ? new Date().toISOString() : null,
+        preloadedSource: inheritedImages.length > 0
+          ? `template:${selectedTemplate.id}`
+          : null,
       };
-      
+
       console.log('🔨 Creating project with data:', projectData);
       const result = await createProject(projectData);
       console.log('📦 Create project result:', result.success ? '✅ Success' : '❌ Failed', result.error || '');
-      
+
       if (!result.success) {
         throw new Error(result.error || 'Failed to create project');
       }
-      
+
       // Config already saved by createProject
       const finalConfig = result.surveyConfig;
 
       // Reload projects to update panel
       console.log('🔄 Reloading projects...');
       await loadProjects();
-      
+
       console.log('🎯 Setting active project:', result.project.id);
       setActiveProject(result.project.id);
       setActiveProjectId(result.project.id);
@@ -385,6 +400,37 @@ export default function ProjectSidebar({
     handleMenuClose();
   };
 
+  // Copy a project's R2 image folder over to a template prefix. Returns the
+  // new preloadedImages array pointing at template-owned URLs. Best-effort:
+  // anything that fails to copy is omitted so the template still saves.
+  const promoteProjectImagesToTemplate = async (project, templateId) => {
+    if (!isR2Configured()) return [];
+    const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
+    const userId = currentUserId || 'anonymous';
+    const projectPrefix = `${userId}/${project.id}/`;
+    const templatePrefix = `templates/${templateId}/`;
+
+    // Discover everything actually in R2 under the project prefix — this
+    // catches images uploaded outside of project.preloadedImages too.
+    const listed = await listImagesFromR2(projectPrefix);
+    if (!listed.success || listed.images.length === 0) return [];
+
+    const copies = listed.images.map((img) => {
+      const filename = img.name; // last path segment
+      return { from: img.key, to: `${templatePrefix}${filename}` };
+    });
+
+    const copyResult = await copyImagesInR2(copies);
+    if (copyResult.errors?.length) {
+      console.warn(`⚠️ ${copyResult.errors.length} image(s) failed to copy to template:`, copyResult.errors);
+    }
+    // Build the preloadedImages payload from successful copies.
+    return (copyResult.copied || []).map(({ to, url }) => ({
+      url: url || (r2PublicUrl ? `${r2PublicUrl}/${to}` : ''),
+      name: to.split('/').pop(),
+    }));
+  };
+
   const confirmSaveAsTemplate = async () => {
     if (!projectToTemplate) {
       console.error('No project to save as template');
@@ -407,16 +453,45 @@ export default function ProjectSidebar({
         .map(tag => tag.trim())
         .filter(tag => tag.length > 0);
 
+      const finalYear   = newProjectYear.trim() || new Date().getFullYear().toString();
+      const finalName   = newProjectName.trim();
+      const finalAuthor = newProjectAuthor.trim() || 'User';
+
+      // Reserve a human-readable, collision-free id BEFORE we touch R2 so
+      // images land in their final folder. saveTemplateToSupabase will still
+      // retry on the rare race where another save grabs the same id between
+      // our SELECT and INSERT — but the R2 destination is locked in here.
+      const baseId    = buildTemplateIdBase({ name: finalName, author: finalAuthor, year: finalYear });
+      const templateId = supabase ? await findAvailableTemplateId(baseId) : baseId;
+
+      // Carry the project's image folder over to the template's own R2
+      // prefix so the template owns its images independently of the source
+      // project (project images can be edited / deleted without affecting
+      // the template).
+      let templateImages = [];
+      try {
+        templateImages = await promoteProjectImagesToTemplate(projectToTemplate, templateId);
+        if (templateImages.length > 0) {
+          console.log(`☁️  Copied ${templateImages.length} image(s) into templates/${templateId}/`);
+        }
+      } catch (copyErr) {
+        console.warn('Image carryover failed (continuing without images):', copyErr);
+      }
+
       const modifiedProject = {
         ...projectToTemplate,
-        name: newProjectName.trim(),
+        id: templateId,
+        name: finalName,
         description: newProjectDescription.trim(),
         author: newProjectAuthor.trim() || 'User',
-        year: newProjectYear.trim() || new Date().getFullYear().toString(),
+        year: finalYear,
         category: newProjectCategory.trim() || 'Custom',
         tags: tagsArray.length > 0 ? tagsArray : ['custom', 'user-created'],
         website: newProjectWebsite.trim() || undefined,
         huggingfaceDataset: newProjectDataset.trim() || undefined,
+        preloadedImages: templateImages,
+        preloadedAt: templateImages.length > 0 ? new Date().toISOString() : null,
+        preloadedSource: templateImages.length > 0 ? 'r2' : null,
       };
 
       let result;
@@ -1494,7 +1569,13 @@ export default function ProjectSidebar({
           </Grid>
           
           <Alert severity="warning" sx={{ mt: 2 }}>
-            <strong>Note:</strong> The template ID will be generated as <code>{newProjectYear}-{newProjectName.trim().split(/\s+/)[0].toLowerCase()}</code>
+            <strong>Note:</strong> The template ID will be generated as{' '}
+            <code>{buildTemplateIdBase({
+              name:   newProjectName,
+              author: newProjectAuthor,
+              year:   newProjectYear,
+            })}</code>
+            {' '}(a <code>-2</code>, <code>-3</code>… suffix is appended if that id already exists).
           </Alert>
         </DialogContent>
         <DialogActions>
@@ -1546,7 +1627,16 @@ export default function ProjectSidebar({
         </DialogTitle>
         <DialogContent sx={{ p: 0 }}>
           {previewingTemplate && (
-            <SurveyPreview config={previewingTemplate.config} />
+            <SurveyPreview
+              config={previewingTemplate.config}
+              currentProject={{
+                id: `tpl-${previewingTemplate.id}`,
+                name: previewingTemplate.name,
+                preloadedImages: Array.isArray(previewingTemplate.preloadedImages)
+                  ? previewingTemplate.preloadedImages
+                  : [],
+              }}
+            />
           )}
         </DialogContent>
       </Dialog>

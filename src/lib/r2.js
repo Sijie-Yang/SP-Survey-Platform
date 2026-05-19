@@ -86,6 +86,32 @@ export async function listImagesFromR2(prefix = '') {
 }
 
 /**
+ * Server-side copy of one or more R2 objects.
+ * @param {Array<{from: string, to: string}>} copies
+ * @returns {{ success: boolean, copied: Array, errors: Array, error?: string }}
+ */
+export async function copyImagesInR2(copies) {
+  try {
+    const res = await fetch(`${SERVER_URL}/api/r2/copy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ copies }),
+    });
+    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
+    const json = await res.json();
+    return {
+      success: json.success,
+      copied: json.copied || [],
+      errors: json.errors || [],
+      error: json.error,
+    };
+  } catch (error) {
+    console.error('copyImagesInR2:', error);
+    return { success: false, copied: [], errors: [], error: error.message };
+  }
+}
+
+/**
  * Check whether R2 is reachable from the server.
  * Returns { configured, connected, bucketName?, error? }
  */

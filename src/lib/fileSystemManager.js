@@ -334,22 +334,25 @@ export const saveProjectAsTemplate = async (project, surveyConfig) => {
     const year = project.year || new Date().getFullYear().toString();
     const firstWord = project.name.trim().split(/\s+/)[0].toLowerCase();
     let baseTemplateId = `${year}-${firstWord}`;
-    
-    // Check for duplicate IDs and increment if necessary
+
+    // Honour a pre-computed id from the caller (so R2 image carryover can
+    // pick the destination prefix ahead of time), but ALWAYS re-check it
+    // against the existing template index and bump a counter on conflict.
+    // We never want to silently overwrite another template's JSON.
+    const candidate = (project.id && /^[a-zA-Z0-9_-]+$/.test(project.id))
+      ? project.id
+      : baseTemplateId;
     const existingTemplates = await loadTemplatesFromFiles();
-    const existingIds = existingTemplates.map(t => t.id);
-    
-    let templateId = baseTemplateId;
-    let counter = 1;
-    
-    // If ID exists, append incrementing number
-    while (existingIds.includes(templateId)) {
-      templateId = `${baseTemplateId}-${counter}`;
-      counter++;
-    }
-    
-    if (templateId !== baseTemplateId) {
-      console.log(`⚠️ Template ID "${baseTemplateId}" already exists, using "${templateId}" instead`);
+    const existingIds = new Set(existingTemplates.map(t => t.id));
+    let templateId = candidate;
+    if (existingIds.has(templateId)) {
+      // Strip any trailing "-N" so we resume the counter cleanly.
+      const m = /^(.+?)(?:-(\d+))?$/.exec(candidate);
+      const stem = m ? m[1] : candidate;
+      let n = (m && m[2]) ? parseInt(m[2], 10) + 1 : 2;
+      while (existingIds.has(`${stem}-${n}`)) n++;
+      templateId = `${stem}-${n}`;
+      console.log(`⚠️ Template ID "${candidate}" already exists, using "${templateId}" instead`);
     }
     
     console.log('🧹 Cleaning project data for template creation...');
@@ -451,6 +454,12 @@ export const saveProjectAsTemplate = async (project, surveyConfig) => {
       tags: project.tags || ['custom', 'user-created'],
       website: project.website || undefined,
       huggingfaceDataset: project.huggingfaceDataset || undefined,
+      // Carry over images promoted from the source project (set up by the
+      // caller via R2 copy). Self-hosted templates persist them as plain
+      // JSON arrays so the same preview pipeline applies.
+      preloadedImages: Array.isArray(project.preloadedImages) ? project.preloadedImages : [],
+      preloadedAt: project.preloadedAt || null,
+      preloadedSource: project.preloadedSource || null,
       createdAt: new Date().toISOString(),
       config: cleanedConfig
     };

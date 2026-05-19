@@ -304,8 +304,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             const resp = await fetch(result.images[k].url);
             if (!resp.ok) continue;
             const blob = await resp.blob();
+            // Run HF-fetched images through the same ≤300KB compressor used
+            // for direct uploads, so every R2 object served to participants
+            // is on the same size/quality budget regardless of source.
+            const wrapped = new File([blob], fname, { type: blob.type || 'image/jpeg' });
+            const compressed = await compressImage(wrapped);
             const r2Key = `${folderName}/${fname}`;
-            const uploadResult = await uploadImageToR2(blob, r2Key);
+            const uploadResult = await uploadImageToR2(compressed, r2Key);
             if (!uploadResult.success) continue;
             allImages.push({ url: uploadResult.url, name: fname });
             newCount++;

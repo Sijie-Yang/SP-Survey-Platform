@@ -194,6 +194,14 @@ export const createProject = async (projectData) => {
         huggingFaceToken: '',
         datasetName: '',
       },
+      // When a template ships with its own image folder we hand its
+      // preloadedImages straight to the new project so previews and live
+      // surveys work without an extra image-upload step.
+      preloadedImages: Array.isArray(projectData.preloadedImages)
+        ? projectData.preloadedImages
+        : [],
+      preloadedAt: projectData.preloadedAt || null,
+      preloadedSource: projectData.preloadedSource || null,
     };
 
     let surveyConfig;

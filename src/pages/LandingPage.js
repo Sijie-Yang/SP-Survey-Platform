@@ -297,26 +297,31 @@ export default function LandingPage() {
 // ── Template Preview Dialog ──────────────────────────────────────────────────
 
 function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
-  const [config, setConfig]     = useState(null);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [config, setConfig]               = useState(null);
+  const [preloadedImages, setPreloadedImages] = useState([]);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState('');
 
   useEffect(() => {
     if (!open || !templateId) return;
     setConfig(null);
+    setPreloadedImages([]);
     setError('');
     setLoading(true);
 
     const fetchConfig = async () => {
       try {
         if (supabase) {
+          // Also pull preloaded_images so SurveyPreview can render the
+          // template's own image folder, just like the admin preview does.
           const { data, error: err } = await supabase
             .from('templates')
-            .select('survey_config')
+            .select('survey_config, preloaded_images')
             .eq('id', templateId)
             .single();
           if (!err && data?.survey_config) {
             setConfig(data.survey_config);
+            setPreloadedImages(Array.isArray(data.preloaded_images) ? data.preloaded_images : []);
             return;
           }
         }
@@ -325,6 +330,7 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
         if (res.ok) {
           const tpl = await res.json();
           setConfig(tpl.config || tpl.survey_config || null);
+          setPreloadedImages(Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages : []);
         } else {
           setError('Preview not available for this template.');
         }
@@ -356,7 +362,16 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
             <Typography color="text.secondary">{error}</Typography>
           </Box>
         )}
-        {config && !loading && <SurveyPreview config={config} currentProject={null} />}
+        {config && !loading && (
+          <SurveyPreview
+            config={config}
+            currentProject={{
+              id: `tpl-${templateId}`,
+              name: templateName,
+              preloadedImages,
+            }}
+          />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>

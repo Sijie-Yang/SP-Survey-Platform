@@ -9,6 +9,14 @@
  * Self-hosted mode (no Supabase):
  *   Functions return empty arrays / throw – callers fall back to
  *   fileSystemManager.js logic.
+ *
+ * Required Supabase SQL additions for template image folders (run once):
+ * ─────────────────────────────────────────────────────────────────────
+ * ALTER TABLE templates
+ *   ADD COLUMN IF NOT EXISTS preloaded_images JSONB DEFAULT '[]'::jsonb,
+ *   ADD COLUMN IF NOT EXISTS preloaded_at     TIMESTAMPTZ,
+ *   ADD COLUMN IF NOT EXISTS preloaded_source TEXT;
+ * ─────────────────────────────────────────────────────────────────────
  */
 
 import { supabase } from './supabase';
@@ -28,6 +36,10 @@ function rowToTemplate(row) {
     huggingfaceDataset: row.huggingface_dataset || row.dataset || null,
     // survey_config is the full SurveyJS config stored as JSONB
     config:            row.survey_config      || {},
+    // Template image folder (mirrors the per-project preloadedImages contract)
+    preloadedImages:   row.preloaded_images   || [],
+    preloadedAt:       row.preloaded_at       || null,
+    preloadedSource:   row.preloaded_source   || null,
     // submitter info
     user_id:           row.user_id            || null,
     submitter_email:   row.submitter_email    || null,
@@ -38,6 +50,57 @@ function rowToTemplate(row) {
     createdAt:         row.created_at,
     updatedAt:         row.updated_at,
   };
+}
+
+// ── ID generation ─────────────────────────────────────────────────────────────
+
+/**
+ * Build the base template id from author + name + year. Format:
+ *   `${year}-${authorFirstWord}-${nameFirstWord}`
+ * Lower-cased, stripped to a-z0-9 per segment.
+ *
+ * Used by the "Save as Template" flow so ids are human readable AND
+ * predictably namespaced. Collisions are resolved by appending -2, -3, …
+ * (see findAvailableTemplateId below).
+ */
+export function buildTemplateIdBase({ name, author, year }) {
+  const safeYear = (year || String(new Date().getFullYear())).toString().trim();
+  const firstWord = (s, fallback) => {
+    const word = (s || fallback).trim().split(/\s+/)[0]
+      .toLowerCase().replace(/[^a-z0-9]/g, '');
+    return word || fallback;
+  };
+  const authorWord = firstWord(author, 'user');
+  const nameWord   = firstWord(name,   'template');
+  return `${safeYear}-${authorWord}-${nameWord}`;
+}
+
+/**
+ * Resolve a unique template id by appending -2, -3, … to the base when it
+ * collides with an existing row. Best-effort: does a single SELECT to fetch
+ * any rows whose id starts with the base, then picks the lowest free suffix.
+ *
+ * NOTE: there is a tiny TOCTOU window between this SELECT and the eventual
+ * INSERT. saveTemplateToSupabase mitigates that by switching upsert→insert
+ * and retrying on unique-violation.
+ */
+export async function findAvailableTemplateId(baseId) {
+  if (!supabase) return baseId;
+  try {
+    const { data, error } = await supabase
+      .from('templates')
+      .select('id')
+      .like('id', `${baseId}%`);
+    if (error) { console.warn('findAvailableTemplateId select error:', error); return baseId; }
+    const taken = new Set((data || []).map(r => r.id));
+    if (!taken.has(baseId)) return baseId;
+    let n = 2;
+    while (taken.has(`${baseId}-${n}`)) n++;
+    return `${baseId}-${n}`;
+  } catch (err) {
+    console.warn('findAvailableTemplateId exception:', err);
+    return baseId;
+  }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -57,7 +120,8 @@ export async function listTemplates(userId) {
       .select(
         'id, name, description, author, year, category, tags, paper_url, ' +
         'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
-        'is_approved, show_on_landing, created_at, updated_at'
+        'is_approved, show_on_landing, preloaded_images, preloaded_at, ' +
+        'preloaded_source, created_at, updated_at'
       )
       .order('created_at', { ascending: false });
 
@@ -105,21 +169,28 @@ export async function saveTemplateToSupabase(template) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  const year      = template.year || String(new Date().getFullYear());
-  const firstWord = (template.name || 'template').trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-  const id        = template.id || `${year}-${firstWord}-${Date.now().toString(36)}`;
+  const year   = template.year || String(new Date().getFullYear());
+  const author = template.author || user.email || 'User';
+  // Caller can pre-compute the id (so it knows where to put R2 images
+  // before the row exists). Otherwise we derive one from author + name.
+  const baseId = template.id || buildTemplateIdBase({
+    name: template.name, author, year,
+  });
 
-  const row = {
+  const buildRow = (id) => ({
     id,
     name:                template.name        || 'Untitled Template',
     description:         template.description || '',
-    author:              template.author      || user.email || 'User',
+    author,
     year,
     category:            template.category    || 'Custom',
     tags:                Array.isArray(template.tags) ? template.tags : [],
     paper_url:           template.website     || null,
     huggingface_dataset: template.huggingfaceDataset || null,
     survey_config:       template.config      || {},
+    preloaded_images:    Array.isArray(template.preloadedImages) ? template.preloadedImages : [],
+    preloaded_at:        template.preloadedAt || null,
+    preloaded_source:    template.preloadedSource || null,
     user_id:             user.id,
     submitter_email:     user.email           || null,
     is_approved:         false,
@@ -127,11 +198,31 @@ export async function saveTemplateToSupabase(template) {
     is_active:           false,
     created_at:          new Date().toISOString(),
     updated_at:          new Date().toISOString(),
-  };
+  });
 
-  const { error } = await supabase.from('templates').upsert(row, { onConflict: 'id' });
-  if (error) throw error;
-  return { success: true, template: rowToTemplate(row) };
+  // Use insert (NOT upsert) so a duplicate id surfaces as a real error
+  // rather than silently overwriting another template's data/images.
+  // On unique_violation (Postgres 23505) we bump a numeric suffix and retry
+  // a few times — covers the TOCTOU race between findAvailableTemplateId's
+  // SELECT and this INSERT.
+  let attemptId = baseId;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = buildRow(attemptId);
+    const { error } = await supabase.from('templates').insert(row);
+    if (!error) {
+      return { success: true, template: rowToTemplate(row) };
+    }
+    if (error.code === '23505') {
+      const m = /^(.+?)(?:-(\d+))?$/.exec(attemptId);
+      const stem = m ? m[1] : attemptId;
+      const next = (m && m[2]) ? parseInt(m[2], 10) + 1 : 2;
+      attemptId = `${stem}-${next}`;
+      console.warn(`Template id "${baseId}" already taken, retrying with "${attemptId}"…`);
+      continue;
+    }
+    throw error;
+  }
+  throw new Error(`Could not allocate a unique template id (last tried: ${attemptId})`);
 }
 
 /**
@@ -154,6 +245,10 @@ export async function updateTemplate(id, updates) {
   if ('tags'        in updates) row.tags        = updates.tags;
   if ('paper_url'     in updates) row.paper_url     = updates.paper_url;
   if ('survey_config' in updates) row.survey_config = updates.survey_config;
+  if ('huggingface_dataset' in updates) row.huggingface_dataset = updates.huggingface_dataset;
+  if ('preloaded_images' in updates) row.preloaded_images = updates.preloaded_images;
+  if ('preloaded_at'     in updates) row.preloaded_at     = updates.preloaded_at;
+  if ('preloaded_source' in updates) row.preloaded_source = updates.preloaded_source;
 
   const { error } = await supabase.from('templates').update(row).eq('id', id);
   if (error) throw error;
@@ -226,6 +321,9 @@ export async function seedBuiltinTemplates(onProgress) {
         paper_url:           tpl.website      || null,
         huggingface_dataset: tpl.huggingfaceDataset || null,
         survey_config:       tpl.config       || {},
+        preloaded_images:    Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages : [],
+        preloaded_at:        tpl.preloadedAt  || null,
+        preloaded_source:    tpl.preloadedSource || null,
         user_id:             user.id,
         submitter_email:     user.email       || null,
         is_approved:         true,

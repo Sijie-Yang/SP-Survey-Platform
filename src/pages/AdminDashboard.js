@@ -1,22 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box, Container, Typography, AppBar, Toolbar, Tabs, Tab, Paper,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Switch, Alert, Snackbar,
   CircularProgress, Tooltip, Stack, Select, MenuItem, FormControl, InputLabel,
+  LinearProgress,
 } from '@mui/material';
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
-  EditNote,
+  EditNote, PhotoLibrary, DeleteForever,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
   listAllTemplates, updateTemplate, deleteTemplate,
   listAllProjects, seedBuiltinTemplates, checkIsAdmin,
 } from '../lib/templateManager';
+import {
+  isR2Configured, uploadImageToR2, listImagesFromR2, deleteImagesFromR2,
+} from '../lib/r2';
 import SurveyPreview from '../components/admin/SurveyPreview';
 import SurveyBuilder from '../components/admin/SurveyBuilder';
+
+// R2 prefix used for template image folders. Stays in sync with how the
+// admin dialog uploads / lists / deletes objects so a template always knows
+// where its images live.
+const templateImagePrefix = (templateId) => `templates/${templateId}/`;
 
 // ─── Edit Template Dialog ────────────────────────────────────────────────────
 
@@ -28,13 +37,14 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
   useEffect(() => {
     if (template) {
       setForm({
-        name:        template.name        || '',
-        description: template.description || '',
-        author:      template.author      || '',
-        year:        template.year        || '',
-        category:    template.category    || '',
-        tags:        (template.tags || []).join(', '),
-        paper_url:   template.website     || '',
+        name:                template.name              || '',
+        description:         template.description       || '',
+        author:              template.author            || '',
+        year:                template.year              || '',
+        category:            template.category          || '',
+        tags:                (template.tags || []).join(', '),
+        paper_url:           template.website           || '',
+        huggingface_dataset: template.huggingfaceDataset || '',
       });
     }
   }, [template]);
@@ -44,13 +54,14 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
     setError('');
     try {
       await updateTemplate(template.id, {
-        name:        form.name,
-        description: form.description,
-        author:      form.author,
-        year:        form.year,
-        category:    form.category,
-        tags:        form.tags.split(',').map(t => t.trim()).filter(Boolean),
-        paper_url:   form.paper_url,
+        name:                form.name,
+        description:         form.description,
+        author:              form.author,
+        year:                form.year,
+        category:            form.category,
+        tags:                form.tags.split(',').map(t => t.trim()).filter(Boolean),
+        paper_url:           form.paper_url,
+        huggingface_dataset: form.huggingface_dataset.trim() || null,
       });
       onSaved();
       onClose();
@@ -75,7 +86,11 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
             { label: '年份', key: 'year' },
             { label: '标签 (逗号分隔)', key: 'tags' },
             { label: '论文链接', key: 'paper_url' },
-          ].map(({ label, key, multiline, rows }) => (
+            { label: 'HuggingFace Dataset', key: 'huggingface_dataset',
+              placeholder: 'username/dataset-name',
+              helperText: '可选，留空表示不绑定。例如 sijiey/Thermal-Affordance-Dataset',
+            },
+          ].map(({ label, key, multiline, rows, placeholder, helperText }) => (
             <TextField
               key={key}
               label={label}
@@ -85,6 +100,8 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
               size="small"
               multiline={multiline}
               rows={rows}
+              placeholder={placeholder}
+              helperText={helperText}
             />
           ))}
           <FormControl fullWidth size="small">
@@ -143,7 +160,13 @@ function SurveyBuilderDialog({ template, open, onClose, onSaved }) {
 
   if (!template) return null;
 
-  const fakeProject = { id: `tpl-${template.id}`, name: template.name };
+  // Surface the template's image folder to SurveyBuilder/SurveyPreview as if
+  // it were a regular project so admins can iterate against real images.
+  const fakeProject = {
+    id: `tpl-${template.id}`,
+    name: template.name,
+    preloadedImages: Array.isArray(template.preloadedImages) ? template.preloadedImages : [],
+  };
 
   return (
     <Dialog open={open} onClose={onClose} fullScreen>
@@ -184,17 +207,314 @@ function SurveyBuilderDialog({ template, open, onClose, onSaved }) {
 
 function SurveyPreviewDialog({ template, open, onClose }) {
   if (!template) return null;
+  // SurveyPreview already knows how to randomly draw from preloadedImages on
+  // currentProject. We synthesise a minimal project-shaped object so the
+  // template's own image folder is used in preview, just like a real project.
+  const previewProject = {
+    id: `tpl-${template.id}`,
+    name: template.name,
+    preloadedImages: Array.isArray(template.preloadedImages) ? template.preloadedImages : [],
+  };
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
       PaperProps={{ sx: { height: '90vh' } }}>
       <DialogTitle>
         预览模板 — {template.name}
         <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-          (只读)
+          (只读 · 使用模板图片 {previewProject.preloadedImages.length} 张)
         </Typography>
       </DialogTitle>
       <DialogContent sx={{ p: 0, overflow: 'auto' }}>
-        <SurveyPreview config={template.config} currentProject={null} />
+        <SurveyPreview config={template.config} currentProject={previewProject} />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>关闭</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// ─── Template Images Dialog ─────────────────────────────────────────────────
+
+// Mirrors the client-side compressor in ImageDataset.js but kept local so
+// AdminDashboard has no implicit cross-component dependency.
+function compressImage(file, maxBytes = 300 * 1024, quality = 0.85) {
+  return new Promise((resolve) => {
+    if (file.size <= maxBytes) { resolve(file); return; }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      const maxDim = 1920;
+      if (width > maxDim || height > maxDim) {
+        const scale = Math.min(maxDim / width, maxDim / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      const tryQuality = (q) => {
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(file); return; }
+          if (blob.size <= maxBytes || q <= 0.3) {
+            resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+          } else {
+            tryQuality(Math.max(q - 0.1, 0.3));
+          }
+        }, 'image/jpeg', q);
+      };
+      tryQuality(quality);
+    };
+    img.onerror = () => resolve(file);
+    img.src = url;
+  });
+}
+
+function TemplateImagesDialog({ template, open, onClose, onSaved }) {
+  const [images, setImages]       = useState([]);
+  const [loading, setLoading]     = useState(false);
+  const [syncing, setSyncing]     = useState(false);
+  const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
+  const [error, setError]         = useState('');
+  const [info, setInfo]           = useState('');
+  const fileInputRef = useRef(null);
+  // Keep onSaved in a ref so refresh() can call it without becoming a new
+  // function on every parent render (which would re-trigger the effect).
+  const onSavedRef = useRef(onSaved);
+  useEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
+
+  const refresh = useCallback(async () => {
+    if (!template) return;
+    setSyncing(true);
+    setError('');
+    const result = await listImagesFromR2(templateImagePrefix(template.id));
+    setSyncing(false);
+    if (!result.success) { setError(result.error || 'Failed to list images'); return; }
+    const mapped = result.images.map((img) => ({ url: img.url, name: img.name, key: img.key }));
+    setImages(mapped);
+    // Persist the canonical list back to Supabase so listTemplates() and the
+    // preview pipeline always see the same picture set the admin sees.
+    if (mapped.length !== (template.preloadedImages?.length || 0)) {
+      try {
+        await updateTemplate(template.id, {
+          preloaded_images: mapped.map(({ url, name }) => ({ url, name })),
+          preloaded_at:     new Date().toISOString(),
+          preloaded_source: 'r2',
+        });
+        if (onSavedRef.current) onSavedRef.current({ silent: true });
+      } catch (err) {
+        console.warn('Could not sync template image list:', err);
+      }
+    }
+  }, [template]);
+
+  useEffect(() => {
+    if (open && template) {
+      setError(''); setInfo('');
+      refresh();
+    }
+  }, [open, template, refresh]);
+
+  const handleUpload = async (fileList) => {
+    if (!template) return;
+    if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+
+    setUploading({ active: true, progress: 0, total: files.length });
+    setError(''); setInfo('');
+
+    const uploaded = [...images];
+    let okCount = 0, failCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const compressed = await compressImage(files[i]);
+        const safeName = files[i].name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const key = `${templateImagePrefix(template.id)}${safeName}`;
+        const result = await uploadImageToR2(compressed, key);
+        if (result.success) {
+          // Replace any previous entry with the same name so re-uploads dedupe
+          const filtered = uploaded.filter((img) => img.name !== safeName);
+          filtered.push({ url: result.url, name: safeName, key });
+          uploaded.splice(0, uploaded.length, ...filtered);
+          okCount++;
+        } else {
+          failCount++;
+          if (!error) setError(`Upload failed: ${result.error}`);
+        }
+      } catch (e) {
+        failCount++;
+        if (!error) setError(e.message);
+      }
+      setUploading((s) => ({ ...s, progress: i + 1 }));
+    }
+
+    setUploading({ active: false, progress: files.length, total: files.length });
+    setImages(uploaded);
+
+    try {
+      await updateTemplate(template.id, {
+        preloaded_images: uploaded.map(({ url, name }) => ({ url, name })),
+        preloaded_at:     new Date().toISOString(),
+        preloaded_source: 'r2',
+      });
+      setInfo(failCount > 0
+        ? `Uploaded ${okCount}, ${failCount} failed.`
+        : `Uploaded ${okCount} image(s).`);
+      if (onSavedRef.current) onSavedRef.current();
+    } catch (err) {
+      setError('Saved to R2 but failed to update template record: ' + err.message);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!template) return;
+    if (!window.confirm(`确认清空模板 "${template.name}" 的全部图片吗？此操作不可恢复。`)) return;
+    setLoading(true); setError(''); setInfo('');
+    try {
+      const listed = await listImagesFromR2(templateImagePrefix(template.id));
+      if (listed.success && listed.images.length > 0) {
+        await deleteImagesFromR2(listed.images.map((img) => img.key));
+      }
+      await updateTemplate(template.id, {
+        preloaded_images: [],
+        preloaded_at:     null,
+        preloaded_source: null,
+      });
+      setImages([]);
+      setInfo('已清空模板图片。');
+      if (onSavedRef.current) onSavedRef.current();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!template) return null;
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth
+      PaperProps={{ sx: { minHeight: '70vh' } }}>
+      <DialogTitle>
+        模板图片 — {template.name}
+        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+          (R2: {templateImagePrefix(template.id)})
+        </Typography>
+      </DialogTitle>
+      <DialogContent dividers>
+        {!isR2Configured() && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Cloudflare R2 未配置，无法上传或浏览图片。
+          </Alert>
+        )}
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
+        {info  && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo('')}>{info}</Alert>}
+
+        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+          <Chip
+            label={syncing ? '同步中…' : `${images.length} 张图片`}
+            color={images.length > 0 ? 'success' : 'default'}
+            variant="outlined"
+            icon={syncing ? <CircularProgress size={14} /> : undefined}
+          />
+          <Box flex={1} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }}
+          />
+          <Button
+            startIcon={<CloudUpload />}
+            variant="contained"
+            size="small"
+            disabled={!isR2Configured() || uploading.active}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            上传图片
+          </Button>
+          <Button
+            startIcon={<Refresh />}
+            size="small"
+            disabled={syncing || uploading.active}
+            onClick={refresh}
+          >
+            刷新
+          </Button>
+          <Tooltip title="清空模板图片">
+            <span>
+              <Button
+                startIcon={<DeleteForever />}
+                size="small"
+                color="error"
+                disabled={images.length === 0 || loading || uploading.active}
+                onClick={handleClear}
+              >
+                清空
+              </Button>
+            </span>
+          </Tooltip>
+        </Stack>
+
+        {uploading.active && (
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography variant="body2">Uploading…</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {uploading.progress} / {uploading.total}
+              </Typography>
+            </Box>
+            <LinearProgress
+              variant="determinate"
+              value={uploading.total > 0 ? (uploading.progress / uploading.total) * 100 : 0}
+              sx={{ height: 8, borderRadius: 4 }}
+            />
+          </Box>
+        )}
+
+        {images.length === 0 ? (
+          <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>
+            <PhotoLibrary sx={{ fontSize: 48, opacity: 0.4 }} />
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              当前模板还没有图片。上传后将存放在 <code>{templateImagePrefix(template.id)}</code>，
+              并会在模板预览以及基于此模板新建的项目中自动使用。
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {images.map((img) => (
+              <Box key={img.key || img.name}
+                sx={{ width: 110, position: 'relative' }}>
+                <Box sx={{ width: 110, height: 110, borderRadius: 1, overflow: 'hidden',
+                  border: '1px solid', borderColor: 'divider', bgcolor: 'grey.100' }}>
+                  <img
+                    src={img.url}
+                    alt={img.name}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.parentElement.innerHTML =
+                        '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10px;color:#999;">Failed</div>';
+                    }}
+                  />
+                </Box>
+                <Typography variant="caption" sx={{
+                  display: 'block', mt: 0.5,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {img.name}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>关闭</Button>
@@ -214,6 +534,8 @@ function TemplateManagement() {
   const [configOpen, setConfigOpen]       = useState(false);
   const [previewTarget, setPreviewTarget] = useState(null);
   const [previewOpen, setPreviewOpen]     = useState(false);
+  const [imagesTarget, setImagesTarget]   = useState(null);
+  const [imagesOpen, setImagesOpen]       = useState(false);
   const [snack, setSnack]                 = useState({ open: false, msg: '', sev: 'success' });
   const [seeding, setSeeding]             = useState(false);
   const [seedLog, setSeedLog]             = useState('');
@@ -252,6 +574,19 @@ function TemplateManagement() {
   const handleDelete = async (id, name) => {
     if (!window.confirm(`确认删除模板 "${name}" 吗？此操作不可恢复。`)) return;
     try {
+      // Best-effort cleanup of R2 image folder before removing the row.
+      // We don't block deletion on this failing — orphans are easy to spot
+      // and the user explicitly opted into a destructive action.
+      if (isR2Configured()) {
+        try {
+          const listed = await listImagesFromR2(templateImagePrefix(id));
+          if (listed.success && listed.images.length > 0) {
+            await deleteImagesFromR2(listed.images.map((img) => img.key));
+          }
+        } catch (cleanupErr) {
+          console.warn('Template image cleanup failed:', cleanupErr);
+        }
+      }
       await deleteTemplate(id);
       showSnack('已删除');
       load();
@@ -321,6 +656,7 @@ function TemplateManagement() {
                 <TableCell>分类</TableCell>
                 <TableCell align="center">已批准</TableCell>
                 <TableCell align="center">首页展示</TableCell>
+                <TableCell align="center">图片</TableCell>
                 <TableCell>提交时间</TableCell>
                 <TableCell align="center">操作</TableCell>
               </TableRow>
@@ -328,7 +664,7 @@ function TemplateManagement() {
             <TableBody>
               {templates.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     暂无模板数据
                   </TableCell>
                 </TableRow>
@@ -362,6 +698,14 @@ function TemplateManagement() {
                       disabled={!t.is_approved}
                     />
                   </TableCell>
+                  <TableCell align="center">
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={(t.preloadedImages?.length || 0) > 0 ? 'success' : 'default'}
+                      label={`${t.preloadedImages?.length || 0} 张`}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Typography variant="caption">
                       {t.createdAt ? new Date(t.createdAt).toLocaleDateString('zh-CN') : '—'}
@@ -373,6 +717,12 @@ function TemplateManagement() {
                         <IconButton size="small" color="primary"
                           onClick={() => { setPreviewTarget(t); setPreviewOpen(true); }}>
                           <Preview fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="管理图片">
+                        <IconButton size="small" color="info"
+                          onClick={() => { setImagesTarget(t); setImagesOpen(true); }}>
+                          <PhotoLibrary fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="编辑调查内容">
@@ -418,6 +768,13 @@ function TemplateManagement() {
         template={previewTarget}
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
+      />
+
+      <TemplateImagesDialog
+        template={imagesTarget}
+        open={imagesOpen}
+        onClose={() => setImagesOpen(false)}
+        onSaved={(opts) => { load(); if (!opts?.silent) showSnack('模板图片已更新'); }}
       />
 
       <Snackbar

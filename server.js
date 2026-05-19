@@ -5,7 +5,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const cors = require('cors');
 const OpenAI = require('openai');
-const { S3Client, PutObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, CopyObjectCommand } = require('@aws-sdk/client-s3');
 
 // Import multi-agent review system
 const {
@@ -2040,6 +2040,43 @@ app.delete('/api/r2/delete', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('R2 delete error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/r2/copy  – body: { copies: [{ from: string, to: string }, ...] }
+// Server-side copy is the fastest way to clone many R2 objects without
+// streaming bytes back to the client. Used when promoting a project's image
+// folder into a template's image folder.
+app.post('/api/r2/copy', async (req, res) => {
+  try {
+    if (!isR2Configured()) {
+      return res.status(503).json({ success: false, error: 'Cloudflare R2 is not configured on the server.' });
+    }
+    const { copies } = req.body;
+    if (!Array.isArray(copies) || copies.length === 0) {
+      return res.status(400).json({ success: false, error: '"copies" array is required.' });
+    }
+    const r2 = createR2Client();
+    const copied = [];
+    const errors = [];
+    for (const { from, to } of copies) {
+      if (!from || !to) { errors.push({ from, to, error: 'from/to required' }); continue; }
+      try {
+        await r2.send(new CopyObjectCommand({
+          Bucket: r2BucketName,
+          CopySource: `/${r2BucketName}/${encodeURIComponent(from).replace(/%2F/g, '/')}`,
+          Key: to,
+        }));
+        copied.push({ from, to, url: `${r2PublicUrl}/${to}` });
+      } catch (err) {
+        errors.push({ from, to, error: err.message });
+      }
+    }
+    console.log(`☁️  R2 copied ${copied.length} object(s), ${errors.length} failure(s)`);
+    res.json({ success: errors.length === 0, copied, errors });
+  } catch (error) {
+    console.error('R2 copy error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
