@@ -29,6 +29,7 @@ import {
   InputAdornment,
   Stack,
   CircularProgress,
+  LinearProgress,
 } from '@mui/material';
 import {
   Folder,
@@ -111,6 +112,14 @@ export default function ProjectSidebar({
   // Prevents double-clicks on "Create Template" from spawning multiple
   // templates while the async R2 copy + Supabase insert is in flight.
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  // Progress for the "Save as Template" flow. `total > 0` switches the
+  // LinearProgress from indeterminate to determinate (used during the
+  // image copy phase).
+  const [templateProgress, setTemplateProgress] = useState({
+    label: '',
+    current: 0,
+    total: 0,
+  });
   
   // Form states
   const [newProjectName, setNewProjectName] = useState('');
@@ -407,7 +416,12 @@ export default function ProjectSidebar({
   // Copy a project's R2 image folder over to a template prefix. Returns the
   // new preloadedImages array pointing at template-owned URLs. Best-effort:
   // anything that fails to copy is omitted so the template still saves.
-  const promoteProjectImagesToTemplate = async (project, templateId) => {
+  //
+  // `onProgress({ current, total })` is invoked after each batch so the
+  // caller can render a determinate progress bar. The total reported is the
+  // count discovered under the project prefix; current is the cumulative
+  // number processed so far (successes + failures).
+  const promoteProjectImagesToTemplate = async (project, templateId, onProgress) => {
     if (!isR2Configured()) return [];
     const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
     const userId = currentUserId || 'anonymous';
@@ -417,19 +431,38 @@ export default function ProjectSidebar({
     // Discover everything actually in R2 under the project prefix — this
     // catches images uploaded outside of project.preloadedImages too.
     const listed = await listImagesFromR2(projectPrefix);
-    if (!listed.success || listed.images.length === 0) return [];
+    if (!listed.success || listed.images.length === 0) {
+      onProgress?.({ current: 0, total: 0 });
+      return [];
+    }
 
-    const copies = listed.images.map((img) => {
-      const filename = img.name; // last path segment
-      return { from: img.key, to: `${templatePrefix}${filename}` };
-    });
+    const allCopies = listed.images.map((img) => ({
+      from: img.key,
+      to: `${templatePrefix}${img.name}`,
+    }));
+    const total = allCopies.length;
+    onProgress?.({ current: 0, total });
 
-    const copyResult = await copyImagesInR2(copies);
-    if (copyResult.errors?.length) {
-      console.warn(`⚠️ ${copyResult.errors.length} image(s) failed to copy to template:`, copyResult.errors);
+    // Batch the copies so the LinearProgress can advance smoothly instead
+    // of waiting for the whole set to finish in one request. The server
+    // processes copies sequentially per request anyway, so batching just
+    // moves the await boundaries — total wall time is similar.
+    const BATCH_SIZE = 10;
+    const copied = [];
+    const errors = [];
+    for (let i = 0; i < allCopies.length; i += BATCH_SIZE) {
+      const batch = allCopies.slice(i, i + BATCH_SIZE);
+      const result = await copyImagesInR2(batch);
+      if (result.copied?.length) copied.push(...result.copied);
+      if (result.errors?.length) errors.push(...result.errors);
+      onProgress?.({ current: Math.min(i + batch.length, total), total });
+    }
+
+    if (errors.length) {
+      console.warn(`⚠️ ${errors.length} image(s) failed to copy to template:`, errors);
     }
     // Build the preloadedImages payload from successful copies.
-    return (copyResult.copied || []).map(({ to, url }) => ({
+    return copied.map(({ to, url }) => ({
       url: url || (r2PublicUrl ? `${r2PublicUrl}/${to}` : ''),
       name: to.split('/').pop(),
     }));
@@ -445,6 +478,7 @@ export default function ProjectSidebar({
     // the disabled state.
     if (isSavingTemplate) return;
     setIsSavingTemplate(true);
+    setTemplateProgress({ label: 'Loading project configuration…', current: 0, total: 0 });
 
     try {
       console.log('📝 Creating template from project:', projectToTemplate.name);
@@ -470,6 +504,7 @@ export default function ProjectSidebar({
       // images land in their final folder. saveTemplateToSupabase will still
       // retry on the rare race where another save grabs the same id between
       // our SELECT and INSERT — but the R2 destination is locked in here.
+      setTemplateProgress({ label: 'Reserving template id…', current: 0, total: 0 });
       const baseId    = buildTemplateIdBase({ name: finalName, author: finalAuthor, year: finalYear });
       const templateId = supabase ? await findAvailableTemplateId(baseId) : baseId;
 
@@ -479,7 +514,20 @@ export default function ProjectSidebar({
       // the template).
       let templateImages = [];
       try {
-        templateImages = await promoteProjectImagesToTemplate(projectToTemplate, templateId);
+        setTemplateProgress({ label: 'Listing project images…', current: 0, total: 0 });
+        templateImages = await promoteProjectImagesToTemplate(
+          projectToTemplate,
+          templateId,
+          ({ current, total }) => {
+            setTemplateProgress({
+              label: total > 0
+                ? `Copying images to template folder… (${current}/${total})`
+                : 'No images to copy',
+              current,
+              total,
+            });
+          },
+        );
         if (templateImages.length > 0) {
           console.log(`☁️  Copied ${templateImages.length} image(s) into templates/${templateId}/`);
         }
@@ -503,6 +551,7 @@ export default function ProjectSidebar({
         preloadedSource: templateImages.length > 0 ? 'r2' : null,
       };
 
+      setTemplateProgress({ label: 'Saving template…', current: 0, total: 0 });
       let result;
       if (supabase) {
         // Platform mode: save to Supabase (is_approved=false, awaiting review)
@@ -518,6 +567,7 @@ export default function ProjectSidebar({
       }
 
       if (result.success) {
+        setTemplateProgress({ label: 'Refreshing template list…', current: 0, total: 0 });
         await loadTemplates();
         console.log('✅ Template submitted for review');
         setError('');
@@ -531,6 +581,7 @@ export default function ProjectSidebar({
       setError('Error creating template: ' + error.message);
     } finally {
       setIsSavingTemplate(false);
+      setTemplateProgress({ label: '', current: 0, total: 0 });
     }
   };
 
@@ -1601,6 +1652,28 @@ export default function ProjectSidebar({
             })}</code>
             {' '}(a <code>-2</code>, <code>-3</code>… suffix is appended if that id already exists).
           </Alert>
+
+          {isSavingTemplate && (
+            <Box sx={{ mt: 3, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {templateProgress.label || 'Working…'}
+                </Typography>
+                {templateProgress.total > 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    {templateProgress.current} / {templateProgress.total}
+                  </Typography>
+                )}
+              </Box>
+              <LinearProgress
+                variant={templateProgress.total > 0 ? 'determinate' : 'indeterminate'}
+                value={templateProgress.total > 0
+                  ? (templateProgress.current / templateProgress.total) * 100
+                  : undefined}
+                sx={{ height: 6, borderRadius: 3 }}
+              />
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
           <Button
