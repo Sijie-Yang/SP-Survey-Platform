@@ -69,7 +69,6 @@ import { saveSurveyConfig, loadSurveyConfig } from '../../lib/surveyStorage';
 import {
   loadTemplatesFromFiles,
   saveTemplateToFile,
-  deleteTemplateFile,
   loadProjectsFromFiles,
   exportProjectToExternal,
   duplicateProjectInFolder,
@@ -80,7 +79,6 @@ import {
 import {
   listTemplates,
   saveTemplateToSupabase,
-  deleteTemplate as deleteTemplateFromSupabase,
   buildTemplateIdBase,
   findAvailableTemplateId,
 } from '../../lib/templateManager';
@@ -1140,31 +1138,14 @@ export default function ProjectSidebar({
                               <ContentCopy fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          {isUserTemplate(template) && (
-                            <Tooltip title="Delete Template">
-                              <IconButton
-                                size="small"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  try {
-                                    if (supabase) {
-                                      await deleteTemplateFromSupabase(template.id);
-                                    } else {
-                                      await deleteTemplateFile(template.id);
-                                    }
-                                    await loadTemplates();
-                                    console.log('✅ Template deleted and panel refreshed');
-                                  } catch (error) {
-                                    console.error('Error deleting template:', error);
-                                    setError('Error deleting template: ' + error.message);
-                                  }
-                                }}
-                                sx={{ p: 0.25, color: 'error.main' }}
-                              >
-                                <Delete fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          )}
+                          {/* No delete button here — template deletion is
+                              an admin-only operation handled from the
+                              Admin Dashboard. Showing a delete icon next
+                              to every "user template" in the sidebar was
+                              misleading: regular users would click it and
+                              hit an RLS rejection, and any template owner
+                              could blow away their own template without
+                              touching admin review state. */}
                         </Box>
                       </ListItemButton>
                       
