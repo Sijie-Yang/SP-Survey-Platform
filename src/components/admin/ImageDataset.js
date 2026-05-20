@@ -274,6 +274,18 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       const existingResult = await listImagesFromR2(`${projectPrefix}/`);
       const existingFileNames = new Set((existingResult.images || []).map(img => img.name));
 
+      // Folder mode (input is "owner/repo/subfolder") returns real file
+      // names from the Hub tree, so the rows-mode `image_NNNNNN.jpg` naming
+      // and its batch-level "all files already exist → skip the network
+      // call entirely" pre-check don't apply. Detect mode up front so the
+      // inner loop branches once instead of per-image.
+      const datasetSegments = hfConfig.datasetName
+        .trim()
+        .replace(/^\/+|\/+$/g, '')
+        .split('/')
+        .filter(Boolean);
+      const isFolderMode = datasetSegments.length > 2;
+
       const countResult = await getImageCountFromDataset(hfConfig.token, hfConfig.datasetName);
       const totalImages = countResult.imageCount || 1000;
       setPreloadStatus(prev => ({ ...prev, total: totalImages }));
@@ -289,23 +301,40 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       let newCount = 0;
       let skipCount = 0;
 
+      // Sanitize an HF filename so it's safe to use as an R2 key segment.
+      // Matches the rule used by the direct-upload path.
+      const safeKey = (name) => name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
       for (let b = 0; b < batches; b++) {
         const offset = b * batchSize;
         const limit = Math.min(batchSize, totalImages - offset);
-        const toDownload = [];
-        for (let j = 0; j < limit; j++) {
-          const padded = String(offset + j).padStart(6, '0');
-          if (!existingFileNames.has(`image_${padded}.jpg`)) toDownload.push(offset + j);
+
+        if (!isFolderMode) {
+          // Rows mode: filenames are deterministic, so we can skip whole
+          // batches when every synthesized name already exists in R2.
+          const toDownload = [];
+          for (let j = 0; j < limit; j++) {
+            const padded = String(offset + j).padStart(6, '0');
+            if (!existingFileNames.has(`image_${padded}.jpg`)) toDownload.push(offset + j);
+          }
+          if (!toDownload.length) {
+            skipCount += limit;
+            setPreloadStatus(prev => ({ ...prev, progress: allImages.length }));
+            continue;
+          }
         }
-        if (!toDownload.length) { skipCount += limit; setPreloadStatus(prev => ({ ...prev, progress: allImages.length })); continue; }
 
         const result = await getImagesFromHuggingFace(hfConfig.token, hfConfig.datasetName, limit, offset);
         if (!result.success || !result.images) throw new Error(result.error || 'Failed to fetch images');
 
         for (let k = 0; k < result.images.length; k++) {
           const gi = offset + k;
-          const padded = String(gi).padStart(6, '0');
-          const fname = `image_${padded}.jpg`;
+          // Folder mode preserves the original filename from the HF tree
+          // (sanitized for R2). Rows mode keeps the existing zero-padded
+          // synthetic naming so old projects continue to dedupe correctly.
+          const fname = isFolderMode
+            ? safeKey(result.images[k].name || `image_${String(gi).padStart(6, '0')}.jpg`)
+            : `image_${String(gi).padStart(6, '0')}.jpg`;
           if (existingFileNames.has(fname)) { skipCount++; continue; }
 
           try {
@@ -329,6 +358,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             const r2Key = `${projectPrefix}/${fname}`;
             const uploadResult = await uploadImageToR2(compressed, r2Key);
             if (!uploadResult.success) continue;
+            // Track the filename we used so a re-run skips it from
+            // existingFileNames without an extra R2 list round-trip.
+            existingFileNames.add(fname);
             allImages.push({ url: uploadResult.url, name: fname });
             newCount++;
             setPreloadStatus(prev => ({ ...prev, progress: allImages.length }));
@@ -560,7 +592,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">
                 HuggingFace Settings → Access Tokens
               </a><br />
-              3. Format: "username/dataset-name" (e.g. "sijiey/Thermal-Affordance-Dataset")<br />
+              3. Format: <code>owner/dataset</code> for parquet-style datasets,
+              or <code>owner/dataset/subfolder</code> to import an image folder
+              (e.g. <code>Jusba/Greenery_Survey_Helsinki_Mapillary/images</code>)<br />
               4. Enable, save, test connection, then click Preload
             </Typography>
           </Alert>
@@ -593,8 +627,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               <TextField
                 fullWidth label="Dataset Name" value={hfConfig.datasetName}
                 onChange={(e) => setHfConfig(p => ({ ...p, datasetName: e.target.value }))}
-                placeholder="username/dataset-name"
-                helperText="Format: 'username/dataset-name'"
+                placeholder="owner/dataset  or  owner/dataset/subfolder"
+                helperText="Use 'owner/dataset' for rows-style data, or 'owner/dataset/subfolder' to import an image folder"
                 disabled={!hfConfig.enabled} size="small"
               />
               <Box sx={{ display: 'flex', gap: 2 }}>

@@ -47,6 +47,109 @@ const authHeaders = (token, extra = {}) => {
   return h;
 };
 
+// Image file extensions accepted when listing dataset folders.
+const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp|bmp|tiff?)$/i;
+
+// Per-segment URL encoding (preserves the slashes between path components
+// while still escaping spaces / unicode within a segment).
+const encodePathSegments = (path) =>
+  path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+
+/**
+ * Parse a user-entered dataset target into `{ dataset, path }`. Accepts:
+ *   - "owner/repo"               → rows mode (datasets-server)
+ *   - "owner/repo/sub/folder"    → folder mode (Hub tree API)
+ * Returns null when the input doesn't look like a HF dataset id at all.
+ */
+const parseDatasetTarget = (input) => {
+  if (!input || typeof input !== 'string') return null;
+  const parts = input.trim().replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+  if (parts.length < 2) return null;
+  return {
+    dataset: `${parts[0]}/${parts[1]}`,
+    path: parts.slice(2).join('/'),
+  };
+};
+
+/**
+ * List all image files under a folder inside a dataset repo via the Hub
+ * tree API. Follows `Link: rel="next"` cursors so big folders fully
+ * enumerate. Results are cached for CACHE_DURATION so the three public
+ * functions can share a single network walk per dataset/path.
+ */
+const listImagesInDatasetFolder = async (token, dataset, folderPath) => {
+  const cacheKey = `tree::${dataset}::${folderPath}::${token ? 'auth' : 'pub'}`;
+  const cached = apiCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    console.log(`📦 Using cached folder listing for ${dataset}/${folderPath}`);
+    return cached.data;
+  }
+
+  const headers = authHeaders(token);
+  const encodedPath = encodePathSegments(folderPath);
+  const base = `https://huggingface.co/api/datasets/${dataset}/tree/main${encodedPath ? `/${encodedPath}` : ''}`;
+  let next = `${base}?recursive=false&expand=false`;
+  const all = [];
+
+  while (next) {
+    await respectRateLimit();
+    const res = await fetch(next, { headers });
+    if (!res.ok) {
+      if (res.status === 401) {
+        throw new Error(
+          (!token || !token.trim())
+            ? `Folder "${dataset}/${folderPath}" requires authentication. Provide a Hugging Face Access Token.`
+            : 'Invalid or expired Hugging Face Access Token.'
+        );
+      }
+      if (res.status === 403) {
+        throw new Error(
+          `Access to "${dataset}" is gated. Open https://huggingface.co/datasets/${dataset} ` +
+          `and click "Agree and access repository", then retry with a token from the same account.`
+        );
+      }
+      if (res.status === 404) {
+        throw new Error(`Folder "${folderPath}" not found in dataset "${dataset}".`);
+      }
+      throw new Error(`HF tree API ${res.status}: ${res.statusText}`);
+    }
+    const items = await res.json();
+    for (const item of items || []) {
+      if (item.type === 'file' && IMAGE_EXT_RE.test(item.path)) {
+        all.push(item.path);
+      }
+    }
+    // HF returns pagination cursors via `Link: <…>; rel="next"`.
+    const link = res.headers.get('Link') || res.headers.get('link');
+    const m = link && link.match(/<([^>]+)>;\s*rel="next"/i);
+    next = m ? m[1] : null;
+  }
+
+  apiCache.set(cacheKey, { data: all, timestamp: Date.now() });
+  return all;
+};
+
+/**
+ * Build image entries (url + filename + metadata) from a folder listing,
+ * sliced by offset/limit so the existing paginated preloader keeps working.
+ */
+const buildFolderModeImages = (dataset, folderPath, paths, offset = 0, limit = paths.length) => {
+  const slice = paths.slice(offset, offset + limit);
+  return slice.map((p) => {
+    const filename = p.split('/').pop();
+    return {
+      url: `https://huggingface.co/datasets/${dataset}/resolve/main/${encodePathSegments(p)}`,
+      name: filename,
+      metadata: {
+        dataset,
+        folderPath,
+        path: p,
+        isPermanent: true,
+      },
+    };
+  });
+};
+
 // Cache for API responses to reduce requests
 const apiCache = new Map();
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -135,6 +238,33 @@ const cachedFetch = async (url, options = {}) => {
  */
 export const testHuggingFaceConnection = async (token, datasetName) => {
   try {
+    const parsed = parseDatasetTarget(datasetName);
+    if (!parsed) {
+      throw new Error(
+        'Invalid dataset name. Use "owner/repo" for rows-style datasets, ' +
+        'or "owner/repo/subfolder" to target a folder of image files.'
+      );
+    }
+
+    // Folder mode: probe the Hub tree API for the requested subfolder.
+    // This bypasses datasets-server entirely (which only understands
+    // parquet-style row layouts) and lets us support image-folder repos.
+    if (parsed.path) {
+      console.log(`Testing folder mode: ${parsed.dataset} @ ${parsed.path}`);
+      const paths = await listImagesInDatasetFolder(token, parsed.dataset, parsed.path);
+      return {
+        success: true,
+        datasetInfo: {
+          id: datasetName,
+          mode: 'folder',
+          folderPath: parsed.path,
+          imageCount: paths.length,
+          author: parsed.dataset.split('/')[0] || 'unknown',
+          description: `Folder access via Hub tree API (${paths.length} image file${paths.length === 1 ? '' : 's'})`,
+        },
+      };
+    }
+
     // Try datasets-server API first (more reliable for public datasets).
     // We pass the token through when present so gated datasets succeed on
     // the first attempt instead of failing with 401 and forcing a retry.
@@ -248,6 +378,26 @@ export const testHuggingFaceConnection = async (token, datasetName) => {
  */
 export const getImagesFromHuggingFace = async (token, datasetName, limit = 500, offset = 0) => {
   try {
+    const parsed = parseDatasetTarget(datasetName);
+    if (!parsed) {
+      throw new Error(
+        'Invalid dataset name. Use "owner/repo" or "owner/repo/subfolder".'
+      );
+    }
+
+    // Folder mode: enumerate via the Hub tree API and slice the cached
+    // result so the existing offset/limit-based preloader pipeline works
+    // unchanged. The listing itself is cached, so multiple paginated
+    // requests reuse a single network walk per dataset+folder.
+    if (parsed.path) {
+      const paths = await listImagesInDatasetFolder(token, parsed.dataset, parsed.path);
+      return {
+        success: true,
+        images: buildFolderModeImages(parsed.dataset, parsed.path, paths, offset, limit),
+        total: paths.length,
+      };
+    }
+
     console.log(`Attempting to load images from dataset: ${datasetName}`);
 
     // Use the rows endpoint with pagination. We pass the token through
@@ -432,6 +582,13 @@ export const getRandomImagesFromHuggingFace = async (token, datasetName, count =
  */
 export const getImageCountFromDataset = async (token, datasetName) => {
   try {
+    const parsed = parseDatasetTarget(datasetName);
+    if (parsed?.path) {
+      // Folder mode: walk the tree once (cached) and count image files.
+      const paths = await listImagesInDatasetFolder(token, parsed.dataset, parsed.path);
+      return { imageCount: paths.length };
+    }
+
     // Use rows API to get the count - it's more reliable
     console.log(`Getting image count for dataset: ${datasetName}`);
 
