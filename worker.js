@@ -95,6 +95,16 @@ function getR2Backend(env) {
       async delete(keys) {
         await bucket.delete(keys);
       },
+      // R2 bindings don't expose a native copy op, so we round-trip through
+      // get/put. Streaming the body avoids buffering the whole object in
+      // memory which keeps us under the Workers heap limit on big images.
+      async copy(from, to) {
+        const src = await bucket.get(from);
+        if (!src) throw new Error(`source not found: ${from}`);
+        await bucket.put(to, src.body, {
+          httpMetadata: src.httpMetadata,
+        });
+      },
       async probe() {
         await bucket.list({ limit: 1 });
       },
@@ -156,6 +166,21 @@ function getR2Backend(env) {
           await ensureOk(res, 'DELETE');
         }
       }
+    },
+    // S3 PUT with `x-amz-copy-source` performs a server-side copy, which is
+    // dramatically faster than downloading + re-uploading the object body.
+    async copy(from, to) {
+      await ensureOk(
+        await client.fetch(objUrl(to), {
+          method: 'PUT',
+          headers: {
+            // `x-amz-copy-source` is "/{bucket}/{encodedKey}". Use the same
+            // path-segment encoding as objUrl so keys with slashes work.
+            'x-amz-copy-source': `/${bucketName}/${encodeS3Key(from)}`,
+          },
+        }),
+        'COPY'
+      );
     },
     async probe() {
       const u = new URL(`${endpoint}/${bucketName}/`);
@@ -229,6 +254,34 @@ async function handleDelete(request, env) {
   return json({ success: true });
 }
 
+// POST /api/r2/copy  — body: { copies: [{ from, to }, ...] }
+// Mirrors the Express /api/r2/copy route. Used by the "Save as Template"
+// flow to carry a project's images into the template's R2 prefix.
+async function handleCopy(request, env) {
+  const backend = getR2Backend(env);
+  if (!backend) return json({ success: false, error: r2NotConfiguredError(env) }, { status: 503 });
+  if (!env.R2_PUBLIC_URL)
+    return json({ success: false, error: 'Missing R2_PUBLIC_URL environment variable.' }, { status: 503 });
+
+  const { copies } = await request.json();
+  if (!Array.isArray(copies) || copies.length === 0)
+    return json({ success: false, error: '"copies" array is required.' }, { status: 400 });
+
+  const publicBase = publicBaseUrl(env);
+  const copied = [];
+  const errors = [];
+  for (const { from, to } of copies) {
+    if (!from || !to) { errors.push({ from, to, error: 'from/to required' }); continue; }
+    try {
+      await backend.copy(from, to);
+      copied.push({ from, to, url: publicBase ? `${publicBase}/${to}` : '' });
+    } catch (err) {
+      errors.push({ from, to, error: err.message || String(err) });
+    }
+  }
+  return json({ success: errors.length === 0, copied, errors });
+}
+
 async function handleStatus(_request, env) {
   const backend = getR2Backend(env);
   const configured = !!backend && !!publicBaseUrl(env);
@@ -273,6 +326,9 @@ export default {
       }
       if (pathname === '/api/r2/delete' && request.method === 'DELETE') {
         return await handleDelete(request, env);
+      }
+      if (pathname === '/api/r2/copy' && request.method === 'POST') {
+        return await handleCopy(request, env);
       }
       if (pathname === '/api/r2/status' && request.method === 'GET') {
         return await handleStatus(request, env);

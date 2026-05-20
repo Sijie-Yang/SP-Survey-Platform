@@ -1,6 +1,6 @@
 // Cloudflare R2 client helpers
-// All operations are proxied through the local Express server (/api/r2/*)
-// because R2 credentials must remain server-side.
+// All operations are proxied through a backend (Express in dev, Cloudflare
+// Worker in production) because R2 credentials must remain server-side.
 
 const SERVER_URL =
   process.env.REACT_APP_SERVER_URL ||
@@ -19,6 +19,26 @@ function toBase64(fileOrBlob) {
   });
 }
 
+// Read the most useful error message out of a non-2xx Response without
+// swallowing the actual server-side reason. The old code blanket-said
+// "is the Express server running?" which masked R2/Worker errors in prod.
+async function describeNonOk(res, label) {
+  let detail = '';
+  try {
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      const body = await res.json();
+      detail = body?.error || body?.message || JSON.stringify(body).slice(0, 300);
+    } else {
+      detail = (await res.text()).slice(0, 300);
+    }
+  } catch {
+    /* leave detail empty */
+  }
+  const hint = detail ? `: ${detail}` : '';
+  return new Error(`${label} failed (HTTP ${res.status})${hint}`);
+}
+
 /**
  * Upload a File or Blob to R2 via the server proxy.
  * @param {File|Blob} file
@@ -34,7 +54,7 @@ export async function uploadImageToR2(file, key) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key, data: base64, contentType }),
     });
-    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
+    if (!res.ok) throw await describeNonOk(res, 'R2 upload');
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Upload failed');
     return { success: true, url: json.url, key: json.key };
@@ -55,7 +75,7 @@ export async function deleteImagesFromR2(keys) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keys }),
     });
-    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
+    if (!res.ok) throw await describeNonOk(res, 'R2 delete');
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Delete failed');
     return { success: true };
@@ -75,7 +95,7 @@ export async function listImagesFromR2(prefix = '') {
     const res = await fetch(
       `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}`
     );
-    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
+    if (!res.ok) throw await describeNonOk(res, 'R2 list');
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'List failed');
     return { success: true, images: json.images };
@@ -97,7 +117,7 @@ export async function copyImagesInR2(copies) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ copies }),
     });
-    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
+    if (!res.ok) throw await describeNonOk(res, 'R2 copy');
     const json = await res.json();
     return {
       success: json.success,
@@ -118,7 +138,7 @@ export async function copyImagesInR2(copies) {
 export async function checkR2Status() {
   try {
     const res = await fetch(`${SERVER_URL}/api/r2/status`);
-    if (!res.ok) throw new Error(`API server returned ${res.status} – is the Express server running?`);
+    if (!res.ok) throw await describeNonOk(res, 'R2 status');
     return await res.json();
   } catch (error) {
     return { configured: false, connected: false, error: error.message };

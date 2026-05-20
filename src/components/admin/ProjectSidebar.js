@@ -715,25 +715,29 @@ export default function ProjectSidebar({
         }
       }
 
-      // Delete the actual file using deleteProjectFile
-      const result = await deleteProjectFile(deletingProject.id);
-      if (result.success) {
-        await deleteProject(deletingProject.id);
-        
-        // Reload projects to update panel
-        await loadProjects();
-        
-        // If we deleted the active project, clear selection
-        if (activeProjectId === deletingProject.id) {
-          setActiveProjectId(null);
-          onProjectSelect(null);
-        }
-        
-        console.log('✅ Project deleted and panel refreshed');
-        setError('');
-      } else {
-        throw new Error(result.error);
+      // Platform mode (Supabase): the row is deleted via deleteProject ↓.
+      // Self-hosted mode: also nuke the JSON file on the Express server.
+      // The old code called deleteProjectFile unconditionally, which hard-
+      // coded http://localhost:3001 and broke deletion in production.
+      if (!supabase) {
+        const fileResult = await deleteProjectFile(deletingProject.id);
+        if (!fileResult.success) throw new Error(fileResult.error);
       }
+
+      const result = await deleteProject(deletingProject.id);
+      if (!result.success) throw new Error(result.error);
+
+      // Reload projects to update panel
+      await loadProjects();
+
+      // If we deleted the active project, clear selection
+      if (activeProjectId === deletingProject.id) {
+        setActiveProjectId(null);
+        onProjectSelect(null);
+      }
+
+      console.log('✅ Project deleted and panel refreshed');
+      setError('');
     } catch (error) {
       console.error('Error deleting project:', error);
       setError('Error deleting project: ' + error.message);
