@@ -772,7 +772,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">
                 HuggingFace Settings → Access Tokens
               </a><br />
-              3. Format: <code>owner/dataset</code> for parquet-style datasets,
+              3. Format: <code>owner/dataset</code> for parquet-style datasets
+              (e.g. <code>sijiey/Thermal-Affordance-Dataset</code>),
               or <code>owner/dataset/subfolder</code> to import an image folder
               (e.g. <code>Jusba/Greenery_Survey_Helsinki_Mapillary/images</code>)<br />
               4. Enable, save, test connection, then click Preload
