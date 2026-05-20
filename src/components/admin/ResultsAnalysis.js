@@ -879,13 +879,18 @@ function exportToCSV(responses, allQuestions) {
 
   const questionNames = allQuestions.map(q => q.name);
 
-  // For each image question, add a companion "shown_images" column
+  // For each image question, add a companion "shown_images" column.
+  // NOTE: SurveyJS's built-in display-only "image" question has no answer
+  // value in survey.data, but its randomly-selected image is still tracked
+  // in row.displayed_images (saved to Supabase). Including 'image' here
+  // ensures the CSV exposes that filename via the __shown_images column.
   const imageTypes = new Set([
     'imagerating', 'image_rating',
     'imageranking', 'image_ranking',
     'imageboolean', 'image_boolean',
     'imagematrix', 'image_matrix',
-    'imagepicker'
+    'imagepicker',
+    'image'
   ]);
   const isImageQuestion = q => imageTypes.has(q.type);
 
