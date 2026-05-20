@@ -309,7 +309,16 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           if (existingFileNames.has(fname)) { skipCount++; continue; }
 
           try {
-            const resp = await fetch(result.images[k].url);
+            // Gated datasets serve their "permanent" image URLs from
+            // huggingface.co/datasets/.../resolve/main/... which 401s
+            // without an Authorization header. Signed CDN URLs already
+            // carry auth in the query string, so we only attach the
+            // bearer token when the request actually targets huggingface.co.
+            const imgUrl = result.images[k].url;
+            const fetchOpts = (hfConfig.token && hfConfig.token.trim() && /^https:\/\/(?:[a-z0-9-]+\.)*huggingface\.co\//i.test(imgUrl))
+              ? { headers: { Authorization: `Bearer ${hfConfig.token.trim()}` } }
+              : undefined;
+            const resp = await fetch(imgUrl, fetchOpts);
             if (!resp.ok) continue;
             const blob = await resp.blob();
             // Run HF-fetched images through the same ≤300KB compressor used
