@@ -256,14 +256,22 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setPreloadStatus(prev => ({ ...prev, error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.' }));
       return;
     }
+    if (!currentProject?.id) {
+      setPreloadStatus(prev => ({ ...prev, error: 'No active project. Please select or create a project before preloading images.' }));
+      return;
+    }
 
     setPreloadStatus({ loading: true, progress: 0, total: 0, error: null, success: null });
 
     try {
-      const folderName = hfConfig.datasetName.replace('/', '_');
+      // Store HF images under the same per-project R2 prefix used by direct
+      // uploads (${userId}/${projectId}/) so they live with the project and
+      // get carried over correctly when exporting the project as a template.
+      const userId = user?.id || 'anonymous';
+      const projectPrefix = `${userId}/${currentProject.id}`;
 
-      // Check which images already exist in R2
-      const existingResult = await listImagesFromR2(folderName);
+      // Check which images already exist in R2 for this project
+      const existingResult = await listImagesFromR2(`${projectPrefix}/`);
       const existingFileNames = new Set((existingResult.images || []).map(img => img.name));
 
       const countResult = await getImageCountFromDataset(hfConfig.token, hfConfig.datasetName);
@@ -309,7 +317,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             // is on the same size/quality budget regardless of source.
             const wrapped = new File([blob], fname, { type: blob.type || 'image/jpeg' });
             const compressed = await compressImage(wrapped);
-            const r2Key = `${folderName}/${fname}`;
+            const r2Key = `${projectPrefix}/${fname}`;
             const uploadResult = await uploadImageToR2(compressed, r2Key);
             if (!uploadResult.success) continue;
             allImages.push({ url: uploadResult.url, name: fname });
