@@ -1283,12 +1283,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 });
               }
               
-              let imagesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;">';
+              // The .sp-image-gallery class is picked up by
+              // src/lib/imagePickerLayout.js for uniform per-question image
+              // heights at natural aspect ratio.
+              let imagesHtml = '<div class="sp-image-gallery">';
               const imageNames = [];
               questionToSave.selectedImageUrls.forEach((url) => {
                 const imageName = imageNamesMap[url] || 'unknown';
                 imageNames.push(imageName);
-                imagesHtml += `<img src="${url}" data-image-name="${imageName}" style="max-width: 300px; height: auto; border-radius: 4px;" />`;
+                imagesHtml += `<div class="sp-image-gallery__item"><div class="sp-image-gallery__image-container"><img src="${url}" data-image-name="${imageName}" alt="${imageName}" /></div></div>`;
               });
               imagesHtml += '</div>';
               
@@ -1324,10 +1327,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   imageLink: url
                 }));
               }
-              questionToSave.imageFit = "cover";
+              // Default imageFit to "contain" to preserve each image's natural aspect ratio.
+              if (!questionToSave.imageFit) {
+                questionToSave.imageFit = "contain";
+              }
             } else if (questionToSave.imageSelectionMode === 'huggingface_random') {
               // Random selection: store the configuration for runtime image loading
-              questionToSave.imageFit = "cover";
+              if (!questionToSave.imageFit) {
+                questionToSave.imageFit = "contain";
+              }
               questionToSave.randomImageSelection = true;
               
               // ✅ No need to save imageSource and huggingFaceConfig - they're global project settings

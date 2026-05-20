@@ -215,8 +215,8 @@ export default function SurveyApp() {
               for (const element of page.elements) {
                 // Keep imageranking as is - it will be handled by our custom component
                 if (element.type === 'imageranking') {
-                  // Set default properties for image ranking
-                  element.imageFit = element.imageFit || "cover";
+                  // Default to "contain" so images keep their natural aspect ratio
+                  element.imageFit = element.imageFit || "contain";
                   
                   // Clean up any unwanted description text that might have been added
                   if (element.description && element.description.includes('Please select all images in your preferred order')) {
@@ -229,26 +229,22 @@ export default function SurveyApp() {
 
                 // Keep imagerating as is - it will be handled by our custom component
                 if (element.type === 'imagerating') {
-                  // Set default properties for image rating
-                  element.imageFit = element.imageFit || "cover";
+                  element.imageFit = element.imageFit || "contain";
                 }
 
                 // Keep imageboolean as is - it will be handled by our custom component
                 if (element.type === 'imageboolean') {
-                  // Set default properties for image boolean
-                  element.imageFit = element.imageFit || "cover";
+                  element.imageFit = element.imageFit || "contain";
                 }
 
                 // Handle image display questions
                 if (element.type === 'image') {
-                  // Set default properties for image display
-                  element.imageFit = element.imageFit || "cover";
+                  element.imageFit = element.imageFit || "contain";
                 }
                 
                 // Handle imagematrix questions
                 if (element.type === 'imagematrix') {
-                  // Set default properties for image matrix
-                  element.imageFit = element.imageFit || "cover";
+                  element.imageFit = element.imageFit || "contain";
                   
                   console.log('📊 ImageMatrix loaded:', element.name, '- rows:', element.rows?.length || 0, 'columns:', element.columns?.length || 0, 'imageMode:', element.imageSelectionMode);
                 }
@@ -375,12 +371,16 @@ export default function SurveyApp() {
                           element.imageNames = selectedImages.map(img => img.name);
                         }
                       } else if (element.type === 'imageboolean' || element.type === 'imagerating' || element.type === 'imagematrix') {
-                        // Store both URLs and HTML for display
+                        // Store both URLs and HTML for display. The class
+                        // structure below is picked up by
+                        // src/lib/imagePickerLayout.js, which sizes each
+                        // image to a uniform per-question height while
+                        // preserving its natural aspect ratio.
                         element.imageLinks = selectedImages.map(img => img.url);
                         element.imageNames = selectedImages.map(img => img.name);
-                        let imagesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;">';
+                        let imagesHtml = '<div class="sp-image-gallery">';
                         selectedImages.forEach((image) => {
-                          imagesHtml += `<img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name}" alt="${image.name}" style="max-width: 300px; height: auto; border-radius: 4px;" onerror="this.onerror=null;this.alt='Image unavailable';this.style.cssText='max-width:300px;min-height:150px;background:#f0f0f0;border:2px dashed #ccc;border-radius:4px;display:flex;align-items:center;justify-content:center'" />`;
+                          imagesHtml += `<div class="sp-image-gallery__item"><div class="sp-image-gallery__image-container"><img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name}" alt="${image.name}" onerror="this.onerror=null;this.alt='Image unavailable';this.style.cssText='min-width:200px;min-height:120px;background:#f0f0f0;border:2px dashed #ccc;border-radius:4px;display:flex;align-items:center;justify-content:center'" /></div></div>`;
                         });
                         imagesHtml += '</div>';
                         element.imageHtml = imagesHtml;
@@ -395,7 +395,11 @@ export default function SurveyApp() {
                         element.imageUrls = selectedImages.map(img => img.url);
                         element.imageNames = selectedImages.map(img => img.name);
                       }
-                      element.imageFit = "cover";
+                      // Preserve any explicit imageFit chosen by the user, but
+                      // default to "contain" so the image keeps its natural aspect ratio.
+                      if (!element.imageFit) {
+                        element.imageFit = "contain";
+                      }
                       
                       console.log(`Loaded ${selectedImages.length} random images for question: ${element.name}`);
                     } else {

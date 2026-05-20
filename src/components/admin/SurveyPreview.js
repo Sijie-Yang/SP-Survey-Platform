@@ -56,8 +56,8 @@ export default function SurveyPreview({ config, currentProject }) {
               for (const element of page.elements) {
                   // Keep imageranking as is - it will be handled by our custom component
                   if (element.type === 'imageranking') {
-                    // Set default properties for image ranking
-                    element.imageFit = element.imageFit || "cover";
+                    // Default to "contain" so images keep their natural aspect ratio
+                    element.imageFit = element.imageFit || "contain";
                     
                     // Clean up any unwanted description text that might have been added
                     if (element.description && element.description.includes('Please select all images in your preferred order')) {
@@ -70,20 +70,17 @@ export default function SurveyPreview({ config, currentProject }) {
 
                   // Keep imagerating as is - it will be handled by our custom component
                   if (element.type === 'imagerating') {
-                    // Set default properties for image rating
-                    element.imageFit = element.imageFit || "cover";
+                    element.imageFit = element.imageFit || "contain";
                   }
 
                   // Keep imageboolean as is - it will be handled by our custom component
                   if (element.type === 'imageboolean') {
-                    // Set default properties for image boolean
-                    element.imageFit = element.imageFit || "cover";
+                    element.imageFit = element.imageFit || "contain";
                   }
 
                   // Handle image display questions
                   if (element.type === 'image') {
-                    // Set default properties for image display
-                    element.imageFit = element.imageFit || "cover";
+                    element.imageFit = element.imageFit || "contain";
                   }
                 
                 // Process random image selection for imagepicker, imageranking, imagerating, imageboolean, imagematrix, and image questions
@@ -207,13 +204,16 @@ export default function SurveyPreview({ config, currentProject }) {
                           element.imageNames = selectedImages.map(img => img.name);
                         }
                       } else if (element.type === 'imageboolean' || element.type === 'imagerating' || element.type === 'imagematrix') {
-                        // For imageboolean, imagerating, and imagematrix questions, store imageHtml
-                        let imagesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;">';
+                        // For imageboolean, imagerating, and imagematrix questions, store imageHtml.
+                        // The .sp-image-gallery class is picked up by
+                        // src/lib/imagePickerLayout.js for uniform per-question
+                        // image heights at natural aspect ratio.
+                        let imagesHtml = '<div class="sp-image-gallery">';
                         selectedImages.forEach((image) => {
-                          imagesHtml += `<img src="${image.url}" data-image-name="${image.name}" style="max-width: 300px; height: auto; border-radius: 4px;" />`;
+                          imagesHtml += `<div class="sp-image-gallery__item"><div class="sp-image-gallery__image-container"><img src="${image.url}" data-image-name="${image.name}" alt="${image.name}" /></div></div>`;
                         });
                         imagesHtml += '</div>';
-                        
+
                         element.imageHtml = imagesHtml;
                         // Store image names separately for tracking
                         element.imageNames = selectedImages.map(img => img.name);
@@ -228,7 +228,11 @@ export default function SurveyPreview({ config, currentProject }) {
                         // Also store names in a separate array for easier tracking
                         element.imageNames = selectedImages.map(img => img.name);
                       }
-                      element.imageFit = "cover";
+                      // Preserve any explicit imageFit chosen by the user, but
+                      // default to "contain" so the image keeps its natural aspect ratio.
+                      if (!element.imageFit) {
+                        element.imageFit = "contain";
+                      }
                       
                       console.log(`Preview loaded ${selectedImages.length} random images for question: ${element.name}`);
                     } else {

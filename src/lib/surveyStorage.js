@@ -113,7 +113,10 @@ export const convertToSurveyJS = (adminConfig) => {
             value: `image_${index}`,
             imageLink: url
           }));
-          question.imageFit = "cover";
+          // "contain" keeps the image's natural aspect ratio; the global CSS in
+          // src/index.css further removes fixed sizing so each image is shown
+          // at its source's natural ratio.
+          question.imageFit = "contain";
           question.multiSelect = element.multiSelect || false;
         }
         
@@ -122,9 +125,7 @@ export const convertToSurveyJS = (adminConfig) => {
           // Randomly select one image
           const randomIndex = Math.floor(Math.random() * element.imageLinks.length);
           question.imageLink = element.imageLinks[randomIndex];
-          question.imageFit = "cover";
-          question.imageHeight = "300px";
-          question.imageWidth = "100%";
+          question.imageFit = "contain";
         }
         
         return question;

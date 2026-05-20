@@ -504,33 +504,33 @@ function ImageMatrixQuestionComponent(props) {
 
   return (
     <div style={{ width: '100%' }}>
-      {/* Display Images */}
+      {/* Display Images — justified gallery, see src/lib/imagePickerLayout.js */}
       {images.length > 0 && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${Math.min(images.length, 4)}, 1fr)`,
-          gap: '16px',
-          marginBottom: '24px',
-          padding: '16px',
-          backgroundColor: '#f5f5f5',
-          borderRadius: '8px'
-        }}>
+        <div
+          className="sp-image-gallery"
+          style={{
+            marginBottom: '24px',
+            padding: '16px',
+            backgroundColor: '#f5f5f5',
+            borderRadius: '8px',
+            boxSizing: 'border-box',
+          }}
+        >
           {images.map((imageUrl, index) => (
-            <div key={index} style={{
-              aspectRatio: '1',
-              borderRadius: '8px',
-              overflow: 'hidden',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-            }}>
-              <img
-                src={imageUrl}
-                alt={`Image ${index + 1}`}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: question.imageFit || 'cover'
-                }}
-              />
+            <div
+              key={index}
+              className="sp-image-gallery__item"
+              style={{
+                borderRadius: '8px',
+                overflow: 'hidden',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                backgroundColor: '#fff',
+                lineHeight: 0,
+              }}
+            >
+              <div className="sp-image-gallery__image-container">
+                <img src={imageUrl} alt={`Image ${index + 1}`} />
+              </div>
             </div>
           ))}
         </div>

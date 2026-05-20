@@ -399,10 +399,13 @@ export default function SurveyAppClean() {
                     element.imageLink = selectedImages[0].url;
                     element.imageName = selectedImages[0].name || selectedImages[0].url;
                   } else if (element.type === 'imageboolean' || element.type === 'imagerating' || element.type === 'imagematrix') {
-                    // For imageboolean, imagerating, and imagematrix questions, store imageHtml
-                    let imagesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0;">';
+                    // For imageboolean, imagerating, and imagematrix questions, store imageHtml.
+                    // The .sp-image-gallery class is picked up by
+                    // src/lib/imagePickerLayout.js for uniform per-question
+                    // image heights at natural aspect ratio.
+                    let imagesHtml = '<div class="sp-image-gallery">';
                     selectedImages.forEach((image) => {
-                      imagesHtml += \`<img src="\${image.url}" style="max-width: 300px; height: auto; border-radius: 4px;" />\`;
+                      imagesHtml += \`<div class="sp-image-gallery__item"><div class="sp-image-gallery__image-container"><img src="\${image.url}" alt="\${image.name || ''}" /></div></div>\`;
                     });
                     imagesHtml += '</div>';
                     
@@ -417,7 +420,10 @@ export default function SurveyAppClean() {
                     element.imageNames = selectedImages.map((img) => img.name || img.url);
                   }
                   imageTracker[element.name] = selectedImages.map((img) => img.name || img.url);
-                  element.imageFit = "cover";
+                  // Default to "contain" so images keep their natural aspect ratio.
+                  if (!element.imageFit) {
+                    element.imageFit = "contain";
+                  }
                 }
               }
             }
