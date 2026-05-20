@@ -28,6 +28,7 @@ import {
   Grid,
   InputAdornment,
   Stack,
+  CircularProgress,
 } from '@mui/material';
 import {
   Folder,
@@ -107,6 +108,9 @@ export default function ProjectSidebar({
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [previewDialog, setPreviewDialog] = useState(false);
   const [saveAsTemplateDialog, setSaveAsTemplateDialog] = useState(false);
+  // Prevents double-clicks on "Create Template" from spawning multiple
+  // templates while the async R2 copy + Supabase insert is in flight.
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   
   // Form states
   const [newProjectName, setNewProjectName] = useState('');
@@ -436,6 +440,11 @@ export default function ProjectSidebar({
       console.error('No project to save as template');
       return;
     }
+    // Re-entry guard: the button is also disabled while saving, but this
+    // protects against rapid double-clicks landing before React re-renders
+    // the disabled state.
+    if (isSavingTemplate) return;
+    setIsSavingTemplate(true);
 
     try {
       console.log('📝 Creating template from project:', projectToTemplate.name);
@@ -520,6 +529,8 @@ export default function ProjectSidebar({
     } catch (error) {
       console.error('Error creating template:', error);
       setError('Error creating template: ' + error.message);
+    } finally {
+      setIsSavingTemplate(false);
     }
   };
 
@@ -1449,7 +1460,20 @@ export default function ProjectSidebar({
       </Dialog>
 
       {/* Save As Template Dialog */}
-      <Dialog open={saveAsTemplateDialog} onClose={() => setSaveAsTemplateDialog(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={saveAsTemplateDialog}
+        onClose={(_, reason) => {
+          // Don't let the user dismiss the dialog while the save is in flight —
+          // closing here doesn't cancel the underlying R2 copy / Supabase insert
+          // and would mask the in-progress state.
+          if (isSavingTemplate) return;
+          if (reason === 'backdropClick' || reason === 'escapeKeyDown') return;
+          setSaveAsTemplateDialog(false);
+        }}
+        disableEscapeKeyDown={isSavingTemplate}
+        maxWidth="md"
+        fullWidth
+      >
         <DialogTitle>Save As Template</DialogTitle>
         <DialogContent>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -1579,8 +1603,21 @@ export default function ProjectSidebar({
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setSaveAsTemplateDialog(false); setProjectToTemplate(null); setError(''); }}>Cancel</Button>
-          <Button onClick={confirmSaveAsTemplate} variant="contained" color="primary">Create Template</Button>
+          <Button
+            onClick={() => { setSaveAsTemplateDialog(false); setProjectToTemplate(null); setError(''); }}
+            disabled={isSavingTemplate}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmSaveAsTemplate}
+            variant="contained"
+            color="primary"
+            disabled={isSavingTemplate}
+            startIcon={isSavingTemplate ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {isSavingTemplate ? 'Creating Template…' : 'Create Template'}
+          </Button>
         </DialogActions>
       </Dialog>
 
