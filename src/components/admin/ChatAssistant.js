@@ -29,7 +29,8 @@ import {
   AccordionSummary,
   AccordionDetails,
   Alert,
-  ButtonGroup
+  ButtonGroup,
+  Collapse
 } from '@mui/material';
 import { ExpandMore, Save, RestartAlt } from '@mui/icons-material';
 import {
@@ -120,7 +121,26 @@ export default function ChatAssistant({
     return PROMPTS;
   });
   const [promptsModified, setPromptsModified] = React.useState(false);
-  
+
+  // The AI Assistant is a sizable panel that most users only need
+  // occasionally. We start it collapsed and let the user expand it by
+  // clicking the header. Persist the open/closed state per project so the
+  // panel stays open if they were actively chatting and switch tabs.
+  const collapsedKey = currentProject?.id
+    ? `chatAssistantCollapsed_${currentProject.id}`
+    : 'chatAssistantCollapsed_default';
+  const [collapsed, setCollapsed] = React.useState(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem(collapsedKey);
+    if (stored === 'false') return false;
+    if (stored === 'true') return true;
+    return true; // default: collapsed
+  });
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(collapsedKey, collapsed ? 'true' : 'false');
+  }, [collapsed, collapsedKey]);
+
   // States for Research Context (per project)
   const [researchContext, setResearchContext] = React.useState(() => {
     if (!currentProject?.id) {
@@ -321,18 +341,29 @@ export default function ChatAssistant({
         overflow: 'hidden'
       }}
     >
-      {/* Header */}
+      {/* Header — click anywhere on it (outside the action icons) to
+          expand / collapse the panel. */}
       <Box
+        onClick={() => setCollapsed((c) => !c)}
         sx={{
           bgcolor: 'primary.main',
           color: 'white',
           p: 2,
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          userSelect: 'none',
+          '&:hover': { bgcolor: 'primary.dark' },
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ExpandMore
+            sx={{
+              transition: 'transform 0.2s',
+              transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+            }}
+          />
           <SmartToy sx={{ fontSize: 28 }} />
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             🤖 AI Assistant
@@ -346,9 +377,16 @@ export default function ChatAssistant({
               sx={{ bgcolor: 'success.light', color: 'white' }}
             />
           )}
+          {collapsed && messages.length > 0 && (
+            <Chip
+              label={`${messages.length} message${messages.length === 1 ? '' : 's'}`}
+              size="small"
+              sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
+            />
+          )}
         </Box>
-        
-        <Box>
+
+        <Box onClick={(e) => e.stopPropagation()}>
           {messages.length > 0 && (
             <>
               <Tooltip title="Download conversation">
@@ -383,6 +421,7 @@ export default function ChatAssistant({
         </Box>
       </Box>
 
+      <Collapse in={!collapsed} timeout="auto" unmountOnExit>
       <CardContent sx={{ p: 0 }}>
         {/* Recommendations */}
         {contextEnabled && recommendations.length > 0 && (
@@ -594,6 +633,7 @@ export default function ChatAssistant({
           )}
         </Box>
       </CardContent>
+      </Collapse>
 
       {/* Settings Dialog */}
       <Dialog 

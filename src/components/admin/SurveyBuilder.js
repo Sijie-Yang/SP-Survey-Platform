@@ -34,7 +34,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Avatar
+  Avatar,
+  Collapse
 } from '@mui/material';
 import {
   ExpandMore,
@@ -200,6 +201,37 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
 export default function SurveyBuilder({ config, onChange, currentProject, onNextStep }) {
   const [selectedPage, setSelectedPage] = useState(null);
   const [selectedQuestion, setSelectedQuestion] = useState(null);
+
+  // Collapsed-state for the rarely-used sub-sections of the Survey Settings
+  // panel. We default both to collapsed and persist the user's choice per
+  // project in localStorage so the sections stay open if they were actively
+  // editing them.
+  const displaySettingsKey = currentProject?.id
+    ? `displaySettingsCollapsed_${currentProject.id}`
+    : 'displaySettingsCollapsed_default';
+  const themeCustomizationKey = currentProject?.id
+    ? `themeCustomizationCollapsed_${currentProject.id}`
+    : 'themeCustomizationCollapsed_default';
+  const [displaySettingsCollapsed, setDisplaySettingsCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem(displaySettingsKey);
+    return stored === 'false' ? false : true;
+  });
+  const [themeCustomizationCollapsed, setThemeCustomizationCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem(themeCustomizationKey);
+    return stored === 'false' ? false : true;
+  });
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(displaySettingsKey, displaySettingsCollapsed ? 'true' : 'false');
+    }
+  }, [displaySettingsCollapsed, displaySettingsKey]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(themeCustomizationKey, themeCustomizationCollapsed ? 'true' : 'false');
+    }
+  }, [themeCustomizationCollapsed, themeCustomizationKey]);
   
   // Chat Assistant states - with localStorage persistence
   const [openaiApiKey, setOpenaiApiKey] = useState(() => {
@@ -1218,6 +1250,14 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
   return (
     <Box>
+      <Typography variant="h5" sx={{ mb: 1, color: 'primary.main' }}>
+        🛠️ Survey Builder
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        Build your survey with pages, questions, and theme. Use the AI assistant
+        below to draft and refine questions, then preview the result before sharing.
+      </Typography>
+
       {/* AI Chat Assistant */}
       <ChatAssistant
         key={currentProject?.id || 'no-project'}
@@ -1332,78 +1372,120 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
             <Divider />
 
-            {/* Display Settings */}
+            {/* Display Settings — collapsed by default since most users
+                rarely need to toggle question numbers / progress bar. */}
             <Box>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-                ⚙️ Display Settings
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={config.showQuestionNumbers !== 'off' && config.showQuestionNumbers !== false}
-                      onChange={(e) => handleBasicInfoChange('showQuestionNumbers', e.target.checked)}
-                    />
-                  }
-                  label="Show Question Numbers"
+              <Box
+                onClick={() => setDisplaySettingsCollapsed((c) => !c)}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  mb: displaySettingsCollapsed ? 0 : 2,
+                  '&:hover': { color: 'primary.main' },
+                }}
+              >
+                <ExpandMore
+                  sx={{
+                    transition: 'transform 0.2s',
+                    transform: displaySettingsCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                  }}
                 />
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={config.showProgressBar !== 'off' && config.showProgressBar !== false}
-                      onChange={(e) => handleBasicInfoChange('showProgressBar', e.target.checked)}
-                    />
-                  }
-                  label="Show Progress Bar"
-                />
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  ⚙️ Display Settings
+                </Typography>
               </Box>
+              <Collapse in={!displaySettingsCollapsed} timeout="auto" unmountOnExit>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={config.showQuestionNumbers !== 'off' && config.showQuestionNumbers !== false}
+                        onChange={(e) => handleBasicInfoChange('showQuestionNumbers', e.target.checked)}
+                      />
+                    }
+                    label="Show Question Numbers"
+                  />
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={config.showProgressBar !== 'off' && config.showProgressBar !== false}
+                        onChange={(e) => handleBasicInfoChange('showProgressBar', e.target.checked)}
+                      />
+                    }
+                    label="Show Progress Bar"
+                  />
+                </Box>
+              </Collapse>
             </Box>
 
             <Divider />
 
-            {/* Theme Customization */}
+            {/* Theme Customization — collapsed by default. The action
+                buttons (Import / Export / Reset) only matter once the
+                section is expanded, so we move them inside the Collapse. */}
             <Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box
+                onClick={() => setThemeCustomizationCollapsed((c) => !c)}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  mb: themeCustomizationCollapsed ? 0 : 2,
+                  '&:hover': { color: 'primary.main' },
+                }}
+              >
+                <ExpandMore
+                  sx={{
+                    transition: 'transform 0.2s',
+                    transform: themeCustomizationCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                  }}
+                />
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                   🎨 Theme Customization
                 </Typography>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleImportTheme}
-                    style={{ display: 'none' }}
-                    id="theme-import-input"
-                  />
-                  <label htmlFor="theme-import-input">
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      component="span"
-                      startIcon={<Download sx={{ transform: 'rotate(180deg)' }} />}
-                    >
-                      Import
-                    </Button>
-                  </label>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={handleExportTheme}
-                    startIcon={<Download />}
-                  >
-                    Export
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    onClick={handleThemeReset}
-                    startIcon={<Clear />}
-                  >
-                    Reset
-                  </Button>
-                </Box>
               </Box>
-              
+              <Collapse in={!themeCustomizationCollapsed} timeout="auto" unmountOnExit>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 2 }}>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportTheme}
+                  style={{ display: 'none' }}
+                  id="theme-import-input"
+                />
+                <label htmlFor="theme-import-input">
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    component="span"
+                    startIcon={<Download sx={{ transform: 'rotate(180deg)' }} />}
+                  >
+                    Import
+                  </Button>
+                </label>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleExportTheme}
+                  startIcon={<Download />}
+                >
+                  Export
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleThemeReset}
+                  startIcon={<Clear />}
+                >
+                  Reset
+                </Button>
+              </Box>
+
               {/* Theme Presets */}
               <Box sx={{ mb: 3 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600, display: 'block', mb: 1.5, color: 'text.secondary' }}>
@@ -1846,6 +1928,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   </Paper>
                 </Box>
               </Box>
+              </Collapse>
             </Box>
           </Box>
         </AccordionDetails>

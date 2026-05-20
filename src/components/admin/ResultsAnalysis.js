@@ -1051,16 +1051,26 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
     <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-            Step 5 – Results Analysis
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 2,
+          flexWrap: 'wrap',
+          mb: 3,
+        }}
+      >
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="h5" sx={{ mb: 1, color: 'primary.main' }}>
+            📊 Results Analysis
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Analyze survey responses per question for project: <strong>{currentProject?.name}</strong>
+            Analyze survey responses per question for project:{' '}
+            <strong>{currentProject?.name}</strong>.
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
           <Tooltip title="Refresh responses">
             <IconButton onClick={fetchResponses} disabled={loading} color="primary">
               <Refresh />
