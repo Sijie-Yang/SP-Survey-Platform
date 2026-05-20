@@ -120,6 +120,14 @@ export default function ProjectSidebar({
     current: 0,
     total: 0,
   });
+  // Same pattern for the "Delete Project" flow — listing + deleting R2
+  // images can take several seconds for image-heavy projects.
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState({
+    label: '',
+    current: 0,
+    total: 0,
+  });
   
   // Form states
   const [newProjectName, setNewProjectName] = useState('');
@@ -686,14 +694,20 @@ export default function ProjectSidebar({
 
   const confirmDeleteProject = async () => {
     if (!deletingProject) return;
+    // Re-entry guard mirrors the create-template flow: the Delete button
+    // is also disabled while running, but this catches rapid double-clicks
+    // landing before React re-renders the disabled state.
+    if (isDeletingProject) return;
+    setIsDeletingProject(true);
+    setDeleteProgress({ label: 'Preparing…', current: 0, total: 0 });
 
     try {
-      // Delete R2 images for this project
+      // ── R2 image cleanup ──────────────────────────────────────────────
       if (isR2Configured()) {
         const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
         const keysToDelete = new Set();
 
-        // 1. Collect keys from preloadedImages URLs
+        // 1. Keys derived from the in-memory preloadedImages URLs
         if (deletingProject.preloadedImages?.length > 0 && r2PublicUrl) {
           for (const img of deletingProject.preloadedImages) {
             if (img.url && img.url.startsWith(r2PublicUrl + '/')) {
@@ -702,23 +716,46 @@ export default function ProjectSidebar({
           }
         }
 
-        // 2. Also list the direct-upload folder to catch any orphaned files
+        // 2. Whatever lives under the project's R2 prefix (catches files
+        //    uploaded outside of project.preloadedImages — HF preload, etc.)
+        setDeleteProgress({ label: 'Listing project images…', current: 0, total: 0 });
         const prefix = `${currentUserId || 'anonymous'}/${deletingProject.id}/`;
         const listResult = await listImagesFromR2(prefix);
         if (listResult.success) {
           for (const img of listResult.images) keysToDelete.add(img.key);
         }
 
-        if (keysToDelete.size > 0) {
-          await deleteImagesFromR2([...keysToDelete]);
-          console.log(`🗑️ Deleted ${keysToDelete.size} R2 image(s) for project ${deletingProject.id}`);
+        // Batch the delete so the bar advances smoothly instead of waiting
+        // for the worker to chew through hundreds of keys in one request.
+        const keys = [...keysToDelete];
+        const total = keys.length;
+        if (total > 0) {
+          setDeleteProgress({
+            label: `Deleting images from R2… (0/${total})`,
+            current: 0,
+            total,
+          });
+          const BATCH_SIZE = 50;
+          for (let i = 0; i < total; i += BATCH_SIZE) {
+            const batch = keys.slice(i, i + BATCH_SIZE);
+            await deleteImagesFromR2(batch);
+            const done = Math.min(i + batch.length, total);
+            setDeleteProgress({
+              label: `Deleting images from R2… (${done}/${total})`,
+              current: done,
+              total,
+            });
+          }
+          console.log(`🗑️ Deleted ${total} R2 image(s) for project ${deletingProject.id}`);
         }
       }
 
+      // ── Project record cleanup ────────────────────────────────────────
       // Platform mode (Supabase): the row is deleted via deleteProject ↓.
       // Self-hosted mode: also nuke the JSON file on the Express server.
       // The old code called deleteProjectFile unconditionally, which hard-
       // coded http://localhost:3001 and broke deletion in production.
+      setDeleteProgress({ label: 'Removing project record…', current: 0, total: 0 });
       if (!supabase) {
         const fileResult = await deleteProjectFile(deletingProject.id);
         if (!fileResult.success) throw new Error(fileResult.error);
@@ -728,6 +765,7 @@ export default function ProjectSidebar({
       if (!result.success) throw new Error(result.error);
 
       // Reload projects to update panel
+      setDeleteProgress({ label: 'Refreshing project list…', current: 0, total: 0 });
       await loadProjects();
 
       // If we deleted the active project, clear selection
@@ -738,13 +776,15 @@ export default function ProjectSidebar({
 
       console.log('✅ Project deleted and panel refreshed');
       setError('');
+      setDeleteDialog(false);
+      setDeletingProject(null);
     } catch (error) {
       console.error('Error deleting project:', error);
       setError('Error deleting project: ' + error.message);
+    } finally {
+      setIsDeletingProject(false);
+      setDeleteProgress({ label: '', current: 0, total: 0 });
     }
-    
-    setDeleteDialog(false);
-    setDeletingProject(null);
   };
 
   // System template IDs (built-in templates that cannot be deleted)
@@ -1699,17 +1739,61 @@ export default function ProjectSidebar({
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialog} onClose={() => setDeleteDialog(false)}>
+      <Dialog
+        open={deleteDialog}
+        onClose={(_, reason) => {
+          // Don't let the user dismiss the dialog while the delete is in
+          // flight — the underlying R2 / Supabase calls don't get cancelled
+          // and the in-progress state would be lost from view.
+          if (isDeletingProject) return;
+          if (reason === 'backdropClick' || reason === 'escapeKeyDown') return;
+          setDeleteDialog(false);
+        }}
+        disableEscapeKeyDown={isDeletingProject}
+      >
         <DialogTitle>Delete Project</DialogTitle>
         <DialogContent>
+          {error && isDeletingProject === false && (
+            <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
+          )}
           <Typography>
             Are you sure you want to delete "{deletingProject?.name}"? This action cannot be undone.
           </Typography>
+
+          {isDeletingProject && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {deleteProgress.label || 'Working…'}
+                </Typography>
+                {deleteProgress.total > 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    {deleteProgress.current} / {deleteProgress.total}
+                  </Typography>
+                )}
+              </Box>
+              <LinearProgress
+                variant={deleteProgress.total > 0 ? 'determinate' : 'indeterminate'}
+                value={deleteProgress.total > 0
+                  ? (deleteProgress.current / deleteProgress.total) * 100
+                  : undefined}
+                sx={{ height: 6, borderRadius: 3 }}
+              />
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialog(false)}>Cancel</Button>
-          <Button onClick={confirmDeleteProject} color="error" variant="contained">
-            Delete
+          <Button onClick={() => setDeleteDialog(false)} disabled={isDeletingProject}>
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmDeleteProject}
+            color="error"
+            variant="contained"
+            disabled={isDeletingProject}
+            startIcon={isDeletingProject ? <CircularProgress size={16} color="inherit" /> : null}
+          >
+            {isDeletingProject ? 'Deleting…' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>
