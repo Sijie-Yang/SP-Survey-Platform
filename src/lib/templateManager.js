@@ -141,6 +141,36 @@ export async function listTemplates(userId) {
 }
 
 /**
+ * Fetch a single template by id. Used by the Image Dataset page to
+ * decide whether to show an "Import Template Images" button when a
+ * project was created from a template (project.template_id is set).
+ *
+ * Returns null when Supabase isn't configured, the id is missing, the
+ * row doesn't exist, or RLS hides it from the caller — callers should
+ * treat any of those the same way (just don't show the button).
+ */
+export async function getTemplateById(id) {
+  if (!supabase || !id) return null;
+  try {
+    const { data, error } = await supabase
+      .from('templates')
+      .select(
+        'id, name, description, author, year, category, tags, paper_url, ' +
+        'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
+        'is_approved, show_on_landing, preloaded_images, preloaded_at, ' +
+        'preloaded_source, created_at, updated_at'
+      )
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data) return null;
+    return rowToTemplate(data);
+  } catch (err) {
+    console.error('getTemplateById exception:', err);
+    return null;
+  }
+}
+
+/**
  * Admin-only: list ALL templates without any filter.
  * Requires the caller's user_id to exist in the `admins` table (RLS).
  */

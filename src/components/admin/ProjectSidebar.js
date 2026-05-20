@@ -126,14 +126,10 @@ export default function ProjectSidebar({
     current: 0,
     total: 0,
   });
-  // And again for "Create Project from Template" — copying the template's
-  // R2 image folder into the new project's prefix is the slow step.
+  // "Create Project from Template" is now a fast metadata-only operation
+  // — image copying is deferred to an explicit user action on the Image
+  // Dataset page, so we only need a simple disabled/spinner flag here.
   const [isCreatingFromTemplate, setIsCreatingFromTemplate] = useState(false);
-  const [createFromTemplateProgress, setCreateFromTemplateProgress] = useState({
-    label: '',
-    current: 0,
-    total: 0,
-  });
   
   // Form states
   const [newProjectName, setNewProjectName] = useState('');
@@ -256,18 +252,17 @@ export default function ProjectSidebar({
       return;
     }
 
-    // Re-entry guard mirrors the other long-running flows in this file.
+    // Re-entry guard against rapid double-clicks on Create Project.
     if (isCreatingFromTemplate) return;
     setIsCreatingFromTemplate(true);
-    setCreateFromTemplateProgress({ label: 'Creating project record…', current: 0, total: 0 });
 
     try {
       console.log('🎯 Creating project from template:', selectedTemplate.name);
 
-      // Step 1: create the project row with no images. We need its id
-      // before we can copy template images into the per-project R2 prefix,
-      // and the row already needs to exist when we patch its preloadedImages
-      // afterwards.
+      // The project is created with NO images — copying the template's
+      // R2 folder is deferred to an explicit "Import Template Images"
+      // action on the Image Dataset page so this flow stays fast and
+      // doesn't burn storage for users who never use the images.
       const projectData = {
         name: newProjectName.trim(),
         description: `Based on ${selectedTemplate.name}`,
@@ -284,70 +279,11 @@ export default function ProjectSidebar({
       const createdProject = createResult.project;
       const finalConfig = createResult.surveyConfig;
 
-      // Step 2: copy the template's R2 image folder into the project's
-      // own prefix so the project owns its images. We fall back to URL
-      // inheritance when R2 isn't configured (dev without R2 creds).
-      let projectImages = [];
-      const templateHasImages = Array.isArray(selectedTemplate.preloadedImages)
-        && selectedTemplate.preloadedImages.length > 0;
-      if (templateHasImages) {
-        if (isR2Configured()) {
-          setCreateFromTemplateProgress({ label: 'Listing template images…', current: 0, total: 0 });
-          try {
-            projectImages = await copyTemplateImagesIntoProject(
-              selectedTemplate,
-              createdProject.id,
-              ({ current, total }) => {
-                setCreateFromTemplateProgress({
-                  label: total > 0
-                    ? `Copying template images to project… (${current}/${total})`
-                    : 'No images to copy',
-                  current,
-                  total,
-                });
-              }
-            );
-            if (projectImages.length > 0) {
-              console.log(`☁️  Copied ${projectImages.length} template image(s) into project ${createdProject.id}`);
-            }
-          } catch (copyErr) {
-            // Don't fail the whole project creation — fall back to URL
-            // inheritance so the project at least previews.
-            console.warn('Template→project image copy failed, falling back to inherited URLs:', copyErr);
-            projectImages = selectedTemplate.preloadedImages.map(({ url, name }) => ({ url, name }));
-          }
-        } else {
-          projectImages = selectedTemplate.preloadedImages.map(({ url, name }) => ({ url, name }));
-        }
-      }
-
-      // Step 3: update the project record so preloadedImages points at
-      // the project-owned URLs we just produced. Skipped when there were
-      // no images to copy in the first place.
-      if (projectImages.length > 0) {
-        setCreateFromTemplateProgress({ label: 'Saving project images…', current: 0, total: 0 });
-        const updateResult = await updateProject(createdProject.id, {
-          preloadedImages: projectImages,
-          preloadedAt: new Date().toISOString(),
-          preloadedSource: 'r2',
-        });
-        if (!updateResult.success) {
-          console.warn('Could not persist preloaded images after copy:', updateResult.error);
-        } else {
-          createdProject.preloadedImages = projectImages;
-          createdProject.preloadedAt = new Date().toISOString();
-          createdProject.preloadedSource = 'r2';
-        }
-      }
-
-      // Step 4: refresh sidebar + activate the new project.
-      setCreateFromTemplateProgress({ label: 'Refreshing project list…', current: 0, total: 0 });
       await loadProjects();
       setActiveProject(createdProject.id);
       setActiveProjectId(createdProject.id);
       onProjectSelect(createdProject, finalConfig);
 
-      // Close dialog and clear state on success
       setTemplateDialog(false);
       setNewProjectName('');
       setSelectedTemplate(null);
@@ -358,7 +294,6 @@ export default function ProjectSidebar({
       setError('Error creating project from template: ' + error.message);
     } finally {
       setIsCreatingFromTemplate(false);
-      setCreateFromTemplateProgress({ label: '', current: 0, total: 0 });
     }
   };
 
@@ -470,54 +405,6 @@ export default function ProjectSidebar({
     // Open confirmation dialog
     setSaveAsTemplateDialog(true);
     handleMenuClose();
-  };
-
-  // Mirror of promoteProjectImagesToTemplate, going the other direction:
-  // copy a template's R2 image folder into a freshly-created project's
-  // prefix so the project owns its images and the template can be edited
-  // or deleted later without breaking projects derived from it. Returns
-  // the new preloadedImages array pointing at project-owned URLs.
-  const copyTemplateImagesIntoProject = async (template, projectId, onProgress) => {
-    if (!isR2Configured()) return [];
-    const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
-    const userId = currentUserId || 'anonymous';
-    const templatePrefix = `templates/${template.id}/`;
-    const projectPrefix = `${userId}/${projectId}/`;
-
-    // Source of truth is whatever's actually in R2 under the template
-    // prefix — this matches the carryover logic in the project→template
-    // direction and catches files added outside template.preloadedImages.
-    const listed = await listImagesFromR2(templatePrefix);
-    if (!listed.success || listed.images.length === 0) {
-      onProgress?.({ current: 0, total: 0 });
-      return [];
-    }
-
-    const allCopies = listed.images.map((img) => ({
-      from: img.key,
-      to: `${projectPrefix}${img.name}`,
-    }));
-    const total = allCopies.length;
-    onProgress?.({ current: 0, total });
-
-    const BATCH_SIZE = 10;
-    const copied = [];
-    const errors = [];
-    for (let i = 0; i < allCopies.length; i += BATCH_SIZE) {
-      const batch = allCopies.slice(i, i + BATCH_SIZE);
-      const result = await copyImagesInR2(batch);
-      if (result.copied?.length) copied.push(...result.copied);
-      if (result.errors?.length) errors.push(...result.errors);
-      onProgress?.({ current: Math.min(i + batch.length, total), total });
-    }
-
-    if (errors.length) {
-      console.warn(`⚠️ ${errors.length} image(s) failed to copy into project:`, errors);
-    }
-    return copied.map(({ to, url }) => ({
-      url: url || (r2PublicUrl ? `${r2PublicUrl}/${to}` : ''),
-      name: to.split('/').pop(),
-    }));
   };
 
   // Copy a project's R2 image folder over to a template prefix. Returns the
@@ -1490,8 +1377,6 @@ export default function ProjectSidebar({
       <Dialog
         open={templateDialog}
         onClose={(_, reason) => {
-          // Block dismissal while the R2 copy / project update is in
-          // flight so the in-progress state remains visible.
           if (isCreatingFromTemplate) return;
           if (reason === 'backdropClick' || reason === 'escapeKeyDown') return;
           setTemplateDialog(false);
@@ -1512,6 +1397,12 @@ export default function ProjectSidebar({
               <Typography variant="body2" color="text.secondary">
                 {selectedTemplate.description}
               </Typography>
+              {Array.isArray(selectedTemplate.preloadedImages) && selectedTemplate.preloadedImages.length > 0 && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                  This template ships with {selectedTemplate.preloadedImages.length} image{selectedTemplate.preloadedImages.length === 1 ? '' : 's'}.
+                  You can import them into your project later from the Image Dataset step.
+                </Typography>
+              )}
             </Box>
           )}
           <TextField
@@ -1524,28 +1415,6 @@ export default function ProjectSidebar({
             onChange={(e) => setNewProjectName(e.target.value)}
             disabled={isCreatingFromTemplate}
           />
-
-          {isCreatingFromTemplate && (
-            <Box sx={{ mt: 3, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                  {createFromTemplateProgress.label || 'Working…'}
-                </Typography>
-                {createFromTemplateProgress.total > 0 && (
-                  <Typography variant="body2" color="text.secondary">
-                    {createFromTemplateProgress.current} / {createFromTemplateProgress.total}
-                  </Typography>
-                )}
-              </Box>
-              <LinearProgress
-                variant={createFromTemplateProgress.total > 0 ? 'determinate' : 'indeterminate'}
-                value={createFromTemplateProgress.total > 0
-                  ? (createFromTemplateProgress.current / createFromTemplateProgress.total) * 100
-                  : undefined}
-                sx={{ height: 6, borderRadius: 3 }}
-              />
-            </Box>
-          )}
         </DialogContent>
         <DialogActions>
           <Button

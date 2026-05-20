@@ -24,13 +24,15 @@ import {
   Delete,
   ExpandMore,
   CloudUpload,
+  ContentCopy,
 } from '@mui/icons-material';
 import {
   testHuggingFaceConnection,
   getImagesFromHuggingFace,
   getImageCountFromDataset,
 } from '../../lib/huggingface';
-import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2 } from '../../lib/r2';
+import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
+import { getTemplateById } from '../../lib/templateManager';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -53,6 +55,14 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   // R2 sync state
   const [r2Syncing, setR2Syncing] = useState(false);
+
+  // "Import Template Images" — populated when this project was created
+  // from a template (project.templateId is set) and that template has
+  // images in its R2 folder. Drives the optional importer UI below.
+  const [sourceTemplate, setSourceTemplate] = useState(null);
+  const [templateImportStatus, setTemplateImportStatus] = useState({
+    loading: false, progress: 0, total: 0, error: null, success: null,
+  });
 
   // On mount / project change: sync actual image count from R2
   useEffect(() => {
@@ -90,6 +100,23 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       restoreScrollRef.current = false;
     }
   });
+
+  // Look up the source template (if this project was created from one)
+  // so we can show an "Import Template Images" button when that template
+  // ships with images. Done as a separate, idempotent effect so it
+  // re-runs on project switch but not on every state change.
+  useEffect(() => {
+    let cancelled = false;
+    setSourceTemplate(null);
+    if (!currentProject?.templateId) return undefined;
+    getTemplateById(currentProject.templateId).then((tpl) => {
+      if (cancelled) return;
+      if (tpl && Array.isArray(tpl.preloadedImages) && tpl.preloadedImages.length > 0) {
+        setSourceTemplate(tpl);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [currentProject?.templateId]);
 
   // Sync hfConfig from project
   useEffect(() => {
@@ -132,6 +159,105 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       }
     } catch (e) {
       setHfStatus({ loading: false, connected: false, error: e.message, datasetInfo: null });
+    }
+  };
+
+  // ── Import images from source template ───────────────────────────────────
+
+  const handleImportFromTemplate = async () => {
+    if (!sourceTemplate || !currentProject?.id) return;
+    if (!isR2Configured()) {
+      setTemplateImportStatus(prev => ({
+        ...prev,
+        error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.',
+      }));
+      return;
+    }
+    if (templateImportStatus.loading) return;
+
+    scrollRef.current = window.scrollY;
+    restoreScrollRef.current = true;
+
+    const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
+    const userId = user?.id || 'anonymous';
+    const templatePrefix = `templates/${sourceTemplate.id}/`;
+    const projectPrefix = `${userId}/${currentProject.id}/`;
+
+    setTemplateImportStatus({ loading: true, progress: 0, total: 0, error: null, success: null });
+
+    try {
+      // List what's actually in R2 under the template prefix — this is
+      // the same source-of-truth strategy used by the project→template
+      // promotion in ProjectSidebar.
+      const listed = await listImagesFromR2(templatePrefix);
+      if (!listed.success) {
+        throw new Error(listed.error || 'Failed to list template images');
+      }
+      if (listed.images.length === 0) {
+        setTemplateImportStatus({
+          loading: false, progress: 0, total: 0, error: null,
+          success: 'Template has no images to import.',
+        });
+        return;
+      }
+
+      // Don't re-copy files we already have in the project prefix.
+      const existing = await listImagesFromR2(projectPrefix);
+      const existingNames = new Set((existing.images || []).map((i) => i.name));
+      const todo = listed.images
+        .filter((img) => !existingNames.has(img.name))
+        .map((img) => ({ from: img.key, to: `${projectPrefix}${img.name}` }));
+
+      const total = todo.length;
+      setTemplateImportStatus(prev => ({ ...prev, total, progress: 0 }));
+
+      const copiedImages = [];
+      const errors = [];
+      if (total > 0) {
+        const BATCH_SIZE = 10;
+        for (let i = 0; i < todo.length; i += BATCH_SIZE) {
+          const batch = todo.slice(i, i + BATCH_SIZE);
+          const res = await copyImagesInR2(batch);
+          if (res.copied?.length) copiedImages.push(...res.copied);
+          if (res.errors?.length) errors.push(...res.errors);
+          setTemplateImportStatus(prev => ({
+            ...prev,
+            progress: Math.min(i + batch.length, total),
+          }));
+        }
+      }
+
+      // Build the final preloadedImages list = pre-existing project files
+      // (kept as-is) + everything we just copied in. Then re-list once
+      // from R2 to make sure the URLs we surface to the project record
+      // come from the canonical R2 source rather than the copy response.
+      const finalListing = await listImagesFromR2(projectPrefix);
+      const finalImages = (finalListing.success ? finalListing.images : [])
+        .map((img) => ({
+          url: img.url || (r2PublicUrl ? `${r2PublicUrl}/${img.key}` : ''),
+          name: img.name,
+        }));
+
+      onProjectUpdate({
+        ...currentProject,
+        preloadedImages: finalImages,
+        preloadedSource: 'r2',
+        preloadedAt: new Date().toISOString(),
+      });
+
+      const newCount = copiedImages.length;
+      const skipCount = listed.images.length - todo.length;
+      setTemplateImportStatus({
+        loading: false,
+        progress: total,
+        total,
+        error: errors.length ? `${errors.length} file(s) failed to copy.` : null,
+        success: `Imported ${newCount} image${newCount === 1 ? '' : 's'} from template${skipCount > 0 ? ` (${skipCount} already in project)` : ''}.`,
+      });
+    } catch (err) {
+      setTemplateImportStatus({
+        loading: false, progress: 0, total: 0, error: err.message, success: null,
+      });
     }
   };
 
@@ -473,6 +599,60 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           <Chip icon={<Warning />} label="No images uploaded yet" color="default" variant="outlined" />
         )}
       </Box>
+
+      {/* ── Import from source template (only when applicable) ── */}
+      {sourceTemplate && (
+        <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'secondary.light' }}>
+          <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ContentCopy fontSize="small" color="secondary" />
+            Import Template Images
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            This project was created from <strong>{sourceTemplate.name}</strong>,
+            which ships with {sourceTemplate.preloadedImages?.length || 0} image
+            {sourceTemplate.preloadedImages?.length === 1 ? '' : 's'}.
+            Copy them into this project so the survey can run out of the box —
+            existing files in your project folder are kept unchanged.
+          </Typography>
+
+          {templateImportStatus.loading && (
+            <Box sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="body2">
+                  {templateImportStatus.total > 0
+                    ? `Copying template images… (${templateImportStatus.progress}/${templateImportStatus.total})`
+                    : 'Listing template images…'}
+                </Typography>
+                {templateImportStatus.total > 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    {templateImportStatus.progress} / {templateImportStatus.total}
+                  </Typography>
+                )}
+              </Box>
+              <LinearProgress
+                variant={templateImportStatus.total > 0 ? 'determinate' : 'indeterminate'}
+                value={templateImportStatus.total > 0
+                  ? (templateImportStatus.progress / templateImportStatus.total) * 100
+                  : undefined}
+                sx={{ height: 8, borderRadius: 4 }}
+              />
+            </Box>
+          )}
+
+          {templateImportStatus.success && <Alert severity="success" sx={{ mb: 2 }}>{templateImportStatus.success}</Alert>}
+          {templateImportStatus.error && <Alert severity="error" sx={{ mb: 2 }}>{templateImportStatus.error}</Alert>}
+
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={handleImportFromTemplate}
+            disabled={templateImportStatus.loading || !isR2Configured()}
+            startIcon={templateImportStatus.loading ? <CircularProgress size={18} color="inherit" /> : <ContentCopy />}
+          >
+            {templateImportStatus.loading ? 'Importing…' : 'Import Images from Template'}
+          </Button>
+        </Box>
+      )}
 
       {/* ── Direct Upload ── */}
       <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'primary.light' }}>
