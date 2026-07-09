@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -25,11 +25,14 @@ import {
   ListItemSecondaryAction,
   Checkbox,
   CircularProgress,
-  Alert
+  Alert,
+  InputAdornment,
+  Tooltip,
 } from '@mui/material';
 import {
   Add,
-  Delete
+  Delete,
+  Search,
 } from '@mui/icons-material';
 import { listSkillsForBuilder } from '../../lib/skillManager';
 import { filterPoolForQuestion, getMediaPoolStatus } from '../../lib/surveyMediaInjection';
@@ -48,6 +51,141 @@ import {
 } from '../../lib/questionTypeConstraints';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
+
+function mediaDisplayName(image) {
+  if (!image) return '(unnamed)';
+  const raw = image.name || image.url || '';
+  try {
+    const base = String(raw).split('?')[0].split('/').pop();
+    return decodeURIComponent(base || raw);
+  } catch {
+    return String(raw).split('?')[0].split('/').pop() || raw;
+  }
+}
+
+/** Curated picker: searchable by filename, shows full file names. */
+function CuratedMediaPicker({
+  availableImages,
+  selectedImages,
+  maxCount,
+  loading,
+  error,
+  onToggle,
+  title = 'Select files',
+}) {
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return availableImages;
+    return availableImages.filter((img) => mediaDisplayName(img).toLowerCase().includes(q));
+  }, [availableImages, query]);
+
+  return (
+    <Box sx={{ mt: 1 }}>
+      <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+        {title} ({selectedImages.length}/{maxCount} selected)
+      </Typography>
+      <TextField
+        fullWidth
+        size="small"
+        variant="outlined"
+        placeholder="Search by file name…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <Search fontSize="small" color="action" />
+            </InputAdornment>
+          ),
+        }}
+        sx={{ mb: 1.5, bgcolor: 'white', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+      />
+      {error && (
+        <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>
+      )}
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+          <CircularProgress />
+        </Box>
+      ) : filtered.length === 0 ? (
+        <Alert severity="info" sx={{ py: 0.5 }}>
+          {availableImages.length === 0
+            ? 'No media available to pick from.'
+            : `No file names match “${query.trim()}”.`}
+        </Alert>
+      ) : (
+        <>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            Showing {filtered.length} of {availableImages.length} file{availableImages.length === 1 ? '' : 's'}
+          </Typography>
+          <Grid container spacing={1.5} sx={{ maxHeight: 420, overflow: 'auto' }}>
+            {filtered.map((image) => {
+              const name = mediaDisplayName(image);
+              const checked = selectedImages.includes(image.url);
+              const atCap = !checked && selectedImages.length >= maxCount;
+              return (
+                <Grid item xs={12} sm={6} md={4} key={image.url}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'stretch',
+                      opacity: atCap ? 0.55 : 1,
+                      borderColor: checked ? 'primary.main' : 'divider',
+                      bgcolor: checked ? 'primary.50' : 'background.paper',
+                    }}
+                  >
+                    <Box
+                      component="img"
+                      src={image.url}
+                      alt={name}
+                      sx={{
+                        width: 72,
+                        height: 72,
+                        objectFit: 'cover',
+                        flexShrink: 0,
+                        bgcolor: 'grey.100',
+                        cursor: atCap ? 'default' : 'pointer',
+                      }}
+                      onClick={() => !atCap && onToggle(image.url, !checked)}
+                    />
+                    <Box sx={{ flex: 1, minWidth: 0, p: 1, display: 'flex', alignItems: 'flex-start', gap: 0.5 }}>
+                      <Tooltip title={name} placement="top" enterDelay={400}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            flex: 1,
+                            minWidth: 0,
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                            fontSize: '0.75rem',
+                            lineHeight: 1.35,
+                            wordBreak: 'break-all',
+                            cursor: atCap ? 'default' : 'pointer',
+                          }}
+                          onClick={() => !atCap && onToggle(image.url, !checked)}
+                        >
+                          {name}
+                        </Typography>
+                      </Tooltip>
+                      <Checkbox
+                        size="small"
+                        checked={checked}
+                        disabled={atCap}
+                        onChange={(e) => onToggle(image.url, e.target.checked)}
+                        sx={{ p: 0.25, mt: -0.25 }}
+                      />
+                    </Box>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </>
+      )}
+    </Box>
+  );
+}
 
 /** Random vs curated sampling — wording matches project media pool. */
 function SamplingModeSelect({ question, onChange }) {
@@ -1180,57 +1318,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                     <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
 
-                    {/* Manual Image Choice Interface */}
-                    {editedQuestion.imageSelectionMode === 'huggingface_manual' && (
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                          Select Images ({selectedImages.length}/{editedQuestion.imageCount || 4} selected)
-                        </Typography>
-                        
-                        {imageError && (
-                          <Alert severity="error" sx={{ mb: 2 }}>
-                            {imageError}
-                          </Alert>
-                        )}
-                        
-                        {loadingImages ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                            <CircularProgress />
-                          </Box>
-                        ) : (
-                          <Grid container spacing={2} sx={{ maxHeight: 400, overflow: 'auto' }}>
-                            {availableImages.map((image) => (
-                              <Grid item xs={6} sm={4} md={3} key={image.url}>
-                                <Card sx={{ position: 'relative' }}>
-                                  <CardMedia
-                                    component="img"
-                                    height="120"
-                                    image={image.url}
-                                    alt={image.name}
-                                    sx={{ objectFit: 'cover' }}
-                                  />
-                                  <CardActions sx={{ position: 'absolute', top: 0, right: 0, p: 0.5 }}>
-                                    <Checkbox
-                                      checked={selectedImages.includes(image.url)}
-                                      onChange={(e) => handleImageSelection(image.url, e.target.checked)}
-                                      disabled={!selectedImages.includes(image.url) && selectedImages.length >= (editedQuestion.imageCount || 4)}
-                                      sx={{ 
-                                        bgcolor: 'rgba(255,255,255,0.8)',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.9)' }
-                                      }}
-                                    />
-                                  </CardActions>
-                                  <Box sx={{ p: 1, bgcolor: 'rgba(0,0,0,0.7)', color: 'white' }}>
-                                    <Typography variant="caption" noWrap>
-                                      {image.name}
-                                    </Typography>
-                                  </Box>
-                                </Card>
-                              </Grid>
-                            ))}
-                          </Grid>
-                        )}
-                      </Box>
+                    {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
+                      <CuratedMediaPicker
+                        availableImages={availableImages}
+                        selectedImages={selectedImages}
+                        maxCount={editedQuestion.imageCount || 4}
+                        loading={loadingImages}
+                        error={imageError}
+                        onToggle={handleImageSelection}
+                        title="Select Images"
+                      />
                     )}
                   </>
                 )}
@@ -1245,57 +1342,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
-                    {/* Manual Image Selection Interface for Ranking */}
                     {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                          Select Images for Ranking ({selectedImages.length}/{editedQuestion.imageCount || 4} selected)
-                        </Typography>
-                        
-                        {imageError && (
-                          <Alert severity="error" sx={{ mb: 2 }}>
-                            {imageError}
-                          </Alert>
-                        )}
-                        
-                        {loadingImages ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                            <CircularProgress />
-                          </Box>
-                        ) : (
-                          <Grid container spacing={2} sx={{ maxHeight: 400, overflow: 'auto' }}>
-                            {availableImages.map((image) => (
-                              <Grid item xs={6} sm={4} md={3} key={image.url}>
-                                <Card sx={{ position: 'relative' }}>
-                                  <CardMedia
-                                    component="img"
-                                    height="120"
-                                    image={image.url}
-                                    alt={image.name}
-                                    sx={{ objectFit: 'cover' }}
-                                  />
-                                  <CardActions sx={{ position: 'absolute', top: 0, right: 0, p: 0.5 }}>
-                                    <Checkbox
-                                      checked={selectedImages.includes(image.url)}
-                                      onChange={(e) => handleImageSelection(image.url, e.target.checked)}
-                                      disabled={!selectedImages.includes(image.url) && selectedImages.length >= (editedQuestion.imageCount || 4)}
-                                      sx={{ 
-                                        bgcolor: 'rgba(255,255,255,0.8)',
-                                        '&:hover': { bgcolor: 'rgba(255,255,255,0.9)' }
-                                      }}
-                                    />
-                                  </CardActions>
-                                  <Box sx={{ p: 1, bgcolor: 'rgba(0,0,0,0.7)', color: 'white' }}>
-                                    <Typography variant="caption" noWrap>
-                                      {image.name}
-                                    </Typography>
-                                  </Box>
-                                </Card>
-                              </Grid>
-                            ))}
-                          </Grid>
-                        )}
-                      </Box>
+                      <CuratedMediaPicker
+                        availableImages={availableImages}
+                        selectedImages={selectedImages}
+                        maxCount={editedQuestion.imageCount || 4}
+                        loading={loadingImages}
+                        error={imageError}
+                        onToggle={handleImageSelection}
+                        title="Select Images for Ranking"
+                      />
                     )}
                   </>
                 )}
@@ -1356,54 +1412,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       </>
                     )}
 
-                    {/* Manual Image Selection */}
                     {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                          Select Images ({selectedImages.length}/{editedQuestion.imageCount || 1} selected)
-                        </Typography>
-                        
-                        {imageError && (
-                          <Alert severity="error" sx={{ mb: 2 }}>
-                            {imageError}
-                          </Alert>
-                        )}
-                        
-                        {loadingImages ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                            <CircularProgress />
-                          </Box>
-                        ) : (
-                          <Grid container spacing={2} sx={{ maxHeight: 400, overflow: 'auto' }}>
-                            {availableImages.map((image) => (
-                              <Grid item xs={6} sm={4} md={3} key={image.url}>
-                                <Card sx={{ position: 'relative' }}>
-                                  <CardMedia
-                                    component="img"
-                                    height="120"
-                                    image={image.url}
-                                    alt={image.name}
-                                    sx={{ cursor: 'pointer' }}
-                                    onClick={() => handleImageSelection(image.url, !selectedImages.includes(image.url))}
-                                  />
-                                  <Checkbox
-                                    checked={selectedImages.includes(image.url)}
-                                    onChange={(e) => handleImageSelection(image.url, e.target.checked)}
-                                    disabled={!selectedImages.includes(image.url) && selectedImages.length >= (editedQuestion.imageCount || 1)}
-                                    sx={{
-                                      position: 'absolute',
-                                      top: 8,
-                                      right: 8,
-                                      backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                                      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.9)' }
-                                    }}
-                                  />
-                                </Card>
-                              </Grid>
-                            ))}
-                          </Grid>
-                        )}
-                      </Box>
+                      <CuratedMediaPicker
+                        availableImages={availableImages}
+                        selectedImages={selectedImages}
+                        maxCount={editedQuestion.imageCount || 1}
+                        loading={loadingImages}
+                        error={imageError}
+                        onToggle={handleImageSelection}
+                        title="Select Images"
+                      />
                     )}
                   </>
                 )}
@@ -1440,54 +1458,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
 
-                    {/* Manual Image Selection Interface for Yes/No */}
                     {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                          Select Images for Yes/No Question ({selectedImages.length}/{editedQuestion.imageCount || 1} selected)
-                        </Typography>
-                        
-                        {imageError && (
-                          <Alert severity="error" sx={{ mb: 2 }}>
-                            {imageError}
-                          </Alert>
-                        )}
-                        
-                        {loadingImages ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                            <CircularProgress />
-                          </Box>
-                        ) : (
-                          <Grid container spacing={2} sx={{ maxHeight: 400, overflow: 'auto' }}>
-                            {availableImages.map((image) => (
-                              <Grid item xs={6} sm={4} md={3} key={image.url}>
-                                <Card sx={{ position: 'relative' }}>
-                                  <CardMedia
-                                    component="img"
-                                    height="120"
-                                    image={image.url}
-                                    alt={image.name}
-                                    sx={{ cursor: 'pointer' }}
-                                    onClick={() => handleImageSelection(image.url, !selectedImages.includes(image.url))}
-                                  />
-                                  <Checkbox
-                                    checked={selectedImages.includes(image.url)}
-                                    onChange={(e) => handleImageSelection(image.url, e.target.checked)}
-                                    disabled={!selectedImages.includes(image.url) && selectedImages.length >= (editedQuestion.imageCount || 1)}
-                                    sx={{
-                                      position: 'absolute',
-                                      top: 8,
-                                      right: 8,
-                                      backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                                      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.9)' }
-                                    }}
-                                  />
-                                </Card>
-                              </Grid>
-                            ))}
-                          </Grid>
-                        )}
-                      </Box>
+                      <CuratedMediaPicker
+                        availableImages={availableImages}
+                        selectedImages={selectedImages}
+                        maxCount={editedQuestion.imageCount || 1}
+                        loading={loadingImages}
+                        error={imageError}
+                        onToggle={handleImageSelection}
+                        title="Select Images for Yes/No Question"
+                      />
                     )}
                   </>
                 )}
@@ -1503,54 +1483,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
-                    {/* Manual Image Selection Interface for Matrix */}
                     {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                          Select Images for Matrix ({selectedImages.length}/{editedQuestion.imageCount || 1} selected)
-                        </Typography>
-                        
-                        {imageError && (
-                          <Alert severity="error" sx={{ mb: 2 }}>
-                            {imageError}
-                          </Alert>
-                        )}
-                        
-                        {loadingImages ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                            <CircularProgress />
-                          </Box>
-                        ) : (
-                          <Grid container spacing={2} sx={{ maxHeight: 400, overflow: 'auto' }}>
-                            {availableImages.map((image) => (
-                              <Grid item xs={6} sm={4} md={3} key={image.url}>
-                                <Card sx={{ position: 'relative' }}>
-                                  <CardMedia
-                                    component="img"
-                                    height="120"
-                                    image={image.url}
-                                    alt={image.name}
-                                    sx={{ cursor: 'pointer' }}
-                                    onClick={() => handleImageSelection(image.url, !selectedImages.includes(image.url))}
-                                  />
-                                  <Checkbox
-                                    checked={selectedImages.includes(image.url)}
-                                    onChange={(e) => handleImageSelection(image.url, e.target.checked)}
-                                    disabled={!selectedImages.includes(image.url) && selectedImages.length >= (editedQuestion.imageCount || 1)}
-                                    sx={{
-                                      position: 'absolute',
-                                      top: 8,
-                                      right: 8,
-                                      backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                                      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.9)' }
-                                    }}
-                                  />
-                                </Card>
-                              </Grid>
-                            ))}
-                          </Grid>
-                        )}
-                      </Box>
+                      <CuratedMediaPicker
+                        availableImages={availableImages}
+                        selectedImages={selectedImages}
+                        maxCount={editedQuestion.imageCount || 1}
+                        loading={loadingImages}
+                        error={imageError}
+                        onToggle={handleImageSelection}
+                        title="Select Images for Matrix"
+                      />
                     )}
                   </>
                 )}
@@ -1571,54 +1513,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
-                    {/* Manual Image Selection Interface for Display */}
                     {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                          Select Images for Display ({selectedImages.length}/{editedQuestion.imageCount || 1} selected)
-                        </Typography>
-                        
-                        {imageError && (
-                          <Alert severity="error" sx={{ mb: 2 }}>
-                            {imageError}
-                          </Alert>
-                        )}
-                        
-                        {loadingImages ? (
-                          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                            <CircularProgress />
-                          </Box>
-                        ) : (
-                          <Grid container spacing={2} sx={{ maxHeight: 400, overflow: 'auto' }}>
-                            {availableImages.map((image) => (
-                              <Grid item xs={6} sm={4} md={3} key={image.url}>
-                                <Card sx={{ position: 'relative' }}>
-                                  <CardMedia
-                                    component="img"
-                                    height="120"
-                                    image={image.url}
-                                    alt={image.name}
-                                    sx={{ cursor: 'pointer' }}
-                                    onClick={() => handleImageSelection(image.url, !selectedImages.includes(image.url))}
-                                  />
-                                  <Checkbox
-                                    checked={selectedImages.includes(image.url)}
-                                    onChange={(e) => handleImageSelection(image.url, e.target.checked)}
-                                    disabled={!selectedImages.includes(image.url) && selectedImages.length >= (editedQuestion.imageCount || 1)}
-                                    sx={{
-                                      position: 'absolute',
-                                      top: 8,
-                                      right: 8,
-                                      backgroundColor: 'rgba(255, 255, 255, 0.8)',
-                                      '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.9)' }
-                                    }}
-                                  />
-                                </Card>
-                              </Grid>
-                            ))}
-                          </Grid>
-                        )}
-                      </Box>
+                      <CuratedMediaPicker
+                        availableImages={availableImages}
+                        selectedImages={selectedImages}
+                        maxCount={editedQuestion.imageCount || 1}
+                        loading={loadingImages}
+                        error={imageError}
+                        onToggle={handleImageSelection}
+                        title="Select Images for Display"
+                      />
                     )}
                   </>
                 )}
