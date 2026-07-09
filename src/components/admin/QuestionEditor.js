@@ -42,8 +42,62 @@ import {
   getPresetBuilderTypeOptions,
   resolveBuilderSkill,
 } from '../../lib/presetSkills';
+import {
+  getQuestionMediaConstraints,
+  clampQuestionImageCount,
+} from '../../lib/questionTypeConstraints';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
+
+/** Random vs curated sampling — wording matches project media pool. */
+function SamplingModeSelect({ question, onChange }) {
+  const mode = question.imageSelectionMode === 'huggingface_manual' || question.imageSelectionMode === 'manual'
+    ? 'huggingface_manual'
+    : 'huggingface_random';
+  return (
+    <FormControl fullWidth variant="outlined">
+      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>How stimuli are chosen</InputLabel>
+      <Select
+        value={mode}
+        onChange={(e) => onChange('imageSelectionMode', e.target.value)}
+        label="How stimuli are chosen"
+      >
+        <MenuItem value="huggingface_random">Random from project media pool</MenuItem>
+        <MenuItem value="huggingface_manual">Curated list (pick specific files)</MenuItem>
+      </Select>
+    </FormControl>
+  );
+}
+
+function StimulusCountField({ question, onChange, constraints }) {
+  if (!constraints?.hasStimuli) return null;
+  if (!constraints.countAdjustable) {
+    return (
+      <Alert severity="info" sx={{ py: 0.75 }}>
+        <strong>Stimulus count:</strong>{' '}
+        {constraints.countLabel || `Fixed at ${constraints.countFixed}`}.
+        {' '}Drawn from the project media pool for each participant.
+      </Alert>
+    );
+  }
+  return (
+    <TextField
+      fullWidth
+      variant="outlined"
+      type="number"
+      label={constraints.countLabel || 'Number of stimuli'}
+      value={question.imageCount ?? constraints.defaultCount}
+      onChange={(e) => onChange(
+        'imageCount',
+        clampQuestionImageCount(question.type, question, e.target.value),
+      )}
+      onFocus={(e) => e.target.select()}
+      helperText="Randomly drawn from the project media pool (or your curated list)"
+      inputProps={{ min: constraints.countMin, max: constraints.countMax, step: 1 }}
+      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+    />
+  );
+}
 
 function AttentionCheckFields({ question, onChange }) {
   const supported = ['rating', 'radiogroup', 'imagepicker'].includes(question.type);
@@ -198,7 +252,7 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
       )}
       {!isGroup && !isCategory && (
         <Typography variant="caption" color="text.secondary" display="block">
-          Picks {count} unrelated file(s) from the project media pool
+          Randomly samples {count} file(s) from the project media pool
           {poolStatus.totalFileCount > 0
             ? ` (${poolStatus.matchingFileCount} matching${mediaTypeHint}).`
             : ' — upload media in Image Dataset first.'}
@@ -717,7 +771,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               {editedQuestion.type === 'imageannotation' && (
                 <Alert severity="info">
                   Participants can draw points, lines, and regions on a randomly selected image.
-                  Set minimum / maximum annotation counts in Annotation Settings below.
+                  Set drawing tools and min/max annotation counts in the task options below.
                 </Alert>
               )}
 
@@ -1026,16 +1080,55 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     onChange={(e) => handleQuestionChange('isRequired', e.target.checked)}
                   />
                 }
-                label="Required Question - participants must answer this question to continue"
+                label="Required — participants must answer to continue"
               />
+
+              {editedQuestion.type === 'boolean' && (
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    label="Yes label"
+                    value={editedQuestion.labelTrue || ''}
+                    onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
+                    placeholder="Yes"
+                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    label="No label"
+                    value={editedQuestion.labelFalse || ''}
+                    onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
+                    placeholder="No"
+                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                </Box>
+              )}
+
+              {editedQuestion.type === 'expression' && (
+                <Alert severity="info" sx={{ py: 0.5 }}>
+                  Instruction-only — participants do not answer. Use the title and description above as the message.
+                </Alert>
+              )}
+
+              {editedQuestion.type === 'slidergroup' && (
+                <Alert severity="info" sx={{ py: 0.5 }}>
+                  This question has no built-in media. Put a <strong>Media Display</strong> on the same page for the stimulus,
+                  or use <strong>Image Slider Group</strong> instead.
+                </Alert>
+              )}
             </Box>
           </Box>
 
           {/* Image Choice for Image Questions */}
           {isImageQuestion && (
             <Box>
-              <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Image Settings
+              <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
+                Stimulus & task settings
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Configure how images are sampled, then set task-specific options below.
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <FormControlLabel
@@ -1045,41 +1138,19 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
                     />
                   }
-                  label="Ensure images in this question have not been used earlier in this survey"
+                  label="Do not reuse images already shown earlier in this survey"
                 />
 
                 <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
 
                 {editedQuestion.type === 'imagepicker' && (
                   <>
-                    <FormControl fullWidth variant="outlined">
-                      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Image Selection Mode</InputLabel>
-                      <Select
-                        value={editedQuestion.imageSelectionMode || 'random'}
-                        onChange={(e) => handleQuestionChange('imageSelectionMode', e.target.value)}
-                        label="Image Selection Mode"
-                      >
-                        <MenuItem value="huggingface_random">Random Selection from Hugging Face</MenuItem>
-                        <MenuItem value="huggingface_manual">Manual Selection from Hugging Face</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
 
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Number of Images to Show"
-                      value={editedQuestion.imageCount || 4}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 1;
-                        handleQuestionChange('imageCount', Math.min(Math.max(value, 1), 20));
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      helperText={editedQuestion.imageSelectionMode === 'huggingface_random' 
-                        ? "How many images to randomly select from Hugging Face" 
-                        : "How many images you will manually select"}
-                      inputProps={{ min: 1, max: 20, step: 1 }}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    <StimulusCountField
+                      question={editedQuestion}
+                      onChange={handleQuestionChange}
+                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
                     
                     <FormControlLabel
@@ -1167,34 +1238,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'imageranking' && (
                   <>
-                    <FormControl fullWidth variant="outlined">
-                      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Image Selection Mode</InputLabel>
-                      <Select
-                        value={editedQuestion.imageSelectionMode || 'random'}
-                        onChange={(e) => handleQuestionChange('imageSelectionMode', e.target.value)}
-                        label="Image Selection Mode"
-                      >
-                        <MenuItem value="huggingface_random">Random Selection from Hugging Face</MenuItem>
-                        <MenuItem value="huggingface_manual">Manual Selection from Hugging Face</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
 
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Number of Images to Rank"
-                      value={editedQuestion.imageCount || 4}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 2;
-                        handleQuestionChange('imageCount', Math.min(Math.max(value, 2), 10));
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      helperText={editedQuestion.imageSelectionMode === 'huggingface_random' 
-                        ? "How many images to randomly select for ranking from Hugging Face" 
-                        : "How many images you will manually select for ranking"}
-                      inputProps={{ min: 2, max: 10, step: 1 }}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    <StimulusCountField
+                      question={editedQuestion}
+                      onChange={handleQuestionChange}
+                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
                     {/* Manual Image Selection Interface for Ranking */}
@@ -1255,34 +1304,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 {/* Image selection (rating / slider group / point allocation with image) */}
                 {['imagerating', 'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type) && (
                   <>
-                    <FormControl fullWidth variant="outlined">
-                      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Image Selection Mode</InputLabel>
-                      <Select
-                        value={editedQuestion.imageSelectionMode || 'random'}
-                        onChange={(e) => handleQuestionChange('imageSelectionMode', e.target.value)}
-                        label="Image Selection Mode"
-                      >
-                        <MenuItem value="huggingface_random">Random Selection from Hugging Face</MenuItem>
-                        <MenuItem value="huggingface_manual">Manual Selection from Hugging Face</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
 
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Number of Images to Display"
-                      value={editedQuestion.imageCount || 1}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 1;
-                        handleQuestionChange('imageCount', Math.min(Math.max(value, 1), 6));
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      helperText={editedQuestion.imageSelectionMode === 'huggingface_random'
-                        ? 'How many images to randomly select from the project media pool'
-                        : 'How many images you will manually select'}
-                      inputProps={{ min: 1, max: 6, step: 1 }}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    <StimulusCountField
+                      question={editedQuestion}
+                      onChange={handleQuestionChange}
+                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
                     {editedQuestion.type === 'imagerating' && (
@@ -1385,34 +1412,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 {/* Image Yes/No Configuration */}
                 {editedQuestion.type === 'imageboolean' && (
                   <>
-                    <FormControl fullWidth variant="outlined">
-                      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Image Selection Mode</InputLabel>
-                      <Select
-                        value={editedQuestion.imageSelectionMode || 'random'}
-                        onChange={(e) => handleQuestionChange('imageSelectionMode', e.target.value)}
-                        label="Image Selection Mode"
-                      >
-                        <MenuItem value="huggingface_random">Random Selection from Hugging Face</MenuItem>
-                        <MenuItem value="huggingface_manual">Manual Selection from Hugging Face</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
 
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Number of Images to Display"
-                      value={editedQuestion.imageCount || 1}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 1;
-                        handleQuestionChange('imageCount', Math.min(Math.max(value, 1), 6));
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      helperText={editedQuestion.imageSelectionMode === 'huggingface_random' 
-                        ? "How many images to randomly select for yes/no question from Hugging Face" 
-                        : "How many images you will manually select for yes/no question"}
-                      inputProps={{ min: 1, max: 6, step: 1 }}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    <StimulusCountField
+                      question={editedQuestion}
+                      onChange={handleQuestionChange}
+                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
                     {/* Yes/No Labels Configuration */}
@@ -1491,34 +1496,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 {/* Image Matrix Configuration */}
                 {editedQuestion.type === 'imagematrix' && (
                   <>
-                    <FormControl fullWidth variant="outlined">
-                      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Image Selection Mode</InputLabel>
-                      <Select
-                        value={editedQuestion.imageSelectionMode || 'huggingface_random'}
-                        onChange={(e) => handleQuestionChange('imageSelectionMode', e.target.value)}
-                        label="Image Selection Mode"
-                      >
-                        <MenuItem value="huggingface_random">Random Selection from Hugging Face</MenuItem>
-                        <MenuItem value="huggingface_manual">Manual Selection from Hugging Face</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
 
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Number of Images to Display"
-                      value={editedQuestion.imageCount || 1}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 1;
-                        handleQuestionChange('imageCount', Math.min(Math.max(value, 1), 6));
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      helperText={editedQuestion.imageSelectionMode === 'huggingface_random' 
-                        ? "How many images to randomly select for matrix from Hugging Face" 
-                        : "How many images you will manually select for matrix"}
-                      inputProps={{ min: 1, max: 6, step: 1 }}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    <StimulusCountField
+                      question={editedQuestion}
+                      onChange={handleQuestionChange}
+                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
                     {/* Manual Image Selection Interface for Matrix */}
@@ -1581,28 +1564,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       To show <strong>multiple images</strong> in the same justified layout as Image Choice,
                       use <strong>Media Display</strong> instead and set the number of media files to 2 or more.
                     </Alert>
-                    <FormControl fullWidth variant="outlined">
-                      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Image Selection Mode</InputLabel>
-                      <Select
-                        value={editedQuestion.imageSelectionMode || 'random'}
-                        onChange={(e) => handleQuestionChange('imageSelectionMode', e.target.value)}
-                        label="Image Selection Mode"
-                      >
-                        <MenuItem value="huggingface_random">Random Selection from Hugging Face</MenuItem>
-                        <MenuItem value="huggingface_manual">Manual Selection from Hugging Face</MenuItem>
-                      </Select>
-                    </FormControl>
+                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
 
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Number of Images to Display"
-                      value={1}
-                      disabled
-                      helperText="Image Display always shows one randomly selected image. Use Media Display for multiple images."
-                      inputProps={{ min: 1, max: 1, step: 1 }}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    <StimulusCountField
+                      question={editedQuestion}
+                      onChange={handleQuestionChange}
+                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                     />
 
                     {/* Manual Image Selection Interface for Display */}
@@ -1663,8 +1630,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {/* Media Settings for media (video/audio/image) questions */}
           {['mediadisplay', 'mediarating', 'mediaboolean'].includes(editedQuestion.type) && (
             <Box>
-              <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Media Settings
+              <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
+                Stimulus & task settings
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Configure how media are sampled, then set presentation / response options.
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {editedQuestion.type === 'mediadisplay' && (
@@ -1742,46 +1712,31 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
                     />
                   }
-                  label="Ensure media in this question has not been used earlier in this survey"
+                  label="Do not reuse media already shown earlier in this survey"
                 />
 
                 <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
 
-                <TextField
-                  fullWidth
-                  variant="outlined"
-                  type="number"
-                  label={editedQuestion.mediaAssignmentMode === 'group' ? 'Files per set' : 'Number of media files'}
-                  value={editedQuestion.imageCount || 1}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value, 10) || 1;
-                    handleQuestionChange('imageCount', Math.min(Math.max(value, 1), 6));
-                  }}
-                  onFocus={(e) => e.target.select()}
-                  helperText={
-                    editedQuestion.type === 'mediadisplay' && (editedQuestion.imageCount || 1) > 1
-                      ? 'Multiple images use the Image Choice justified gallery (same height per row, widths by aspect ratio)'
-                      : editedQuestion.mediaAssignmentMode === 'group'
-                        ? 'Must match the number of files in each filename group (e.g. 2 for before/after pairs)'
-                        : 'How many media files to inject (use 2+ for multi-image gallery)'
-                  }
-                  inputProps={{ min: 1, max: 6, step: 1 }}
-                  sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                <StimulusCountField
+                  question={editedQuestion}
+                  onChange={handleQuestionChange}
+                  constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                 />
 
                 <Alert severity="info">
                   {editedQuestion.mediaAssignmentMode === 'group'
                     ? 'One complete media set will be randomly assigned per participant.'
-                    : 'One media file matching the type filter above will be randomly selected per participant.'}
+                    : `${editedQuestion.imageCount || 1} media file(s) matching the type filter will be randomly selected per participant.`}
                 </Alert>
 
                 {editedQuestion.type === 'mediarating' && (
                   <>
+                    <Typography variant="subtitle2" fontWeight={600}>Task options — rating scale</Typography>
                     <TextField
                       fullWidth
                       variant="outlined"
                       type="number"
-                      label="Minimum Rating Value"
+                      label="Minimum rating"
                       value={editedQuestion.rateMin ?? 1}
                       onChange={(e) => handleQuestionChange('rateMin', parseInt(e.target.value) || 1)}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
@@ -1790,9 +1745,27 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       fullWidth
                       variant="outlined"
                       type="number"
-                      label="Maximum Rating Value"
+                      label="Maximum rating"
                       value={editedQuestion.rateMax ?? 5}
                       onChange={(e) => handleQuestionChange('rateMax', parseInt(e.target.value) || 5)}
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      label="Low-end label"
+                      value={editedQuestion.minRateDescription || ''}
+                      onChange={(e) => handleQuestionChange('minRateDescription', e.target.value)}
+                      placeholder="e.g., Very poor"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      label="High-end label"
+                      value={editedQuestion.maxRateDescription || ''}
+                      onChange={(e) => handleQuestionChange('maxRateDescription', e.target.value)}
+                      placeholder="e.g., Excellent"
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
                   </>
@@ -1827,8 +1800,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {/* Annotation Settings */}
           {editedQuestion.type === 'imageannotation' && (
             <Box>
-              <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Annotation Settings
+              <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
+                Stimulus & task settings
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                One image is sampled for annotation; configure tools and limits below.
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <FormControlLabel
@@ -1838,25 +1814,13 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
                     />
                   }
-                  label="Ensure the image in this question has not been used earlier in this survey"
+                  label="Do not reuse images already shown earlier in this survey"
                 />
                 <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
-                <TextField
-                  fullWidth
-                  variant="outlined"
-                  type="number"
-                  label={editedQuestion.mediaAssignmentMode === 'group' ? 'Files per set' : 'Number of images'}
-                  value={editedQuestion.imageCount || 1}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value, 10) || 1;
-                    handleQuestionChange('imageCount', Math.min(Math.max(value, 1), 6));
-                  }}
-                  onFocus={(e) => e.target.select()}
-                  helperText={editedQuestion.mediaAssignmentMode === 'group'
-                    ? 'For group mode, annotation uses the first image in the assigned set.'
-                    : 'Number of images to inject (annotation uses the first)'}
-                  inputProps={{ min: 1, max: 6, step: 1 }}
-                  sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                <StimulusCountField
+                  question={editedQuestion}
+                  onChange={handleQuestionChange}
+                  constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
                 />
                 <FormControl fullWidth variant="outlined">
                   <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Allowed Tools</InputLabel>
@@ -1910,7 +1874,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {(editedQuestion.type === 'slidergroup' || editedQuestion.type === 'imageslidergroup') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                {editedQuestion.type === 'imageslidergroup' ? 'Image Slider Group Settings' : 'Slider Group Settings'}
+                {editedQuestion.type === 'imageslidergroup' ? 'Task options — semantic differential' : 'Task options — semantic differential'}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <SkillDimensionsEditor
@@ -1954,7 +1918,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {(editedQuestion.type === 'pointallocation' || editedQuestion.type === 'imagepointallocation') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                {editedQuestion.type === 'imagepointallocation' ? 'Image Point Allocation Settings' : 'Budget Settings'}
+                {editedQuestion.type === 'imagepointallocation' ? 'Task options — budget allocation' : 'Task options — budget allocation'}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <TextField
@@ -1976,8 +1940,20 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {needsChoices && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Answer Choices
+                {['pointallocation', 'imagepointallocation'].includes(editedQuestion.type)
+                  ? 'Allocation categories'
+                  : editedQuestion.type === 'ranking'
+                    ? 'Items to rank'
+                    : 'Answer choices'}
               </Typography>
+              {['pointallocation', 'imagepointallocation'].includes(editedQuestion.type) && (
+                <Alert severity="info" sx={{ mb: 2, py: 0.5 }}>
+                  These are the categories participants distribute points across
+                  {editedQuestion.type === 'imagepointallocation'
+                    ? ' (independent of the sampled images above)'
+                    : ''}.
+                </Alert>
+              )}
               {editedQuestion.type === 'radiogroup' && (
                 <Box sx={{ mb: 2 }}>
                   <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
@@ -2050,7 +2026,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {(editedQuestion.type === 'matrix' || editedQuestion.type === 'imagematrix') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Matrix Configuration
+                Task options — matrix rows & columns
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {/* Rows Configuration */}
@@ -2210,7 +2186,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {(editedQuestion.type === 'comment' || editedQuestion.type === 'text' || editedQuestion.type === 'rating') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Advanced Settings
+                Task options
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {editedQuestion.type === 'comment' && (
@@ -2337,6 +2313,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
           if (questionToSave.type === 'image') {
             questionToSave.imageCount = 1;
+          }
+
+          if (['imagepicker','imageranking','imagerating','imageboolean','imagematrix','image','imageslidergroup','imagepointallocation','mediadisplay','mediarating','mediaboolean','imageannotation'].includes(questionToSave.type)) {
+            questionToSave.imageCount = clampQuestionImageCount(
+              questionToSave.type,
+              questionToSave,
+              questionToSave.imageCount,
+            );
           }
 
           // Skill questions: enforce preset mediaConstraints (e.g. pairwise = always 2 images)
