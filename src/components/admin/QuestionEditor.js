@@ -36,7 +36,12 @@ import { filterPoolForQuestion, getMediaPoolStatus } from '../../lib/surveyMedia
 import { getMediaCategories } from '../../lib/mediaUtils';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
 import SkillQuestionFrame from '../SkillQuestionWidget';
-import { buildFallbackDemoImages, getSkillMediaConstraints } from '../../lib/presetSkills';
+import {
+  buildFallbackDemoImages,
+  getSkillMediaConstraints,
+  getPresetBuilderTypeOptions,
+  resolveBuilderSkill,
+} from '../../lib/presetSkills';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
 
@@ -257,40 +262,63 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     listSkillsForBuilder().then(setBuilderSkills);
   }, []);
 
-  const baseQuestionTypes = [
-    { value: 'text', label: 'Text Input' },
-    { value: 'comment', label: 'Text Multi-line Input' },
-    { value: 'radiogroup', label: 'Text Single Choice' },
-    { value: 'checkbox', label: 'Text Multiple Choice' },
-    { value: 'imagepicker', label: 'Image Choice' },
-    { value: 'ranking', label: 'Text Ranking' },
-    { value: 'imageranking', label: 'Image Ranking' },
-    { value: 'rating', label: 'Text Rating Scale' },
-    { value: 'imagerating', label: 'Image Rating Scale' },
-    { value: 'boolean', label: 'Text Yes/No' },
-    { value: 'imageboolean', label: 'Image Yes/No' },
-    { value: 'dropdown', label: 'Text Dropdown' },
-    { value: 'matrix', label: 'Matrix' },
-    { value: 'imagematrix', label: 'Image Matrix' },
-    { value: 'slidergroup', label: 'Slider Group (Semantic Differential)' },
-    { value: 'imageslidergroup', label: 'Image Slider Group (Semantic Differential)' },
-    { value: 'pointallocation', label: 'Point Allocation (Budget)' },
-    { value: 'imagepointallocation', label: 'Image Point Allocation (Budget)' },
-    { value: 'expression', label: 'Text Instruction' },
-    { value: 'image', label: 'Image Display (single image only)' },
-    { value: 'mediadisplay', label: 'Media Display (multi-image / video / audio)' },
-    { value: 'mediarating', label: 'Media Rating Scale' },
-    { value: 'mediaboolean', label: 'Media Yes/No' },
-    { value: 'imageannotation', label: 'Image Annotation' },
-    { value: 'skillquestion', label: 'Custom Skill Question' },
-  ];
+  const presetTypeOptions = getPresetBuilderTypeOptions();
+  const presetSkillIds = new Set(presetTypeOptions.map((o) => o.value.slice(6)));
+
+  // Library skills that are not built-in presets (custom / approved community)
+  const libraryTypeOptions = builderSkills
+    .filter((s) => !presetSkillIds.has(s.id) && !String(s.id).startsWith('preset_'))
+    .map((s) => ({
+      value: `skill:${s.id}`,
+      label: s.scope === 'mine' && !s.is_approved
+        ? `Advanced · My task: ${s.name}`
+        : `Advanced · Library: ${s.name}`,
+      group: 'advanced',
+    }));
 
   const questionTypes = [
-    ...baseQuestionTypes,
-    ...builderSkills.map((s) => ({
-      value: `skill:${s.id}`,
-      label: s.scope === 'mine' && !s.is_approved ? `Skill (Mine): ${s.name}` : `Skill: ${s.name}`,
-    })),
+    { value: 'text', label: 'Text Input', group: 'text' },
+    { value: 'comment', label: 'Text Multi-line Input', group: 'text' },
+    { value: 'radiogroup', label: 'Text Single Choice', group: 'text' },
+    { value: 'checkbox', label: 'Text Multiple Choice', group: 'text' },
+    { value: 'ranking', label: 'Text Ranking', group: 'text' },
+    { value: 'rating', label: 'Text Rating Scale', group: 'text' },
+    { value: 'boolean', label: 'Text Yes/No', group: 'text' },
+    { value: 'dropdown', label: 'Text Dropdown', group: 'text' },
+    { value: 'matrix', label: 'Matrix', group: 'text' },
+    { value: 'expression', label: 'Text Instruction', group: 'text' },
+    { value: 'imagepicker', label: 'Image Choice', group: 'image' },
+    { value: 'imageranking', label: 'Image Ranking', group: 'image' },
+    { value: 'imagerating', label: 'Image Rating Scale', group: 'image' },
+    { value: 'imageboolean', label: 'Image Yes/No', group: 'image' },
+    { value: 'imagematrix', label: 'Image Matrix', group: 'image' },
+    { value: 'image', label: 'Image Display (single image)', group: 'image' },
+    { value: 'imageannotation', label: 'Image Annotation', group: 'image' },
+    { value: 'imageslidergroup', label: 'Image Slider Group', group: 'image' },
+    { value: 'imagepointallocation', label: 'Image Point Allocation', group: 'image' },
+    { value: 'mediadisplay', label: 'Media Display (image / video / audio)', group: 'media' },
+    { value: 'mediarating', label: 'Media Rating Scale', group: 'media' },
+    { value: 'mediaboolean', label: 'Media Yes/No', group: 'media' },
+    { value: 'slidergroup', label: 'Slider Group (Semantic Differential)', group: 'structured' },
+    { value: 'pointallocation', label: 'Point Allocation (Budget)', group: 'structured' },
+    // Built-in perception tasks — first-class types (not labeled "Skill")
+    ...presetTypeOptions,
+    // Advanced: blank custom HTML skill + user/library skills
+    {
+      value: 'skillquestion',
+      label: 'Advanced · Build custom interactive task (HTML)',
+      group: 'advanced',
+    },
+    ...libraryTypeOptions,
+  ];
+
+  const typeMenuGroups = [
+    { id: 'text', label: 'Text & choice' },
+    { id: 'image', label: 'Image questions' },
+    { id: 'media', label: 'Media questions' },
+    { id: 'structured', label: 'Structured scales' },
+    { id: 'perception', label: 'Perception tasks (ready to use)' },
+    { id: 'advanced', label: 'Advanced · custom tasks' },
   ];
 
   const handleQuestionChange = (field, value) => {
@@ -309,11 +337,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     if (field === 'type') {
       if (String(value).startsWith('skill:')) {
         const skillId = String(value).slice(6);
-        const skill = builderSkills.find((s) => s.id === skillId);
+        const skill = resolveBuilderSkill(skillId, builderSkills);
         updates.type = 'skillquestion';
-        updates.skillId = skillId;
+        updates.skillId = skill?.id || skillId;
         updates.skillHtml = skill?.sourceHtml || '';
-        const mediaConstraints = getSkillMediaConstraints(skillId, skill);
+        const mediaConstraints = getSkillMediaConstraints(updates.skillId, skill);
         const lockedCount = mediaConstraints.countFixed
           ?? skill?.defaultConfig?.mediaCount
           ?? 1;
@@ -328,6 +356,21 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         updates.imageSelectionMode = 'huggingface_random';
         updates.excludePreviouslyUsedImages = true;
         updates.imageCount = lockedCount;
+        if (!editedQuestion.title || editedQuestion.title === 'New Question') {
+          updates.title = skill?.builderLabel || skill?.name || 'Perception task';
+        }
+        return setEditedQuestion({ ...editedQuestion, ...updates });
+      }
+      if (value === 'skillquestion') {
+        // Blank advanced custom task — no preset HTML until user picks/imports a skill
+        updates.skillId = '';
+        updates.skillHtml = '';
+        updates.skillConfig = {};
+        updates.skillResultSchema = [];
+        updates.randomImageSelection = true;
+        updates.imageSelectionMode = 'huggingface_random';
+        updates.excludePreviouslyUsedImages = true;
+        updates.imageCount = 1;
         return setEditedQuestion({ ...editedQuestion, ...updates });
       }
       // Types that should have 1 image/media by default
@@ -605,11 +648,31 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   onChange={(e) => handleQuestionChange('type', e.target.value)}
                   label="Question Type"
                 >
-                  {questionTypes.map((type) => (
-                    <MenuItem key={type.value} value={type.value}>
-                      {type.label}
-                    </MenuItem>
-                  ))}
+                  {typeMenuGroups.flatMap((group) => {
+                    const items = questionTypes.filter((t) => t.group === group.id);
+                    if (!items.length) return [];
+                    return [
+                      <MenuItem
+                        key={`hdr-${group.id}`}
+                        disabled
+                        sx={{
+                          opacity: '1 !important',
+                          fontWeight: 700,
+                          fontSize: '0.75rem',
+                          color: 'text.secondary',
+                          bgcolor: 'grey.50',
+                          py: 0.75,
+                        }}
+                      >
+                        {group.label}
+                      </MenuItem>,
+                      ...items.map((type) => (
+                        <MenuItem key={type.value} value={type.value} sx={{ pl: 3 }}>
+                          {type.label}
+                        </MenuItem>
+                      )),
+                    ];
+                  })}
                 </Select>
               </FormControl>
 
@@ -658,8 +721,18 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 </Alert>
               )}
 
+              {editedQuestion.type === 'skillquestion' && !editedQuestion.skillId && (
+                <Alert severity="warning">
+                  <strong>Advanced custom task.</strong> Most studies only need a ready-made perception task
+                  (Pairwise Preference, Best–Worst, etc.) from the type list above.
+                  To continue here, import or create a task in <strong>My Skill Library</strong>, then re-select it
+                  under <em>Advanced · Library</em>.
+                </Alert>
+              )}
+
               {editedQuestion.type === 'skillquestion' && editedQuestion.skillId && (() => {
-                const skillDef = builderSkills.find((s) => s.id === editedQuestion.skillId);
+                const skillDef = resolveBuilderSkill(editedQuestion.skillId, builderSkills);
+                const isPreset = skillDef?.scope === 'preset' || String(editedQuestion.skillId).startsWith('preset_');
                 const schema = skillDef?.configSchema || [];
                 const cfg = editedQuestion.skillConfig || {};
                 const mediaConstraints = getSkillMediaConstraints(editedQuestion.skillId, skillDef);
@@ -788,8 +861,18 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 };
                 return (
                   <>
-                    <Alert severity="success">
-                      Using Skill: {skillDef?.name || editedQuestion.skillId}
+                    <Alert severity="success" sx={{ mt: 0 }}>
+                      <strong>{skillDef?.builderLabel || skillDef?.name || 'Perception task'}</strong>
+                      {(skillDef?.builderHint || skillDef?.description) && (
+                        <Typography variant="body2" sx={{ mt: 0.5 }}>
+                          {skillDef.builderHint || skillDef.description}
+                        </Typography>
+                      )}
+                      {!isPreset && (
+                        <Typography variant="caption" display="block" sx={{ mt: 0.5 }} color="text.secondary">
+                          Custom / library task · id: {editedQuestion.skillId}
+                        </Typography>
+                      )}
                     </Alert>
                     {skillDef?.sourceHtml && editedQuestion.skillHtml
                       && skillDef.sourceHtml !== editedQuestion.skillHtml && (
@@ -812,31 +895,34 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                           </Button>
                         )}
                       >
-                        This question uses an older copy of the skill. Update to the latest library version
-                        to get new configurable fields (your current settings are kept).
+                        This question uses an older copy of the task. Update to the latest version
+                        (your current wording settings are kept).
                       </Alert>
                     )}
                     <Alert severity="info" sx={{ mt: 1 }}>
-                      <strong>Question Title</strong> above is shown to participants as the survey question heading.
-                      Use <strong>Prompt</strong> below for instructions inside the skill widget.
+                      <strong>Question Title</strong> is the heading participants see.
+                      Use <strong>Task instructions</strong> below for guidance inside the interactive area.
                     </Alert>
-                    <Box sx={{ mt: 2 }}>
-                      <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
-                    </Box>
+
                     <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
-                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2 }}>
-                        Skill Settings
+                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
+                        1. How stimuli are sampled
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+                        {mediaConstraints.countFixed != null
+                          ? `This task always shows ${mediaConstraints.countFixed} ${mediaTypeLabel}(s). Choose how they are drawn from your project media.`
+                          : `Choose how many ${mediaTypeLabel}(s) to show and how they are drawn from your project media.`}
                       </Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {mediaConstraints.countAdjustable ? (
+                        {mediaConstraints.countAdjustable && (
                           <TextField
                             fullWidth
                             type="number"
                             variant="outlined"
-                            label={mediaConstraints.countLabel || 'Media count'}
+                            label={mediaConstraints.countLabel || `Number of ${mediaTypeLabel}s`}
                             value={displayMediaCount}
                             onChange={(e) => setMediaCount(e.target.value)}
-                            helperText={`Number of ${mediaTypeLabel}(s) randomly injected from the project media pool`}
+                            helperText={`Randomly drawn from the project ${mediaTypeLabel} pool for each participant`}
                             inputProps={{
                               min: mediaConstraints.countMin,
                               max: mediaConstraints.countMax,
@@ -844,20 +930,13 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                             }}
                             sx={{ bgcolor: 'white' }}
                           />
-                        ) : (
-                          <Alert severity="info" sx={{ py: 0.75 }}>
-                            <strong>Media count:</strong>{' '}
-                            {mediaConstraints.countLabel || `Fixed at ${mediaConstraints.countFixed} ${mediaTypeLabel}(s)`}.
-                            {' '}Randomly selected from the project pool
-                            {editedQuestion.mediaAssignmentMode === 'group' ? ' as a paired set' : ''}.
-                          </Alert>
                         )}
-                        {mediaConstraints.typeAdjustable ? (
+                        {mediaConstraints.typeAdjustable && (
                           <FormControl fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
-                            <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media type</InputLabel>
+                            <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media type filter</InputLabel>
                             <Select
                               value={cfg.mediaType || 'image'}
-                              label="Media type"
+                              label="Media type filter"
                               onChange={(e) => setCfg('mediaType', e.target.value)}
                             >
                               <MenuItem value="image">Image</MenuItem>
@@ -866,21 +945,37 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                               <MenuItem value="any">Any (mixed)</MenuItem>
                             </Select>
                           </FormControl>
-                        ) : (
-                          <Alert severity="info" sx={{ py: 0.75 }}>
-                            <strong>Media type:</strong> Fixed to {mediaConstraints.typeFixed}
-                            {' '}(required by this skill UI).
-                          </Alert>
                         )}
+                        <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={editedQuestion.excludePreviouslyUsedImages !== false}
+                              onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
+                            />
+                          }
+                          label="Do not reuse media already shown earlier in this survey"
+                        />
+                      </Box>
+                    </Box>
+
+                    <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
+                        2. Wording & task options
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+                        Labels and instructions participants see inside this task.
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {editableSchema.length === 0 && (
-                          <Alert severity="warning" sx={{ py: 0.5 }}>
-                            This skill has no extra config fields. Edit the skill source in My Skill Library to expose
-                            prompts, scales, or dimensions via configSchema.
+                          <Alert severity="info" sx={{ py: 0.5 }}>
+                            No extra wording fields for this task. Edit the Question Title above if needed.
                           </Alert>
                         )}
                         {editableSchema.map((field) => renderSchemaField(field))}
                       </Box>
                     </Box>
+
                     {(() => {
                       const previewHtml = editedQuestion.skillHtml || skillDef?.sourceHtml;
                       if (!previewHtml) return null;
@@ -905,15 +1000,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       return (
                         <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'primary.light', borderRadius: 1, bgcolor: 'white' }}>
                           <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-                            Live Preview
+                            3. Participant preview
                           </Typography>
                           <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                            Updates as you change settings above. Uses project media when available, otherwise demo images.
+                            What participants will interact with. Uses project media when available; otherwise demo placeholders.
                           </Typography>
                           <SkillQuestionFrame
                             skillHtml={previewHtml}
                             config={mergedCfg}
                             images={previewImages}
+                            skillId={editedQuestion.skillId}
                             readOnly
                           />
                         </Box>
@@ -2245,7 +2341,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
           // Skill questions: enforce preset mediaConstraints (e.g. pairwise = always 2 images)
           if (questionToSave.type === 'skillquestion' && questionToSave.skillId) {
-            const skillDef = builderSkills.find((s) => s.id === questionToSave.skillId);
+            const skillDef = resolveBuilderSkill(questionToSave.skillId, builderSkills);
             const mediaConstraints = getSkillMediaConstraints(questionToSave.skillId, skillDef);
             const nextCfg = { ...(questionToSave.skillConfig || {}) };
             if (mediaConstraints.countFixed != null) {

@@ -46,6 +46,15 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import QuestionEditor from './QuestionEditor';
+import { getPresetSkill } from '../../lib/presetSkills';
+
+function skillQuestionTypeLabel(question) {
+  if (question?.type !== 'skillquestion') return null;
+  const preset = getPresetSkill(question.skillId);
+  if (preset) return preset.builderLabel || preset.name;
+  if (question.skillId) return 'Custom interactive task';
+  return 'Custom interactive task (not configured)';
+}
 
 // Sortable Question Item Component
 function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDuplicate }) {
@@ -70,6 +79,10 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
     // Special handling for image ranking questions
     if (typeof question === 'object' && type === 'ranking' && question.isImageRanking) {
       return 'Image Ranking';
+    }
+
+    if (type === 'skillquestion') {
+      return skillQuestionTypeLabel(typeof question === 'object' ? question : null) || 'Custom interactive task';
     }
     
     const typeLabels = {
@@ -97,7 +110,6 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
       imageslidergroup: 'Image Slider Group',
       pointallocation: 'Point Allocation',
       imagepointallocation: 'Image Point Allocation',
-      skillquestion: 'Skill Question',
     };
     return typeLabels[type] || type;
   };
@@ -329,6 +341,10 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
     if (typeof question === 'object' && type === 'ranking' && question.isImageRanking) {
       return 'Image Ranking';
     }
+
+    if (type === 'skillquestion') {
+      return skillQuestionTypeLabel(typeof question === 'object' ? question : null) || 'Custom interactive task';
+    }
     
     const typeLabels = {
       text: 'Text Input',
@@ -355,7 +371,6 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
       imageslidergroup: 'Image Slider Group',
       pointallocation: 'Point Allocation',
       imagepointallocation: 'Image Point Allocation',
-      skillquestion: 'Skill Question',
     };
     return typeLabels[type] || type;
   };

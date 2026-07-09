@@ -210,12 +210,15 @@ export const PRESET_SKILLS = [
   {
     id: 'image_preference_slider',
     name: 'Pairwise Preference Slider',
+    /** Shown in survey builder type list (first-class question type). */
+    builderLabel: 'Pairwise Preference (A/B slider)',
+    builderHint: 'Shows two random images; participants rate preference strength on a continuous slider.',
     description: 'Shows two spatial images side by side; participants express preference strength on a continuous slider. Ideal for urban design A/B comparisons and AI-generated image evaluation.',
     category: 'image',
     configSchema: [
-      { key: 'leftLabel', label: 'Left label', type: 'string' },
-      { key: 'rightLabel', label: 'Right label', type: 'string' },
-      { key: 'prompt', label: 'Prompt', type: 'string' },
+      { key: 'leftLabel', label: 'Left label (A)', type: 'string' },
+      { key: 'rightLabel', label: 'Right label (B)', type: 'string' },
+      { key: 'prompt', label: 'Task instructions (inside the question)', type: 'string' },
     ],
     resultSchema: [
       { key: 'preference', label: 'Preference score (-100 = A, +100 = B)', type: 'number' },
@@ -285,11 +288,13 @@ document.getElementById('hard').onchange = report;
   {
     id: 'video_moment_tag',
     name: 'Video Key Moment Tagging',
+    builderLabel: 'Video Key Moments',
+    builderHint: 'Participants watch one video and mark start/end times of key events.',
     description: 'Plays a project video and lets participants mark start/end times of key events on the timeline. Suited for behavioral observation and spatial experience video analysis.',
     category: 'video',
     configSchema: [
-      { key: 'prompt', label: 'Prompt', type: 'string' },
-      { key: 'maxSegments', label: 'Max segments', type: 'number' },
+      { key: 'prompt', label: 'Task instructions (inside the question)', type: 'string' },
+      { key: 'maxSegments', label: 'Max segments allowed', type: 'number' },
     ],
     resultSchema: [
       { key: 'segments', label: 'Key moments marked', type: 'count' },
@@ -405,10 +410,12 @@ document.getElementById('markEnd').onclick = function() {
   {
     id: 'emotion_color_picker',
     name: 'Emotion Color Mapping',
+    builderLabel: 'Emotion Color Mapping',
+    builderHint: 'One image stimulus; participants pick a color and intensity for their emotional response.',
     description: 'After viewing an environment image, participants pick the color on a wheel that best represents their emotional response and tune its intensity. For emotional geography and place perception research.',
     category: 'image',
     configSchema: [
-      { key: 'prompt', label: 'Prompt', type: 'string' },
+      { key: 'prompt', label: 'Task instructions (inside the question)', type: 'string' },
     ],
     resultSchema: [
       { key: 'color.hex', label: 'Emotion color', type: 'color' },
@@ -509,11 +516,13 @@ document.getElementById('intensity').oninput = function() {
   {
     id: 'best_worst_choice',
     name: 'Best–Worst Image Choice',
+    builderLabel: 'Best–Worst Choice (MaxDiff)',
+    builderHint: 'Shows several random images; participants pick one best and one worst option.',
     description: 'Shows a grid of scene images; participants pick the single best and single worst option. Best–Worst Scaling (MaxDiff) produces more stable preference scores than independent ratings.',
     category: 'image',
     configSchema: [
-      { key: 'prompt', label: 'Prompt', type: 'string' },
-      { key: 'mediaCount', label: 'Number of options', type: 'number', min: 2, max: 6 },
+      { key: 'prompt', label: 'Task instructions (inside the question)', type: 'string' },
+      { key: 'mediaCount', label: 'Images shown per trial', type: 'number', min: 2, max: 6 },
       { key: 'bestLabel', label: 'Best button label', type: 'string' },
       { key: 'worstLabel', label: 'Worst button label', type: 'string' },
     ],
@@ -620,10 +629,12 @@ document.addEventListener('spskill-init', function(e) {
   {
     id: 'video_continuous_rating',
     name: 'Continuous Video Rating',
+    builderLabel: 'Continuous Video Rating',
+    builderHint: 'One video; participants keep adjusting a slider while watching (sampled over time).',
     description: 'While a walkthrough video plays, participants continuously adjust a slider to report their momentary experience; ratings are sampled per second into a timeline. For dynamic spatial experience measurement.',
     category: 'video',
     configSchema: [
-      { key: 'prompt', label: 'Prompt', type: 'string' },
+      { key: 'prompt', label: 'Task instructions (inside the question)', type: 'string' },
       { key: 'lowLabel', label: 'Low end label', type: 'string' },
       { key: 'highLabel', label: 'High end label', type: 'string' },
     ],
@@ -721,10 +732,12 @@ document.addEventListener('spskill-init', function(e) {
   {
     id: 'composite_blocks',
     name: 'Composite Question (Blocks)',
+    builderLabel: 'Composite Blocks (flexible)',
+    builderHint: 'Combine media, sliders, word chips, choice, and text via configuration. More flexible; slightly more advanced.',
     description: 'Assemble a custom question from preset building blocks — media display, rating slider groups, word chips, single choice, and free text — purely through configuration. No HTML editing needed; ideal starting point for AI generation or manual composition.',
     category: 'media',
     configSchema: [
-      { key: 'prompt', label: 'Prompt', type: 'string' },
+      { key: 'prompt', label: 'Task instructions (inside the question)', type: 'string' },
       { key: 'scaleMin', label: 'Scale minimum (sliders)', type: 'number', min: 0, max: 10 },
       { key: 'scaleMax', label: 'Scale maximum (sliders)', type: 'number', min: 2, max: 101 },
       { key: 'blocks', label: 'Blocks (JSON) — see skill description', type: 'json' },
@@ -946,7 +959,48 @@ export const PRESET_SKILL_DEMO_IMAGES = [
 ];
 
 export function getPresetSkill(presetId) {
-  return PRESET_SKILLS.find((p) => p.id === presetId) || null;
+  const id = String(presetId || '').replace(/^preset_/, '');
+  return PRESET_SKILLS.find((p) => p.id === id) || null;
+}
+
+/** Stable skillId used in survey JSON for built-in presets. */
+export function presetSkillId(presetId) {
+  const id = String(presetId || '').replace(/^preset_/, '');
+  return id ? `preset_${id}` : '';
+}
+
+/** Builder type-list entries for built-in experimental tasks (not labeled "Skill"). */
+export function getPresetBuilderTypeOptions() {
+  return PRESET_SKILLS.map((p) => ({
+    value: `skill:${presetSkillId(p.id)}`,
+    label: p.builderLabel || p.name,
+    hint: p.builderHint || p.description,
+    group: 'perception',
+  }));
+}
+
+/** Resolve a skill definition for the builder (preset or library row). */
+export function resolveBuilderSkill(skillId, librarySkills = []) {
+  if (!skillId) return null;
+  const fromLibrary = librarySkills.find((s) => s.id === skillId);
+  if (skillId.startsWith('preset_') || (!fromLibrary && getPresetSkill(skillId))) {
+    const preset = getPresetSkill(skillId);
+    if (!preset) return fromLibrary || null;
+    return {
+      id: presetSkillId(preset.id),
+      name: preset.name,
+      description: preset.description,
+      builderLabel: preset.builderLabel || preset.name,
+      builderHint: preset.builderHint || preset.description,
+      sourceHtml: preset.sourceHtml,
+      configSchema: preset.configSchema || [],
+      defaultConfig: preset.defaultConfig || {},
+      resultSchema: preset.resultSchema || [],
+      mediaConstraints: preset.mediaConstraints,
+      scope: 'preset',
+    };
+  }
+  return fromLibrary || null;
 }
 
 /**
@@ -955,7 +1009,9 @@ export function getPresetSkill(presetId) {
  */
 export function getSkillMediaConstraints(skillId, skillDef) {
   const id = skillId?.replace(/^preset_/, '');
-  const def = skillDef || (id ? getPresetSkill(id) : null);
+  const def = skillDef?.mediaConstraints
+    ? skillDef
+    : (id ? getPresetSkill(id) : null) || skillDef;
   const c = def?.mediaConstraints || {};
   return {
     countFixed: c.countFixed ?? null,

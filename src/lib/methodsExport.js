@@ -11,7 +11,7 @@ function questionTypeLabel(type) {
     matrix: 'matrix question',
     slidergroup: 'semantic differential slider group',
     pointallocation: 'point allocation task',
-    skillquestion: 'custom interactive task',
+    skillquestion: 'interactive perception task',
   };
   return labels[type] || type;
 }
