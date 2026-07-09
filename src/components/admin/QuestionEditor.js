@@ -557,10 +557,13 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
   // Load images from Hugging Face when image questions are selected and in manual mode
   useEffect(() => {
-    if ((editedQuestion.type === 'imagepicker' || editedQuestion.type === 'imageranking' || editedQuestion.type === 'imagerating' || editedQuestion.type === 'imageboolean' || editedQuestion.type === 'image' || editedQuestion.type === 'imagematrix' || editedQuestion.type === 'imageslidergroup' || editedQuestion.type === 'imagepointallocation') && editedQuestion.imageSelectionMode === 'huggingface_manual') {
+    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'];
+    const isCurated = editedQuestion.imageSelectionMode === 'huggingface_manual'
+      || editedQuestion.imageSelectionMode === 'manual';
+    if (imageQuestionTypes.includes(editedQuestion.type) && isCurated) {
       loadImages();
     }
-  }, [editedQuestion.type, editedQuestion.imageSelectionMode]);
+  }, [editedQuestion.type, editedQuestion.imageSelectionMode, currentProject?.preloadedImages]);
 
   // Initialize selected images from existing question data
   useEffect(() => {
@@ -589,67 +592,63 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   }, [editedQuestion.type]);
 
   const loadImages = async () => {
-    // Only load from Hugging Face now
-    if (editedQuestion.imageSelectionMode === 'huggingface_manual') {
-      return loadImagesFromHuggingFace();
-    }
-  };
-
-  const loadImagesFromHuggingFace = async () => {
-    if (!currentProject?.imageDatasetConfig?.enabled || !currentProject?.imageDatasetConfig?.datasetName) {
-      setImageError('Hugging Face dataset not configured for this project');
+    if (editedQuestion.imageSelectionMode !== 'huggingface_manual'
+      && editedQuestion.imageSelectionMode !== 'manual') {
       return;
     }
-
+    // Curated list: pick from project-uploaded media (Image Dataset).
+    // Hugging Face is only a fallback when the project has no preloaded media.
     setLoadingImages(true);
     setImageError(null);
-
     try {
-      // Import Hugging Face functions dynamically
-      const { getImagesFromHuggingFace } = await import('../../lib/huggingface');
-      
-      const { huggingFaceToken, datasetName } = currentProject.imageDatasetConfig;
-      
-      // Load ALL images from the dataset (since they're just URLs)
-      const allImages = [];
-      let offset = 0;
-      const batchSize = 100;
-      let hasMore = true;
-      
-      console.log('Loading all images from Hugging Face dataset...');
-      
-      while (hasMore) {
-        const result = await getImagesFromHuggingFace(huggingFaceToken, datasetName, batchSize, offset);
-        
-        if (result.success && result.images.length > 0) {
-          allImages.push(...result.images);
-          offset += batchSize;
-          
-          console.log(`Loaded batch: ${result.images.length} images (total so far: ${allImages.length})`);
-          
-          // Check if we've reached the end
-          if (result.images.length < batchSize || (result.total && offset >= result.total)) {
+      const pool = filterPoolForQuestion(currentProject?.preloadedImages || [], editedQuestion);
+      if (pool.length > 0) {
+        setAvailableImages(pool.map((img) => ({
+          url: img.url,
+          name: img.name || img.url,
+          type: img.type,
+        })));
+        setImageError(null);
+        return;
+      }
+
+      if (currentProject?.imageDatasetConfig?.enabled && currentProject?.imageDatasetConfig?.datasetName) {
+        const { getImagesFromHuggingFace } = await import('../../lib/huggingface');
+        const { huggingFaceToken, datasetName } = currentProject.imageDatasetConfig;
+        const allImages = [];
+        let offset = 0;
+        const batchSize = 100;
+        let hasMore = true;
+        while (hasMore) {
+          const result = await getImagesFromHuggingFace(huggingFaceToken, datasetName, batchSize, offset);
+          if (result.success && result.images.length > 0) {
+            allImages.push(...result.images);
+            offset += batchSize;
+            if (result.images.length < batchSize || (result.total && offset >= result.total)) {
+              hasMore = false;
+            }
+          } else {
             hasMore = false;
-          }
-        } else {
-          hasMore = false;
-          if (allImages.length === 0) {
-            setImageError(`Failed to load images from Hugging Face: ${result.error}`);
+            if (allImages.length === 0) {
+              setImageError(`Failed to load Hugging Face fallback: ${result.error}`);
+            }
           }
         }
+        if (allImages.length > 0) {
+          setAvailableImages(allImages);
+          setImageError(null);
+        } else {
+          setAvailableImages([]);
+          setImageError((prev) => prev || 'No images found in the Hugging Face fallback dataset');
+        }
+        return;
       }
-      
-      if (allImages.length > 0) {
-        setAvailableImages(allImages);
-        setImageError(null);
-        console.log(`✅ Successfully loaded ALL ${allImages.length} images from Hugging Face dataset`);
-      } else {
-        setImageError('No images found in the Hugging Face dataset');
-        setAvailableImages([]);
-      }
+
+      setAvailableImages([]);
+      setImageError('No media in this project yet. Upload files in Image Dataset, then pick a curated list here.');
     } catch (error) {
-      console.error('Error loading images from Hugging Face:', error);
-      setImageError(`Error loading images from Hugging Face: ${error.message}`);
+      console.error('Error loading curated media:', error);
+      setImageError(error.message || 'Failed to load project media');
       setAvailableImages([]);
     } finally {
       setLoadingImages(false);
