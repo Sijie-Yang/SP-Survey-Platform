@@ -230,6 +230,8 @@ export const PRESET_SKILLS = [
       prompt: 'Which one do you prefer? Drag the slider to express how strongly.',
       demoImages: [demoImg(0, 'street-a.svg'), demoImg(1, 'street-b.svg')],
     },
+    // Pairwise UI always shows exactly two images — count/type are not researcher knobs.
+    mediaConstraints: { countFixed: 2, typeFixed: 'image', countLabel: 'Always 2 images (A vs B)' },
     sourceHtml: buildSkill(`
 <div class="card">
   <p class="title">Pairwise Preference</p>
@@ -300,6 +302,7 @@ document.getElementById('hard').onchange = report;
       maxSegments: 5,
       demoImages: [demoImg(0, 'street-a.svg')],
     },
+    mediaConstraints: { countFixed: 1, typeFixed: 'video', countLabel: 'Always 1 video' },
     sourceHtml: buildSkill(`
 <div class="card">
   <p class="title">Video Key Moment Tagging</p>
@@ -417,6 +420,7 @@ document.getElementById('markEnd').onclick = function() {
       prompt: 'Look at the image and pick the color that best matches your first emotional response',
       demoImages: [demoImg(2, 'alley.svg')],
     },
+    mediaConstraints: { countFixed: 1, typeFixed: 'image', countLabel: 'Always 1 image' },
     sourceHtml: buildSkill(`
 <div class="card">
   <p class="title">Emotion Color Mapping</p>
@@ -526,6 +530,8 @@ document.getElementById('intensity').oninput = function() {
       worstLabel: 'Worst',
       demoImages: [demoImg(0, 'opt-a.svg'), demoImg(1, 'opt-b.svg'), demoImg(2, 'opt-c.svg'), demoImg(4, 'opt-d.svg')],
     },
+    // Count is adjustable (2–6); type stays image-only for this grid UI.
+    mediaConstraints: { countMin: 2, countMax: 6, typeFixed: 'image', countLabel: 'Number of image options (2–6)' },
     sourceHtml: buildSkill(`
 <div class="card">
   <p class="title">Best–Worst Choice</p>
@@ -633,6 +639,7 @@ document.addEventListener('spskill-init', function(e) {
       highLabel: 'Very pleasant',
       demoImages: [demoImg(0, 'street-a.svg')],
     },
+    mediaConstraints: { countFixed: 1, typeFixed: 'video', countLabel: 'Always 1 video' },
     sourceHtml: buildSkill(`
 <div class="card">
   <p class="title">Continuous Video Rating</p>
@@ -759,6 +766,8 @@ document.addEventListener('spskill-init', function(e) {
       ],
       demoImages: [demoImg(0, 'street-a.svg')],
     },
+    // Default demo uses 1 image; researchers can raise count if blocks reference more indices.
+    mediaConstraints: { countMin: 1, countMax: 6, countLabel: 'Media files available to blocks' },
     sourceHtml: buildSkill(`
 <div class="card">
   <p class="title" id="skillTitle">Composite Question</p>
@@ -938,4 +947,23 @@ export const PRESET_SKILL_DEMO_IMAGES = [
 
 export function getPresetSkill(presetId) {
   return PRESET_SKILLS.find((p) => p.id === presetId) || null;
+}
+
+/**
+ * Resolve media UI constraints for a skill question.
+ * Preset skills declare mediaConstraints; custom skills stay fully adjustable.
+ */
+export function getSkillMediaConstraints(skillId, skillDef) {
+  const id = skillId?.replace(/^preset_/, '');
+  const def = skillDef || (id ? getPresetSkill(id) : null);
+  const c = def?.mediaConstraints || {};
+  return {
+    countFixed: c.countFixed ?? null,
+    countMin: c.countMin ?? 1,
+    countMax: c.countMax ?? 6,
+    typeFixed: c.typeFixed ?? null,
+    countLabel: c.countLabel || null,
+    countAdjustable: c.countFixed == null,
+    typeAdjustable: c.typeFixed == null,
+  };
 }

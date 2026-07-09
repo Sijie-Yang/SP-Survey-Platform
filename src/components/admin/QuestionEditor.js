@@ -36,7 +36,7 @@ import { filterPoolForQuestion, getMediaPoolStatus } from '../../lib/surveyMedia
 import { getMediaCategories } from '../../lib/mediaUtils';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
 import SkillQuestionFrame from '../SkillQuestionWidget';
-import { buildFallbackDemoImages } from '../../lib/presetSkills';
+import { buildFallbackDemoImages, getSkillMediaConstraints } from '../../lib/presetSkills';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
 
@@ -313,12 +313,21 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         updates.type = 'skillquestion';
         updates.skillId = skillId;
         updates.skillHtml = skill?.sourceHtml || '';
-        updates.skillConfig = skill?.defaultConfig || {};
+        const mediaConstraints = getSkillMediaConstraints(skillId, skill);
+        const lockedCount = mediaConstraints.countFixed
+          ?? skill?.defaultConfig?.mediaCount
+          ?? 1;
+        const lockedType = mediaConstraints.typeFixed || skill?.defaultConfig?.mediaType || 'image';
+        updates.skillConfig = {
+          ...(skill?.defaultConfig || {}),
+          mediaCount: lockedCount,
+          mediaType: lockedType,
+        };
         updates.skillResultSchema = skill?.resultSchema || [];
         updates.randomImageSelection = true;
         updates.imageSelectionMode = 'huggingface_random';
         updates.excludePreviouslyUsedImages = true;
-        updates.imageCount = skill?.defaultConfig?.mediaCount || 1;
+        updates.imageCount = lockedCount;
         return setEditedQuestion({ ...editedQuestion, ...updates });
       }
       // Types that should have 1 image/media by default
@@ -653,18 +662,28 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 const skillDef = builderSkills.find((s) => s.id === editedQuestion.skillId);
                 const schema = skillDef?.configSchema || [];
                 const cfg = editedQuestion.skillConfig || {};
-                const mediaTypeLabel = cfg.mediaType === 'video' ? 'video'
-                  : cfg.mediaType === 'audio' ? 'audio'
-                  : cfg.mediaType === 'any' ? 'media file' : 'image';
+                const mediaConstraints = getSkillMediaConstraints(editedQuestion.skillId, skillDef);
+                const effectiveMediaType = mediaConstraints.typeFixed || cfg.mediaType || 'image';
+                const mediaTypeLabel = effectiveMediaType === 'video' ? 'video'
+                  : effectiveMediaType === 'audio' ? 'audio'
+                  : effectiveMediaType === 'any' ? 'media file' : 'image';
                 const setCfg = (key, value) => handleQuestionChange('skillConfig', { ...cfg, [key]: value });
                 const setMediaCount = (n) => {
-                  const count = Math.min(Math.max(parseInt(n, 10) || 1, 1), 6);
+                  if (!mediaConstraints.countAdjustable) return;
+                  const count = Math.min(
+                    Math.max(parseInt(n, 10) || mediaConstraints.countMin, mediaConstraints.countMin),
+                    mediaConstraints.countMax,
+                  );
                   setEditedQuestion({
                     ...editedQuestion,
                     imageCount: count,
                     skillConfig: { ...cfg, mediaCount: count },
                   });
                 };
+                const displayMediaCount = mediaConstraints.countFixed
+                  ?? cfg.mediaCount
+                  ?? editedQuestion.imageCount
+                  ?? 1;
                 const editableSchema = schema.filter((f) => !['mediaCount', 'mediaType'].includes(f.key));
                 const renderSchemaField = (field) => {
                   const val = cfg[field.key];
@@ -809,30 +828,50 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         Skill Settings
                       </Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <TextField
-                          fullWidth
-                          type="number"
-                          variant="outlined"
-                          label="Media count"
-                          value={cfg.mediaCount ?? editedQuestion.imageCount ?? 1}
-                          onChange={(e) => setMediaCount(e.target.value)}
-                          helperText={`Number of ${mediaTypeLabel}(s) injected from the project media pool`}
-                          inputProps={{ min: 1, max: 6, step: 1 }}
-                          sx={{ bgcolor: 'white' }}
-                        />
-                        <FormControl fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
-                          <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media type</InputLabel>
-                          <Select
-                            value={cfg.mediaType || 'image'}
-                            label="Media type"
-                            onChange={(e) => setCfg('mediaType', e.target.value)}
-                          >
-                            <MenuItem value="image">Image</MenuItem>
-                            <MenuItem value="video">Video</MenuItem>
-                            <MenuItem value="audio">Audio</MenuItem>
-                            <MenuItem value="any">Any (mixed)</MenuItem>
-                          </Select>
-                        </FormControl>
+                        {mediaConstraints.countAdjustable ? (
+                          <TextField
+                            fullWidth
+                            type="number"
+                            variant="outlined"
+                            label={mediaConstraints.countLabel || 'Media count'}
+                            value={displayMediaCount}
+                            onChange={(e) => setMediaCount(e.target.value)}
+                            helperText={`Number of ${mediaTypeLabel}(s) randomly injected from the project media pool`}
+                            inputProps={{
+                              min: mediaConstraints.countMin,
+                              max: mediaConstraints.countMax,
+                              step: 1,
+                            }}
+                            sx={{ bgcolor: 'white' }}
+                          />
+                        ) : (
+                          <Alert severity="info" sx={{ py: 0.75 }}>
+                            <strong>Media count:</strong>{' '}
+                            {mediaConstraints.countLabel || `Fixed at ${mediaConstraints.countFixed} ${mediaTypeLabel}(s)`}.
+                            {' '}Randomly selected from the project pool
+                            {editedQuestion.mediaAssignmentMode === 'group' ? ' as a paired set' : ''}.
+                          </Alert>
+                        )}
+                        {mediaConstraints.typeAdjustable ? (
+                          <FormControl fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
+                            <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media type</InputLabel>
+                            <Select
+                              value={cfg.mediaType || 'image'}
+                              label="Media type"
+                              onChange={(e) => setCfg('mediaType', e.target.value)}
+                            >
+                              <MenuItem value="image">Image</MenuItem>
+                              <MenuItem value="video">Video</MenuItem>
+                              <MenuItem value="audio">Audio</MenuItem>
+                              <MenuItem value="any">Any (mixed)</MenuItem>
+                            </Select>
+                          </FormControl>
+                        ) : (
+                          <Alert severity="info" sx={{ py: 0.75 }}>
+                            <strong>Media type:</strong> Fixed to {mediaConstraints.typeFixed}
+                            {' '}(required by this skill UI).
+                          </Alert>
+                        )}
                         {editableSchema.length === 0 && (
                           <Alert severity="warning" sx={{ py: 0.5 }}>
                             This skill has no extra config fields. Edit the skill source in My Skill Library to expose
@@ -845,14 +884,23 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     {(() => {
                       const previewHtml = editedQuestion.skillHtml || skillDef?.sourceHtml;
                       if (!previewHtml) return null;
-                      const mergedCfg = { ...(skillDef?.defaultConfig || {}), ...cfg };
-                      const count = mergedCfg.mediaCount || editedQuestion.imageCount || 1;
+                      const mergedCfg = {
+                        ...(skillDef?.defaultConfig || {}),
+                        ...cfg,
+                        mediaCount: displayMediaCount,
+                        mediaType: effectiveMediaType,
+                      };
+                      const count = displayMediaCount;
                       let previewImages = [];
                       if (currentProject?.preloadedImages?.length) {
-                        previewImages = filterPoolForQuestion(currentProject.preloadedImages, editedQuestion).slice(0, count);
+                        previewImages = filterPoolForQuestion(currentProject.preloadedImages, {
+                          ...editedQuestion,
+                          imageCount: count,
+                          skillConfig: mergedCfg,
+                        }).slice(0, count);
                       }
                       if (!previewImages.length) {
-                        previewImages = buildFallbackDemoImages(count, mergedCfg.mediaType || 'image', editedQuestion.skillId);
+                        previewImages = buildFallbackDemoImages(count, effectiveMediaType, editedQuestion.skillId);
                       }
                       return (
                         <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'primary.light', borderRadius: 1, bgcolor: 'white' }}>
@@ -2193,6 +2241,28 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
           if (questionToSave.type === 'image') {
             questionToSave.imageCount = 1;
+          }
+
+          // Skill questions: enforce preset mediaConstraints (e.g. pairwise = always 2 images)
+          if (questionToSave.type === 'skillquestion' && questionToSave.skillId) {
+            const skillDef = builderSkills.find((s) => s.id === questionToSave.skillId);
+            const mediaConstraints = getSkillMediaConstraints(questionToSave.skillId, skillDef);
+            const nextCfg = { ...(questionToSave.skillConfig || {}) };
+            if (mediaConstraints.countFixed != null) {
+              nextCfg.mediaCount = mediaConstraints.countFixed;
+              questionToSave.imageCount = mediaConstraints.countFixed;
+            } else if (nextCfg.mediaCount != null) {
+              nextCfg.mediaCount = Math.min(
+                Math.max(Number(nextCfg.mediaCount) || mediaConstraints.countMin, mediaConstraints.countMin),
+                mediaConstraints.countMax,
+              );
+              questionToSave.imageCount = nextCfg.mediaCount;
+            }
+            if (mediaConstraints.typeFixed) {
+              nextCfg.mediaType = mediaConstraints.typeFixed;
+            }
+            questionToSave.skillConfig = nextCfg;
+            questionToSave.randomImageSelection = true;
           }
 
           // Media display / rating / boolean / annotation — always inject from project pool at runtime
