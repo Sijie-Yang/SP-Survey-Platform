@@ -9,6 +9,8 @@ import AdminApp from './AdminApp';
 import LoginPage from './pages/LoginPage';
 import LandingPage from './pages/LandingPage';
 import AdminDashboard from './pages/AdminDashboard';
+import SkillEditorPage from './pages/SkillEditorPage';
+import SkillLibraryPage from './pages/SkillLibraryPage';
 
 const theme = createTheme({
   palette: {
@@ -54,6 +56,42 @@ function ProtectedAdminDashboard() {
   return <AdminDashboard />;
 }
 
+function ProtectedSkillLibrary() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <SkillLibraryPage />;
+}
+
+function ProtectedSkillEditor() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <SkillEditorPage />;
+}
+
 export default function App() {
   return (
     <ThemeProvider theme={theme}>
@@ -66,6 +104,9 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/admin" element={<ProtectedAdmin />} />
             <Route path="/admin-dashboard" element={<ProtectedAdminDashboard />} />
+            <Route path="/skills" element={<ProtectedSkillLibrary />} />
+            <Route path="/skill-editor" element={<ProtectedSkillEditor />} />
+            <Route path="/skill-editor/:id" element={<ProtectedSkillEditor />} />
           </Routes>
         </Router>
       </AuthProvider>

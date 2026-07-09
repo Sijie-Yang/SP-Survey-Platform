@@ -5,6 +5,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const cors = require('cors');
 const OpenAI = require('openai');
+const { resolveAiRequest, aiChat, formatAiError } = require('./aiClient');
 const { S3Client, PutObjectCommand, DeleteObjectsCommand, ListObjectsV2Command, CopyObjectCommand } = require('@aws-sdk/client-s3');
 
 // Import multi-agent review system
@@ -26,11 +27,11 @@ const PORT = 3001;
 
 // Enable CORS for React app
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: ['http://localhost:3000', 'http://localhost:3002'],
   credentials: true
 }));
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '100mb' }));
 
 const TEMPLATES_PATH = path.join(__dirname, 'public', 'project_templates');
 const PROJECTS_PATH = path.join(__dirname, 'public', 'projects');
@@ -614,25 +615,105 @@ app.post('/api/restart', async (req, res) => {
 
 // ✅ OpenAI API endpoints for AI-powered survey generation
 
-// Validate OpenAI API key
+// Validate user's API key (OpenAI or OpenRouter)
 app.post('/api/openai/validate-key', async (req, res) => {
   try {
     const { apiKey } = req.body;
-    
+
     if (!apiKey) {
-      return res.status(400).json({ success: false, error: 'API key is required' });
+      return res.status(400).json({ success: false, valid: false, error: 'API key is required' });
     }
-    
-    const openai = new OpenAI({ apiKey });
-    
-    // Try a simple API call to validate the key
-    await openai.models.list();
-    
-    console.log('✅ OpenAI API key validated successfully');
-    res.json({ success: true, valid: true });
+
+    const ai = resolveAiRequest(apiKey);
+    await ai.client.models.list();
+
+    console.log(`✅ API key validated (${ai.provider})`);
+    res.json({ success: true, valid: true, provider: ai.provider });
   } catch (error) {
-    console.error('❌ OpenAI API key validation failed:', error.message);
+    console.error('❌ API key validation failed:', error.message);
     res.status(400).json({ success: false, valid: false, error: 'Invalid API key' });
+  }
+});
+
+// Generate or revise a custom question skill (HTML + config schemas)
+app.post('/api/openai/generate-skill', async (req, res) => {
+  try {
+    const { message, apiKey, currentSkill, conversationHistory = [] } = req.body;
+    if (!apiKey || !message) {
+      return res.status(400).json({ success: false, error: 'API key and message are required' });
+    }
+
+    const ai = resolveAiRequest(apiKey);
+    const skillContext = currentSkill
+      ? `\n\nCurrent skill JSON (revise this):\n${JSON.stringify({
+        name: currentSkill.name,
+        description: currentSkill.description,
+        configSchema: currentSkill.configSchema,
+        defaultConfig: currentSkill.defaultConfig,
+        resultSchema: currentSkill.resultSchema,
+        sourceHtml: currentSkill.sourceHtml,
+      }, null, 2).slice(0, 12000)}`
+      : '';
+
+    const systemPrompt = `You are an expert at building custom survey question types ("skills") for the SP Survey Platform.
+
+Each skill is HTML/CSS/JS running in a sandboxed iframe with this SDK:
+- document.addEventListener('spskill-init', function(e) { var cfg = e.detail.config; var images = e.detail.images; ... })
+- SPSkill.setAnswer(object) — submit participant answer
+- SPSkill.ready() — call when UI is ready
+- spSetImg(imgEl, 'image'|'video'|'audio', index, alt) — bind injected media
+- spUrl('image', index, label) — media URL helper
+- cfg.prompt, cfg.mediaCount, cfg.mediaType from defaultConfig
+
+Return JSON only:
+{
+  "message": "brief explanation of what you built/changed",
+  "skill": {
+    "name": "string",
+    "description": "string",
+    "configSchema": [{ "key": "prompt", "label": "Prompt", "type": "string" }, ...],
+    "defaultConfig": { "mediaCount": 1, "mediaType": "image", "prompt": "...", ... },
+    "resultSchema": [{ "key": "score", "label": "Score", "type": "number" }],
+    "sourceHtml": "<full HTML document with inline script using spskill-init>"
+  }
+}
+
+configSchema field types: string, text, number, boolean, select (with options array), dimensions (array of {id,left,right}), stringList (array of strings), json.
+
+Platform conventions (follow strictly so the question editor renders proper controls):
+- Rating axes: config key "dimensions" of type "dimensions", value [{id,left,right},...]. Render sliders dynamically from cfg.dimensions — never hardcode axis names or count.
+- Scale range: config keys "scaleMin" and "scaleMax" (type "number"). Sliders must use min=cfg.scaleMin, max=cfg.scaleMax, default value = midpoint. Default 1–7 unless user asks otherwise.
+- Word/tag lists: type "stringList" (e.g. "descriptorWords"), plus a "number" field for the max selectable count.
+- Every research variable (dimension names, ranges, word lists, option lists, timing) MUST be in defaultConfig and configSchema — nothing research-relevant hardcoded in HTML.
+Keep HTML self-contained (inline styles OK).`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt + skillContext },
+      ...conversationHistory.slice(-6),
+      { role: 'user', content: message },
+    ];
+
+    const completion = await aiChat(ai, 'strong', {
+      messages,
+      response_format: { type: 'json_object' },
+      temperature: 0.4,
+      max_tokens: 8000,
+    });
+
+    const raw = completion.choices[0].message.content.trim();
+    const parsed = JSON.parse(raw);
+    if (!parsed.skill?.sourceHtml) {
+      return res.status(500).json({ success: false, error: 'AI did not return valid skill HTML' });
+    }
+
+    res.json({
+      success: true,
+      message: parsed.message || 'Skill generated',
+      skill: parsed.skill,
+    });
+  } catch (error) {
+    console.error('generate-skill error:', error);
+    res.status(500).json({ success: false, error: formatAiError(error) });
   }
 });
 
@@ -1287,10 +1368,11 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
     const { surveyConfig, apiKey, mode = '1v1', maxRounds: maxRoundsParam, customAgents: customAgentsParam, userRequest, researchContext: researchContextParam } = req.query;
     
     if (!apiKey || !surveyConfig) {
-      sendEvent('error', { message: 'Missing required parameters' });
+      sendEvent('error', { message: 'API key and survey configuration are required' });
       res.end();
       return;
     }
+    const ai = resolveAiRequest(apiKey);
     
     // Parse research context if provided
     const researchContext = researchContextParam ? JSON.parse(researchContextParam) : null;
@@ -1302,7 +1384,6 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
     const agentsConfig = customAgentsParam ? JSON.parse(customAgentsParam) : AGENTS;
     
     const config = JSON.parse(surveyConfig);
-    const openai = new OpenAI({ apiKey });
     const agentIds = Object.keys(agentsConfig);
     const reviewHistory = [];
     let currentRound = 1;
@@ -1329,8 +1410,7 @@ app.get('/api/openai/multi-agent-review-stream', async (req, res) => {
             ? generate1v1ReviewPrompt(agentId, currentConfig, currentRound, agentsConfig, userOriginalRequest, researchContext)
             : generateGroupDiscussionPrompt(currentConfig, roundReviews, currentRound, agentsConfig, userOriginalRequest, researchContext);
           
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4o",
+          const completion = await aiChat(ai, 'strong', {
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt }
@@ -1408,8 +1488,7 @@ Summarize:
 2. What are the priorities for revision?
 3. What should be the revision strategy?`;
 
-        const revStep1Completion = await openai.chat.completions.create({
-          model: "gpt-4o",
+        const revStep1Completion = await aiChat(ai, 'strong', {
           messages: [
             { role: "system", content: "You are a survey revision strategist. Analyze expert feedback." },
             { role: "user", content: revStep1Prompt }
@@ -1433,8 +1512,7 @@ Plan specific changes:
 2. What specific changes to make?
 3. What is the priority order?`;
 
-        const revStep2Completion = await openai.chat.completions.create({
-          model: "gpt-4o",
+        const revStep2Completion = await aiChat(ai, 'strong', {
           messages: [
             { role: "system", content: "You are a survey revision planner. Plan specific changes." },
             { role: "user", content: revStep2Prompt }
@@ -1467,8 +1545,7 @@ Now revise the survey configuration.`;
           // Load prompts configuration
           const { PROMPTS } = require('./prompts.config.js');
           
-          const revisionCompletion = await openai.chat.completions.create({
-            model: "gpt-4o",
+          const revisionCompletion = await aiChat(ai, 'strong', {
             messages: [
               { role: "system", content: PROMPTS.revision },
               { role: "system", content: `Current survey:\n${JSON.stringify(currentConfig, null, 2)}` },
@@ -1543,11 +1620,13 @@ app.post('/api/openai/chat', async (req, res) => {
     const { message, currentConfig, conversationHistory, apiKey, customPrompts, researchContext } = req.body;
     
     if (!apiKey || !message) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'API key and message are required'
+      return res.status(400).json({
+        success: false,
+        error: 'API key and message are required',
       });
     }
+
+    const ai = resolveAiRequest(apiKey);
     
     // Load default prompts from shared config
     const { PROMPTS: defaultPrompts } = require('./prompts.config.js');
@@ -1572,18 +1651,13 @@ app.post('/api/openai/chat', async (req, res) => {
       console.log('🔬 Research context will be included:', researchContext);
     }
     
-    const openai = new OpenAI({ apiKey });
-    
     // Step 1: Determine user intent using configured prompt
     console.log('🧠 Analyzing user intent...');
-    
-    // Add context information to the intent detection
     const contextInfo = `\n\nCurrent context:
 - User ${currentConfig && currentConfig.pages ? 'HAS' : 'DOES NOT HAVE'} an existing survey configuration
 - Existing survey has ${currentConfig?.pages?.length || 0} pages`;
     
-    const intentCompletion = await openai.chat.completions.create({
-      model: "gpt-4o",
+    const intentCompletion = await aiChat(ai, 'fast', {
       messages: [
         { role: "system", content: prompts.intentDetection + contextInfo },
         { role: "user", content: message }
@@ -1622,8 +1696,7 @@ Return JSON:
 
 If the user message doesn't contain research information, set hasResearchInfo to false and keep existing values.`;
 
-      const extractCompletion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const extractCompletion = await aiChat(ai, 'fast', {
         messages: [
           { role: "system", content: "You are an expert at extracting research context from user requests. Be concise and accurate." },
           { role: "user", content: extractPrompt }
@@ -1680,8 +1753,7 @@ User request: "${message}"
 
 Provide a brief analysis (2-3 sentences for each point).`;
 
-      const step1Completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const step1Completion = await aiChat(ai, 'default', {
         messages: [
           { role: "system", content: prompts.generate },
           { role: "user", content: step1Prompt }
@@ -1707,8 +1779,7 @@ Now plan the survey structure:
 
 Provide a structured plan with page-by-page breakdown.`;
 
-      const step2Completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const step2Completion = await aiChat(ai, 'default', {
         messages: [
           { role: "system", content: prompts.generate },
           { role: "user", content: step2Prompt }
@@ -1737,8 +1808,7 @@ Now generate the complete survey configuration following all the rules and examp
 
       const systemPrompt = prompts.generate + researchContextSection;
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const completion = await aiChat(ai, 'default', {
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: step3Prompt }
@@ -1786,7 +1856,7 @@ Now generate the complete survey configuration following all the rules and examp
           requiresGenerate: true
         });
       }
-      
+
       console.log('🧠 Starting Chain of Thoughts adjustment...');
       
       // Step 1: Understand adjustment goal
@@ -1806,8 +1876,7 @@ Analyze:
 
 Provide a brief analysis.`;
 
-      const step1Completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const step1Completion = await aiChat(ai, 'default', {
         messages: [
           { role: "system", content: prompts.adjust },
           { role: "user", content: step1Prompt }
@@ -1835,8 +1904,7 @@ Plan the specific adjustments:
 
 Provide a detailed adjustment plan.`;
 
-      const step2Completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const step2Completion = await aiChat(ai, 'default', {
         messages: [
           { role: "system", content: prompts.adjust },
           { role: "user", content: step2Prompt }
@@ -1865,8 +1933,7 @@ Now adjust the survey configuration following all the rules and maintaining cons
 
       const systemPrompt = prompts.adjust + researchContextSection;
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const completion = await aiChat(ai, 'default', {
         messages: [
           { role: "system", content: systemPrompt },
           { role: "system", content: `Current survey configuration:\n${JSON.stringify(currentConfig, null, 2)}` },
@@ -1909,8 +1976,7 @@ Now adjust the survey configuration following all the rules and maintaining cons
       // Answer question
       const systemPrompt = prompts.question + researchContextSection;
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+      const completion = await aiChat(ai, 'default', {
         messages: [
           { role: "system", content: systemPrompt },
           ...(conversationHistory || []),
@@ -1932,9 +1998,11 @@ Now adjust the survey configuration following all the rules and maintaining cons
     
   } catch (error) {
     console.error('❌ Error in chat routing:', error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Failed to process chat message' 
+    const status = error?.status === 429 ? 429 : 500;
+    res.status(status).json({
+      success: false,
+      error: formatAiError(error),
+      rateLimited: status === 429,
     });
   }
 });
@@ -2005,15 +2073,26 @@ app.get('/api/r2/list', async (req, res) => {
       Prefix: prefix,
       MaxKeys: 10000,
     }));
+    const MEDIA_FILE_RE = /\.(jpe?g|png|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg)$/i;
+    const inferType = (name) => {
+      const ext = (name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
+      if (['mp4', 'webm', 'mov'].includes(ext)) return 'video';
+      if (['mp3', 'wav', 'm4a', 'ogg'].includes(ext)) return 'audio';
+      return 'image';
+    };
     const images = (result.Contents || [])
-      .filter(obj => /\.(jpg|jpeg|png|gif|webp)$/i.test(obj.Key))
-      .map(obj => ({
-        name: obj.Key.split('/').pop(),
-        key: obj.Key,
-        url: `${r2PublicUrl}/${obj.Key}`,
-        size: obj.Size,
-        lastModified: obj.LastModified,
-      }));
+      .filter(obj => MEDIA_FILE_RE.test(obj.Key))
+      .map(obj => {
+        const name = obj.Key.split('/').pop();
+        return {
+          name,
+          key: obj.Key,
+          url: `${r2PublicUrl}/${obj.Key}`,
+          size: obj.Size,
+          lastModified: obj.LastModified,
+          type: inferType(name),
+        };
+      });
     res.json({ success: true, images });
   } catch (error) {
     console.error('R2 list error:', error);

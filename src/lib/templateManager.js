@@ -295,6 +295,22 @@ export async function deleteTemplate(id) {
   return { success: true };
 }
 
+function rowToAdminProject(row) {
+  return {
+    id:              row.id,
+    name:            row.name            || '',
+    description:     row.description     || '',
+    user_id:         row.user_id         || null,
+    template_id:     row.template_id     || null,
+    config:          row.survey_config   || {},
+    preloadedImages: row.preloaded_images || [],
+    preloadedAt:     row.preloaded_at    || null,
+    preloadedSource: row.preloaded_source || null,
+    created_at:      row.created_at,
+    updated_at:      row.updated_at,
+  };
+}
+
 /**
  * Admin: list all projects across all users.
  * Requires the caller to be in the `admins` table (RLS).
@@ -304,14 +320,42 @@ export async function listAllProjects() {
   try {
     const { data, error } = await supabase
       .from('projects')
-      .select('id, name, description, user_id, created_at, updated_at, template_id')
+      .select('*')
       .order('updated_at', { ascending: false });
     if (error) { console.error('listAllProjects:', error); return []; }
-    return data || [];
+    return (data || []).map(rowToAdminProject);
   } catch (err) {
     console.error('listAllProjects exception:', err);
     return [];
   }
+}
+
+/**
+ * Admin: update any fields on a project without changing ownership.
+ */
+export async function updateProjectAdmin(id, updates) {
+  if (!supabase) throw new Error('Supabase not configured');
+  const row = { updated_at: new Date().toISOString() };
+  if ('name'             in updates) row.name              = updates.name;
+  if ('description'      in updates) row.description       = updates.description;
+  if ('survey_config'    in updates) row.survey_config     = updates.survey_config;
+  if ('preloaded_images' in updates) row.preloaded_images  = updates.preloaded_images;
+  if ('preloaded_at'     in updates) row.preloaded_at      = updates.preloaded_at;
+  if ('preloaded_source' in updates) row.preloaded_source  = updates.preloaded_source;
+
+  const { error } = await supabase.from('projects').update(row).eq('id', id);
+  if (error) throw error;
+  return { success: true };
+}
+
+/**
+ * Admin: permanently delete a project.
+ */
+export async function deleteProjectAdmin(id) {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase.from('projects').delete().eq('id', id);
+  if (error) throw error;
+  return { success: true };
 }
 
 /**

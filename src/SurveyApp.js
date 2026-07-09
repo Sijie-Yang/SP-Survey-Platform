@@ -4,22 +4,47 @@ import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
 import { Box, Alert, CircularProgress, Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography } from '@mui/material';
 import { saveSurveyResponse, isSupabaseConfigured } from './lib/supabase';
+import { findDraftForProject, saveDraft, clearDraft, clearDraftByKey } from './lib/surveyDraft';
 import { surveyJson, displayedImages } from './config/questions';
 import { surveyConfig } from './config/surveyConfig';
 import { themeJson } from "./theme";
 import { loadSurveyConfig, convertToSurveyJS, generateCustomTheme } from './lib/surveyStorage';
-import registerImageRankingWidget, { registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget } from './components/SurveyCustomComponents';
+import registerImageRankingWidget, {
+  registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget,
+  registerAllExtendedWidgets,
+} from './components/SurveyCustomComponents';
+import {
+  isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
+  ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesGroupMediaAssignment,
+  usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia,
+} from './lib/surveyMediaInjection';
 
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMessage, setLoadingMessage] = useState('Loading survey…');
   const [error, setError] = useState(null);
   const [useAdminConfig, setUseAdminConfig] = useState(true); // Use admin config by default
   const [adminConfigExists, setAdminConfigExists] = useState(false);
   const [infoDialogOpen, setInfoDialogOpen] = useState(false);
   const [displayedImagesMap, setDisplayedImagesMap] = useState({}); // Track displayed images for each question
   const [currentProjectId, setCurrentProjectId] = useState(null); // Track current project ID
+  const [repeatProgress, setRepeatProgress] = useState(null);
+  const [surveyPhase, setSurveyPhase] = useState('loading'); // loading | active | completed | submit-error
+  const [completionInfo, setCompletionInfo] = useState(null);
+  const [pendingSubmission, setPendingSubmission] = useState(null);
+  const [resumeDialog, setResumeDialog] = useState(null);
+  const [completionMessage, setCompletionMessage] = useState('');
+  const repeatSessionRef = useRef(null);
+  const repeatParticipantRef = useRef(null);
+  const repeatAttemptRef = useRef(1);
+  const participantIdRef = useRef(null);
+  const draftSaveTimerRef = useRef(null);
+  const resumeChoiceRef = useRef(null);
+  const projectIdRef = useRef(null);
   const displayedImagesRef = useRef({}); // Use ref to ensure onComplete has access to latest value
+  const displayedMediaGroupsRef = useRef({});
+  const displayedMediaCategoriesRef = useRef({});
 
   // Monitor URL changes and reinitialize when project ID changes
   useEffect(() => {
@@ -98,45 +123,103 @@ export default function SurveyApp() {
     };
   }, [useAdminConfig]);
 
-  const initializeSurvey = async () => {
+  const submitSurveyResponse = async (completeData, { isRepeatMode, repeatTotal, attemptIndex }) => {
+    const result = await saveSurveyResponse(completeData);
+    if (result.success) {
+      clearDraft(projectIdRef.current, participantIdRef.current);
+      if (isRepeatMode && attemptIndex < repeatTotal) {
+        repeatAttemptRef.current = attemptIndex + 1;
+        setRepeatProgress({ current: repeatAttemptRef.current, total: repeatTotal });
+        setSurveyModel(null);
+        setSurveyPhase('loading');
+        setLoading(true);
+        resumeChoiceRef.current = 'fresh';
+        setTimeout(() => initializeSurvey({ skipDraftCheck: true }), 300);
+        return;
+      }
+      setSurveyPhase('completed');
+      setCompletionInfo({
+        participantId: completeData.participant_id,
+        storage: result.storage,
+        isRepeatMode,
+        repeatTotal,
+      });
+      setPendingSubmission(null);
+      if (isRepeatMode) setRepeatProgress(null);
+      return;
+    }
+    setPendingSubmission(completeData);
+    setSurveyPhase('submit-error');
+  };
+
+  const scheduleDraftSave = (model, imageTracker, finalSurveyJson) => {
+    if (!projectIdRef.current || !participantIdRef.current) return;
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    draftSaveTimerRef.current = setTimeout(() => {
+      saveDraft(projectIdRef.current, participantIdRef.current, {
+        surveyData: { ...model.data },
+        currentPageNo: model.currentPageNo,
+        displayedImages: { ...imageTracker },
+        finalSurveyJson: JSON.parse(JSON.stringify(finalSurveyJson)),
+      });
+    }, 800);
+  };
+
+  const initializeSurvey = async (options = {}) => {
     try {
       setLoading(true);
-      
-      console.log('🚀 InitializeSurvey called at:', new Date().toISOString());
+      setLoadingMessage('Loading survey…');
       
       // Register custom components
       registerImageRankingWidget();
       registerImageRatingWidget();
       registerImageBooleanWidget();
       registerImageMatrixWidget();
+      registerAllExtendedWidgets();
+      setLoadingMessage('Preparing questions and media…');
       let finalSurveyJson;
       let finalDisplayedImages = displayedImages;
       const imageTracker = {}; // Track displayed images for each question
+      const mediaGroupTracker = {}; // questionName -> groupId (for paired assignment)
+      const mediaCategoryTracker = {}; // questionName -> category[] (one-per-category mode)
       const globallyUsedImageKeys = new Set();
-      const getImageKey = (image) => image?.name || image?.url;
+      const globallyUsedGroupKeys = new Set();
       const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
-      const pickRandomImagesFromPool = (pool, imageCount, excludeUsed) => {
-        const shuffled = [...pool].sort(() => 0.5 - Math.random());
-        if (!excludeUsed) {
-          return shuffled.slice(0, imageCount);
+      const finalizeMediaSelection = (element, pool, preselected) => {
+        if (preselected?.length && !usesGroupMediaAssignment(element) && !usesCategoryMediaAssignment(element)) {
+          const imageCount = element.imageCount || defaultMediaCount(element);
+          const excludeUsed = shouldExcludePreviouslyUsedImages(element);
+          let selected = preselected;
+          if (excludeUsed) {
+            selected = preselected.filter((image) => {
+              const key = getImageKey(image);
+              return key && !globallyUsedImageKeys.has(key);
+            }).slice(0, imageCount);
+          } else {
+            selected = preselected.slice(0, imageCount);
+          }
+          const assignment = { images: selected, groupKey: null, groupId: null };
+          trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
+          return assignment;
         }
-        const filtered = shuffled.filter((image) => {
-          const key = getImageKey(image);
-          return key && !globallyUsedImageKeys.has(key);
-        });
-        return filtered.slice(0, imageCount);
-      };
-      const trackGloballyUsedImages = (selectedImages, excludeUsed) => {
-        if (!excludeUsed) return;
-        selectedImages.forEach((image) => {
-          const key = getImageKey(image);
-          if (key) globallyUsedImageKeys.add(key);
-        });
+        const assignment = pickRandomMediaForQuestion(
+          pool,
+          element,
+          globallyUsedImageKeys,
+          globallyUsedGroupKeys,
+        );
+        trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
+        return assignment;
       };
 
       // Get project ID from URL parameters
       const urlParams = new URLSearchParams(window.location.search);
       const projectId = urlParams.get('project') || 'default';
+      projectIdRef.current = projectId;
+      
+      if (!participantIdRef.current) {
+        participantIdRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      }
       
       console.log('📂 Loading survey for project:', projectId);
 
@@ -152,6 +235,7 @@ export default function SurveyApp() {
       
       // Load survey configuration (platform mode: Supabase, self-hosted: local server)
       const adminConfig = await loadSurveyConfig(projectId);
+      setCompletionMessage(adminConfig?.completionMessage || '');
       
       // Build runtime Supabase config from project sources.
       // Priority: project.supabaseConfig (legacy/system status) -> imageDatasetConfig (current UI flow)
@@ -207,6 +291,7 @@ export default function SurveyApp() {
         // Directly use admin configuration (already in standard SurveyJS format)
         // Use deep copy to avoid modifying the original config
         finalSurveyJson = JSON.parse(JSON.stringify(adminConfig));
+        await resolveSkillQuestions(finalSurveyJson);
         
         // Process image questions and convert imageranking to ranking for SurveyJS
         if (finalSurveyJson.pages) {
@@ -251,36 +336,42 @@ export default function SurveyApp() {
                 
                 // Process random image selection for imagepicker, imageranking, imagerating, imageboolean, imagematrix, and image questions
                 // ✅ Skip if manual selection mode - use existing choices
-                const isImageQuestion = (element.type === 'imagepicker' || element.type === 'imageranking' || element.type === 'imagerating' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imagematrix');
+                const isImageQuestion = isRandomMediaQuestion(element);
                 const isManualMode = (element.imageSelectionMode === 'huggingface_manual' || element.imageSelectionMode === 'manual');
                 
                 if (isImageQuestion && isManualMode && element.choices && element.choices.length > 0) {
                   console.log(`✅ Skipping image loading for ${element.type} question "${element.name}" - using manually selected images (${element.choices.length} images)`);
                 }
                 
-                if (isImageQuestion && element.randomImageSelection && !isManualMode) {
+                if (shouldInjectMedia(element)) {
                   console.log(`🔄 Loading random images for ${element.type} question: ${element.name}`);
                   try {
                     let result;
-                    const excludeUsed = shouldExcludePreviouslyUsedImages(element);
                     
                     // PRIORITY 1: Check if project has preloaded images
                     if (projectData?.preloadedImages && projectData.preloadedImages.length > 0) {
-                      console.log(`📦 Using preloaded images from project (${projectData.preloadedImages.length} available)`);
-                      
-                      // Use type-specific defaults if imageCount is not set
-                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
-                      const imageCount = element.imageCount || defaultCount;
-                      
-                      // Randomly select from preloaded images with optional cross-question uniqueness
-                      const selectedImages = pickRandomImagesFromPool(projectData.preloadedImages, imageCount, excludeUsed);
+                      console.log(`📦 Using preloaded media from project (${projectData.preloadedImages.length} available)`);
+                      const pool = filterPoolForQuestion(projectData.preloadedImages, element);
+                      let assignment = finalizeMediaSelection(element, pool);
+                      let selectedImages = assignment.images;
+                      // Skill questions: reuse pool images rather than falling back to demo media
+                      if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesGroupMediaAssignment(element)) {
+                        const imageCount = element.imageCount || defaultMediaCount(element);
+                        selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+                        assignment = { images: selectedImages, groupKey: null, groupId: null };
+                        trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
+                        console.log(`♻️ Pool exhausted, reusing ${selectedImages.length} images for skill question`);
+                      }
                       
                       result = {
                         success: true,
-                        images: selectedImages
+                        images: selectedImages,
+                        groupId: assignment.groupId,
+                        categories: assignment.categories,
+                        _assigned: true,
                       };
                       
-                      console.log(`✅ Selected ${selectedImages.length} random images from preloaded pool`);
+                      console.log(`✅ Selected ${selectedImages.length} media file(s) from preloaded pool${assignment.groupId ? ` (group: ${assignment.groupId})` : ''}${assignment.categories?.length ? ` (categories: ${assignment.categories.join(', ')})` : ''}`);
                     }
                     // PRIORITY 2: Use global imageDatasetConfig if available
                     else if (projectData?.imageDatasetConfig?.enabled && projectData.imageDatasetConfig.datasetName) {
@@ -327,81 +418,56 @@ export default function SurveyApp() {
                       const supabaseResult = await getAllImagesFromSupabase(element.bucketPath, projectSupabase);
                       
                       if (supabaseResult.success && supabaseResult.images.length > 0) {
-                        // Randomly select images with optional cross-question uniqueness
-                        // Use type-specific defaults if imageCount is not set
-                        const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
-                        const imageCount = element.imageCount || defaultCount;
-                        const selectedImages = pickRandomImagesFromPool(supabaseResult.images, imageCount, excludeUsed);
-                        result = { success: true, images: selectedImages };
+                        const pool = filterPoolForQuestion(supabaseResult.images, element);
+                        const assignment = finalizeMediaSelection(element, pool);
+                        result = { success: true, images: assignment.images, groupId: assignment.groupId, categories: assignment.categories, _assigned: true };
                       } else {
                         result = supabaseResult;
                       }
                     } else {
-                      console.warn(`No image source configured for question: ${element.name}`);
-                      continue;
+                      if (element.type === 'skillquestion') {
+                        ensureSkillDemoMedia(element);
+                        console.log(`Using demo media for skill question: ${element.name}`);
+                      } else {
+                        console.warn(`No image source configured for question: ${element.name}`);
+                        continue;
+                      }
                     }
                     
-                    if (result.success && result.images.length > 0) {
-                      // Apply cross-question uniqueness for sources that may return pre-randomized subsets (e.g. Hugging Face API).
+                    if (result?.success && result.images.length > 0) {
                       let selectedImages = result.images;
-                      if (excludeUsed) {
-                        const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
-                        const imageCount = element.imageCount || defaultCount;
-                        const uniqueImages = selectedImages.filter((image) => {
-                          const key = getImageKey(image);
-                          return key && !globallyUsedImageKeys.has(key);
-                        });
-                        selectedImages = uniqueImages.slice(0, imageCount);
+                      let groupId = result.groupId || null;
+                      let categories = result.categories || null;
+                      if (!result._assigned) {
+                        const assignment = finalizeMediaSelection(
+                          element,
+                          filterPoolForQuestion(result.images, element),
+                          usesGroupMediaAssignment(element) ? null : result.images,
+                        );
+                        selectedImages = assignment.images;
+                        groupId = assignment.groupId;
+                        categories = assignment.categories;
                       }
-                      trackGloballyUsedImages(selectedImages, excludeUsed);
+                      if (groupId) {
+                        element.assignedMediaGroupId = groupId;
+                        mediaGroupTracker[element.name] = groupId;
+                      }
+                      if (categories?.length) {
+                        element.assignedMediaCategories = categories;
+                        mediaCategoryTracker[element.name] = categories;
+                      }
                       
-                      // Track displayed image URLs for this question (used in results analysis)
                       const imageUrls = selectedImages.map(img => img.url);
                       imageTracker[element.name] = imageUrls;
                       console.log(`✅ Tracked ${imageUrls.length} image URLs for question: ${element.name}`, imageUrls);
+                      if (groupId) console.log(`🔗 Assigned media group "${groupId}" → ${selectedImages.map((i) => i.name).join(', ')}`);
+                      if (categories?.length) console.log(`🏷️ Categories [${categories.join(', ')}] → ${selectedImages.map((i) => i.name).join(', ')}`);
                       
-                      // Set image data for SurveyJS
-                      if (element.type === 'image') {
-                        if (selectedImages.length > 0) {
-                          element.imageLink = selectedImages[0].url;
-                          element.imageName = selectedImages[0].name;
-                        }
-                        if (selectedImages.length > 1) {
-                          element.imageLinks = selectedImages.map(img => img.url);
-                          element.imageNames = selectedImages.map(img => img.name);
-                        }
-                      } else if (element.type === 'imageboolean' || element.type === 'imagerating' || element.type === 'imagematrix') {
-                        // Store both URLs and HTML for display. The class
-                        // structure below is picked up by
-                        // src/lib/imagePickerLayout.js, which sizes each
-                        // image to a uniform per-question height while
-                        // preserving its natural aspect ratio.
-                        element.imageLinks = selectedImages.map(img => img.url);
-                        element.imageNames = selectedImages.map(img => img.name);
-                        let imagesHtml = '<div class="sp-image-gallery">';
-                        selectedImages.forEach((image) => {
-                          imagesHtml += `<div class="sp-image-gallery__item"><div class="sp-image-gallery__image-container"><img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name}" alt="${image.name}" onerror="this.onerror=null;this.alt='Image unavailable';this.style.cssText='min-width:200px;min-height:120px;background:#f0f0f0;border:2px dashed #ccc;border-radius:4px;display:flex;align-items:center;justify-content:center'" /></div></div>`;
-                        });
-                        imagesHtml += '</div>';
-                        element.imageHtml = imagesHtml;
-                        console.log(`Stored imageLinks/imageHtml for ${element.type} question with ${selectedImages.length} images`);
-                      } else {
-                        // imageranking, imagepicker: use choices
-                        element.choices = selectedImages.map((image, index) => ({
-                          value: `image_${index}`,
-                          imageLink: image.url,
-                          imageName: image.name
-                        }));
-                        element.imageUrls = selectedImages.map(img => img.url);
-                        element.imageNames = selectedImages.map(img => img.name);
-                      }
-                      // Preserve any explicit imageFit chosen by the user, but
-                      // default to "contain" so the image keeps its natural aspect ratio.
-                      if (!element.imageFit) {
-                        element.imageFit = "contain";
-                      }
-                      
-                      console.log(`Loaded ${selectedImages.length} random images for question: ${element.name}`);
+                      applyMediaToElement(element, selectedImages);
+                      console.log(`Loaded ${selectedImages.length} random media for question: ${element.name}`);
+                    } else if (element.type === 'skillquestion') {
+                      ensureSkillDemoMedia(element);
+                      console.log(`Fallback demo media for skill: ${element.name}`);
                     } else {
                       console.warn(`No images found for random selection in question: ${element.name}`);
                     }
@@ -657,11 +723,28 @@ export default function SurveyApp() {
         }
       }
 
+      // Repeat annotation mode setup
+      const urlRepeat = parseInt(urlParams.get('repeat') || '0', 10);
+      const repeatCfg = finalSurveyJson?.repeatConfig || {};
+      const repeatTotal = urlRepeat > 0 ? urlRepeat : (repeatCfg.enabled ? (repeatCfg.total || 1) : 1);
+      const isRepeatMode = repeatTotal > 1;
+
+      if (isRepeatMode && !repeatSessionRef.current) {
+        repeatSessionRef.current = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        repeatParticipantRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        repeatAttemptRef.current = 1;
+        setRepeatProgress({ current: 1, total: repeatTotal });
+      } else if (isRepeatMode) {
+        setRepeatProgress({ current: repeatAttemptRef.current, total: repeatTotal });
+      }
+
       // Handle survey completion
       model.onComplete.add(async (survey, options) => {
         console.log("=== SURVEY COMPLETION STARTED ===");
         const responses = survey.data;
         const displayedImages = displayedImagesRef.current || {};
+        const displayedMediaGroups = displayedMediaGroupsRef.current || {};
+        const displayedMediaCategories = displayedMediaCategoriesRef.current || {};
         const surveyQuestionTypeMap = {};
         survey.getAllQuestions().forEach((question) => {
           surveyQuestionTypeMap[question.name] = question.getType();
@@ -690,7 +773,9 @@ export default function SurveyApp() {
           acc[questionName] = {
             type: surveyQuestionTypeMap[questionName] || null,
             answer: mappedAnswer,
-            shown_images: shownImages
+            shown_images: shownImages,
+            shown_media_group: displayedMediaGroups[questionName] || null,
+            shown_media_categories: displayedMediaCategories[questionName] || null,
           };
           return acc;
         }, {});
@@ -700,17 +785,27 @@ export default function SurveyApp() {
         console.log('Current Supabase config in sessionStorage:', currentSupabaseConfig);
         
         // Combine user responses with displayed images information
+        const attemptIndex = isRepeatMode ? repeatAttemptRef.current : 1;
         const completeData = {
           project_id: projectId,
+          participant_id: isRepeatMode ? repeatParticipantRef.current : participantIdRef.current,
           responses: enrichedResponses,
           raw_responses: responses,
           displayed_images: displayedImages,
+          displayed_media_groups: displayedMediaGroups,
+          displayed_media_categories: displayedMediaCategories,
           survey_metadata: {
             completion_time: new Date().toISOString(),
             user_agent: navigator.userAgent,
             screen_resolution: `${window.screen.width}x${window.screen.height}`,
             survey_version: useAdminConfig ? `2.0-admin-${projectId}` : "1.0-original",
-            project_id: projectId
+            project_id: projectId,
+            ...(isRepeatMode ? {
+              session_id: repeatSessionRef.current,
+              attempt_index: attemptIndex,
+              repeat_total: repeatTotal,
+              researcher_mode: true,
+            } : {}),
           }
         };
         
@@ -725,20 +820,58 @@ export default function SurveyApp() {
         
         if (result.success) {
           console.log("✅ Survey response saved successfully!");
-          const storageMessage = result.storage === 'file' 
-            ? "Thank you for completing the survey! Your responses have been saved locally. (Note: Supabase database not configured)"
-            : "Thank you for completing the survey! Your responses have been saved to the database.";
-          alert(storageMessage);
+          await submitSurveyResponse(completeData, { isRepeatMode, repeatTotal, attemptIndex });
         } else {
           console.error("❌ Failed to save survey response:", result.error);
-          alert("There was an error saving your responses. Please try again.");
+          setPendingSubmission(completeData);
+          setSurveyPhase('submit-error');
         }
       });
+
+      model.onValueChanged.add(() => {
+        scheduleDraftSave(model, imageTracker, finalSurveyJson);
+      });
+      model.onCurrentPageChanged.add(() => {
+        scheduleDraftSave(model, imageTracker, finalSurveyJson);
+      });
+
+      const existingDraft = !options.skipDraftCheck ? findDraftForProject(projectId) : null;
+      if (existingDraft && !resumeChoiceRef.current) {
+        setResumeDialog({
+          draft: existingDraft.draft,
+          draftKey: existingDraft.key,
+          model,
+          imageTracker,
+          finalSurveyJson,
+        });
+        setLoading(false);
+        setSurveyPhase('loading');
+        return;
+      }
+
+      if (resumeChoiceRef.current === 'resume' && existingDraft?.draft) {
+        model.data = existingDraft.draft.surveyData || {};
+        if (typeof existingDraft.draft.currentPageNo === 'number') {
+          model.currentPageNo = existingDraft.draft.currentPageNo;
+        }
+        if (existingDraft.draft.displayedImages) {
+          Object.assign(imageTracker, existingDraft.draft.displayedImages);
+          displayedImagesRef.current = existingDraft.draft.displayedImages;
+        }
+        if (existingDraft.draft.participantId) {
+          participantIdRef.current = existingDraft.draft.participantId;
+        }
+      }
+      resumeChoiceRef.current = null;
 
       // Save displayed images mapping (both state and ref)
       setDisplayedImagesMap(imageTracker);
       displayedImagesRef.current = imageTracker; // Save to ref for onComplete callback
+      displayedMediaGroupsRef.current = mediaGroupTracker;
+      displayedMediaCategoriesRef.current = mediaCategoryTracker;
       console.log('📸 Displayed images tracker:', imageTracker);
+      console.log('🔗 Media group assignments:', mediaGroupTracker);
+      console.log('🏷️ Media category assignments:', mediaCategoryTracker);
       console.log('📸 Number of questions with images:', Object.keys(imageTracker).length);
       
       // Record load time for staleness detection
@@ -746,6 +879,7 @@ export default function SurveyApp() {
       console.log('✅ Survey initialized successfully at:', new Date(window.lastSurveyLoadTime).toISOString());
       
       setSurveyModel(model);
+      setSurveyPhase('active');
       setError(null);
     } catch (err) {
       console.error('Error initializing survey:', err);
@@ -755,10 +889,59 @@ export default function SurveyApp() {
     }
   };
 
-  if (loading) {
+  if (loading && !resumeDialog) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', gap: 2 }}>
         <CircularProgress />
+        <Typography variant="body2" color="text.secondary">{loadingMessage}</Typography>
+      </Box>
+    );
+  }
+
+  if (surveyPhase === 'completed' && completionInfo) {
+    const defaultMsg = completionInfo.isRepeatMode
+      ? `All ${completionInfo.repeatTotal} annotation rounds completed!`
+      : 'Thank you for completing the survey!';
+    return (
+      <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
+        <Typography variant="h4" sx={{ mb: 2, fontWeight: 600 }}>Thank you!</Typography>
+        <Typography variant="body1" sx={{ mb: 2 }}>
+          {completionMessage || defaultMsg}
+        </Typography>
+        {completionInfo.participantId && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Your participant ID: <strong>{completionInfo.participantId}</strong>
+          </Typography>
+        )}
+        <Typography variant="caption" color="text.secondary">
+          {completionInfo.storage === 'file'
+            ? 'Responses saved locally.'
+            : 'Responses saved successfully.'}
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (surveyPhase === 'submit-error' && pendingSubmission) {
+    return (
+      <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
+        <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
+          We could not save your responses due to a network or server issue. Your answers are preserved — please try again.
+        </Alert>
+        <Button
+          variant="contained"
+          size="large"
+          onClick={() => {
+            setSurveyPhase('loading');
+            submitSurveyResponse(pendingSubmission, {
+              isRepeatMode: !!pendingSubmission.survey_metadata?.researcher_mode,
+              repeatTotal: pendingSubmission.survey_metadata?.repeat_total || 1,
+              attemptIndex: pendingSubmission.survey_metadata?.attempt_index || 1,
+            });
+          }}
+        >
+          Retry submission
+        </Button>
       </Box>
     );
   }
@@ -844,11 +1027,70 @@ export default function SurveyApp() {
       </Box>
       )}
       
-      {surveyModel && (
+      {surveyModel && surveyPhase === 'active' && (
         <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }}>
+          {repeatProgress && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Research annotation mode: Round {repeatProgress.current} of {repeatProgress.total}
+            </Alert>
+          )}
           <Survey model={surveyModel} />
         </Box>
       )}
+
+      <Dialog open={!!resumeDialog} onClose={() => {}}>
+        <DialogTitle>Resume previous session?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            We found an unfinished survey from{' '}
+            {resumeDialog?.draft?.savedAt
+              ? new Date(resumeDialog.draft.savedAt).toLocaleString()
+              : 'a previous visit'}.
+            Would you like to continue where you left off?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              clearDraftByKey(resumeDialog.draftKey);
+              const { model, imageTracker, finalSurveyJson } = resumeDialog;
+              setResumeDialog(null);
+              resumeChoiceRef.current = 'fresh';
+              displayedImagesRef.current = imageTracker;
+              setDisplayedImagesMap(imageTracker);
+              setSurveyModel(model);
+              setSurveyPhase('active');
+              setLoading(false);
+            }}
+          >
+            Start over
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              const { draft, model, imageTracker } = resumeDialog;
+              model.data = draft.surveyData || {};
+              if (typeof draft.currentPageNo === 'number') {
+                model.currentPageNo = draft.currentPageNo;
+              }
+              if (draft.displayedImages) {
+                Object.assign(imageTracker, draft.displayedImages);
+                displayedImagesRef.current = draft.displayedImages;
+              }
+              if (draft.participantId) {
+                participantIdRef.current = draft.participantId;
+              }
+              setResumeDialog(null);
+              setDisplayedImagesMap(imageTracker);
+              setSurveyModel(model);
+              setSurveyPhase('active');
+              setLoading(false);
+            }}
+          >
+            Continue
+          </Button>
+        </DialogActions>
+      </Dialog>
       
       {/* Survey Types Info Dialog */}
       <Dialog open={infoDialogOpen} onClose={() => setInfoDialogOpen(false)} maxWidth="md" fullWidth>

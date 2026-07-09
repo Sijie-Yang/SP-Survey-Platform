@@ -38,10 +38,10 @@ function generateParticipantId() {
 
 export async function saveSurveyResponse(completeData) {
   try {
+    const participantId = completeData.participant_id || generateParticipantId();
     if (!supabase) {
-      // Fallback: save via local Express backend
       const responseData = {
-        participant_id: generateParticipantId(),
+        participant_id: participantId,
         project_id: completeData.project_id || null,
         responses: completeData.responses,
         displayed_images: completeData.displayed_images,
@@ -59,7 +59,7 @@ export async function saveSurveyResponse(completeData) {
 
     const { data, error } = await supabase.from('survey_responses').insert([
       {
-        participant_id: generateParticipantId(),
+        participant_id: participantId,
         project_id: completeData.project_id || null,
         responses: completeData.responses,
         displayed_images: completeData.displayed_images,

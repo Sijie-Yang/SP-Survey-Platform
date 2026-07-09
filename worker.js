@@ -220,7 +220,14 @@ async function handleUpload(request, env) {
   return json({ success: true, url: `${publicBaseUrl(env)}/${key}`, key });
 }
 
-const IMAGE_RE = /\.(jpe?g|png|gif|webp)$/i;
+const MEDIA_FILE_RE = /\.(jpe?g|png|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg)$/i;
+
+function inferMediaType(name) {
+  const ext = (name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
+  if (['mp4', 'webm', 'mov'].includes(ext)) return 'video';
+  if (['mp3', 'wav', 'm4a', 'ogg'].includes(ext)) return 'audio';
+  return 'image';
+}
 
 async function handleList(request, env) {
   const backend = getR2Backend(env);
@@ -231,14 +238,18 @@ async function handleList(request, env) {
   const publicBase = publicBaseUrl(env);
   const objects = await backend.list(prefix);
   const images = objects
-    .filter((o) => IMAGE_RE.test(o.key))
-    .map((o) => ({
-      name: o.key.split('/').pop(),
-      key: o.key,
-      url: publicBase ? `${publicBase}/${o.key}` : '',
-      size: o.size,
-      lastModified: o.uploaded,
-    }));
+    .filter((o) => MEDIA_FILE_RE.test(o.key))
+    .map((o) => {
+      const name = o.key.split('/').pop();
+      return {
+        name,
+        key: o.key,
+        url: publicBase ? `${publicBase}/${o.key}` : '',
+        size: o.size,
+        lastModified: o.uploaded,
+        type: inferMediaType(name),
+      };
+    });
   return json({ success: true, images });
 }
 

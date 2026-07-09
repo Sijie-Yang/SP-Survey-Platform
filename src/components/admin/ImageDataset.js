@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -14,6 +14,22 @@ import {
   TextField,
   Switch,
   FormControlLabel,
+  IconButton,
+  Checkbox,
+  Tooltip,
+  Pagination,
+  InputAdornment,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
 } from '@mui/material';
 import {
   Refresh,
@@ -25,6 +41,9 @@ import {
   ExpandMore,
   CloudUpload,
   ContentCopy,
+  Search,
+  SelectAll,
+  Deselect,
 } from '@mui/icons-material';
 import {
   testHuggingFaceConnection,
@@ -32,9 +51,24 @@ import {
   getImageCountFromDataset,
 } from '../../lib/huggingface';
 import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
+import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT, analyzeMediaGroups, summarizeMediaGroupsBySize, analyzeMediaCategories, downloadMediaFiles } from '../../lib/mediaUtils';
+import { MediaPairingGuide } from './MediaPairingGuide';
+import { MediaCategoryGuide } from './MediaCategoryGuide';
 import { getTemplateById } from '../../lib/templateManager';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
+
+const MEDIA_PAGE_SIZE = 24;
+
+function safeR2Name(name = '') {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function mediaEntryKey(entry, userId, projectId) {
+  if (entry?.key) return entry.key;
+  if (!entry?.name || !projectId) return null;
+  return `${userId}/${projectId}/${safeR2Name(entry.name)}`;
+}
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
   useRegion();
@@ -64,6 +98,190 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     loading: false, progress: 0, total: 0, error: null, success: null,
   });
 
+  // Uploaded media library management
+  const [mediaSearch, setMediaSearch] = useState('');
+  const [mediaFilter, setMediaFilter] = useState('all');
+  const [mediaPage, setMediaPage] = useState(1);
+  const [selectedMedia, setSelectedMedia] = useState(() => new Set());
+  const [mediaActionStatus, setMediaActionStatus] = useState({ loading: false, error: null, success: null });
+  const [mediaDownloadProgress, setMediaDownloadProgress] = useState(null);
+  const [refreshingMedia, setRefreshingMedia] = useState(false);
+  const [groupSizeFilter, setGroupSizeFilter] = useState('all');
+
+  const userId = user?.id || 'anonymous';
+  const projectId = currentProject?.id;
+  const projectPrefix = projectId ? `${userId}/${projectId}/` : '';
+
+  const normalizeR2Listing = (images = []) => images.map((img) => normalizeMediaEntry({
+    url: img.url,
+    name: img.name,
+    key: img.key,
+    type: img.type || inferMediaType(img.name),
+  }));
+
+  const persistPreloadedImages = (images, extra = {}) => {
+    if (!currentProject) return;
+    const updatedProject = {
+      ...currentProject,
+      preloadedImages: images,
+      preloadedAt: images.length ? (extra.preloadedAt || new Date().toISOString()) : null,
+      preloadedSource: images.length ? 'r2' : null,
+      ...extra,
+    };
+    onProjectUpdate(updatedProject);
+    if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
+    return updatedProject;
+  };
+
+  const refreshMediaFromR2 = async () => {
+    if (!isR2Configured() || !projectId) return;
+    setRefreshingMedia(true);
+    setMediaActionStatus({ loading: false, error: null, success: null });
+    try {
+      const result = await listImagesFromR2(projectPrefix);
+      if (!result.success) throw new Error(result.error || 'Failed to list media from R2');
+      const images = normalizeR2Listing(result.images);
+      persistPreloadedImages(images);
+      setSelectedMedia(new Set());
+      setMediaPage(1);
+      setMediaActionStatus({
+        loading: false,
+        error: null,
+        success: `Synced ${images.length} file(s) from Cloudflare R2.`,
+      });
+    } catch (err) {
+      setMediaActionStatus({ loading: false, error: err.message, success: null });
+    } finally {
+      setRefreshingMedia(false);
+    }
+  };
+
+  const deleteMediaEntries = async (entries) => {
+    if (!entries.length || !currentProject) return;
+    scrollRef.current = window.scrollY;
+    restoreScrollRef.current = true;
+
+    const label = entries.length === 1 ? `"${entries[0].name}"` : `${entries.length} files`;
+    if (!window.confirm(`Delete ${label} from Cloudflare R2? This cannot be undone.`)) return;
+
+    setMediaActionStatus({ loading: true, error: null, success: null });
+    try {
+      if (isR2Configured()) {
+        const keys = entries
+          .map((entry) => mediaEntryKey(entry, userId, projectId))
+          .filter(Boolean);
+        if (keys.length) {
+          const del = await deleteImagesFromR2(keys);
+          if (!del.success) throw new Error(del.error || 'Failed to delete from R2');
+        }
+      }
+
+      const removeNames = new Set(entries.map((e) => e.name));
+      const remaining = (currentProject.preloadedImages || []).filter((m) => !removeNames.has(m.name));
+      persistPreloadedImages(remaining);
+      setSelectedMedia((prev) => {
+        const next = new Set(prev);
+        removeNames.forEach((n) => next.delete(n));
+        return next;
+      });
+      setMediaActionStatus({
+        loading: false,
+        error: null,
+        success: `Deleted ${entries.length} file(s).`,
+      });
+    } catch (err) {
+      setMediaActionStatus({ loading: false, error: err.message, success: null });
+    }
+  };
+
+  const handleDeleteSingleMedia = (entry) => deleteMediaEntries([entry]);
+  const handleDeleteSelectedMedia = () => {
+    const selected = filteredMedia.filter((m) => selectedMedia.has(m.name));
+    if (!selected.length) return;
+    deleteMediaEntries(selected);
+  };
+
+  const downloadMediaEntries = async (entries) => {
+    if (!entries.length) return;
+    setMediaActionStatus({ loading: true, error: null, success: null });
+    setMediaDownloadProgress({ done: 0, total: entries.length });
+    try {
+      const { succeeded, failed, failures } = await downloadMediaFiles(entries, {
+        onProgress: (done, total) => setMediaDownloadProgress({ done, total }),
+      });
+      if (failed > 0 && succeeded === 0) {
+        throw new Error(failures[0]?.error || 'Download failed');
+      }
+      const failHint = failed > 0
+        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        : '';
+      setMediaActionStatus({
+        loading: false,
+        error: null,
+        success: `Downloaded ${succeeded} of ${entries.length} file(s).${failHint}`,
+      });
+    } catch (err) {
+      setMediaActionStatus({ loading: false, error: err.message, success: null });
+    } finally {
+      setMediaDownloadProgress(null);
+    }
+  };
+
+  const handleDownloadSingleMedia = (entry, e) => {
+    e?.stopPropagation();
+    downloadMediaEntries([entry]);
+  };
+
+  const handleDownloadSelectedMedia = () => {
+    const selected = filteredMedia.filter((m) => selectedMedia.has(m.name));
+    if (!selected.length) return;
+    downloadMediaEntries(selected);
+  };
+
+  const handleDownloadFilteredMedia = () => {
+    if (!filteredMedia.length) return;
+    downloadMediaEntries(filteredMedia);
+  };
+
+  const filteredMedia = useMemo(() => {
+    const q = mediaSearch.trim().toLowerCase();
+    return (currentProject?.preloadedImages || []).filter((m) => {
+      const t = m.type || inferMediaType(m.name || m.url);
+      if (mediaFilter !== 'all' && t !== mediaFilter) return false;
+      if (q && !(m.name || '').toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [currentProject?.preloadedImages, mediaSearch, mediaFilter]);
+
+  const totalMediaPages = Math.max(1, Math.ceil(filteredMedia.length / MEDIA_PAGE_SIZE));
+  const pagedMedia = useMemo(() => {
+    const start = (mediaPage - 1) * MEDIA_PAGE_SIZE;
+    return filteredMedia.slice(start, start + MEDIA_PAGE_SIZE);
+  }, [filteredMedia, mediaPage]);
+
+  useEffect(() => {
+    setMediaPage(1);
+  }, [mediaSearch, mediaFilter]);
+
+  useEffect(() => {
+    if (mediaPage > totalMediaPages) setMediaPage(totalMediaPages);
+  }, [mediaPage, totalMediaPages]);
+
+  const toggleMediaSelection = (name) => {
+    setSelectedMedia((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedMedia(new Set(filteredMedia.map((m) => m.name)));
+  };
+
+  const clearMediaSelection = () => setSelectedMedia(new Set());
+
   // On mount / project change: sync actual image count from R2
   useEffect(() => {
     if (!isR2Configured() || !currentProject?.id || !user?.id) return;
@@ -79,7 +297,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       // If R2 has more images than stored locally, update the project record
       const storedCount = currentProject.preloadedImages?.length || 0;
       if (result.images.length !== storedCount) {
-        const images = result.images.map((img) => ({ url: img.url, name: img.name }));
+        const images = normalizeR2Listing(result.images);
         onProjectUpdate({
           ...currentProject,
           preloadedImages: images,
@@ -236,6 +454,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         .map((img) => ({
           url: img.url || (r2PublicUrl ? `${r2PublicUrl}/${img.key}` : ''),
           name: img.name,
+          key: img.key,
+          type: img.type || inferMediaType(img.name),
         }));
 
       onProjectUpdate({
@@ -317,7 +537,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
       for (let i = 0; i < selectedFiles.length; i++) {
         const raw = selectedFiles[i];
-        const file = await compressImage(raw); // compress to ≤300KB client-side
+        const mediaType = inferMediaType(raw.name);
+        const file = mediaType === 'image' ? await compressImage(raw) : raw;
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const userId = user?.id || 'anonymous';
         const key = `${userId}/${currentProject?.id || 'default'}/${safeName}`;
@@ -325,7 +546,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         const result = await uploadImageToR2(file, key);
 
         if (result.success) {
-          uploadedImages.push({ url: result.url, name: raw.name });
+          uploadedImages.push({ url: result.url, name: raw.name, type: mediaType, key });
           successCount++;
         } else {
           console.error('Upload error:', result.error);
@@ -360,7 +581,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setDirectUploadStatus({
         loading: false, progress: selectedFiles.length, total: selectedFiles.length,
         error: failCount > 0 ? `${failCount} file(s) failed to upload.` : null,
-        success: `Successfully uploaded ${successCount} image(s) to Cloudflare R2!`,
+        success: `Successfully uploaded ${successCount} file(s) to Cloudflare R2!`,
       });
       setSelectedFiles([]);
     } catch (error) {
@@ -419,7 +640,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       // Collect public URLs for already-existing images
       const allImages = [];
       for (const img of (existingResult.images || [])) {
-        allImages.push({ url: img.url, name: img.name });
+        allImages.push({ url: img.url, name: img.name, key: img.key, type: img.type || inferMediaType(img.name) });
       }
 
       const batchSize = 100;
@@ -487,7 +708,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             // Track the filename we used so a re-run skips it from
             // existingFileNames without an extra R2 list round-trip.
             existingFileNames.add(fname);
-            allImages.push({ url: uploadResult.url, name: fname });
+            allImages.push({ url: uploadResult.url, name: fname, key: r2Key, type: 'image' });
             newCount++;
             setPreloadStatus(prev => ({ ...prev, progress: allImages.length }));
 
@@ -552,22 +773,60 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       preloadedSource: null,
     };
     onProjectUpdate(updatedProject);
+    setSelectedMedia(new Set());
+    setMediaPage(1);
     if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   const preloadedCount = currentProject?.preloadedImages?.length || 0;
+  const mediaGroups = useMemo(
+    () => analyzeMediaGroups(currentProject?.preloadedImages || []),
+    [currentProject?.preloadedImages],
+  );
+  const groupSummary = useMemo(
+    () => summarizeMediaGroupsBySize(currentProject?.preloadedImages || []),
+    [currentProject?.preloadedImages],
+  );
+  const pairedGroups = mediaGroups.filter((g) => g.isGrouped);
+  const filteredPairedGroups = useMemo(() => {
+    if (groupSizeFilter === 'all') return pairedGroups;
+    const n = parseInt(groupSizeFilter, 10);
+    return pairedGroups.filter((g) => g.size === n);
+  }, [pairedGroups, groupSizeFilter]);
+  const mediaCategories = useMemo(
+    () => analyzeMediaCategories(currentProject?.preloadedImages || []),
+    [currentProject?.preloadedImages],
+  );
+  const mediaCounts = (currentProject?.preloadedImages || []).reduce((acc, m) => {
+    const t = m.type || inferMediaType(m.name || m.url);
+    acc[t] = (acc[t] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <Box>
       <Typography variant="h5" sx={{ mb: 1, color: 'primary.main' }}>
-        🖼️ Image Dataset
+        Media Dataset
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Upload images to Cloudflare R2. They will be served to survey participants.
-        HuggingFace batch import is available as an optional tool.
+        Upload images, videos, and audio to Cloudflare R2. They will be served to survey participants.
+        Images over 300 KB are automatically compressed. Video/audio are uploaded as-is (max ~100 MB).
+        HuggingFace batch import is available as an optional tool for images.
       </Typography>
+
+      <MediaPairingGuide
+        totalFileCount={preloadedCount}
+        pairedSetCount={groupSummary.total}
+        pairedSetsBySize={groupSummary.bySize}
+      />
+
+      <MediaCategoryGuide
+        categoryCount={mediaCategories.length}
+        totalFileCount={preloadedCount}
+        categoryLabels={mediaCategories.map((c) => c.category)}
+      />
 
       {!isR2Configured() && (
         <Alert severity="warning" sx={{ mb: 3 }}>
@@ -587,7 +846,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           </Box>
         ) : preloadedCount > 0 ? (
           <>
-            <Chip icon={<CheckCircle />} label={`${preloadedCount} images in R2`} color="success" variant="outlined" />
+            <Chip icon={<CheckCircle />} label={`${preloadedCount} media file(s) in R2`} color="success" variant="outlined" />
+            {Object.entries(mediaCounts).map(([t, n]) => (
+              <Chip key={t} size="small" label={`${n} ${t}`} variant="outlined" />
+            ))}
             <Chip label="☁️ Cloudflare R2" color="primary" size="small" variant="outlined" />
             {currentProject?.preloadedAt && (
               <Typography variant="body2" color="text.secondary">
@@ -599,6 +861,127 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           <Chip icon={<Warning />} label="No images uploaded yet" color="default" variant="outlined" />
         )}
       </Box>
+
+      {preloadedCount > 0 && pairedGroups.length > 0 && (
+        <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'info.light' }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+            Detected Media Groups ({pairedGroups.length})
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Upload-time pairing preview. Each row is one fixed set that stays together when a question uses
+            &quot;Random fixed sets&quot; with a matching <strong>files per set</strong> count.
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+            {Object.entries(groupSummary.bySize)
+              .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10))
+              .map(([size, count]) => (
+                <Chip
+                  key={size}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  label={`${count} set(s) × ${size} file(s)`}
+                />
+              ))}
+          </Box>
+          <FormControl size="small" sx={{ minWidth: 160, mb: 2 }}>
+            <InputLabel id="group-size-filter">Filter by set size</InputLabel>
+            <Select
+              labelId="group-size-filter"
+              label="Filter by set size"
+              value={groupSizeFilter}
+              onChange={(e) => setGroupSizeFilter(e.target.value)}
+            >
+              <MenuItem value="all">All sizes</MenuItem>
+              {Object.keys(groupSummary.bySize)
+                .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+                .map((size) => (
+                  <MenuItem key={size} value={size}>{size} file(s) per set</MenuItem>
+                ))}
+            </Select>
+          </FormControl>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
+                  <TableCell>Group ID</TableCell>
+                  <TableCell align="center">Size</TableCell>
+                  <TableCell>Types</TableCell>
+                  <TableCell>Files (in slot order)</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {filteredPairedGroups.slice(0, 50).map((g) => (
+                  <TableRow key={g.groupKey} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>{g.groupId}</Typography>
+                    </TableCell>
+                    <TableCell align="center">{g.size}</TableCell>
+                    <TableCell>
+                      <Typography variant="caption">{g.types.join(' + ')}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" component="div" sx={{ fontFamily: 'monospace' }}>
+                        {g.members.map((m) => m.name).join('  ·  ')}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          {filteredPairedGroups.length > 50 && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              Showing first 50 of {filteredPairedGroups.length} groups.
+            </Typography>
+          )}
+          {filteredPairedGroups.length === 0 && (
+            <Alert severity="warning" sx={{ mt: 1 }}>No groups match this size filter.</Alert>
+          )}
+        </Box>
+      )}
+
+      {preloadedCount > 0 && mediaCategories.length > 0 && (
+        <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'secondary.light' }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+            Detected Media Categories ({mediaCategories.length})
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Use Survey Builder → Media Assignment → <strong>One per category</strong> to show one random file from each class in every question.
+          </Typography>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
+                  <TableCell>Category</TableCell>
+                  <TableCell align="center">Files</TableCell>
+                  <TableCell>Types</TableCell>
+                  <TableCell>Sample filenames</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {mediaCategories.map((c) => (
+                  <TableRow key={c.category} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>{c.category}</Typography>
+                    </TableCell>
+                    <TableCell align="center">{c.count}</TableCell>
+                    <TableCell>
+                      <Typography variant="caption">{c.types.join(', ')}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                        {c.members.slice(0, 4).map((m) => m.name).join(' · ')}
+                        {c.count > 4 ? ` · +${c.count - 4} more` : ''}
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      )}
 
       {/* ── Import from source template (only when applicable) ── */}
       {sourceTemplate && (
@@ -658,17 +1041,17 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'primary.light' }}>
         <Typography variant="subtitle1" sx={{ mb: 1.5, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
           <CloudUpload fontSize="small" color="primary" />
-          Upload Images to Cloudflare R2
+          Upload Media to Cloudflare R2
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Select image files to upload to Cloudflare R2.
+          Select image, video, or audio files to upload to Cloudflare R2.
           Images over 300 KB are automatically compressed in your browser before upload.
         </Typography>
 
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept={MEDIA_ACCEPT}
           multiple
           style={{ display: 'none' }}
           onChange={(e) => setSelectedFiles(Array.from(e.target.files))}
@@ -676,7 +1059,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap' }}>
           <Button variant="outlined" onClick={() => fileInputRef.current?.click()} disabled={directUploadStatus.loading}>
-            Choose Image Files
+            Choose Media Files
           </Button>
           {selectedFiles.length > 0 && (
             <Typography variant="body2" color="text.secondary">
@@ -711,38 +1094,231 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           disabled={!selectedFiles.length || directUploadStatus.loading || !isR2Configured()}
           startIcon={directUploadStatus.loading ? <CircularProgress size={20} color="inherit" /> : <CloudUpload />}
         >
-          Upload {selectedFiles.length > 0 ? `${selectedFiles.length} Image(s)` : ''} to R2
+          Upload {selectedFiles.length > 0 ? `${selectedFiles.length} File(s)` : ''} to R2
         </Button>
       </Box>
 
-      {/* ── Image Preview ── */}
+      {/* ── Uploaded Media Library ── */}
       {preloadedCount > 0 && (
         <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-          <Typography variant="subtitle2" sx={{ mb: 2 }}>
-            🖼️ Uploaded Images (preview — first 10):
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-            {currentProject.preloadedImages.slice(0, 10).map((img, i) => (
-              <Box key={i} sx={{ width: 100, height: 100, borderRadius: 1, overflow: 'hidden', border: '1px solid', borderColor: 'divider' }}>
-                <img
-                  src={img.url} alt={img.name}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  onError={(e) => {
-                    e.target.style.display = 'none';
-                    e.target.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10px;color:#999;">Failed</div>';
-                  }}
-                />
-              </Box>
-            ))}
-          </Box>
-          {preloadedCount > 10 && (
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              ... and {preloadedCount - 10} more images
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+              Uploaded Media ({preloadedCount})
             </Typography>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={refreshingMedia ? <CircularProgress size={14} /> : <Refresh />}
+                onClick={refreshMediaFromR2}
+                disabled={refreshingMedia || !isR2Configured()}
+              >
+                Refresh from R2
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<SelectAll />}
+                onClick={selectAllFiltered}
+                disabled={!filteredMedia.length}
+              >
+                Select filtered
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Deselect />}
+                onClick={clearMediaSelection}
+                disabled={!selectedMedia.size}
+              >
+                Clear selection
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={mediaActionStatus.loading && mediaDownloadProgress ? <CircularProgress size={14} /> : <CloudDownload />}
+                onClick={handleDownloadSelectedMedia}
+                disabled={!selectedMedia.size || mediaActionStatus.loading}
+              >
+                Download selected ({selectedMedia.size})
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<CloudDownload />}
+                onClick={handleDownloadFilteredMedia}
+                disabled={!filteredMedia.length || mediaActionStatus.loading}
+              >
+                Download filtered ({filteredMedia.length})
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                startIcon={<Delete />}
+                onClick={handleDeleteSelectedMedia}
+                disabled={!selectedMedia.size || mediaActionStatus.loading}
+              >
+                Delete selected ({selectedMedia.size})
+              </Button>
+              <Button variant="outlined" color="error" onClick={handleClearImages} startIcon={<Delete />} size="small">
+                Clear all
+              </Button>
+            </Box>
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+            <TextField
+              size="small"
+              placeholder="Search by filename…"
+              value={mediaSearch}
+              onChange={(e) => setMediaSearch(e.target.value)}
+              sx={{ minWidth: 220, flex: 1 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              <InputLabel id="media-filter-label">Type</InputLabel>
+              <Select
+                labelId="media-filter-label"
+                label="Type"
+                value={mediaFilter}
+                onChange={(e) => setMediaFilter(e.target.value)}
+              >
+                <MenuItem value="all">All types</MenuItem>
+                <MenuItem value="image">Image</MenuItem>
+                <MenuItem value="video">Video</MenuItem>
+                <MenuItem value="audio">Audio</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+
+          {mediaActionStatus.success && <Alert severity="success" sx={{ mb: 2 }}>{mediaActionStatus.success}</Alert>}
+          {mediaActionStatus.error && <Alert severity="error" sx={{ mb: 2 }}>{mediaActionStatus.error}</Alert>}
+          {mediaDownloadProgress && (
+            <Box sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="body2">Downloading…</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {mediaDownloadProgress.done} / {mediaDownloadProgress.total}
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={(mediaDownloadProgress.done / mediaDownloadProgress.total) * 100}
+                sx={{ height: 6, borderRadius: 3 }}
+              />
+            </Box>
           )}
-          <Button variant="outlined" color="error" onClick={handleClearImages} startIcon={<Delete />} size="small">
-            Clear All Images
-          </Button>
+
+          {filteredMedia.length === 0 ? (
+            <Alert severity="info">No media matches your search or filter.</Alert>
+          ) : (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                Showing {pagedMedia.length} of {filteredMedia.length} file(s)
+                {mediaSearch || mediaFilter !== 'all' ? ' (filtered)' : ''}.
+                Click a card to select; use download or trash icons on each file.
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 1.5, mb: 2 }}>
+                {pagedMedia.map((img) => {
+                  const t = img.type || inferMediaType(img.name || img.url);
+                  const selected = selectedMedia.has(img.name);
+                  return (
+                    <Box
+                      key={img.key || img.name}
+                      sx={{
+                        position: 'relative',
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                        border: '2px solid',
+                        borderColor: selected ? 'primary.main' : 'divider',
+                        bgcolor: 'grey.100',
+                        cursor: 'pointer',
+                        transition: 'border-color .15s',
+                        '&:hover .media-action-btn': { opacity: 1 },
+                      }}
+                      onClick={() => toggleMediaSelection(img.name)}
+                    >
+                      <Checkbox
+                        size="small"
+                        checked={selected}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleMediaSelection(img.name)}
+                        sx={{ position: 'absolute', top: 2, left: 2, zIndex: 2, bgcolor: 'rgba(255,255,255,0.85)', borderRadius: 1, p: 0.25 }}
+                      />
+                      <Box sx={{ position: 'absolute', top: 2, right: 2, zIndex: 2, display: 'flex', gap: 0.25 }}>
+                        <Tooltip title="Download">
+                          <IconButton
+                            className="media-action-btn"
+                            size="small"
+                            color="primary"
+                            disabled={mediaActionStatus.loading}
+                            onClick={(e) => handleDownloadSingleMedia(img, e)}
+                            sx={{
+                              bgcolor: 'rgba(255,255,255,0.9)', opacity: 0, transition: 'opacity .15s',
+                            }}
+                          >
+                            <CloudDownload fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete">
+                          <IconButton
+                            className="media-action-btn"
+                            size="small"
+                            color="error"
+                            disabled={mediaActionStatus.loading}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteSingleMedia(img); }}
+                            sx={{
+                              bgcolor: 'rgba(255,255,255,0.9)', opacity: 0, transition: 'opacity .15s',
+                            }}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                      <Box sx={{ height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {t === 'video' ? (
+                          <video src={img.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
+                        ) : t === 'audio' ? (
+                          <Typography variant="caption" sx={{ p: 1, textAlign: 'center' }}>🎵 Audio</Typography>
+                        ) : (
+                          <img
+                            src={img.url}
+                            alt={img.name}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                          />
+                        )}
+                      </Box>
+                      <Box sx={{ p: 1, bgcolor: 'background.paper', borderTop: '1px solid', borderColor: 'divider' }}>
+                        <Typography variant="caption" noWrap title={img.name} sx={{ display: 'block' }}>
+                          {img.name}
+                        </Typography>
+                        <Chip size="small" label={t} variant="outlined" sx={{ height: 18, fontSize: '0.65rem', mt: 0.5 }} />
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Box>
+              {totalMediaPages > 1 && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
+                  <Pagination
+                    count={totalMediaPages}
+                    page={mediaPage}
+                    onChange={(_, p) => setMediaPage(p)}
+                    color="primary"
+                    size="small"
+                  />
+                </Box>
+              )}
+            </>
+          )}
         </Box>
       )}
 

@@ -30,7 +30,8 @@ import {
   AccordionDetails,
   Alert,
   ButtonGroup,
-  Collapse
+  Collapse,
+  Snackbar
 } from '@mui/material';
 import { ExpandMore, Save, RestartAlt } from '@mui/icons-material';
 import {
@@ -84,7 +85,9 @@ export default function ChatAssistant({
   onClearHistory,
   onDownloadHistory,
   onPromptsChange,
-  chatEndRef
+  chatEndRef,
+  aiUndoAvailable = false,
+  onRevertAiChange,
 }) {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState(0);
@@ -121,6 +124,7 @@ export default function ChatAssistant({
     return PROMPTS;
   });
   const [promptsModified, setPromptsModified] = React.useState(false);
+  const [promptSnackbar, setPromptSnackbar] = React.useState({ open: false, message: '', severity: 'success' });
 
   // The AI Assistant is a sizable panel that most users only need
   // occasionally. We start it collapsed and let the user expand it by
@@ -314,9 +318,9 @@ export default function ChatAssistant({
     if (currentProject?.id) {
       localStorage.setItem(`customPrompts_${currentProject.id}`, JSON.stringify(prompts));
       setPromptsModified(false);
-      alert('✅ Prompts saved successfully for this project!');
+      setPromptSnackbar({ open: true, message: 'Prompts saved successfully for this project!', severity: 'success' });
     } else {
-      alert('⚠️ No project selected');
+      setPromptSnackbar({ open: true, message: 'No project selected', severity: 'warning' });
     }
   };
   
@@ -327,7 +331,7 @@ export default function ChatAssistant({
         localStorage.removeItem(`customPrompts_${currentProject.id}`);
       }
       setPromptsModified(false);
-      alert('✅ Prompts reset to defaults!');
+      setPromptSnackbar({ open: true, message: 'Prompts reset to defaults!', severity: 'info' });
     }
   };
 
@@ -472,7 +476,7 @@ export default function ChatAssistant({
               <Typography variant="body2" textAlign="center" sx={{ maxWidth: 400 }}>
                 {apiKeyValid 
                   ? "I can help you create and modify surveys. Just type what you need, and I'll automatically figure out whether to generate a new survey or adjust your existing one!"
-                  : "Please configure your OpenAI API key in settings to get started."}
+                  : "Please configure your API key in settings to get started."}
               </Typography>
             </Box>
           ) : (
@@ -588,6 +592,13 @@ export default function ChatAssistant({
 
         {/* Input Area */}
         <Box sx={{ p: 2, bgcolor: 'white', borderTop: '1px solid #ddd' }}>
+          {aiUndoAvailable && (
+            <Box sx={{ mb: 1 }}>
+              <Button size="small" variant="outlined" color="warning" onClick={onRevertAiChange}>
+                ↩️ Undo last AI change
+              </Button>
+            </Box>
+          )}
           <Box sx={{ display: 'flex', gap: 1 }}>
             <TextField
               fullWidth
@@ -673,10 +684,14 @@ export default function ChatAssistant({
             <Box>
               {/* API Key Configuration */}
               <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
-                🔑 OpenAI API Key
+                🔑 API Key
               </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a>
+            Use an{' '}
+            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI</a>
+            {' '}or{' '}
+            <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">OpenRouter</a>
+            {' '}API key. OpenRouter keys start with <code>sk-or-</code>.
           </Typography>
           <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
             <TextField
@@ -685,7 +700,7 @@ export default function ChatAssistant({
               label="API Key"
               value={openaiApiKey}
               onChange={(e) => onApiKeyChange(e.target.value)}
-              placeholder="sk-..."
+              placeholder="sk-or-... or sk-..."
               InputProps={{
                 endAdornment: apiKeyValid && (
                   <InputAdornment position="end">
@@ -1329,6 +1344,16 @@ export default function ChatAssistant({
           <Button onClick={() => setSettingsOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+      <Snackbar
+        open={promptSnackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setPromptSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={promptSnackbar.severity} onClose={() => setPromptSnackbar((s) => ({ ...s, open: false }))}>
+          {promptSnackbar.message}
+        </Alert>
+      </Snackbar>
     </Card>
   );
 }

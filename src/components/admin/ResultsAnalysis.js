@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import {
   Box,
   Typography,
@@ -43,6 +43,9 @@ import {
   TableChart
 } from '@mui/icons-material';
 import { supabase as platformSupabase } from '../../lib/supabase';
+import AnnotationAnalysis from './AnnotationAnalysis';
+import { getPresetSkill } from '../../lib/presetSkills';
+import { ImageResolverContext } from './imageResolverContext';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -123,7 +126,6 @@ function typeIcon(type) {
   return icons[type] || <QuestionAnswer fontSize="small" />;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function HorizontalBar({ label, count, total, color, index }) {
   const width = pct(count, total);
@@ -406,7 +408,7 @@ function MatrixDistribution({ answers, rows, columns }) {
 
 // Context: carries a resolver function (filename | url) → displayable URL
 // value is a Map<name, url> built from currentProject.preloadedImages
-const ImageResolverContext = createContext(null);
+// (lives in its own module so AnnotationAnalysis can import it without cycles)
 
 // Detect whether a string is a usable URL
 function isUrl(str) {
@@ -556,10 +558,10 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     );
   }
 
-  // ── image_rating ──────────────────────────────────────────────────────────
+  // ── image_rating / media_rating ───────────────────────────────────────────
   // answer = a single number (overall rating for the shown image set)
   // shown_images = the image(s) that were shown
-  if (type === 'image_rating' || type === 'imagerating') {
+  if (type === 'image_rating' || type === 'imagerating' || type === 'mediarating') {
     // Group responses by shown_images key so we can show each image's stats
     const imageSetMap = {}; // { setKey: { urls, ratings[] } }
     for (const { answer, shown_images } of answers) {
@@ -609,9 +611,9 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     );
   }
 
-  // ── image_boolean ─────────────────────────────────────────────────────────
+  // ── image_boolean / media_boolean ─────────────────────────────────────────
   // answer = true | false  ·  shown_images = the image(s) shown
-  if (type === 'image_boolean' || type === 'imageboolean') {
+  if (type === 'image_boolean' || type === 'imageboolean' || type === 'mediaboolean') {
     const imageSetMap = {}; // { setKey: { urls, yes, no } }
     for (const { answer, shown_images } of answers) {
       if (!shown_images?.length) continue;
@@ -739,6 +741,351 @@ function ImageQuestionAnalysis({ answers, type, question }) {
   );
 }
 
+// ─── Skill question analysis ──────────────────────────────────────────────────
+// Skills declare a resultSchema ([{ key, label, type }]) describing how each
+// answer field should be summarized. Supported types:
+//   number | boolean | choice | text | count | color | scaleGroup
+// Without a schema we auto-infer one from the answer shape, so results are
+// never shown as raw JSON dumps.
+
+function getPath(obj, path) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  return String(path).split('.').reduce(
+    (o, k) => (o && typeof o === 'object' ? o[k] : undefined),
+    obj,
+  );
+}
+
+function SkillFieldSummary({ field, answers }) {
+  const values = answers
+    .map((a) => getPath(a.answer, field.key))
+    .filter((v) => v !== undefined && v !== null);
+
+  const header = (
+    <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+      {field.label || field.key}
+      <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+        n={values.length}
+      </Typography>
+    </Typography>
+  );
+
+  if (!values.length) {
+    return (
+      <Box sx={{ mb: 2.5 }}>
+        {header}
+        <Typography variant="body2" color="text.secondary">No data.</Typography>
+      </Box>
+    );
+  }
+
+  let body = null;
+
+  if (field.type === 'number') {
+    const nums = values.map(Number).filter((n) => !isNaN(n));
+    const avg = average(nums);
+    const distinct = [...new Set(nums)].sort((a, b) => a - b);
+    body = (
+      <Box>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, mb: 1 }}>
+          <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+            {avg !== null ? avg.toFixed(2) : '—'}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            mean · range {Math.min(...nums)} – {Math.max(...nums)}
+          </Typography>
+        </Box>
+        {distinct.length > 1 && distinct.length <= 10 && distinct.map((v, idx) => (
+          <HorizontalBar
+            key={v}
+            label={String(v)}
+            count={nums.filter((n) => n === v).length}
+            total={nums.length}
+            index={idx}
+          />
+        ))}
+      </Box>
+    );
+  } else if (field.type === 'boolean') {
+    const yes = values.filter((v) => v === true || v === 'true').length;
+    body = (
+      <Box>
+        <HorizontalBar label="Yes" count={yes} total={values.length} color="#4caf50" />
+        <HorizontalBar label="No" count={values.length - yes} total={values.length} color="#f44336" />
+      </Box>
+    );
+  } else if (field.type === 'count') {
+    const lengths = values.map((v) => (Array.isArray(v) ? v.length : 0));
+    const avg = average(lengths);
+    body = (
+      <Typography variant="body2" color="text.secondary">
+        {lengths.reduce((a, b) => a + b, 0)} items total · avg {avg !== null ? avg.toFixed(1) : '—'} per participant
+      </Typography>
+    );
+  } else if (field.type === 'color') {
+    const freq = {};
+    for (const v of values) {
+      const hex = typeof v === 'string' ? v : v?.hex;
+      if (hex) freq[hex] = (freq[hex] || 0) + 1;
+    }
+    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+    body = (
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+        {sorted.map(([hex, count]) => (
+          <Chip
+            key={hex}
+            size="small"
+            label={`${hex} × ${count}`}
+            sx={{
+              bgcolor: hex,
+              color: '#fff',
+              textShadow: '0 0 3px rgba(0,0,0,0.7)',
+              fontFamily: 'monospace',
+            }}
+          />
+        ))}
+      </Box>
+    );
+  } else if (field.type === 'scaleGroup') {
+    // value = [{ id, left, right, label?, value }] — average each dimension
+    const dims = {}; // id → { left, right, label, values: [] }
+    for (const v of values) {
+      if (!Array.isArray(v)) continue;
+      for (const d of v) {
+        if (!d || d.value === undefined) continue;
+        const id = d.id || d.label || `${d.left}/${d.right}`;
+        if (!dims[id]) dims[id] = { left: d.left, right: d.right, label: d.label, values: [] };
+        const n = Number(d.value);
+        if (!isNaN(n)) dims[id].values.push(n);
+      }
+    }
+    const allVals = Object.values(dims).flatMap((d) => d.values);
+    const scaleMax = Math.max(7, ...allVals);
+    body = (
+      <Box>
+        {Object.entries(dims).map(([id, d]) => {
+          const avg = average(d.values);
+          const w = avg !== null ? Math.round(((avg - 1) / (scaleMax - 1)) * 100) : 0;
+          return (
+            <Box key={id} sx={{ mb: 1.2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+                <Typography variant="body2">
+                  {d.label || `${d.left || ''} ↔ ${d.right || ''}`}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {avg !== null ? avg.toFixed(2) : '—'} / {scaleMax}
+                </Typography>
+              </Box>
+              <Box sx={{ height: 10, bgcolor: 'grey.100', borderRadius: 1, overflow: 'hidden' }}>
+                <Box sx={{ height: '100%', width: `${w}%`, bgcolor: 'primary.main', borderRadius: 1 }} />
+              </Box>
+            </Box>
+          );
+        })}
+      </Box>
+    );
+  } else if (field.type === 'text') {
+    body = <TextAnswers answers={values.map((v) => ({ answer: String(v) }))} />;
+  } else {
+    // 'choice' and anything else: frequency distribution of stringified values
+    const freq = {};
+    for (const v of values) {
+      const key = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      freq[key] = (freq[key] || 0) + 1;
+    }
+    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+    body = (
+      <Box>
+        {sorted.map(([value, count], idx) => (
+          <HorizontalBar key={value} label={value} count={count} total={values.length} index={idx} />
+        ))}
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ mb: 2.5 }}>
+      {header}
+      {body}
+    </Box>
+  );
+}
+
+// Keys that carry media context rather than measurements — excluded from
+// the auto-inferred schema.
+const SKILL_CONTEXT_KEY_RE = /url|name|mode|size/i;
+
+function inferSkillResultSchema(sampleAnswer) {
+  if (!sampleAnswer || typeof sampleAnswer !== 'object') return [];
+  return Object.entries(sampleAnswer)
+    .filter(([k]) => !SKILL_CONTEXT_KEY_RE.test(k))
+    .map(([k, v]) => {
+      if (typeof v === 'number') return { key: k, label: k, type: 'number' };
+      if (typeof v === 'boolean') return { key: k, label: k, type: 'boolean' };
+      if (Array.isArray(v)) return { key: k, label: k, type: 'count' };
+      if (typeof v === 'string') return { key: k, label: k, type: 'choice' };
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function SkillQuestionAnalysis({ question, answers }) {
+  const [showRaw, setShowRaw] = useState(false);
+
+  const objAnswers = answers.filter((a) => a.answer && typeof a.answer === 'object');
+
+  let schema = question.skillResultSchema;
+  if (!schema?.length && question.skillId?.startsWith('preset_')) {
+    schema = getPresetSkill(question.skillId.replace(/^preset_/, ''))?.resultSchema;
+  }
+  if (!schema?.length && objAnswers.length) {
+    schema = inferSkillResultSchema(objAnswers[0].answer);
+  }
+
+  if (!schema?.length || !objAnswers.length) {
+    return (
+      <TextAnswers
+        answers={answers.map((a) => ({
+          answer: typeof a.answer === 'object' ? JSON.stringify(a.answer) : String(a.answer),
+        }))}
+      />
+    );
+  }
+
+  return (
+    <Box>
+      {schema.map((field) => (
+        <SkillFieldSummary key={field.key} field={field} answers={objAnswers} />
+      ))}
+      <Button size="small" onClick={() => setShowRaw((s) => !s)}>
+        {showRaw ? 'Hide raw responses' : 'View raw responses'}
+      </Button>
+      {showRaw && (
+        <TextAnswers
+          answers={answers.map((a) => ({ answer: JSON.stringify(a.answer) }))}
+          maxVisible={10}
+        />
+      )}
+    </Box>
+  );
+}
+
+// ─── Text ranking analysis ────────────────────────────────────────────────────
+// answer = [choiceValue_rank1, choiceValue_rank2, ...]
+function RankingDistribution({ answers, choices }) {
+  const labelMap = {};
+  (choices || []).forEach((c) => {
+    if (typeof c === 'object' && c !== null) labelMap[c.value] = c.text || c.value;
+    else labelMap[c] = c;
+  });
+  const rankPositions = {}; // value → [ranks]
+  for (const { answer } of answers) {
+    const ranked = Array.isArray(answer) ? answer : [];
+    ranked.forEach((val, idx) => {
+      if (!rankPositions[val]) rankPositions[val] = [];
+      rankPositions[val].push(idx + 1);
+    });
+  }
+  const sorted = Object.entries(rankPositions)
+    .map(([val, ranks]) => ({ val, avg: average(ranks), n: ranks.length }))
+    .sort((a, b) => (a.avg ?? 999) - (b.avg ?? 999));
+  const maxRank = sorted.length;
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+        Average rank position (rank 1 = top choice)
+      </Typography>
+      {sorted.map(({ val, avg, n }, idx) => (
+        <Box key={val} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+          <Chip size="small" label={`#${idx + 1}`} color={idx === 0 ? 'primary' : 'default'} sx={{ width: 44 }} />
+          <Typography variant="body2" sx={{ width: 160, flexShrink: 0 }} noWrap>
+            {labelMap[val] || val}
+          </Typography>
+          <Box sx={{ flex: 1, height: 10, bgcolor: 'grey.100', borderRadius: 1, overflow: 'hidden' }}>
+            <Box sx={{
+              height: '100%',
+              width: `${pct(maxRank - (avg ?? maxRank) + 1, maxRank)}%`,
+              bgcolor: BAR_COLORS[idx % BAR_COLORS.length],
+            }} />
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ width: 110, textAlign: 'right' }}>
+            avg {avg?.toFixed(2) ?? '–'} · n={n}
+          </Typography>
+        </Box>
+      ))}
+      {sorted.length === 0 && (
+        <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
+      )}
+    </Box>
+  );
+}
+
+// ─── Native slider group / point allocation analysis ─────────────────────────
+
+function SliderGroupAnalysis({ question, answers }) {
+  const dims = question.dimensions || [];
+  const scaleMin = question.scaleMin ?? 1;
+  const scaleMax = question.scaleMax ?? 7;
+  const stats = dims.map((d) => {
+    const vals = answers
+      .map((a) => (a.answer && typeof a.answer === 'object' ? Number(a.answer[d.id]) : NaN))
+      .filter((v) => !Number.isNaN(v));
+    const mean = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
+    return { ...d, mean, n: vals.length };
+  });
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+      {stats.map((s) => (
+        <Box key={s.id}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
+            <Typography variant="caption" color="text.secondary">{s.left}</Typography>
+            <Typography variant="caption" fontWeight={700}>
+              {s.mean !== null ? `avg ${s.mean.toFixed(2)} (n=${s.n})` : 'no data'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">{s.right}</Typography>
+          </Box>
+          <Box sx={{ position: 'relative', height: 8, bgcolor: 'grey.200', borderRadius: 4 }}>
+            {s.mean !== null && (
+              <Box sx={{
+                position: 'absolute', top: -2, width: 12, height: 12, borderRadius: '50%',
+                bgcolor: 'primary.main',
+                left: `calc(${((s.mean - scaleMin) / (scaleMax - scaleMin)) * 100}% - 6px)`,
+              }} />
+            )}
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+function PointAllocationAnalysis({ question, answers }) {
+  const choices = (question.choices || []).map((c) => (typeof c === 'object' ? c : { value: c, text: c }));
+  const budget = question.budget || 100;
+  const stats = choices.map((c) => {
+    const vals = answers
+      .map((a) => (a.answer && typeof a.answer === 'object' ? Number(a.answer[c.value]) || 0 : 0));
+    const mean = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+    return { ...c, mean };
+  });
+  const maxMean = Math.max(...stats.map((s) => s.mean), 1);
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      {stats.map((s) => (
+        <Box key={s.value} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography variant="caption" sx={{ width: 140, flexShrink: 0 }} noWrap>{s.text}</Typography>
+          <Box sx={{ flex: 1, height: 14, bgcolor: 'grey.100', borderRadius: 1, overflow: 'hidden' }}>
+            <Box sx={{ width: `${(s.mean / maxMean) * 100}%`, height: '100%', bgcolor: 'primary.main' }} />
+          </Box>
+          <Typography variant="caption" fontWeight={700} sx={{ width: 90, textAlign: 'right' }}>
+            {s.mean.toFixed(1)} / {budget}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
 // ─── Question Card ────────────────────────────────────────────────────────────
 
 function QuestionCard({ question, answers, totalResponses, index }) {
@@ -780,6 +1127,18 @@ function QuestionCard({ question, answers, totalResponses, index }) {
           />
         );
 
+      case 'ranking':
+        return <RankingDistribution answers={answers} choices={question.choices} />;
+
+      case 'expression':
+      case 'image':
+        return (
+          <Typography variant="body2" color="text.secondary">
+            Display-only question — no participant answers are collected.
+            {type === 'image' ? ' The shown image is exported in the __shown_images CSV column.' : ''}
+          </Typography>
+        );
+
       case 'imagepicker':
         return <ImagePickerDistribution answers={answers} choices={question.choices} />;
 
@@ -791,7 +1150,30 @@ function QuestionCard({ question, answers, totalResponses, index }) {
       case 'imageboolean':
       case 'image_matrix':
       case 'imagematrix':
+      case 'mediarating':
+      case 'mediaboolean':
         return <ImageQuestionAnalysis answers={answers} type={type} question={question} />;
+
+      case 'mediadisplay':
+        return (
+          <Typography variant="body2" color="text.secondary">
+            Display-only question — no participant answers are collected.
+            The shown media files are exported in the __shown_images / __shown_media_group /
+            __shown_media_categories CSV columns.
+          </Typography>
+        );
+
+      case 'slidergroup':
+        return <SliderGroupAnalysis question={question} answers={answers} />;
+
+      case 'pointallocation':
+        return <PointAllocationAnalysis question={question} answers={answers} />;
+
+      case 'imageannotation':
+        return <AnnotationAnalysis answers={answers} questionName={question.name} responses={question._allResponses} />;
+
+      case 'skillquestion':
+        return <SkillQuestionAnalysis question={question} answers={answers} />;
 
       default:
         // Generic: try choice distribution first, else text
@@ -861,7 +1243,7 @@ function QuestionCard({ question, answers, totalResponses, index }) {
       <Collapse in={expanded}>
         <Divider />
         <CardContent>
-          {responseCount === 0 ? (
+          {responseCount === 0 && !['expression', 'image', 'mediadisplay'].includes(type) ? (
             <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography>
           ) : (
             renderAnalysis()
@@ -890,23 +1272,54 @@ function exportToCSV(responses, allQuestions) {
     'imageboolean', 'image_boolean',
     'imagematrix', 'image_matrix',
     'imagepicker',
-    'image'
+    'image',
+    'mediadisplay', 'mediarating', 'mediaboolean',
+    'imageannotation',
+    'skillquestion',
   ]);
   const isImageQuestion = q => imageTypes.has(q.type);
+
+  // Per-dimension / per-choice / per-schema-key sub-columns for structured answer types
+  const subKeysFor = (q) => {
+    if (q.type === 'slidergroup') {
+      return (q.dimensions || []).map((d) => d.id).filter(Boolean);
+    }
+    if (q.type === 'pointallocation') {
+      return (q.choices || []).map((c) => (typeof c === 'object' ? c.value : c)).filter(Boolean);
+    }
+    if (q.type === 'skillquestion') {
+      let schema = q.skillResultSchema;
+      if (!schema?.length && q.skillId?.startsWith('preset_')) {
+        schema = getPresetSkill(q.skillId.replace(/^preset_/, ''))?.resultSchema;
+      }
+      return (schema || []).map((f) => f.key).filter(Boolean);
+    }
+    return null;
+  };
 
   // Build header columns: answer column + shown_images column (for image questions)
   const headerCols = [];
   for (const q of allQuestions) {
     headerCols.push(q.name);
-    if (isImageQuestion(q)) headerCols.push(`${q.name}__shown_images`);
+    const subKeys = subKeysFor(q);
+    if (subKeys) {
+      subKeys.forEach((k) => headerCols.push(`${q.name}__${String(k).replace(/\./g, '_')}`));
+    }
+    if (isImageQuestion(q)) {
+      headerCols.push(`${q.name}__shown_images`);
+      headerCols.push(`${q.name}__shown_media_group`);
+      headerCols.push(`${q.name}__shown_media_categories`);
+    }
   }
 
-  const headers = ['participant_id', 'created_at', ...headerCols];
+  const headers = ['participant_id', 'created_at', 'session_id', 'attempt_index', ...headerCols];
 
   const rows = responses.map(row => {
     const cols = [
       row.participant_id || '',
-      row.created_at || row.survey_metadata?.completion_time || ''
+      row.created_at || row.survey_metadata?.completion_time || '',
+      row.survey_metadata?.session_id || '',
+      row.survey_metadata?.attempt_index ?? '',
     ];
     for (const q of allQuestions) {
       const qName = q.name;
@@ -931,12 +1344,34 @@ function exportToCSV(responses, allQuestions) {
       }
       cols.push(typeof ansForCsv === 'object' ? JSON.stringify(ansForCsv) : String(ansForCsv ?? ''));
 
+      // Per-dimension / per-choice / per-schema-key sub-columns
+      const subKeys = subKeysFor(q);
+      if (subKeys) {
+        const obj = (ans && typeof ans === 'object' && !Array.isArray(ans)) ? ans : {};
+        subKeys.forEach((k) => {
+          const v = getPath(obj, k);
+          cols.push(v === undefined || v === null
+            ? ''
+            : (typeof v === 'object' ? JSON.stringify(v) : v));
+        });
+      }
+
       // Shown images column (only for image questions) — use filenames, not full URLs
       if (isImageQuestion(q)) {
         const imgNames = Array.isArray(shownImgs)
           ? shownImgs.map(v => v ? v.split('?')[0].split('/').pop() : v)
           : [shownImgs ?? ''];
         cols.push(imgNames.join('|'));
+        const mediaGroup = (typeof qData === 'object' && qData && 'shown_media_group' in qData)
+          ? (qData.shown_media_group || '')
+          : (row.displayed_media_groups?.[qName] || '');
+        cols.push(mediaGroup || '');
+        const mediaCategories = (typeof qData === 'object' && qData && qData.shown_media_categories)
+          ? (Array.isArray(qData.shown_media_categories) ? qData.shown_media_categories.join('|') : qData.shown_media_categories)
+          : (Array.isArray(row.displayed_media_categories?.[qName])
+            ? row.displayed_media_categories[qName].join('|')
+            : (row.displayed_media_categories?.[qName] || ''));
+        cols.push(mediaCategories || '');
       }
     }
     return cols.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');
@@ -960,6 +1395,9 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
   const [error, setError] = useState(null);
   const [dataSource, setDataSource] = useState(null);
   const [searchText, setSearchText] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [sessionFilter, setSessionFilter] = useState('');
 
   const fetchResponses = useCallback(async () => {
     setLoading(true);
@@ -1004,6 +1442,24 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
     return surveyConfig.pages.flatMap(page => page.elements || []);
   }, [surveyConfig]);
 
+  const filteredResponses = useMemo(() => {
+    return responses.filter((row) => {
+      const ts = row.created_at || row.survey_metadata?.completion_time;
+      if (dateFrom && ts && new Date(ts) < new Date(`${dateFrom}T00:00:00`)) return false;
+      if (dateTo && ts && new Date(ts) > new Date(`${dateTo}T23:59:59`)) return false;
+      if (sessionFilter && row.survey_metadata?.session_id !== sessionFilter) return false;
+      return true;
+    });
+  }, [responses, dateFrom, dateTo, sessionFilter]);
+
+  const sessionOptions = useMemo(() => {
+    const ids = new Set();
+    responses.forEach((r) => {
+      if (r.survey_metadata?.session_id) ids.add(r.survey_metadata.session_id);
+    });
+    return [...ids];
+  }, [responses]);
+
   // Filter questions by search
   const filteredQuestions = useMemo(() => {
     if (!searchText.trim()) return allQuestions;
@@ -1019,18 +1475,28 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
   const questionAnswers = useMemo(() => {
     const map = {};
     for (const q of allQuestions) {
-      map[q.name] = collectAnswers(q.name, responses);
+      map[q.name] = collectAnswers(q.name, filteredResponses);
     }
     return map;
-  }, [allQuestions, responses]);
+  }, [allQuestions, filteredResponses]);
 
   // Stats
-  const totalResponses = responses.length;
+  const totalResponses = filteredResponses.length;
+  const sessionStats = useMemo(() => {
+    const sessions = {};
+    filteredResponses.forEach((r) => {
+      const sid = r.survey_metadata?.session_id;
+      if (!sid) return;
+      if (!sessions[sid]) sessions[sid] = { count: 0, participant: r.participant_id };
+      sessions[sid].count += 1;
+    });
+    return Object.entries(sessions);
+  }, [filteredResponses]);
   const answeredQuestions = allQuestions.filter(q => (questionAnswers[q.name]?.length || 0) > 0).length;
 
   const dateRange = useMemo(() => {
-    if (!responses.length) return null;
-    const dates = responses
+    if (!filteredResponses.length) return null;
+    const dates = filteredResponses
       .map(r => r.created_at || r.survey_metadata?.completion_time)
       .filter(Boolean)
       .map(d => new Date(d))
@@ -1040,7 +1506,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
     return dates.length === 1
       ? fmt(dates[0])
       : `${fmt(dates[0])} – ${fmt(dates[dates.length - 1])}`;
-  }, [responses]);
+  }, [filteredResponses]);
 
   // Build name → URL lookup from preloadedImages
   const imageNameToUrl = useMemo(() => {
@@ -1084,8 +1550,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
           <Button
             variant="outlined"
             startIcon={<Download />}
-            disabled={!responses.length}
-            onClick={() => exportToCSV(responses, allQuestions)}
+            disabled={!filteredResponses.length}
+            onClick={() => exportToCSV(filteredResponses, allQuestions)}
             size="small"
           >
             Export CSV
@@ -1109,6 +1575,47 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
       {error && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {error}
+        </Alert>
+      )}
+
+      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
+        <TextField
+          type="date"
+          label="From"
+          size="small"
+          InputLabelProps={{ shrink: true }}
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+        />
+        <TextField
+          type="date"
+          label="To"
+          size="small"
+          InputLabelProps={{ shrink: true }}
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+        />
+        {sessionOptions.length > 0 && (
+          <TextField
+            select
+            label="Session"
+            size="small"
+            value={sessionFilter}
+            onChange={(e) => setSessionFilter(e.target.value)}
+            SelectProps={{ native: true }}
+            sx={{ minWidth: 180 }}
+          >
+            <option value="">All sessions</option>
+            {sessionOptions.map((sid) => (
+              <option key={sid} value={sid}>{sid.slice(-8)}</option>
+            ))}
+          </TextField>
+        )}
+      </Box>
+
+      {sessionStats.length > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Research sessions: {sessionStats.length} ({sessionStats.map(([sid, s]) => `${sid.slice(-6)}: ${s.count} rounds`).join(', ')})
         </Alert>
       )}
 
@@ -1209,7 +1716,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig }) {
                 {pageQuestions.map((question, idx) => (
                   <QuestionCard
                     key={question.name}
-                    question={question}
+                    question={{ ...question, _allResponses: filteredResponses }}
                     answers={questionAnswers[question.name] || []}
                     totalResponses={totalResponses}
                     index={allQuestions.indexOf(question)}
