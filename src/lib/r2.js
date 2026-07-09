@@ -105,19 +105,60 @@ export async function listImagesFromR2(prefix = '') {
   }
 }
 
+async function readCopyStream(body, onProgress) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result = { success: false, copied: [], errors: [] };
+
+  const handleLine = (line) => {
+    if (!line.trim()) return;
+    const msg = JSON.parse(line);
+    if (msg.type === 'item') {
+      onProgress?.(msg);
+      if (msg.ok) result.copied.push({ from: msg.from, to: msg.to, url: msg.url });
+      else result.errors.push({ from: msg.from, to: msg.to, error: msg.error });
+    } else if (msg.type === 'done') {
+      result = {
+        success: msg.success,
+        copied: msg.copied || result.copied,
+        errors: msg.errors || result.errors,
+        error: msg.error,
+      };
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    lines.forEach(handleLine);
+  }
+  if (buffer.trim()) handleLine(buffer);
+  return result;
+}
+
 /**
  * Server-side copy of one or more R2 objects.
  * @param {Array<{from: string, to: string}>} copies
+ * @param {{ onProgress?: (msg: { type: 'item', ok: boolean, finished: number, total: number }) => void }} [options]
  * @returns {{ success: boolean, copied: Array, errors: Array, error?: string }}
  */
-export async function copyImagesInR2(copies) {
+export async function copyImagesInR2(copies, options = {}) {
+  const { onProgress } = options;
+  const stream = typeof onProgress === 'function';
   try {
     const res = await fetch(`${SERVER_URL}/api/r2/copy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ copies }),
+      body: JSON.stringify({ copies, stream }),
     });
     if (!res.ok) throw await describeNonOk(res, 'R2 copy');
+    if (stream && res.body) {
+      return await readCopyStream(res.body, onProgress);
+    }
     const json = await res.json();
     return {
       success: json.success,

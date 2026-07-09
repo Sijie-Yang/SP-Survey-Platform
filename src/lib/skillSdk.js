@@ -80,6 +80,11 @@ export const SKILL_SDK_SOURCE = `
 `;
 
 export function buildSkillSrcdoc(sourceHtml, bootstrap) {
+  const touchCss = `<style>
+html,body{margin:0;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+input[type=range]{touch-action:pan-x;cursor:pointer;width:100%;}
+button,.btn{cursor:pointer;touch-action:manipulation;}
+</style>`;
   const boot = bootstrap
     ? `<script>window.__SP_BOOT__=${JSON.stringify(bootstrap).replace(/</g, '\\u003c')};<\/script>`
     : '';
@@ -87,11 +92,11 @@ export function buildSkillSrcdoc(sourceHtml, bootstrap) {
   if (/<\/html>/i.test(sourceHtml)) {
     let html = sourceHtml;
     if (/<head[^>]*>/i.test(html)) {
-      html = html.replace(/<head([^>]*)>/i, `<head$1>${boot}`);
+      html = html.replace(/<head([^>]*)>/i, `<head$1>${touchCss}${boot}`);
     } else {
-      html = html.replace(/<body([^>]*)>/i, `<body$1>${boot}`);
+      html = html.replace(/<body([^>]*)>/i, `<body$1>${touchCss}${boot}`);
     }
     return html.replace(/<\/body>/i, `${sdk}</body>`);
   }
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">${boot}<style>body{margin:0;padding:8px;font-family:sans-serif;}</style></head><body>${sourceHtml}${sdk}</body></html>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${touchCss}${boot}<style>body{margin:0;padding:8px;font-family:sans-serif;}</style></head><body>${sourceHtml}${sdk}</body></html>`;
 }

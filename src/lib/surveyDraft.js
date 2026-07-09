@@ -40,3 +40,15 @@ export function clearDraft(projectId, participantId) {
 export function clearDraftByKey(key) {
   if (key) localStorage.removeItem(key);
 }
+
+/** Remove every in-progress draft for a project (any participant). */
+export function clearAllDraftsForProject(projectId) {
+  if (!projectId) return;
+  const prefix = `${DRAFT_PREFIX}${projectId}_`;
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(prefix)) keys.push(key);
+  }
+  keys.forEach((key) => localStorage.removeItem(key));
+}

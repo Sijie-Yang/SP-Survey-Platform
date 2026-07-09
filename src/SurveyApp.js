@@ -4,7 +4,7 @@ import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
 import { Box, Alert, CircularProgress, Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography } from '@mui/material';
 import { saveSurveyResponse, isSupabaseConfigured } from './lib/supabase';
-import { findDraftForProject, saveDraft, clearDraft, clearDraftByKey } from './lib/surveyDraft';
+import { findDraftForProject, saveDraft, clearDraft, clearDraftByKey, clearAllDraftsForProject } from './lib/surveyDraft';
 import { surveyJson, displayedImages } from './config/questions';
 import { surveyConfig } from './config/surveyConfig';
 import { themeJson } from "./theme";
@@ -13,11 +13,14 @@ import registerImageRankingWidget, {
   registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget,
   registerAllExtendedWidgets,
 } from './components/SurveyCustomComponents';
+import { getBrowserId, generateCompletionCode } from './lib/browserId';
+import { countProjectResponses, fetchPairStats } from './lib/surveyPublicApi';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
   ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesGroupMediaAssignment,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia,
 } from './lib/surveyMediaInjection';
+import { getSkillMediaUrls } from './lib/skillMediaUtils';
 
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
@@ -30,8 +33,9 @@ export default function SurveyApp() {
   const [displayedImagesMap, setDisplayedImagesMap] = useState({}); // Track displayed images for each question
   const [currentProjectId, setCurrentProjectId] = useState(null); // Track current project ID
   const [repeatProgress, setRepeatProgress] = useState(null);
-  const [surveyPhase, setSurveyPhase] = useState('loading'); // loading | active | completed | submit-error
+  const [surveyPhase, setSurveyPhase] = useState('loading'); // loading | active | submitting | completed | submit-error | closed
   const [completionInfo, setCompletionInfo] = useState(null);
+  const [quotaClosed, setQuotaClosed] = useState(false);
   const [pendingSubmission, setPendingSubmission] = useState(null);
   const [resumeDialog, setResumeDialog] = useState(null);
   const [completionMessage, setCompletionMessage] = useState('');
@@ -40,11 +44,18 @@ export default function SurveyApp() {
   const repeatAttemptRef = useRef(1);
   const participantIdRef = useRef(null);
   const draftSaveTimerRef = useRef(null);
+  const draftSavingEnabledRef = useRef(true);
   const resumeChoiceRef = useRef(null);
   const projectIdRef = useRef(null);
   const displayedImagesRef = useRef({}); // Use ref to ensure onComplete has access to latest value
   const displayedMediaGroupsRef = useRef({});
   const displayedMediaCategoriesRef = useRef({});
+  const surveyStartedAtRef = useRef(null);
+  const pageEnteredAtRef = useRef(null);
+  const pageTimingRef = useRef({});
+  const pairStatsRef = useRef(null);
+  const lastPageNameRef = useRef(null);
+  const submissionGuardRef = useRef(false);
 
   // Monitor URL changes and reinitialize when project ID changes
   useEffect(() => {
@@ -126,8 +137,10 @@ export default function SurveyApp() {
   const submitSurveyResponse = async (completeData, { isRepeatMode, repeatTotal, attemptIndex }) => {
     const result = await saveSurveyResponse(completeData);
     if (result.success) {
-      clearDraft(projectIdRef.current, participantIdRef.current);
+      discardDraftForProject(projectIdRef.current, completeData.participant_id);
       if (isRepeatMode && attemptIndex < repeatTotal) {
+        submissionGuardRef.current = false;
+        draftSavingEnabledRef.current = true;
         repeatAttemptRef.current = attemptIndex + 1;
         setRepeatProgress({ current: repeatAttemptRef.current, total: repeatTotal });
         setSurveyModel(null);
@@ -137,9 +150,11 @@ export default function SurveyApp() {
         setTimeout(() => initializeSurvey({ skipDraftCheck: true }), 300);
         return;
       }
+      participantIdRef.current = null;
       setSurveyPhase('completed');
       setCompletionInfo({
         participantId: completeData.participant_id,
+        completionCode: completeData.survey_metadata?.completion_code,
         storage: result.storage,
         isRepeatMode,
         repeatTotal,
@@ -148,14 +163,29 @@ export default function SurveyApp() {
       if (isRepeatMode) setRepeatProgress(null);
       return;
     }
+    submissionGuardRef.current = false;
     setPendingSubmission(completeData);
     setSurveyPhase('submit-error');
   };
 
+  const cancelPendingDraftSave = () => {
+    if (draftSaveTimerRef.current) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+  };
+
+  const discardDraftForProject = (projectId, participantId) => {
+    if (participantId) clearDraft(projectId, participantId);
+    clearAllDraftsForProject(projectId);
+  };
+
   const scheduleDraftSave = (model, imageTracker, finalSurveyJson) => {
+    if (!draftSavingEnabledRef.current) return;
     if (!projectIdRef.current || !participantIdRef.current) return;
-    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    cancelPendingDraftSave();
     draftSaveTimerRef.current = setTimeout(() => {
+      if (!draftSavingEnabledRef.current) return;
       saveDraft(projectIdRef.current, participantIdRef.current, {
         surveyData: { ...model.data },
         currentPageNo: model.currentPageNo,
@@ -167,6 +197,9 @@ export default function SurveyApp() {
 
   const initializeSurvey = async (options = {}) => {
     try {
+      submissionGuardRef.current = false;
+      draftSavingEnabledRef.current = true;
+      cancelPendingDraftSave();
       setLoading(true);
       setLoadingMessage('Loading survey…');
       
@@ -207,6 +240,7 @@ export default function SurveyApp() {
           element,
           globallyUsedImageKeys,
           globallyUsedGroupKeys,
+          pairStatsRef.current,
         );
         trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
         return assignment;
@@ -236,6 +270,23 @@ export default function SurveyApp() {
       // Load survey configuration (platform mode: Supabase, self-hosted: local server)
       const adminConfig = await loadSurveyConfig(projectId);
       setCompletionMessage(adminConfig?.completionMessage || '');
+
+      // Response quota gate
+      const responseQuota = Number(adminConfig?.responseQuota) || 0;
+      if (responseQuota > 0) {
+        setLoadingMessage('Checking survey availability…');
+        const currentCount = await countProjectResponses(projectId);
+        if (currentCount != null && currentCount >= responseQuota) {
+          setQuotaClosed(true);
+          setSurveyPhase('closed');
+          setLoading(false);
+          return;
+        }
+      }
+      setQuotaClosed(false);
+
+      // Pair stats for adaptive/balanced pairing (best-effort)
+      pairStatsRef.current = await fetchPairStats(projectId);
       
       // Build runtime Supabase config from project sources.
       // Priority: project.supabaseConfig (legacy/system status) -> imageDatasetConfig (current UI flow)
@@ -376,7 +427,7 @@ export default function SurveyApp() {
                     // PRIORITY 2: Use global imageDatasetConfig if available
                     else if (projectData?.imageDatasetConfig?.enabled && projectData.imageDatasetConfig.datasetName) {
                       // Load from Hugging Face using global config
-                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
+                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 Fetching ${imageCount} images from Hugging Face dataset (global config): ${projectData.imageDatasetConfig.datasetName}`);
                       const { getRandomImagesFromHuggingFace } = await import('./lib/huggingface');
@@ -393,7 +444,7 @@ export default function SurveyApp() {
                     // PRIORITY 3: Legacy - element-specific config (kept for backward compatibility)
                     else if (element.imageSource === 'huggingface' && element.huggingFaceConfig) {
                       // Load from Hugging Face using element config (deprecated)
-                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
+                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 [Legacy] Fetching ${imageCount} images from element config: ${element.huggingFaceConfig.datasetName}`);
                       const { getRandomImagesFromHuggingFace } = await import('./lib/huggingface');
@@ -467,6 +518,10 @@ export default function SurveyApp() {
                       console.log(`Loaded ${selectedImages.length} random media for question: ${element.name}`);
                     } else if (element.type === 'skillquestion') {
                       ensureSkillDemoMedia(element);
+                      const skillUrls = getSkillMediaUrls(element);
+                      if (skillUrls.length && !imageTracker[element.name]) {
+                        imageTracker[element.name] = skillUrls;
+                      }
                       console.log(`Fallback demo media for skill: ${element.name}`);
                     } else {
                       console.warn(`No images found for random selection in question: ${element.name}`);
@@ -526,6 +581,12 @@ export default function SurveyApp() {
                 } else if (element.imageName && !imageTracker[element.name]) {
                   imageTracker[element.name] = [element.imageName];
                   console.log(`✅ Tracked 1 image name from imageName for question: ${element.name}`);
+                } else if (element.type === 'skillquestion' && !imageTracker[element.name]) {
+                  const skillUrls = getSkillMediaUrls(element);
+                  if (skillUrls.length) {
+                    imageTracker[element.name] = skillUrls;
+                    console.log(`✅ Tracked ${skillUrls.length} skill media URLs for question: ${element.name}`);
+                  }
                 }
                 
                 // Check if element should be converted to panel (has imageHtml from manual or random selection)
@@ -628,6 +689,123 @@ export default function SurveyApp() {
                         rows: element.rows
                       }
                     ]
+                  });
+                } else if (element.type === 'mediarating' && (element.imageHtml || element.randomImageSelection)) {
+                  if (!element.imageHtml) {
+                    console.warn(`mediarating ${element.name} has no imageHtml, skipping panel conversion`);
+                    newElements.push(element);
+                    continue;
+                  }
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'rating',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        rateMin: element.rateMin || 1,
+                        rateMax: element.rateMax || 5,
+                        minRateDescription: element.minRateDescription,
+                        maxRateDescription: element.maxRateDescription,
+                      },
+                    ],
+                  });
+                } else if (element.type === 'mediaboolean' && (element.imageHtml || element.randomImageSelection)) {
+                  if (!element.imageHtml) {
+                    console.warn(`mediaboolean ${element.name} has no imageHtml, skipping panel conversion`);
+                    newElements.push(element);
+                    continue;
+                  }
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'boolean',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        labelTrue: element.labelTrue || 'Yes',
+                        labelFalse: element.labelFalse || 'No',
+                        valueTrue: element.valueTrue,
+                        valueFalse: element.valueFalse,
+                      },
+                    ],
+                  });
+                } else if (element.type === 'imageslidergroup' && (element.imageHtml || element.randomImageSelection)) {
+                  if (!element.imageHtml) {
+                    console.warn(`imageslidergroup ${element.name} has no imageHtml, skipping panel conversion`);
+                    newElements.push(element);
+                    continue;
+                  }
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'slidergroup',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        dimensions: element.dimensions || [],
+                        scaleMin: element.scaleMin ?? 1,
+                        scaleMax: element.scaleMax ?? 7,
+                      },
+                    ],
+                  });
+                } else if (element.type === 'imagepointallocation' && (element.imageHtml || element.randomImageSelection)) {
+                  if (!element.imageHtml) {
+                    console.warn(`imagepointallocation ${element.name} has no imageHtml, skipping panel conversion`);
+                    newElements.push(element);
+                    continue;
+                  }
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'pointallocation',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        choices: element.choices || [],
+                        budget: element.budget ?? 100,
+                      },
+                    ],
                   });
                 } else {
                   newElements.push(element);
@@ -739,7 +917,16 @@ export default function SurveyApp() {
       }
 
       // Handle survey completion
-      model.onComplete.add(async (survey, options) => {
+      model.showCompletedPage = false;
+
+      model.onComplete.add(async (survey) => {
+        if (submissionGuardRef.current) return;
+        submissionGuardRef.current = true;
+        draftSavingEnabledRef.current = false;
+        cancelPendingDraftSave();
+        discardDraftForProject(projectId, participantIdRef.current);
+        setSurveyPhase('submitting');
+
         console.log("=== SURVEY COMPLETION STARTED ===");
         const responses = survey.data;
         const displayedImages = displayedImagesRef.current || {};
@@ -786,9 +973,20 @@ export default function SurveyApp() {
         
         // Combine user responses with displayed images information
         const attemptIndex = isRepeatMode ? repeatAttemptRef.current : 1;
+        const participantId = isRepeatMode ? repeatParticipantRef.current : participantIdRef.current;
+        if (lastPageNameRef.current) {
+          const elapsed = Math.round((Date.now() - (pageEnteredAtRef.current || Date.now())) / 1000);
+          pageTimingRef.current[lastPageNameRef.current] =
+            (pageTimingRef.current[lastPageNameRef.current] || 0) + elapsed;
+        }
+        const completionCode = generateCompletionCode(participantId);
+        const now = Date.now();
+        const totalSeconds = surveyStartedAtRef.current
+          ? Math.round((now - surveyStartedAtRef.current) / 1000)
+          : null;
         const completeData = {
           project_id: projectId,
-          participant_id: isRepeatMode ? repeatParticipantRef.current : participantIdRef.current,
+          participant_id: participantId,
           responses: enrichedResponses,
           raw_responses: responses,
           displayed_images: displayedImages,
@@ -796,10 +994,16 @@ export default function SurveyApp() {
           displayed_media_categories: displayedMediaCategories,
           survey_metadata: {
             completion_time: new Date().toISOString(),
+            completion_code: completionCode,
+            browser_id: getBrowserId(),
             user_agent: navigator.userAgent,
             screen_resolution: `${window.screen.width}x${window.screen.height}`,
             survey_version: useAdminConfig ? `2.0-admin-${projectId}` : "1.0-original",
             project_id: projectId,
+            timing: {
+              total_seconds: totalSeconds,
+              page_seconds: { ...pageTimingRef.current },
+            },
             ...(isRepeatMode ? {
               session_id: repeatSessionRef.current,
               attempt_index: attemptIndex,
@@ -812,26 +1016,30 @@ export default function SurveyApp() {
         console.log("Survey completed with complete data:", completeData);
         console.log("📸 Displayed images in response:", displayedImages);
         console.log("Attempting to save to Supabase...");
-        
-        // Save to Supabase
-        const result = await saveSurveyResponse(completeData);
-        
-        console.log("Save result:", result);
-        
-        if (result.success) {
-          console.log("✅ Survey response saved successfully!");
-          await submitSurveyResponse(completeData, { isRepeatMode, repeatTotal, attemptIndex });
-        } else {
-          console.error("❌ Failed to save survey response:", result.error);
-          setPendingSubmission(completeData);
-          setSurveyPhase('submit-error');
-        }
+
+        await submitSurveyResponse(completeData, { isRepeatMode, repeatTotal, attemptIndex });
       });
 
       model.onValueChanged.add(() => {
         scheduleDraftSave(model, imageTracker, finalSurveyJson);
       });
-      model.onCurrentPageChanged.add(() => {
+
+      surveyStartedAtRef.current = Date.now();
+      pageEnteredAtRef.current = Date.now();
+      pageTimingRef.current = {};
+      lastPageNameRef.current = model.currentPage?.name || null;
+
+      const recordPageTiming = (pageName) => {
+        if (!pageName || pageEnteredAtRef.current == null) return;
+        const elapsed = Math.round((Date.now() - pageEnteredAtRef.current) / 1000);
+        pageTimingRef.current[pageName] = (pageTimingRef.current[pageName] || 0) + elapsed;
+        pageEnteredAtRef.current = Date.now();
+      };
+
+      model.onCurrentPageChanged.add((sender) => {
+        const newPageName = sender.currentPage?.name;
+        if (lastPageNameRef.current) recordPageTiming(lastPageNameRef.current);
+        lastPageNameRef.current = newPageName;
         scheduleDraftSave(model, imageTracker, finalSurveyJson);
       });
 
@@ -898,6 +1106,26 @@ export default function SurveyApp() {
     );
   }
 
+  if (surveyPhase === 'submitting') {
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', gap: 2 }}>
+        <CircularProgress />
+        <Typography variant="body2" color="text.secondary">Saving your responses…</Typography>
+      </Box>
+    );
+  }
+
+  if (surveyPhase === 'closed' || quotaClosed) {
+    return (
+      <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
+        <Typography variant="h5" sx={{ mb: 2, fontWeight: 600 }}>Survey closed</Typography>
+        <Typography variant="body1" color="text.secondary">
+          This survey is no longer accepting responses. Thank you for your interest.
+        </Typography>
+      </Box>
+    );
+  }
+
   if (surveyPhase === 'completed' && completionInfo) {
     const defaultMsg = completionInfo.isRepeatMode
       ? `All ${completionInfo.repeatTotal} annotation rounds completed!`
@@ -908,6 +1136,11 @@ export default function SurveyApp() {
         <Typography variant="body1" sx={{ mb: 2 }}>
           {completionMessage || defaultMsg}
         </Typography>
+        {completionInfo.completionCode && (
+          <Typography variant="body1" sx={{ mb: 2, fontWeight: 600, letterSpacing: 1 }}>
+            Completion code: <strong>{completionInfo.completionCode}</strong>
+          </Typography>
+        )}
         {completionInfo.participantId && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Your participant ID: <strong>{completionInfo.participantId}</strong>
@@ -932,7 +1165,8 @@ export default function SurveyApp() {
           variant="contained"
           size="large"
           onClick={() => {
-            setSurveyPhase('loading');
+            submissionGuardRef.current = true;
+            setSurveyPhase('submitting');
             submitSurveyResponse(pendingSubmission, {
               isRepeatMode: !!pendingSubmission.survey_metadata?.researcher_mode,
               repeatTotal: pendingSubmission.survey_metadata?.repeat_total || 1,
@@ -1053,9 +1287,15 @@ export default function SurveyApp() {
           <Button
             onClick={() => {
               clearDraftByKey(resumeDialog.draftKey);
-              const { model, imageTracker, finalSurveyJson } = resumeDialog;
+              clearAllDraftsForProject(projectIdRef.current);
+              participantIdRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+              const { model, imageTracker } = resumeDialog;
               setResumeDialog(null);
               resumeChoiceRef.current = 'fresh';
+              draftSavingEnabledRef.current = true;
+              model.data = {};
+              model.currentPageNo = 0;
+              Object.keys(imageTracker).forEach((k) => delete imageTracker[k]);
               displayedImagesRef.current = imageTracker;
               setDisplayedImagesMap(imageTracker);
               setSurveyModel(model);

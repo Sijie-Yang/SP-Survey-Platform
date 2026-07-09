@@ -6,11 +6,35 @@ import {
   buildMediaByCategory, getMediaCategories, parseMediaCategory, summarizeMediaGroupsBySize,
 } from './mediaUtils';
 import { getSkillById } from './skillManager';
-import { buildFallbackDemoImages } from './presetSkills';
+import { buildFallbackDemoImages, getPresetSkill } from './presetSkills';
+
+/** Build justified image gallery HTML (same layout as imagerating panels). */
+export function buildImageGalleryHtml(selectedImages) {
+  let html = '<div class="sp-image-gallery">';
+  (selectedImages || []).forEach((image) => {
+    html += `<div class="sp-image-gallery__item"><div class="sp-image-gallery__image-container"><img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name || ''}" alt="${image.name || ''}" /></div></div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function skillFromPreset(skillId) {
+  if (!skillId?.startsWith('preset_')) return null;
+  const preset = getPresetSkill(skillId.replace(/^preset_/, ''));
+  if (!preset) return null;
+  return {
+    id: skillId,
+    name: preset.name,
+    sourceHtml: preset.sourceHtml,
+    defaultConfig: preset.defaultConfig,
+    resultSchema: preset.resultSchema || [],
+  };
+}
 
 export const RANDOM_MEDIA_TYPES = new Set([
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix',
   'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation',
+  'imageslidergroup', 'imagepointallocation',
 ]);
 
 export function isSkillMediaQuestion(element) {
@@ -89,7 +113,7 @@ export function defaultMediaCount(element) {
   if (element.type === 'skillquestion') {
     return element.imageCount || element.skillConfig?.mediaCount || 1;
   }
-  if (['imagerating', 'imagematrix', 'imageboolean', 'image', 'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation'].includes(element.type)) {
+  if (['imagerating', 'imagematrix', 'imageboolean', 'image', 'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
     return 1;
   }
   return 4;
@@ -103,7 +127,7 @@ export function getMediaTypeFilter(element) {
   if (['mediadisplay', 'mediarating', 'mediaboolean'].includes(element.type)) {
     return element.mediaType || 'any';
   }
-  if (['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix'].includes(element.type)) {
+  if (['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
     return 'image';
   }
   return 'any';
@@ -195,9 +219,10 @@ export function getGroupTrackingKey(group) {
  * Pick media for a question — individual files or a fixed-size filename group.
  * Returns { images, groupKey, groupId }.
  */
-export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys, globallyUsedGroupKeys) {
+export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys, globallyUsedGroupKeys, pairStats = null) {
   const imageCount = element.imageCount || defaultMediaCount(element);
   const excludeUsed = element.excludePreviouslyUsedImages !== false;
+  const pairingMode = element.pairingMode || 'random';
 
   if (usesCategoryMediaAssignment(element)) {
     const picked = pickOnePerCategory(pool, element, globallyUsedImageKeys);
@@ -220,6 +245,51 @@ export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys,
       groupKey: picked.groupKey,
       groupId: picked.groupId,
     };
+  }
+
+  // Pairwise pairing modes (imageCount === 2, individual assignment)
+  if (imageCount === 2 && pairingMode !== 'random' && pool.length >= 2) {
+    let candidates = [...pool];
+    if (excludeUsed && globallyUsedImageKeys) {
+      candidates = candidates.filter((img) => {
+        const key = getImageKey(img);
+        return key && !globallyUsedImageKeys.has(key);
+      });
+    }
+    if (candidates.length < 2) {
+      candidates = [...pool];
+    }
+
+    const exposure = (img) => {
+      const key = getImageKey(img);
+      return pairStats?.[key]?.exposures ?? 0;
+    };
+    const mu = (img) => {
+      const key = getImageKey(img);
+      return pairStats?.[key]?.mu ?? 25;
+    };
+
+    if (pairingMode === 'balanced') {
+      const sorted = [...candidates].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
+      return { images: sorted.slice(0, 2), groupKey: null, groupId: null };
+    }
+
+    if (pairingMode === 'adaptive') {
+      let bestPair = null;
+      let bestGap = Infinity;
+      for (let i = 0; i < candidates.length; i += 1) {
+        for (let j = i + 1; j < candidates.length; j += 1) {
+          const gap = Math.abs(mu(candidates[i]) - mu(candidates[j]));
+          const expSum = exposure(candidates[i]) + exposure(candidates[j]);
+          const score = gap + expSum * 0.01;
+          if (score < bestGap) {
+            bestGap = score;
+            bestPair = [candidates[i], candidates[j]];
+          }
+        }
+      }
+      if (bestPair) return { images: bestPair, groupKey: null, groupId: null };
+    }
   }
 
   const shuffled = [...pool].sort(() => 0.5 - Math.random());
@@ -310,6 +380,10 @@ export function applyMediaToElement(element, selectedImages) {
     element.mediaUrl = first.url;
     element.mediaName = first.name;
     element.mediaType = first.type || inferMediaType(first.url);
+    const imageEntries = selectedImages.filter((img) => !img.type || img.type === 'image');
+    if (imageEntries.length) {
+      element.imageHtml = buildImageGalleryHtml(imageEntries);
+    }
     return;
   }
 
@@ -318,15 +392,10 @@ export function applyMediaToElement(element, selectedImages) {
     return;
   }
 
-  if (['imageboolean', 'imagerating', 'imagematrix'].includes(element.type)) {
+  if (['imageboolean', 'imagerating', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
     element.imageLinks = selectedImages.map((img) => img.url);
     element.imageNames = selectedImages.map((img) => img.name);
-    let imagesHtml = '<div class="sp-image-gallery">';
-    selectedImages.forEach((image) => {
-      imagesHtml += `<div class="sp-image-gallery__item"><div class="sp-image-gallery__image-container"><img src="${image.url}" data-image-url="${image.url}" data-image-name="${image.name}" alt="${image.name}" /></div></div>`;
-    });
-    imagesHtml += '</div>';
-    element.imageHtml = imagesHtml;
+    element.imageHtml = buildImageGalleryHtml(selectedImages);
     return;
   }
 
@@ -368,16 +437,18 @@ export async function resolveSkillQuestions(surveyJson) {
     if (!page.elements) continue;
     for (const el of page.elements) {
       if (el.type !== 'skillquestion' || !el.skillId) continue;
-      const skill = await getSkillById(el.skillId);
+      let skill = await getSkillById(el.skillId);
+      if (!skill) skill = skillFromPreset(el.skillId);
       if (skill) {
-        // Always use the latest skill HTML from DB (question configs may hold stale copies)
-        el.skillHtml = skill.sourceHtml;
+        el.skillHtml = skill.sourceHtml || el.skillHtml;
         const merged = { ...(skill.defaultConfig || {}), ...(el.skillConfig || {}) };
-        // demoImages should always come from the latest skill definition, not stale copies
         if (skill.defaultConfig?.demoImages?.length) {
           merged.demoImages = skill.defaultConfig.demoImages;
         }
         el.skillConfig = merged;
+      } else if (!el.skillHtml && el.skillId?.startsWith('preset_')) {
+        const preset = skillFromPreset(el.skillId);
+        if (preset) el.skillHtml = preset.sourceHtml;
       }
       // Skill questions always take part in random media injection unless explicitly disabled
       if (el.randomImageSelection === undefined || el.randomImageSelection === null) {

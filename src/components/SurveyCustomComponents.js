@@ -5,7 +5,7 @@ import ImageRankingWidget from './ImageRankingWidget';
 import ImageRatingWidget from './ImageRatingWidget';
 import ImageBooleanWidget from './ImageBooleanWidget';
 import { MediaDisplayContent, MediaRatingContent, MediaBooleanContent } from './MediaWidgets';
-import { SliderGroupContent, PointAllocationContent } from './ResponseWidgets';
+import { SliderGroupContent, PointAllocationContent, ImageSliderGroupContent, ImagePointAllocationContent } from './ResponseWidgets';
 import ImageAnnotationCanvas from './ImageAnnotationWidget';
 import SkillQuestionFrame from './SkillQuestionWidget';
 import { readSkillQuestionFields } from '../lib/skillPostMessage';
@@ -653,6 +653,7 @@ export default registerImageRankingWidget;
 const MEDIA_PAIRING_TYPES = [
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix',
   'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation', 'skillquestion',
+  'imageslidergroup', 'imagepointallocation',
 ];
 
 export function registerMediaPairingProps() {
@@ -876,6 +877,84 @@ export function registerPointAllocationWidget() {
   });
 }
 
+export function registerImageSliderGroupWidget() {
+  class Q extends Question {
+    getType() { return 'imageslidergroup'; }
+    onCheckForErrors(errors, isOnValueChanged) {
+      super.onCheckForErrors(errors, isOnValueChanged);
+      if (!this.isRequired || isOnValueChanged) return;
+      const dims = this.dimensions || [];
+      const val = this.value || {};
+      const missing = dims.filter((d) => val[d.id] === undefined || val[d.id] === null);
+      if (missing.length) {
+        errors.push(new CustomError('Please rate every dimension.', this));
+      }
+    }
+  }
+  Serializer.addClass('imageslidergroup', [
+    ...MEDIA_PROPS,
+    { name: 'imageHtml', category: 'general' },
+    { name: 'imageLinks:string[]', category: 'general' },
+    { name: 'imageNames:string[]', category: 'general' },
+    { name: 'dimensions', default: [], category: 'general' },
+    { name: 'scaleMin:number', default: 1, category: 'general' },
+    { name: 'scaleMax:number', default: 7, category: 'general' },
+  ], () => new Q(), 'question');
+
+  ReactQuestionFactory.Instance.registerQuestion('imageslidergroup', (props) => {
+    const q = props.question;
+    const urls = q.imageLinks?.length ? q.imageLinks : [];
+    return React.createElement(ImageSliderGroupContent, {
+      imageUrls: urls,
+      dimensions: q.dimensions || [],
+      scaleMin: q.scaleMin ?? 1,
+      scaleMax: q.scaleMax ?? 7,
+      value: q.value,
+      onChange: (v) => { q.value = v; },
+      readOnly: q.isReadOnly,
+    });
+  });
+}
+
+export function registerImagePointAllocationWidget() {
+  class Q extends Question {
+    getType() { return 'imagepointallocation'; }
+    onCheckForErrors(errors, isOnValueChanged) {
+      super.onCheckForErrors(errors, isOnValueChanged);
+      if (isOnValueChanged) return;
+      const budget = this.budget || 100;
+      const val = this.value || {};
+      const total = Object.values(val).reduce((s, n) => s + (Number(n) || 0), 0);
+      if (this.isRequired && total !== budget) {
+        errors.push(new CustomError(`Please allocate exactly ${budget} points (currently ${total}).`, this));
+      } else if (!this.isRequired && total > budget) {
+        errors.push(new CustomError(`Please allocate at most ${budget} points (currently ${total}).`, this));
+      }
+    }
+  }
+  Serializer.addClass('imagepointallocation', [
+    ...MEDIA_PROPS,
+    { name: 'imageHtml', category: 'general' },
+    { name: 'imageLinks:string[]', category: 'general' },
+    { name: 'imageNames:string[]', category: 'general' },
+    { name: 'choices', default: [], category: 'general' },
+    { name: 'budget:number', default: 100, category: 'general' },
+  ], () => new Q(), 'question');
+
+  ReactQuestionFactory.Instance.registerQuestion('imagepointallocation', (props) => {
+    const q = props.question;
+    const urls = q.imageLinks?.length ? q.imageLinks : [];
+    return React.createElement(ImagePointAllocationContent, {
+      imageUrls: urls,
+      choices: q.choices || [],
+      budget: q.budget || 100,
+      value: q.value,
+      onChange: (v) => { q.value = v; },
+      readOnly: q.isReadOnly,
+    });
+  });
+}
+
 // ── Skill question type ───────────────────────────────────────────────────────
 
 export function registerSkillQuestionWidget() {
@@ -897,6 +976,7 @@ export function registerSkillQuestionWidget() {
     const { config, images, value } = readSkillQuestionFields(q);
     return React.createElement(SkillQuestionFrame, {
       skillHtml: q.skillHtml || '',
+      skillId: q.skillId || '',
       config,
       images,
       value,
@@ -912,6 +992,8 @@ export function registerAllExtendedWidgets() {
   registerImageAnnotationWidget();
   registerSliderGroupWidget();
   registerPointAllocationWidget();
+  registerImageSliderGroupWidget();
+  registerImagePointAllocationWidget();
   registerSkillQuestionWidget();
   registerMediaPairingProps();
 }

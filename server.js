@@ -25,6 +25,25 @@ const {
 const app = express();
 const PORT = 3001;
 
+/** Run async tasks with bounded concurrency (used for R2 server-side copies). */
+async function asyncPool(concurrency, items, fn) {
+  if (!items.length) return [];
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Math.min(Math.max(1, concurrency), items.length);
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex;
+      nextIndex += 1;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, worker));
+  return results;
+}
+
+const R2_COPY_CONCURRENCY = 32;
+
 // Enable CORS for React app
 app.use(cors({
   origin: ['http://localhost:3000', 'http://localhost:3002'],
@@ -554,7 +573,7 @@ app.get('/api/responses', async (req, res) => {
     for (const file of files) {
       try {
         const content = await fs.readFile(path.join(RESPONSES_PATH, file), 'utf8');
-        responses.push(JSON.parse(content));
+        responses.push({ ...JSON.parse(content), _filename: file });
       } catch (e) {
         console.error(`Error reading response file ${file}:`, e);
       }
@@ -563,6 +582,28 @@ app.get('/api/responses', async (req, res) => {
     res.json({ success: true, responses, count: responses.length });
   } catch (error) {
     console.error('Error listing responses:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/responses/:filename — remove a local response JSON file
+app.delete('/api/responses/:filename', async (req, res) => {
+  try {
+    const raw = req.params.filename || '';
+    const filename = path.basename(raw);
+    if (!filename.endsWith('.json') || filename.includes('..')) {
+      return res.status(400).json({ success: false, error: 'Invalid filename' });
+    }
+    const RESPONSES_PATH = path.join(__dirname, 'public', 'responses');
+    const filePath = path.join(RESPONSES_PATH, filename);
+    if (!(await fs.pathExists(filePath))) {
+      return res.status(404).json({ success: false, error: 'Response file not found' });
+    }
+    await fs.remove(filePath);
+    console.log(`🗑️  Deleted response file ${filename}`);
+    res.json({ success: true, filename });
+  } catch (error) {
+    console.error('Error deleting response:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -2068,11 +2109,6 @@ app.get('/api/r2/list', async (req, res) => {
     }
     const prefix = req.query.prefix || '';
     const r2 = createR2Client();
-    const result = await r2.send(new ListObjectsV2Command({
-      Bucket: r2BucketName,
-      Prefix: prefix,
-      MaxKeys: 10000,
-    }));
     const MEDIA_FILE_RE = /\.(jpe?g|png|gif|webp|mp4|webm|mov|mp3|wav|m4a|ogg)$/i;
     const inferType = (name) => {
       const ext = (name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
@@ -2080,7 +2116,21 @@ app.get('/api/r2/list', async (req, res) => {
       if (['mp3', 'wav', 'm4a', 'ogg'].includes(ext)) return 'audio';
       return 'image';
     };
-    const images = (result.Contents || [])
+
+    const allObjects = [];
+    let continuationToken;
+    do {
+      const result = await r2.send(new ListObjectsV2Command({
+        Bucket: r2BucketName,
+        Prefix: prefix,
+        MaxKeys: 1000,
+        ContinuationToken: continuationToken,
+      }));
+      allObjects.push(...(result.Contents || []));
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    const images = allObjects
       .filter(obj => MEDIA_FILE_RE.test(obj.Key))
       .map(obj => {
         const name = obj.Key.split('/').pop();
@@ -2123,40 +2173,81 @@ app.delete('/api/r2/delete', async (req, res) => {
   }
 });
 
-// POST /api/r2/copy  – body: { copies: [{ from: string, to: string }, ...] }
+// POST /api/r2/copy  – body: { copies: [{ from: string, to: string }, ...], stream?: boolean }
 // Server-side copy is the fastest way to clone many R2 objects without
-// streaming bytes back to the client. Used when promoting a project's image
-// folder into a template's image folder.
+// streaming bytes back to the client. Copies run in parallel (see R2_COPY_CONCURRENCY).
+// When stream=true, responds with NDJSON — one line per finished copy plus a final "done".
 app.post('/api/r2/copy', async (req, res) => {
   try {
     if (!isR2Configured()) {
       return res.status(503).json({ success: false, error: 'Cloudflare R2 is not configured on the server.' });
     }
-    const { copies } = req.body;
+    const { copies, stream } = req.body;
     if (!Array.isArray(copies) || copies.length === 0) {
       return res.status(400).json({ success: false, error: '"copies" array is required.' });
     }
     const r2 = createR2Client();
+    const total = copies.length;
+    let finished = 0;
     const copied = [];
     const errors = [];
-    for (const { from, to } of copies) {
-      if (!from || !to) { errors.push({ from, to, error: 'from/to required' }); continue; }
+
+    const emitItem = (payload) => {
+      if (!stream) return;
+      res.write(`${JSON.stringify({ type: 'item', finished, total, ...payload })}\n`);
+    };
+
+    if (stream) {
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.flushHeaders?.();
+    }
+
+    await asyncPool(R2_COPY_CONCURRENCY, copies, async ({ from, to }) => {
+      if (!from || !to) {
+        finished += 1;
+        const err = { from, to, error: 'from/to required' };
+        errors.push(err);
+        emitItem({ ok: false, ...err });
+        return { ok: false, ...err };
+      }
       try {
         await r2.send(new CopyObjectCommand({
           Bucket: r2BucketName,
           CopySource: `/${r2BucketName}/${encodeURIComponent(from).replace(/%2F/g, '/')}`,
           Key: to,
         }));
-        copied.push({ from, to, url: `${r2PublicUrl}/${to}` });
+        finished += 1;
+        const item = { from, to, url: `${r2PublicUrl}/${to}` };
+        copied.push(item);
+        emitItem({ ok: true, ...item });
+        return { ok: true, ...item };
       } catch (err) {
-        errors.push({ from, to, error: err.message });
+        finished += 1;
+        const item = { from, to, error: err.message };
+        errors.push(item);
+        emitItem({ ok: false, ...item });
+        return { ok: false, ...item };
       }
-    }
+    });
+
     console.log(`☁️  R2 copied ${copied.length} object(s), ${errors.length} failure(s)`);
-    res.json({ success: errors.length === 0, copied, errors });
+    const result = { success: errors.length === 0, copied, errors };
+    if (stream) {
+      res.write(`${JSON.stringify({ type: 'done', ...result })}\n`);
+      res.end();
+    } else {
+      res.json(result);
+    }
   } catch (error) {
     console.error('R2 copy error:', error);
-    res.status(500).json({ success: false, error: error.message });
+    if (req.body?.stream && !res.headersSent) {
+      res.status(500);
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.end(`${JSON.stringify({ type: 'done', success: false, copied: [], errors: [], error: error.message })}\n`);
+    } else if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message });
+    }
   }
 });
 

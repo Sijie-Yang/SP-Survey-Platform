@@ -792,7 +792,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
   // ✅ Post-process AI-generated config to ensure all image questions have correct settings
   const processAIGeneratedConfig = (surveyConfig) => {
-    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix'];
+    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'];
     
     const processedConfig = JSON.parse(JSON.stringify(surveyConfig)); // Deep clone
     
@@ -1284,7 +1284,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     if (!cfg?.pages) return [];
     const warnings = [];
     const names = new Set();
-    const imageTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image', 'imageannotation', 'skillquestion', 'mediadisplay', 'mediarating', 'mediaboolean'];
+    const imageTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image', 'imageannotation', 'skillquestion', 'mediadisplay', 'mediarating', 'mediaboolean', 'imageslidergroup', 'imagepointallocation'];
 
     cfg.pages.forEach((page, pi) => {
       const pageTitle = page.title || `Page ${pi + 1}`;
@@ -1303,10 +1303,10 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
             warnings.push(`"${el.title || el.name}" may have no images configured.`);
           }
         }
-        if (el.type === 'slidergroup' && !el.dimensions?.length) {
+        if ((el.type === 'slidergroup' || el.type === 'imageslidergroup') && !el.dimensions?.length) {
           warnings.push(`Slider group "${el.title || el.name}" has no dimensions configured.`);
         }
-        if (el.type === 'pointallocation' && !el.choices?.length) {
+        if ((el.type === 'pointallocation' || el.type === 'imagepointallocation') && !el.choices?.length) {
           warnings.push(`Point allocation "${el.title || el.name}" has no choices configured.`);
         }
       });
@@ -1427,6 +1427,20 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   value={config.completionMessage || ''}
                   onChange={(e) => handleBasicInfoChange('completionMessage', e.target.value)}
                   helperText="Shown to participants after they submit the survey"
+                />
+
+                <TextField
+                  fullWidth
+                  variant="outlined"
+                  type="number"
+                  label="Response Quota (optional)"
+                  value={config.responseQuota ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    handleBasicInfoChange('responseQuota', v === '' ? null : Math.max(1, parseInt(v, 10) || 1));
+                  }}
+                  helperText="Close the survey automatically after this many responses (leave empty for unlimited)"
+                  inputProps={{ min: 1 }}
                 />
               </Box>
             </Box>

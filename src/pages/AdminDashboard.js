@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Box, Container, Typography, AppBar, Toolbar, Tabs, Tab, Paper,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  TableSortLabel,
   Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Switch, Alert, Snackbar,
   CircularProgress, Tooltip, Stack, Select, MenuItem, FormControl, InputLabel,
@@ -13,9 +14,10 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
-  listAllTemplates, updateTemplate, deleteTemplate,
+  listAllTemplates, updateTemplate, deleteTemplate, renameTemplateId,
+  normalizeTemplateId, templateImagePrefix,
   listAllProjects, updateProjectAdmin, deleteProjectAdmin,
-  seedBuiltinTemplates, checkIsAdmin,
+  seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
 } from '../lib/templateManager';
 import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT } from '../lib/mediaUtils';
 import { SKILL_PREVIEW_PREFIX, listSkillPreviewMedia } from '../lib/skillPreviewMedia';
@@ -25,13 +27,10 @@ import {
 import {
   isR2Configured, uploadImageToR2, listImagesFromR2, deleteImagesFromR2,
 } from '../lib/r2';
+import { asyncPool } from '../lib/asyncPool';
 import SurveyPreview from '../components/admin/SurveyPreview';
 import SurveyBuilder from '../components/admin/SurveyBuilder';
 
-// R2 prefix used for template image folders. Stays in sync with how the
-// admin dialog uploads / lists / deletes objects so a template always knows
-// where its images live.
-const templateImagePrefix = (templateId) => `templates/${templateId}/`;
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 
 // ─── Edit Template Dialog ────────────────────────────────────────────────────
@@ -40,10 +39,12 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [migrateProgress, setMigrateProgress] = useState({ label: '', current: 0, total: 0 });
 
   useEffect(() => {
     if (template) {
       setForm({
+        id:                  template.id                || '',
         name:                template.name              || '',
         description:         template.description       || '',
         author:              template.author            || '',
@@ -53,14 +54,20 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
         paper_url:           template.website           || '',
         huggingface_dataset: template.huggingfaceDataset || '',
       });
+      setMigrateProgress({ label: '', current: 0, total: 0 });
+      setError('');
     }
   }, [template]);
+
+  const idChanged = template && normalizeTemplateId(form.id) !== template.id;
 
   const handleSave = async () => {
     setSaving(true);
     setError('');
+    setMigrateProgress({ label: idChanged ? '准备迁移…' : '正在保存…', current: 0, total: 0 });
     try {
-      await updateTemplate(template.id, {
+      const nextId = normalizeTemplateId(form.id);
+      const fields = {
         name:                form.name,
         description:         form.description,
         author:              form.author,
@@ -69,23 +76,39 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
         tags:                form.tags.split(',').map(t => t.trim()).filter(Boolean),
         paper_url:           form.paper_url,
         huggingface_dataset: form.huggingface_dataset.trim() || null,
-      });
+      };
+      if (nextId !== template.id) {
+        await renameTemplateId(template.id, nextId, fields, ({ label, current, total }) => {
+          setMigrateProgress({ label, current, total });
+        });
+      } else {
+        await updateTemplate(template.id, fields);
+      }
       onSaved();
       onClose();
     } catch (err) {
       setError(err.message);
     } finally {
       setSaving(false);
+      setMigrateProgress({ label: '', current: 0, total: 0 });
     }
   };
 
   if (!template) return null;
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="sm" fullWidth disableEscapeKeyDown={saving}>
       <DialogTitle>编辑模板: {template.name}</DialogTitle>
       <DialogContent>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
         <Stack spacing={2} sx={{ mt: 1 }}>
+          <TextField
+            label="模板 ID"
+            value={form.id || ''}
+            onChange={(e) => setForm((f) => ({ ...f, id: normalizeTemplateId(e.target.value) }))}
+            fullWidth
+            size="small"
+            helperText={`云端图片路径：${templateImagePrefix(form.id || template.id)}（修改 ID 会同步移动 R2 文件夹）`}
+          />
           {[
             { label: '名称', key: 'name' },
             { label: '描述', key: 'description', multiline: true, rows: 3 },
@@ -124,6 +147,28 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
               <MenuItem value="AI Template">AI Template</MenuItem>
             </Select>
           </FormControl>
+
+          {saving && (
+            <Box sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {migrateProgress.label || (idChanged ? '正在迁移模板…' : '正在保存…')}
+                </Typography>
+                {migrateProgress.total > 0 && (
+                  <Typography variant="body2" color="text.secondary">
+                    {migrateProgress.current} / {migrateProgress.total}
+                  </Typography>
+                )}
+              </Box>
+              <LinearProgress
+                variant={migrateProgress.total > 0 ? 'determinate' : 'indeterminate'}
+                value={migrateProgress.total > 0
+                  ? (migrateProgress.current / migrateProgress.total) * 100
+                  : undefined}
+                sx={{ height: 6, borderRadius: 3 }}
+              />
+            </Box>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -337,30 +382,36 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
     setError(''); setInfo('');
 
     const uploaded = [...images];
-    let okCount = 0, failCount = 0;
+    let okCount = 0;
+    let failCount = 0;
+    let completed = 0;
 
-    for (let i = 0; i < files.length; i++) {
+    const results = await asyncPool(6, files, async (file) => {
       try {
-        const compressed = await compressImage(files[i]);
-        const safeName = files[i].name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const compressed = await compressImage(file);
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const key = `${templateImagePrefix(template.id)}${safeName}`;
         const result = await uploadImageToR2(compressed, key);
-        if (result.success) {
-          // Replace any previous entry with the same name so re-uploads dedupe
-          const filtered = uploaded.filter((img) => img.name !== safeName);
-          filtered.push({ url: result.url, name: safeName, key });
-          uploaded.splice(0, uploaded.length, ...filtered);
-          okCount++;
-        } else {
-          failCount++;
-          if (!error) setError(`Upload failed: ${result.error}`);
-        }
+        return { file, safeName, result };
       } catch (e) {
-        failCount++;
-        if (!error) setError(e.message);
+        return { file, safeName: file.name, result: { success: false, error: e.message } };
+      } finally {
+        completed += 1;
+        setUploading((s) => ({ ...s, progress: completed }));
       }
-      setUploading((s) => ({ ...s, progress: i + 1 }));
-    }
+    });
+
+    results.forEach(({ safeName, result }) => {
+      if (result.success) {
+        const filtered = uploaded.filter((img) => img.name !== safeName);
+        filtered.push({ url: result.url, name: safeName, key: `${templateImagePrefix(template.id)}${safeName}` });
+        uploaded.splice(0, uploaded.length, ...filtered);
+        okCount++;
+      } else {
+        failCount++;
+        if (!error) setError(`Upload failed: ${result.error}`);
+      }
+    });
 
     setUploading({ active: false, progress: files.length, total: files.length });
     setImages(uploaded);
@@ -534,6 +585,49 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
 
 // ─── Template Management Tab ─────────────────────────────────────────────────
 
+function compareTemplateSort(a, b, sortBy) {
+  switch (sortBy) {
+    case 'name':
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+    case 'year': {
+      const av = parseInt(String(a.year || ''), 10) || 0;
+      const bv = parseInt(String(b.year || ''), 10) || 0;
+      return av - bv;
+    }
+    case 'submitter':
+      return String(a.submitter_email || '').localeCompare(String(b.submitter_email || ''), undefined, { sensitivity: 'base' });
+    case 'category':
+      return String(a.category || '').localeCompare(String(b.category || ''), undefined, { sensitivity: 'base' });
+    case 'approved':
+      return Number(!!a.is_approved) - Number(!!b.is_approved);
+    case 'landing':
+      return Number(!!a.show_on_landing) - Number(!!b.show_on_landing);
+    case 'images':
+      return (a.preloadedImages?.length || 0) - (b.preloadedImages?.length || 0);
+    case 'createdAt': {
+      const av = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bv = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return av - bv;
+    }
+    default:
+      return 0;
+  }
+}
+
+function TemplateSortLabel({ column, label, align, sortBy, sortOrder, onSort }) {
+  return (
+    <TableCell align={align} sortDirection={sortBy === column ? sortOrder : false}>
+      <TableSortLabel
+        active={sortBy === column}
+        direction={sortBy === column ? sortOrder : 'asc'}
+        onClick={() => onSort(column)}
+      >
+        {label}
+      </TableSortLabel>
+    </TableCell>
+  );
+}
+
 function TemplateManagement() {
   const [templates, setTemplates]         = useState([]);
   const [loading, setLoading]             = useState(false);
@@ -548,8 +642,27 @@ function TemplateManagement() {
   const [snack, setSnack]                 = useState({ open: false, msg: '', sev: 'success' });
   const [seeding, setSeeding]             = useState(false);
   const [seedLog, setSeedLog]             = useState('');
+  const [seedConfirmOpen, setSeedConfirmOpen] = useState(false);
+  const [seedPreview, setSeedPreview]     = useState(null);
+  const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
+  const [sortBy, setSortBy]               = useState('createdAt');
+  const [sortOrder, setSortOrder]         = useState('desc');
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
+
+  const handleSort = (column) => {
+    if (sortBy === column) {
+      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(column);
+      setSortOrder(['createdAt', 'year', 'images', 'approved', 'landing'].includes(column) ? 'desc' : 'asc');
+    }
+  };
+
+  const sortedTemplates = useMemo(() => {
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    return [...templates].sort((a, b) => compareTemplateSort(a, b, sortBy) * dir);
+  }, [templates, sortBy, sortOrder]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -604,14 +717,35 @@ function TemplateManagement() {
     }
   };
 
-  const handleSeed = async () => {
+  const handleOpenSeedConfirm = async () => {
+    setSeedPreviewLoading(true);
+    setSeedPreview(null);
+    setSeedConfirmOpen(true);
+    try {
+      const preview = await previewBuiltinTemplateImport(templates.map((t) => t.id));
+      setSeedPreview(preview);
+    } catch (err) {
+      showSnack(err.message, 'error');
+      setSeedConfirmOpen(false);
+    } finally {
+      setSeedPreviewLoading(false);
+    }
+  };
+
+  const handleConfirmSeed = async () => {
+    if (!seedPreview?.toInsert?.length) return;
     setSeeding(true);
     setSeedLog('');
+    setSeedConfirmOpen(false);
     try {
-      const result = await seedBuiltinTemplates(({ imported, total, current }) => {
-        setSeedLog(`进度: ${imported}/${total} — ${current}`);
+      const idsToImport = seedPreview.toInsert.map((item) => item.id);
+      const result = await seedBuiltinTemplates({
+        idsToImport,
+        onProgress: ({ inserted, skipped, total, current }) => {
+          setSeedLog(`进度: 新增 ${inserted} / 跳过 ${skipped} / 共 ${total} — ${current}`);
+        },
       });
-      showSnack(`导入完成: ${result.imported} 条, 跳过 ${result.skipped} 条`);
+      showSnack(`导入完成: 新增 ${result.inserted} 条, 跳过 ${result.skipped} 条`);
       if (result.errors.length) {
         setSeedLog('错误: ' + result.errors.join('; '));
       } else {
@@ -622,6 +756,7 @@ function TemplateManagement() {
       showSnack(err.message, 'error');
     } finally {
       setSeeding(false);
+      setSeedPreview(null);
     }
   };
 
@@ -634,8 +769,8 @@ function TemplateManagement() {
           <Button
             variant="outlined"
             startIcon={seeding ? <CircularProgress size={16} /> : <CloudUpload />}
-            onClick={handleSeed}
-            disabled={seeding}
+            onClick={handleOpenSeedConfirm}
+            disabled={seeding || seedPreviewLoading}
           >
             导入内置模板
           </Button>
@@ -660,29 +795,33 @@ function TemplateManagement() {
           <Table size="small">
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
-                <TableCell>名称</TableCell>
-                <TableCell>提交者</TableCell>
-                <TableCell>分类</TableCell>
-                <TableCell align="center">已批准</TableCell>
-                <TableCell align="center">首页展示</TableCell>
-                <TableCell align="center">图片</TableCell>
-                <TableCell>提交时间</TableCell>
+                <TemplateSortLabel column="name" label="名称" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="year" label="年份" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="submitter" label="提交者" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="category" label="分类" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="approved" label="已批准" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="landing" label="首页展示" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="images" label="图片" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="createdAt" label="提交时间" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TableCell align="center">操作</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {templates.length === 0 && (
+              {sortedTemplates.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     暂无模板数据
                   </TableCell>
                 </TableRow>
               )}
-              {templates.map(t => (
+              {sortedTemplates.map(t => (
                 <TableRow key={t.id} hover>
                   <TableCell>
                     <Typography variant="body2" fontWeight={600}>{t.name}</Typography>
                     <Typography variant="caption" color="text.secondary">{t.id}</Typography>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Typography variant="body2">{t.year || '—'}</Typography>
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2">{t.submitter_email || '—'}</Typography>
@@ -785,6 +924,125 @@ function TemplateManagement() {
         onClose={() => setImagesOpen(false)}
         onSaved={(opts) => { load(); if (!opts?.silent) showSnack('模板图片已更新'); }}
       />
+
+      <Dialog
+        open={seedConfirmOpen}
+        onClose={() => !seeding && setSeedConfirmOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>确认导入内置模板</DialogTitle>
+        <DialogContent dividers>
+          {seedPreviewLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : seedPreview ? (
+            <Stack spacing={2}>
+              <Typography variant="body2" color="text.secondary">
+                将扫描 <strong>{seedPreview.total}</strong> 个内置模板文件。
+                已存在于数据库中的模板（ID 相同）不会导入或覆盖。
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Chip size="small" color="success" label={`将导入 ${seedPreview.toInsert.length} 个`} />
+                <Chip size="small" color="default" label={`已存在跳过 ${seedPreview.toSkip.length} 个`} />
+                {(seedPreview.invalid.length + seedPreview.errors.length) > 0 && (
+                  <Chip
+                    size="small"
+                    color="warning"
+                    label={`无法处理 ${seedPreview.invalid.length + seedPreview.errors.length} 个`}
+                  />
+                )}
+              </Stack>
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
+                      <TableCell>状态</TableCell>
+                      <TableCell>ID</TableCell>
+                      <TableCell>名称</TableCell>
+                      <TableCell>作者</TableCell>
+                      <TableCell align="center">年份</TableCell>
+                      <TableCell align="center">页数</TableCell>
+                      <TableCell align="center">图片</TableCell>
+                      <TableCell>文件</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {seedPreview.toInsert.map((item) => (
+                      <TableRow key={`insert-${item.id}`}>
+                        <TableCell>
+                          <Chip size="small" color="success" label="将导入" />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">{item.id}</Typography>
+                        </TableCell>
+                        <TableCell>{item.name}</TableCell>
+                        <TableCell>{item.author || '—'}</TableCell>
+                        <TableCell align="center">{item.year || '—'}</TableCell>
+                        <TableCell align="center">{item.pageCount}</TableCell>
+                        <TableCell align="center">{item.imageCount}</TableCell>
+                        <TableCell>
+                          <Typography variant="caption" color="text.secondary">{item.filename}</Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {seedPreview.toSkip.map((item) => (
+                      <TableRow key={`skip-${item.id}`} sx={{ opacity: 0.72 }}>
+                        <TableCell>
+                          <Chip size="small" variant="outlined" label="已存在" />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">{item.id}</Typography>
+                        </TableCell>
+                        <TableCell>{item.name}</TableCell>
+                        <TableCell>{item.author || '—'}</TableCell>
+                        <TableCell align="center">{item.year || '—'}</TableCell>
+                        <TableCell align="center">{item.pageCount}</TableCell>
+                        <TableCell align="center">{item.imageCount}</TableCell>
+                        <TableCell>
+                          <Typography variant="caption" color="text.secondary">{item.filename}</Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {seedPreview.toInsert.length === 0 && seedPreview.toSkip.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={8} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                          没有可预览的内置模板
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              {seedPreview.invalid.length > 0 && (
+                <Alert severity="warning">
+                  无效模板: {seedPreview.invalid.map((i) => `${i.filename} (${i.reason})`).join('；')}
+                </Alert>
+              )}
+              {seedPreview.errors.length > 0 && (
+                <Alert severity="error">
+                  加载失败: {seedPreview.errors.map((e) => `${e.filename} (${e.reason})`).join('；')}
+                </Alert>
+              )}
+            </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSeedConfirmOpen(false)} disabled={seeding}>
+            取消
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleConfirmSeed}
+            disabled={seeding || seedPreviewLoading || !seedPreview?.toInsert?.length}
+          >
+            {seedPreview?.toInsert?.length
+              ? `确认导入 ${seedPreview.toInsert.length} 个模板`
+              : '无可导入项'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snack.open}
@@ -1042,29 +1300,37 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
     setError(''); setInfo('');
 
     const uploaded = [...images];
-    let okCount = 0, failCount = 0;
+    let okCount = 0;
+    let failCount = 0;
+    let completed = 0;
+    const prefix = projectImagePrefix(project);
 
-    for (let i = 0; i < files.length; i++) {
+    const results = await asyncPool(6, files, async (file) => {
       try {
-        const compressed = await compressImage(files[i]);
-        const safeName = files[i].name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const key = `${projectImagePrefix(project)}${safeName}`;
+        const compressed = await compressImage(file);
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const key = `${prefix}${safeName}`;
         const result = await uploadImageToR2(compressed, key);
-        if (result.success) {
-          const filtered = uploaded.filter((img) => img.name !== safeName);
-          filtered.push({ url: result.url, name: safeName, key });
-          uploaded.splice(0, uploaded.length, ...filtered);
-          okCount++;
-        } else {
-          failCount++;
-          if (!error) setError(`Upload failed: ${result.error}`);
-        }
+        return { safeName, key, result };
       } catch (e) {
-        failCount++;
-        if (!error) setError(e.message);
+        return { safeName: file.name, key: null, result: { success: false, error: e.message } };
+      } finally {
+        completed += 1;
+        setUploading((s) => ({ ...s, progress: completed }));
       }
-      setUploading((s) => ({ ...s, progress: i + 1 }));
-    }
+    });
+
+    results.forEach(({ safeName, key, result }) => {
+      if (result.success) {
+        const filtered = uploaded.filter((img) => img.name !== safeName);
+        filtered.push({ url: result.url, name: safeName, key });
+        uploaded.splice(0, uploaded.length, ...filtered);
+        okCount++;
+      } else {
+        failCount++;
+        if (!error) setError(`Upload failed: ${result.error}`);
+      }
+    });
 
     setUploading({ active: false, progress: files.length, total: files.length });
     setImages(uploaded);

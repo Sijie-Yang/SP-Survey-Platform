@@ -573,6 +573,26 @@ export default function AdminApp() {
     }
   };
 
+  const handleResultsConfigSync = (nextConfig) => {
+    const savedCopy = JSON.parse(JSON.stringify(nextConfig));
+    setSurveyConfig(nextConfig);
+    setLastSavedConfig(savedCopy);
+    if (currentProject) {
+      setProjectStates((prev) => {
+        const next = {
+          ...prev,
+          [currentProject.id]: {
+            ...(prev[currentProject.id] || {}),
+            surveyConfig: nextConfig,
+            lastSavedConfig: savedCopy,
+          },
+        };
+        saveProjectStatesToStorage(next);
+        return next;
+      });
+    }
+  };
+
   const handleProjectUpdate = async (updatedProject) => {
     console.log('🔄 Updating project:', updatedProject.name);
     console.log('🔄 Current tabValue:', tabValue);
@@ -1270,6 +1290,7 @@ export default function AdminApp() {
               <ResultsAnalysis
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
+                onSurveyConfigChange={handleResultsConfigSync}
               />
             </TabPanel>
           </Paper>

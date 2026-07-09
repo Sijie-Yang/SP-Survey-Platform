@@ -171,7 +171,7 @@ Design your survey with image-based question types using a drag-and-drop editor 
 Copy your survey link and share it with participants. No deployment needed — the survey is already live.
 
 **Step 4 — Results Analysis**
-Analyze responses per question with automatic image–response pairing and export to CSV.
+Analyze responses per question with automatic image–response pairing, specialized charts for image and skill questions, inter-rater reliability metrics, and CSV export (including `__shown_images` columns for media questions).
 
 <p align="center">
   <img src="./public/step-5.jpg" alt="Step 4 - Results Analysis" width="90%">
@@ -190,50 +190,88 @@ Analyze responses per question with automatic image–response pairing and expor
 
 ### 🔧 Survey Capabilities
 
-**Image-Based Questions:**
-- Image Choice (imagepicker) — Compare streetscape designs
-- Image Ranking (imageranking) — Preference hierarchies
-- Image Rating (imagerating) — Quantify comfort, safety, aesthetics (1–5 scale)
-- Image Yes/No (imageboolean) — Binary assessments
-- Image Matrix (imagematrix) — Multi-criteria evaluation
-- Image Display (image) — Reference images
+**Image & Media Questions:**
+- **Image Choice** (`imagepicker`) — Compare streetscape designs; TrueSkill ranking in results
+- **Image Ranking** (`imageranking`) — Preference hierarchies
+- **Image Rating** (`imagerating`) — Quantify comfort, safety, aesthetics (1–5 scale)
+- **Image Yes/No** (`imageboolean`) — Binary assessments with image panel
+- **Image Matrix** (`imagematrix`) — Multi-criteria evaluation per image
+- **Image Display** (`image`) — Single reference image (random or fixed)
+- **Media Display** (`mediadisplay`) — Image galleries, video, or audio
+- **Media Rating / Yes–No** (`mediarating`, `mediaboolean`) — Rating or boolean below media panel
+- **Image Annotation** (`imageannotation`) — Click/drag regions on an image (min/max limits configurable)
+- **Image Slider Group** (`imageslidergroup`) — Semantic differential sliders below images
+- **Image Point Allocation** (`imagepointallocation`) — Budget allocation across shown images
 
-**Text Questions:**
-- Text input, multi-line comments, single/multiple choice
-- Rating scales, ranking, dropdowns, matrices
+**Text & Structured Questions:**
+- Text input, multi-line comments, single/multiple choice, dropdown
+- Rating scales, ranking, boolean, matrix
+- **Slider Group** (`slidergroup`) — Multi-dimensional semantic differentials
+- **Point Allocation** (`pointallocation`) — Fixed budget across text choices
+
+**Custom Skill Questions** (`skillquestion`):
+Interactive iframe tasks with media injection (random images/videos from your dataset). Built-in presets include:
+- **Pairwise Preference Slider** — A/B image comparison on a continuous scale
+- **Best–Worst Choice (MaxDiff)** — Best–worst scaling with BWS scores
+- **Video Key Moment Tagging** — Mark start/end of key events on a timeline
+- **Continuous Video Rating** — Moment-by-moment slider ratings while watching
+- **Emotion Color Picker** — Color wheel + intensity for place emotion
+- **Composite Blocks** — Configurable blocks (media, sliders, word chips, choice, text)
+
+Import custom skills from the Skill Library or author HTML/JS with the `SPSkill` SDK. Skills support `skillConfig`, random media assignment, and structured `resultSchema` for analysis.
+
+**Media Assignment:**
+- Random selection from preloaded images/videos with optional **group** or **category** pairing
+- Per-question image counts; exclude previously used images across the survey
+- Tracks `shown_images`, media group, and categories in every response for reproducible analysis
 
 **Research Features:**
-- Multi-page surveys with progress tracking
-- Fully responsive design
+- Multi-page surveys with progress tracking and draft resume
+- Fully responsive design (touch-friendly skill iframes)
 - Drag-and-drop builder with real-time preview
 - Multi-language support (English / 中文)
+- Response quality flags, Krippendorff's α / percent agreement where applicable
+- Methods text export and per-question CSV downloads
 
-### 📋 Template System
+### 📊 Results Analysis
+
+- **Per-question cards** grouped by survey page with response rates
+- **Image questions**: compact thumbnail rankings, TrueSkill (imagepicker), matrix column-proportion sorts
+- **Skill questions**: preset-specific charts (preference histograms, MaxDiff BWS, video timelines, emotion hue wheel, etc.) linked to **shown media**
+- **Raw responses**: answer fields only; shown media listed separately (not mixed into JSON)
+- **CSV export**: answer columns + `__shown_images` / `__shown_media_group` / `__shown_media_categories` for media and skill questions
+
+---
+
+## 📋 Template System
 
 <p align="center">
   <img src="./public/template-library.jpg" alt="Template Library" width="90%">
 </p>
 
-Start with peer-reviewed survey designs from published research:
+Start with peer-reviewed survey designs from published research. Templates can be imported from the admin **Template Library** (existing project IDs are skipped on re-import).
 
-#### 2025
-- **Thermal Comfort in Sight** | Yang et al. | [Paper](https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514) | [Image](https://huggingface.co/datasets/sijiey/Thermal-Affordance-Dataset)  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Thermal affordance assessment through street view imagery with 50+ validated questions  
-- **SPECS** | Quintana et al. | [Paper](https://www.nature.com/articles/s44284-025-00330-x) | [Image](https://huggingface.co/datasets/matiasqr/specs)  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Street perception evaluation integrating demographics and personality across 5 countries  
-- **Street Multi-Activity Potential** | Li et al. | [Paper](https://www.sciencedirect.com/science/article/pii/S0198971525001036) | [Image](https://huggingface.co/datasets/lajitong424/SMAP_svi)  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Graph-based community detection for evaluating street multi-activity potential (SMAP)  
-- **Effective Perception Survey** | Gu et al. | [Paper](https://doi.org/10.1016/j.landurbplan.2025.105368) | [Image](https://huggingface.co/datasets/Reubengyl/EffectivePerceptionSurvey)  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Comprehensive framework for image-based survey design in outdoor urban environments  
+#### Platform QA
+- **SP All Question Types (2026)** — Full QA template covering all native question types and six preset skills (`2026-sp-all.json`)
+
+#### 2025–2026
+- **Thermal Comfort in Sight** | Yang et al. | [Paper](https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514) | `2025-yang-thermal.json`
+- **SPECS** | Quintana et al. | [Paper](https://www.nature.com/articles/s44284-025-00330-x) | `2025-quintana-specs.json`
+- **Street Multi-Activity Potential** | Li et al. | [Paper](https://www.sciencedirect.com/science/article/pii/S0198971525001036) | `2025-li-street.json`
+- **Effective Perception Survey** | Gu et al. | [Paper](https://doi.org/10.1016/j.landurbplan.2025.105368) | `2025-gu-effective.json`
+- **Urban / City / Street (admin variants)** | `2025-torkko-urban.json`, `2025-fan-city.json`, `2026-peng-city.json`, etc.
 
 #### 2024
-- **Building Exterior Perception** | Liang et al. | [Paper](https://doi.org/10.1016/j.buildenv.2024.111875) | -  
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Human perception evaluation of building exteriors using machine learning techniques
+- **Building Exterior Perception** | Liang et al. | [Paper](https://doi.org/10.1016/j.buildenv.2024.111875) | `2024-liang-building.json`
 
-#### AI Template
-- **City Landmark** | AI Generated | [Image](https://huggingface.co/datasets/Zicheng00/Landmark_visibility)  
-- **Street Bikeability** | AI Generated | [Image](https://huggingface.co/datasets/koito19960406/sp_survey_bikeability)  
-- **Urban Greenery** | AI Generated  
+#### Classic benchmarks
+- **Place Pulse** (2016) | Dubey et al. | `2016-dubey-place.json`
+- **Streetscore** (2014) | Naik et al. | `2014-naik-streetscore.json`
+- **Gehl street quality** (2010) | `2010-gehl-gehl.json`
+- **Kaplan art restoration** (1995) | `1995-kaplan-art.json`
+- **Scenicness** (2017) | Seresinhe et al. | `2017-seresinhe-scenic.json`
+
+See `public/project_templates/index.json` for the full catalog.
 
 ---
 
@@ -270,6 +308,13 @@ Start with peer-reviewed survey designs from published research:
 1. Make sure the URL includes `?project=YOUR_PROJECT_ID`
 2. Save your project in the Admin Panel before sharing the link
 
+### Skill Questions on the Same Page
+Each skill question runs in its own iframe. If multiple skills appear on one page, ensure you are on the latest version (postMessage is scoped per iframe). Place unrelated video skills on separate pages if participants report cross-talk on very old deployments.
+
+### Results Show Wrong Media for Skills
+1. Confirm random media was assigned (check `__shown_images` in CSV export)
+2. Re-collect responses after updating the platform — older submissions may lack `shown_images` metadata
+
 **Getting Help:**
 - **GitHub Issues**: [Report a bug](https://github.com/Sijie-Yang/Streetscape-Perception-Survey/issues)
 - **Discussions**: [Ask questions](https://github.com/Sijie-Yang/Streetscape-Perception-Survey/discussions)
@@ -302,6 +347,6 @@ This work is licensed under a [Creative Commons Attribution 4.0 International Li
 **Technology Stack:**
 - SurveyJS, Material-UI, React 18.2
 - OpenAI GPT-4o (AI features)
-- Supabase (Database, Storage & Auth)
+- Supabase & Cloudflare R2 (Database, Storage & Auth)
 - Hugging Face (Dataset hosting)
 - Cloudflare Pages (Deployment)

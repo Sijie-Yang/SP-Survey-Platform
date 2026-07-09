@@ -94,7 +94,9 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
       mediaboolean: 'Media Yes/No',
       imageannotation: 'Image Annotation',
       slidergroup: 'Slider Group',
+      imageslidergroup: 'Image Slider Group',
       pointallocation: 'Point Allocation',
+      imagepointallocation: 'Image Point Allocation',
       skillquestion: 'Skill Question',
     };
     return typeLabels[type] || type;
@@ -350,7 +352,9 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
       mediaboolean: 'Media Yes/No',
       imageannotation: 'Image Annotation',
       slidergroup: 'Slider Group',
+      imageslidergroup: 'Image Slider Group',
       pointallocation: 'Point Allocation',
+      imagepointallocation: 'Image Point Allocation',
       skillquestion: 'Skill Question',
     };
     return typeLabels[type] || type;

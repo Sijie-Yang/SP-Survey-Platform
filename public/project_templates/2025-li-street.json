@@ -1,5 +1,5 @@
 {
-  "id": "2025-street",
+  "id": "2025-li-street",
   "name": "Street Multi-Activity Potential (SMAP)",
   "description": "Multi-view graph-based community detection to systematically evaluate street multi-activity potential (SMAP).",
   "author": "Li et al.",

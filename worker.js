@@ -65,52 +65,27 @@ function parseListXml(xml) {
 
 const publicBaseUrl = (env) => String(env.R2_PUBLIC_URL || '').replace(/\/$/, '');
 
-// ── R2 backend picker (binding > S3 credentials) ──────────────────────────────
+const R2_COPY_CONCURRENCY = 32;
 
-function getR2Backend(env) {
-  if (env.R2_BUCKET && typeof env.R2_BUCKET.put === 'function') {
-    const bucket = env.R2_BUCKET;
-    return {
-      kind: 'binding',
-      bucketName: env.R2_BUCKET_NAME,
-      async put(key, body, contentType) {
-        await bucket.put(key, body, { httpMetadata: { contentType } });
-      },
-      async list(prefix) {
-        const all = [];
-        let cursor;
-        do {
-          const page = await bucket.list({ prefix, limit: 1000, cursor });
-          for (const o of page.objects) {
-            all.push({
-              key: o.key,
-              size: o.size,
-              uploaded: o.uploaded?.toISOString?.() || o.uploaded || null,
-            });
-          }
-          cursor = page.truncated ? page.cursor : undefined;
-        } while (cursor);
-        return all;
-      },
-      async delete(keys) {
-        await bucket.delete(keys);
-      },
-      // R2 bindings don't expose a native copy op, so we round-trip through
-      // get/put. Streaming the body avoids buffering the whole object in
-      // memory which keeps us under the Workers heap limit on big images.
-      async copy(from, to) {
-        const src = await bucket.get(from);
-        if (!src) throw new Error(`source not found: ${from}`);
-        await bucket.put(to, src.body, {
-          httpMetadata: src.httpMetadata,
-        });
-      },
-      async probe() {
-        await bucket.list({ limit: 1 });
-      },
-    };
+async function asyncPool(concurrency, items, fn) {
+  if (!items.length) return [];
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Math.min(Math.max(1, concurrency), items.length);
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex;
+      nextIndex += 1;
+      results[i] = await fn(items[i], i);
+    }
   }
+  await Promise.all(Array.from({ length: workers }, worker));
+  return results;
+}
 
+// ── R2 backend picker (S3 credentials > binding — S3 enables fast server-side copy) ──
+
+function buildS3Backend(env) {
   const accountId = env.R2_ACCOUNT_ID;
   const accessKeyId = env.R2_ACCESS_KEY_ID;
   const secretAccessKey = env.R2_SECRET_ACCESS_KEY;
@@ -167,15 +142,11 @@ function getR2Backend(env) {
         }
       }
     },
-    // S3 PUT with `x-amz-copy-source` performs a server-side copy, which is
-    // dramatically faster than downloading + re-uploading the object body.
     async copy(from, to) {
       await ensureOk(
         await client.fetch(objUrl(to), {
           method: 'PUT',
           headers: {
-            // `x-amz-copy-source` is "/{bucket}/{encodedKey}". Use the same
-            // path-segment encoding as objUrl so keys with slashes work.
             'x-amz-copy-source': `/${bucketName}/${encodeS3Key(from)}`,
           },
         }),
@@ -189,6 +160,56 @@ function getR2Backend(env) {
       await ensureOk(await client.fetch(u.toString()), 'probe');
     },
   };
+}
+
+function getR2Backend(env) {
+  const s3 = buildS3Backend(env);
+  if (s3) return s3;
+
+  if (env.R2_BUCKET && typeof env.R2_BUCKET.put === 'function') {
+    const bucket = env.R2_BUCKET;
+    return {
+      kind: 'binding',
+      bucketName: env.R2_BUCKET_NAME,
+      async put(key, body, contentType) {
+        await bucket.put(key, body, { httpMetadata: { contentType } });
+      },
+      async list(prefix) {
+        const all = [];
+        let cursor;
+        do {
+          const page = await bucket.list({ prefix, limit: 1000, cursor });
+          for (const o of page.objects) {
+            all.push({
+              key: o.key,
+              size: o.size,
+              uploaded: o.uploaded?.toISOString?.() || o.uploaded || null,
+            });
+          }
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+        return all;
+      },
+      async delete(keys) {
+        await bucket.delete(keys);
+      },
+      // R2 bindings don't expose a native copy op, so we round-trip through
+      // get/put. Streaming the body avoids buffering the whole object in
+      // memory which keeps us under the Workers heap limit on big images.
+      async copy(from, to) {
+        const src = await bucket.get(from);
+        if (!src) throw new Error(`source not found: ${from}`);
+        await bucket.put(to, src.body, {
+          httpMetadata: src.httpMetadata,
+        });
+      },
+      async probe() {
+        await bucket.list({ limit: 1 });
+      },
+    };
+  }
+
+  return null;
 }
 
 function r2NotConfiguredError(env) {
@@ -268,29 +289,83 @@ async function handleDelete(request, env) {
 // POST /api/r2/copy  — body: { copies: [{ from, to }, ...] }
 // Mirrors the Express /api/r2/copy route. Used by the "Save as Template"
 // flow to carry a project's images into the template's R2 prefix.
+async function runR2Copy(copies, backend, publicBase, onItem) {
+  const total = copies.length;
+  let finished = 0;
+  const copied = [];
+  const errors = [];
+
+  await asyncPool(R2_COPY_CONCURRENCY, copies, async ({ from, to }) => {
+    if (!from || !to) {
+      finished += 1;
+      const err = { from, to, error: 'from/to required' };
+      errors.push(err);
+      onItem?.({ type: 'item', ok: false, finished, total, ...err });
+      return { ok: false, ...err };
+    }
+    try {
+      await backend.copy(from, to);
+      finished += 1;
+      const item = { from, to, url: publicBase ? `${publicBase}/${to}` : '' };
+      copied.push(item);
+      onItem?.({ type: 'item', ok: true, finished, total, ...item });
+      return { ok: true, ...item };
+    } catch (err) {
+      finished += 1;
+      const item = { from, to, error: err.message || String(err) };
+      errors.push(item);
+      onItem?.({ type: 'item', ok: false, finished, total, ...item });
+      return { ok: false, ...item };
+    }
+  });
+
+  return { success: errors.length === 0, copied, errors };
+}
+
 async function handleCopy(request, env) {
   const backend = getR2Backend(env);
   if (!backend) return json({ success: false, error: r2NotConfiguredError(env) }, { status: 503 });
   if (!env.R2_PUBLIC_URL)
     return json({ success: false, error: 'Missing R2_PUBLIC_URL environment variable.' }, { status: 503 });
 
-  const { copies } = await request.json();
+  const { copies, stream } = await request.json();
   if (!Array.isArray(copies) || copies.length === 0)
     return json({ success: false, error: '"copies" array is required.' }, { status: 400 });
 
   const publicBase = publicBaseUrl(env);
-  const copied = [];
-  const errors = [];
-  for (const { from, to } of copies) {
-    if (!from || !to) { errors.push({ from, to, error: 'from/to required' }); continue; }
-    try {
-      await backend.copy(from, to);
-      copied.push({ from, to, url: publicBase ? `${publicBase}/${to}` : '' });
-    } catch (err) {
-      errors.push({ from, to, error: err.message || String(err) });
-    }
+
+  if (stream) {
+    const encoder = new TextEncoder();
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    (async () => {
+      try {
+        const result = await runR2Copy(copies, backend, publicBase, async (msg) => {
+          await writer.write(encoder.encode(`${JSON.stringify(msg)}\n`));
+        });
+        await writer.write(encoder.encode(`${JSON.stringify({ type: 'done', ...result })}\n`));
+      } catch (error) {
+        await writer.write(encoder.encode(`${JSON.stringify({
+          type: 'done',
+          success: false,
+          copied: [],
+          errors: [],
+          error: error.message || String(error),
+        })}\n`));
+      } finally {
+        await writer.close();
+      }
+    })();
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'application/x-ndjson',
+        'Cache-Control': 'no-cache',
+      },
+    });
   }
-  return json({ success: errors.length === 0, copied, errors });
+
+  const result = await runR2Copy(copies, backend, publicBase);
+  return json(result);
 }
 
 async function handleStatus(_request, env) {

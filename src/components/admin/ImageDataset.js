@@ -51,14 +51,75 @@ import {
   getImageCountFromDataset,
 } from '../../lib/huggingface';
 import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
+import { asyncPool } from '../../lib/asyncPool';
 import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT, analyzeMediaGroups, summarizeMediaGroupsBySize, analyzeMediaCategories, downloadMediaFiles } from '../../lib/mediaUtils';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
-import { getTemplateById } from '../../lib/templateManager';
+import { getTemplateById, listTemplates } from '../../lib/templateManager';
+import {
+  computeTemplateImportProgress,
+  buildTemplateCopyTodo,
+  mergeCopiedIntoProjectImages,
+  getTemplateImportHistory,
+  mergeTemplateImportHistory,
+  formatTemplateImportStatus,
+} from '../../lib/templateImageImport';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
 
 const MEDIA_PAGE_SIZE = 24;
+/** Images per R2 copy API request. */
+const R2_COPY_REQUEST_BATCH = 100;
+/** How many copy requests run in parallel (up to BATCH × CONCURRENCY objects in flight). */
+const R2_COPY_CONCURRENCY = 3;
+
+function templateImportProgressLabel(status) {
+  if (status.phase === 'listing') return 'Scanning template & project folders…';
+  if (status.phase === 'saving') return 'Saving project image list…';
+  if (status.total === 0) {
+    return status.activeTemplateName
+      ? `All images from "${status.activeTemplateName}" are already in this project.`
+      : 'All template images are already in this project.';
+  }
+  const shown = Math.min(status.progress, status.total);
+  const pct = status.total > 0 ? Math.round((shown / status.total) * 100) : 0;
+  let label = status.activeTemplateName
+    ? `Importing "${status.activeTemplateName}": ${shown} / ${status.total} (${pct}%)`
+    : `Copying ${shown} / ${status.total} (${pct}%)`;
+  if (status.skipped > 0) label += ` · ${status.skipped} skipped (already present)`;
+  return label;
+}
+
+/** Copy template images — progress ticks +1 each time the server finishes one file. */
+async function copyTemplateImagesWithRealProgress(todo, setStatus) {
+  const batches = [];
+  for (let i = 0; i < todo.length; i += R2_COPY_REQUEST_BATCH) {
+    batches.push(todo.slice(i, i + R2_COPY_REQUEST_BATCH));
+  }
+
+  const copiedImages = [];
+  const errors = [];
+  const progressRef = { current: 0 };
+
+  await asyncPool(R2_COPY_CONCURRENCY, batches, async (batch) => {
+    const res = await copyImagesInR2(batch, {
+      onProgress: () => {
+        progressRef.current += 1;
+        const done = progressRef.current;
+        setStatus((prev) => ({
+          ...prev,
+          progress: done,
+          phase: 'copying',
+        }));
+      },
+    });
+    if (res.copied?.length) copiedImages.push(...res.copied);
+    if (res.errors?.length) errors.push(...res.errors);
+    return res;
+  });
+
+  return { copiedImages, errors, completed: progressRef.current };
+}
 
 function safeR2Name(name = '') {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -90,12 +151,22 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   // R2 sync state
   const [r2Syncing, setR2Syncing] = useState(false);
 
-  // "Import Template Images" — populated when this project was created
-  // from a template (project.templateId is set) and that template has
-  // images in its R2 folder. Drives the optional importer UI below.
-  const [sourceTemplate, setSourceTemplate] = useState(null);
+  // Import template images — any project can pull from any template with an R2 folder.
+  const [availableTemplates, setAvailableTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templateProgressMap, setTemplateProgressMap] = useState({});
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templateImportStatus, setTemplateImportStatus] = useState({
-    loading: false, progress: 0, total: 0, error: null, success: null,
+    loading: false,
+    progress: 0,
+    total: 0,
+    templateTotal: 0,
+    skipped: 0,
+    phase: 'idle', // idle | listing | copying | saving
+    activeTemplateId: null,
+    activeTemplateName: null,
+    error: null,
+    success: null,
   });
 
   // Uploaded media library management
@@ -319,22 +390,61 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
   });
 
-  // Look up the source template (if this project was created from one)
-  // so we can show an "Import Template Images" button when that template
-  // ships with images. Done as a separate, idempotent effect so it
-  // re-runs on project switch but not on every state change.
+  const templateImportHistory = useMemo(
+    () => getTemplateImportHistory(currentProject),
+    [currentProject?.imageDatasetConfig?.templateImportHistory],
+  );
+
+  const refreshTemplateProgress = async (templateIds) => {
+    if (!projectId || !isR2Configured() || !templateIds?.length) return;
+    const uid = user?.id || 'anonymous';
+    const entries = await Promise.all(
+      templateIds.map(async (id) => {
+        const progress = await computeTemplateImportProgress(id, uid, projectId);
+        return [id, progress];
+      }),
+    );
+    setTemplateProgressMap((prev) => {
+      const next = { ...prev };
+      entries.forEach(([id, progress]) => { next[id] = progress; });
+      return next;
+    });
+  };
+
+  // Load templates that ship with images (any project can import from them).
   useEffect(() => {
     let cancelled = false;
-    setSourceTemplate(null);
-    if (!currentProject?.templateId) return undefined;
-    getTemplateById(currentProject.templateId).then((tpl) => {
+    setLoadingTemplates(true);
+    listTemplates(user?.id).then((templates) => {
       if (cancelled) return;
-      if (tpl && Array.isArray(tpl.preloadedImages) && tpl.preloadedImages.length > 0) {
-        setSourceTemplate(tpl);
-      }
+      const withImages = templates.filter(
+        (t) => Array.isArray(t.preloadedImages) && t.preloadedImages.length > 0,
+      );
+      setAvailableTemplates(withImages);
+      setSelectedTemplateId((prev) => {
+        if (prev && withImages.some((t) => t.id === prev)) return prev;
+        if (currentProject?.templateId && withImages.some((t) => t.id === currentProject.templateId)) {
+          return currentProject.templateId;
+        }
+        return withImages[0]?.id || '';
+      });
+    }).finally(() => {
+      if (!cancelled) setLoadingTemplates(false);
     });
     return () => { cancelled = true; };
-  }, [currentProject?.templateId]);
+  }, [user?.id, currentProject?.templateId]);
+
+  // Refresh per-template import counts (supports resume after interrupt).
+  useEffect(() => {
+    const ids = new Set([
+      ...availableTemplates.map((t) => t.id),
+      ...Object.keys(templateImportHistory),
+    ]);
+    if (ids.size && projectId) refreshTemplateProgress([...ids]);
+  }, [availableTemplates, projectId, currentProject?.preloadedImages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedTemplate = availableTemplates.find((t) => t.id === selectedTemplateId) || null;
+  const selectedProgress = templateProgressMap[selectedTemplateId];
 
   // Sync hfConfig from project
   useEffect(() => {
@@ -382,10 +492,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   // ── Import images from source template ───────────────────────────────────
 
-  const handleImportFromTemplate = async () => {
-    if (!sourceTemplate || !currentProject?.id) return;
+  const handleImportFromTemplate = async (templateIdOverride) => {
+    const templateId = templateIdOverride || selectedTemplateId;
+    if (!templateId || !currentProject?.id) return;
     if (!isR2Configured()) {
-      setTemplateImportStatus(prev => ({
+      setTemplateImportStatus((prev) => ({
         ...prev,
         error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.',
       }));
@@ -393,90 +504,139 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
     if (templateImportStatus.loading) return;
 
+    const template = availableTemplates.find((t) => t.id === templateId)
+      || (await getTemplateById(templateId));
+    if (!template) {
+      setTemplateImportStatus((prev) => ({ ...prev, error: 'Template not found.' }));
+      return;
+    }
+
     scrollRef.current = window.scrollY;
     restoreScrollRef.current = true;
 
     const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
-    const userId = user?.id || 'anonymous';
-    const templatePrefix = `templates/${sourceTemplate.id}/`;
-    const projectPrefix = `${userId}/${currentProject.id}/`;
+    const uid = user?.id || 'anonymous';
+    const projectPrefix = `${uid}/${currentProject.id}/`;
 
-    setTemplateImportStatus({ loading: true, progress: 0, total: 0, error: null, success: null });
+    setTemplateImportStatus({
+      loading: true,
+      progress: 0,
+      total: 0,
+      templateTotal: 0,
+      skipped: 0,
+      phase: 'listing',
+      activeTemplateId: template.id,
+      activeTemplateName: template.name,
+      error: null,
+      success: null,
+    });
 
     try {
-      // List what's actually in R2 under the template prefix — this is
-      // the same source-of-truth strategy used by the project→template
-      // promotion in ProjectSidebar.
-      const listed = await listImagesFromR2(templatePrefix);
-      if (!listed.success) {
-        throw new Error(listed.error || 'Failed to list template images');
+      const progress = await computeTemplateImportProgress(template.id, uid, currentProject.id);
+      if (progress.error) throw new Error(progress.error);
+
+      const listed = { success: true, images: progress.templateImages };
+      const existing = await listImagesFromR2(projectPrefix);
+      if (!existing.success) {
+        throw new Error(existing.error || 'Failed to list project images');
       }
+
       if (listed.images.length === 0) {
         setTemplateImportStatus({
-          loading: false, progress: 0, total: 0, error: null,
-          success: 'Template has no images to import.',
+          loading: false,
+          progress: 0,
+          total: 0,
+          templateTotal: 0,
+          skipped: 0,
+          phase: 'idle',
+          activeTemplateId: template.id,
+          activeTemplateName: template.name,
+          error: null,
+          success: `"${template.name}" has no images in its template folder.`,
         });
         return;
       }
 
-      // Don't re-copy files we already have in the project prefix.
-      const existing = await listImagesFromR2(projectPrefix);
-      const existingNames = new Set((existing.images || []).map((i) => i.name));
-      const todo = listed.images
-        .filter((img) => !existingNames.has(img.name))
-        .map((img) => ({ from: img.key, to: `${projectPrefix}${img.name}` }));
-
+      const todo = buildTemplateCopyTodo(listed.images, progress.existingNames, projectPrefix);
       const total = todo.length;
-      setTemplateImportStatus(prev => ({ ...prev, total, progress: 0 }));
+      const skipCount = listed.images.length - total;
+
+      setTemplateImportStatus((prev) => ({
+        ...prev,
+        templateTotal: listed.images.length,
+        skipped: skipCount,
+        total,
+        progress: 0,
+        phase: total > 0 ? 'copying' : 'saving',
+      }));
 
       const copiedImages = [];
       const errors = [];
       if (total > 0) {
-        const BATCH_SIZE = 10;
-        for (let i = 0; i < todo.length; i += BATCH_SIZE) {
-          const batch = todo.slice(i, i + BATCH_SIZE);
-          const res = await copyImagesInR2(batch);
-          if (res.copied?.length) copiedImages.push(...res.copied);
-          if (res.errors?.length) errors.push(...res.errors);
-          setTemplateImportStatus(prev => ({
-            ...prev,
-            progress: Math.min(i + batch.length, total),
-          }));
-        }
+        const copyResult = await copyTemplateImagesWithRealProgress(todo, setTemplateImportStatus);
+        copiedImages.push(...copyResult.copiedImages);
+        errors.push(...copyResult.errors);
       }
 
-      // Build the final preloadedImages list = pre-existing project files
-      // (kept as-is) + everything we just copied in. Then re-list once
-      // from R2 to make sure the URLs we surface to the project record
-      // come from the canonical R2 source rather than the copy response.
-      const finalListing = await listImagesFromR2(projectPrefix);
-      const finalImages = (finalListing.success ? finalListing.images : [])
-        .map((img) => ({
-          url: img.url || (r2PublicUrl ? `${r2PublicUrl}/${img.key}` : ''),
-          name: img.name,
-          key: img.key,
-          type: img.type || inferMediaType(img.name),
-        }));
+      setTemplateImportStatus((prev) => ({
+        ...prev,
+        phase: 'saving',
+        progress: copiedImages.length,
+      }));
+
+      const finalImages = mergeCopiedIntoProjectImages(existing.images, copiedImages, r2PublicUrl);
+
+      const afterProgress = await computeTemplateImportProgress(template.id, uid, currentProject.id);
+      const historyEntry = {
+        templateName: template.name,
+        totalInTemplate: afterProgress.totalInTemplate,
+        importedCount: afterProgress.importedCount,
+        remaining: afterProgress.remaining,
+        isComplete: afterProgress.isComplete,
+        lastImportAt: new Date().toISOString(),
+        lastBatchCopied: copiedImages.length,
+      };
+
+      const updatedImageDatasetConfig = mergeTemplateImportHistory(currentProject, template.id, historyEntry);
 
       onProjectUpdate({
         ...currentProject,
         preloadedImages: finalImages,
         preloadedSource: 'r2',
         preloadedAt: new Date().toISOString(),
+        imageDatasetConfig: updatedImageDatasetConfig,
       });
+      if (onConfigChange) onConfigChange(true, updatedImageDatasetConfig);
+
+      await refreshTemplateProgress([template.id]);
 
       const newCount = copiedImages.length;
-      const skipCount = listed.images.length - todo.length;
       setTemplateImportStatus({
         loading: false,
         progress: total,
         total,
+        templateTotal: listed.images.length,
+        skipped: skipCount,
+        phase: 'idle',
+        activeTemplateId: template.id,
+        activeTemplateName: template.name,
         error: errors.length ? `${errors.length} file(s) failed to copy.` : null,
-        success: `Imported ${newCount} image${newCount === 1 ? '' : 's'} from template${skipCount > 0 ? ` (${skipCount} already in project)` : ''}.`,
+        success: total === 0
+          ? `All ${listed.images.length} image(s) from "${template.name}" are already in this project.`
+          : `Imported ${newCount} image${newCount === 1 ? '' : 's'} from "${template.name}"${skipCount > 0 ? ` (${skipCount} already present — resume supported)` : ''}.`,
       });
     } catch (err) {
       setTemplateImportStatus({
-        loading: false, progress: 0, total: 0, error: err.message, success: null,
+        loading: false,
+        progress: 0,
+        total: 0,
+        templateTotal: 0,
+        skipped: 0,
+        phase: 'idle',
+        activeTemplateId: template?.id || null,
+        activeTemplateName: template?.name || null,
+        error: err.message,
+        success: null,
       });
     }
   };
@@ -983,57 +1143,210 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         </Box>
       )}
 
-      {/* ── Import from source template (only when applicable) ── */}
-      {sourceTemplate && (
+      {/* ── Import from templates (any project) ── */}
+      {isR2Configured() && (loadingTemplates || availableTemplates.length > 0 || Object.keys(templateImportHistory).length > 0) && (
         <Box sx={{ mb: 3, p: 3, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid', borderColor: 'secondary.light' }}>
           <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
             <ContentCopy fontSize="small" color="secondary" />
             Import Template Images
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            This project was created from <strong>{sourceTemplate.name}</strong>,
-            which ships with {sourceTemplate.preloadedImages?.length || 0} image
-            {sourceTemplate.preloadedImages?.length === 1 ? '' : 's'}.
-            Copy them into this project so the survey can run out of the box —
-            existing files in your project folder are kept unchanged.
+            Copy images from any published template into this project. You can import from multiple templates;
+            files already in your project folder are skipped automatically so interrupted imports can be resumed.
           </Typography>
+
+          {/* Import history — templates with progress or past imports */}
+          {(() => {
+            const historyIds = [...new Set([
+              ...Object.keys(templateImportHistory),
+              ...availableTemplates.map((t) => t.id),
+            ])].filter((tid) => {
+              const hist = templateImportHistory[tid];
+              const live = templateProgressMap[tid];
+              const imported = live?.importedCount ?? hist?.importedCount ?? 0;
+              return imported > 0 || hist?.lastImportAt;
+            });
+            if (historyIds.length === 0) return null;
+            const totalImportedFiles = historyIds.reduce((sum, tid) => {
+              const live = templateProgressMap[tid];
+              const hist = templateImportHistory[tid];
+              return sum + (live?.importedCount ?? hist?.importedCount ?? 0);
+            }, 0);
+            return (
+              <>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>{historyIds.length}</strong> template{historyIds.length === 1 ? '' : 's'} with imports ·{' '}
+                  <strong>{totalImportedFiles}</strong> template file{totalImportedFiles === 1 ? '' : 's'} in this project
+                </Typography>
+                <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, maxHeight: 280 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700 }}>Template</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Imported</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Total</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Last import</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }} />
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {historyIds.map((tid) => {
+                        const hist = templateImportHistory[tid];
+                        const tpl = availableTemplates.find((t) => t.id === tid);
+                        const live = templateProgressMap[tid];
+                        const total = live?.totalInTemplate ?? hist?.totalInTemplate ?? tpl?.preloadedImages?.length ?? 0;
+                        const imported = live?.importedCount ?? hist?.importedCount ?? 0;
+                        const remaining = live?.remaining ?? hist?.remaining ?? Math.max(0, total - imported);
+                        const isComplete = live?.isComplete ?? hist?.isComplete ?? (total > 0 && remaining === 0);
+                        const name = hist?.templateName || tpl?.name || tid;
+                        const lastAt = hist?.lastImportAt
+                          ? new Date(hist.lastImportAt).toLocaleString()
+                          : '—';
+                        const isActive = templateImportStatus.loading && templateImportStatus.activeTemplateId === tid;
+                        return (
+                          <TableRow key={tid} hover selected={selectedTemplateId === tid}>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight={600}>{name}</Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>{tid}</Typography>
+                            </TableCell>
+                            <TableCell align="right">{imported}</TableCell>
+                            <TableCell align="right">{total}</TableCell>
+                            <TableCell>
+                              {isComplete ? (
+                                <Chip size="small" color="success" label="Complete" />
+                              ) : remaining > 0 ? (
+                                <Chip size="small" color="warning" label={`${remaining} remaining`} />
+                              ) : (
+                                <Chip size="small" variant="outlined" label="In progress" />
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="caption">{lastAt}</Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              {!isComplete && total > 0 && (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  disabled={templateImportStatus.loading}
+                                  onClick={() => {
+                                    setSelectedTemplateId(tid);
+                                    handleImportFromTemplate(tid);
+                                  }}
+                                >
+                                  {isActive ? 'Importing…' : `Resume (${remaining})`}
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            );
+          })()}
+
+          {loadingTemplates ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              <CircularProgress size={20} />
+              <Typography variant="body2" color="text.secondary">Loading templates…</Typography>
+            </Box>
+          ) : availableTemplates.length === 0 ? (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              No templates with images are available yet. Upload images to a template in Admin → Templates first.
+            </Alert>
+          ) : (
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'flex-end', mb: 2 }}>
+              <FormControl size="small" sx={{ minWidth: 280 }}>
+                <InputLabel id="template-import-select">Template to import</InputLabel>
+                <Select
+                  labelId="template-import-select"
+                  label="Template to import"
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                  disabled={templateImportStatus.loading}
+                >
+                  {availableTemplates.map((t) => {
+                    const live = templateProgressMap[t.id];
+                    const status = formatTemplateImportStatus(live) || `${t.preloadedImages?.length || 0} in catalog`;
+                    return (
+                      <MenuItem key={t.id} value={t.id}>
+                        {t.name} ({status})
+                      </MenuItem>
+                    );
+                  })}
+                </Select>
+              </FormControl>
+              {selectedTemplate && selectedProgress && !selectedProgress.isComplete && selectedProgress.remaining > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  {selectedProgress.importedCount}/{selectedProgress.totalInTemplate} already in project ·{' '}
+                  {selectedProgress.remaining} left to copy
+                </Typography>
+              )}
+            </Box>
+          )}
 
           {templateImportStatus.loading && (
             <Box sx={{ mb: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                <Typography variant="body2">
-                  {templateImportStatus.total > 0
-                    ? `Copying template images… (${templateImportStatus.progress}/${templateImportStatus.total})`
-                    : 'Listing template images…'}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5, gap: 2 }}>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {templateImportProgressLabel(templateImportStatus)}
                 </Typography>
-                {templateImportStatus.total > 0 && (
-                  <Typography variant="body2" color="text.secondary">
-                    {templateImportStatus.progress} / {templateImportStatus.total}
+                {templateImportStatus.phase === 'copying' && templateImportStatus.total > 0 && (
+                  <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                    {Math.min(
+                      100,
+                      Math.round((templateImportStatus.progress / templateImportStatus.total) * 100),
+                    )}%
                   </Typography>
                 )}
               </Box>
               <LinearProgress
-                variant={templateImportStatus.total > 0 ? 'determinate' : 'indeterminate'}
+                variant={templateImportStatus.phase === 'copying' && templateImportStatus.total > 0
+                  ? 'determinate'
+                  : 'indeterminate'}
                 value={templateImportStatus.total > 0
-                  ? (templateImportStatus.progress / templateImportStatus.total) * 100
+                  ? Math.min(
+                    (templateImportStatus.progress / templateImportStatus.total) * 100,
+                    100,
+                  )
                   : undefined}
                 sx={{ height: 8, borderRadius: 4 }}
               />
+              {templateImportStatus.templateTotal > 0 && templateImportStatus.phase === 'copying' && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                  Template has {templateImportStatus.templateTotal} file(s) total
+                  {templateImportStatus.skipped > 0
+                    ? ` · ${templateImportStatus.skipped} already in your project folder (resume)`
+                    : ''}
+                </Typography>
+              )}
             </Box>
           )}
 
           {templateImportStatus.success && <Alert severity="success" sx={{ mb: 2 }}>{templateImportStatus.success}</Alert>}
           {templateImportStatus.error && <Alert severity="error" sx={{ mb: 2 }}>{templateImportStatus.error}</Alert>}
 
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={handleImportFromTemplate}
-            disabled={templateImportStatus.loading || !isR2Configured()}
-            startIcon={templateImportStatus.loading ? <CircularProgress size={18} color="inherit" /> : <ContentCopy />}
-          >
-            {templateImportStatus.loading ? 'Importing…' : 'Import Images from Template'}
-          </Button>
+          {availableTemplates.length > 0 && (
+            <Button
+              variant="contained"
+              color="secondary"
+              onClick={() => handleImportFromTemplate()}
+              disabled={templateImportStatus.loading || !selectedTemplateId}
+              startIcon={templateImportStatus.loading ? <CircularProgress size={18} color="inherit" /> : <ContentCopy />}
+            >
+              {templateImportStatus.loading
+                ? 'Importing…'
+                : selectedProgress?.remaining > 0
+                  ? `Resume import (${selectedProgress.remaining} remaining)`
+                  : selectedProgress?.isComplete
+                    ? 'Re-check template (all copied)'
+                    : 'Import from selected template'}
+            </Button>
+          )}
         </Box>
       )}
 

@@ -3,6 +3,46 @@ import { Box, Button, ButtonGroup, Typography } from '@mui/material';
 
 const TOOL_COLORS = { point: '#e53935', line: '#1e88e5', region: '#43a047' };
 
+export function inferShapeTool(shape) {
+  if (shape?.tool) return shape.tool;
+  const n = shape?.points?.length || 0;
+  if (n >= 3) return 'region';
+  if (n === 2) return 'line';
+  return 'point';
+}
+
+export function drawAnnotationShape(ctx, shape, w, h, { color, alpha = 1, fillAlpha = 0.35 } = {}) {
+  const tool = inferShapeTool(shape);
+  const pts = (shape.points || []).map((p) => ({ x: p.x * w, y: p.y * h }));
+  if (!pts.length) return;
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color || TOOL_COLORS[tool] || '#333';
+  ctx.fillStyle = color || TOOL_COLORS[tool] || '#333';
+  ctx.lineWidth = 2;
+  if (tool === 'point' && pts[0]) {
+    ctx.beginPath();
+    ctx.arc(pts[0].x, pts[0].y, 6, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (tool === 'line' && pts.length >= 2) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    pts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
+    ctx.stroke();
+    pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
+  } else if (tool === 'region' && pts.length >= 2) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    pts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
+    if (pts.length >= 3) ctx.closePath();
+    const base = color || TOOL_COLORS.region || '#43a047';
+    ctx.fillStyle = base.length === 7 ? `${base}${Math.round(fillAlpha * 255).toString(16).padStart(2, '0')}` : base;
+    ctx.fill();
+    ctx.strokeStyle = color || TOOL_COLORS.region || '#43a047';
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function normalizePoint(x, y, w, h) {
   return { x: x / w, y: y / h };
 }
@@ -47,31 +87,7 @@ export default function ImageAnnotationCanvas({
     ctx.clearRect(0, 0, w, h);
 
     const drawShape = (shape, alpha = 1) => {
-      const pts = shape.points.map((p) => denormalizePoint(p, w, h));
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = TOOL_COLORS[shape.tool] || '#333';
-      ctx.fillStyle = TOOL_COLORS[shape.tool] || '#333';
-      ctx.lineWidth = 2;
-      if (shape.tool === 'point' && pts[0]) {
-        ctx.beginPath();
-        ctx.arc(pts[0].x, pts[0].y, 6, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (shape.tool === 'line' && pts.length >= 2) {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        pts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
-        ctx.stroke();
-        pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
-      } else if (shape.tool === 'region' && pts.length >= 2) {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        pts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
-        if (pts.length >= 3) ctx.closePath();
-        ctx.fillStyle = (TOOL_COLORS.region || '#43a047') + '55';
-        ctx.fill();
-        ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
+      drawAnnotationShape(ctx, shape, w, h, { alpha, fillAlpha: 0.35 });
     };
 
     shapes.forEach((s) => drawShape(s));
@@ -155,9 +171,9 @@ export default function ImageAnnotationCanvas({
           </ButtonGroup>
           <Button size="small" onClick={undo} disabled={!shapes.length}>Undo</Button>
           <Button size="small" color="error" onClick={clear} disabled={!shapes.length}>Clear</Button>
-          {(minAnnotations > 0 || maxAnnotations < 50) && (
+          {(minAnnotations > 0 || maxAnnotations > 0) && (
             <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-              Annotations: {shapes.length}{maxAnnotations < 50 ? ` / ${maxAnnotations}` : ''}{minAnnotations > 0 ? ` (min ${minAnnotations})` : ''}
+              Annotations: {shapes.length}{maxAnnotations > 0 ? ` / ${maxAnnotations}` : ''}{minAnnotations > 0 ? ` (min ${minAnnotations})` : ''}
             </Typography>
           )}
           {tool === 'region' && (
@@ -213,22 +229,7 @@ export function AnnotationOverlay({ imageUrl, annotations, width = 500 }) {
       annotations.forEach((ann, pi) => {
         const color = PARTICIPANT_COLORS[pi % PARTICIPANT_COLORS.length];
         (ann.shapes || []).forEach((shape) => {
-          const pts = shape.points.map((p) => ({ x: p.x * w, y: p.y * h }));
-          ctx.globalAlpha = 0.65;
-          ctx.strokeStyle = color;
-          ctx.fillStyle = color;
-          ctx.lineWidth = 2;
-          if (shape.tool === 'point' && pts[0]) {
-            ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, 5, 0, Math.PI * 2); ctx.fill();
-          } else if (shape.tool === 'line' && pts.length >= 2) {
-            ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-            pts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y)); ctx.stroke();
-          } else if (shape.tool === 'region' && pts.length >= 3) {
-            ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-            pts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y)); ctx.closePath();
-            ctx.fillStyle = color + '44'; ctx.fill(); ctx.stroke();
-          }
-          ctx.globalAlpha = 1;
+          drawAnnotationShape(ctx, shape, w, h, { color, alpha: 0.75, fillAlpha: 0.28 });
         });
       });
     };

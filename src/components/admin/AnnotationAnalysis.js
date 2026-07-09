@@ -1,7 +1,72 @@
-import React, { useMemo, useContext } from 'react';
+import React, { useMemo, useContext, useRef, useEffect } from 'react';
 import { Box, Typography, Button, Stack, Chip } from '@mui/material';
-import { AnnotationOverlay } from '../ImageAnnotationWidget';
+import { AnnotationOverlay, drawAnnotationShape } from '../ImageAnnotationWidget';
 import { ImageResolverContext } from './imageResolverContext';
+
+function AggregateDensityOverlay({ imageUrl, annotations, width = 480 }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !imageUrl) return;
+    let cancelled = false;
+
+    const draw = (img) => {
+      if (cancelled) return;
+      const aspect = img ? img.height / img.width : 0.625;
+      const w = width;
+      const h = Math.round(w * aspect);
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (img) ctx.drawImage(img, 0, 0, w, h);
+      else { ctx.fillStyle = '#eceff1'; ctx.fillRect(0, 0, w, h); }
+
+      const grid = {};
+      const cell = 12;
+      annotations.forEach((ann) => {
+        (ann.shapes || []).forEach((shape) => {
+          (shape.points || []).forEach((p) => {
+            const gx = Math.floor((p.x * w) / cell);
+            const gy = Math.floor((p.y * h) / cell);
+            const key = `${gx},${gy}`;
+            grid[key] = (grid[key] || 0) + 1;
+          });
+        });
+      });
+      const max = Math.max(...Object.values(grid), 1);
+      Object.entries(grid).forEach(([key, count]) => {
+        const [gx, gy] = key.split(',').map(Number);
+        const alpha = 0.15 + 0.65 * (count / max);
+        ctx.fillStyle = `rgba(25, 118, 210, ${alpha})`;
+        ctx.fillRect(gx * cell, gy * cell, cell, cell);
+      });
+
+      annotations.forEach((ann, pi) => {
+        const color = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00acc1'][pi % 6];
+        (ann.shapes || []).forEach((shape) => {
+          drawAnnotationShape(ctx, shape, w, h, { color, alpha: 0.55, fillAlpha: 0.22 });
+        });
+      });
+    };
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => draw(img);
+    img.onerror = () => draw(null);
+    img.src = imageUrl;
+    return () => { cancelled = true; };
+  }, [imageUrl, annotations, width]);
+
+  return (
+    <Box sx={{ mb: 1 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+        Aggregate overlay — darker cells = more annotations in that area
+      </Typography>
+      <canvas ref={canvasRef} style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid #ddd' }} />
+    </Box>
+  );
+}
 
 /**
  * Group annotation answers by base image URL and render overlay + export.
@@ -86,6 +151,13 @@ export default function AnnotationAnalysis({ answers, questionName, responses })
             {imgUrl.split('/').pop()}
             <Chip size="small" label={`${byImage[imgUrl].length} participant(s)`} sx={{ ml: 1 }} />
           </Typography>
+          {byImage[imgUrl].length > 1 && (
+            <AggregateDensityOverlay
+              imageUrl={imgUrl}
+              annotations={byImage[imgUrl]}
+              width={480}
+            />
+          )}
           <AnnotationOverlay
             imageUrl={imgUrl}
             annotations={byImage[imgUrl]}

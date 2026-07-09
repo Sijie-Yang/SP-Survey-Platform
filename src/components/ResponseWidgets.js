@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Typography, Slider, TextField, Chip } from '@mui/material';
+import { ImageGalleryGrid } from './MediaWidgets';
 
 /**
  * Slider group (semantic differential): multiple bipolar dimensions rated
@@ -116,6 +117,74 @@ export function PointAllocationContent({ choices = [], budget = 100, value, onCh
           You have allocated more than {budget} points — please reduce some values.
         </Typography>
       )}
+    </Box>
+  );
+}
+
+/** Image + semantic differential sliders (imageslidergroup). */
+export function ImageSliderGroupContent({
+  imageUrls = [],
+  dimensions = [],
+  scaleMin = 1,
+  scaleMax = 7,
+  value,
+  onChange,
+  readOnly,
+}) {
+  const items = (imageUrls || []).filter(Boolean).map((url, i) => ({
+    url,
+    name: url.split('/').pop() || `Image ${i + 1}`,
+    type: 'image',
+  }));
+
+  return (
+    <Box>
+      {items.length > 0 && (
+        <Box sx={{ mb: 2 }}>
+          <ImageGalleryGrid items={items} />
+        </Box>
+      )}
+      <SliderGroupContent
+        dimensions={dimensions}
+        scaleMin={scaleMin}
+        scaleMax={scaleMax}
+        value={value}
+        onChange={onChange}
+        readOnly={readOnly}
+      />
+    </Box>
+  );
+}
+
+/** Image + point budget allocation (imagepointallocation). */
+export function ImagePointAllocationContent({
+  imageUrls = [],
+  choices = [],
+  budget = 100,
+  value,
+  onChange,
+  readOnly,
+}) {
+  const items = (imageUrls || []).filter(Boolean).map((url, i) => ({
+    url,
+    name: url.split('/').pop() || `Image ${i + 1}`,
+    type: 'image',
+  }));
+
+  return (
+    <Box>
+      {items.length > 0 && (
+        <Box sx={{ mb: 2 }}>
+          <ImageGalleryGrid items={items} />
+        </Box>
+      )}
+      <PointAllocationContent
+        choices={choices}
+        budget={budget}
+        value={value}
+        onChange={onChange}
+        readOnly={readOnly}
+      />
     </Box>
   );
 }

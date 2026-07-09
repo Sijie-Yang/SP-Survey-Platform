@@ -268,9 +268,11 @@ export default function ProjectSidebar({
         description: `Based on ${selectedTemplate.name}`,
         templateId: selectedTemplate.id,
         surveyConfig: selectedTemplate.config,
-        preloadedImages: [],
-        preloadedAt: null,
-        preloadedSource: null,
+        preloadedImages: Array.isArray(selectedTemplate.preloadedImages)
+          ? selectedTemplate.preloadedImages
+          : [],
+        preloadedAt: selectedTemplate.preloadedAt || (selectedTemplate.preloadedImages?.length ? new Date().toISOString() : null),
+        preloadedSource: selectedTemplate.preloadedSource || (selectedTemplate.preloadedImages?.length ? 'template' : null),
       };
       const createResult = await createProject(projectData);
       if (!createResult.success) {
@@ -441,7 +443,7 @@ export default function ProjectSidebar({
     // of waiting for the whole set to finish in one request. The server
     // processes copies sequentially per request anyway, so batching just
     // moves the await boundaries — total wall time is similar.
-    const BATCH_SIZE = 10;
+    const BATCH_SIZE = 200;
     const copied = [];
     const errors = [];
     for (let i = 0; i < allCopies.length; i += BATCH_SIZE) {

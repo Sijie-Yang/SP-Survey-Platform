@@ -322,6 +322,103 @@ export default function SurveyPreview({ config, currentProject }) {
                       }
                     ]
                   });
+                } else if (element.type === 'mediarating' && element.imageHtml) {
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'rating',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        rateMin: element.rateMin || 1,
+                        rateMax: element.rateMax || 5,
+                        minRateDescription: element.minRateDescription,
+                        maxRateDescription: element.maxRateDescription,
+                      },
+                    ],
+                  });
+                } else if (element.type === 'mediaboolean' && element.imageHtml) {
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'boolean',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        labelTrue: element.labelTrue || 'Yes',
+                        labelFalse: element.labelFalse || 'No',
+                        valueTrue: element.valueTrue,
+                        valueFalse: element.valueFalse,
+                      },
+                    ],
+                  });
+                } else if (element.type === 'imageslidergroup' && element.imageHtml) {
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'slidergroup',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        dimensions: element.dimensions || [],
+                        scaleMin: element.scaleMin ?? 1,
+                        scaleMax: element.scaleMax ?? 7,
+                      },
+                    ],
+                  });
+                } else if (element.type === 'imagepointallocation' && element.imageHtml) {
+                  newElements.push({
+                    type: 'panel',
+                    name: `${element.name}_panel`,
+                    title: 'See below images:',
+                    description: element.description,
+                    state: 'expanded',
+                    elements: [
+                      {
+                        type: 'html',
+                        name: `${element.name}_images`,
+                        html: element.imageHtml,
+                      },
+                      {
+                        type: 'pointallocation',
+                        name: element.name,
+                        title: element.title,
+                        isRequired: element.isRequired,
+                        choices: element.choices || [],
+                        budget: element.budget ?? 100,
+                      },
+                    ],
+                  });
                 } else {
                   newElements.push(element);
                 }

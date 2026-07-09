@@ -1,5 +1,5 @@
 {
-  "id": "2024-building",
+  "id": "2024-liang-building",
   "name": "Building Exterior Perception",
   "description": "In this study, we integrate a traditional survey-based evaluation framework with machine learning techniques to analyse human perception of over 250,000 building images from Singapore, San Francisco, and Amsterdam.",
   "author": "Liang et al.",

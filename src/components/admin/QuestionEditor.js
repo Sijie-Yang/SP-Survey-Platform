@@ -40,6 +40,42 @@ import { buildFallbackDemoImages } from '../../lib/presetSkills';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
 
+function AttentionCheckFields({ question, onChange }) {
+  const supported = ['rating', 'radiogroup', 'imagepicker'].includes(question.type);
+  if (!supported) return null;
+  return (
+    <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+      <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+        Attention Check (data quality)
+      </Typography>
+      <FormControlLabel
+        control={
+          <Switch
+            checked={!!question.isAttentionCheck}
+            onChange={(e) => onChange('isAttentionCheck', e.target.checked)}
+          />
+        }
+        label="Mark as attention-check question"
+      />
+      {question.isAttentionCheck && (
+        <TextField
+          fullWidth
+          size="small"
+          sx={{ mt: 1 }}
+          label="Expected answer"
+          value={question.expectedAnswer ?? ''}
+          onChange={(e) => onChange('expectedAnswer', e.target.value)}
+          helperText={
+            question.type === 'imagepicker'
+              ? 'Filename or choice value the participant must select (checked in analysis, not blocked at submit)'
+              : 'Exact value the participant must select (checked in analysis, not blocked at submit)'
+          }
+        />
+      )}
+    </Box>
+  );
+}
+
 function MediaAssignmentFields({ question, onChange, currentProject }) {
   const mode = question.mediaAssignmentMode || 'individual';
   const isGroup = mode === 'group';
@@ -237,7 +273,9 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     { value: 'matrix', label: 'Matrix' },
     { value: 'imagematrix', label: 'Image Matrix' },
     { value: 'slidergroup', label: 'Slider Group (Semantic Differential)' },
+    { value: 'imageslidergroup', label: 'Image Slider Group (Semantic Differential)' },
     { value: 'pointallocation', label: 'Point Allocation (Budget)' },
+    { value: 'imagepointallocation', label: 'Image Point Allocation (Budget)' },
     { value: 'expression', label: 'Text Instruction' },
     { value: 'image', label: 'Image Display (single image only)' },
     { value: 'mediadisplay', label: 'Media Display (multi-image / video / audio)' },
@@ -285,6 +323,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
       }
       // Types that should have 1 image/media by default
       if (value === 'imagerating' || value === 'imagematrix' || value === 'imageboolean' || value === 'image'
+        || value === 'imageslidergroup' || value === 'imagepointallocation'
         || value === 'mediadisplay' || value === 'mediarating' || value === 'mediaboolean' || value === 'imageannotation') {
         if (!editedQuestion.imageCount) updates.imageCount = 1;
         if (value === 'image') updates.imageCount = 1;
@@ -297,6 +336,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         }
         if (value === 'imageannotation') {
           updates.allowedTools = ['point', 'line', 'region'];
+          if (editedQuestion.minAnnotations == null) updates.minAnnotations = 0;
+          if (editedQuestion.maxAnnotations == null) updates.maxAnnotations = 50;
         }
       }
       else if (value === 'slidergroup') {
@@ -309,7 +350,29 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         if (editedQuestion.scaleMin == null) updates.scaleMin = 1;
         if (editedQuestion.scaleMax == null) updates.scaleMax = 7;
       }
+      else if (value === 'imageslidergroup') {
+        if (!editedQuestion.imageCount) updates.imageCount = 1;
+        updates.imageSelectionMode = 'huggingface_random';
+        updates.randomImageSelection = true;
+        updates.excludePreviouslyUsedImages = true;
+        if (!editedQuestion.dimensions?.length) {
+          updates.dimensions = [
+            { id: 'dim_1', left: 'Negative', right: 'Positive' },
+            { id: 'dim_2', left: 'Unpleasant', right: 'Pleasant' },
+          ];
+        }
+        if (editedQuestion.scaleMin == null) updates.scaleMin = 1;
+        if (editedQuestion.scaleMax == null) updates.scaleMax = 7;
+      }
       else if (value === 'pointallocation') {
+        if (editedQuestion.budget == null) updates.budget = 100;
+        updates.choices = editedQuestion.choices || [];
+      }
+      else if (value === 'imagepointallocation') {
+        if (!editedQuestion.imageCount) updates.imageCount = 1;
+        updates.imageSelectionMode = 'huggingface_random';
+        updates.randomImageSelection = true;
+        updates.excludePreviouslyUsedImages = true;
         if (editedQuestion.budget == null) updates.budget = 100;
         updates.choices = editedQuestion.choices || [];
       }
@@ -381,28 +444,28 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     });
   };
 
-  const needsChoices = ['radiogroup', 'checkbox', 'dropdown', 'ranking', 'pointallocation'].includes(editedQuestion.type);
-  const isImageQuestion = ['imagepicker', 'image', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix'].includes(editedQuestion.type);
+  const needsChoices = ['radiogroup', 'checkbox', 'dropdown', 'ranking', 'pointallocation', 'imagepointallocation'].includes(editedQuestion.type);
+  const isImageQuestion = ['imagepicker', 'image', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type);
   const isRankingQuestion = editedQuestion.type === 'ranking';
   const isImageRankingQuestion = editedQuestion.type === 'imageranking';
 
   // Load images from Hugging Face when image questions are selected and in manual mode
   useEffect(() => {
-    if ((editedQuestion.type === 'imagepicker' || editedQuestion.type === 'imageranking' || editedQuestion.type === 'imagerating' || editedQuestion.type === 'imageboolean' || editedQuestion.type === 'image' || editedQuestion.type === 'imagematrix') && editedQuestion.imageSelectionMode === 'huggingface_manual') {
+    if ((editedQuestion.type === 'imagepicker' || editedQuestion.type === 'imageranking' || editedQuestion.type === 'imagerating' || editedQuestion.type === 'imageboolean' || editedQuestion.type === 'image' || editedQuestion.type === 'imagematrix' || editedQuestion.type === 'imageslidergroup' || editedQuestion.type === 'imagepointallocation') && editedQuestion.imageSelectionMode === 'huggingface_manual') {
       loadImages();
     }
   }, [editedQuestion.type, editedQuestion.imageSelectionMode]);
 
   // Initialize selected images from existing question data
   useEffect(() => {
-    if ((editedQuestion.type === 'imagepicker' || editedQuestion.type === 'imageranking' || editedQuestion.type === 'imagerating' || editedQuestion.type === 'imageboolean' || editedQuestion.type === 'image' || editedQuestion.type === 'imagematrix') && editedQuestion.selectedImageUrls) {
+    if ((editedQuestion.type === 'imagepicker' || editedQuestion.type === 'imageranking' || editedQuestion.type === 'imagerating' || editedQuestion.type === 'imageboolean' || editedQuestion.type === 'image' || editedQuestion.type === 'imagematrix' || editedQuestion.type === 'imageslidergroup' || editedQuestion.type === 'imagepointallocation') && editedQuestion.selectedImageUrls) {
       setSelectedImages(editedQuestion.selectedImageUrls);
     }
   }, [editedQuestion.type]);
 
   // ✅ Auto-initialize image questions with random selection mode if not set
   useEffect(() => {
-    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix'];
+    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'];
     
     if (imageQuestionTypes.includes(editedQuestion.type)) {
       // Check if imageSelectionMode is missing or undefined
@@ -582,6 +645,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               {editedQuestion.type === 'imageannotation' && (
                 <Alert severity="info">
                   Participants can draw points, lines, and regions on a randomly selected image.
+                  Set minimum / maximum annotation counts in Annotation Settings below.
                 </Alert>
               )}
 
@@ -884,6 +948,24 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       label="Allow Multiple Selection - participants can choose more than one image"
                     />
 
+                    {(editedQuestion.imageCount || 4) === 2
+                      && (editedQuestion.mediaAssignmentMode || 'individual') === 'individual' && (
+                      <FormControl fullWidth variant="outlined">
+                        <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Pairing Mode</InputLabel>
+                        <Select
+                          value={editedQuestion.pairingMode || 'random'}
+                          onChange={(e) => handleQuestionChange('pairingMode', e.target.value)}
+                          label="Pairing Mode"
+                        >
+                          <MenuItem value="random">Random — uniform random pairs</MenuItem>
+                          <MenuItem value="balanced">Balanced — prioritize least-exposed images</MenuItem>
+                          <MenuItem value="adaptive">Adaptive — prioritize similar-score images (TrueSkill)</MenuItem>
+                        </Select>
+                      </FormControl>
+                    )}
+
+                    <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
+
                     {/* Manual Image Choice Interface */}
                     {editedQuestion.imageSelectionMode === 'huggingface_manual' && (
                       <Box sx={{ mt: 2 }}>
@@ -1026,8 +1108,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   </>
                 )}
 
-                {/* Image Rating Scale Configuration */}
-                {editedQuestion.type === 'imagerating' && (
+                {/* Image selection (rating / slider group / point allocation with image) */}
+                {['imagerating', 'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type) && (
                   <>
                     <FormControl fullWidth variant="outlined">
                       <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Image Selection Mode</InputLabel>
@@ -1052,13 +1134,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         handleQuestionChange('imageCount', Math.min(Math.max(value, 1), 6));
                       }}
                       onFocus={(e) => e.target.select()}
-                      helperText={editedQuestion.imageSelectionMode === 'huggingface_random' 
-                        ? "How many images to randomly select for rating from Hugging Face" 
-                        : "How many images you will manually select for rating"}
+                      helperText={editedQuestion.imageSelectionMode === 'huggingface_random'
+                        ? 'How many images to randomly select from the project media pool'
+                        : 'How many images you will manually select'}
                       inputProps={{ min: 1, max: 6, step: 1 }}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
 
+                    {editedQuestion.type === 'imagerating' && (
+                      <>
                     {/* Rating Scale Configuration */}
                     <TextField
                       fullWidth
@@ -1099,12 +1183,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       placeholder="e.g., Excellent"
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
+                      </>
+                    )}
 
-                    {/* Manual Image Selection Interface for Rating */}
+                    {/* Manual Image Selection */}
                     {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
                       <Box sx={{ mt: 2 }}>
                         <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 600 }}>
-                          Select Images for Rating ({selectedImages.length}/{editedQuestion.imageCount || 1} selected)
+                          Select Images ({selectedImages.length}/{editedQuestion.imageCount || 1} selected)
                         </Typography>
                         
                         {imageError && (
@@ -1642,15 +1728,45 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     <MenuItem value="region">Region (polygon)</MenuItem>
                   </Select>
                 </FormControl>
+                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    type="number"
+                    label="Minimum annotations"
+                    value={editedQuestion.minAnnotations ?? 0}
+                    onChange={(e) => {
+                      const n = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      handleQuestionChange('minAnnotations', n);
+                    }}
+                    helperText="Required before continuing (0 = no minimum)"
+                    inputProps={{ min: 0, max: 100, step: 1 }}
+                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    type="number"
+                    label="Maximum annotations"
+                    value={editedQuestion.maxAnnotations ?? 50}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value, 10);
+                      handleQuestionChange('maxAnnotations', Number.isNaN(raw) ? 50 : Math.max(0, raw));
+                    }}
+                    helperText="Cap on shapes per participant (0 = unlimited)"
+                    inputProps={{ min: 0, max: 500, step: 1 }}
+                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                </Box>
               </Box>
             </Box>
           )}
 
           {/* Slider group (semantic differential) settings */}
-          {editedQuestion.type === 'slidergroup' && (
+          {(editedQuestion.type === 'slidergroup' || editedQuestion.type === 'imageslidergroup') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Slider Group Settings
+                {editedQuestion.type === 'imageslidergroup' ? 'Image Slider Group Settings' : 'Slider Group Settings'}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <SkillDimensionsEditor
@@ -1679,19 +1795,22 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                   />
                 </Box>
+                {editedQuestion.type === 'slidergroup' && (
                 <Alert severity="info" sx={{ py: 0.5 }}>
                   To rate an image / video / audio clip, put a Media Display question on the same page —
                   it handles random media injection; this question collects the ratings.
+                  Or use <strong>Image Slider Group</strong> for built-in image display.
                 </Alert>
+                )}
               </Box>
             </Box>
           )}
 
           {/* Point allocation settings */}
-          {editedQuestion.type === 'pointallocation' && (
+          {(editedQuestion.type === 'pointallocation' || editedQuestion.type === 'imagepointallocation') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                Budget Settings
+                {editedQuestion.type === 'imagepointallocation' ? 'Image Point Allocation Settings' : 'Budget Settings'}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <TextField
@@ -1715,6 +1834,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
                 Answer Choices
               </Typography>
+              {editedQuestion.type === 'radiogroup' && (
+                <Box sx={{ mb: 2 }}>
+                  <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
+                </Box>
+              )}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <Box sx={{ display: 'flex', gap: 1 }}>
                   <TextField
@@ -1975,6 +2099,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'rating' && (
                   <>
+                    <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
                     <TextField
                       fullWidth
                       variant="outlined"
@@ -2019,8 +2144,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             console.log('🖼️ ImageMatrix - imageCount:', questionToSave.imageCount);
           }
           
-          // Handle imageboolean, imagerating, imagematrix: keep the type but generate imageHtml for runtime display
-          if (questionToSave.type === 'imageboolean' || questionToSave.type === 'imagerating' || questionToSave.type === 'imagematrix') {
+          // Handle image types: keep type, generate imageHtml for runtime display
+          if (['imageboolean', 'imagerating', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(questionToSave.type)) {
             console.log(`🔄 Processing ${questionToSave.type} - keeping type, generating imageHtml`);
             
             // Set default imageSelectionMode if not set

@@ -50,7 +50,9 @@ body {
 .media-frame img, .media-frame video { display: block; width: 100%; max-height: 320px; object-fit: cover; background: #e8eef5; }
 .slider-row { margin: 12px 0; }
 .slider-row label { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--muted); margin-bottom: 4px; }
-input[type=range] { width: 100%; accent-color: var(--primary); }
+input[type=range] { width: 100%; accent-color: var(--primary); cursor: pointer; touch-action: pan-x; }
+button,.btn { cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+html, body { touch-action: manipulation; }
 .scale-labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
 .dim-row { padding: 10px 0; border-bottom: 1px solid var(--border); }
 .dim-row:last-child { border-bottom: none; }
@@ -565,13 +567,29 @@ function refresh() {
     worst == null ? 'Now select the Worst image.' : 'Done — you can still change your choices.';
 }
 function report() {
+  var urls = [];
+  for (var i = 0; i < n; i++) urls.push(spUrl('image', i, 'Option ' + String.fromCharCode(65 + i)));
   SPSkill.setAnswer({
     bestIndex: best, worstIndex: worst,
     bestUrl: best != null ? spUrl('image', best, 'Best') : null,
     worstUrl: worst != null ? spUrl('image', worst, 'Worst') : null,
+    shownUrls: urls,
     complete: best != null && worst != null,
   });
 }
+document.addEventListener('click', function(ev) {
+  var btn = ev.target && ev.target.closest ? ev.target.closest('button[data-i]') : null;
+  if (!btn || !document.getElementById('grid') || !document.getElementById('grid').contains(btn)) return;
+  var i = parseInt(btn.dataset.i, 10);
+  if (btn.classList.contains('bw-best')) {
+    best = best === i ? null : i;
+    if (worst === best) worst = null;
+  } else if (btn.classList.contains('bw-worst')) {
+    worst = worst === i ? null : i;
+    if (best === worst) best = null;
+  } else return;
+  refresh(); report();
+});
 document.addEventListener('spskill-init', function(e) {
   cfg = e.detail.config || {};
   n = cfg.mediaCount || 4;
@@ -581,22 +599,12 @@ document.addEventListener('spskill-init', function(e) {
   for (var i = 0; i < n; i++) html += cellHtml(i);
   grid.innerHTML = html;
   for (var j = 0; j < n; j++) spSetImg(document.getElementById('img' + j), 'image', j, 'Option ' + String.fromCharCode(65 + j));
-  grid.addEventListener('click', function(ev) {
-    var t = ev.target;
-    if (!t.dataset || t.dataset.i == null) return;
-    var i = parseInt(t.dataset.i, 10);
-    if (t.className.indexOf('bw-best') >= 0) {
-      best = best === i ? null : i;
-      if (worst === best) worst = null;
-    } else if (t.className.indexOf('bw-worst') >= 0) {
-      worst = worst === i ? null : i;
-      if (best === worst) best = null;
-    }
-    refresh(); report();
-  });
   if (e.detail.value) {
     if (e.detail.value.bestIndex != null) best = e.detail.value.bestIndex;
     if (e.detail.value.worstIndex != null) worst = e.detail.value.worstIndex;
+  } else {
+    best = null;
+    worst = null;
   }
   refresh();
   SPSkill.ready();
@@ -772,6 +780,12 @@ function report() {
     var d = dimIndex[id] || {};
     ratings.push({ id: id, left: d.left, right: d.right, value: state.ratings[id] });
   });
+  var stimulusUrl = null;
+  (cfg.blocks || []).forEach(function(b) {
+    if (b.type === 'media' && !stimulusUrl) {
+      stimulusUrl = spUrl(b.mediaType || 'image', b.index || 0, 'Scene');
+    }
+  });
   SPSkill.setAnswer({
     ratings: ratings,
     words: state.words,
@@ -779,6 +793,7 @@ function report() {
     text: state.text,
     scaleMin: scaleMin(),
     scaleMax: scaleMax(),
+    imageUrl: stimulusUrl,
   });
 }
 
