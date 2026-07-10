@@ -194,9 +194,9 @@ export const createProject = async (projectData) => {
         huggingFaceToken: '',
         datasetName: '',
       },
-      // When a template ships with its own image folder we hand its
-      // preloadedImages straight to the new project so previews and live
-      // surveys work without an extra image-upload step.
+      // Images are opt-in: template create leaves this empty until the user
+      // imports via Image Dataset (or uploads). Callers may still pass an
+      // explicit preloadedImages list when they intentionally want one.
       preloadedImages: Array.isArray(projectData.preloadedImages)
         ? projectData.preloadedImages
         : [],

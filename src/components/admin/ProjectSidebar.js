@@ -91,7 +91,7 @@ import {
   computeLiveStatus,
 } from '../../lib/liveSurveyManager';
 import { supabase } from '../../lib/supabase';
-import { isR2Configured, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
+import { isR2Configured, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix } from '../../lib/r2';
 
 export default function ProjectSidebar({ 
   open, 
@@ -281,16 +281,16 @@ export default function ProjectSidebar({
       // R2 folder is deferred to an explicit "Import Template Images"
       // action on the Image Dataset page so this flow stays fast and
       // doesn't burn storage for users who never use the images.
+      // Do NOT copy template.preloadedImages here: those URLs still point at
+      // the template-owned R2 prefix and would falsely appear as "Uploaded".
       const projectData = {
         name: newProjectName.trim(),
         description: `Based on ${selectedTemplate.name}`,
         templateId: selectedTemplate.id,
         surveyConfig: selectedTemplate.config,
-        preloadedImages: Array.isArray(selectedTemplate.preloadedImages)
-          ? selectedTemplate.preloadedImages
-          : [],
-        preloadedAt: selectedTemplate.preloadedAt || (selectedTemplate.preloadedImages?.length ? new Date().toISOString() : null),
-        preloadedSource: selectedTemplate.preloadedSource || (selectedTemplate.preloadedImages?.length ? 'template' : null),
+        preloadedImages: [],
+        preloadedAt: null,
+        preloadedSource: null,
       };
       const createResult = await createProject(projectData);
       if (!createResult.success) {
@@ -779,31 +779,17 @@ export default function ProjectSidebar({
 
     try {
       // ── R2 image cleanup ──────────────────────────────────────────────
+      // ONLY delete under this project's own prefix. Never derive keys from
+      // preloadedImages URLs — those may still point at templates/… after a
+      // buggy create-from-template that shared template refs.
       if (isR2Configured()) {
-        const r2PublicUrl = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
-        const keysToDelete = new Set();
-
-        // 1. Keys derived from the in-memory preloadedImages URLs
-        if (deletingProject.preloadedImages?.length > 0 && r2PublicUrl) {
-          for (const img of deletingProject.preloadedImages) {
-            if (img.url && img.url.startsWith(r2PublicUrl + '/')) {
-              keysToDelete.add(img.url.slice(r2PublicUrl.length + 1).split('?')[0]);
-            }
-          }
-        }
-
-        // 2. Whatever lives under the project's R2 prefix (catches files
-        //    uploaded outside of project.preloadedImages — HF preload, etc.)
+        const prefix = projectR2Prefix(currentUserId || 'anonymous', deletingProject.id);
         setDeleteProgress({ label: 'Listing project images…', current: 0, total: 0 });
-        const prefix = `${currentUserId || 'anonymous'}/${deletingProject.id}/`;
         const listResult = await listImagesFromR2(prefix);
-        if (listResult.success) {
-          for (const img of listResult.images) keysToDelete.add(img.key);
-        }
+        const keys = (listResult.success ? listResult.images : [])
+          .map((img) => img.key)
+          .filter((key) => key && key.startsWith(prefix));
 
-        // Batch the delete so the bar advances smoothly instead of waiting
-        // for the worker to chew through hundreds of keys in one request.
-        const keys = [...keysToDelete];
         const total = keys.length;
         if (total > 0) {
           setDeleteProgress({
@@ -814,7 +800,7 @@ export default function ProjectSidebar({
           const BATCH_SIZE = 50;
           for (let i = 0; i < total; i += BATCH_SIZE) {
             const batch = keys.slice(i, i + BATCH_SIZE);
-            await deleteImagesFromR2(batch);
+            await deleteImagesFromR2(batch, { allowedPrefix: prefix });
             const done = Math.min(i + batch.length, total);
             setDeleteProgress({
               label: `Deleting images from R2… (${done}/${total})`,

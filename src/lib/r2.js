@@ -9,6 +9,67 @@ const SERVER_URL =
 // Returns true when the R2 public URL env var is set (synchronous, safe to call anywhere)
 export const isR2Configured = () => !!process.env.REACT_APP_R2_PUBLIC_URL;
 
+export function getR2PublicBase() {
+  return (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
+}
+
+export function projectR2Prefix(userId, projectId) {
+  if (!userId || !projectId) return '';
+  return `${userId}/${projectId}/`;
+}
+
+/** Extract object key from a public R2 URL, or null. */
+export function r2KeyFromUrl(url) {
+  const base = getR2PublicBase();
+  if (!url || !base) return null;
+  const prefix = `${base}/`;
+  if (!String(url).startsWith(prefix)) return null;
+  return String(url).slice(prefix.length).split('?')[0];
+}
+
+export function isTemplateR2Key(key) {
+  return typeof key === 'string' && key.startsWith('templates/');
+}
+
+/** True when a media entry still points at a template-owned R2 object. */
+export function isTemplateOwnedMediaEntry(entry) {
+  if (!entry) return false;
+  if (isTemplateR2Key(entry.key)) return true;
+  const fromUrl = r2KeyFromUrl(entry.url);
+  return isTemplateR2Key(fromUrl);
+}
+
+/** Drop template-owned refs that must never be treated as project uploads. */
+export function stripTemplateOwnedMedia(preloadedImages = []) {
+  return (preloadedImages || []).filter((entry) => !isTemplateOwnedMediaEntry(entry));
+}
+
+/**
+ * Only allow deletes under an explicit prefix.
+ * Template keys (`templates/…`) are blocked unless allowTemplateKeys=true.
+ */
+export function filterDeletableR2Keys(keys, {
+  allowedPrefix = null,
+  allowTemplateKeys = false,
+} = {}) {
+  const out = [];
+  const skipped = [];
+  for (const raw of keys || []) {
+    const key = String(raw || '').replace(/^\/+/, '');
+    if (!key) continue;
+    if (!allowTemplateKeys && isTemplateR2Key(key)) {
+      skipped.push(key);
+      continue;
+    }
+    if (allowedPrefix && !key.startsWith(allowedPrefix)) {
+      skipped.push(key);
+      continue;
+    }
+    out.push(key);
+  }
+  return { keys: [...new Set(out)], skipped: [...new Set(skipped)] };
+}
+
 // Convert a File or Blob to a base64-encoded string (without the data-URL prefix)
 function toBase64(fileOrBlob) {
   return new Promise((resolve, reject) => {
@@ -66,19 +127,38 @@ export async function uploadImageToR2(file, key) {
 
 /**
  * Delete one or more objects from R2.
+ * By default refuses `templates/…` keys so project cleanup cannot wipe template libraries.
+ * Pass `{ allowTemplateKeys: true }` only for intentional template admin deletes.
+ *
  * @param {string[]} keys
+ * @param {{ allowTemplateKeys?: boolean, allowedPrefix?: string|null }} [options]
  */
-export async function deleteImagesFromR2(keys) {
+export async function deleteImagesFromR2(keys, options = {}) {
+  const { allowTemplateKeys = false, allowedPrefix = null } = options;
   try {
+    const { keys: safeKeys, skipped } = filterDeletableR2Keys(keys, {
+      allowTemplateKeys,
+      allowedPrefix,
+    });
+    if (skipped.length) {
+      console.warn(
+        `🛡️ Blocked R2 delete of ${skipped.length} key(s) outside allowed scope`
+        + (allowTemplateKeys ? '' : ' (templates/ protected)'),
+        skipped.slice(0, 5),
+      );
+    }
+    if (!safeKeys.length) {
+      return { success: true, deleted: 0, skipped: skipped.length };
+    }
     const res = await fetch(`${SERVER_URL}/api/r2/delete`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys }),
+      body: JSON.stringify({ keys: safeKeys, allowTemplateKeys }),
     });
     if (!res.ok) throw await describeNonOk(res, 'R2 delete');
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'Delete failed');
-    return { success: true };
+    return { success: true, deleted: safeKeys.length, skipped: skipped.length };
   } catch (error) {
     console.error('deleteImagesFromR2:', error);
     return { success: false, error: error.message };

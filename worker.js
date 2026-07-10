@@ -278,12 +278,25 @@ async function handleDelete(request, env) {
   const backend = getR2Backend(env);
   if (!backend) return json({ success: false, error: r2NotConfiguredError(env) }, { status: 503 });
 
-  const { keys } = await request.json();
+  const body = await request.json();
+  const { keys, allowTemplateKeys = false } = body || {};
   if (!Array.isArray(keys) || keys.length === 0)
     return json({ success: false, error: '"keys" array is required.' }, { status: 400 });
 
-  await backend.delete(keys);
-  return json({ success: true });
+  const safeKeys = [];
+  let blocked = 0;
+  for (const raw of keys) {
+    const key = String(raw || '').replace(/^\/+/, '');
+    if (!key) continue;
+    if (!allowTemplateKeys && key.startsWith('templates/')) {
+      blocked += 1;
+      continue;
+    }
+    safeKeys.push(key);
+  }
+  if (blocked) console.warn(`R2 delete blocked ${blocked} templates/ key(s)`);
+  if (safeKeys.length) await backend.delete(safeKeys);
+  return json({ success: true, deleted: safeKeys.length, blocked });
 }
 
 // POST /api/r2/copy  — body: { copies: [{ from, to }, ...] }

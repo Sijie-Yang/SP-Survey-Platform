@@ -20,6 +20,7 @@ import {
   listAllProjects, updateProjectAdmin, deleteProjectAdmin,
   seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
 } from '../lib/templateManager';
+import { findDuplicateQuestionNames, repairDuplicateQuestionNames } from '../lib/questionNames';
 import {
   listAllLiveSurveys,
   approveLiveListing,
@@ -508,7 +509,7 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
             keys.push(preannotationKey(templateImagePrefix(template.id), img.name, img.name));
           });
           if (keys.length > 0) {
-            await deleteImagesFromR2(keys);
+            await deleteImagesFromR2(keys, { allowTemplateKeys: true });
           }
           await updateTemplate(template.id, {
             preloaded_images: [],
@@ -846,7 +847,7 @@ function TemplateManagement() {
             try {
               const listed = await listImagesFromR2(templateImagePrefix(id));
               if (listed.success && listed.images.length > 0) {
-                await deleteImagesFromR2(listed.images.map((img) => img.key));
+                await deleteImagesFromR2(listed.images.map((img) => img.key), { allowTemplateKeys: true });
               }
             } catch (cleanupErr) {
               console.warn('Template image cleanup failed:', cleanupErr);
@@ -1360,6 +1361,11 @@ function ProjectSurveyBuilderDialog({ project, open, onClose, onSaved }) {
             onChange={setDraftConfig}
             currentProject={previewProject}
             onNextStep={null}
+            onRepairComplete={async (fixed) => {
+              setDraftConfig(fixed);
+              await updateProjectAdmin(project.id, { survey_config: fixed });
+              onSaved?.();
+            }}
           />
         )}
       </Box>
@@ -1519,7 +1525,11 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
         try {
           const listed = await listImagesFromR2(projectImagePrefix(project));
           if (listed.success && listed.images.length > 0) {
-            await deleteImagesFromR2(listed.images.map((img) => img.key));
+            const prefix = projectImagePrefix(project);
+            await deleteImagesFromR2(
+              listed.images.map((img) => img.key),
+              { allowedPrefix: prefix },
+            );
           }
           await updateProjectAdmin(project.id, {
             preloaded_images: [],
@@ -1695,6 +1705,7 @@ function ProjectOverview() {
   const [imagesOpen, setImagesOpen]       = useState(false);
   const [snack, setSnack]                 = useState({ open: false, msg: '', sev: 'success' });
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [repairingId, setRepairingId]     = useState(null);
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
@@ -1706,6 +1717,63 @@ function ProjectOverview() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const projectsWithDupIds = useMemo(
+    () => projects
+      .map((p) => ({
+        project: p,
+        dups: findDuplicateQuestionNames(p.config),
+      }))
+      .filter((row) => row.dups.length > 0),
+    [projects],
+  );
+
+  const handleRepairDuplicates = (project) => {
+    const dups = findDuplicateQuestionNames(project.config);
+    if (!dups.length) return;
+    const names = dups.map((d) => `"${d.name}"×${d.count}`).join(', ');
+    setConfirmDialog({
+      title: '修复重复题目 ID',
+      message: (
+        <Box>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            项目「{project.name}」存在重复 question id：{names}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            将保留第一次出现的 id，给后续副本自动改名并写入数据库。已收集答卷里写在旧共享 id 下的答案无法自动拆分。
+          </Typography>
+        </Box>
+      ),
+      confirmLabel: '修复并保存',
+      confirmColor: 'warning',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setRepairingId(project.id);
+        try {
+          const { config: fixed, renames, remainingDuplicates } = repairDuplicateQuestionNames(project.config);
+          if (!renames.length) {
+            throw new Error('未能生成任何改名（配置可能异常）。请打开「编辑调查内容」手动改 name。');
+          }
+          if (remainingDuplicates?.length) {
+            throw new Error(`仍有 ${remainingDuplicates.length} 组重复 id，请手动处理：${remainingDuplicates.map((d) => d.name).join(', ')}`);
+          }
+          const result = await updateProjectAdmin(project.id, { survey_config: fixed });
+          // Verify persisted config no longer has duplicates
+          const savedConfig = result.project?.survey_config || fixed;
+          const still = findDuplicateQuestionNames(savedConfig);
+          if (still.length) {
+            throw new Error('数据库返回的配置仍有重复 id，请检查权限或稍后重试。');
+          }
+          showSnack(`已修复并保存 ${renames.length} 个重复 id`);
+          await load();
+        } catch (err) {
+          showSnack(err.message, 'error');
+        } finally {
+          setRepairingId(null);
+        }
+      },
+    });
+  };
 
   const handleDelete = (project) => {
     setConfirmDialog({
@@ -1720,7 +1788,11 @@ function ProjectOverview() {
             try {
               const listed = await listImagesFromR2(projectImagePrefix(project));
               if (listed.success && listed.images.length > 0) {
-                await deleteImagesFromR2(listed.images.map((img) => img.key));
+                const prefix = projectImagePrefix(project);
+                await deleteImagesFromR2(
+                  listed.images.map((img) => img.key),
+                  { allowedPrefix: prefix },
+                );
               }
             } catch (cleanupErr) {
               console.warn('Project image cleanup failed:', cleanupErr);
@@ -1745,6 +1817,25 @@ function ProjectOverview() {
           刷新
         </Button>
       </Stack>
+
+      {projectsWithDupIds.length > 0 && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+            发现 {projectsWithDupIds.length} 个项目存在重复题目 ID
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            同名题目会导致答卷互相覆盖。可在对应行点击「修复重复 ID」。已收数据无法按副本自动拆分。
+          </Typography>
+          {projectsWithDupIds.slice(0, 8).map(({ project, dups }) => (
+            <Typography key={project.id} variant="caption" display="block">
+              • {project.name || project.id}：{dups.map((d) => `${d.name}×${d.count}`).join(', ')}
+            </Typography>
+          ))}
+          {projectsWithDupIds.length > 8 && (
+            <Typography variant="caption">…还有 {projectsWithDupIds.length - 8} 个</Typography>
+          )}
+        </Alert>
+      )}
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -1772,11 +1863,21 @@ function ProjectOverview() {
                   </TableCell>
                 </TableRow>
               )}
-              {projects.map(p => (
+              {projects.map(p => {
+                const dups = findDuplicateQuestionNames(p.config);
+                return (
                 <TableRow key={p.id} hover>
                   <TableCell>
                     <Typography variant="body2" fontWeight={600}>{p.name || '未命名'}</Typography>
                     <Typography variant="caption" color="text.secondary">{p.id}</Typography>
+                    {dups.length > 0 && (
+                      <Chip
+                        size="small"
+                        color="error"
+                        label={`重复ID ${dups.length}`}
+                        sx={{ mt: 0.5 }}
+                      />
+                    )}
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
@@ -1804,6 +1905,19 @@ function ProjectOverview() {
                   </TableCell>
                   <TableCell align="center">
                     <Stack direction="row" spacing={0.5} justifyContent="center">
+                      {dups.length > 0 && (
+                        <Tooltip title="修复重复题目 ID">
+                          <Button
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                            disabled={repairingId === p.id}
+                            onClick={() => handleRepairDuplicates(p)}
+                          >
+                            {repairingId === p.id ? '修复中…' : '修复重复ID'}
+                          </Button>
+                        </Tooltip>
+                      )}
                       <Tooltip title="预览调查">
                         <IconButton size="small" color="primary"
                           onClick={() => { setPreviewTarget(p); setPreviewOpen(true); }}>
@@ -1835,7 +1949,8 @@ function ProjectOverview() {
                     </Stack>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>

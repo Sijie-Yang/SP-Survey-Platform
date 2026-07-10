@@ -54,7 +54,7 @@ import {
   getImagesFromHuggingFace,
   getImageCountFromDataset,
 } from '../../lib/huggingface';
-import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
+import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix, stripTemplateOwnedMedia, r2KeyFromUrl, isTemplateR2Key } from '../../lib/r2';
 import { asyncPool } from '../../lib/asyncPool';
 import { inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT, analyzeMediaGroups, summarizeMediaGroupsBySize, analyzeMediaCategories, downloadMediaFiles } from '../../lib/mediaUtils';
 import { MediaPairingGuide } from './MediaPairingGuide';
@@ -80,6 +80,7 @@ import {
   getTemplateImportHistory,
   mergeTemplateImportHistory,
   formatTemplateImportStatus,
+  formatTemplateImportButtonLabel,
 } from '../../lib/templateImageImport';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -143,9 +144,22 @@ function safeR2Name(name = '') {
 }
 
 function mediaEntryKey(entry, userId, projectId) {
-  if (entry?.key) return entry.key;
-  if (!entry?.name || !projectId) return null;
-  return `${userId}/${projectId}/${safeR2Name(entry.name)}`;
+  const prefix = projectR2Prefix(userId, projectId);
+  if (!prefix) return null;
+
+  // Only delete objects that live under THIS project. Template keys/URLs must
+  // never be deleted from the project media UI.
+  if (entry?.key) {
+    if (entry.key.startsWith(prefix)) return entry.key;
+    if (isTemplateR2Key(entry.key)) return null;
+  }
+  const fromUrl = r2KeyFromUrl(entry?.url);
+  if (fromUrl) {
+    if (fromUrl.startsWith(prefix)) return fromUrl;
+    if (isTemplateR2Key(fromUrl)) return null;
+  }
+  if (!entry?.name) return null;
+  return `${prefix}${safeR2Name(entry.name)}`;
 }
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
@@ -232,6 +246,25 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     type: img.type || inferMediaType(img.name),
   }));
 
+  // Strip accidental template-owned URLs/keys from project media list.
+  // (Legacy bug: create-from-template copied template refs into preloadedImages.)
+  useEffect(() => {
+    const imgs = currentProject?.preloadedImages;
+    if (!imgs?.length || !onProjectUpdate) return;
+    const cleaned = stripTemplateOwnedMedia(imgs);
+    if (cleaned.length === imgs.length) return;
+    console.warn(
+      `Removed ${imgs.length - cleaned.length} template-owned media ref(s) from project ${currentProject.id}`,
+    );
+    onProjectUpdate({
+      ...currentProject,
+      preloadedImages: cleaned,
+      preloadedAt: cleaned.length ? currentProject.preloadedAt : null,
+      preloadedSource: cleaned.length ? currentProject.preloadedSource : null,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject?.id, currentProject?.preloadedImages?.length]);
+
   // Backfill media_id on legacy preloadedImages entries
   useEffect(() => {
     const imgs = currentProject?.preloadedImages;
@@ -307,7 +340,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               .map((entry) => mediaEntryKey(entry, userId, projectId))
               .filter(Boolean);
             if (keys.length) {
-              const del = await deleteImagesFromR2(keys);
+              const del = await deleteImagesFromR2(keys, {
+                allowedPrefix: projectR2Prefix(userId, projectId),
+              });
               if (!del.success) throw new Error(del.error || 'Failed to delete from R2');
             }
           }
@@ -567,17 +602,18 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     return () => { cancelled = true; };
   }, [user?.id, currentProject?.templateId]);
 
-  // Refresh per-template import counts (supports resume after interrupt).
+  // Refresh import progress only for templates the user actually imported
+  // (plus the currently selected one). Do not scan every catalog template —
+  // shared filenames would falsely look like multi-template imports.
   useEffect(() => {
-    const ids = new Set([
-      ...availableTemplates.map((t) => t.id),
-      ...Object.keys(templateImportHistory),
-    ]);
+    const ids = new Set(Object.keys(templateImportHistory));
+    if (selectedTemplateId) ids.add(selectedTemplateId);
     if (ids.size && projectId) refreshTemplateProgress([...ids]);
-  }, [availableTemplates, projectId, currentProject?.preloadedImages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTemplateId, projectId, currentProject?.preloadedImages?.length, Object.keys(templateImportHistory).join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedTemplate = availableTemplates.find((t) => t.id === selectedTemplateId) || null;
   const selectedProgress = templateProgressMap[selectedTemplateId];
+  const selectedImportHistory = templateImportHistory[selectedTemplateId] || null;
 
   // Sync hfConfig from project
   useEffect(() => {
@@ -668,6 +704,24 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       const progress = await computeTemplateImportProgress(template.id, uid, currentProject.id);
       if (progress.error) throw new Error(progress.error);
 
+      // Record that this template import was started (enables Resume after interrupt).
+      // Filename overlap alone is not enough to attribute files to a template.
+      const startHistoryEntry = {
+        templateName: template.name,
+        totalInTemplate: progress.totalInTemplate,
+        importedCount: progress.importedCount,
+        remaining: progress.remaining,
+        isComplete: progress.isComplete,
+        lastImportAt: new Date().toISOString(),
+        lastBatchCopied: 0,
+      };
+      const startConfig = mergeTemplateImportHistory(currentProject, template.id, startHistoryEntry);
+      onProjectUpdate({
+        ...currentProject,
+        imageDatasetConfig: startConfig,
+      });
+      if (onConfigChange) onConfigChange(true, startConfig);
+
       const listed = { success: true, images: progress.templateImages };
       const existing = await listImagesFromR2(projectPrefix);
       if (!existing.success) {
@@ -748,7 +802,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         lastBatchCopied: copiedImages.length,
       };
 
-      const updatedImageDatasetConfig = mergeTemplateImportHistory(currentProject, template.id, historyEntry);
+      const updatedImageDatasetConfig = mergeTemplateImportHistory(
+        { ...currentProject, imageDatasetConfig: startConfig },
+        template.id,
+        historyEntry,
+      );
 
       onProjectUpdate({
         ...currentProject,
@@ -1089,10 +1147,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           try {
             const uid = user?.id || 'anonymous';
             const pid = currentProject.id;
-            const listResult = await listImagesFromR2(`${uid}/${pid}`);
+            const prefix = projectR2Prefix(uid, pid);
+            const listResult = await listImagesFromR2(prefix);
             if (listResult.success && listResult.images.length > 0) {
-              const keys = listResult.images.map((img) => img.key);
-              await deleteImagesFromR2(keys);
+              const keys = listResult.images
+                .map((img) => img.key)
+                .filter((key) => key && key.startsWith(prefix));
+              await deleteImagesFromR2(keys, { allowedPrefix: prefix });
             }
           } catch (e) {
             console.error('Error clearing images from R2:', e);
@@ -1346,28 +1407,24 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             files already in your project folder are skipped automatically so interrupted imports can be resumed.
           </Typography>
 
-          {/* Import history — templates with progress or past imports */}
+          {/* Import history — only templates the user actually imported */}
           {(() => {
-            const historyIds = [...new Set([
-              ...Object.keys(templateImportHistory),
-              ...availableTemplates.map((t) => t.id),
-            ])].filter((tid) => {
+            const historyIds = Object.keys(templateImportHistory).filter((tid) => {
               const hist = templateImportHistory[tid];
-              const live = templateProgressMap[tid];
-              const imported = live?.importedCount ?? hist?.importedCount ?? 0;
-              return imported > 0 || hist?.lastImportAt;
+              return Boolean(hist?.lastImportAt);
             });
             if (historyIds.length === 0) return null;
             const totalImportedFiles = historyIds.reduce((sum, tid) => {
               const live = templateProgressMap[tid];
               const hist = templateImportHistory[tid];
+              // Prefer live overlap for the templates we know were imported.
               return sum + (live?.importedCount ?? hist?.importedCount ?? 0);
             }, 0);
             return (
               <>
                 <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>{historyIds.length}</strong> template{historyIds.length === 1 ? '' : 's'} with imports ·{' '}
-                  <strong>{totalImportedFiles}</strong> template file{totalImportedFiles === 1 ? '' : 's'} in this project
+                  <strong>{historyIds.length}</strong> template{historyIds.length === 1 ? '' : 's'} imported ·{' '}
+                  <strong>{totalImportedFiles}</strong> matching file{totalImportedFiles === 1 ? '' : 's'} in this project
                 </Typography>
                 <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, maxHeight: 280 }}>
                   <Table size="small" stickyHeader>
@@ -1409,7 +1466,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                               ) : remaining > 0 ? (
                                 <Chip size="small" color="warning" label={`${remaining} remaining`} />
                               ) : (
-                                <Chip size="small" variant="outlined" label="In progress" />
+                                <Chip size="small" variant="outlined" label="Started" />
                               )}
                             </TableCell>
                             <TableCell>
@@ -1462,7 +1519,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                 >
                   {availableTemplates.map((t) => {
                     const live = templateProgressMap[t.id];
-                    const status = formatTemplateImportStatus(live) || `${t.preloadedImages?.length || 0} in catalog`;
+                    const hist = templateImportHistory[t.id];
+                    const status = formatTemplateImportStatus(live, hist)
+                      || `${t.preloadedImages?.length || 0} in catalog`;
                     return (
                       <MenuItem key={t.id} value={t.id}>
                         {t.name} ({status})
@@ -1471,7 +1530,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   })}
                 </Select>
               </FormControl>
-              {selectedTemplate && selectedProgress && !selectedProgress.isComplete && selectedProgress.remaining > 0 && (
+              {selectedImportHistory && selectedProgress && !selectedProgress.isComplete && selectedProgress.remaining > 0 && (
                 <Typography variant="caption" color="text.secondary">
                   {selectedProgress.importedCount}/{selectedProgress.totalInTemplate} already in project ·{' '}
                   {selectedProgress.remaining} left to copy
@@ -1529,13 +1588,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               disabled={templateImportStatus.loading || !selectedTemplateId}
               startIcon={templateImportStatus.loading ? <CircularProgress size={18} color="inherit" /> : <ContentCopy />}
             >
-              {templateImportStatus.loading
-                ? 'Importing…'
-                : selectedProgress?.remaining > 0
-                  ? `Resume import (${selectedProgress.remaining} remaining)`
-                  : selectedProgress?.isComplete
-                    ? 'Re-check template (all copied)'
-                    : 'Import from selected template'}
+              {formatTemplateImportButtonLabel(selectedProgress, selectedImportHistory, {
+                loading: templateImportStatus.loading,
+              })}
             </Button>
           )}
         </Box>

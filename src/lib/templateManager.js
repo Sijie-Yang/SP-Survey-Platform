@@ -384,7 +384,7 @@ export async function renameTemplateId(oldId, newId, updates = {}, onProgress) {
       report('正在删除旧路径图片…', 0, total);
       for (let i = 0; i < keys.length; i += BATCH_SIZE) {
         const batch = keys.slice(i, i + BATCH_SIZE);
-        const deleteResult = await deleteImagesFromR2(batch);
+        const deleteResult = await deleteImagesFromR2(batch, { allowTemplateKeys: true });
         if (!deleteResult.success) {
           throw new Error(deleteResult.error || 'Failed to remove old template image folder');
         }
@@ -478,6 +478,8 @@ export async function listAllProjects() {
 
 /**
  * Admin: update any fields on a project without changing ownership.
+ * Always .select() so RLS/no-op updates surface as errors (Supabase otherwise
+ * returns success with 0 rows).
  */
 export async function updateProjectAdmin(id, updates) {
   if (!supabase) throw new Error('Supabase not configured');
@@ -489,9 +491,19 @@ export async function updateProjectAdmin(id, updates) {
   if ('preloaded_at'     in updates) row.preloaded_at      = updates.preloaded_at;
   if ('preloaded_source' in updates) row.preloaded_source  = updates.preloaded_source;
 
-  const { error } = await supabase.from('projects').update(row).eq('id', id);
+  const { data, error } = await supabase
+    .from('projects')
+    .update(row)
+    .eq('id', id)
+    .select('id, survey_config')
+    .maybeSingle();
   if (error) throw error;
-  return { success: true };
+  if (!data?.id) {
+    throw new Error(
+      '保存失败：没有更新到任何项目行（可能是管理员 RLS 未允许更新他人项目）。请检查 Supabase projects 表的 UPDATE 策略。',
+    );
+  }
+  return { success: true, project: data };
 }
 
 /**
@@ -690,18 +702,26 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
 
 /**
  * Check whether the current authenticated user is an admin.
- * Two-layer check:
- *   1. Frontend gate: email in REACT_APP_ADMIN_EMAILS env var
- *   2. (Rely on Supabase RLS for actual DB enforcement)
+ * 1) Supabase `admins` table (source of truth for RLS)
+ * 2) Fallback: REACT_APP_ADMIN_EMAILS env allowlist (UI gate only)
  */
 export async function checkIsAdmin() {
   if (!supabase) return false;
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
+
+    // Prefer DB registry — matches RLS is_platform_admin()
+    const { data: adminRow } = await supabase
+      .from('admins')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (adminRow?.user_id) return true;
+
     const adminEmails = (process.env.REACT_APP_ADMIN_EMAILS || '')
       .split(',')
-      .map(e => e.trim())
+      .map((e) => e.trim())
       .filter(Boolean);
     return adminEmails.includes(user.email);
   } catch {

@@ -24,11 +24,21 @@ export function mergeTemplateImportHistory(project, templateId, entry) {
 
 /**
  * Compare template R2 folder vs project folder by filename.
- * Supports resume: already-copied files count as imported.
+ * Used to skip already-copied files when importing/resuming ONE template.
+ * Do NOT treat filename overlap as proof that other templates were imported —
+ * many templates share the same streetscape filenames.
  */
 export async function computeTemplateImportProgress(templateId, userId, projectId) {
   if (!templateId || !projectId) {
-    return { totalInTemplate: 0, importedCount: 0, remaining: 0, isComplete: true, templateImages: [], error: null };
+    return {
+      totalInTemplate: 0,
+      importedCount: 0,
+      remaining: 0,
+      isComplete: false,
+      hasStarted: false,
+      templateImages: [],
+      error: null,
+    };
   }
   const templatePrefix = `templates/${templateId}/`;
   const projectPrefix = `${userId}/${projectId}/`;
@@ -44,6 +54,7 @@ export async function computeTemplateImportProgress(templateId, userId, projectI
       importedCount: 0,
       remaining: 0,
       isComplete: false,
+      hasStarted: false,
       templateImages: [],
       error: listed.error || 'Failed to list template images',
     };
@@ -54,12 +65,15 @@ export async function computeTemplateImportProgress(templateId, userId, projectI
   const importedCount = templateImages.filter((img) => existingNames.has(img.name)).length;
   const totalInTemplate = templateImages.length;
   const remaining = Math.max(0, totalInTemplate - importedCount);
+  const hasStarted = importedCount > 0;
 
   return {
     totalInTemplate,
     importedCount,
     remaining,
-    isComplete: totalInTemplate === 0 || remaining === 0,
+    // Empty template folder is not "complete import" — nothing to copy.
+    isComplete: totalInTemplate > 0 && remaining === 0,
+    hasStarted,
     templateImages,
     existingNames,
     error: null,
@@ -94,9 +108,40 @@ export function mergeCopiedIntoProjectImages(existingImages, copiedImages, r2Pub
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function formatTemplateImportStatus(progress) {
-  if (!progress) return '';
-  if (progress.totalInTemplate === 0) return 'No images in template folder';
-  if (progress.isComplete) return `Complete (${progress.importedCount}/${progress.totalInTemplate})`;
-  return `${progress.importedCount}/${progress.totalInTemplate} imported · ${progress.remaining} remaining`;
+/**
+ * Label for the template picker.
+ * @param {object|null} progress - live R2 filename overlap
+ * @param {object|null} historyEntry - explicit import history for this template
+ */
+export function formatTemplateImportStatus(progress, historyEntry = null) {
+  const catalog = progress?.totalInTemplate;
+  if (historyEntry?.lastImportAt) {
+    if (progress?.isComplete) {
+      return `Imported (${progress.importedCount}/${progress.totalInTemplate})`;
+    }
+    if (progress?.hasStarted) {
+      return `${progress.importedCount}/${progress.totalInTemplate} imported · ${progress.remaining} left`;
+    }
+    return historyEntry.isComplete
+      ? `Imported (${historyEntry.importedCount}/${historyEntry.totalInTemplate})`
+      : `${historyEntry.importedCount || 0}/${historyEntry.totalInTemplate || catalog || '?'} imported`;
+  }
+  if (catalog === 0) return 'No images in template folder';
+  if (typeof catalog === 'number') return `${catalog} in catalog`;
+  return '';
+}
+
+/** Primary CTA label for the import button. */
+export function formatTemplateImportButtonLabel(progress, historyEntry = null, { loading = false } = {}) {
+  if (loading) return 'Importing…';
+  const hasHistory = Boolean(historyEntry?.lastImportAt);
+  // Only history proves this template was imported. Shared filenames across
+  // templates must not flip a fresh pick into Resume / Re-check.
+  if (hasHistory && progress?.remaining > 0) {
+    return `Resume import (${progress.remaining} remaining)`;
+  }
+  if (hasHistory && (progress?.isComplete || historyEntry?.isComplete)) {
+    return 'Re-check template (all copied)';
+  }
+  return 'Import from selected template';
 }

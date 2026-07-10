@@ -2367,23 +2367,40 @@ app.get('/api/r2/list', async (req, res) => {
   }
 });
 
-// DELETE /api/r2/delete  – body: { keys: string[] }
+// DELETE /api/r2/delete  – body: { keys: string[], allowTemplateKeys?: boolean }
 app.delete('/api/r2/delete', async (req, res) => {
   try {
     if (!isR2Configured()) {
       return res.status(503).json({ success: false, error: 'Cloudflare R2 is not configured on the server.' });
     }
-    const { keys } = req.body;
+    const { keys, allowTemplateKeys = false } = req.body || {};
     if (!keys || !keys.length) {
       return res.status(400).json({ success: false, error: '"keys" array is required.' });
+    }
+    const safeKeys = [];
+    const blocked = [];
+    for (const raw of keys) {
+      const key = String(raw || '').replace(/^\/+/, '');
+      if (!key) continue;
+      if (!allowTemplateKeys && key.startsWith('templates/')) {
+        blocked.push(key);
+        continue;
+      }
+      safeKeys.push(key);
+    }
+    if (blocked.length) {
+      console.warn(`🛡️ R2 delete blocked ${blocked.length} templates/ key(s)`);
+    }
+    if (!safeKeys.length) {
+      return res.json({ success: true, deleted: 0, blocked: blocked.length });
     }
     const r2 = createR2Client();
     await r2.send(new DeleteObjectsCommand({
       Bucket: r2BucketName,
-      Delete: { Objects: keys.map(k => ({ Key: k })) },
+      Delete: { Objects: safeKeys.map(k => ({ Key: k })) },
     }));
-    console.log(`🗑️  R2 deleted ${keys.length} object(s)`);
-    res.json({ success: true });
+    console.log(`🗑️  R2 deleted ${safeKeys.length} object(s)`);
+    res.json({ success: true, deleted: safeKeys.length, blocked: blocked.length });
   } catch (error) {
     console.error('R2 delete error:', error);
     res.status(500).json({ success: false, error: error.message });
