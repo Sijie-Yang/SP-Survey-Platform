@@ -56,7 +56,7 @@ export default function SkillEditorPage() {
       const count = previewConfig.mediaCount || 1;
       const mediaType = previewConfig.mediaType || 'image';
       const picked = pickPreviewMedia(pool, mediaType, count);
-      setPreviewImages(picked.length ? picked : (previewConfig.demoImages || []));
+      setPreviewImages(picked);
     })();
     return () => { cancelled = true; };
   }, [previewConfig]);
@@ -254,7 +254,10 @@ export default function SkillEditorPage() {
               readOnly
             />
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              Preview uses skill-preview library media when available, otherwise demo images.
+              Preview uses the admin skill-preview media library.
+              {previewImages.length === 0
+                ? ' No matching media found — add files under Admin → Skill Preview Media.'
+                : ''}
             </Typography>
           </Paper>
           <Stack direction="row" spacing={2}>

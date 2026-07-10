@@ -6,7 +6,7 @@ import {
   buildMediaByCategory, getMediaCategories, parseMediaCategory, summarizeMediaGroupsBySize,
 } from './mediaUtils';
 import { getSkillById } from './skillManager';
-import { buildFallbackDemoImages, getPresetSkill } from './presetSkills';
+import { getPresetSkill } from './presetSkills';
 
 /** Build justified image gallery HTML (same layout as imagerating panels). */
 export function buildImageGalleryHtml(selectedImages) {
@@ -33,7 +33,7 @@ function skillFromPreset(skillId) {
 
 export const RANDOM_MEDIA_TYPES = new Set([
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix',
-  'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation',
+  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation',
   'imageslidergroup', 'imagepointallocation',
 ]);
 
@@ -45,16 +45,54 @@ export function isRandomMediaQuestion(element) {
   return RANDOM_MEDIA_TYPES.has(element.type) || isSkillMediaQuestion(element);
 }
 
+export function isCuratedMediaMode(element) {
+  return element?.imageSelectionMode === 'huggingface_manual'
+    || element?.imageSelectionMode === 'manual';
+}
+
 /** Media display/rating types inject from project pool unless explicitly disabled. */
 export function shouldInjectMedia(element) {
   if (!isRandomMediaQuestion(element)) return false;
-  if (element.imageSelectionMode === 'huggingface_manual' || element.imageSelectionMode === 'manual') {
+  if (isCuratedMediaMode(element)) {
     return false;
   }
   if (['mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation'].includes(element.type)) {
     return element.randomImageSelection !== false;
   }
   return !!element.randomImageSelection;
+}
+
+/** Resolve curated selectedImageUrls against the project pool (or bare URLs). */
+export function resolveCuratedImages(element, projectImages = []) {
+  const urls = Array.isArray(element?.selectedImageUrls) ? element.selectedImageUrls : [];
+  if (!urls.length) return [];
+  const byUrl = new Map((projectImages || []).map((img) => [img.url, img]));
+  return urls.map((url) => {
+    const found = byUrl.get(url);
+    if (found) return normalizeMediaEntry(found);
+    const name = String(url).split('?')[0].split('/').pop() || url;
+    return normalizeMediaEntry({ url, name });
+  }).filter((m) => m?.url);
+}
+
+/**
+ * Apply curated list media at runtime/preview when random injection is skipped.
+ * Returns true when media was applied from selectedImageUrls.
+ */
+export function applyCuratedMediaIfNeeded(element, projectImages = []) {
+  if (!element || !isCuratedMediaMode(element)) return false;
+  // imagepicker / imageranking / mediaranking already persist choices on save
+  if (
+    (element.type === 'imagepicker' || element.type === 'imageranking' || element.type === 'mediaranking')
+    && Array.isArray(element.choices)
+    && element.choices.length > 0
+  ) {
+    return false;
+  }
+  const images = resolveCuratedImages(element, projectImages);
+  if (!images.length) return false;
+  applyMediaToElement(element, images);
+  return true;
 }
 
 function toPlainArray(maybeArray) {
@@ -124,7 +162,7 @@ export function getMediaTypeFilter(element) {
     return element.skillConfig?.mediaType || 'image';
   }
   if (element.type === 'imageannotation') return 'image';
-  if (['mediadisplay', 'mediarating', 'mediaboolean'].includes(element.type)) {
+  if (['mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking'].includes(element.type)) {
     return element.mediaType || 'any';
   }
   if (['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
@@ -409,25 +447,19 @@ export function applyMediaToElement(element, selectedImages) {
   if (!element.imageFit) element.imageFit = 'contain';
 }
 
-/** Fill skillImages from skillConfig.demoImages or built-in fallbacks. */
+/**
+ * Ensure skillConfig carries skillId. Media comes from project injection or
+ * the admin skill-preview library in builder previews — no SVG demos.
+ */
 export function ensureSkillDemoMedia(element) {
   if (element.type !== 'skillquestion') return;
-  if (element.skillImages?.length) return;
-
   const cfg = { ...(element.skillConfig || {}) };
   if (element.skillId) cfg.skillId = element.skillId;
-
-  let demos = cfg.demoImages;
-  if (!demos?.length) {
-    demos = buildFallbackDemoImages(
-      element.imageCount || cfg.mediaCount || 1,
-      cfg.mediaType || 'image',
-      element.skillId,
-    );
+  // Drop legacy embedded SVG demoImages if present
+  if (cfg.demoImages) {
+    delete cfg.demoImages;
   }
-
-  element.skillImages = demos.map((entry) => normalizeMediaEntry(entry)).filter(Boolean);
-  element.skillConfig = { ...cfg, demoImages: demos };
+  element.skillConfig = cfg;
 }
 
 /** Resolve skillquestion elements: merge skill metadata + demo media. */
@@ -442,9 +474,7 @@ export async function resolveSkillQuestions(surveyJson) {
       if (skill) {
         el.skillHtml = skill.sourceHtml || el.skillHtml;
         const merged = { ...(skill.defaultConfig || {}), ...(el.skillConfig || {}) };
-        if (skill.defaultConfig?.demoImages?.length) {
-          merged.demoImages = skill.defaultConfig.demoImages;
-        }
+        delete merged.demoImages;
         el.skillConfig = merged;
       } else if (!el.skillHtml && el.skillId?.startsWith('preset_')) {
         const preset = skillFromPreset(el.skillId);

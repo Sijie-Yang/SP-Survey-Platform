@@ -6,7 +6,7 @@
 const MEDIA_TYPES = new Set([
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix',
   'image', 'imageslidergroup', 'imagepointallocation',
-  'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation',
+  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation',
   'skillquestion',
 ]);
 
@@ -48,7 +48,7 @@ export function getQuestionMediaConstraints(type, question = {}) {
       countLabel: 'Always 2 media files (before / after)',
       countAdjustable: false,
       defaultCount: 2,
-      samplingModes: false,
+      samplingModes: true,
       mediaAssignment: true,
     };
   }
@@ -62,6 +62,11 @@ export function getQuestionMediaConstraints(type, question = {}) {
     imageranking: {
       countMin: 2, countMax: 10, defaultCount: 4,
       countLabel: 'Images to rank',
+      samplingModes: true,
+    },
+    mediaranking: {
+      countMin: 2, countMax: 10, defaultCount: 4,
+      countLabel: 'Media files to rank',
       samplingModes: true,
     },
     imagerating: {
@@ -97,22 +102,22 @@ export function getQuestionMediaConstraints(type, question = {}) {
     mediadisplay: {
       countMin: 1, countMax: 6, defaultCount: 1,
       countLabel: 'Media files shown',
-      samplingModes: false,
+      samplingModes: true,
     },
     mediarating: {
       countMin: 1, countMax: 6, defaultCount: 1,
       countLabel: 'Media files shown',
-      samplingModes: false,
+      samplingModes: true,
     },
     mediaboolean: {
       countMin: 1, countMax: 6, defaultCount: 1,
       countLabel: 'Media files shown',
-      samplingModes: false,
+      samplingModes: true,
     },
     imageannotation: {
       countFixed: 1,
       countLabel: 'Always 1 image to annotate',
-      samplingModes: false,
+      samplingModes: true,
     },
   };
 
@@ -141,4 +146,14 @@ export function clampQuestionImageCount(type, question, rawCount) {
 
 export function isMediaStimulusQuestion(type) {
   return MEDIA_TYPES.has(type) && type !== 'skillquestion';
+}
+
+/** True when the editor should show stimulus sampling controls (card 1). */
+export function usesStimulusSampling(type, question = {}) {
+  if (type === 'skillquestion') return true;
+  return getQuestionMediaConstraints(type, question).hasStimuli;
+}
+
+export function isCuratedSelectionMode(mode) {
+  return mode === 'huggingface_manual' || mode === 'manual';
 }

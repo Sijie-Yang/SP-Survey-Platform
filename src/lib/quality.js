@@ -10,6 +10,32 @@ export function getAttentionCheckQuestions(surveyConfig) {
   );
 }
 
+/**
+ * Per-question attention-check pass rate among respondents who answered.
+ * @returns {{ answered: number, passed: number, failed: number, passRate: number|null }}
+ */
+export function attentionCheckQuestionStats(question, responses = []) {
+  if (!question?.isAttentionCheck || question.expectedAnswer == null
+    || String(question.expectedAnswer).trim() === '') {
+    return { answered: 0, passed: 0, failed: 0, passRate: null };
+  }
+  let answered = 0;
+  let passed = 0;
+  for (const row of responses) {
+    const raw = extractAnswer(row.responses?.[question.name]);
+    if (raw === null || raw === undefined || raw === '') continue;
+    answered += 1;
+    if (answersMatch(raw, question.expectedAnswer, question.type)) passed += 1;
+  }
+  const failed = answered - passed;
+  return {
+    answered,
+    passed,
+    failed,
+    passRate: answered > 0 ? passed / answered : null,
+  };
+}
+
 function extractAnswer(qData) {
   if (qData === null || qData === undefined) return null;
   if (typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) return qData.answer;
@@ -89,11 +115,19 @@ export function checkStraightLiningFlags(response, surveyConfig) {
       // single rating — skip
       continue;
     }
-    if (q.type === 'matrix' && typeof raw === 'object' && !Array.isArray(raw)) {
+    if (
+      (q.type === 'matrix' || q.type === 'imagematrix')
+      && typeof raw === 'object'
+      && !Array.isArray(raw)
+    ) {
       const rowVals = Object.values(raw);
       if (isStraightLineValues(rowVals)) flags.push('straight_lining');
     }
-    if (q.type === 'slidergroup' && typeof raw === 'object' && !Array.isArray(raw)) {
+    if (
+      (q.type === 'slidergroup' || q.type === 'imageslidergroup')
+      && typeof raw === 'object'
+      && !Array.isArray(raw)
+    ) {
       const vals = Object.values(raw);
       if (isStraightLineValues(vals)) flags.push('straight_lining');
     }

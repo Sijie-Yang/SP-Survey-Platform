@@ -35,22 +35,53 @@ import {
   Search,
 } from '@mui/icons-material';
 import { listSkillsForBuilder } from '../../lib/skillManager';
-import { filterPoolForQuestion, getMediaPoolStatus } from '../../lib/surveyMediaInjection';
+import {
+  filterPoolForQuestion,
+  getMediaPoolStatus,
+  applyMediaToElement,
+} from '../../lib/surveyMediaInjection';
 import { getMediaCategories } from '../../lib/mediaUtils';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
 import SkillQuestionFrame from '../SkillQuestionWidget';
 import {
-  buildFallbackDemoImages,
   getSkillMediaConstraints,
   getPresetBuilderTypeOptions,
   resolveBuilderSkill,
 } from '../../lib/presetSkills';
+import { listSkillPreviewMedia, pickPreviewMedia } from '../../lib/skillPreviewMedia';
 import {
   getQuestionMediaConstraints,
   clampQuestionImageCount,
+  isMediaStimulusQuestion,
+  isCuratedSelectionMode,
 } from '../../lib/questionTypeConstraints';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
+import QuestionParticipantPreview from './QuestionParticipantPreview';
+
+const CURATED_STIMULUS_TYPES = [
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix',
+  'image', 'imageslidergroup', 'imagepointallocation',
+  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation',
+];
+
+function SettingsSection({ step, title, hint, children }) {
+  return (
+    <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
+        {step != null ? `${step}. ${title}` : title}
+      </Typography>
+      {hint && (
+        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
+          {hint}
+        </Typography>
+      )}
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {children}
+      </Box>
+    </Box>
+  );
+}
 
 function mediaDisplayName(image) {
   if (!image) return '(unnamed)';
@@ -188,8 +219,8 @@ function CuratedMediaPicker({
 }
 
 /** Random vs curated sampling — wording matches project media pool. */
-function SamplingModeSelect({ question, onChange }) {
-  const mode = question.imageSelectionMode === 'huggingface_manual' || question.imageSelectionMode === 'manual'
+function SamplingModeSelect({ question, onQuestionPatch }) {
+  const mode = isCuratedSelectionMode(question.imageSelectionMode)
     ? 'huggingface_manual'
     : 'huggingface_random';
   return (
@@ -197,7 +228,13 @@ function SamplingModeSelect({ question, onChange }) {
       <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>How stimuli are chosen</InputLabel>
       <Select
         value={mode}
-        onChange={(e) => onChange('imageSelectionMode', e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          onQuestionPatch({
+            imageSelectionMode: next,
+            randomImageSelection: next === 'huggingface_random',
+          });
+        }}
         label="How stimuli are chosen"
       >
         <MenuItem value="huggingface_random">Random from project media pool</MenuItem>
@@ -238,7 +275,7 @@ function StimulusCountField({ question, onChange, constraints }) {
 }
 
 function AttentionCheckFields({ question, onChange }) {
-  const supported = ['rating', 'radiogroup', 'imagepicker'].includes(question.type);
+  const supported = ['rating', 'radiogroup', 'dropdown', 'boolean', 'imagepicker'].includes(question.type);
   if (!supported) return null;
   return (
     <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
@@ -265,7 +302,9 @@ function AttentionCheckFields({ question, onChange }) {
           helperText={
             question.type === 'imagepicker'
               ? 'Filename or choice value the participant must select (checked in analysis, not blocked at submit)'
-              : 'Exact value the participant must select (checked in analysis, not blocked at submit)'
+              : question.type === 'boolean'
+                ? 'Use true or false (or the Yes/No label text as stored — usually true/false)'
+                : 'Exact choice value the participant must select (checked in analysis, not blocked at submit)'
           }
         />
       )}
@@ -449,9 +488,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const [loadingImages, setLoadingImages] = useState(false);
   const [imageError, setImageError] = useState(null);
   const [builderSkills, setBuilderSkills] = useState([]);
+  const [skillPreviewPool, setSkillPreviewPool] = useState([]);
 
   useEffect(() => {
     listSkillsForBuilder().then(setBuilderSkills);
+  }, []);
+
+  useEffect(() => {
+    listSkillPreviewMedia().then(setSkillPreviewPool).catch(() => setSkillPreviewPool([]));
   }, []);
 
   const presetTypeOptions = getPresetBuilderTypeOptions();
@@ -471,14 +515,18 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const questionTypes = [
     { value: 'text', label: 'Text Input', group: 'text' },
     { value: 'comment', label: 'Text Multi-line Input', group: 'text' },
+    { value: 'number', label: 'Text Number', group: 'text' },
     { value: 'radiogroup', label: 'Text Single Choice', group: 'text' },
     { value: 'checkbox', label: 'Text Multiple Choice', group: 'text' },
     { value: 'ranking', label: 'Text Ranking', group: 'text' },
     { value: 'rating', label: 'Text Rating Scale', group: 'text' },
     { value: 'boolean', label: 'Text Yes/No', group: 'text' },
     { value: 'dropdown', label: 'Text Dropdown', group: 'text' },
-    { value: 'matrix', label: 'Matrix', group: 'text' },
+    { value: 'matrix', label: 'Text Matrix', group: 'text' },
     { value: 'expression', label: 'Text Instruction', group: 'text' },
+    { value: 'consent', label: 'Text Consent', group: 'text' },
+    { value: 'slidergroup', label: 'Text Slider Group', group: 'text' },
+    { value: 'pointallocation', label: 'Text Point Allocation', group: 'text' },
     { value: 'imagepicker', label: 'Image Choice', group: 'image' },
     { value: 'imageranking', label: 'Image Ranking', group: 'image' },
     { value: 'imagerating', label: 'Image Rating Scale', group: 'image' },
@@ -491,9 +539,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     { value: 'mediadisplay', label: 'Media Display (image / video / audio)', group: 'media' },
     { value: 'mediarating', label: 'Media Rating Scale', group: 'media' },
     { value: 'mediaboolean', label: 'Media Yes/No', group: 'media' },
-    { value: 'slidergroup', label: 'Slider Group (Semantic Differential)', group: 'structured' },
-    { value: 'pointallocation', label: 'Point Allocation (Budget)', group: 'structured' },
-    // Built-in perception tasks — first-class types (not labeled "Skill")
+    { value: 'mediaranking', label: 'Media Ranking', group: 'media' },
+    // Built-in interactive questions — first-class types (not labeled "Skill")
     ...presetTypeOptions,
     // Advanced: blank custom HTML skill + user/library skills
     {
@@ -508,8 +555,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     { id: 'text', label: 'Text & choice' },
     { id: 'image', label: 'Image questions' },
     { id: 'media', label: 'Media questions' },
-    { id: 'structured', label: 'Structured scales' },
-    { id: 'perception', label: 'Perception tasks (ready to use)' },
+    { id: 'perception', label: 'Interactive questions' },
     { id: 'advanced', label: 'Advanced · custom tasks' },
   ];
 
@@ -549,7 +595,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         updates.excludePreviouslyUsedImages = true;
         updates.imageCount = lockedCount;
         if (!editedQuestion.title || editedQuestion.title === 'New Question') {
-          updates.title = skill?.builderLabel || skill?.name || 'Perception task';
+          updates.title = skill?.builderLabel || skill?.name || 'Interactive question';
         }
         return setEditedQuestion({ ...editedQuestion, ...updates });
       }
@@ -582,6 +628,27 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           updates.allowedTools = ['point', 'line', 'region'];
           if (editedQuestion.minAnnotations == null) updates.minAnnotations = 0;
           if (editedQuestion.maxAnnotations == null) updates.maxAnnotations = 50;
+        }
+      }
+      else if (value === 'mediaranking') {
+        if (!editedQuestion.imageCount) updates.imageCount = 4;
+        updates.imageSelectionMode = 'huggingface_random';
+        updates.randomImageSelection = true;
+        updates.excludePreviouslyUsedImages = true;
+        updates.mediaType = editedQuestion.mediaType || 'any';
+        updates.choices = updates.choices || [];
+      }
+      else if (value === 'number') {
+        updates.inputType = 'number';
+        if (editedQuestion.min == null) updates.min = 0;
+        if (editedQuestion.max == null) updates.max = 100;
+      }
+      else if (value === 'consent') {
+        updates.isRequired = true;
+        updates.labelTrue = editedQuestion.labelTrue || 'I agree / I consent';
+        updates.labelFalse = editedQuestion.labelFalse || 'I do not agree';
+        if (!editedQuestion.title || editedQuestion.title === 'New Question') {
+          updates.title = 'I have read and agree to participate in this study.';
         }
       }
       else if (value === 'slidergroup') {
@@ -689,49 +756,43 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   };
 
   const needsChoices = ['radiogroup', 'checkbox', 'dropdown', 'ranking', 'pointallocation', 'imagepointallocation'].includes(editedQuestion.type);
-  const isImageQuestion = ['imagepicker', 'image', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type);
+  const isStimulusQuestion = isMediaStimulusQuestion(editedQuestion.type)
+    || (editedQuestion.type === 'skillquestion' && !!editedQuestion.skillId);
+  const mediaConstraints = getQuestionMediaConstraints(editedQuestion.type, editedQuestion);
   const isRankingQuestion = editedQuestion.type === 'ranking';
-  const isImageRankingQuestion = editedQuestion.type === 'imageranking';
+  const isCuratedMode = isCuratedSelectionMode(editedQuestion.imageSelectionMode);
 
-  // Load images from Hugging Face when image questions are selected and in manual mode
+  // Load curated picker options for all stimulus types (project pool first)
   useEffect(() => {
-    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'];
-    const isCurated = editedQuestion.imageSelectionMode === 'huggingface_manual'
-      || editedQuestion.imageSelectionMode === 'manual';
-    if (imageQuestionTypes.includes(editedQuestion.type) && isCurated) {
+    if (CURATED_STIMULUS_TYPES.includes(editedQuestion.type) && isCuratedMode) {
       loadImages();
     }
   }, [editedQuestion.type, editedQuestion.imageSelectionMode, currentProject?.preloadedImages]);
 
   // Initialize selected images from existing question data
   useEffect(() => {
-    if ((editedQuestion.type === 'imagepicker' || editedQuestion.type === 'imageranking' || editedQuestion.type === 'imagerating' || editedQuestion.type === 'imageboolean' || editedQuestion.type === 'image' || editedQuestion.type === 'imagematrix' || editedQuestion.type === 'imageslidergroup' || editedQuestion.type === 'imagepointallocation') && editedQuestion.selectedImageUrls) {
+    if (CURATED_STIMULUS_TYPES.includes(editedQuestion.type) && editedQuestion.selectedImageUrls) {
       setSelectedImages(editedQuestion.selectedImageUrls);
     }
   }, [editedQuestion.type]);
 
-  // ✅ Auto-initialize image questions with random selection mode if not set
+  // Auto-initialize stimulus questions with random selection mode if not set
   useEffect(() => {
-    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'];
-    
-    if (imageQuestionTypes.includes(editedQuestion.type)) {
-      // Check if imageSelectionMode is missing or undefined
+    if (CURATED_STIMULUS_TYPES.includes(editedQuestion.type)) {
       if (!editedQuestion.imageSelectionMode) {
-        console.log('🔧 Auto-setting imageSelectionMode to huggingface_random for', editedQuestion.type);
-        setEditedQuestion(prev => ({
+        setEditedQuestion((prev) => ({
           ...prev,
           imageSelectionMode: 'huggingface_random',
           randomImageSelection: true,
           excludePreviouslyUsedImages: true,
-          choices: prev.choices || []
+          choices: prev.choices || [],
         }));
       }
     }
   }, [editedQuestion.type]);
 
   const loadImages = async () => {
-    if (editedQuestion.imageSelectionMode !== 'huggingface_manual'
-      && editedQuestion.imageSelectionMode !== 'manual') {
+    if (!isCuratedSelectionMode(editedQuestion.imageSelectionMode)) {
       return;
     }
     // Curated list: pick from project-uploaded media (Image Dataset).
@@ -889,25 +950,9 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               />
 
-              {['mediadisplay', 'mediarating', 'mediaboolean'].includes(editedQuestion.type) && (
-                <FormControl fullWidth variant="outlined">
-                  <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media Type Filter</InputLabel>
-                  <Select
-                    value={editedQuestion.mediaType || 'any'}
-                    label="Media Type Filter"
-                    onChange={(e) => handleQuestionChange('mediaType', e.target.value)}
-                  >
-                    <MenuItem value="any">Any (image/video/audio)</MenuItem>
-                    <MenuItem value="image">Image only</MenuItem>
-                    <MenuItem value="video">Video only</MenuItem>
-                    <MenuItem value="audio">Audio only</MenuItem>
-                  </Select>
-                </FormControl>
-              )}
-
               {editedQuestion.type === 'imageannotation' && (
                 <Alert severity="info">
-                  Participants can draw points, lines, and regions on a randomly selected image.
+                  Participants can draw points, lines, and regions on an image from your sampling settings.
                   Set drawing tools and min/max annotation counts in the task options below.
                 </Alert>
               )}
@@ -924,136 +969,10 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               {editedQuestion.type === 'skillquestion' && editedQuestion.skillId && (() => {
                 const skillDef = resolveBuilderSkill(editedQuestion.skillId, builderSkills);
                 const isPreset = skillDef?.scope === 'preset' || String(editedQuestion.skillId).startsWith('preset_');
-                const schema = skillDef?.configSchema || [];
-                const cfg = editedQuestion.skillConfig || {};
-                const mediaConstraints = getSkillMediaConstraints(editedQuestion.skillId, skillDef);
-                const effectiveMediaType = mediaConstraints.typeFixed || cfg.mediaType || 'image';
-                const mediaTypeLabel = effectiveMediaType === 'video' ? 'video'
-                  : effectiveMediaType === 'audio' ? 'audio'
-                  : effectiveMediaType === 'any' ? 'media file' : 'image';
-                const setCfg = (key, value) => handleQuestionChange('skillConfig', { ...cfg, [key]: value });
-                const setMediaCount = (n) => {
-                  if (!mediaConstraints.countAdjustable) return;
-                  const count = Math.min(
-                    Math.max(parseInt(n, 10) || mediaConstraints.countMin, mediaConstraints.countMin),
-                    mediaConstraints.countMax,
-                  );
-                  setEditedQuestion({
-                    ...editedQuestion,
-                    imageCount: count,
-                    skillConfig: { ...cfg, mediaCount: count },
-                  });
-                };
-                const displayMediaCount = mediaConstraints.countFixed
-                  ?? cfg.mediaCount
-                  ?? editedQuestion.imageCount
-                  ?? 1;
-                const editableSchema = schema.filter((f) => !['mediaCount', 'mediaType'].includes(f.key));
-                const renderSchemaField = (field) => {
-                  const val = cfg[field.key];
-                  if (field.type === 'boolean') {
-                    return (
-                      <FormControlLabel
-                        key={field.key}
-                        control={
-                          <Switch
-                            checked={!!val}
-                            onChange={(e) => setCfg(field.key, e.target.checked)}
-                          />
-                        }
-                        label={field.label || field.key}
-                      />
-                    );
-                  }
-                  if (field.type === 'number') {
-                    return (
-                      <TextField
-                        key={field.key}
-                        fullWidth
-                        type="number"
-                        variant="outlined"
-                        label={field.label || field.key}
-                        value={val ?? ''}
-                        onChange={(e) => setCfg(field.key, e.target.value === '' ? undefined : Number(e.target.value))}
-                        inputProps={{
-                          min: field.min,
-                          max: field.max,
-                          step: field.step || 1,
-                        }}
-                        sx={{ bgcolor: 'white' }}
-                      />
-                    );
-                  }
-                  if (field.type === 'dimensions') {
-                    return (
-                      <Box key={field.key}>
-                        <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>{field.label || 'Scale dimensions'}</Typography>
-                        <SkillDimensionsEditor
-                          value={val}
-                          onChange={(parsed) => setCfg(field.key, parsed)}
-                          scaleMin={cfg.scaleMin ?? field.scaleMin ?? 1}
-                          scaleMax={cfg.scaleMax ?? field.scaleMax ?? 7}
-                        />
-                      </Box>
-                    );
-                  }
-                  if (field.type === 'stringList') {
-                    return (
-                      <Box key={field.key}>
-                        <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>{field.label || field.key}</Typography>
-                        <SkillStringListEditor
-                          value={val}
-                          onChange={(parsed) => setCfg(field.key, parsed)}
-                          label={field.itemLabel || 'Item'}
-                          placeholder={field.placeholder || 'items'}
-                        />
-                      </Box>
-                    );
-                  }
-                  if (field.type === 'json') {
-                    return (
-                      <SkillJsonField
-                        key={field.key}
-                        label={field.label || field.key}
-                        value={val}
-                        onCommit={(parsed) => setCfg(field.key, parsed)}
-                      />
-                    );
-                  }
-                  if (field.type === 'select' && Array.isArray(field.options)) {
-                    return (
-                      <FormControl key={field.key} fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
-                        <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>{field.label || field.key}</InputLabel>
-                        <Select
-                          value={val ?? ''}
-                          label={field.label || field.key}
-                          onChange={(e) => setCfg(field.key, e.target.value)}
-                        >
-                          {field.options.map((opt) => (
-                            <MenuItem key={String(opt)} value={opt}>{String(opt)}</MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    );
-                  }
-                  return (
-                    <TextField
-                      key={field.key}
-                      fullWidth
-                      variant="outlined"
-                      label={field.label || field.key}
-                      value={val ?? ''}
-                      onChange={(e) => setCfg(field.key, e.target.value)}
-                      multiline={field.type === 'text'}
-                      rows={field.type === 'text' ? 3 : undefined}
-                      sx={{ bgcolor: 'white' }}
-                    />
-                  );
-                };
                 return (
                   <>
                     <Alert severity="success" sx={{ mt: 0 }}>
-                      <strong>{skillDef?.builderLabel || skillDef?.name || 'Perception task'}</strong>
+                      <strong>{skillDef?.builderLabel || skillDef?.name || 'Interactive question'}</strong>
                       {(skillDef?.builderHint || skillDef?.description) && (
                         <Typography variant="body2" sx={{ mt: 0.5 }}>
                           {skillDef.builderHint || skillDef.description}
@@ -1092,123 +1011,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     )}
                     <Alert severity="info" sx={{ mt: 1 }}>
                       <strong>Question Title</strong> is the heading participants see.
-                      Use <strong>Task instructions</strong> below for guidance inside the interactive area.
+                      Use <strong>Task instructions</strong> in task options below for guidance inside the interactive area.
                     </Alert>
-
-                    <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
-                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
-                        1. How stimuli are sampled
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-                        {mediaConstraints.countFixed != null
-                          ? `This task always shows ${mediaConstraints.countFixed} ${mediaTypeLabel}(s). Choose how they are drawn from your project media.`
-                          : `Choose how many ${mediaTypeLabel}(s) to show and how they are drawn from your project media.`}
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {mediaConstraints.countAdjustable && (
-                          <TextField
-                            fullWidth
-                            type="number"
-                            variant="outlined"
-                            label={mediaConstraints.countLabel || `Number of ${mediaTypeLabel}s`}
-                            value={displayMediaCount}
-                            onChange={(e) => setMediaCount(e.target.value)}
-                            helperText={`Randomly drawn from the project ${mediaTypeLabel} pool for each participant`}
-                            inputProps={{
-                              min: mediaConstraints.countMin,
-                              max: mediaConstraints.countMax,
-                              step: 1,
-                            }}
-                            sx={{ bgcolor: 'white' }}
-                          />
-                        )}
-                        {mediaConstraints.typeAdjustable && (
-                          <FormControl fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
-                            <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media type filter</InputLabel>
-                            <Select
-                              value={cfg.mediaType || 'image'}
-                              label="Media type filter"
-                              onChange={(e) => setCfg('mediaType', e.target.value)}
-                            >
-                              <MenuItem value="image">Image</MenuItem>
-                              <MenuItem value="video">Video</MenuItem>
-                              <MenuItem value="audio">Audio</MenuItem>
-                              <MenuItem value="any">Any (mixed)</MenuItem>
-                            </Select>
-                          </FormControl>
-                        )}
-                        <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
-                        <FormControlLabel
-                          control={
-                            <Switch
-                              checked={editedQuestion.excludePreviouslyUsedImages !== false}
-                              onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
-                            />
-                          }
-                          label="Do not reuse media already shown earlier in this survey"
-                        />
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
-                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
-                        2. Wording & task options
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-                        Labels and instructions participants see inside this task.
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        {editableSchema.length === 0 && (
-                          <Alert severity="info" sx={{ py: 0.5 }}>
-                            No extra wording fields for this task. Edit the Question Title above if needed.
-                          </Alert>
-                        )}
-                        {editableSchema.map((field) => renderSchemaField(field))}
-                      </Box>
-                    </Box>
-
-                    {(() => {
-                      const previewHtml = editedQuestion.skillHtml || skillDef?.sourceHtml;
-                      if (!previewHtml) return null;
-                      const mergedCfg = {
-                        ...(skillDef?.defaultConfig || {}),
-                        ...cfg,
-                        mediaCount: displayMediaCount,
-                        mediaType: effectiveMediaType,
-                      };
-                      const count = displayMediaCount;
-                      let previewImages = [];
-                      if (currentProject?.preloadedImages?.length) {
-                        previewImages = filterPoolForQuestion(currentProject.preloadedImages, {
-                          ...editedQuestion,
-                          imageCount: count,
-                          skillConfig: mergedCfg,
-                        }).slice(0, count);
-                      }
-                      if (!previewImages.length) {
-                        previewImages = buildFallbackDemoImages(count, effectiveMediaType, editedQuestion.skillId);
-                      }
-                      return (
-                        <Box sx={{ mt: 2, p: 2, border: '1px solid', borderColor: 'primary.light', borderRadius: 1, bgcolor: 'white' }}>
-                          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
-                            3. Participant preview
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
-                            What participants will interact with. Uses project media when available; otherwise demo placeholders.
-                          </Typography>
-                          <SkillQuestionFrame
-                            skillHtml={previewHtml}
-                            config={mergedCfg}
-                            images={previewImages}
-                            skillId={editedQuestion.skillId}
-                            readOnly
-                          />
-                        </Box>
-                      );
-                    })()}
                   </>
                 );
               })()}
+
 
               <FormControlLabel
                 control={
@@ -1221,26 +1029,36 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               />
 
               {editedQuestion.type === 'boolean' && (
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <TextField
-                    fullWidth
-                    variant="outlined"
-                    label="Yes label"
-                    value={editedQuestion.labelTrue || ''}
-                    onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
-                    placeholder="Yes"
-                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                  />
-                  <TextField
-                    fullWidth
-                    variant="outlined"
-                    label="No label"
-                    value={editedQuestion.labelFalse || ''}
-                    onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
-                    placeholder="No"
-                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                  />
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      label="Yes label"
+                      value={editedQuestion.labelTrue || ''}
+                      onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
+                      placeholder="Yes"
+                      sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      label="No label"
+                      value={editedQuestion.labelFalse || ''}
+                      onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
+                      placeholder="No"
+                      sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                  </Box>
+                  <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
                 </Box>
+              )}
+
+              {editedQuestion.type === 'consent' && (
+                <Alert severity="info" sx={{ py: 0.5 }}>
+                  Participants must accept to continue. Set the consent statement in the Question Title
+                  (and optional Description). The Yes label is the accept action.
+                </Alert>
               )}
 
               {editedQuestion.type === 'expression' && (
@@ -1258,16 +1076,21 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             </Box>
           </Box>
 
-          {/* Image Choice for Image Questions */}
-          {isImageQuestion && (
+          {/* Unified stimulus sampling + task options + preview */}
+          {isStimulusQuestion && (
             <Box>
               <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
                 Stimulus & task settings
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Configure how images are sampled, then set task-specific options below.
+                Configure how stimuli are sampled, then set task-specific options and preview the participant view.
               </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+
+              <SettingsSection
+                step={1}
+                title="How stimuli are sampled"
+                hint="Exclude reuse, assignment mode, random vs curated list, and stimulus count."
+              >
                 <FormControlLabel
                   control={
                     <Switch
@@ -1275,21 +1098,250 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
                     />
                   }
-                  label="Do not reuse images already shown earlier in this survey"
+                  label="Do not reuse media already shown earlier in this survey"
                 />
 
-                <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
-
-                {editedQuestion.type === 'imagepicker' && (
+                {editedQuestion.type === 'skillquestion' ? (() => {
+                  const skillDef = resolveBuilderSkill(editedQuestion.skillId, builderSkills);
+                  const mediaConstraintsSkill = getSkillMediaConstraints(editedQuestion.skillId, skillDef);
+                  const cfg = editedQuestion.skillConfig || {};
+                  const effectiveMediaType = mediaConstraintsSkill.typeFixed || cfg.mediaType || 'image';
+                  const mediaTypeLabel = effectiveMediaType === 'video' ? 'video'
+                    : effectiveMediaType === 'audio' ? 'audio'
+                    : effectiveMediaType === 'any' ? 'media file' : 'image';
+                  const setCfg = (key, value) => handleQuestionChange('skillConfig', { ...cfg, [key]: value });
+                  const setMediaCount = (n) => {
+                    if (!mediaConstraintsSkill.countAdjustable) return;
+                    const count = Math.min(
+                      Math.max(parseInt(n, 10) || mediaConstraintsSkill.countMin, mediaConstraintsSkill.countMin),
+                      mediaConstraintsSkill.countMax,
+                    );
+                    setEditedQuestion({
+                      ...editedQuestion,
+                      imageCount: count,
+                      skillConfig: { ...cfg, mediaCount: count },
+                    });
+                  };
+                  const displayMediaCount = mediaConstraintsSkill.countFixed
+                    ?? cfg.mediaCount
+                    ?? editedQuestion.imageCount
+                    ?? 1;
+                  return (
+                    <>
+                      {mediaConstraintsSkill.countAdjustable && (
+                        <TextField
+                          fullWidth
+                          type="number"
+                          variant="outlined"
+                          label={mediaConstraintsSkill.countLabel || `Number of ${mediaTypeLabel}s`}
+                          value={displayMediaCount}
+                          onChange={(e) => setMediaCount(e.target.value)}
+                          helperText={`Randomly drawn from the project ${mediaTypeLabel} pool for each participant`}
+                          inputProps={{
+                            min: mediaConstraintsSkill.countMin,
+                            max: mediaConstraintsSkill.countMax,
+                            step: 1,
+                          }}
+                          sx={{ bgcolor: 'white' }}
+                        />
+                      )}
+                      {!mediaConstraintsSkill.countAdjustable && (
+                        <Alert severity="info" sx={{ py: 0.75 }}>
+                          <strong>Stimulus count:</strong>{' '}
+                          {mediaConstraintsSkill.countLabel
+                            || `Always ${mediaConstraintsSkill.countFixed} ${mediaTypeLabel}(s)`}.
+                        </Alert>
+                      )}
+                      {mediaConstraintsSkill.typeAdjustable && (
+                        <FormControl fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
+                          <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media type filter</InputLabel>
+                          <Select
+                            value={cfg.mediaType || 'image'}
+                            label="Media type filter"
+                            onChange={(e) => setCfg('mediaType', e.target.value)}
+                          >
+                            <MenuItem value="image">Image</MenuItem>
+                            <MenuItem value="video">Video</MenuItem>
+                            <MenuItem value="audio">Audio</MenuItem>
+                            <MenuItem value="any">Any (mixed)</MenuItem>
+                          </Select>
+                        </FormControl>
+                      )}
+                      <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
+                    </>
+                  );
+                })() : (
                   <>
-                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
+                    <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
+
+                    {['mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking'].includes(editedQuestion.type) && (
+                      <FormControl fullWidth variant="outlined">
+                        <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media Type Filter</InputLabel>
+                        <Select
+                          value={editedQuestion.mediaType || 'any'}
+                          label="Media Type Filter"
+                          onChange={(e) => handleQuestionChange('mediaType', e.target.value)}
+                        >
+                          <MenuItem value="any">Any (image/video/audio)</MenuItem>
+                          <MenuItem value="image">Image only</MenuItem>
+                          <MenuItem value="video">Video only</MenuItem>
+                          <MenuItem value="audio">Audio only</MenuItem>
+                        </Select>
+                      </FormControl>
+                    )}
+
+                    {mediaConstraints.samplingModes && (
+                      <SamplingModeSelect
+                        question={editedQuestion}
+                        onQuestionPatch={(patch) => setEditedQuestion((prev) => ({ ...prev, ...patch }))}
+                      />
+                    )}
 
                     <StimulusCountField
                       question={editedQuestion}
                       onChange={handleQuestionChange}
-                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
+                      constraints={mediaConstraints}
                     />
-                    
+
+                    {isCuratedMode && (
+                      <CuratedMediaPicker
+                        availableImages={availableImages}
+                        selectedImages={selectedImages}
+                        maxCount={editedQuestion.imageCount || mediaConstraints.defaultCount || 1}
+                        loading={loadingImages}
+                        error={imageError}
+                        onToggle={handleImageSelection}
+                        title="Select files"
+                      />
+                    )}
+                  </>
+                )}
+              </SettingsSection>
+
+              <SettingsSection
+                step={2}
+                title={editedQuestion.type === 'skillquestion' ? 'Wording & task options' : 'Task options'}
+                hint={editedQuestion.type === 'skillquestion'
+                  ? 'Labels and instructions participants see inside this task.'
+                  : 'Type-specific response and presentation options.'}
+              >
+                {editedQuestion.type === 'skillquestion' && (() => {
+                  const skillDef = resolveBuilderSkill(editedQuestion.skillId, builderSkills);
+                  const schema = skillDef?.configSchema || [];
+                  const cfg = editedQuestion.skillConfig || {};
+                  const setCfg = (key, value) => handleQuestionChange('skillConfig', { ...cfg, [key]: value });
+                  const editableSchema = schema.filter((f) => !['mediaCount', 'mediaType'].includes(f.key));
+                  const renderSchemaField = (field) => {
+                    const val = cfg[field.key];
+                    if (field.type === 'boolean') {
+                      return (
+                        <FormControlLabel
+                          key={field.key}
+                          control={
+                            <Switch
+                              checked={!!val}
+                              onChange={(e) => setCfg(field.key, e.target.checked)}
+                            />
+                          }
+                          label={field.label || field.key}
+                        />
+                      );
+                    }
+                    if (field.type === 'number') {
+                      return (
+                        <TextField
+                          key={field.key}
+                          fullWidth
+                          type="number"
+                          variant="outlined"
+                          label={field.label || field.key}
+                          value={val ?? ''}
+                          onChange={(e) => setCfg(field.key, e.target.value === '' ? undefined : Number(e.target.value))}
+                          inputProps={{ min: field.min, max: field.max, step: field.step || 1 }}
+                          sx={{ bgcolor: 'white' }}
+                        />
+                      );
+                    }
+                    if (field.type === 'dimensions') {
+                      return (
+                        <Box key={field.key}>
+                          <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>{field.label || 'Scale dimensions'}</Typography>
+                          <SkillDimensionsEditor
+                            value={val}
+                            onChange={(parsed) => setCfg(field.key, parsed)}
+                            scaleMin={cfg.scaleMin ?? field.scaleMin ?? 1}
+                            scaleMax={cfg.scaleMax ?? field.scaleMax ?? 7}
+                          />
+                        </Box>
+                      );
+                    }
+                    if (field.type === 'stringList') {
+                      return (
+                        <Box key={field.key}>
+                          <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>{field.label || field.key}</Typography>
+                          <SkillStringListEditor
+                            value={val}
+                            onChange={(parsed) => setCfg(field.key, parsed)}
+                            label={field.itemLabel || 'Item'}
+                            placeholder={field.placeholder || 'items'}
+                          />
+                        </Box>
+                      );
+                    }
+                    if (field.type === 'json') {
+                      return (
+                        <SkillJsonField
+                          key={field.key}
+                          label={field.label || field.key}
+                          value={val}
+                          onCommit={(parsed) => setCfg(field.key, parsed)}
+                        />
+                      );
+                    }
+                    if (field.type === 'select' && Array.isArray(field.options)) {
+                      return (
+                        <FormControl key={field.key} fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
+                          <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>{field.label || field.key}</InputLabel>
+                          <Select
+                            value={val ?? ''}
+                            label={field.label || field.key}
+                            onChange={(e) => setCfg(field.key, e.target.value)}
+                          >
+                            {field.options.map((opt) => (
+                              <MenuItem key={String(opt)} value={opt}>{String(opt)}</MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      );
+                    }
+                    return (
+                      <TextField
+                        key={field.key}
+                        fullWidth
+                        variant="outlined"
+                        label={field.label || field.key}
+                        value={val ?? ''}
+                        onChange={(e) => setCfg(field.key, e.target.value)}
+                        multiline={field.type === 'text'}
+                        rows={field.type === 'text' ? 3 : undefined}
+                        sx={{ bgcolor: 'white' }}
+                      />
+                    );
+                  };
+                  return (
+                    <>
+                      {editableSchema.length === 0 && (
+                        <Alert severity="info" sx={{ py: 0.5 }}>
+                          No extra wording fields for this task. Edit the Question Title above if needed.
+                        </Alert>
+                      )}
+                      {editableSchema.map((field) => renderSchemaField(field))}
+                    </>
+                  );
+                })()}
+
+                {editedQuestion.type === 'imagepicker' && (
+                  <>
                     <FormControlLabel
                       control={
                         <Switch
@@ -1299,7 +1351,6 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       }
                       label="Allow Multiple Selection - participants can choose more than one image"
                     />
-
                     {(editedQuestion.imageCount || 4) === 2
                       && (editedQuestion.mediaAssignmentMode || 'individual') === 'individual' && (
                       <FormControl fullWidth variant="outlined">
@@ -1315,237 +1366,71 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         </Select>
                       </FormControl>
                     )}
-
                     <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
-
-                    {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <CuratedMediaPicker
-                        availableImages={availableImages}
-                        selectedImages={selectedImages}
-                        maxCount={editedQuestion.imageCount || 4}
-                        loading={loadingImages}
-                        error={imageError}
-                        onToggle={handleImageSelection}
-                        title="Select Images"
-                      />
-                    )}
                   </>
                 )}
 
-                {editedQuestion.type === 'imageranking' && (
-                  <>
-                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
-
-                    <StimulusCountField
-                      question={editedQuestion}
-                      onChange={handleQuestionChange}
-                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
-                    />
-
-                    {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <CuratedMediaPicker
-                        availableImages={availableImages}
-                        selectedImages={selectedImages}
-                        maxCount={editedQuestion.imageCount || 4}
-                        loading={loadingImages}
-                        error={imageError}
-                        onToggle={handleImageSelection}
-                        title="Select Images for Ranking"
-                      />
-                    )}
-                  </>
+                {(editedQuestion.type === 'imageranking' || editedQuestion.type === 'mediaranking') && (
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    Participants drag items into ranked order. Stimulus count is set above.
+                  </Alert>
                 )}
 
-                {/* Image selection (rating / slider group / point allocation with image) */}
-                {['imagerating', 'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type) && (
+                {editedQuestion.type === 'imagerating' && (
                   <>
-                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
-
-                    <StimulusCountField
-                      question={editedQuestion}
-                      onChange={handleQuestionChange}
-                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
-                    />
-
-                    {editedQuestion.type === 'imagerating' && (
-                      <>
-                    {/* Rating Scale Configuration */}
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Minimum Rating Value"
+                    <TextField fullWidth variant="outlined" type="number" label="Minimum Rating Value"
                       value={editedQuestion.rateMin || 1}
                       onChange={(e) => handleQuestionChange('rateMin', parseInt(e.target.value))}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Maximum Rating Value"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" type="number" label="Maximum Rating Value"
                       value={editedQuestion.rateMax || 5}
                       onChange={(e) => handleQuestionChange('rateMax', parseInt(e.target.value))}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="Minimum Rating Label"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" label="Minimum Rating Label"
                       value={editedQuestion.minRateDescription || ''}
                       onChange={(e) => handleQuestionChange('minRateDescription', e.target.value)}
                       placeholder="e.g., Very Poor"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="Maximum Rating Label"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" label="Maximum Rating Label"
                       value={editedQuestion.maxRateDescription || ''}
                       onChange={(e) => handleQuestionChange('maxRateDescription', e.target.value)}
                       placeholder="e.g., Excellent"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-                      </>
-                    )}
-
-                    {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <CuratedMediaPicker
-                        availableImages={availableImages}
-                        selectedImages={selectedImages}
-                        maxCount={editedQuestion.imageCount || 1}
-                        loading={loadingImages}
-                        error={imageError}
-                        onToggle={handleImageSelection}
-                        title="Select Images"
-                      />
-                    )}
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
                   </>
                 )}
 
-                {/* Image Yes/No Configuration */}
                 {editedQuestion.type === 'imageboolean' && (
                   <>
-                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
-
-                    <StimulusCountField
-                      question={editedQuestion}
-                      onChange={handleQuestionChange}
-                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
-                    />
-
-                    {/* Yes/No Labels Configuration */}
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="Yes Label"
+                    <TextField fullWidth variant="outlined" label="Yes Label"
                       value={editedQuestion.labelTrue || ''}
                       onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
                       placeholder="e.g., Yes, Agree, Like"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="No Label"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" label="No Label"
                       value={editedQuestion.labelFalse || ''}
                       onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
                       placeholder="e.g., No, Disagree, Dislike"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-
-                    {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <CuratedMediaPicker
-                        availableImages={availableImages}
-                        selectedImages={selectedImages}
-                        maxCount={editedQuestion.imageCount || 1}
-                        loading={loadingImages}
-                        error={imageError}
-                        onToggle={handleImageSelection}
-                        title="Select Images for Yes/No Question"
-                      />
-                    )}
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
                   </>
                 )}
 
-                {/* Image Matrix Configuration */}
-                {editedQuestion.type === 'imagematrix' && (
-                  <>
-                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
-
-                    <StimulusCountField
-                      question={editedQuestion}
-                      onChange={handleQuestionChange}
-                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
-                    />
-
-                    {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <CuratedMediaPicker
-                        availableImages={availableImages}
-                        selectedImages={selectedImages}
-                        maxCount={editedQuestion.imageCount || 1}
-                        loading={loadingImages}
-                        error={imageError}
-                        onToggle={handleImageSelection}
-                        title="Select Images for Matrix"
-                      />
-                    )}
-                  </>
-                )}
-
-                {/* Image Display Configuration */}
                 {editedQuestion.type === 'image' && (
-                  <>
-                    <Alert severity="info" sx={{ py: 0.5 }}>
-                      <strong>Image Display shows exactly one image</strong> per participant (large, natural aspect ratio).
-                      To show <strong>multiple images</strong> in the same justified layout as Image Choice,
-                      use <strong>Media Display</strong> instead and set the number of media files to 2 or more.
-                    </Alert>
-                    <SamplingModeSelect question={editedQuestion} onChange={handleQuestionChange} />
-
-                    <StimulusCountField
-                      question={editedQuestion}
-                      onChange={handleQuestionChange}
-                      constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
-                    />
-
-                    {(editedQuestion.imageSelectionMode === 'manual' || editedQuestion.imageSelectionMode === 'huggingface_manual') && (
-                      <CuratedMediaPicker
-                        availableImages={availableImages}
-                        selectedImages={selectedImages}
-                        maxCount={editedQuestion.imageCount || 1}
-                        loading={loadingImages}
-                        error={imageError}
-                        onToggle={handleImageSelection}
-                        title="Select Images for Display"
-                      />
-                    )}
-                  </>
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    <strong>Image Display shows exactly one image</strong> per participant.
+                    To show multiple images, use <strong>Media Display</strong> instead.
+                  </Alert>
                 )}
-              </Box>
-            </Box>
-          )}
 
-          {/* Media Settings for media (video/audio/image) questions */}
-          {['mediadisplay', 'mediarating', 'mediaboolean'].includes(editedQuestion.type) && (
-            <Box>
-              <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
-                Stimulus & task settings
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Configure how media are sampled, then set presentation / response options.
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {editedQuestion.type === 'imagematrix' && (
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    Configure matrix rows and columns in the section below.
+                  </Alert>
+                )}
+
                 {editedQuestion.type === 'mediadisplay' && (
                   <>
                     <Alert severity="info" sx={{ py: 0.5 }}>
-                      For <strong>2+ images</strong>, the default gallery layout matches <strong>Image Choice</strong>:
-                      same row height, widths proportional to each image&apos;s aspect ratio (panoramas wider, squares narrower).
-                      Use <strong>Image Display</strong> only when you need a single large image.
+                      For <strong>2+ images</strong>, the default gallery layout matches <strong>Image Choice</strong>.
                     </Alert>
                     <FormControl fullWidth variant="outlined">
                       <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Display Mode</InputLabel>
@@ -1568,216 +1453,224 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     </FormControl>
                     {editedQuestion.displayMode === 'reveal' && (
                       <Box sx={{ display: 'flex', gap: 2 }}>
-                        <TextField
-                          fullWidth
-                          variant="outlined"
-                          label="Before label"
+                        <TextField fullWidth variant="outlined" label="Before label"
                           value={editedQuestion.beforeLabel || 'Before'}
                           onChange={(e) => handleQuestionChange('beforeLabel', e.target.value)}
-                          sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                        />
-                        <TextField
-                          fullWidth
-                          variant="outlined"
-                          label="After label"
+                          sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                        <TextField fullWidth variant="outlined" label="After label"
                           value={editedQuestion.afterLabel || 'After'}
                           onChange={(e) => handleQuestionChange('afterLabel', e.target.value)}
-                          sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                        />
+                          sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
                       </Box>
                     )}
-                    {editedQuestion.displayMode === 'reveal' && (
-                      <Alert severity="info" sx={{ py: 0.5 }}>
-                        Needs exactly 2 images: the 1st is shown as "{editedQuestion.beforeLabel || 'Before'}",
-                        the 2nd as "{editedQuestion.afterLabel || 'After'}". Use paired media sets
-                        (<code>name__before.jpg</code> / <code>name__after.jpg</code>) to keep the order stable.
-                      </Alert>
-                    )}
                     {editedQuestion.displayMode === 'timed' && (
-                      <TextField
-                        fullWidth
-                        variant="outlined"
-                        type="number"
-                        label="Exposure time (seconds)"
+                      <TextField fullWidth variant="outlined" type="number" label="Exposure time (seconds)"
                         value={editedQuestion.exposureSeconds ?? 5}
                         onChange={(e) => handleQuestionChange('exposureSeconds', Math.min(Math.max(parseInt(e.target.value, 10) || 5, 1), 120))}
-                        helperText="Participant clicks to start; media hides permanently after this many seconds. Put rating questions on the same page."
+                        helperText="Participant clicks to start; media hides permanently after this many seconds."
                         inputProps={{ min: 1, max: 120, step: 1 }}
-                        sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                      />
+                        sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
                     )}
                   </>
                 )}
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={editedQuestion.excludePreviouslyUsedImages !== false}
-                      onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
-                    />
-                  }
-                  label="Do not reuse media already shown earlier in this survey"
-                />
-
-                <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
-
-                <StimulusCountField
-                  question={editedQuestion}
-                  onChange={handleQuestionChange}
-                  constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
-                />
-
-                <Alert severity="info">
-                  {editedQuestion.mediaAssignmentMode === 'group'
-                    ? 'One complete media set will be randomly assigned per participant.'
-                    : `${editedQuestion.imageCount || 1} media file(s) matching the type filter will be randomly selected per participant.`}
-                </Alert>
 
                 {editedQuestion.type === 'mediarating' && (
                   <>
-                    <Typography variant="subtitle2" fontWeight={600}>Task options — rating scale</Typography>
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Minimum rating"
+                    <TextField fullWidth variant="outlined" type="number" label="Minimum rating"
                       value={editedQuestion.rateMin ?? 1}
                       onChange={(e) => handleQuestionChange('rateMin', parseInt(e.target.value) || 1)}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      type="number"
-                      label="Maximum rating"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" type="number" label="Maximum rating"
                       value={editedQuestion.rateMax ?? 5}
                       onChange={(e) => handleQuestionChange('rateMax', parseInt(e.target.value) || 5)}
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="Low-end label"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" label="Low-end label"
                       value={editedQuestion.minRateDescription || ''}
                       onChange={(e) => handleQuestionChange('minRateDescription', e.target.value)}
                       placeholder="e.g., Very poor"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="High-end label"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" label="High-end label"
                       value={editedQuestion.maxRateDescription || ''}
                       onChange={(e) => handleQuestionChange('maxRateDescription', e.target.value)}
                       placeholder="e.g., Excellent"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
                   </>
                 )}
 
                 {editedQuestion.type === 'mediaboolean' && (
                   <>
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="Yes Label"
+                    <TextField fullWidth variant="outlined" label="Yes Label"
                       value={editedQuestion.labelTrue || ''}
                       onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
                       placeholder="e.g., Yes, Agree, Like"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="No Label"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    <TextField fullWidth variant="outlined" label="No Label"
                       value={editedQuestion.labelFalse || ''}
                       onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
                       placeholder="e.g., No, Disagree, Dislike"
-                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                    />
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
                   </>
                 )}
-              </Box>
-            </Box>
-          )}
 
-          {/* Annotation Settings */}
-          {editedQuestion.type === 'imageannotation' && (
-            <Box>
-              <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
-                Stimulus & task settings
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                One image is sampled for annotation; configure tools and limits below.
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={editedQuestion.excludePreviouslyUsedImages !== false}
-                      onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
+                {editedQuestion.type === 'imageannotation' && (
+                  <>
+                    <FormControl fullWidth variant="outlined">
+                      <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Allowed Tools</InputLabel>
+                      <Select
+                        multiple
+                        value={editedQuestion.allowedTools || ['point', 'line', 'region']}
+                        onChange={(e) => handleQuestionChange('allowedTools',
+                          typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+                        label="Allowed Tools"
+                      >
+                        <MenuItem value="point">Point</MenuItem>
+                        <MenuItem value="line">Line</MenuItem>
+                        <MenuItem value="region">Region (polygon)</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                      <TextField fullWidth variant="outlined" type="number" label="Minimum annotations"
+                        value={editedQuestion.minAnnotations ?? 0}
+                        onChange={(e) => handleQuestionChange('minAnnotations', Math.max(0, parseInt(e.target.value, 10) || 0))}
+                        helperText="Required before continuing (0 = no minimum)"
+                        inputProps={{ min: 0, max: 100, step: 1 }}
+                        sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                      <TextField fullWidth variant="outlined" type="number" label="Maximum annotations"
+                        value={editedQuestion.maxAnnotations ?? 50}
+                        onChange={(e) => {
+                          const raw = parseInt(e.target.value, 10);
+                          handleQuestionChange('maxAnnotations', Number.isNaN(raw) ? 50 : Math.max(0, raw));
+                        }}
+                        helperText="Cap on shapes per participant (0 = unlimited)"
+                        inputProps={{ min: 0, max: 500, step: 1 }}
+                        sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
+                    </Box>
+                  </>
+                )}
+
+                {editedQuestion.type === 'imageslidergroup' && (
+                  <>
+                    <SkillDimensionsEditor
+                      value={editedQuestion.dimensions || []}
+                      onChange={(dims) => handleQuestionChange('dimensions', dims)}
+                      scaleMin={editedQuestion.scaleMin ?? 1}
+                      scaleMax={editedQuestion.scaleMax ?? 7}
                     />
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <TextField
+                        fullWidth
+                        variant="outlined"
+                        type="number"
+                        label="Scale minimum"
+                        value={editedQuestion.scaleMin ?? 1}
+                        onChange={(e) => handleQuestionChange('scaleMin', parseInt(e.target.value, 10) || 0)}
+                        sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                      />
+                      <TextField
+                        fullWidth
+                        variant="outlined"
+                        type="number"
+                        label="Scale maximum"
+                        value={editedQuestion.scaleMax ?? 7}
+                        onChange={(e) => handleQuestionChange('scaleMax', parseInt(e.target.value, 10) || 7)}
+                        sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                      />
+                    </Box>
+                  </>
+                )}
+
+                {editedQuestion.type === 'imagepointallocation' && (
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    type="number"
+                    label="Total points to allocate"
+                    value={editedQuestion.budget ?? 100}
+                    onChange={(e) => handleQuestionChange('budget', Math.max(1, parseInt(e.target.value, 10) || 100))}
+                    helperText="Participants distribute exactly this many points across the allocation categories below"
+                    inputProps={{ min: 1, step: 1 }}
+                    sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                )}
+
+                {!['skillquestion', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image',
+                  'imagematrix', 'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation',
+                  'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type) && (
+                  <Alert severity="info" sx={{ py: 0.5 }}>No extra task options for this type.</Alert>
+                )}
+              </SettingsSection>
+
+              <SettingsSection
+                step={3}
+                title="Participant preview"
+                hint="What participants will interact with. Uses project media when available."
+              >
+                {editedQuestion.type === 'skillquestion' ? (() => {
+                  const skillDef = resolveBuilderSkill(editedQuestion.skillId, builderSkills);
+                  const cfg = editedQuestion.skillConfig || {};
+                  const mediaConstraintsSkill = getSkillMediaConstraints(editedQuestion.skillId, skillDef);
+                  const effectiveMediaType = mediaConstraintsSkill.typeFixed || cfg.mediaType || 'image';
+                  const displayMediaCount = mediaConstraintsSkill.countFixed
+                    ?? cfg.mediaCount
+                    ?? editedQuestion.imageCount
+                    ?? 1;
+                  const previewHtml = editedQuestion.skillHtml || skillDef?.sourceHtml;
+                  if (!previewHtml) {
+                    return <Alert severity="info" sx={{ py: 0.5 }}>No skill HTML available to preview.</Alert>;
                   }
-                  label="Do not reuse images already shown earlier in this survey"
-                />
-                <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
-                <StimulusCountField
-                  question={editedQuestion}
-                  onChange={handleQuestionChange}
-                  constraints={getQuestionMediaConstraints(editedQuestion.type, editedQuestion)}
-                />
-                <FormControl fullWidth variant="outlined">
-                  <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Allowed Tools</InputLabel>
-                  <Select
-                    multiple
-                    value={editedQuestion.allowedTools || ['point', 'line', 'region']}
-                    onChange={(e) => handleQuestionChange('allowedTools',
-                      typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-                    label="Allowed Tools"
-                  >
-                    <MenuItem value="point">Point</MenuItem>
-                    <MenuItem value="line">Line</MenuItem>
-                    <MenuItem value="region">Region (polygon)</MenuItem>
-                  </Select>
-                </FormControl>
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <TextField
-                    fullWidth
-                    variant="outlined"
-                    type="number"
-                    label="Minimum annotations"
-                    value={editedQuestion.minAnnotations ?? 0}
-                    onChange={(e) => {
-                      const n = Math.max(0, parseInt(e.target.value, 10) || 0);
-                      handleQuestionChange('minAnnotations', n);
-                    }}
-                    helperText="Required before continuing (0 = no minimum)"
-                    inputProps={{ min: 0, max: 100, step: 1 }}
-                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  const mergedCfg = {
+                    ...(skillDef?.defaultConfig || {}),
+                    ...cfg,
+                    mediaCount: displayMediaCount,
+                    mediaType: effectiveMediaType,
+                  };
+                  let previewImages = [];
+                  if (currentProject?.preloadedImages?.length) {
+                    previewImages = filterPoolForQuestion(currentProject.preloadedImages, {
+                      ...editedQuestion,
+                      imageCount: displayMediaCount,
+                      skillConfig: mergedCfg,
+                    }).slice(0, displayMediaCount);
+                  }
+                  if (!previewImages.length && skillPreviewPool.length) {
+                    previewImages = pickPreviewMedia(
+                      skillPreviewPool,
+                      effectiveMediaType,
+                      displayMediaCount,
+                    );
+                  }
+                  return (
+                    <>
+                      {!previewImages.length && (
+                        <Alert severity="info" sx={{ py: 0.5, mb: 1 }}>
+                          No project media or admin skill-preview library media available.
+                          Upload project media, or ask an admin to add files to the skill-preview library.
+                        </Alert>
+                      )}
+                      <SkillQuestionFrame
+                        skillHtml={previewHtml}
+                        config={mergedCfg}
+                        images={previewImages}
+                        skillId={editedQuestion.skillId}
+                        readOnly
+                      />
+                    </>
+                  );
+                })() : (
+                  <QuestionParticipantPreview
+                    question={editedQuestion}
+                    currentProject={currentProject}
                   />
-                  <TextField
-                    fullWidth
-                    variant="outlined"
-                    type="number"
-                    label="Maximum annotations"
-                    value={editedQuestion.maxAnnotations ?? 50}
-                    onChange={(e) => {
-                      const raw = parseInt(e.target.value, 10);
-                      handleQuestionChange('maxAnnotations', Number.isNaN(raw) ? 50 : Math.max(0, raw));
-                    }}
-                    helperText="Cap on shapes per participant (0 = unlimited)"
-                    inputProps={{ min: 0, max: 500, step: 1 }}
-                    sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-                  />
-                </Box>
-              </Box>
+                )}
+              </SettingsSection>
             </Box>
           )}
 
-          {/* Slider group (semantic differential) settings */}
-          {(editedQuestion.type === 'slidergroup' || editedQuestion.type === 'imageslidergroup') && (
+          {/* Slider group (non-image) — image variant uses Card 2 above */}
+          {editedQuestion.type === 'slidergroup' && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                {editedQuestion.type === 'imageslidergroup' ? 'Task options — semantic differential' : 'Task options — semantic differential'}
+                Task options — semantic differential
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <SkillDimensionsEditor
@@ -1806,22 +1699,20 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                   />
                 </Box>
-                {editedQuestion.type === 'slidergroup' && (
                 <Alert severity="info" sx={{ py: 0.5 }}>
                   To rate an image / video / audio clip, put a Media Display question on the same page —
-                  it handles random media injection; this question collects the ratings.
+                  it handles media injection; this question collects the ratings.
                   Or use <strong>Image Slider Group</strong> for built-in image display.
                 </Alert>
-                )}
               </Box>
             </Box>
           )}
 
-          {/* Point allocation settings */}
-          {(editedQuestion.type === 'pointallocation' || editedQuestion.type === 'imagepointallocation') && (
+          {/* Point allocation (non-image) — image variant uses Card 2 above */}
+          {editedQuestion.type === 'pointallocation' && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                {editedQuestion.type === 'imagepointallocation' ? 'Task options — budget allocation' : 'Task options — budget allocation'}
+                Task options — budget allocation
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <TextField
@@ -1857,7 +1748,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     : ''}.
                 </Alert>
               )}
-              {editedQuestion.type === 'radiogroup' && (
+              {(editedQuestion.type === 'radiogroup' || editedQuestion.type === 'dropdown') && (
                 <Box sx={{ mb: 2 }}>
                   <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
                 </Box>
@@ -2086,7 +1977,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           )}
 
           {/* Additional Settings for Specific Question Types */}
-          {(editedQuestion.type === 'comment' || editedQuestion.type === 'text' || editedQuestion.type === 'rating') && (
+          {(editedQuestion.type === 'comment' || editedQuestion.type === 'text' || editedQuestion.type === 'rating' || editedQuestion.type === 'number' || editedQuestion.type === 'consent') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
                 Task options
@@ -2120,6 +2011,53 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   />
                 )}
 
+                {editedQuestion.type === 'number' && (
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      type="number"
+                      label="Minimum"
+                      value={editedQuestion.min ?? 0}
+                      onChange={(e) => handleQuestionChange('min', e.target.value === '' ? undefined : Number(e.target.value))}
+                      sx={{ flex: '1 1 160px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      type="number"
+                      label="Maximum"
+                      value={editedQuestion.max ?? 100}
+                      onChange={(e) => handleQuestionChange('max', e.target.value === '' ? undefined : Number(e.target.value))}
+                      sx={{ flex: '1 1 160px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                  </Box>
+                )}
+
+                {editedQuestion.type === 'consent' && (
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      label="Accept label"
+                      value={editedQuestion.labelTrue || 'I agree / I consent'}
+                      onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
+                      sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      label="Decline label"
+                      value={editedQuestion.labelFalse || 'I do not agree'}
+                      onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
+                      sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <Alert severity="info" sx={{ width: '100%', py: 0.5 }}>
+                      Consent is always required. Participants must choose accept to continue.
+                    </Alert>
+                  </Box>
+                )}
+
                 {editedQuestion.type === 'rating' && (
                   <>
                     <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
@@ -2148,6 +2086,25 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   </>
                 )}
               </Box>
+            </Box>
+          )}
+
+          {/* Non-stimulus: task options live above; Card 3 preview only */}
+          {!isStimulusQuestion && editedQuestion.type && editedQuestion.type !== 'expression' && (
+            <Box>
+              <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
+                Participant preview
+              </Typography>
+              <SettingsSection
+                step={3}
+                title="Participant preview"
+                hint="Compact SurveyJS preview of this question alone."
+              >
+                <QuestionParticipantPreview
+                  question={editedQuestion}
+                  currentProject={currentProject}
+                />
+              </SettingsSection>
             </Box>
           )}
         </Box>
@@ -2218,7 +2175,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             questionToSave.imageCount = 1;
           }
 
-          if (['imagepicker','imageranking','imagerating','imageboolean','imagematrix','image','imageslidergroup','imagepointallocation','mediadisplay','mediarating','mediaboolean','imageannotation'].includes(questionToSave.type)) {
+          if (['imagepicker','imageranking','imagerating','imageboolean','imagematrix','image','imageslidergroup','imagepointallocation','mediadisplay','mediarating','mediaboolean','mediaranking','imageannotation'].includes(questionToSave.type)) {
             questionToSave.imageCount = clampQuestionImageCount(
               questionToSave.type,
               questionToSave,
@@ -2227,6 +2184,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           }
 
           // Skill questions: enforce preset mediaConstraints (e.g. pairwise = always 2 images)
+          if (questionToSave.type === 'consent') {
+            questionToSave.isRequired = true;
+            questionToSave.labelTrue = questionToSave.labelTrue || 'I agree / I consent';
+            questionToSave.labelFalse = questionToSave.labelFalse || 'I do not agree';
+          }
+          if (questionToSave.type === 'number') {
+            questionToSave.inputType = 'number';
+          }
+
           if (questionToSave.type === 'skillquestion' && questionToSave.skillId) {
             const skillDef = resolveBuilderSkill(questionToSave.skillId, builderSkills);
             const mediaConstraints = getSkillMediaConstraints(questionToSave.skillId, skillDef);
@@ -2248,21 +2214,35 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             questionToSave.randomImageSelection = true;
           }
 
-          // Media display / rating / boolean / annotation — always inject from project pool at runtime
+          // Media display / rating / boolean / annotation — honor curated vs random
           if (['mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation'].includes(questionToSave.type)) {
             if (!questionToSave.imageSelectionMode) {
               questionToSave.imageSelectionMode = 'huggingface_random';
             }
-            questionToSave.randomImageSelection = true;
+            const curated = isCuratedSelectionMode(questionToSave.imageSelectionMode);
+            questionToSave.randomImageSelection = !curated;
             questionToSave.excludePreviouslyUsedImages = questionToSave.excludePreviouslyUsedImages !== false;
-            if (!questionToSave.imageCount) {
-              questionToSave.imageCount = 1;
+            questionToSave.imageCount = clampQuestionImageCount(
+              questionToSave.type,
+              questionToSave,
+              questionToSave.imageCount,
+            );
+            if (curated && questionToSave.selectedImageUrls?.length) {
+              const pool = filterPoolForQuestion(currentProject?.preloadedImages || [], questionToSave);
+              const byUrl = new Map(pool.map((img) => [img.url, img]));
+              const selected = questionToSave.selectedImageUrls.map((url) => {
+                const found = byUrl.get(url);
+                if (found) return found;
+                const name = String(url).split('?')[0].split('/').pop() || url;
+                return { url, name };
+              });
+              applyMediaToElement(questionToSave, selected);
             }
           }
           
           // Convert selectedImageUrls to SurveyJS choices format for imagepicker, imageranking, and image questions
           // Note: imageboolean, imagerating, imagematrix use imageHtml instead (handled above)
-          if (questionToSave.type === 'imagepicker' || questionToSave.type === 'imageranking' || questionToSave.type === 'image') {
+          if (questionToSave.type === 'imagepicker' || questionToSave.type === 'imageranking' || questionToSave.type === 'mediaranking' || questionToSave.type === 'image') {
             if (questionToSave.imageSelectionMode === 'huggingface_manual' && questionToSave.selectedImageUrls && questionToSave.selectedImageUrls.length > 0) {
               // Manual selection: use the specifically selected images
               if (questionToSave.type === 'image') {
@@ -2273,7 +2253,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   questionToSave.imageLinks = questionToSave.selectedImageUrls;
                 }
               } else {
-                // For imagepicker and imageranking, use choices
+                // For imagepicker / imageranking / mediaranking, use choices
                 questionToSave.choices = questionToSave.selectedImageUrls.map((url, index) => ({
                   value: `image_${index}`,
                   imageLink: url

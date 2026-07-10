@@ -92,6 +92,33 @@ export const exportSurveyConfig = (config) => {
   linkElement.click();
 };
 
+/** Map builder-only types onto SurveyJS-native types before Model creation. */
+export function normalizeBuilderQuestion(element) {
+  if (!element || typeof element !== 'object') return element;
+  const question = { ...element };
+  if (question.type === 'number') {
+    question.type = 'text';
+    question.inputType = 'number';
+    if (question.min != null && question.min !== '') question.min = Number(question.min);
+    if (question.max != null && question.max !== '') question.max = Number(question.max);
+  } else if (question.type === 'consent') {
+    question.type = 'boolean';
+    question.isRequired = true;
+    question.labelTrue = question.labelTrue || 'I agree / I consent';
+    question.labelFalse = question.labelFalse || 'I do not agree';
+  }
+  return question;
+}
+
+export function normalizeBuilderSurveyJson(surveyJson) {
+  if (!surveyJson?.pages) return surveyJson;
+  const copy = { ...surveyJson, pages: surveyJson.pages.map((page) => ({
+    ...page,
+    elements: (page.elements || []).map(normalizeBuilderQuestion),
+  })) };
+  return copy;
+}
+
 // Convert admin config to SurveyJS format for actual survey use
 export const convertToSurveyJS = (adminConfig) => {
   return {
@@ -101,7 +128,7 @@ export const convertToSurveyJS = (adminConfig) => {
     logoPosition: adminConfig.logoPosition,
     pages: adminConfig.pages?.map(page => {
       const mappedElements = page.elements?.map(element => {
-        const question = { ...element };
+        const question = normalizeBuilderQuestion(element);
         
         // Handle image questions
         if (element.type === 'imagepicker' && element.imageLinks) {

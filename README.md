@@ -252,7 +252,7 @@ Import custom skills from the Skill Library or author HTML/JS with the `SPSkill`
 Start with peer-reviewed survey designs from published research. Templates can be imported from the admin **Template Library** (existing project IDs are skipped on re-import).
 
 #### Platform QA
-- **SP All Question Types (2026)** — Full QA template covering all native question types and six preset skills (`2026-sp-all.json`)
+- **SP All Question Types (2026)** — Full QA template covering all native question types and seven preset skills (`2026-sp-all.json`)
 
 #### 2025–2026
 - **Thermal Comfort in Sight** | Yang et al. | [Paper](https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514) | `2025-yang-thermal.json`

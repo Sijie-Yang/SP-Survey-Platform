@@ -3,7 +3,7 @@ import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
 import { Box, Alert, CircularProgress, Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
-import { convertToSurveyJS, generateCustomTheme } from '../../lib/surveyStorage';
+import { convertToSurveyJS, generateCustomTheme, normalizeBuilderSurveyJson } from '../../lib/surveyStorage';
 import { themeJson } from "../../theme";
 import registerImageRankingWidget, {
   registerImageRatingWidget, registerImageBooleanWidget, registerAllExtendedWidgets,
@@ -11,7 +11,7 @@ import registerImageRankingWidget, {
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
   ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesGroupMediaAssignment,
-  usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia,
+  usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
 } from '../../lib/surveyMediaInjection';
 
 export default function SurveyPreview({ config, currentProject }) {
@@ -109,6 +109,10 @@ export default function SurveyPreview({ config, currentProject }) {
                 
                 if (isImageQuestion && isManualMode && element.choices && element.choices.length > 0) {
                   console.log(`✅ Preview: Skipping image loading for ${element.type} question "${element.name}" - using manually selected images (${element.choices.length} images)`);
+                }
+
+                if (isManualMode && applyCuratedMediaIfNeeded(element, currentProject?.preloadedImages || [])) {
+                  console.log(`✅ Preview: Applied curated media for ${element.type} question "${element.name}"`);
                 }
                 
                 if (shouldInjectMedia(element)) {
@@ -483,7 +487,7 @@ export default function SurveyPreview({ config, currentProject }) {
     }
     
     // Directly use processed configuration (already in standard SurveyJS format)
-    const model = new Model(configToUse);
+    const model = new Model(normalizeBuilderSurveyJson(configToUse));
     
     // Apply theme (same as Live Survey) - with error handling
     try {

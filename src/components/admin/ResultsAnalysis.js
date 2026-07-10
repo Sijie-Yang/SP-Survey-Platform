@@ -56,7 +56,12 @@ import { supabase as platformSupabase } from '../../lib/supabase';
 import AnnotationAnalysis from './AnnotationAnalysis';
 import { getPresetSkill } from '../../lib/presetSkills';
 import { ImageResolverContext } from './imageResolverContext';
-import { summarizeQuality, evaluateResponseQuality, QUALITY_FLAG_LABELS } from '../../lib/quality';
+import {
+  summarizeQuality,
+  evaluateResponseQuality,
+  QUALITY_FLAG_LABELS,
+  attentionCheckQuestionStats,
+} from '../../lib/quality';
 import { computeQuestionIrr } from '../../lib/reliability';
 import { computeQuestionTrueSkill } from '../../lib/trueskill';
 import { average, pct, descriptiveStats, wilsonCI } from '../../lib/stats';
@@ -456,8 +461,41 @@ function ImagePickerDistribution({ answers, choices, question, allResponses }) {
     if (choiceMap[value]?.imageUrl) return choiceMap[value].imageUrl;
     if (value && (value.startsWith('http') || value.startsWith('/'))) return value;
     if (resolvedUrl?.has(value)) return resolvedUrl.get(value);
+    // Try filename key from URL / displayed images
+    const key = imageKeyFromShown(value);
+    if (key && resolvedUrl?.has(key)) return resolvedUrl.get(key);
+    if (key && choiceMap[key]?.imageUrl) return choiceMap[key].imageUrl;
     return null;
   };
+
+  const pickFreqItems = useMemo(() => {
+    const freq = {};
+    let totalPicks = 0;
+    for (const { answer } of answers) {
+      const vals = Array.isArray(answer) ? answer : (answer != null && answer !== '' ? [answer] : []);
+      for (const v of vals) {
+        const key = imageKeyFromShown(v) || String(v);
+        if (!key) continue;
+        if (!freq[key]) freq[key] = { key, url: typeof v === 'string' ? v : key, count: 0 };
+        freq[key].count += 1;
+        totalPicks += 1;
+        if (typeof v === 'string' && (v.startsWith('http') || v.startsWith('/'))) {
+          freq[key].url = v;
+        } else if (choiceMap[String(v)]?.imageUrl) {
+          freq[key].url = choiceMap[String(v)].imageUrl;
+        }
+      }
+    }
+    const respondentCount = answers.length || 1;
+    return Object.values(freq)
+      .map(({ key, url, count }) => ({
+        key,
+        url,
+        value: count,
+        label: `${count} pick${count === 1 ? '' : 's'} · ${pct(count, respondentCount)}% of respondents · ${totalPicks ? pct(count, totalPicks) : 0}% of picks`,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [answers, choices]);
 
   const trueskillResult = useMemo(() => {
     if (!allResponses?.length || !question?.name) return { matches: [], rankings: [] };
@@ -465,9 +503,26 @@ function ImagePickerDistribution({ answers, choices, question, allResponses }) {
   }, [allResponses, question?.name]);
 
   const { matches, rankings } = trueskillResult;
+  const isMulti = !!question?.multiSelect;
 
   return (
     <Box>
+      {pickFreqItems.length > 0 && (
+        <CompactImageRanking
+          title={isMulti ? 'Selection frequency (multi-select)' : 'Selection frequency'}
+          items={pickFreqItems}
+          getImageUrl={getImageUrl}
+          maxValue={Math.max(...pickFreqItems.map((i) => i.value), 1)}
+          formatLabel={(_v, label) => label}
+        />
+      )}
+      {pickFreqItems.length === 0 && matches.length === 0 && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>No responses yet.</Typography>
+      )}
+
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, mt: pickFreqItems.length ? 2 : 0 }}>
+        TrueSkill (pairwise from selections vs non-selected shown images)
+      </Typography>
       {matches.length === 0 ? (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Not enough pairwise comparisons for TrueSkill (need participants to select among shown images).
@@ -482,6 +537,58 @@ function ImagePickerDistribution({ answers, choices, question, allResponses }) {
         </>
       )}
     </Box>
+  );
+}
+
+function NumberDistribution({ answers, question }) {
+  const nums = answers.map((a) => Number(a.answer)).filter((n) => !Number.isNaN(n));
+  if (!nums.length) {
+    return <Typography variant="body2" color="text.secondary">No numeric responses yet.</Typography>;
+  }
+  const domainMin = question?.min != null && question.min !== ''
+    ? Number(question.min)
+    : Math.min(...nums);
+  const domainMax = question?.max != null && question.max !== ''
+    ? Number(question.max)
+    : Math.max(...nums);
+  const lo = Number.isFinite(domainMin) ? domainMin : Math.min(...nums);
+  const hi = Number.isFinite(domainMax) && domainMax > lo ? domainMax : Math.max(...nums, lo + 1);
+  return (
+    <Box>
+      <DescriptiveStatsLine nums={nums} unit="" />
+      <DensityHistogramChart
+        scores={nums}
+        domainMin={lo}
+        domainMax={hi}
+        title="Numeric response distribution"
+        xLabel={question?.title || 'Value'}
+      />
+    </Box>
+  );
+}
+
+function AttentionCheckPassRate({ question, allResponses }) {
+  if (!question?.isAttentionCheck) return null;
+  const stats = attentionCheckQuestionStats(question, allResponses || []);
+  if (stats.answered === 0) {
+    return (
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Attention check — no answered responses yet (expected: {String(question.expectedAnswer)}).
+      </Alert>
+    );
+  }
+  const ratePct = Math.round((stats.passRate || 0) * 100);
+  const severity = ratePct >= 80 ? 'success' : ratePct >= 50 ? 'warning' : 'error';
+  return (
+    <Alert severity={severity} sx={{ mb: 2 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>Attention check pass rate</Typography>
+      <Typography variant="body2">
+        {stats.passed} / {stats.answered} passed ({ratePct}%) · {stats.failed} failed
+      </Typography>
+      <Typography variant="caption" color="text.secondary" display="block">
+        Expected answer: {String(question.expectedAnswer)}
+      </Typography>
+    </Alert>
   );
 }
 
@@ -753,8 +860,8 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     return resolvedUrl?.get(key) || resolvedUrl?.get(value) || null;
   };
 
-  // ── image_ranking ─────────────────────────────────────────────────────────
-  if (type === 'image_ranking' || type === 'imageranking') {
+  // ── image_ranking / media_ranking ─────────────────────────────────────────
+  if (type === 'image_ranking' || type === 'imageranking' || type === 'mediaranking') {
     const imageRankPositions = {};
     const rankingLists = [];
     for (const { answer } of answers) {
@@ -769,19 +876,28 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     const items = Object.keys(imageRankPositions);
     const nItems = items.length;
     const w = kendallW(rankingLists, items);
+    const bordaMap = computeBordaScores(imageRankPositions, nItems);
     const maxRank = Math.max(nItems, 1);
+    const mediaLabel = type === 'mediaranking' ? 'Media' : 'Image';
 
-    const rankedItems = Object.entries(imageRankPositions)
-      .map(([url, ranks]) => {
-        const avg = average(ranks);
-        return {
-          key: url,
-          url,
-          value: maxRank > 0 ? (maxRank - (avg ?? maxRank) + 1) / maxRank : 0,
-          label: `avg rank ${avg?.toFixed(2) ?? '–'} · n=${ranks.length}`,
-        };
-      })
-      .sort((a, b) => b.value - a.value);
+    const sorted = Object.entries(imageRankPositions)
+      .map(([url, ranks]) => ({
+        val: url,
+        avg: average(ranks),
+        sd: ranks.length > 1
+          ? Math.sqrt(ranks.reduce((s, r) => s + (r - average(ranks)) ** 2, 0) / ranks.length)
+          : 0,
+        borda: bordaMap[url]?.borda,
+        n: ranks.length,
+      }))
+      .sort((a, b) => (a.avg ?? 999) - (b.avg ?? 999));
+
+    const rankedItems = sorted.map(({ val, avg, borda, n, sd }) => ({
+      key: val,
+      url: val,
+      value: maxRank > 0 ? (maxRank - (avg ?? maxRank) + 1) / maxRank : 0,
+      label: `avg ${avg?.toFixed(2) ?? '–'} ±${sd?.toFixed(2)} · Borda ${borda?.toFixed(1) ?? '–'} · n=${n}`,
+    }));
 
     return (
       <Box>
@@ -790,12 +906,27 @@ function ImageQuestionAnalysis({ answers, type, question }) {
             Kendall&apos;s W = {w.toFixed(3)} — {interpretKendallW(w)}
           </Alert>
         )}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            Average rank (1 = top) · Borda score · SD
+          </Typography>
+          {question?.name && sorted.length > 0 && (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<Download />}
+              onClick={() => exportRankingCsv(question.name, sorted, w, items)}
+            >
+              Export ranking CSV
+            </Button>
+          )}
+        </Box>
         <CompactImageRanking
-          title="Image ranking (rank 1 = most preferred)"
+          title={`${mediaLabel} ranking (rank 1 = most preferred)`}
           items={rankedItems}
           getImageUrl={getImageUrl}
           maxValue={1}
-          formatLabel={(v, label) => label}
+          formatLabel={(_v, label) => label}
         />
         {rankedItems.length === 0 && (
           <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
@@ -832,10 +963,11 @@ function ImageQuestionAnalysis({ answers, type, question }) {
       })
       .sort((a, b) => b.value - a.value);
 
+    const mediaNoun = type === 'mediarating' ? 'media' : 'image';
     return (
       <Box>
         <CompactImageRanking
-          title="Average rating by image"
+          title={`Average rating by ${mediaNoun}`}
           items={rankedItems}
           getImageUrl={getImageUrl}
           maxValue={rateMax}
@@ -875,10 +1007,11 @@ function ImageQuestionAnalysis({ answers, type, question }) {
       })
       .sort((a, b) => b.value - a.value);
 
+    const mediaNoun = type === 'mediaboolean' ? 'media' : 'image';
     return (
       <Box>
         <CompactImageRanking
-          title="Yes rate by image"
+          title={`Yes rate by ${mediaNoun}`}
           items={rankedItems}
           getImageUrl={getImageUrl}
           maxValue={1}
@@ -1605,6 +1738,7 @@ function QuestionCard({ question, answers, totalResponses, questionNumber, allRe
         return <ChoiceDistribution answers={answers} choices={question.choices} isCheckbox />;
 
       case 'boolean':
+      case 'consent':
         return <BooleanDistribution answers={answers} />;
 
       case 'text':
@@ -1650,6 +1784,7 @@ function QuestionCard({ question, answers, totalResponses, questionNumber, allRe
       case 'imagerating':
       case 'image_ranking':
       case 'imageranking':
+      case 'mediaranking':
       case 'image_boolean':
       case 'imageboolean':
       case 'image_matrix':
@@ -1664,6 +1799,9 @@ function QuestionCard({ question, answers, totalResponses, questionNumber, allRe
             <ImageQuestionAnalysis answers={answers} type={type} question={question} />
           </>
         );
+
+      case 'number':
+        return <NumberDistribution answers={answers} question={question} />;
 
       case 'mediadisplay':
         return (
@@ -1758,6 +1896,9 @@ function QuestionCard({ question, answers, totalResponses, questionNumber, allRe
               variant="outlined"
               sx={{ fontSize: '0.7rem' }}
             />
+            {question.isAttentionCheck && (
+              <Chip label="Attention check" size="small" color="warning" variant="outlined" sx={{ fontSize: '0.7rem' }} />
+            )}
             {displayOnly ? (
               <Typography variant="caption" color="text.secondary">
                 Display / instruction
@@ -1778,6 +1919,7 @@ function QuestionCard({ question, answers, totalResponses, questionNumber, allRe
       <Collapse in={expanded}>
         <Divider />
         <CardContent>
+          <AttentionCheckPassRate question={question} allResponses={allResponses} />
           {responseCount === 0 && !isDisplayOnlyQuestion(question) ? (
             <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography>
           ) : (
@@ -1804,6 +1946,7 @@ function exportToCSV(responses, allQuestions, surveyConfig) {
   const imageTypes = new Set([
     'imagerating', 'image_rating',
     'imageranking', 'image_ranking',
+    'mediaranking',
     'imageboolean', 'image_boolean',
     'imagematrix', 'image_matrix',
     'imagepicker',
@@ -1823,6 +1966,20 @@ function exportToCSV(responses, allQuestions, surveyConfig) {
     }
     if (q.type === 'pointallocation' || q.type === 'imagepointallocation') {
       return (q.choices || []).map((c) => (typeof c === 'object' ? c.value : c)).filter(Boolean);
+    }
+    if (q.type === 'matrix' || q.type === 'imagematrix') {
+      return (q.rows || []).map((r) => (typeof r === 'object' ? r.value : r)).filter(Boolean);
+    }
+    if (q.type === 'ranking' || q.type === 'imageranking' || q.type === 'mediaranking') {
+      // rank positions: item_1 (best) … from first response or choices
+      const sample = null; // filled per-row below via dynamic length — use fixed choice list when available
+      if (q.type === 'ranking' && q.choices?.length) {
+        return q.choices.map((_, i) => `rank_${i + 1}`);
+      }
+      if ((q.type === 'imageranking' || q.type === 'mediaranking') && q.imageCount) {
+        return Array.from({ length: q.imageCount }, (_, i) => `rank_${i + 1}`);
+      }
+      return sample;
     }
     if (q.type === 'skillquestion') {
       let schema = q.skillResultSchema;
@@ -1889,17 +2046,34 @@ function exportToCSV(responses, allQuestions, surveyConfig) {
       }
       cols.push(typeof ansForCsv === 'object' ? JSON.stringify(ansForCsv) : String(ansForCsv ?? ''));
 
-      // Per-dimension / per-choice / per-schema-key sub-columns
+      // Per-dimension / per-choice / per-schema-key / rank-position sub-columns
       const subKeys = subKeysFor(q);
       if (subKeys) {
-        const rawObj = (ans && typeof ans === 'object' && !Array.isArray(ans)) ? ans : {};
-        const obj = q.type === 'skillquestion' ? stripSkillAnswerContext(rawObj) : rawObj;
-        subKeys.forEach((k) => {
-          const v = getPath(obj, k);
-          cols.push(v === undefined || v === null
-            ? ''
-            : (typeof v === 'object' ? JSON.stringify(v) : v));
-        });
+        if (q.type === 'ranking' || q.type === 'imageranking' || q.type === 'mediaranking') {
+          const ranked = Array.isArray(ans) ? ans : [];
+          const urlToName = (v) => (v && typeof v === 'string') ? v.split('?')[0].split('/').pop() : v;
+          subKeys.forEach((k, i) => {
+            const v = ranked[i];
+            cols.push(v == null ? '' : String(urlToName(v) ?? v));
+          });
+        } else if (q.type === 'matrix' || q.type === 'imagematrix') {
+          const rawObj = (ans && typeof ans === 'object' && !Array.isArray(ans)) ? ans : {};
+          subKeys.forEach((k) => {
+            const v = rawObj[k];
+            cols.push(v === undefined || v === null
+              ? ''
+              : (typeof v === 'object' ? JSON.stringify(v) : v));
+          });
+        } else {
+          const rawObj = (ans && typeof ans === 'object' && !Array.isArray(ans)) ? ans : {};
+          const obj = q.type === 'skillquestion' ? stripSkillAnswerContext(rawObj) : rawObj;
+          subKeys.forEach((k) => {
+            const v = getPath(obj, k);
+            cols.push(v === undefined || v === null
+              ? ''
+              : (typeof v === 'object' ? JSON.stringify(v) : v));
+          });
+        }
       }
 
       // Shown images column (only for image questions) — use filenames, not full URLs

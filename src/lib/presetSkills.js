@@ -60,29 +60,6 @@ html, body { touch-action: manipulation; }
 `;
 
 const HELPERS = `
-function spPlaceholder(label) {
-  var palettes = [
-    { sky: '#87CEEB', ground: '#78909C', accent: '#1976d2', title: 'Main Street' },
-    { sky: '#64B5F6', ground: '#BCAAA4', accent: '#1565c0', title: 'City Plaza' },
-    { sky: '#CFD8DC', ground: '#616161', accent: '#455a64', title: 'Alleyway' },
-    { sky: '#B0BEC5', ground: '#757575', accent: '#37474f', title: 'Before' },
-    { sky: '#81D4FA', ground: '#A5D6A7', accent: '#2e7d32', title: 'After' },
-  ];
-  var idx = 0;
-  if (label && label.indexOf('B') >= 0) idx = 1;
-  if (label && label.indexOf('Before') >= 0) idx = 3;
-  if (label && label.indexOf('After') >= 0) idx = 4;
-  var p = palettes[idx] || palettes[0];
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">' +
-    '<rect width="800" height="500" fill="' + p.sky + '"/>' +
-    '<rect y="340" width="800" height="160" fill="' + p.ground + '"/>' +
-    '<rect x="80" y="120" width="140" height="220" fill="#90A4AE" opacity="0.85"/>' +
-    '<rect x="560" y="100" width="160" height="240" fill="#A1887F" opacity="0.85"/>' +
-    '<ellipse cx="400" cy="300" rx="60" ry="75" fill="#43A047"/>' +
-    '<rect x="388" y="300" width="24" height="50" fill="#6D4C41"/>' +
-    '<text x="400" y="470" text-anchor="middle" fill="' + p.accent + '" font-family="sans-serif" font-size="16" font-weight="600">' + p.title + '</text></svg>';
-  return 'data:image/svg+xml,' + encodeURIComponent(svg);
-}
 function spAbsUrl(url) {
   if (!url) return url;
   if (url.indexOf('http') === 0 || url.indexOf('data:') === 0) return url;
@@ -109,35 +86,29 @@ function spMedia(type, index) {
   var item = list[index != null ? index : 0];
   return item && item.url ? item : null;
 }
-function spDemoFromConfig(type, index) {
-  var cfg = {};
-  try { cfg = SPSkill.getConfig() || {}; } catch (e) { /* ignore */ }
-  if (!cfg.demoImages && window.__SP_BOOT__ && window.__SP_BOOT__.config) {
-    cfg = window.__SP_BOOT__.config;
-  }
-  var demos = cfg.demoImages || [];
-  var idx = index != null ? index : 0;
-  if (type) {
-    var typed = demos.filter(function(d) { return !d.type || d.type === type; });
-    if (typed[idx]) return typed[idx];
-  }
-  return demos[idx] || null;
-}
-function spUrl(type, index, label) {
+function spUrl(type, index) {
   var m = spMedia(type, index);
-  if (m && m.url) return spAbsUrl(m.url);
-  var d = spDemoFromConfig(type, index);
-  if (d && d.url) return spAbsUrl(d.url);
-  return spPlaceholder(label);
+  return m && m.url ? spAbsUrl(m.url) : '';
 }
 function spName(type, index) {
-  var m = spMedia(type, index) || spDemoFromConfig(type, index);
-  return m ? (m.name || 'media') : 'demo';
+  var m = spMedia(type, index);
+  return m ? (m.name || 'media') : '';
 }
 function spSetImg(el, type, index, label) {
   if (!el) return;
-  el.onerror = function() { el.onerror = null; el.src = spPlaceholder(label); };
-  el.src = spUrl(type, index, label);
+  var url = spUrl(type, index);
+  el.onerror = function() {
+    el.onerror = null;
+    el.removeAttribute('src');
+    el.alt = label || 'Media unavailable';
+  };
+  if (url) {
+    el.alt = label || '';
+    el.src = url;
+  } else {
+    el.removeAttribute('src');
+    el.alt = label || 'No media';
+  }
 }
 `;
 
@@ -149,61 +120,6 @@ ${bodyHtml}
 ${HELPERS}
 ${script}
 </script></body></html>`;
-}
-
-export const PRESET_DEMO_IMAGES = {
-  streetA: { name: 'demo-street-a.svg', url: '/preset_skills/demo-street-a.svg', type: 'image' },
-  streetB: { name: 'demo-street-b.svg', url: '/preset_skills/demo-street-b.svg', type: 'image' },
-  alley: { name: 'demo-alley.svg', url: '/preset_skills/demo-alley.svg', type: 'image' },
-  before: { name: 'demo-before.svg', url: '/preset_skills/demo-before.svg', type: 'image' },
-  after: { name: 'demo-after.svg', url: '/preset_skills/demo-after.svg', type: 'image' },
-};
-
-const INLINE_DEMO_PALETTES = [
-  { sky: '#87CEEB', ground: '#78909C', accent: '#1976d2', title: 'Main Street' },
-  { sky: '#64B5F6', ground: '#BCAAA4', accent: '#1565c0', title: 'City Plaza' },
-  { sky: '#CFD8DC', ground: '#616161', accent: '#455a64', title: 'Alleyway' },
-  { sky: '#B0BEC5', ground: '#757575', accent: '#37474f', title: 'Before' },
-  { sky: '#81D4FA', ground: '#A5D6A7', accent: '#2e7d32', title: 'After' },
-];
-
-/** Self-contained demo image (data URI) — works inside sandboxed iframe without network. */
-export function inlineDemoSvgDataUri(sceneIndex = 0) {
-  const p = INLINE_DEMO_PALETTES[sceneIndex % INLINE_DEMO_PALETTES.length];
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">`
-    + `<rect width="800" height="500" fill="${p.sky}"/>`
-    + `<rect y="340" width="800" height="160" fill="${p.ground}"/>`
-    + `<rect x="80" y="120" width="140" height="220" fill="#90A4AE" opacity="0.85"/>`
-    + `<rect x="560" y="100" width="160" height="240" fill="#A1887F" opacity="0.85"/>`
-    + `<ellipse cx="400" cy="300" rx="60" ry="75" fill="#43A047"/>`
-    + `<rect x="388" y="300" width="24" height="50" fill="#6D4C41"/>`
-    + `<text x="400" y="470" text-anchor="middle" fill="${p.accent}" font-family="sans-serif" font-size="16" font-weight="600">${p.title}</text></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
-
-/** Resolve bundled / preset demo images for a skill question element. */
-export function buildFallbackDemoImages(count = 1, mediaType = 'image', skillId = null) {
-  if (skillId?.startsWith('preset_')) {
-    const preset = getPresetSkill(skillId.replace(/^preset_/, ''));
-    if (preset?.defaultConfig?.demoImages?.length) {
-      return preset.defaultConfig.demoImages.map((img, i) => ({ ...img, type: img.type || 'image' }));
-    }
-  }
-  const n = Math.max(1, count || 1);
-  if (mediaType === 'video') {
-    return [{ name: 'demo-poster.svg', url: inlineDemoSvgDataUri(0), type: 'image' }];
-  }
-  if (n >= 2) {
-    return [
-      { name: 'demo-a.svg', url: inlineDemoSvgDataUri(0), type: 'image' },
-      { name: 'demo-b.svg', url: inlineDemoSvgDataUri(1), type: 'image' },
-    ].slice(0, n);
-  }
-  return [{ name: 'demo.svg', url: inlineDemoSvgDataUri(0), type: 'image' }];
-}
-
-function demoImg(index, name) {
-  return { name: name || `demo-${index}.svg`, url: inlineDemoSvgDataUri(index), type: 'image' };
 }
 
 export const PRESET_SKILLS = [
@@ -231,7 +147,6 @@ export const PRESET_SKILLS = [
       leftLabel: 'Prefer A',
       rightLabel: 'Prefer B',
       prompt: 'Which one do you prefer? Drag the slider to express how strongly.',
-      demoImages: [demoImg(0, 'street-a.svg'), demoImg(1, 'street-b.svg')],
     },
     // Pairwise UI always shows exactly two images — count/type are not researcher knobs.
     mediaConstraints: { countFixed: 2, typeFixed: 'image', countLabel: 'Always 2 images (A vs B)' },
@@ -286,6 +201,84 @@ document.getElementById('hard').onchange = report;
 `),
   },
   {
+    id: 'image_preference_forced',
+    name: 'Forced-Choice A/B Preference',
+    builderLabel: 'Forced-Choice A/B',
+    builderHint: 'Shows two random images; participants must pick A or B (no intensity slider).',
+    description: 'Strict binary preference between two images for logistic / Bradley–Terry analyses without continuous intensity.',
+    category: 'image',
+    configSchema: [
+      { key: 'leftLabel', label: 'Option A label', type: 'string' },
+      { key: 'rightLabel', label: 'Option B label', type: 'string' },
+      { key: 'prompt', label: 'Task instructions (inside the question)', type: 'string' },
+    ],
+    resultSchema: [
+      { key: 'choice', label: 'Chosen side (A or B)', type: 'choice' },
+      { key: 'chosenIndex', label: 'Chosen index (0=A, 1=B)', type: 'number' },
+    ],
+    defaultConfig: {
+      mediaCount: 2,
+      mediaType: 'image',
+      leftLabel: 'Option A',
+      rightLabel: 'Option B',
+      prompt: 'Which one do you prefer? Choose one.',
+    },
+    mediaConstraints: { countFixed: 2, typeFixed: 'image', countLabel: 'Always 2 images (A vs B)' },
+    sourceHtml: buildSkill(`
+<div class="card">
+  <p class="title">Forced-Choice Preference</p>
+  <p class="subtitle" id="prompt"></p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+    <button type="button" id="pickA" class="choice-btn" style="border:2px solid var(--border,#ddd);border-radius:8px;padding:8px;background:#fff;cursor:pointer;text-align:left;">
+      <div class="badge" style="margin-bottom:6px;" id="labA">Option A</div>
+      <div class="media-frame"><img id="imgA" alt="A"/></div>
+    </button>
+    <button type="button" id="pickB" class="choice-btn" style="border:2px solid var(--border,#ddd);border-radius:8px;padding:8px;background:#fff;cursor:pointer;text-align:left;">
+      <div class="badge" style="margin-bottom:6px;" id="labB">Option B</div>
+      <div class="media-frame"><img id="imgB" alt="B"/></div>
+    </button>
+  </div>
+  <p class="subtitle" id="chosen" style="min-height:1.2em;"></p>
+</div>`,
+      `
+var cfg = {};
+var selected = null;
+function paint() {
+  document.getElementById('pickA').style.borderColor = selected === 'A' ? 'var(--primary,#1976d2)' : 'var(--border,#ddd)';
+  document.getElementById('pickB').style.borderColor = selected === 'B' ? 'var(--primary,#1976d2)' : 'var(--border,#ddd)';
+  document.getElementById('chosen').textContent = selected
+    ? ('Selected: ' + (selected === 'A' ? (cfg.leftLabel || 'Option A') : (cfg.rightLabel || 'Option B')))
+    : '';
+}
+function report(side) {
+  selected = side;
+  paint();
+  SPSkill.setAnswer({
+    choice: side,
+    chosenIndex: side === 'A' ? 0 : 1,
+    imageA: spUrl('image', 0, 'Option A'),
+    imageB: spUrl('image', 1, 'Option B'),
+    chosenUrl: spUrl('image', side === 'A' ? 0 : 1, side === 'A' ? 'Option A' : 'Option B'),
+  });
+}
+document.addEventListener('spskill-init', function(e) {
+  cfg = e.detail.config || {};
+  document.getElementById('prompt').textContent = cfg.prompt || '';
+  document.getElementById('labA').textContent = cfg.leftLabel || 'Option A';
+  document.getElementById('labB').textContent = cfg.rightLabel || 'Option B';
+  spSetImg(document.getElementById('imgA'), 'image', 0, 'Option A');
+  spSetImg(document.getElementById('imgB'), 'image', 1, 'Option B');
+  if (e.detail.value && e.detail.value.choice) {
+    selected = e.detail.value.choice;
+    paint();
+  }
+  SPSkill.ready();
+});
+document.getElementById('pickA').onclick = function() { report('A'); };
+document.getElementById('pickB').onclick = function() { report('B'); };
+`),
+  },
+  {
     id: 'video_moment_tag',
     name: 'Video Key Moment Tagging',
     builderLabel: 'Video Key Moments',
@@ -305,7 +298,6 @@ document.getElementById('hard').onchange = report;
       mediaType: 'video',
       prompt: 'Watch the video and mark the moments you consider key or important (click "Mark start" then "Mark end")',
       maxSegments: 5,
-      demoImages: [demoImg(0, 'street-a.svg')],
     },
     mediaConstraints: { countFixed: 1, typeFixed: 'video', countLabel: 'Always 1 video' },
     sourceHtml: buildSkill(`
@@ -425,7 +417,6 @@ document.getElementById('markEnd').onclick = function() {
       mediaCount: 1,
       mediaType: 'image',
       prompt: 'Look at the image and pick the color that best matches your first emotional response',
-      demoImages: [demoImg(2, 'alley.svg')],
     },
     mediaConstraints: { countFixed: 1, typeFixed: 'image', countLabel: 'Always 1 image' },
     sourceHtml: buildSkill(`
@@ -462,12 +453,14 @@ function hslToHex(h, s, l) {
 }
 function drawWheel() {
   var cx = 80, cy = 80, r = 78;
+  // Filled hue disk (not a thin ring) — one wedge per degree
   for (var a = 0; a < 360; a++) {
     wctx.beginPath();
-    wctx.strokeStyle = hslToHex(a, 85, 52);
-    wctx.lineWidth = 3;
-    wctx.arc(cx, cy, r, (a - 1) * Math.PI / 180, (a + 1) * Math.PI / 180);
-    wctx.stroke();
+    wctx.moveTo(cx, cy);
+    wctx.arc(cx, cy, r, (a - 0.5) * Math.PI / 180, (a + 0.5) * Math.PI / 180);
+    wctx.closePath();
+    wctx.fillStyle = hslToHex(a, 85, 52);
+    wctx.fill();
   }
 }
 function pick(ev) {
@@ -537,7 +530,6 @@ document.getElementById('intensity').oninput = function() {
       prompt: 'Among these scenes, select the one you like MOST and the one you like LEAST',
       bestLabel: 'Best',
       worstLabel: 'Worst',
-      demoImages: [demoImg(0, 'opt-a.svg'), demoImg(1, 'opt-b.svg'), demoImg(2, 'opt-c.svg'), demoImg(4, 'opt-d.svg')],
     },
     // Count is adjustable (2–6); type stays image-only for this grid UI.
     mediaConstraints: { countMin: 2, countMax: 6, typeFixed: 'image', countLabel: 'Number of image options (2–6)' },
@@ -648,7 +640,6 @@ document.addEventListener('spskill-init', function(e) {
       prompt: 'While the video plays, keep adjusting the slider to match how pleasant the environment feels right now',
       lowLabel: 'Very unpleasant',
       highLabel: 'Very pleasant',
-      demoImages: [demoImg(0, 'street-a.svg')],
     },
     mediaConstraints: { countFixed: 1, typeFixed: 'video', countLabel: 'Always 1 video' },
     sourceHtml: buildSkill(`
@@ -777,7 +768,6 @@ document.addEventListener('spskill-init', function(e) {
         },
         { type: 'text', title: 'Any other comments?', placeholder: 'Optional…' },
       ],
-      demoImages: [demoImg(0, 'street-a.svg')],
     },
     // Default demo uses 1 image; researchers can raise count if blocks reference more indices.
     mediaConstraints: { countMin: 1, countMax: 6, countLabel: 'Media files available to blocks' },
@@ -951,12 +941,6 @@ document.addEventListener('spskill-init', function(e) {
   },
 ];
 
-/** Demo media for gallery preview — inline SVG (no network). */
-export const PRESET_SKILL_DEMO_IMAGES = [
-  demoImg(0, 'street-a.svg'),
-  demoImg(1, 'street-b.svg'),
-  demoImg(2, 'alley.svg'),
-];
 
 export function getPresetSkill(presetId) {
   const id = String(presetId || '').replace(/^preset_/, '');

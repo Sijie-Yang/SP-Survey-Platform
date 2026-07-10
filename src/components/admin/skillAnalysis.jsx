@@ -102,6 +102,76 @@ function resolveImageKeyFromContext(key, resolvedUrl) {
   return resolveImageKey(key, resolvedUrl);
 }
 
+export function ForcedChoicePreferenceAnalysis({ answers }) {
+  const resolveUrl = useMediaResolver();
+  const pickA = answers.filter((a) => a.answer?.choice === 'A' || a.answer?.chosenIndex === 0).length;
+  const pickB = answers.filter((a) => a.answer?.choice === 'B' || a.answer?.chosenIndex === 1).length;
+  const total = pickA + pickB;
+
+  const perImage = useMemo(() => {
+    const stats = {};
+    answers.forEach(({ answer }) => {
+      const choice = answer?.choice === 'B' || answer?.chosenIndex === 1 ? 'B' : (
+        answer?.choice === 'A' || answer?.chosenIndex === 0 ? 'A' : null
+      );
+      if (!choice) return;
+      const winner = choice === 'A' ? answer?.imageA : answer?.imageB;
+      const loser = choice === 'A' ? answer?.imageB : answer?.imageA;
+      [[winner, 1], [loser, 0]].forEach(([url, win]) => {
+        if (!url) return;
+        const key = mediaFilenameKey(url);
+        if (!stats[key]) stats[key] = { key, url, wins: 0, shown: 0 };
+        stats[key].shown += 1;
+        stats[key].wins += win;
+      });
+    });
+    return Object.values(stats)
+      .map(({ key, url, wins, shown }) => ({
+        key,
+        url,
+        value: shown > 0 ? wins / shown : 0,
+        label: `${pct(wins, shown)}% win (${wins}/${shown})`,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [answers]);
+
+  const pairPreview = answers.find((a) => a.answer?.imageA && a.answer?.imageB)?.answer;
+
+  return (
+    <Box>
+      {pairPreview && (
+        <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ textAlign: 'center' }}>
+            <Typography variant="caption" color="text.secondary">Option A</Typography>
+            {resolveUrl(pairPreview.imageA) && (
+              <Box component="img" src={resolveUrl(pairPreview.imageA)} alt="A" sx={{ display: 'block', width: 96, height: 96, objectFit: 'cover', borderRadius: 1, mt: 0.5 }} />
+            )}
+          </Box>
+          <Box sx={{ textAlign: 'center' }}>
+            <Typography variant="caption" color="text.secondary">Option B</Typography>
+            {resolveUrl(pairPreview.imageB) && (
+              <Box component="img" src={resolveUrl(pairPreview.imageB)} alt="B" sx={{ display: 'block', width: 96, height: 96, objectFit: 'cover', borderRadius: 1, mt: 0.5 }} />
+            )}
+          </Box>
+        </Box>
+      )}
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>A/B choice rates</Typography>
+      <HorizontalBar label="Chose A" count={pickA} total={total || 1} color="#1976d2" />
+      <HorizontalBar label="Chose B" count={pickB} total={total || 1} color="#ed6c02" />
+      <SkillMediaRanking
+        title="Win rate by image (chosen when shown)"
+        items={perImage}
+        resolveUrl={resolveUrl}
+        maxValue={1}
+        formatLabel={(_v, label) => label}
+      />
+      {total === 0 && (
+        <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
+      )}
+    </Box>
+  );
+}
+
 export function PairwisePreferenceAnalysis({ answers }) {
   const resolveUrl = useMediaResolver();
   const prefs = answers.map((a) => Number(a.answer?.preference)).filter((n) => !Number.isNaN(n));
@@ -433,6 +503,7 @@ export function getPresetSkillAnalysis(skillId) {
   const id = skillId?.replace(/^preset_/, '');
   const map = {
     image_preference_slider: PairwisePreferenceAnalysis,
+    image_preference_forced: ForcedChoicePreferenceAnalysis,
     best_worst_choice: MaxDiffAnalysis,
     video_moment_tag: VideoMomentAnalysis,
     video_continuous_rating: ContinuousVideoRatingAnalysis,

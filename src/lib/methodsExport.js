@@ -7,8 +7,12 @@ function questionTypeLabel(type) {
     imagepicker: 'pairwise image choice',
     rating: 'Likert rating scale',
     imagerating: 'image rating scale',
+    mediarating: 'media rating scale',
+    mediaranking: 'media ranking',
     radiogroup: 'single-choice question',
     matrix: 'matrix question',
+    number: 'numeric input',
+    consent: 'informed consent gate',
     slidergroup: 'semantic differential slider group',
     pointallocation: 'point allocation task',
     skillquestion: 'interactive perception task',
@@ -50,6 +54,17 @@ export function generateMethodsText({
 
   const attentionQs = getAttentionCheckQuestions(surveyConfig);
   const pairwiseQs = allQuestions.filter((q) => q.type === 'imagepicker');
+  const forcedChoiceQs = allQuestions.filter(
+    (q) => q.type === 'skillquestion'
+      && (q.skillId === 'preset_image_preference_forced'
+        || q.skillId === 'image_preference_forced'
+        || String(q.skillId || '').endsWith('image_preference_forced')),
+  );
+  const sliderPairQs = allQuestions.filter(
+    (q) => q.type === 'skillquestion'
+      && (q.skillId === 'preset_image_preference_slider'
+        || String(q.skillId || '').endsWith('image_preference_slider')),
+  );
 
   const lines = [];
   lines.push('METHODS (auto-generated — review and edit before submission)');
@@ -79,6 +94,20 @@ export function generateMethodsText({
       + `${modes.join('/')} pairing where configured. `
       + `Each selected image was treated as winning over non-selected shown alternatives; `
       + `scores were estimated with TrueSkill (μ − 3σ conservative rating).`,
+    );
+  }
+
+  if (forcedChoiceQs.length) {
+    lines.push(
+      `Forced-choice A/B preference tasks (${forcedChoiceQs.length} question(s)) presented two images; `
+      + `participants selected A or B without a continuous intensity scale.`,
+    );
+  }
+
+  if (sliderPairQs.length) {
+    lines.push(
+      `Continuous A/B preference sliders (${sliderPairQs.length} question(s)) collected preference strength `
+      + `on a −100 to +100 scale between two randomly paired images.`,
     );
   }
 

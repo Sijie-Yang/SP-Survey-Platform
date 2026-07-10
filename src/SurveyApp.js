@@ -8,7 +8,7 @@ import { findDraftForProject, saveDraft, clearDraft, clearDraftByKey, clearAllDr
 import { surveyJson, displayedImages } from './config/questions';
 import { surveyConfig } from './config/surveyConfig';
 import { themeJson } from "./theme";
-import { loadSurveyConfig, convertToSurveyJS, generateCustomTheme } from './lib/surveyStorage';
+import { loadSurveyConfig, convertToSurveyJS, generateCustomTheme, normalizeBuilderSurveyJson } from './lib/surveyStorage';
 import registerImageRankingWidget, {
   registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget,
   registerAllExtendedWidgets,
@@ -18,9 +18,10 @@ import { countProjectResponses, fetchPairStats } from './lib/surveyPublicApi';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
   ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesGroupMediaAssignment,
-  usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia,
+  usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
+import { getProjectLiveAccess, formatLiveWindow } from './lib/liveSurveyManager';
 
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
@@ -36,6 +37,7 @@ export default function SurveyApp() {
   const [surveyPhase, setSurveyPhase] = useState('loading'); // loading | active | submitting | completed | submit-error | closed
   const [completionInfo, setCompletionInfo] = useState(null);
   const [quotaClosed, setQuotaClosed] = useState(false);
+  const [liveClosedMessage, setLiveClosedMessage] = useState(null);
   const [pendingSubmission, setPendingSubmission] = useState(null);
   const [resumeDialog, setResumeDialog] = useState(null);
   const [completionMessage, setCompletionMessage] = useState('');
@@ -271,6 +273,25 @@ export default function SurveyApp() {
       const adminConfig = await loadSurveyConfig(projectId);
       setCompletionMessage(adminConfig?.completionMessage || '');
 
+      // Live Surveys approved-window gate (projects without a listing stay open by link)
+      setLoadingMessage('Checking survey availability…');
+      const liveAccess = await getProjectLiveAccess(projectId);
+      if (liveAccess.gated && !liveAccess.allowed) {
+        const phase = liveAccess.phase;
+        const windowText = liveAccess.listing
+          ? formatLiveWindow(liveAccess.listing.online_start, liveAccess.listing.online_end)
+          : '';
+        setLiveClosedMessage(
+          phase === 'upcoming'
+            ? `This survey is not online yet.${windowText ? ` Approved window: ${windowText}.` : ''}`
+            : `This survey is not online right now.${windowText ? ` Approved window was: ${windowText}.` : ''}`,
+        );
+        setSurveyPhase('closed');
+        setLoading(false);
+        return;
+      }
+      setLiveClosedMessage(null);
+
       // Response quota gate
       const responseQuota = Number(adminConfig?.responseQuota) || 0;
       if (responseQuota > 0) {
@@ -392,6 +413,10 @@ export default function SurveyApp() {
                 
                 if (isImageQuestion && isManualMode && element.choices && element.choices.length > 0) {
                   console.log(`✅ Skipping image loading for ${element.type} question "${element.name}" - using manually selected images (${element.choices.length} images)`);
+                }
+
+                if (isManualMode && applyCuratedMediaIfNeeded(element, projectData?.preloadedImages || [])) {
+                  console.log(`✅ Applied curated media for ${element.type} question "${element.name}"`);
                 }
                 
                 if (shouldInjectMedia(element)) {
@@ -846,7 +871,8 @@ export default function SurveyApp() {
         console.log('🔧 Survey: Fixed showProgressBar boolean to string');
       }
       
-      // Create survey model
+      // Create survey model (map builder-only types like number/consent)
+      finalSurveyJson = normalizeBuilderSurveyJson(finalSurveyJson);
       const model = new Model(finalSurveyJson);
       
       // Apply theme - with error handling
@@ -1120,7 +1146,8 @@ export default function SurveyApp() {
       <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
         <Typography variant="h5" sx={{ mb: 2, fontWeight: 600 }}>Survey closed</Typography>
         <Typography variant="body1" color="text.secondary">
-          This survey is no longer accepting responses. Thank you for your interest.
+          {liveClosedMessage
+            || 'This survey is no longer accepting responses. Thank you for your interest.'}
         </Typography>
       </Box>
     );

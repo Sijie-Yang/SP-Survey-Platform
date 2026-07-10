@@ -19,6 +19,16 @@ import {
   listAllProjects, updateProjectAdmin, deleteProjectAdmin,
   seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
 } from '../lib/templateManager';
+import {
+  listAllLiveSurveys,
+  approveLiveListing,
+  revokeLiveListing,
+  updateLiveListing,
+  deleteLiveListing,
+  formatLiveWindow,
+  computeLiveStatus,
+} from '../lib/liveSurveyManager';
+import { supabase } from '../lib/supabase';
 import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT } from '../lib/mediaUtils';
 import { SKILL_PREVIEW_PREFIX, listSkillPreviewMedia } from '../lib/skillPreviewMedia';
 import {
@@ -2013,6 +2023,208 @@ function SkillManagement() {
   );
 }
 
+// ─── Live Surveys Management ─────────────────────────────────────────────────
+
+function LiveSurveyManagement() {
+  const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [snack, setSnack] = useState({ open: false, msg: '', sev: 'success' });
+  const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setListings(await listAllLiveSurveys());
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const reviewerEmail = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user?.email || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleApprove = async (id) => {
+    try {
+      await approveLiveListing(id, await reviewerEmail());
+      showSnack('已批准 / 已应用时间窗');
+      load();
+    } catch (err) { showSnack(err.message, 'error'); }
+  };
+
+  const handleRevoke = async (id, title) => {
+    if (!window.confirm(`撤销 Live 上架「${title}」？参与者直链在窗口外也会被关闭。`)) return;
+    try {
+      await revokeLiveListing(id, 'Revoked by admin', await reviewerEmail());
+      showSnack('已撤销');
+      load();
+    } catch (err) { showSnack(err.message, 'error'); }
+  };
+
+  const handleShowOnLive = async (id, value) => {
+    try {
+      await updateLiveListing(id, { show_on_live: value });
+      showSnack(value ? '已显示在 Live 页' : '已从 Live 页隐藏');
+      load();
+    } catch (err) { showSnack(err.message, 'error'); }
+  };
+
+  const handleDelete = async (id, title) => {
+    if (!window.confirm(`永久删除申请记录「${title}」？`)) return;
+    try {
+      await deleteLiveListing(id);
+      showSnack('已删除');
+      load();
+    } catch (err) { showSnack(err.message, 'error'); }
+  };
+
+  const filtered = listings.filter((l) => {
+    const phase = computeLiveStatus(l);
+    if (filter === 'pending') return l.status === 'pending' || l.has_pending_window_change;
+    if (filter === 'approved') return l.status === 'approved';
+    if (filter === 'expired') return l.status === 'approved' && phase === 'closed';
+    if (filter === 'revoked') return l.status === 'revoked';
+    return true;
+  });
+
+  return (
+    <Box>
+      <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
+        <Typography variant="h6">Live Surveys 审核</Typography>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel>筛选</InputLabel>
+          <Select value={filter} label="筛选" onChange={(e) => setFilter(e.target.value)}>
+            <MenuItem value="all">全部</MenuItem>
+            <MenuItem value="pending">待审核 / 时间窗变更</MenuItem>
+            <MenuItem value="approved">已批准</MenuItem>
+            <MenuItem value="expired">已过期（仍批准）</MenuItem>
+            <MenuItem value="revoked">已撤销</MenuItem>
+          </Select>
+        </FormControl>
+        <Box flex={1} />
+        <Button startIcon={<Refresh />} onClick={load} disabled={loading}>刷新</Button>
+      
+      </Stack>
+      {loading ? <CircularProgress /> : (
+        <TableContainer component={Paper} variant="outlined">
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
+                <TableCell>标题</TableCell>
+                <TableCell>项目 ID</TableCell>
+                <TableCell>提交者</TableCell>
+                <TableCell>在线窗口</TableCell>
+                <TableCell align="center">状态</TableCell>
+                <TableCell align="center">Live 页</TableCell>
+                <TableCell align="center">操作</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filtered.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    暂无记录
+                  </TableCell>
+                </TableRow>
+              )}
+              {filtered.map((l) => {
+                const phase = computeLiveStatus(l);
+                return (
+                  <TableRow key={l.id} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>{l.title}</Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {l.author || '—'} · {l.category}
+                      </Typography>
+                      {l.has_pending_window_change && (
+                        <Chip size="small" color="warning" label="时间窗变更待审" sx={{ mt: 0.5 }} />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>{l.project_id}</Typography>
+                    </TableCell>
+                    <TableCell>{l.submitter_email || '—'}</TableCell>
+                    <TableCell>
+                      <Typography variant="caption" display="block">
+                        {formatLiveWindow(l.online_start, l.online_end)}
+                      </Typography>
+                      {l.has_pending_window_change && (
+                        <Typography variant="caption" color="warning.main" display="block">
+                          待审: {formatLiveWindow(l.pending_online_start, l.pending_online_end)}
+                        </Typography>
+                      )}
+                      {l.status === 'approved' && (
+                        <Chip
+                          size="small"
+                          sx={{ mt: 0.5 }}
+                          label={phase}
+                          color={phase === 'online' ? 'success' : phase === 'upcoming' ? 'info' : 'default'}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Chip
+                        size="small"
+                        label={l.status}
+                        color={l.status === 'approved' ? 'success' : l.status === 'pending' ? 'warning' : 'default'}
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Switch
+                        size="small"
+                        checked={!!l.show_on_live && l.status === 'approved'}
+                        disabled={l.status !== 'approved'}
+                        onChange={(e) => handleShowOnLive(l.id, e.target.checked)}
+                        color="success"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack direction="row" spacing={0.5} justifyContent="center" flexWrap="wrap">
+                        {(l.status === 'pending' || l.has_pending_window_change) && (
+                          <Button size="small" variant="contained" color="success" onClick={() => handleApprove(l.id)}>
+                            批准
+                          </Button>
+                        )}
+                        <Tooltip title="打开问卷">
+                          <IconButton
+                            size="small"
+                            component="a"
+                            href={`/survey?project=${encodeURIComponent(l.project_id)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Preview fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        {l.status !== 'revoked' && (
+                          <Button size="small" color="warning" onClick={() => handleRevoke(l.id, l.title)}>
+                            撤销
+                          </Button>
+                        )}
+                        <IconButton size="small" color="error" onClick={() => handleDelete(l.id, l.title)}>
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+      <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((x) => ({ ...x, open: false }))}>
+        <Alert severity={snack.sev}>{snack.msg}</Alert>
+      </Snackbar>
+    </Box>
+  );
+}
+
 // ─── Main AdminDashboard Page ────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -2067,10 +2279,13 @@ export default function AdminDashboard() {
           value={tab}
           onChange={(_, v) => setTab(v)}
           sx={{ borderTop: 1, borderColor: 'divider', bgcolor: 'white' }}
+          variant="scrollable"
+          scrollButtons="auto"
         >
           <Tab label="模板管理" />
           <Tab label="项目概览" />
           <Tab label="Skill 审核" />
+          <Tab label="Live Surveys" />
         </Tabs>
       </AppBar>
 
@@ -2078,6 +2293,7 @@ export default function AdminDashboard() {
         {tab === 0 && <TemplateManagement />}
         {tab === 1 && <ProjectOverview />}
         {tab === 2 && <SkillManagement />}
+        {tab === 3 && <LiveSurveyManagement />}
       </Container>
     </Box>
   );

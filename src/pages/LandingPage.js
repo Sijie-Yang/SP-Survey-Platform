@@ -6,8 +6,9 @@ import {
 } from '@mui/material';
 import {
   Search, Login, GitHub, Article, Dataset,
-  AutoAwesome, BarChart, CloudUpload, Share, Preview,
+  AutoAwesome, BarChart, CloudUpload, Share, Preview, Public,
 } from '@mui/icons-material';
+import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { projectTemplates } from '../lib/projectTemplates';
@@ -46,9 +47,13 @@ export default function LandingPage() {
   const [templates, setTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [search, setSearch] = useState('');
+  const [onlineLiveCount, setOnlineLiveCount] = useState(0);
 
   useEffect(() => {
     loadTemplates();
+    listPublicLiveSurveys().then((rows) => {
+      setOnlineLiveCount(rows.filter((r) => computeLiveStatus(r) === 'online').length);
+    }).catch(() => setOnlineLiveCount(0));
   }, []);
 
   async function loadTemplates() {
@@ -114,7 +119,15 @@ export default function LandingPage() {
             sx={{ height: 44, objectFit: 'contain' }}
             onError={e => { e.target.style.display = 'none'; }} />
         </Box>
-        <Box sx={{ display: 'flex', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Button
+            variant="outlined"
+            startIcon={<Public />}
+            onClick={() => navigate('/live')}
+            size="small"
+          >
+            Live Surveys{onlineLiveCount > 0 ? ` (${onlineLiveCount})` : ''}
+          </Button>
           <Button variant="outlined" startIcon={<GitHub />} href="https://github.com/Sijie-Yang/SP-Survey" target="_blank" size="small">
             GitHub
           </Button>
@@ -123,6 +136,20 @@ export default function LandingPage() {
           </Button>
         </Box>
       </Box>
+
+      {/* ── Live Surveys teaser ── */}
+      {onlineLiveCount > 0 && (
+        <Box sx={{ bgcolor: 'success.50', borderBottom: '1px solid', borderColor: 'success.light', py: 1.5, px: 2 }}>
+          <Container maxWidth="lg" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+            <Typography variant="body2" fontWeight={600}>
+              {onlineLiveCount} live {onlineLiveCount === 1 ? 'survey is' : 'surveys are'} online now — take them as a participant.
+            </Typography>
+            <Button size="small" variant="contained" color="success" startIcon={<Public />} onClick={() => navigate('/live')}>
+              Browse Live Surveys
+            </Button>
+          </Container>
+        </Box>
+      )}
 
       {/* ── Hero ── */}
       <Box sx={{ bgcolor: 'primary.main', color: 'white', py: { xs: 6, md: 10 }, textAlign: 'center' }}>

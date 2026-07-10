@@ -53,6 +53,7 @@ import {
   InfoOutlined,
   Search,
   FilterList,
+  Public,
 } from '@mui/icons-material';
 import { 
   getUserProjects, 
@@ -82,6 +83,13 @@ import {
   buildTemplateIdBase,
   findAvailableTemplateId,
 } from '../../lib/templateManager';
+import {
+  applyLiveListing,
+  getLiveListingForProject,
+  toDatetimeLocalValue,
+  formatLiveWindow,
+  computeLiveStatus,
+} from '../../lib/liveSurveyManager';
 import { supabase } from '../../lib/supabase';
 import { isR2Configured, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
 
@@ -107,6 +115,16 @@ export default function ProjectSidebar({
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [previewDialog, setPreviewDialog] = useState(false);
   const [saveAsTemplateDialog, setSaveAsTemplateDialog] = useState(false);
+  const [liveListingDialog, setLiveListingDialog] = useState(false);
+  const [projectForLive, setProjectForLive] = useState(null);
+  const [existingLiveListing, setExistingLiveListing] = useState(null);
+  const [isSavingLiveListing, setIsSavingLiveListing] = useState(false);
+  const [liveTitle, setLiveTitle] = useState('');
+  const [liveDescription, setLiveDescription] = useState('');
+  const [liveAuthor, setLiveAuthor] = useState('');
+  const [liveCategory, setLiveCategory] = useState('Custom');
+  const [liveStart, setLiveStart] = useState('');
+  const [liveEnd, setLiveEnd] = useState('');
   // Prevents double-clicks on "Create Template" from spawning multiple
   // templates while the async R2 copy + Supabase insert is in flight.
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
@@ -385,6 +403,76 @@ export default function ProjectSidebar({
     }
     
     handleMenuClose();
+  };
+
+  const handleApplyLiveSurvey = async () => {
+    if (!menuProject) return;
+    if (!supabase) {
+      setError('Live Surveys require platform mode (Supabase). Self-hosted installs use share links instead.');
+      handleMenuClose();
+      return;
+    }
+    setProjectForLive(menuProject);
+    setLiveTitle(menuProject.name || '');
+    setLiveDescription(menuProject.description || '');
+    setLiveAuthor(menuProject.author || '');
+    setLiveCategory(menuProject.category || 'Custom');
+    setError('');
+    try {
+      const existing = await getLiveListingForProject(menuProject.id);
+      setExistingLiveListing(existing);
+      if (existing?.has_pending_window_change && existing.pending_online_start) {
+        setLiveStart(toDatetimeLocalValue(existing.pending_online_start));
+        setLiveEnd(toDatetimeLocalValue(existing.pending_online_end));
+      } else if (existing?.online_start) {
+        setLiveStart(toDatetimeLocalValue(existing.online_start));
+        setLiveEnd(toDatetimeLocalValue(existing.online_end));
+      } else {
+        const start = new Date();
+        const end = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        setLiveStart(toDatetimeLocalValue(start.toISOString()));
+        setLiveEnd(toDatetimeLocalValue(end.toISOString()));
+      }
+    } catch (err) {
+      console.error(err);
+      setExistingLiveListing(null);
+      const start = new Date();
+      const end = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      setLiveStart(toDatetimeLocalValue(start.toISOString()));
+      setLiveEnd(toDatetimeLocalValue(end.toISOString()));
+    }
+    setLiveListingDialog(true);
+    handleMenuClose();
+  };
+
+  const confirmApplyLiveSurvey = async () => {
+    if (!projectForLive || isSavingLiveListing) return;
+    setIsSavingLiveListing(true);
+    setError('');
+    try {
+      const result = await applyLiveListing({
+        projectId: projectForLive.id,
+        title: liveTitle.trim() || projectForLive.name,
+        description: liveDescription,
+        category: liveCategory,
+        author: liveAuthor,
+        onlineStart: liveStart,
+        onlineEnd: liveEnd,
+        refreshCardFromProject: true,
+      });
+      setExistingLiveListing(result.listing);
+      setLiveListingDialog(false);
+      setProjectForLive(null);
+      const msg = result.mode === 'window_change'
+        ? 'Online window change submitted for admin review. The current approved window stays active until approved.'
+        : 'Live Survey application submitted for admin review.';
+      alert(msg);
+    } catch (err) {
+      console.error('applyLiveListing failed:', err);
+      setError(err.message || 'Failed to submit Live Survey application');
+    } finally {
+      setIsSavingLiveListing(false);
+    }
   };
 
   const handleExportAsTemplate = () => {
@@ -1336,6 +1424,10 @@ export default function ProjectSidebar({
           <ListItemIcon><Description /></ListItemIcon>
           <ListItemText>Save as Template</ListItemText>
         </MenuItem>
+        <MenuItem onClick={handleApplyLiveSurvey}>
+          <ListItemIcon><Public /></ListItemIcon>
+          <ListItemText>Publish to Live Surveys</ListItemText>
+        </MenuItem>
         <Divider />
         <MenuItem onClick={handleDeleteProject} sx={{ color: 'error.main' }}>
           <ListItemIcon><Delete color="error" /></ListItemIcon>
@@ -1735,6 +1827,129 @@ export default function ProjectSidebar({
             startIcon={isSavingTemplate ? <CircularProgress size={16} color="inherit" /> : null}
           >
             {isSavingTemplate ? 'Creating Template…' : 'Create Template'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Publish to Live Surveys Dialog */}
+      <Dialog
+        open={liveListingDialog}
+        onClose={(_, reason) => {
+          if (isSavingLiveListing) return;
+          if (reason === 'backdropClick' || reason === 'escapeKeyDown') return;
+          setLiveListingDialog(false);
+        }}
+        disableEscapeKeyDown={isSavingLiveListing}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {existingLiveListing?.status === 'approved'
+            ? 'Change Live Surveys window'
+            : 'Publish to Live Surveys'}
+        </DialogTitle>
+        <DialogContent>
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          <Alert severity="info" sx={{ mb: 2 }}>
+            {existingLiveListing?.status === 'approved'
+              ? 'Request a new online window. Your current approved window stays active until an admin approves the change. Survey content always stays in sync with this project.'
+              : 'Submit this project for the public Live Surveys page. An admin must approve it. Participants always take the latest project (not a snapshot).'}
+          </Alert>
+          {existingLiveListing && (
+            <Alert
+              severity={existingLiveListing.status === 'approved' ? 'success' : 'warning'}
+              sx={{ mb: 2 }}
+            >
+              Current status: <strong>{existingLiveListing.status}</strong>
+              {existingLiveListing.status === 'approved' && existingLiveListing.online_start && (
+                <>
+                  {' · '}window {formatLiveWindow(existingLiveListing.online_start, existingLiveListing.online_end)}
+                  {' · '}phase {computeLiveStatus(existingLiveListing)}
+                </>
+              )}
+              {existingLiveListing.has_pending_window_change && (
+                <> · window change pending review</>
+              )}
+            </Alert>
+          )}
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Display title"
+            fullWidth
+            value={liveTitle}
+            onChange={(e) => setLiveTitle(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            margin="dense"
+            label="Short description"
+            fullWidth
+            multiline
+            rows={3}
+            value={liveDescription}
+            onChange={(e) => setLiveDescription(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            margin="dense"
+            label="Author / lab"
+            fullWidth
+            value={liveAuthor}
+            onChange={(e) => setLiveAuthor(e.target.value)}
+            sx={{ mb: 2 }}
+          />
+          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
+            <InputLabel>Category</InputLabel>
+            <Select
+              value={liveCategory}
+              label="Category"
+              onChange={(e) => setLiveCategory(e.target.value)}
+            >
+              <MenuItem value="Custom">Custom</MenuItem>
+              <MenuItem value="Academic Research">Academic Research</MenuItem>
+              <MenuItem value="Urban Theory">Urban Theory</MenuItem>
+              <MenuItem value="AI Template">AI Template</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField
+            margin="dense"
+            label="Online from"
+            type="datetime-local"
+            fullWidth
+            value={liveStart}
+            onChange={(e) => setLiveStart(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            sx={{ mb: 2 }}
+            helperText="Stored in UTC; shown in each visitor’s local time"
+          />
+          <TextField
+            margin="dense"
+            label="Online until"
+            type="datetime-local"
+            fullWidth
+            value={liveEnd}
+            onChange={(e) => setLiveEnd(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            helperText="After this time the Live Surveys card turns grey / closed"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => { setLiveListingDialog(false); setProjectForLive(null); setError(''); }}
+            disabled={isSavingLiveListing}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={confirmApplyLiveSurvey}
+            variant="contained"
+            disabled={isSavingLiveListing || !liveStart || !liveEnd}
+            startIcon={isSavingLiveListing ? <CircularProgress size={16} color="inherit" /> : <Public />}
+          >
+            {isSavingLiveListing
+              ? 'Submitting…'
+              : (existingLiveListing?.status === 'approved' ? 'Submit window change' : 'Submit for review')}
           </Button>
         </DialogActions>
       </Dialog>

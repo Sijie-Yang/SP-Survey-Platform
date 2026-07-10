@@ -1,7 +1,7 @@
 {
   "id": "2026-sp-all",
   "name": "All Question Types (QA Template)",
-  "description": "Smoke-test survey covering all 23 native question types and 6 preset skills. Uses bundled demo images from /preset_skills/ — no Hugging Face dataset required. Before previewing skill questions, import the 6 preset skills from Skill Library once.",
+  "description": "Smoke-test survey covering all native builder question types and 7 preset Interactive skills. Upload your own media in Image Dataset before testing image/media/skill questions. Skill questions resolve via built-in preset_* skillIds.",
   "author": "SP Survey Platform",
   "year": "2026",
   "category": "Platform",
@@ -12,19 +12,10 @@
   ],
   "website": null,
   "huggingfaceDataset": null,
-  "preloadedImages": [
-    { "name": "demo-street-a.svg", "url": "/preset_skills/demo-street-a.svg", "type": "image" },
-    { "name": "demo-street-b.svg", "url": "/preset_skills/demo-street-b.svg", "type": "image" },
-    { "name": "demo-alley.svg", "url": "/preset_skills/demo-alley.svg", "type": "image" },
-    { "name": "demo-before.svg", "url": "/preset_skills/demo-before.svg", "type": "image" },
-    { "name": "demo-after.svg", "url": "/preset_skills/demo-after.svg", "type": "image" }
-  ],
-  "preloadedSource": "static",
-  "preloadedAt": "2026-07-09T00:00:00.000Z",
-  "createdAt": "2026-07-09T00:00:00.000Z",
+  "createdAt": "2026-07-10T00:49:47.592Z",
   "config": {
     "title": "All Question Types — QA Smoke Test",
-    "description": "One page per question family. Answer a few items on each page to verify rendering, validation, response capture, and Results analysis. Skill questions require preset skills imported in Skill Library.",
+    "description": "One page per question family. Answer a few items on each page to verify rendering, validation, response capture, and Results analysis.",
     "logo": "",
     "logoPosition": "right",
     "settings": {
@@ -39,20 +30,28 @@
       {
         "name": "intro",
         "title": "Introduction",
-        "description": "This template exists to QA every supported question type in SP Survey Platform.",
+        "description": "QA every supported question type in SP Survey Platform.",
         "elements": [
           {
             "type": "expression",
             "name": "qa_intro",
             "title": "How to use this template",
-            "description": "Work through each page. Native types (text, rating, image, media, slider group, etc.) need no extra setup. For skill questions, open Skill Library → import all 6 presets first. Demo images load from /preset_skills/ automatically when the project is created from this template."
+            "description": "Work through each page. For image/media/skill questions, upload media in the project Image Dataset first. Interactive presets use skillId preset_* (built into the platform)."
+          },
+          {
+            "type": "consent",
+            "name": "qa_consent",
+            "title": "[consent] I agree to participate in this QA smoke test",
+            "labelTrue": "I agree",
+            "labelFalse": "I do not agree",
+            "isRequired": true
           }
         ]
       },
       {
         "name": "text_and_choice",
         "title": "Text & choice types",
-        "description": "text · comment · radiogroup · checkbox · dropdown · boolean · rating · ranking · matrix",
+        "description": "text · comment · number · radiogroup · checkbox · dropdown · boolean · rating · ranking · matrix",
         "elements": [
           {
             "type": "text",
@@ -66,27 +65,49 @@
             "name": "qa_comment",
             "title": "[comment] Multi-line answer",
             "placeholder": "Longer free text…",
+            "rows": 3,
+            "isRequired": false
+          },
+          {
+            "type": "number",
+            "name": "qa_number",
+            "title": "[number] Enter a number",
+            "min": 0,
+            "max": 100,
             "isRequired": false
           },
           {
             "type": "radiogroup",
             "name": "qa_radiogroup",
             "title": "[radiogroup] Pick one",
-            "choices": ["Option A", "Option B", "Option C"],
+            "choices": [
+              "Option A",
+              "Option B",
+              "Option C"
+            ],
             "isRequired": false
           },
           {
             "type": "checkbox",
             "name": "qa_checkbox",
             "title": "[checkbox] Pick any",
-            "choices": ["Tag 1", "Tag 2", "Tag 3", "Tag 4"],
+            "choices": [
+              "Tag 1",
+              "Tag 2",
+              "Tag 3",
+              "Tag 4"
+            ],
             "isRequired": false
           },
           {
             "type": "dropdown",
             "name": "qa_dropdown",
             "title": "[dropdown] Select from list",
-            "choices": ["Low", "Medium", "High"],
+            "choices": [
+              "Low",
+              "Medium",
+              "High"
+            ],
             "isRequired": false
           },
           {
@@ -94,6 +115,8 @@
             "name": "qa_boolean",
             "title": "[boolean] Yes or No",
             "label": "Do you agree?",
+            "labelTrue": "Yes",
+            "labelFalse": "No",
             "isRequired": false
           },
           {
@@ -110,18 +133,37 @@
             "type": "ranking",
             "name": "qa_ranking",
             "title": "[ranking] Order by preference",
-            "choices": ["First choice", "Second choice", "Third choice"],
+            "choices": [
+              "First choice",
+              "Second choice",
+              "Third choice"
+            ],
             "isRequired": false
           },
           {
             "type": "matrix",
             "name": "qa_matrix",
             "title": "[matrix] Grid ratings",
-            "columns": ["1", "2", "3", "4", "5"],
+            "columns": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5"
+            ],
             "rows": [
-              { "value": "quality", "text": "Quality" },
-              { "value": "value", "text": "Value" },
-              { "value": "design", "text": "Design" }
+              {
+                "value": "quality",
+                "text": "Quality"
+              },
+              {
+                "value": "value",
+                "text": "Value"
+              },
+              {
+                "value": "design",
+                "text": "Design"
+              }
             ],
             "isRequired": false
           }
@@ -139,9 +181,21 @@
             "scaleMin": 1,
             "scaleMax": 7,
             "dimensions": [
-              { "id": "pleasant", "left": "Unpleasant", "right": "Pleasant" },
-              { "id": "safe", "left": "Unsafe", "right": "Safe" },
-              { "id": "lively", "left": "Dull", "right": "Lively" }
+              {
+                "id": "pleasant",
+                "left": "Unpleasant",
+                "right": "Pleasant"
+              },
+              {
+                "id": "safe",
+                "left": "Unsafe",
+                "right": "Safe"
+              },
+              {
+                "id": "lively",
+                "left": "Dull",
+                "right": "Lively"
+              }
             ],
             "isRequired": false
           },
@@ -151,10 +205,22 @@
             "title": "[pointallocation] Allocate 100 points",
             "budget": 100,
             "choices": [
-              { "value": "walk", "text": "Walking" },
-              { "value": "bike", "text": "Cycling" },
-              { "value": "transit", "text": "Public transit" },
-              { "value": "car", "text": "Driving" }
+              {
+                "value": "walk",
+                "text": "Walking"
+              },
+              {
+                "value": "bike",
+                "text": "Cycling"
+              },
+              {
+                "value": "transit",
+                "text": "Public transit"
+              },
+              {
+                "value": "car",
+                "text": "Driving"
+              }
             ],
             "isRequired": false
           }
@@ -163,32 +229,37 @@
       {
         "name": "image_native",
         "title": "Image question types",
-        "description": "image (display) · imagepicker · imagerating · imageboolean · imageranking · imagematrix",
+        "description": "image · imagepicker · imagerating · imageboolean · imageranking · imagematrix · imageslidergroup · imagepointallocation · imageannotation",
         "elements": [
           {
-            "type": "image",
-            "name": "qa_image_display",
-            "title": "[image] Single image display",
-            "imageCount": 1,
-            "imageSelectionMode": "random",
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false,
             "choices": [],
-            "isRequired": false
+            "isRequired": false,
+            "type": "image",
+            "name": "qa_image_display",
+            "title": "[image] Single image display",
+            "imageCount": 1
           },
           {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
             "type": "imagepicker",
             "name": "qa_imagepicker",
             "title": "[imagepicker] Pick preferred scene",
             "imageCount": 4,
-            "multiSelect": false,
-            "imageSelectionMode": "random",
+            "multiSelect": false
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false,
             "choices": [],
-            "isRequired": false
-          },
-          {
+            "isRequired": false,
             "type": "imagerating",
             "name": "qa_imagerating",
             "title": "[imagerating] Rate this scene",
@@ -196,87 +267,189 @@
             "rateMin": 1,
             "rateMax": 5,
             "minRateDescription": "Very poor",
-            "maxRateDescription": "Excellent",
-            "imageSelectionMode": "random",
+            "maxRateDescription": "Excellent"
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false,
             "choices": [],
-            "isRequired": false
-          },
-          {
+            "isRequired": false,
             "type": "imageboolean",
             "name": "qa_imageboolean",
             "title": "[imageboolean] Would you walk here?",
             "imageCount": 1,
-            "imageSelectionMode": "random",
+            "labelTrue": "Yes",
+            "labelFalse": "No"
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false,
             "choices": [],
-            "isRequired": false
-          },
-          {
+            "isRequired": false,
             "type": "imageranking",
             "name": "qa_imageranking",
             "title": "[imageranking] Rank scenes (best first)",
-            "imageCount": 4,
-            "imageSelectionMode": "random",
+            "imageCount": 4
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false,
             "choices": [],
-            "isRequired": false
-          },
-          {
+            "isRequired": false,
             "type": "imagematrix",
             "name": "qa_imagematrix",
             "title": "[imagematrix] Rate attributes of shown scenes",
             "imageCount": 2,
-            "imageSelectionMode": "random",
+            "columns": [
+              {
+                "value": "1",
+                "text": "Low"
+              },
+              {
+                "value": "2",
+                "text": "Medium"
+              },
+              {
+                "value": "3",
+                "text": "High"
+              }
+            ],
+            "rows": [
+              {
+                "value": "appeal",
+                "text": "Visual appeal"
+              },
+              {
+                "value": "comfort",
+                "text": "Comfort"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false,
             "choices": [],
-            "columns": [
-              { "value": "1", "text": "Low" },
-              { "value": "2", "text": "Medium" },
-              { "value": "3", "text": "High" }
+            "isRequired": false,
+            "type": "imageslidergroup",
+            "name": "qa_imageslidergroup",
+            "title": "[imageslidergroup] Rate the scene on dimensions",
+            "imageCount": 1,
+            "scaleMin": 1,
+            "scaleMax": 7,
+            "dimensions": [
+              {
+                "id": "safe",
+                "left": "Unsafe",
+                "right": "Safe"
+              },
+              {
+                "id": "beautiful",
+                "left": "Ugly",
+                "right": "Beautiful"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [
+              {
+                "value": "greenery",
+                "text": "Greenery"
+              },
+              {
+                "value": "safety",
+                "text": "Safety"
+              },
+              {
+                "value": "activity",
+                "text": "Activity"
+              }
             ],
-            "rows": [
-              { "value": "appeal", "text": "Visual appeal" },
-              { "value": "comfort", "text": "Comfort" }
+            "isRequired": false,
+            "type": "imagepointallocation",
+            "name": "qa_imagepointallocation",
+            "title": "[imagepointallocation] Allocate points after viewing",
+            "imageCount": 1,
+            "budget": 100
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "imageannotation",
+            "name": "qa_imageannotation",
+            "title": "[imageannotation] Mark points, lines, or regions",
+            "imageCount": 1,
+            "allowedTools": [
+              "point",
+              "line",
+              "region"
             ],
-            "isRequired": false
+            "minAnnotations": 0,
+            "maxAnnotations": 20
           }
         ]
       },
       {
         "name": "media_types",
         "title": "Media display & responses",
-        "description": "mediadisplay · mediarating · mediaboolean",
+        "description": "mediadisplay · mediarating · mediaboolean · mediaranking",
         "elements": [
           {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
             "type": "mediadisplay",
             "name": "qa_mediadisplay_single",
-            "title": "[mediadisplay] Single media",
+            "title": "[mediadisplay] Single / gallery",
             "displayMode": "single",
             "mediaType": "image",
-            "imageCount": 1,
-            "randomImageSelection": true,
-            "imageSelectionMode": "random",
-            "excludePreviouslyUsedImages": false,
-            "isRequired": false
+            "imageCount": 2
           },
           {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
             "type": "mediadisplay",
             "name": "qa_mediadisplay_side",
             "title": "[mediadisplay] Side-by-side comparison",
             "displayMode": "sideBySide",
             "mediaType": "image",
-            "imageCount": 2,
-            "randomImageSelection": true,
-            "imageSelectionMode": "random",
-            "excludePreviouslyUsedImages": false,
-            "isRequired": false
+            "imageCount": 2
           },
           {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediadisplay",
+            "name": "qa_mediadisplay_reveal",
+            "title": "[mediadisplay] Before/After reveal",
+            "displayMode": "reveal",
+            "mediaType": "image",
+            "imageCount": 2,
+            "beforeLabel": "Before",
+            "afterLabel": "After"
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
             "type": "mediarating",
             "name": "qa_mediarating",
             "title": "[mediarating] Rate the media",
@@ -284,48 +457,41 @@
             "imageCount": 1,
             "rateMin": 1,
             "rateMax": 5,
-            "randomImageSelection": true,
-            "imageSelectionMode": "random",
-            "excludePreviouslyUsedImages": false,
-            "isRequired": false
+            "minRateDescription": "Poor",
+            "maxRateDescription": "Excellent"
           },
           {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
             "type": "mediaboolean",
             "name": "qa_mediaboolean",
             "title": "[mediaboolean] Yes/No about the media",
             "mediaType": "image",
             "imageCount": 1,
-            "randomImageSelection": true,
-            "imageSelectionMode": "random",
-            "excludePreviouslyUsedImages": false,
-            "isRequired": false
-          }
-        ]
-      },
-      {
-        "name": "annotation",
-        "title": "Image annotation",
-        "description": "imageannotation",
-        "elements": [
+            "labelTrue": "Yes",
+            "labelFalse": "No"
+          },
           {
-            "type": "imageannotation",
-            "name": "qa_imageannotation",
-            "title": "[imageannotation] Mark points, lines, or regions",
-            "imageCount": 1,
-            "allowedTools": ["point", "line", "region"],
-            "minAnnotations": 0,
-            "maxAnnotations": 20,
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageSelectionMode": "random",
             "excludePreviouslyUsedImages": false,
-            "isRequired": false
+            "choices": [],
+            "isRequired": false,
+            "type": "mediaranking",
+            "name": "qa_mediaranking",
+            "title": "[mediaranking] Rank media (best first)",
+            "mediaType": "image",
+            "imageCount": 4
           }
         ]
       },
       {
-        "name": "skills_pairwise_maxdiff",
-        "title": "Preset skills (1/3)",
-        "description": "Pairwise Preference Slider · Best–Worst (MaxDiff)",
+        "name": "skills_pairwise",
+        "title": "Interactive presets (1/3)",
+        "description": "Pairwise Preference Slider · Forced-Choice A/B · Best–Worst (MaxDiff)",
         "elements": [
           {
             "type": "skillquestion",
@@ -339,6 +505,24 @@
               "mediaCount": 2,
               "mediaType": "image"
             },
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "imageCount": 2,
+            "isRequired": false
+          },
+          {
+            "type": "skillquestion",
+            "name": "qa_skill_forced",
+            "title": "[skill] Forced-Choice A/B",
+            "skillId": "preset_image_preference_forced",
+            "skillConfig": {
+              "leftLabel": "Image A",
+              "rightLabel": "Image B",
+              "prompt": "Which scene do you prefer? Click one.",
+              "mediaCount": 2,
+              "mediaType": "image"
+            },
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "imageCount": 2,
             "isRequired": false
@@ -355,6 +539,7 @@
               "bestLabel": "Best",
               "worstLabel": "Worst"
             },
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "imageCount": 4,
             "isRequired": false
@@ -363,7 +548,7 @@
       },
       {
         "name": "skills_color_composite",
-        "title": "Preset skills (2/3)",
+        "title": "Interactive presets (2/3)",
         "description": "Emotion Color Mapping · Composite Blocks",
         "elements": [
           {
@@ -376,6 +561,7 @@
               "mediaCount": 1,
               "mediaType": "image"
             },
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "imageCount": 1,
             "isRequired": false
@@ -383,7 +569,7 @@
           {
             "type": "skillquestion",
             "name": "qa_skill_composite",
-            "title": "[skill] Composite Question (Blocks)",
+            "title": "[skill] Composite Blocks",
             "skillId": "preset_composite_blocks",
             "skillConfig": {
               "prompt": "Look at the scene and answer all blocks below.",
@@ -392,29 +578,55 @@
               "mediaCount": 1,
               "mediaType": "image",
               "blocks": [
-                { "type": "media", "index": 0 },
+                {
+                  "type": "media",
+                  "index": 0
+                },
                 {
                   "type": "sliders",
                   "title": "Rate the scene",
                   "dimensions": [
-                    { "id": "safe", "left": "Unsafe", "right": "Safe" },
-                    { "id": "beautiful", "left": "Ugly", "right": "Beautiful" }
+                    {
+                      "id": "safe",
+                      "left": "Unsafe",
+                      "right": "Safe"
+                    },
+                    {
+                      "id": "beautiful",
+                      "left": "Ugly",
+                      "right": "Beautiful"
+                    }
                   ]
                 },
                 {
                   "type": "words",
                   "title": "Pick up to 3 words",
                   "max": 3,
-                  "options": ["green", "noisy", "open", "historic", "crowded"]
+                  "options": [
+                    "green",
+                    "noisy",
+                    "open",
+                    "historic",
+                    "crowded"
+                  ]
                 },
                 {
                   "type": "choice",
                   "title": "Would you visit?",
-                  "options": ["Yes", "Maybe", "No"]
+                  "options": [
+                    "Yes",
+                    "Maybe",
+                    "No"
+                  ]
                 },
-                { "type": "text", "title": "Comments", "placeholder": "Optional…" }
+                {
+                  "type": "text",
+                  "title": "Comments",
+                  "placeholder": "Optional…"
+                }
               ]
             },
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "imageCount": 1,
             "isRequired": false
@@ -423,8 +635,8 @@
       },
       {
         "name": "skills_video",
-        "title": "Preset skills (3/3)",
-        "description": "Video Key Moment Tagging · Continuous Video Rating (use demo poster in preview)",
+        "title": "Interactive presets (3/3)",
+        "description": "Video Key Moments · Continuous Video Rating (demo posters from image pool)",
         "elements": [
           {
             "type": "skillquestion",
@@ -437,6 +649,7 @@
               "mediaCount": 1,
               "mediaType": "video"
             },
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "imageCount": 1,
             "isRequired": false
@@ -453,6 +666,7 @@
               "mediaCount": 1,
               "mediaType": "video"
             },
+            "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "imageCount": 1,
             "isRequired": false
@@ -468,7 +682,7 @@
             "type": "expression",
             "name": "qa_complete",
             "title": "Checklist",
-            "description": "Verify in Results: text stats, rating histograms, image TrueSkill, slider profile, MaxDiff BWS, video timelines, and IRR where applicable."
+            "description": "Verify in Results: text stats, number histogram, rating histograms, image TrueSkill, ranking Borda, slider profiles, MaxDiff BWS, forced-choice bars, emotion color, video timelines, annotation overlay, and consent/boolean distributions."
           }
         ]
       }

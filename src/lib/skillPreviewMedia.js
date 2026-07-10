@@ -1,7 +1,7 @@
 /**
  * Global "skill preview media library" — a shared R2 folder maintained by
- * admins. Preset/skill previews draw real images / video / audio from here
- * instead of the built-in inline demo SVGs.
+ * admins. Preset/skill builder previews draw real images / video / audio
+ * from here (no built-in SVG demos).
  */
 import { listImagesFromR2 } from './r2';
 import { filterMediaByType, inferMediaType } from './mediaUtils';
@@ -24,8 +24,7 @@ export async function listSkillPreviewMedia() {
 
 /**
  * Pick `count` random entries of the requested media type from the pool.
- * Returns [] when the pool has no matching media (caller should fall back
- * to the preset's built-in demo images).
+ * Returns [] when the pool has no matching media.
  */
 export function pickPreviewMedia(pool, mediaType, count) {
   const matching = filterMediaByType(pool, mediaType);
