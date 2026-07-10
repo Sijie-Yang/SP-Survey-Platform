@@ -223,7 +223,9 @@ export function usesCategoryMediaAssignment(element) {
 
 function pickOnePerCategory(pool, element, globallyUsedImageKeys) {
   const byCategory = buildMediaByCategory(pool);
-  const categories = [...byCategory.keys()].sort((a, b) => a.localeCompare(b));
+  const categories = [...byCategory.keys()].sort((a, b) =>
+    String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }),
+  );
   const excludeUsed = element.excludePreviouslyUsedImages !== false;
   const images = [];
   const assignedCategories = [];

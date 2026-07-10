@@ -32,6 +32,26 @@ export function inferMediaType(nameOrUrl = '') {
   return 'image';
 }
 
+/**
+ * Natural filename compare so "2_1.jpg" comes before "10_1.jpg"
+ * (plain localeCompare would put 10 before 2).
+ */
+export function compareMediaNames(a, b) {
+  return String(a || '').localeCompare(String(b || ''), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+/** Sort media entries (or bare name strings) with natural numeric order. */
+export function sortMediaByName(items, nameKey = 'name') {
+  return [...(items || [])].sort((a, b) => {
+    const na = typeof a === 'string' ? a : a?.[nameKey];
+    const nb = typeof b === 'string' ? b : b?.[nameKey];
+    return compareMediaNames(na, nb);
+  });
+}
+
 /** Normalize a preloaded media entry (legacy entries without type → image). */
 export function normalizeMediaEntry(entry) {
   if (!entry) return null;
@@ -219,14 +239,7 @@ export function parseMediaGroupFilename(name = '') {
 }
 
 export function compareMediaSlots(a, b) {
-  const sa = String(a || '');
-  const sb = String(b || '');
-  const na = /^\d+$/.test(sa);
-  const nb = /^\d+$/.test(sb);
-  if (na && nb) return parseInt(sa, 10) - parseInt(sb, 10);
-  if (na && !nb) return -1;
-  if (!na && nb) return 1;
-  return sa.localeCompare(sb);
+  return compareMediaNames(a, b);
 }
 
 /** Build Map<groupKey, normalized member[]> from a flat media pool. */
@@ -288,7 +301,7 @@ export function analyzeMediaGroups(pool) {
   }
   summary.sort((a, b) => {
     if (a.isGrouped !== b.isGrouped) return a.isGrouped ? -1 : 1;
-    return String(a.groupId).localeCompare(String(b.groupId));
+    return compareMediaNames(a.groupId, b.groupId);
   });
   return summary;
 }
@@ -314,12 +327,15 @@ export function buildMediaByCategory(pool) {
     if (!byCategory.has(category)) byCategory.set(category, []);
     byCategory.get(category).push({ ...entry, category });
   }
+  for (const members of byCategory.values()) {
+    members.sort((a, b) => compareMediaNames(a.name, b.name));
+  }
   return byCategory;
 }
 
 /** Sorted unique category labels in a pool. */
 export function getMediaCategories(pool) {
-  return [...buildMediaByCategory(pool).keys()].sort((a, b) => a.localeCompare(b));
+  return [...buildMediaByCategory(pool).keys()].sort(compareMediaNames);
 }
 
 /** Admin summary — files per category. */
@@ -335,6 +351,6 @@ export function analyzeMediaCategories(pool) {
       members,
     });
   }
-  summary.sort((a, b) => a.category.localeCompare(b.category));
+  summary.sort((a, b) => compareMediaNames(a.category, b.category));
   return summary;
 }

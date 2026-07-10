@@ -270,7 +270,8 @@ async function handleList(request, env) {
         lastModified: o.uploaded,
         type: inferMediaType(name),
       };
-    });
+    })
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
   return json({ success: true, images });
 }
 

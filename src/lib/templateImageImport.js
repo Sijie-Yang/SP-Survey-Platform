@@ -1,7 +1,7 @@
 /** Template → project image import helpers (R2 copy + progress tracking). */
 
 import { listImagesFromR2 } from './r2';
-import { inferMediaType } from './mediaUtils';
+import { inferMediaType, compareMediaNames } from './mediaUtils';
 
 export function getTemplateImportHistory(project) {
   return project?.imageDatasetConfig?.templateImportHistory || {};
@@ -105,7 +105,7 @@ export function mergeCopiedIntoProjectImages(existingImages, copiedImages, r2Pub
       type: inferMediaType(name),
     });
   });
-  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...byName.values()].sort((a, b) => compareMediaNames(a.name, b.name));
 }
 
 /**

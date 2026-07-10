@@ -31,7 +31,7 @@ import {
   computeLiveStatus,
 } from '../lib/liveSurveyManager';
 import { supabase } from '../lib/supabase';
-import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT } from '../lib/mediaUtils';
+import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT, sortMediaByName } from '../lib/mediaUtils';
 import { SKILL_PREVIEW_PREFIX, listSkillPreviewMedia } from '../lib/skillPreviewMedia';
 import {
   listSubmittedSkills, updateSkill, deleteSkill, getSkillStatus,
@@ -402,9 +402,9 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
     const result = await listImagesFromR2(templateImagePrefix(template.id));
     setSyncing(false);
     if (!result.success) { setError(result.error || 'Failed to list images'); return; }
-    const mapped = result.images.map((img) => normalizeMediaEntry({
+    const mapped = sortMediaByName(result.images.map((img) => normalizeMediaEntry({
       url: img.url, name: img.name, type: img.type || inferMediaType(img.name),
-    }));
+    })));
     setImages(mapped);
     reloadFeatures();
     // Persist the canonical list back to Supabase so listTemplates() and the
@@ -1426,9 +1426,9 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
     const result = await listImagesFromR2(projectImagePrefix(project));
     setSyncing(false);
     if (!result.success) { setError(result.error || 'Failed to list images'); return; }
-    const mapped = result.images.map((img) => normalizeMediaEntry({
+    const mapped = sortMediaByName(result.images.map((img) => normalizeMediaEntry({
       url: img.url, name: img.name, type: img.type || inferMediaType(img.name),
-    }));
+    })));
     setImages(mapped);
     if (mapped.length !== (project.preloadedImages?.length || 0)) {
       try {

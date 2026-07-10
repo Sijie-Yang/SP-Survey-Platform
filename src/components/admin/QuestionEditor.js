@@ -40,7 +40,7 @@ import {
   getMediaPoolStatus,
   applyMediaToElement,
 } from '../../lib/surveyMediaInjection';
-import { getMediaCategories } from '../../lib/mediaUtils';
+import { getMediaCategories, sortMediaByName } from '../../lib/mediaUtils';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
 import SkillQuestionFrame from '../SkillQuestionWidget';
 import {
@@ -107,8 +107,10 @@ function CuratedMediaPicker({
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return availableImages;
-    return availableImages.filter((img) => mediaDisplayName(img).toLowerCase().includes(q));
+    const list = !q
+      ? availableImages
+      : availableImages.filter((img) => mediaDisplayName(img).toLowerCase().includes(q));
+    return sortMediaByName(list);
   }, [availableImages, query]);
 
   return (
@@ -803,11 +805,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     try {
       const pool = filterPoolForQuestion(currentProject?.preloadedImages || [], editedQuestion);
       if (pool.length > 0) {
-        setAvailableImages(pool.map((img) => ({
+        setAvailableImages(sortMediaByName(pool.map((img) => ({
           url: img.url,
           name: img.name || img.url,
           type: img.type,
-        })));
+        }))));
         setImageError(null);
         return;
       }
@@ -835,7 +837,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           }
         }
         if (allImages.length > 0) {
-          setAvailableImages(allImages);
+          setAvailableImages(sortMediaByName(allImages));
           setImageError(null);
         } else {
           setAvailableImages([]);

@@ -56,7 +56,7 @@ import {
 } from '../../lib/huggingface';
 import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix, stripTemplateOwnedMedia, r2KeyFromUrl, isTemplateR2Key } from '../../lib/r2';
 import { asyncPool } from '../../lib/asyncPool';
-import { inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT, analyzeMediaGroups, summarizeMediaGroupsBySize, analyzeMediaCategories, downloadMediaFiles } from '../../lib/mediaUtils';
+import { inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT, analyzeMediaGroups, summarizeMediaGroupsBySize, analyzeMediaCategories, downloadMediaFiles, sortMediaByName, compareMediaNames } from '../../lib/mediaUtils';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
@@ -239,12 +239,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     return () => { cancelled = true; };
   }, [projectPrefix, currentProject?.preloadedImages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const normalizeR2Listing = (images = []) => images.map((img) => normalizeMediaEntry({
+  const normalizeR2Listing = (images = []) => sortMediaByName(images.map((img) => normalizeMediaEntry({
     url: img.url,
     name: img.name,
     key: img.key,
     type: img.type || inferMediaType(img.name),
-  }));
+  })));
 
   // Strip accidental template-owned URLs/keys from project media list.
   // (Legacy bug: create-from-template copied template refs into preloadedImages.)
@@ -418,12 +418,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   const filteredMedia = useMemo(() => {
     const q = mediaSearch.trim().toLowerCase();
-    return (currentProject?.preloadedImages || []).filter((m) => {
+    const filtered = (currentProject?.preloadedImages || []).filter((m) => {
       const t = m.type || inferMediaType(m.name || m.url);
       if (mediaFilter !== 'all' && t !== mediaFilter) return false;
       if (q && !(m.name || '').toLowerCase().includes(q)) return false;
       return true;
     });
+    return sortMediaByName(filtered);
   }, [currentProject?.preloadedImages, mediaSearch, mediaFilter]);
 
   /** Images available for SAM pre-annotate (respects gallery filter/search). */
@@ -1112,7 +1113,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         }
       }
 
-      allImages.sort((a, b) => a.name.localeCompare(b.name));
+      allImages.sort((a, b) => compareMediaNames(a.name, b.name));
       const updatedProject = {
         ...currentProject,
         preloadedImages: allImages,

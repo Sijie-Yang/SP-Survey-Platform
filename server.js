@@ -2359,7 +2359,8 @@ app.get('/api/r2/list', async (req, res) => {
           lastModified: obj.LastModified,
           type: inferType(name),
         };
-      });
+      })
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
     res.json({ success: true, images });
   } catch (error) {
     console.error('R2 list error:', error);
