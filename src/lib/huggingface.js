@@ -231,6 +231,33 @@ const cachedFetch = async (url, options = {}) => {
 };
 
 /**
+ * Lightweight HF token check (whoami) — no dataset required.
+ * Used by Spatial Intelligence for SegFormer inference auth.
+ */
+export const testHuggingFaceToken = async (token) => {
+  const t = String(token || '').trim();
+  if (!t) throw new Error('HuggingFace token is required');
+  const res = await fetch('https://huggingface.co/api/whoami-v2', {
+    headers: { Authorization: `Bearer ${t}` },
+  });
+  const text = await res.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(text.slice(0, 200) || `HF HTTP ${res.status}`);
+  }
+  if (!res.ok) {
+    throw new Error(body?.error || body?.message || `Invalid HuggingFace token (${res.status})`);
+  }
+  return {
+    success: true,
+    name: body?.name || body?.fullname?.name || null,
+    type: body?.type || null,
+  };
+};
+
+/**
  * Test connection to Hugging Face dataset
  * @param {string} token - Hugging Face access token
  * @param {string} datasetName - Dataset name (e.g., "username/dataset-name")

@@ -77,6 +77,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import PageEditor from './PageEditor';
+import ConfirmDialog from '../layout/ConfirmDialog';
 import QuestionEditor from './QuestionEditor';
 import ChatAssistant from './ChatAssistant';
 // Old API functions removed - now using chatApi.js
@@ -200,6 +201,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
 }
 
 export default function SurveyBuilder({ config, onChange, currentProject, onNextStep }) {
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
 
   // Collapsed-state for the rarely-used sub-sections of the Survey Settings
@@ -684,14 +686,21 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     const message = questionCount > 0
       ? `Delete "${pageTitle}" and its ${questionCount} question(s)? This cannot be undone.`
       : `Delete "${pageTitle}"? This cannot be undone.`;
-    if (!window.confirm(message)) return;
-
-    const newPages = config.pages.filter((_, index) => index !== pageIndex);
-    onChange({
-      ...config,
-      pages: newPages
+    setConfirmDialog({
+      title: 'Delete page',
+      message,
+      confirmLabel: 'Delete',
+      confirmColor: 'error',
+      onConfirm: () => {
+        setConfirmDialog(null);
+        const newPages = config.pages.filter((_, index) => index !== pageIndex);
+        onChange({
+          ...config,
+          pages: newPages
+        });
+        setSelectedPage(null);
+      },
     });
-    setSelectedPage(null);
   };
 
   const duplicatePage = (pageIndex) => {
@@ -1368,10 +1377,17 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         onReviewModeChange={setReviewMode}
         onMaxReviewRoundsChange={setMaxReviewRounds}
         onClearHistory={() => {
-          if (window.confirm('Clear conversation history?')) {
-            conversationHistoryRef.current?.clear();
-            setConversationMessages([]);
-          }
+          setConfirmDialog({
+            title: 'Clear conversation',
+            message: 'Clear conversation history?',
+            confirmLabel: 'Clear',
+            confirmColor: 'error',
+            onConfirm: () => {
+              setConfirmDialog(null);
+              conversationHistoryRef.current?.clear();
+              setConversationMessages([]);
+            },
+          });
         }}
         onDownloadHistory={() => {
           const data = conversationHistoryRef.current?.export();
@@ -2168,6 +2184,15 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
           {themeSnackbar.message}
         </Alert>
       </Snackbar>
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Box>
   );
 }

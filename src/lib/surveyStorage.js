@@ -1,6 +1,8 @@
 // Survey configuration storage using file system API
 // No localStorage dependency - all data saved to server
 
+import { paletteToSurveyJsVars } from '../themes/themeConfig';
+
 const STORAGE_PREFIX = 'survey_config_';
 
 export const saveSurveyConfig = async (name, config, options = {}) => {
@@ -186,11 +188,20 @@ const ensureColorString = (color, defaultColor) => {
     return defaultColor;
   }
   const trimmed = String(color).trim();
+  if (/NaN/i.test(trimmed)) {
+    return defaultColor;
+  }
   // Ensure it starts with # for hex colors or is a valid CSS color
   if (!trimmed.startsWith('#') && !trimmed.startsWith('rgb') && !trimmed.startsWith('hsl')) {
     return defaultColor;
   }
   return trimmed;
+};
+
+const isInvalidSurveyColor = (color) => {
+  if (!color || typeof color !== 'string') return true;
+  const trimmed = String(color).trim();
+  return /NaN/i.test(trimmed) || trimmed.length === 0;
 };
 
 // Generate custom theme based on admin config
@@ -221,6 +232,19 @@ export const generateCustomTheme = (adminConfig) => {
       focusBorder: ensureColorString(theme.focusBorder, "#1976d2")
     };
     
+    const paletteVars = paletteToSurveyJsVars({
+      primary: safeTheme.primaryColor,
+      secondary: safeTheme.secondaryColor,
+      mode: 'light',
+    });
+
+    const primaryLight = isInvalidSurveyColor(safeTheme.primaryLight)
+      ? paletteVars['--sjs-primary-backcolor-light']
+      : safeTheme.primaryLight;
+    const primaryDark = isInvalidSurveyColor(safeTheme.primaryDark)
+      ? paletteVars['--sjs-primary-backcolor-dark']
+      : safeTheme.primaryDark;
+
     console.log('✅ Generated safe theme:', safeTheme);
     
     return {
@@ -235,14 +259,14 @@ export const generateCustomTheme = (adminConfig) => {
         "--sjs-general-forecolor-light": safeTheme.secondaryText,
         "--sjs-general-dim-forecolor": safeTheme.disabledText,
         
-        // Primary colors
-        "--sjs-primary-backcolor": safeTheme.primaryColor,
-        "--sjs-primary-backcolor-light": safeTheme.primaryLight,
-        "--sjs-primary-backcolor-dark": safeTheme.primaryDark,
-        "--sjs-primary-forecolor": "#ffffff",
+        // Primary colors (paletteToSurveyJsVars ensures valid light/dark variants)
+        "--sjs-primary-backcolor": paletteVars['--sjs-primary-backcolor'],
+        "--sjs-primary-backcolor-light": primaryLight,
+        "--sjs-primary-backcolor-dark": primaryDark,
+        "--sjs-primary-forecolor": paletteVars['--sjs-primary-forecolor'],
         
         // Secondary colors
-        "--sjs-secondary-backcolor": safeTheme.secondaryColor,
+        "--sjs-secondary-backcolor": paletteVars['--sjs-secondary-backcolor'] || safeTheme.secondaryColor,
         "--sjs-secondary-backcolor-light": safeTheme.accentColor,
         "--sjs-secondary-backcolor-semi-light": safeTheme.successColor,
         "--sjs-secondary-forecolor": "#ffffff",

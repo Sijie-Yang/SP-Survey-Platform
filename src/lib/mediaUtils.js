@@ -36,15 +36,29 @@ export function inferMediaType(nameOrUrl = '') {
 export function normalizeMediaEntry(entry) {
   if (!entry) return null;
   if (typeof entry === 'string') {
-    return { name: entry.split('/').pop(), url: entry, type: inferMediaType(entry) };
+    const name = entry.split('/').pop();
+    return {
+      name,
+      url: entry,
+      type: inferMediaType(entry),
+      media_id: name || entry,
+    };
   }
-  const name = entry.name || entry.url?.split('/').pop() || '';
+  const name = entry.name || entry.url?.split('?')[0].split('/').pop() || '';
+  const mediaId = entry.media_id || entry.key || name || entry.url || '';
   return {
     name,
     url: entry.url,
     key: entry.key,
     type: entry.type || inferMediaType(name || entry.url),
+    media_id: mediaId,
   };
+}
+
+/** Stable media id for features / response join (prefer R2 key). */
+export function getMediaId(entry) {
+  const n = normalizeMediaEntry(entry);
+  return n?.media_id || n?.key || n?.name || n?.url || '';
 }
 
 /** Filter media pool by requested type(s). */

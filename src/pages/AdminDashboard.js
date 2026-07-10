@@ -6,11 +6,12 @@ import {
   Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Switch, Alert, Snackbar,
   CircularProgress, Tooltip, Stack, Select, MenuItem, FormControl, InputLabel,
-  LinearProgress,
+  LinearProgress, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
   EditNote, PhotoLibrary, DeleteForever, Videocam, Audiotrack, PermMedia,
+  ExpandMore,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -40,6 +41,20 @@ import {
 import { asyncPool } from '../lib/asyncPool';
 import SurveyPreview from '../components/admin/SurveyPreview';
 import SurveyBuilder from '../components/admin/SurveyBuilder';
+import FeatureExtractionJobs from '../components/admin/FeatureExtractionJobs';
+import MediaPreannotateDialog from '../components/admin/MediaPreannotateDialog';
+import { loadUserSpatialSettings } from '../lib/spatialSettingsStore';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  featureCsvKey,
+  FEATURE_MODELS,
+  preannotationKey,
+  SAM_PREANNOT_MODEL,
+  loadFeaturesMapFromR2,
+  featureStatusFromMap,
+} from '../lib/imageFeaturesR2';
+import AdminShell from '../components/layout/AdminShell';
+import ConfirmDialog from '../components/layout/ConfirmDialog';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 
@@ -336,17 +351,48 @@ function compressImage(file, maxBytes = 300 * 1024, quality = 0.85) {
 }
 
 function TemplateImagesDialog({ template, open, onClose, onSaved }) {
+  const { user } = useAuth();
   const [images, setImages]       = useState([]);
   const [loading, setLoading]     = useState(false);
   const [syncing, setSyncing]     = useState(false);
   const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
   const [error, setError]         = useState('');
   const [info, setInfo]           = useState('');
+  const [hfToken, setHfToken]     = useState('');
+  const [falKey, setFalKey]       = useState('');
+  const [r2FeatureMap, setR2FeatureMap] = useState({});
+  const [preannotateTarget, setPreannotateTarget] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const fileInputRef = useRef(null);
   // Keep onSaved in a ref so refresh() can call it without becoming a new
   // function on every parent render (which would re-trigger the effect).
   const onSavedRef = useRef(onSaved);
   useEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!open || !user?.id) return;
+      const settings = await loadUserSpatialSettings(user.id);
+      if (cancelled) return;
+      if (settings?.huggingFaceToken) setHfToken(settings.huggingFaceToken);
+      if (settings?.falApiKey) setFalKey(settings.falApiKey);
+    })();
+    return () => { cancelled = true; };
+  }, [open, user?.id]);
+
+  const reloadFeatures = useCallback(async () => {
+    if (!template?.id || !isR2Configured()) {
+      setR2FeatureMap({});
+      return;
+    }
+    try {
+      const map = await loadFeaturesMapFromR2(templateImagePrefix(template.id), FEATURE_MODELS);
+      setR2FeatureMap(map);
+    } catch (err) {
+      console.warn(err);
+    }
+  }, [template?.id]);
 
   const refresh = useCallback(async () => {
     if (!template) return;
@@ -359,6 +405,7 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
       url: img.url, name: img.name, type: img.type || inferMediaType(img.name),
     }));
     setImages(mapped);
+    reloadFeatures();
     // Persist the canonical list back to Supabase so listTemplates() and the
     // preview pipeline always see the same picture set the admin sees.
     if (mapped.length !== (template.preloadedImages?.length || 0)) {
@@ -373,7 +420,7 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
         console.warn('Could not sync template image list:', err);
       }
     }
-  }, [template]);
+  }, [template, reloadFeatures]);
 
   useEffect(() => {
     if (open && template) {
@@ -441,28 +488,44 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
     }
   };
 
-  const handleClear = async () => {
+  const handleClear = () => {
     if (!template) return;
-    if (!window.confirm(`确认清空模板 "${template.name}" 的全部图片吗？此操作不可恢复。`)) return;
-    setLoading(true); setError(''); setInfo('');
-    try {
-      const listed = await listImagesFromR2(templateImagePrefix(template.id));
-      if (listed.success && listed.images.length > 0) {
-        await deleteImagesFromR2(listed.images.map((img) => img.key));
-      }
-      await updateTemplate(template.id, {
-        preloaded_images: [],
-        preloaded_at:     null,
-        preloaded_source: null,
-      });
-      setImages([]);
-      setInfo('已清空模板图片。');
-      if (onSavedRef.current) onSavedRef.current();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    setConfirmDialog({
+      title: '清空模板图片',
+      message: `确认清空模板 "${template.name}" 的全部图片吗？此操作不可恢复。`,
+      confirmLabel: '清空',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setLoading(true); setError(''); setInfo('');
+        try {
+          const listed = await listImagesFromR2(templateImagePrefix(template.id));
+          const keys = listed.success ? listed.images.map((img) => img.key) : [];
+          FEATURE_MODELS.forEach((model) => {
+            keys.push(featureCsvKey(templateImagePrefix(template.id), model));
+          });
+          (listed.success ? listed.images : []).forEach((img) => {
+            keys.push(preannotationKey(templateImagePrefix(template.id), img.name, img.name));
+          });
+          if (keys.length > 0) {
+            await deleteImagesFromR2(keys);
+          }
+          await updateTemplate(template.id, {
+            preloaded_images: [],
+            preloaded_at:     null,
+            preloaded_source: null,
+          });
+          setImages([]);
+          setR2FeatureMap({});
+          setInfo('已清空模板图片、特征 CSV 与预标注。');
+          if (onSavedRef.current) onSavedRef.current();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   if (!template) return null;
@@ -484,6 +547,35 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
         )}
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
         {info  && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo('')}>{info}</Alert>}
+
+        <Accordion defaultExpanded={false} sx={{ mb: 2 }}>
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Box>
+              <Typography variant="subtitle2" fontWeight={700}>Spatial features (L0 / Seg)</Typography>
+              <Typography variant="caption" color="text.secondary">
+                为模板图片预计算特征，存到 R2 CSV；项目导入模板时会按文件名自动带上
+              </Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            {!hfToken && (
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                SegFormer 需要 HuggingFace token。请先在任意项目的 Media Dataset → Spatial Intelligence 里保存 HF token（会同步到你的账号）。
+              </Alert>
+            )}
+            {!falKey && (
+              <Alert severity="info" sx={{ mb: 1.5 }}>
+                SAM3 预标注需要 fal key。请在 Media Dataset → Spatial Intelligence 保存 fal key。
+              </Alert>
+            )}
+            <FeatureExtractionJobs
+              r2Prefix={templateImagePrefix(template.id)}
+              images={images}
+              hfToken={hfToken}
+              onFeaturesUpdated={setR2FeatureMap}
+            />
+          </AccordionDetails>
+        </Accordion>
 
         <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
           <Chip
@@ -559,7 +651,10 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
           </Box>
         ) : (
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {images.map((img) => (
+            {images.map((img) => {
+              const feat = featureStatusFromMap(r2FeatureMap, img, FEATURE_MODELS);
+              const samOk = feat?.status?.[SAM_PREANNOT_MODEL] === 'ready';
+              return (
               <Box key={img.key || img.name}
                 sx={{ width: 110, position: 'relative' }}>
                 <Box sx={{ width: 110, height: 110, borderRadius: 1, overflow: 'hidden',
@@ -581,14 +676,45 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
                 }}>
                   {img.name}
                 </Typography>
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.25 }}>
+                  {samOk && <Chip size="small" label="SAM" color="secondary" sx={{ height: 18, fontSize: '0.65rem' }} />}
+                  <Chip
+                    size="small"
+                    label="Pre-annotate"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: '0.65rem' }}
+                    onClick={() => setPreannotateTarget(img)}
+                  />
+                </Stack>
               </Box>
-            ))}
+              );
+            })}
           </Box>
         )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>关闭</Button>
       </DialogActions>
+
+      <MediaPreannotateDialog
+        open={!!preannotateTarget}
+        onClose={() => setPreannotateTarget(null)}
+        mediaEntry={preannotateTarget}
+        r2Prefix={template ? templateImagePrefix(template.id) : ''}
+        falKey={falKey}
+        projectId=""
+        onSaved={() => reloadFeatures()}
+      />
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Dialog>
   );
 }
@@ -657,6 +783,7 @@ function TemplateManagement() {
   const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
   const [sortBy, setSortBy]               = useState('createdAt');
   const [sortOrder, setSortOrder]         = useState('desc');
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
@@ -703,28 +830,36 @@ function TemplateManagement() {
     }
   };
 
-  const handleDelete = async (id, name) => {
-    if (!window.confirm(`确认删除模板 "${name}" 吗？此操作不可恢复。`)) return;
-    try {
-      // Best-effort cleanup of R2 image folder before removing the row.
-      // We don't block deletion on this failing — orphans are easy to spot
-      // and the user explicitly opted into a destructive action.
-      if (isR2Configured()) {
+  const handleDelete = (id, name) => {
+    setConfirmDialog({
+      title: '删除模板',
+      message: `确认删除模板 "${name}" 吗？此操作不可恢复。`,
+      confirmLabel: '删除',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
         try {
-          const listed = await listImagesFromR2(templateImagePrefix(id));
-          if (listed.success && listed.images.length > 0) {
-            await deleteImagesFromR2(listed.images.map((img) => img.key));
+          // Best-effort cleanup of R2 image folder before removing the row.
+          // We don't block deletion on this failing — orphans are easy to spot
+          // and the user explicitly opted into a destructive action.
+          if (isR2Configured()) {
+            try {
+              const listed = await listImagesFromR2(templateImagePrefix(id));
+              if (listed.success && listed.images.length > 0) {
+                await deleteImagesFromR2(listed.images.map((img) => img.key));
+              }
+            } catch (cleanupErr) {
+              console.warn('Template image cleanup failed:', cleanupErr);
+            }
           }
-        } catch (cleanupErr) {
-          console.warn('Template image cleanup failed:', cleanupErr);
+          await deleteTemplate(id);
+          showSnack('已删除');
+          load();
+        } catch (err) {
+          showSnack(err.message, 'error');
         }
-      }
-      await deleteTemplate(id);
-      showSnack('已删除');
-      load();
-    } catch (err) {
-      showSnack(err.message, 'error');
-    }
+      },
+    });
   };
 
   const handleOpenSeedConfirm = async () => {
@@ -1064,6 +1199,16 @@ function TemplateManagement() {
           {snack.msg}
         </Alert>
       </Snackbar>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Box>
   );
 }
@@ -1259,6 +1404,7 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
   const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
   const [error, setError]         = useState('');
   const [info, setInfo]           = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const fileInputRef = useRef(null);
   const onSavedRef = useRef(onSaved);
   useEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
@@ -1360,28 +1506,36 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
     }
   };
 
-  const handleClear = async () => {
+  const handleClear = () => {
     if (!project) return;
-    if (!window.confirm(`确认清空项目 "${project.name}" 的全部图片吗？此操作不可恢复。`)) return;
-    setLoading(true); setError(''); setInfo('');
-    try {
-      const listed = await listImagesFromR2(projectImagePrefix(project));
-      if (listed.success && listed.images.length > 0) {
-        await deleteImagesFromR2(listed.images.map((img) => img.key));
-      }
-      await updateProjectAdmin(project.id, {
-        preloaded_images: [],
-        preloaded_at:     null,
-        preloaded_source: null,
-      });
-      setImages([]);
-      setInfo('已清空项目图片。');
-      if (onSavedRef.current) onSavedRef.current();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    setConfirmDialog({
+      title: '清空项目图片',
+      message: `确认清空项目 "${project.name}" 的全部图片吗？此操作不可恢复。`,
+      confirmLabel: '清空',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setLoading(true); setError(''); setInfo('');
+        try {
+          const listed = await listImagesFromR2(projectImagePrefix(project));
+          if (listed.success && listed.images.length > 0) {
+            await deleteImagesFromR2(listed.images.map((img) => img.key));
+          }
+          await updateProjectAdmin(project.id, {
+            preloaded_images: [],
+            preloaded_at:     null,
+            preloaded_source: null,
+          });
+          setImages([]);
+          setInfo('已清空项目图片。');
+          if (onSavedRef.current) onSavedRef.current();
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
   };
 
   if (!project) return null;
@@ -1512,6 +1666,16 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
       <DialogActions>
         <Button onClick={onClose}>关闭</Button>
       </DialogActions>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Dialog>
   );
 }
@@ -1530,6 +1694,7 @@ function ProjectOverview() {
   const [imagesTarget, setImagesTarget]   = useState(null);
   const [imagesOpen, setImagesOpen]       = useState(false);
   const [snack, setSnack]                 = useState({ open: false, msg: '', sev: 'success' });
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
@@ -1542,25 +1707,33 @@ function ProjectOverview() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleDelete = async (project) => {
-    if (!window.confirm(`确认删除项目 "${project.name}" 吗？此操作不可恢复。`)) return;
-    try {
-      if (isR2Configured() && project.user_id) {
+  const handleDelete = (project) => {
+    setConfirmDialog({
+      title: '删除项目',
+      message: `确认删除项目 "${project.name}" 吗？此操作不可恢复。`,
+      confirmLabel: '删除',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
         try {
-          const listed = await listImagesFromR2(projectImagePrefix(project));
-          if (listed.success && listed.images.length > 0) {
-            await deleteImagesFromR2(listed.images.map((img) => img.key));
+          if (isR2Configured() && project.user_id) {
+            try {
+              const listed = await listImagesFromR2(projectImagePrefix(project));
+              if (listed.success && listed.images.length > 0) {
+                await deleteImagesFromR2(listed.images.map((img) => img.key));
+              }
+            } catch (cleanupErr) {
+              console.warn('Project image cleanup failed:', cleanupErr);
+            }
           }
-        } catch (cleanupErr) {
-          console.warn('Project image cleanup failed:', cleanupErr);
+          await deleteProjectAdmin(project.id);
+          showSnack('已删除');
+          load();
+        } catch (err) {
+          showSnack(err.message, 'error');
         }
-      }
-      await deleteProjectAdmin(project.id);
-      showSnack('已删除');
-      load();
-    } catch (err) {
-      showSnack(err.message, 'error');
-    }
+      },
+    });
   };
 
   return (
@@ -1705,6 +1878,16 @@ function ProjectOverview() {
           {snack.msg}
         </Alert>
       </Snackbar>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Box>
   );
 }
@@ -1720,6 +1903,7 @@ function SkillPreviewMediaDialog({ open, onClose }) {
   const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
   const [error, setError]         = useState('');
   const [info, setInfo]           = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const fileInputRef = useRef(null);
 
   const refresh = useCallback(async () => {
@@ -1764,20 +1948,36 @@ function SkillPreviewMediaDialog({ open, onClose }) {
     refresh();
   };
 
-  const handleDeleteOne = async (item) => {
-    if (!window.confirm(`确认删除「${item.name}」吗？`)) return;
-    const result = await deleteImagesFromR2([item.key || `${SKILL_PREVIEW_PREFIX}${item.name}`]);
-    if (!result.success) { setError(result.error || 'Delete failed'); return; }
-    refresh();
+  const handleDeleteOne = (item) => {
+    setConfirmDialog({
+      title: '删除预览媒体',
+      message: `确认删除「${item.name}」吗？`,
+      confirmLabel: '删除',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        const result = await deleteImagesFromR2([item.key || `${SKILL_PREVIEW_PREFIX}${item.name}`]);
+        if (!result.success) { setError(result.error || 'Delete failed'); return; }
+        refresh();
+      },
+    });
   };
 
-  const handleClear = async () => {
+  const handleClear = () => {
     if (!media.length) return;
-    if (!window.confirm(`确认清空全部 ${media.length} 个预览媒体吗？此操作不可恢复。`)) return;
-    const result = await deleteImagesFromR2(media.map((m) => m.key || `${SKILL_PREVIEW_PREFIX}${m.name}`));
-    if (!result.success) { setError(result.error || 'Delete failed'); return; }
-    setInfo('已清空预览媒体库。');
-    refresh();
+    setConfirmDialog({
+      title: '清空预览媒体库',
+      message: `确认清空全部 ${media.length} 个预览媒体吗？此操作不可恢复。`,
+      confirmLabel: '清空',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        const result = await deleteImagesFromR2(media.map((m) => m.key || `${SKILL_PREVIEW_PREFIX}${m.name}`));
+        if (!result.success) { setError(result.error || 'Delete failed'); return; }
+        setInfo('已清空预览媒体库。');
+        refresh();
+      },
+    });
   };
 
   const counts = media.reduce((acc, m) => {
@@ -1913,6 +2113,16 @@ function SkillPreviewMediaDialog({ open, onClose }) {
       <DialogActions>
         <Button onClick={onClose}>关闭</Button>
       </DialogActions>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Dialog>
   );
 }
@@ -1925,6 +2135,7 @@ function SkillManagement() {
   const [loading, setLoading] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [snack, setSnack] = useState({ open: false, msg: '', sev: 'success' });
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
   const load = useCallback(async () => {
@@ -1943,13 +2154,21 @@ function SkillManagement() {
     } catch (err) { showSnack(err.message, 'error'); }
   };
 
-  const handleDelete = async (id, name) => {
-    if (!window.confirm(`确认删除 Skill "${name}" 吗？`)) return;
-    try {
-      await deleteSkill(id);
-      showSnack('已删除');
-      load();
-    } catch (err) { showSnack(err.message, 'error'); }
+  const handleDelete = (id, name) => {
+    setConfirmDialog({
+      title: '删除 Skill',
+      message: `确认删除 Skill "${name}" 吗？`,
+      confirmLabel: '删除',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteSkill(id);
+          showSnack('已删除');
+          load();
+        } catch (err) { showSnack(err.message, 'error'); }
+      },
+    });
   };
 
   return (
@@ -2019,6 +2238,16 @@ function SkillManagement() {
       <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((x) => ({ ...x, open: false }))}>
         <Alert severity={snack.sev}>{snack.msg}</Alert>
       </Snackbar>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Box>
   );
 }
@@ -2030,6 +2259,7 @@ function LiveSurveyManagement() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [snack, setSnack] = useState({ open: false, msg: '', sev: 'success' });
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
   const load = useCallback(async () => {
@@ -2057,13 +2287,21 @@ function LiveSurveyManagement() {
     } catch (err) { showSnack(err.message, 'error'); }
   };
 
-  const handleRevoke = async (id, title) => {
-    if (!window.confirm(`撤销 Live 上架「${title}」？参与者直链在窗口外也会被关闭。`)) return;
-    try {
-      await revokeLiveListing(id, 'Revoked by admin', await reviewerEmail());
-      showSnack('已撤销');
-      load();
-    } catch (err) { showSnack(err.message, 'error'); }
+  const handleRevoke = (id, title) => {
+    setConfirmDialog({
+      title: '撤销 Live 上架',
+      message: `撤销 Live 上架「${title}」？参与者直链在窗口外也会被关闭。`,
+      confirmLabel: '撤销',
+      confirmColor: 'warning',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await revokeLiveListing(id, 'Revoked by admin', await reviewerEmail());
+          showSnack('已撤销');
+          load();
+        } catch (err) { showSnack(err.message, 'error'); }
+      },
+    });
   };
 
   const handleShowOnLive = async (id, value) => {
@@ -2074,13 +2312,21 @@ function LiveSurveyManagement() {
     } catch (err) { showSnack(err.message, 'error'); }
   };
 
-  const handleDelete = async (id, title) => {
-    if (!window.confirm(`永久删除申请记录「${title}」？`)) return;
-    try {
-      await deleteLiveListing(id);
-      showSnack('已删除');
-      load();
-    } catch (err) { showSnack(err.message, 'error'); }
+  const handleDelete = (id, title) => {
+    setConfirmDialog({
+      title: '删除申请记录',
+      message: `永久删除申请记录「${title}」？`,
+      confirmLabel: '删除',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteLiveListing(id);
+          showSnack('已删除');
+          load();
+        } catch (err) { showSnack(err.message, 'error'); }
+      },
+    });
   };
 
   const filtered = listings.filter((l) => {
@@ -2221,6 +2467,16 @@ function LiveSurveyManagement() {
       <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((x) => ({ ...x, open: false }))}>
         <Alert severity={snack.sev}>{snack.msg}</Alert>
       </Snackbar>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Box>
   );
 }
@@ -2262,23 +2518,23 @@ export default function AdminDashboard() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <AppBar position="static" color="default" elevation={1}>
-        <Toolbar>
-          <IconButton edge="start" onClick={() => navigate('/admin')} sx={{ mr: 1 }}>
-            <ArrowBack />
-          </IconButton>
-          <Typography variant="h6" fontWeight={700} sx={{ flex: 1 }}>
-            管理后台
-          </Typography>
-          <IconButton onClick={() => navigate('/')} title="返回首页">
+    <AdminShell
+      title="平台管理"
+      backTo="/admin"
+      maxWidth="xl"
+      actions={(
+        <Tooltip title="返回首页">
+          <IconButton onClick={() => navigate('/')} size="small">
             <Home />
           </IconButton>
-        </Toolbar>
+        </Tooltip>
+      )}
+    >
+      <Box sx={{ mx: { xs: -2, sm: -3 }, mt: { xs: -2, sm: -3 }, mb: 2 }}>
         <Tabs
           value={tab}
           onChange={(_, v) => setTab(v)}
-          sx={{ borderTop: 1, borderColor: 'divider', bgcolor: 'white' }}
+          sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', px: { xs: 1, sm: 2 } }}
           variant="scrollable"
           scrollButtons="auto"
         >
@@ -2287,14 +2543,11 @@ export default function AdminDashboard() {
           <Tab label="Skill 审核" />
           <Tab label="Live Surveys" />
         </Tabs>
-      </AppBar>
-
-      <Container maxWidth="xl" sx={{ py: 3 }}>
-        {tab === 0 && <TemplateManagement />}
-        {tab === 1 && <ProjectOverview />}
-        {tab === 2 && <SkillManagement />}
-        {tab === 3 && <LiveSurveyManagement />}
-      </Container>
-    </Box>
+      </Box>
+      {tab === 0 && <TemplateManagement />}
+      {tab === 1 && <ProjectOverview />}
+      {tab === 2 && <SkillManagement />}
+      {tab === 3 && <LiveSurveyManagement />}
+    </AdminShell>
   );
 }

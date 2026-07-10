@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -30,6 +30,10 @@ import {
   TableHead,
   TableRow,
   Paper,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Refresh,
@@ -52,9 +56,22 @@ import {
 } from '../../lib/huggingface';
 import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2 } from '../../lib/r2';
 import { asyncPool } from '../../lib/asyncPool';
-import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT, analyzeMediaGroups, summarizeMediaGroupsBySize, analyzeMediaCategories, downloadMediaFiles } from '../../lib/mediaUtils';
+import { inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT, analyzeMediaGroups, summarizeMediaGroupsBySize, analyzeMediaCategories, downloadMediaFiles } from '../../lib/mediaUtils';
 import { MediaPairingGuide } from './MediaPairingGuide';
 import { MediaCategoryGuide } from './MediaCategoryGuide';
+import SpatialIntelligencePanel from './SpatialIntelligencePanel';
+import MediaPreannotatePanel from './MediaPreannotatePanel';
+import ConfirmDialog from '../layout/ConfirmDialog';
+import { L0_MODEL } from '../../lib/imageFeaturesL0';
+import { SEG_MODEL } from '../../lib/falInference';
+import {
+  loadFeaturesMapFromR2,
+  featureStatusFromMap,
+  copyFeatureCsvsTemplateToProject,
+  migrateLegacyFeaturesToR2,
+  FEATURE_MODELS,
+  SAM_PREANNOT_MODEL,
+} from '../../lib/imageFeaturesR2';
 import { getTemplateById, listTemplates } from '../../lib/templateManager';
 import {
   computeTemplateImportProgress,
@@ -178,10 +195,35 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const [mediaDownloadProgress, setMediaDownloadProgress] = useState(null);
   const [refreshingMedia, setRefreshingMedia] = useState(false);
   const [groupSizeFilter, setGroupSizeFilter] = useState('all');
+  const [featureInspect, setFeatureInspect] = useState(null); // { name, mediaId, records }
+  const [r2FeatureMap, setR2FeatureMap] = useState({});
+  const [preannotateFocusName, setPreannotateFocusName] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, onConfirm }
 
   const userId = user?.id || 'anonymous';
   const projectId = currentProject?.id;
   const projectPrefix = projectId ? `${userId}/${projectId}/` : '';
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!projectPrefix || !isR2Configured()) {
+        setR2FeatureMap({});
+        return;
+      }
+      try {
+        const legacy = currentProject?.imageDatasetConfig?.imageFeatures;
+        if (legacy && Object.keys(legacy).length) {
+          await migrateLegacyFeaturesToR2(projectPrefix, legacy);
+        }
+        const map = await loadFeaturesMapFromR2(projectPrefix, FEATURE_MODELS);
+        if (!cancelled) setR2FeatureMap(map);
+      } catch (err) {
+        console.warn('loadFeaturesMapFromR2', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectPrefix, currentProject?.preloadedImages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const normalizeR2Listing = (images = []) => images.map((img) => normalizeMediaEntry({
     url: img.url,
@@ -189,6 +231,24 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     key: img.key,
     type: img.type || inferMediaType(img.name),
   }));
+
+  // Backfill media_id on legacy preloadedImages entries
+  useEffect(() => {
+    const imgs = currentProject?.preloadedImages;
+    if (!imgs?.length || !onProjectUpdate) return;
+    let changed = false;
+    const next = imgs.map((raw) => {
+      const n = normalizeMediaEntry(raw);
+      if (!n) return raw;
+      if (raw.media_id === n.media_id && raw.type === n.type) return raw;
+      changed = true;
+      return { ...raw, media_id: n.media_id, type: n.type || raw.type };
+    });
+    if (changed) {
+      onProjectUpdate({ ...currentProject, preloadedImages: next });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run when project id / image count changes
+  }, [currentProject?.id, currentProject?.preloadedImages?.length]);
 
   const persistPreloadedImages = (images, extra = {}) => {
     if (!currentProject) return;
@@ -233,36 +293,43 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     restoreScrollRef.current = true;
 
     const label = entries.length === 1 ? `"${entries[0].name}"` : `${entries.length} files`;
-    if (!window.confirm(`Delete ${label} from Cloudflare R2? This cannot be undone.`)) return;
+    setConfirmDialog({
+      title: 'Delete media',
+      message: `Delete ${label} from Cloudflare R2? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setMediaActionStatus({ loading: true, error: null, success: null });
+        try {
+          if (isR2Configured()) {
+            const keys = entries
+              .map((entry) => mediaEntryKey(entry, userId, projectId))
+              .filter(Boolean);
+            if (keys.length) {
+              const del = await deleteImagesFromR2(keys);
+              if (!del.success) throw new Error(del.error || 'Failed to delete from R2');
+            }
+          }
 
-    setMediaActionStatus({ loading: true, error: null, success: null });
-    try {
-      if (isR2Configured()) {
-        const keys = entries
-          .map((entry) => mediaEntryKey(entry, userId, projectId))
-          .filter(Boolean);
-        if (keys.length) {
-          const del = await deleteImagesFromR2(keys);
-          if (!del.success) throw new Error(del.error || 'Failed to delete from R2');
+          const removeNames = new Set(entries.map((e) => e.name));
+          const remaining = (currentProject.preloadedImages || []).filter((m) => !removeNames.has(m.name));
+          persistPreloadedImages(remaining);
+          setSelectedMedia((prev) => {
+            const next = new Set(prev);
+            removeNames.forEach((n) => next.delete(n));
+            return next;
+          });
+          setMediaActionStatus({
+            loading: false,
+            error: null,
+            success: `Deleted ${entries.length} file(s).`,
+          });
+        } catch (err) {
+          setMediaActionStatus({ loading: false, error: err.message, success: null });
         }
-      }
-
-      const removeNames = new Set(entries.map((e) => e.name));
-      const remaining = (currentProject.preloadedImages || []).filter((m) => !removeNames.has(m.name));
-      persistPreloadedImages(remaining);
-      setSelectedMedia((prev) => {
-        const next = new Set(prev);
-        removeNames.forEach((n) => next.delete(n));
-        return next;
-      });
-      setMediaActionStatus({
-        loading: false,
-        error: null,
-        success: `Deleted ${entries.length} file(s).`,
-      });
-    } catch (err) {
-      setMediaActionStatus({ loading: false, error: err.message, success: null });
-    }
+      },
+    });
   };
 
   const handleDeleteSingleMedia = (entry) => deleteMediaEntries([entry]);
@@ -324,6 +391,62 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     });
   }, [currentProject?.preloadedImages, mediaSearch, mediaFilter]);
 
+  /** Images available for SAM pre-annotate (respects gallery filter/search). */
+  const preannotateImages = useMemo(
+    () => filteredMedia.filter((m) => (m.type || inferMediaType(m.name || m.url)) === 'image'),
+    [filteredMedia],
+  );
+
+  const preannotateIndex = useMemo(() => {
+    if (!preannotateFocusName) return 0;
+    const idx = preannotateImages.findIndex((m) => m.name === preannotateFocusName);
+    return idx >= 0 ? idx : 0;
+  }, [preannotateImages, preannotateFocusName]);
+
+  const preannotateEntry = preannotateImages[preannotateIndex] || null;
+
+  const preannotScrollLockRef = useRef(null); // { top: number } panel viewport top before nav
+
+  const focusMediaInGallery = useCallback((name) => {
+    if (!name) return;
+    const panel = document.getElementById('media-preannotate-panel');
+    if (panel) {
+      preannotScrollLockRef.current = { top: panel.getBoundingClientRect().top };
+    } else {
+      preannotScrollLockRef.current = { top: null, y: window.scrollY };
+    }
+    setPreannotateFocusName(name);
+    setSelectedMedia(new Set([name]));
+    const idxInFiltered = filteredMedia.findIndex((m) => m.name === name);
+    if (idxInFiltered >= 0) {
+      setMediaPage(Math.floor(idxInFiltered / MEDIA_PAGE_SIZE) + 1);
+    }
+  }, [filteredMedia]);
+
+  useLayoutEffect(() => {
+    const lock = preannotScrollLockRef.current;
+    if (!lock) return;
+    preannotScrollLockRef.current = null;
+    const panel = document.getElementById('media-preannotate-panel');
+    if (panel && typeof lock.top === 'number') {
+      const delta = panel.getBoundingClientRect().top - lock.top;
+      if (Math.abs(delta) > 0.5) window.scrollBy(0, delta);
+      return;
+    }
+    if (typeof lock.y === 'number') window.scrollTo(0, lock.y);
+  }, [preannotateFocusName, mediaPage, selectedMedia]);
+
+  // Keep focus valid when filter/list changes
+  useEffect(() => {
+    if (!preannotateImages.length) {
+      setPreannotateFocusName(null);
+      return;
+    }
+    if (!preannotateFocusName || !preannotateImages.some((m) => m.name === preannotateFocusName)) {
+      setPreannotateFocusName(preannotateImages[0].name);
+    }
+  }, [preannotateImages, preannotateFocusName]);
+
   const totalMediaPages = Math.max(1, Math.ceil(filteredMedia.length / MEDIA_PAGE_SIZE));
   const pagedMedia = useMemo(() => {
     const start = (mediaPage - 1) * MEDIA_PAGE_SIZE;
@@ -345,6 +468,16 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       else next.add(name);
       return next;
     });
+  };
+
+  /** Card click: focus for pre-annotate (images) + select; multi-select via checkbox. */
+  const handleMediaCardClick = (img) => {
+    const t = img.type || inferMediaType(img.name || img.url);
+    if (t === 'image') {
+      focusMediaInGallery(img.name);
+      return;
+    }
+    toggleMediaSelection(img.name);
   };
 
   const selectAllFiltered = () => {
@@ -586,6 +719,24 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
       const finalImages = mergeCopiedIntoProjectImages(existing.images, copiedImages, r2PublicUrl);
 
+      // Copy L0/Seg feature CSVs from template → project (remap media_id by filename)
+      try {
+        const nameToNewMediaId = new Map();
+        finalImages.forEach((img) => {
+          const entry = normalizeMediaEntry(img);
+          if (entry?.name) nameToNewMediaId.set(entry.name, getMediaId(entry));
+        });
+        await copyFeatureCsvsTemplateToProject({
+          templatePrefix: `templates/${template.id}/`,
+          projectPrefix,
+          nameToNewMediaId,
+        });
+        const featMap = await loadFeaturesMapFromR2(projectPrefix, FEATURE_MODELS);
+        setR2FeatureMap(featMap);
+      } catch (featErr) {
+        console.warn('Feature CSV copy skipped/failed:', featErr);
+      }
+
       const afterProgress = await computeTemplateImportProgress(template.id, uid, currentProject.id);
       const historyEntry = {
         templateName: template.name,
@@ -706,7 +857,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         const result = await uploadImageToR2(file, key);
 
         if (result.success) {
-          uploadedImages.push({ url: result.url, name: raw.name, type: mediaType, key });
+          uploadedImages.push({
+            url: result.url,
+            name: raw.name,
+            type: mediaType,
+            key,
+            media_id: key,
+          });
           successCount++;
         } else {
           console.error('Upload error:', result.error);
@@ -800,7 +957,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       // Collect public URLs for already-existing images
       const allImages = [];
       for (const img of (existingResult.images || [])) {
-        allImages.push({ url: img.url, name: img.name, key: img.key, type: img.type || inferMediaType(img.name) });
+        allImages.push({
+          url: img.url,
+          name: img.name,
+          key: img.key,
+          media_id: img.media_id || img.key,
+          type: img.type || inferMediaType(img.name),
+        });
       }
 
       const batchSize = 100;
@@ -868,7 +1031,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             // Track the filename we used so a re-run skips it from
             // existingFileNames without an extra R2 list round-trip.
             existingFileNames.add(fname);
-            allImages.push({ url: uploadResult.url, name: fname, key: r2Key, type: 'image' });
+            allImages.push({
+              url: uploadResult.url,
+              name: fname,
+              key: r2Key,
+              media_id: r2Key,
+              type: 'image',
+            });
             newCount++;
             setPreloadStatus(prev => ({ ...prev, progress: allImages.length }));
 
@@ -909,38 +1078,53 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     restoreScrollRef.current = true;
 
     const count = currentProject.preloadedImages?.length || 0;
-    if (!window.confirm(`Clear all ${count} uploaded images from Cloudflare R2? This cannot be undone.`)) return;
-
-    // Delete files from R2
-    if (isR2Configured() && currentProject.preloadedImages?.length > 0) {
-      try {
-        const userId = user?.id || 'anonymous';
-        const projectId = currentProject.id;
-        const listResult = await listImagesFromR2(`${userId}/${projectId}`);
-        if (listResult.success && listResult.images.length > 0) {
-          const keys = listResult.images.map(img => img.key);
-          await deleteImagesFromR2(keys);
+    setConfirmDialog({
+      title: 'Clear all media',
+      message: `Clear all ${count} uploaded images from Cloudflare R2? This cannot be undone.`,
+      confirmLabel: 'Clear all',
+      confirmColor: 'error',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        if (isR2Configured() && currentProject.preloadedImages?.length > 0) {
+          try {
+            const uid = user?.id || 'anonymous';
+            const pid = currentProject.id;
+            const listResult = await listImagesFromR2(`${uid}/${pid}`);
+            if (listResult.success && listResult.images.length > 0) {
+              const keys = listResult.images.map((img) => img.key);
+              await deleteImagesFromR2(keys);
+            }
+          } catch (e) {
+            console.error('Error clearing images from R2:', e);
+          }
         }
-      } catch (e) {
-        console.error('Error clearing images from R2:', e);
-      }
-    }
 
-    const updatedProject = {
-      ...currentProject,
-      preloadedImages: [],
-      preloadedAt: null,
-      preloadedSource: null,
-    };
-    onProjectUpdate(updatedProject);
-    setSelectedMedia(new Set());
-    setMediaPage(1);
-    if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
+        const updatedProject = {
+          ...currentProject,
+          preloadedImages: [],
+          preloadedAt: null,
+          preloadedSource: null,
+        };
+        onProjectUpdate(updatedProject);
+        setSelectedMedia(new Set());
+        setMediaPage(1);
+        if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
+      },
+    });
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   const preloadedCount = currentProject?.preloadedImages?.length || 0;
+  const featureStatusByName = useMemo(() => {
+    const map = new Map();
+    (currentProject?.preloadedImages || []).forEach((raw) => {
+      const entry = normalizeMediaEntry(raw);
+      if (!entry?.name) return;
+      map.set(entry.name, featureStatusFromMap(r2FeatureMap, entry, FEATURE_MODELS));
+    });
+    return map;
+  }, [currentProject?.preloadedImages, r2FeatureMap]);
   const mediaGroups = useMemo(
     () => analyzeMediaGroups(currentProject?.preloadedImages || []),
     [currentProject?.preloadedImages],
@@ -986,6 +1170,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         categoryCount={mediaCategories.length}
         totalFileCount={preloadedCount}
         categoryLabels={mediaCategories.map((c) => c.category)}
+      />
+
+      <SpatialIntelligencePanel
+        currentProject={currentProject}
+        onProjectUpdate={onProjectUpdate}
+        onConfigChange={onConfigChange}
+        onFeaturesUpdated={setR2FeatureMap}
       />
 
       {!isR2Configured() && (
@@ -1536,27 +1727,38 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
                 Showing {pagedMedia.length} of {filteredMedia.length} file(s)
                 {mediaSearch || mediaFilter !== 'all' ? ' (filtered)' : ''}.
-                Click a card to select; use download or trash icons on each file.
+                Click a card to focus Pre-annotate below (images); use checkboxes for multi-select download/delete.
               </Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 1.5, mb: 2 }}>
                 {pagedMedia.map((img) => {
                   const t = img.type || inferMediaType(img.name || img.url);
                   const selected = selectedMedia.has(img.name);
+                  const focused = preannotateFocusName === img.name;
+                  const feat = featureStatusByName.get(img.name);
+                  const l0Status = feat?.status?.[L0_MODEL];
+                  const segStatus = feat?.status?.[SEG_MODEL];
+                  const samStatus = feat?.status?.[SAM_PREANNOT_MODEL];
+                  const l0Ok = l0Status === 'ready';
+                  const segOk = segStatus === 'ready';
+                  const samOk = samStatus === 'ready';
+                  const l0Err = l0Status === 'error';
+                  const segErr = segStatus === 'error';
                   return (
                     <Box
-                      key={img.key || img.name}
+                      key={img.key || img.media_id || img.name}
                       sx={{
                         position: 'relative',
                         borderRadius: 1,
                         overflow: 'hidden',
                         border: '2px solid',
-                        borderColor: selected ? 'primary.main' : 'divider',
+                        borderColor: focused ? 'secondary.main' : selected ? 'primary.main' : 'divider',
+                        boxShadow: focused ? 2 : 0,
                         bgcolor: 'grey.100',
                         cursor: 'pointer',
-                        transition: 'border-color .15s',
+                        transition: 'border-color .15s, box-shadow .15s',
                         '&:hover .media-action-btn': { opacity: 1 },
                       }}
-                      onClick={() => toggleMediaSelection(img.name)}
+                      onClick={() => handleMediaCardClick(img)}
                     >
                       <Checkbox
                         size="small"
@@ -1613,7 +1815,66 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                         <Typography variant="caption" noWrap title={img.name} sx={{ display: 'block' }}>
                           {img.name}
                         </Typography>
-                        <Chip size="small" label={t} variant="outlined" sx={{ height: 18, fontSize: '0.65rem', mt: 0.5 }} />
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                          <Chip size="small" label={t} variant="outlined" sx={{ height: 18, fontSize: '0.65rem' }} />
+                          {t === 'image' && l0Ok && (
+                            <Chip
+                              size="small"
+                              label="L0"
+                              color="success"
+                              sx={{ height: 18, fontSize: '0.65rem' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFeatureInspect({
+                                  name: img.name,
+                                  mediaId: feat.mediaId,
+                                  records: feat.records,
+                                  url: img.url,
+                                });
+                              }}
+                            />
+                          )}
+                          {t === 'image' && l0Err && (
+                            <Chip size="small" label="L0!" color="warning" sx={{ height: 18, fontSize: '0.65rem' }} title="L0 failed" />
+                          )}
+                          {t === 'image' && segOk && (
+                            <Chip
+                              size="small"
+                              label="Seg"
+                              color="info"
+                              sx={{ height: 18, fontSize: '0.65rem' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFeatureInspect({
+                                  name: img.name,
+                                  mediaId: feat.mediaId,
+                                  records: feat.records,
+                                  url: img.url,
+                                });
+                              }}
+                            />
+                          )}
+                          {t === 'image' && segErr && (
+                            <Chip size="small" label="Seg!" color="warning" sx={{ height: 18, fontSize: '0.65rem' }} title="Seg failed" />
+                          )}
+                          {t === 'image' && samOk && (
+                            <Chip
+                              size="small"
+                              label="SAM"
+                              color="secondary"
+                              sx={{ height: 18, fontSize: '0.65rem' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFeatureInspect({
+                                  name: img.name,
+                                  mediaId: feat.mediaId,
+                                  records: feat.records,
+                                  url: img.url,
+                                });
+                              }}
+                            />
+                          )}
+                        </Box>
                       </Box>
                     </Box>
                   );
@@ -1633,6 +1894,36 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             </>
           )}
         </Box>
+      )}
+
+      {/* ── SAM3 Pre-annotate (synced with gallery selection) ── */}
+      {preloadedCount > 0 && (
+        <MediaPreannotatePanel
+          mediaEntry={preannotateEntry}
+          imageIndex={preannotateIndex}
+          imageTotal={preannotateImages.length}
+          onPrev={() => {
+            if (preannotateIndex <= 0) return;
+            const prev = preannotateImages[preannotateIndex - 1];
+            if (prev) focusMediaInGallery(prev.name);
+          }}
+          onNext={() => {
+            if (preannotateIndex >= preannotateImages.length - 1) return;
+            const next = preannotateImages[preannotateIndex + 1];
+            if (next) focusMediaInGallery(next.name);
+          }}
+          r2Prefix={projectPrefix}
+          falKey={currentProject?.imageDatasetConfig?.falApiKey || ''}
+          projectId={projectId || ''}
+          onSaved={async () => {
+            try {
+              const map = await loadFeaturesMapFromR2(projectPrefix, FEATURE_MODELS);
+              setR2FeatureMap(map);
+            } catch (err) {
+              console.warn(err);
+            }
+          }}
+        />
       )}
 
       <Divider sx={{ my: 4 }} />
@@ -1760,6 +2051,78 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           </Button>
         </Box>
       )}
+
+      <Dialog open={!!featureInspect} onClose={() => setFeatureInspect(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>{featureInspect?.name || 'Image features'}</DialogTitle>
+        <DialogContent dividers>
+          {featureInspect?.url && (
+            <Box sx={{ mb: 2, textAlign: 'center' }}>
+              <img
+                src={featureInspect.url}
+                alt={featureInspect.name}
+                style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain' }}
+              />
+            </Box>
+          )}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            media_id: {featureInspect?.mediaId}
+          </Typography>
+          {featureInspect?.records?.[L0_MODEL]?.features && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>L0 ({L0_MODEL})</Typography>
+              {Object.entries(featureInspect.records[L0_MODEL].features).map(([k, v]) => (
+                <Typography key={k} variant="caption" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                  {k}: {typeof v === 'number' ? v.toFixed(4) : String(v)}
+                </Typography>
+              ))}
+            </Box>
+          )}
+          {featureInspect?.records?.[SEG_MODEL]?.features && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>Streetscape seg ({SEG_MODEL})</Typography>
+              {Object.entries(featureInspect.records[SEG_MODEL].features)
+                .filter(([k]) => k.startsWith('seg_ratio_'))
+                .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+                .map(([k, v]) => (
+                  <Box key={k} sx={{ mb: 0.75 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="caption">{k.replace('seg_ratio_', '')}</Typography>
+                      <Typography variant="caption">{typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : '—'}</Typography>
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={typeof v === 'number' ? Math.min(100, v * 100) : 0}
+                      sx={{ height: 6, borderRadius: 1 }}
+                    />
+                  </Box>
+                ))}
+            </Box>
+          )}
+          {featureInspect?.records?.[SAM_PREANNOT_MODEL]?.features && (
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>SAM pre-annot ({SAM_PREANNOT_MODEL})</Typography>
+              {Object.entries(featureInspect.records[SAM_PREANNOT_MODEL].features).map(([k, v]) => (
+                <Typography key={k} variant="caption" sx={{ display: 'block', fontFamily: 'monospace' }}>
+                  {k}: {typeof v === 'number' ? v.toFixed(4) : String(v)}
+                </Typography>
+              ))}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFeatureInspect(null)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Box>
   );
 }

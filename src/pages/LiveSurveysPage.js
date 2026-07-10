@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box, Container, Typography, Button, Card, CardContent, Chip,
-  CircularProgress, Stack, Alert, Divider,
+  CircularProgress, Alert, Divider,
 } from '@mui/material';
-import { ArrowBack, Login, Public, Schedule } from '@mui/icons-material';
+import { Public, Schedule } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import {
   listPublicLiveSurveys,
   computeLiveStatus,
@@ -26,6 +27,9 @@ function LiveCard({ listing }) {
         filter: online ? 'none' : 'grayscale(0.85)',
         bgcolor: online ? 'background.paper' : 'grey.100',
         borderColor: online ? 'primary.light' : 'divider',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+        transition: 'box-shadow 0.2s',
+        '&:hover': online ? { boxShadow: '0 4px 16px rgba(0,0,0,0.12)' } : undefined,
       }}
     >
       <CardContent sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 1.5 }}>
@@ -68,7 +72,6 @@ function LiveCard({ listing }) {
 }
 
 export default function LiveSurveysPage() {
-  const navigate = useNavigate();
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -104,33 +107,10 @@ export default function LiveSurveysPage() {
   }, [listings]);
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fafafa' }}>
-      <Box
-        sx={{
-          bgcolor: 'white',
-          borderBottom: '1px solid #e0e0e0',
-          px: 3,
-          py: 1.5,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-        }}
-      >
-        <Stack direction="row" spacing={1} alignItems="center">
-          <Button startIcon={<ArrowBack />} onClick={() => navigate('/')} size="small">
-            Home
-          </Button>
-          <Typography variant="h6" fontWeight={700}>Live Surveys</Typography>
-        </Stack>
-        <Button variant="contained" startIcon={<Login />} onClick={() => navigate('/login')} size="small">
-          Sign In
-        </Button>
-      </Box>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
+      <PublicHeader />
 
-      <Container maxWidth="lg" sx={{ py: 5 }}>
+      <Container maxWidth="lg" sx={{ py: 5, flex: 1 }}>
         <Typography variant="h4" fontWeight={800} sx={{ mb: 1 }}>
           Live Surveys
         </Typography>
@@ -188,6 +168,8 @@ export default function LiveSurveysPage() {
           </>
         )}
       </Container>
+
+      <PublicFooter />
     </Box>
   );
 }

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Container, Typography, Button, Grid, Card, CardContent,
+  Box, Container, Typography, Button, Card, CardContent,
   Chip, TextField, InputAdornment, CircularProgress, Divider,
   Avatar, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import {
-  Search, Login, GitHub, Article, Dataset,
+  Search, Article, Dataset,
   AutoAwesome, BarChart, CloudUpload, Share, Preview, Public,
 } from '@mui/icons-material';
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { projectTemplates } from '../lib/projectTemplates';
 import SurveyPreview from '../components/admin/SurveyPreview';
+import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 
 const CLAMP = (lines) => ({
   display: '-webkit-box',
@@ -104,38 +105,8 @@ export default function LandingPage() {
   const ai       = visible.filter(t => t.category === 'ai');
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#fafafa' }}>
-
-      {/* ── Navbar ── */}
-      <Box sx={{ bgcolor: 'white', borderBottom: '1px solid #e0e0e0', px: 3, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box component="img" src="/logo-web-header.png" alt="SP-Survey"
-            sx={{ height: 36, objectFit: 'contain' }}
-            onError={e => { e.target.style.display = 'none'; }} />
-          <Box component="img" src="/UAL%20Logo.jpg" alt="Urban Analytics Lab"
-            sx={{ height: 44, objectFit: 'contain' }}
-            onError={e => { e.target.style.display = 'none'; }} />
-          <Box component="img" src="/DoA%20Logo.jpg" alt="DoA"
-            sx={{ height: 44, objectFit: 'contain' }}
-            onError={e => { e.target.style.display = 'none'; }} />
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Button
-            variant="outlined"
-            startIcon={<Public />}
-            onClick={() => navigate('/live')}
-            size="small"
-          >
-            Live Surveys{onlineLiveCount > 0 ? ` (${onlineLiveCount})` : ''}
-          </Button>
-          <Button variant="outlined" startIcon={<GitHub />} href="https://github.com/Sijie-Yang/SP-Survey" target="_blank" size="small">
-            GitHub
-          </Button>
-          <Button variant="contained" startIcon={<Login />} onClick={() => navigate('/login')} size="small">
-            Sign In
-          </Button>
-        </Box>
-      </Box>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
+      <PublicHeader />
 
       {/* ── Live Surveys teaser ── */}
       {onlineLiveCount > 0 && (
@@ -154,10 +125,7 @@ export default function LandingPage() {
       {/* ── Hero ── */}
       <Box sx={{ bgcolor: 'primary.main', color: 'white', py: { xs: 6, md: 10 }, textAlign: 'center' }}>
         <Container maxWidth="md">
-          <Box component="img" src="/logo-centre.png" alt="SP-Survey"
-            sx={{ height: { xs: 120, md: 180 }, objectFit: 'contain', mb: 3 }}
-            onError={e => { e.target.style.display = 'none'; }} />
-          <Typography variant="h3" fontWeight={800} sx={{ mb: 2, fontSize: { xs: '2rem', md: '2.8rem' } }}>
+          <Typography variant="h3" fontWeight={800} sx={{ mb: 2, fontSize: { xs: '2rem', md: '2.8rem' }, letterSpacing: '-0.02em' }}>
             Streetscape Perception Survey
           </Typography>
           <Typography variant="h6" sx={{ opacity: 0.88, mb: 0.5, fontWeight: 400, maxWidth: 860, mx: 'auto' }}>
@@ -195,14 +163,20 @@ export default function LandingPage() {
         <Typography variant="h4" fontWeight={700} textAlign="center" sx={{ mb: 5 }}>
           Everything you need for perception research
         </Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 3 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' }, gap: 3 }}>
           {[
             { icon: <CloudUpload color="primary" />, title: 'Upload Images', desc: 'Upload street-view images directly to cloud storage. Auto-compressed to keep surveys fast.' },
             { icon: <AutoAwesome color="secondary" />, title: 'AI Survey Builder', desc: 'Describe your research goals and let GPT-4o generate a complete survey with validated question types.' },
             { icon: <Share color="success" />, title: 'Instant Sharing', desc: 'Get a shareable link immediately — no server setup, no deployment, no configuration.' },
             { icon: <BarChart color="warning" />, title: 'Results Analysis', desc: 'View responses per question with image–response pairing and export to CSV.' },
           ].map((f, i) => (
-            <Card key={i} sx={{ height: 220, borderRadius: 2, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+            <Card key={i} sx={{
+              height: 220,
+              borderRadius: 2,
+              boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+              transition: 'box-shadow 0.2s',
+              '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.12)' },
+            }}>
               <CardContent sx={{ p: 3, height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
                 <Avatar sx={{ bgcolor: 'grey.100', width: 40, height: 40, mb: 1.5, flexShrink: 0 }}>{f.icon}</Avatar>
                 <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5, flexShrink: 0 }}>{f.title}</Typography>
@@ -219,7 +193,7 @@ export default function LandingPage() {
       <Container maxWidth="lg" sx={{ py: 8 }}>
         <Box sx={{ textAlign: 'center', mb: 5 }}>
           <Typography variant="h4" fontWeight={700} sx={{ mb: 1 }}>
-            📋 Template Library
+            Template Library
           </Typography>
           <Typography variant="body1" color="text.secondary">
             Start from peer-reviewed survey designs used in published research
@@ -241,9 +215,9 @@ export default function LandingPage() {
         ) : (
           <>
             {[
-              { key: 'academic', label: '🎓 Academic Research', color: 'success', list: academic },
-              { key: 'urban',    label: '🏙️ Urban Theory',      color: 'warning', list: urban },
-              { key: 'ai',       label: '🤖 AI Generated',      color: 'primary', list: ai },
+              { key: 'academic', label: 'Academic Research', color: 'success', list: academic },
+              { key: 'urban',    label: 'Urban Theory',      color: 'warning', list: urban },
+              { key: 'ai',       label: 'AI Generated',      color: 'primary', list: ai },
             ].map(({ key, label, color, list }, idx, arr) => (
               allByCategory(key).length > 0 && (
                 <Box key={key} sx={{ mb: idx < arr.length - 1 ? 5 : 0 }}>
@@ -253,7 +227,7 @@ export default function LandingPage() {
                     <Chip label={allByCategory(key).length} size="small" color={color} />
                   </Typography>
                   {list.length > 0 ? (
-                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 2 }}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
                       {list.map(t => <TemplateCard key={t.id} template={t} onUse={() => navigate('/login')} />)}
                     </Box>
                   ) : (
@@ -295,28 +269,7 @@ export default function LandingPage() {
         </Container>
       </Box>
 
-      {/* ── Footer ── */}
-      <Box sx={{ bgcolor: '#1a1a2e', color: 'grey.400', py: 4, textAlign: 'center' }}>
-        <Container>
-          <Box component="img" src="/logo-long.png" alt="SP-Survey"
-            sx={{ height: 28, objectFit: 'contain', mb: 1.5, filter: 'brightness(0) invert(0.6)' }}
-            onError={e => { e.target.style.display = 'none'; }} />
-          <Typography variant="body2">
-            Developed by{' '}
-            <a href="https://ual.sg" target="_blank" rel="noopener noreferrer" style={{ color: '#90caf9' }}>
-              Urban Analytics Lab, NUS
-            </a>
-            {' '}·{' '}
-            <a href="https://github.com/Sijie-Yang/SP-Survey" target="_blank" rel="noopener noreferrer" style={{ color: '#90caf9' }}>
-              Open Source (CC BY 4.0)
-            </a>
-            {' '}·{' '}
-            <a href="https://www.sciencedirect.com/science/article/pii/S0360132325000514" target="_blank" rel="noopener noreferrer" style={{ color: '#90caf9' }}>
-              Paper
-            </a>
-          </Typography>
-        </Container>
-      </Box>
+      <PublicFooter />
     </Box>
   );
 }
@@ -414,7 +367,7 @@ function TemplateCard({ template, onUse }) {
   const isAI     = template.category === 'ai';
   const isUrban  = template.category === 'urban';
   const chipColor = isAI ? 'primary' : isUrban ? 'warning' : 'success';
-  const chipLabel = isAI ? '🤖 AI' : isUrban ? '🏙️ Urban' : '🎓 Academic';
+  const chipLabel = isAI ? 'AI' : isUrban ? 'Urban' : 'Academic';
 
   return (
     <>

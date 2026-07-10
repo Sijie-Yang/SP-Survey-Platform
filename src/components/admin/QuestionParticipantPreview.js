@@ -6,15 +6,7 @@ import { Alert, Box, CircularProgress, Typography } from '@mui/material';
 import registerImageRankingWidget, {
   registerImageRatingWidget, registerImageBooleanWidget, registerAllExtendedWidgets,
 } from '../SurveyCustomComponents';
-import {
-  applyMediaToElement,
-  defaultMediaCount,
-  filterPoolForQuestion,
-  isCuratedMediaMode,
-  resolveCuratedImages,
-} from '../../lib/surveyMediaInjection';
-import { clampQuestionImageCount } from '../../lib/questionTypeConstraints';
-import { normalizeBuilderQuestion } from '../../lib/surveyStorage';
+import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 
 let widgetsRegistered = false;
 function ensureWidgets() {
@@ -24,173 +16,6 @@ function ensureWidgets() {
   registerImageBooleanWidget();
   registerAllExtendedWidgets();
   widgetsRegistered = true;
-}
-
-function resolvePreviewImages(question, projectImages) {
-  const count = clampQuestionImageCount(
-    question.type,
-    question,
-    question.imageCount ?? defaultMediaCount(question),
-  );
-  if (isCuratedMediaMode(question) && question.selectedImageUrls?.length) {
-    return resolveCuratedImages(question, projectImages).slice(0, count);
-  }
-  const pool = filterPoolForQuestion(projectImages || [], question);
-  return pool.slice(0, count);
-}
-
-/** Mirror SurveyPreview panel conversions for composite image/media types. */
-function toPreviewElement(element) {
-  if (element.type === 'imageboolean' && element.imageHtml) {
-    return {
-      type: 'panel',
-      name: `${element.name}_panel`,
-      title: 'See below images:',
-      description: element.description,
-      state: 'expanded',
-      elements: [
-        { type: 'html', name: `${element.name}_images`, html: element.imageHtml },
-        {
-          type: 'boolean',
-          name: element.name,
-          title: element.title,
-          isRequired: element.isRequired,
-          labelTrue: element.labelTrue || 'Yes',
-          labelFalse: element.labelFalse || 'No',
-          valueTrue: element.valueTrue,
-          valueFalse: element.valueFalse,
-        },
-      ],
-    };
-  }
-  if (element.type === 'imagerating' && element.imageHtml) {
-    return {
-      type: 'panel',
-      name: `${element.name}_panel`,
-      title: 'See below images:',
-      description: element.description,
-      state: 'expanded',
-      elements: [
-        { type: 'html', name: `${element.name}_images`, html: element.imageHtml },
-        {
-          type: 'rating',
-          name: element.name,
-          title: element.title,
-          isRequired: element.isRequired,
-          rateMin: element.rateMin || 1,
-          rateMax: element.rateMax || 5,
-          minRateDescription: element.minRateDescription,
-          maxRateDescription: element.maxRateDescription,
-        },
-      ],
-    };
-  }
-  if (element.type === 'imagematrix' && element.imageHtml) {
-    return {
-      type: 'panel',
-      name: `${element.name}_panel`,
-      title: 'See below images:',
-      description: element.description,
-      state: 'expanded',
-      elements: [
-        { type: 'html', name: `${element.name}_images`, html: element.imageHtml },
-        {
-          type: 'matrix',
-          name: element.name,
-          title: element.title,
-          isRequired: element.isRequired,
-          columns: element.columns,
-          rows: element.rows,
-        },
-      ],
-    };
-  }
-  if (element.type === 'mediarating' && element.imageHtml) {
-    return {
-      type: 'panel',
-      name: `${element.name}_panel`,
-      title: 'See below images:',
-      description: element.description,
-      state: 'expanded',
-      elements: [
-        { type: 'html', name: `${element.name}_images`, html: element.imageHtml },
-        {
-          type: 'rating',
-          name: element.name,
-          title: element.title,
-          isRequired: element.isRequired,
-          rateMin: element.rateMin || 1,
-          rateMax: element.rateMax || 5,
-          minRateDescription: element.minRateDescription,
-          maxRateDescription: element.maxRateDescription,
-        },
-      ],
-    };
-  }
-  if (element.type === 'mediaboolean' && element.imageHtml) {
-    return {
-      type: 'panel',
-      name: `${element.name}_panel`,
-      title: 'See below images:',
-      description: element.description,
-      state: 'expanded',
-      elements: [
-        { type: 'html', name: `${element.name}_images`, html: element.imageHtml },
-        {
-          type: 'boolean',
-          name: element.name,
-          title: element.title,
-          isRequired: element.isRequired,
-          labelTrue: element.labelTrue || 'Yes',
-          labelFalse: element.labelFalse || 'No',
-          valueTrue: element.valueTrue,
-          valueFalse: element.valueFalse,
-        },
-      ],
-    };
-  }
-  if (element.type === 'imageslidergroup' && element.imageHtml) {
-    return {
-      type: 'panel',
-      name: `${element.name}_panel`,
-      title: 'See below images:',
-      description: element.description,
-      state: 'expanded',
-      elements: [
-        { type: 'html', name: `${element.name}_images`, html: element.imageHtml },
-        {
-          type: 'slidergroup',
-          name: element.name,
-          title: element.title,
-          isRequired: element.isRequired,
-          dimensions: element.dimensions || [],
-          scaleMin: element.scaleMin ?? 1,
-          scaleMax: element.scaleMax ?? 7,
-        },
-      ],
-    };
-  }
-  if (element.type === 'imagepointallocation' && element.imageHtml) {
-    return {
-      type: 'panel',
-      name: `${element.name}_panel`,
-      title: 'See below images:',
-      description: element.description,
-      state: 'expanded',
-      elements: [
-        { type: 'html', name: `${element.name}_images`, html: element.imageHtml },
-        {
-          type: 'pointallocation',
-          name: element.name,
-          title: element.title,
-          isRequired: element.isRequired,
-          choices: element.choices || [],
-          budget: element.budget ?? 100,
-        },
-      ],
-    };
-  }
-  return element;
 }
 
 /**
@@ -224,6 +49,7 @@ export default function QuestionParticipantPreview({ question, currentProject })
         scaleMax: question?.scaleMax,
         budget: question?.budget,
         allowedTools: question?.allowedTools,
+        annotationLabels: question?.annotationLabels,
         minAnnotations: question?.minAnnotations,
         maxAnnotations: question?.maxAnnotations,
         beforeLabel: question?.beforeLabel,
@@ -248,19 +74,12 @@ export default function QuestionParticipantPreview({ question, currentProject })
           setModel(null);
           return;
         }
-        const element = normalizeBuilderQuestion(JSON.parse(JSON.stringify(question)));
-        if (!element.name) element.name = 'preview_q';
-        const projectImages = currentProject?.preloadedImages || [];
-        const images = resolvePreviewImages(question, projectImages);
-        if (images.length) {
-          applyMediaToElement(element, images);
-        }
-        const previewEl = toPreviewElement(element);
-        const surveyJson = {
+        const { surveyJson } = buildSingleQuestionSurvey({
+          question,
+          projectImages: currentProject?.preloadedImages || [],
+          randomMedia: false,
           showNavigationButtons: false,
-          showCompletedPage: false,
-          pages: [{ name: 'p1', elements: [previewEl] }],
-        };
+        });
         const m = new Model(surveyJson);
         m.mode = 'display';
         m.showPreviewBeforeComplete = false;

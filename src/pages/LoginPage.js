@@ -11,8 +11,9 @@ import {
   Tab,
   Divider,
 } from '@mui/material';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -50,73 +51,98 @@ export default function LoginPage() {
       sx={{
         minHeight: '100vh',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        bgcolor: 'grey.100',
-        p: 2,
+        flexDirection: 'column',
+        bgcolor: 'background.default',
       }}
     >
-      <Paper elevation={3} sx={{ width: '100%', maxWidth: 420, p: 4, borderRadius: 2 }}>
-        {/* Logo / Title */}
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
-          <Box
-            component="img"
-            src="/logo-header.png"
-            alt="SP-Survey"
-            sx={{ height: 48, objectFit: 'contain', mb: 1.5 }}
-            onError={(e) => { e.target.style.display = 'none'; }}
-          />
-          <Typography variant="h6" fontWeight={700}>
-            Streetscape Perception Survey
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Admin Platform
-          </Typography>
-        </Box>
+      <PublicHeader />
 
-        <Divider sx={{ mb: 3 }} />
+      <Box
+        sx={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 2,
+        }}
+      >
+        <Paper
+          variant="outlined"
+          elevation={0}
+          sx={{
+            width: '100%',
+            maxWidth: 420,
+            p: 4,
+            borderRadius: 2,
+            borderColor: 'divider',
+          }}
+        >
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h6" fontWeight={700}>
+              Streetscape Perception Survey
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Researcher login
+            </Typography>
+          </Box>
 
-        <Tabs value={tab} onChange={(_, v) => { setTab(v); setError(''); setInfo(''); }} sx={{ mb: 3 }}>
-          <Tab label="Sign In" />
-          <Tab label="Create Account" />
-        </Tabs>
+          <Divider sx={{ mb: 3 }} />
 
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        {info && <Alert severity="success" sx={{ mb: 2 }}>{info}</Alert>}
+          <Tabs value={tab} onChange={(_, v) => { setTab(v); setError(''); setInfo(''); }} sx={{ mb: 3 }}>
+            <Tab label="Sign In" />
+            <Tab label="Create Account" />
+          </Tabs>
 
-        <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <TextField
-            label="Email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoFocus
-            autoComplete="email"
-          />
-          <TextField
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete={tab === 0 ? 'current-password' : 'new-password'}
-            helperText={tab === 1 ? 'Minimum 6 characters' : ''}
-          />
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {info && <Alert severity="success" sx={{ mb: 2 }}>{info}</Alert>}
+
+          <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoFocus
+              autoComplete="email"
+            />
+            <TextField
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete={tab === 0 ? 'current-password' : 'new-password'}
+              helperText={tab === 1 ? 'Minimum 6 characters' : ''}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              color="primary"
+              size="large"
+              disabled={loading}
+              startIcon={loading ? <CircularProgress size={20} color="inherit" /> : null}
+              sx={{ mt: 1 }}
+            >
+              {loading
+                ? tab === 0 ? 'Signing in...' : 'Creating account...'
+                : tab === 0 ? 'Sign In' : 'Create Account'}
+            </Button>
+          </Box>
+
           <Button
-            type="submit"
-            variant="contained"
-            size="large"
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={20} color="inherit" /> : null}
-            sx={{ mt: 1 }}
+            component={RouterLink}
+            to="/"
+            variant="text"
+            size="small"
+            sx={{ mt: 2, alignSelf: 'center', display: 'block', mx: 'auto' }}
           >
-            {loading
-              ? tab === 0 ? 'Signing in...' : 'Creating account...'
-              : tab === 0 ? 'Sign In' : 'Create Account'}
+            ← Back to home
           </Button>
-        </Box>
-      </Paper>
+        </Paper>
+      </Box>
+
+      <PublicFooter />
     </Box>
   );
 }

@@ -27,6 +27,7 @@ import {
   DragIndicator,
   ContentCopy
 } from '@mui/icons-material';
+import ConfirmDialog from '../layout/ConfirmDialog';
 import {
   DndContext,
   closestCenter,
@@ -225,6 +226,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
 export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject }) {
   const [editedPage, setEditedPage] = useState({ ...page });
   const [selectedQuestion, setSelectedQuestion] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -257,12 +259,19 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
   const deleteQuestion = (questionIndex) => {
     const question = editedPage.elements[questionIndex];
     const title = question?.title || question?.name || `Question ${questionIndex + 1}`;
-    if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
-
-    const newElements = editedPage.elements.filter((_, index) => index !== questionIndex);
-    setEditedPage({
-      ...editedPage,
-      elements: newElements
+    setConfirmDialog({
+      title: 'Delete question',
+      message: `Delete "${title}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      confirmColor: 'error',
+      onConfirm: () => {
+        setConfirmDialog(null);
+        const newElements = editedPage.elements.filter((_, index) => index !== questionIndex);
+        setEditedPage({
+          ...editedPage,
+          elements: newElements
+        });
+      },
     });
   };
 
@@ -489,6 +498,15 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
           currentProject={currentProject}
         />
       )}
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'error'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </>
   );
 }

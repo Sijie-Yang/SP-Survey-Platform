@@ -246,7 +246,7 @@ function pickOnePerCategory(pool, element, globallyUsedImageKeys) {
 }
 
 export function getImageKey(image) {
-  return image?.name || image?.url;
+  return image?.media_id || image?.key || image?.name || image?.url;
 }
 
 export function getGroupTrackingKey(group) {
@@ -434,6 +434,12 @@ export function applyMediaToElement(element, selectedImages) {
     element.imageLinks = selectedImages.map((img) => img.url);
     element.imageNames = selectedImages.map((img) => img.name);
     element.imageHtml = buildImageGalleryHtml(selectedImages);
+    return;
+  }
+
+  // Only image/media choice types use choices-as-images. Never overwrite
+  // text radiogroup / checkbox / dropdown / ranking choices.
+  if (!['imagepicker', 'imageranking', 'mediaranking'].includes(element.type)) {
     return;
   }
 

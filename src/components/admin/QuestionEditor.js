@@ -625,9 +625,10 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           updates.mediaType = 'any';
         }
         if (value === 'imageannotation') {
-          updates.allowedTools = ['point', 'line', 'region'];
+          updates.allowedTools = ['point', 'line', 'region', 'bbox'];
           if (editedQuestion.minAnnotations == null) updates.minAnnotations = 0;
           if (editedQuestion.maxAnnotations == null) updates.maxAnnotations = 50;
+          if (!Array.isArray(editedQuestion.annotationLabels)) updates.annotationLabels = [];
         }
       }
       else if (value === 'mediaranking') {
@@ -952,8 +953,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
               {editedQuestion.type === 'imageannotation' && (
                 <Alert severity="info">
-                  Participants can draw points, lines, and regions on an image from your sampling settings.
-                  Set drawing tools and min/max annotation counts in the task options below.
+                  Participants can draw points, lines, regions, and bounding boxes on an image from your sampling settings.
+                  Optionally define class labels, then set tools and min/max counts in the task options below.
                 </Alert>
               )}
 
@@ -1518,7 +1519,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Allowed Tools</InputLabel>
                       <Select
                         multiple
-                        value={editedQuestion.allowedTools || ['point', 'line', 'region']}
+                        value={editedQuestion.allowedTools || ['point', 'line', 'region', 'bbox']}
                         onChange={(e) => handleQuestionChange('allowedTools',
                           typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
                         label="Allowed Tools"
@@ -1526,8 +1527,25 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         <MenuItem value="point">Point</MenuItem>
                         <MenuItem value="line">Line</MenuItem>
                         <MenuItem value="region">Region (polygon)</MenuItem>
+                        <MenuItem value="bbox">Bounding box</MenuItem>
                       </Select>
                     </FormControl>
+                    <TextField
+                      fullWidth
+                      variant="outlined"
+                      label="Class labels (optional)"
+                      value={(editedQuestion.annotationLabels || []).join(', ')}
+                      onChange={(e) => {
+                        const labels = e.target.value
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+                        handleQuestionChange('annotationLabels', labels);
+                      }}
+                      helperText="Comma-separated labels applied to new shapes (e.g. building, tree, sky). Leave empty for unlabeled annotation."
+                      placeholder="building, tree, sky"
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
                     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
                       <TextField fullWidth variant="outlined" type="number" label="Minimum annotations"
                         value={editedQuestion.minAnnotations ?? 0}

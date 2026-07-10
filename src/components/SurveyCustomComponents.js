@@ -119,7 +119,7 @@ function ImageRankingQuestionComponent(props) {
   // Simple test rendering first
   if (!question.choices || question.choices.length === 0) {
     return (
-      <div style={{ padding: '20px', border: '1px solid #ccc', backgroundColor: '#f9f9f9' }}>
+      <div style={{ padding: '20px', border: '1px solid rgba(0,0,0,0.12)', backgroundColor: '#f9f9f9' }}>
         <p>Image Ranking Component Loaded</p>
         <p>No choices available yet. Choices: {JSON.stringify(question.choices)}</p>
         <p>Question type: {question.getType()}</p>
@@ -261,7 +261,7 @@ function ImageRatingQuestionComponent(props) {
   // Simple test rendering first
   if (!question.choices || question.choices.length === 0) {
     return (
-      <div style={{ padding: '20px', border: '1px solid #ccc', backgroundColor: '#f9f9f9' }}>
+      <div style={{ padding: '20px', border: '1px solid rgba(0,0,0,0.12)', backgroundColor: '#f9f9f9' }}>
         <p>Image Rating Component Loaded</p>
         <p>No choices available yet. Choices: {JSON.stringify(question.choices)}</p>
         <p>Question type: {question.getType()}</p>
@@ -394,7 +394,7 @@ function ImageBooleanQuestionComponent(props) {
   // Simple test rendering first
   if (!question.choices || question.choices.length === 0) {
     return (
-      <div style={{ padding: '20px', border: '1px solid #ccc', backgroundColor: '#f9f9f9' }}>
+      <div style={{ padding: '20px', border: '1px solid rgba(0,0,0,0.12)', backgroundColor: '#f9f9f9' }}>
         <p>Image Boolean Component Loaded</p>
         <p>No choices available yet. Choices: {JSON.stringify(question.choices)}</p>
         <p>Question type: {question.getType()}</p>
@@ -790,9 +790,13 @@ export function registerImageAnnotationWidget() {
   Serializer.addClass('imageannotation', [
     ...MEDIA_PROPS.filter((p) => p.name !== 'mediaUrl' && p.name !== 'mediaName'),
     { name: 'annotationImageUrl', category: 'general' },
-    { name: 'allowedTools', default: ['point', 'line', 'region'], category: 'general' },
+    { name: 'allowedTools', default: ['point', 'line', 'region', 'bbox'], category: 'general' },
+    { name: 'annotationLabels', default: [], category: 'general' },
     { name: 'minAnnotations:number', default: 0, category: 'general' },
     { name: 'maxAnnotations:number', default: 50, category: 'general' },
+    { name: 'enableSamAssist:boolean', default: false, category: 'general' },
+    { name: 'falApiKey', category: 'general' },
+    { name: 'projectId', category: 'general' },
   ], () => new QuestionModel(), 'question');
 
   ReactQuestionFactory.Instance.registerQuestion('imageannotation', (props) => {
@@ -801,9 +805,13 @@ export function registerImageAnnotationWidget() {
     return React.createElement(ImageAnnotationCanvas, {
       imageUrl: url,
       value: q.value,
-      allowedTools: q.allowedTools || ['point', 'line', 'region'],
+      allowedTools: q.allowedTools || ['point', 'line', 'region', 'bbox'],
+      annotationLabels: q.annotationLabels || [],
       minAnnotations: q.minAnnotations || 0,
       maxAnnotations: q.maxAnnotations ?? 50,
+      enableSamAssist: false, // never expose SAM in live / practice surveys
+      falKey: '',
+      projectId: q.projectId || '',
       onChange: (v) => { q.value = v; },
     });
   });

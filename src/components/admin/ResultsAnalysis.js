@@ -54,6 +54,7 @@ import {
 } from '@mui/icons-material';
 import { supabase as platformSupabase } from '../../lib/supabase';
 import AnnotationAnalysis from './AnnotationAnalysis';
+import ImagePerceptionPanel from './ImagePerceptionPanel';
 import { getPresetSkill } from '../../lib/presetSkills';
 import { ImageResolverContext } from './imageResolverContext';
 import {
@@ -103,13 +104,27 @@ function isAnswerableQuestion(question) {
   return !!question?.name && !isDisplayOnlyQuestion(question);
 }
 
+/**
+ * Responses that count toward a question's completion denominator / analysis pool.
+ * Full survey submissions count for every question; researcher practice rows only
+ * count for the single question they practiced (survey_metadata.practice_question).
+ */
+function responsesEligibleForQuestion(questionName, responses) {
+  return (responses || []).filter((row) => {
+    if (row.survey_metadata?.practice_mode) {
+      return row.survey_metadata?.practice_question === questionName;
+    }
+    return true;
+  });
+}
+
 // Collect answers for a question from all responses.
 // Handles two formats:
 //   New: responses[name] = { type, answer, shown_images }
 //   Old: responses[name] = <raw_answer>, displayed_images[name] = [...]
 function collectAnswers(questionName, responses) {
   const result = [];
-  for (const row of responses) {
+  for (const row of responsesEligibleForQuestion(questionName, responses)) {
     const qData = row.responses?.[questionName];
     if (qData === undefined || qData === null) continue;
 
@@ -2001,6 +2016,7 @@ function exportToCSV(responses, allQuestions, surveyConfig) {
     }
     if (isImageQuestion(q)) {
       headerCols.push(`${q.name}__shown_images`);
+      headerCols.push(`${q.name}__shown_media_ids`);
       headerCols.push(`${q.name}__shown_media_group`);
       headerCols.push(`${q.name}__shown_media_categories`);
     }
@@ -2082,6 +2098,10 @@ function exportToCSV(responses, allQuestions, surveyConfig) {
           ? shownImgs.map(v => v ? v.split('?')[0].split('/').pop() : v)
           : [shownImgs ?? ''];
         cols.push(imgNames.join('|'));
+        const mediaIds = (typeof qData === 'object' && qData && Array.isArray(qData.shown_media_ids))
+          ? qData.shown_media_ids
+          : [];
+        cols.push(mediaIds.join('|'));
         const mediaGroup = (typeof qData === 'object' && qData && 'shown_media_group' in qData)
           ? (qData.shown_media_group || '')
           : (row.displayed_media_groups?.[qName] || '');
@@ -2115,6 +2135,12 @@ function readExcludeFlaggedFromConfig(surveyConfig) {
     : true;
 }
 
+function readIncludePracticeFromConfig(surveyConfig) {
+  return typeof surveyConfig?.includeResearcherPractice === 'boolean'
+    ? surveyConfig.includeResearcherPractice
+    : false;
+}
+
 export default function ResultsAnalysis({ currentProject, surveyConfig, onSurveyConfigChange }) {
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2124,8 +2150,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sessionFilter, setSessionFilter] = useState('');
+  const [includePractice, setIncludePractice] = useState(() => readIncludePracticeFromConfig(surveyConfig));
   const [excludeFlagged, setExcludeFlagged] = useState(() => readExcludeFlaggedFromConfig(surveyConfig));
   const [savingExcludePref, setSavingExcludePref] = useState(false);
+  const [savingPracticePref, setSavingPracticePref] = useState(false);
   const [excludePrefError, setExcludePrefError] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -2134,6 +2162,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
   useEffect(() => {
     setExcludeFlagged(readExcludeFlaggedFromConfig(surveyConfig));
   }, [currentProject?.id, surveyConfig?.excludeFlaggedFromAnalysis]);
+
+  useEffect(() => {
+    setIncludePractice(readIncludePracticeFromConfig(surveyConfig));
+  }, [currentProject?.id, surveyConfig?.includeResearcherPractice]);
 
   const handleExcludeFlaggedChange = async (checked) => {
     const previous = excludeFlagged;
@@ -2152,6 +2184,26 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       setExcludePrefError(err.message || 'Could not save analysis preference');
     } finally {
       setSavingExcludePref(false);
+    }
+  };
+
+  const handleIncludePracticeChange = async (checked) => {
+    const previous = includePractice;
+    setIncludePractice(checked);
+    setExcludePrefError(null);
+    if (!currentProject?.id || !surveyConfig) return;
+
+    const nextConfig = { ...surveyConfig, includeResearcherPractice: checked };
+    setSavingPracticePref(true);
+    try {
+      const result = await saveProjectFull(currentProject, nextConfig);
+      if (!result.success) throw new Error(result.error || 'Failed to save preference');
+      onSurveyConfigChange?.(nextConfig);
+    } catch (err) {
+      setIncludePractice(previous);
+      setExcludePrefError(err.message || 'Could not save analysis preference');
+    } finally {
+      setSavingPracticePref(false);
     }
   };
 
@@ -2224,9 +2276,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       if (dateFrom && ts && new Date(ts) < new Date(`${dateFrom}T00:00:00`)) return false;
       if (dateTo && ts && new Date(ts) > new Date(`${dateTo}T23:59:59`)) return false;
       if (sessionFilter && row.survey_metadata?.session_id !== sessionFilter) return false;
+      if (!includePractice && row.survey_metadata?.practice_mode) return false;
       return true;
     });
-  }, [responses, currentProject?.id, dateFrom, dateTo, sessionFilter]);
+  }, [responses, currentProject?.id, dateFrom, dateTo, sessionFilter, includePractice]);
 
   const handleDeleteResponse = async () => {
     if (!deleteTarget) return;
@@ -2278,6 +2331,11 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
     return [...ids];
   }, [responses]);
 
+  const practiceCount = useMemo(
+    () => responses.filter((r) => r.survey_metadata?.practice_mode).length,
+    [responses],
+  );
+
   // Filter questions by search
   const filteredQuestions = useMemo(() => {
     if (!searchText.trim()) return allQuestions;
@@ -2289,11 +2347,27 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
     );
   }, [allQuestions, searchText]);
 
-  // Pre-collect answers per question
+  // Pre-collect answers + per-question denominators (practice only inflates that question)
   const questionAnswers = useMemo(() => {
     const map = {};
     for (const q of allQuestions) {
       map[q.name] = collectAnswers(q.name, filteredResponses);
+    }
+    return map;
+  }, [allQuestions, filteredResponses]);
+
+  const questionDenominators = useMemo(() => {
+    const map = {};
+    for (const q of allQuestions) {
+      map[q.name] = responsesEligibleForQuestion(q.name, filteredResponses).length;
+    }
+    return map;
+  }, [allQuestions, filteredResponses]);
+
+  const questionResponsePools = useMemo(() => {
+    const map = {};
+    for (const q of allQuestions) {
+      map[q.name] = responsesEligibleForQuestion(q.name, filteredResponses);
     }
     return map;
   }, [allQuestions, filteredResponses]);
@@ -2455,6 +2529,21 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             ))}
           </TextField>
         )}
+        <FormControlLabel
+          control={
+            <Switch
+              checked={includePractice}
+              onChange={(e) => handleIncludePracticeChange(e.target.checked)}
+              disabled={savingPracticePref}
+              size="small"
+            />
+          }
+          label={
+            practiceCount > 0
+              ? `Include researcher practice (${practiceCount})`
+              : 'Include researcher practice'
+          }
+        />
       </Box>
 
       {sessionStats.length > 0 && (
@@ -2612,6 +2701,17 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                     <TableRow key={key} hover>
                       <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
                         {row.participant_id || '—'}
+                        {row.survey_metadata?.practice_mode && (
+                          <Chip
+                            size="small"
+                            label={row.survey_metadata?.practice_question
+                              ? `practice: ${row.survey_metadata.practice_question}`
+                              : 'practice'}
+                            color="secondary"
+                            variant="outlined"
+                            sx={{ ml: 1, height: 20, fontSize: '0.65rem' }}
+                          />
+                        )}
                       </TableCell>
                       <TableCell>{formatResponseTime(row)}</TableCell>
                       <TableCell sx={{ fontFamily: 'monospace' }}>
@@ -2679,6 +2779,12 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       {/* Per-question analysis */}
       {!loading && surveyConfig && allQuestions.length > 0 && (
         <>
+          <ImagePerceptionPanel
+            currentProject={currentProject}
+            responses={filteredResponses}
+            questions={allQuestions}
+          />
+
           {/* Search */}
           <TextField
             size="small"
@@ -2710,11 +2816,11 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                 {pageQuestions.map((question) => (
                   <QuestionCard
                     key={question.name}
-                    question={{ ...question, _allResponses: filteredResponses }}
+                    question={{ ...question, _allResponses: questionResponsePools[question.name] || [] }}
                     answers={questionAnswers[question.name] || []}
-                    totalResponses={totalResponses}
+                    totalResponses={questionDenominators[question.name] || 0}
                     questionNumber={answerableNumberByName.get(question.name) ?? null}
-                    allResponses={filteredResponses}
+                    allResponses={questionResponsePools[question.name] || []}
                   />
                 ))}
               </Box>

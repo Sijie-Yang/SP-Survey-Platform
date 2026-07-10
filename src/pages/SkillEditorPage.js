@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Container, Typography, AppBar, Toolbar, TextField, Button,
-  Alert, Paper, Stack, IconButton, Chip,
+  Box, Typography, TextField, Button,
+  Alert, Paper, Stack, Chip,
 } from '@mui/material';
-import { ArrowBack, Publish, Save } from '@mui/icons-material';
+import { Publish, Save } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   saveSkill, submitSkillForReview, getSkillById, getSkillStatus,
@@ -11,6 +11,7 @@ import {
 import SkillQuestionFrame from '../components/SkillQuestionWidget';
 import { listSkillPreviewMedia, pickPreviewMedia } from '../lib/skillPreviewMedia';
 import SkillAiPanel from '../components/admin/SkillAiPanel';
+import AdminShell from '../components/layout/AdminShell';
 
 const DEFAULT_SKILL_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -184,18 +185,15 @@ export default function SkillEditorPage() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.50' }}>
-      <AppBar position="static" color="default" elevation={1}>
-        <Toolbar>
-          <IconButton edge="start" onClick={() => navigate('/skills')}><ArrowBack /></IconButton>
-          <Typography variant="h6" sx={{ flex: 1 }}>
-            {skillId ? 'Edit Skill' : 'New Skill'}
-          </Typography>
-          {statusChip && <Chip size="small" label={statusChip.label} color={statusChip.color} sx={{ mr: 1 }} />}
-        </Toolbar>
-      </AppBar>
-      <Container maxWidth="lg" sx={{ py: 3 }}>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+    <AdminShell
+      title={skillId ? 'Edit Skill' : 'New Skill'}
+      backTo="/skills"
+      maxWidth="lg"
+      actions={statusChip ? (
+        <Chip size="small" label={statusChip.label} color={statusChip.color} />
+      ) : null}
+    >
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Build a custom question type with HTML/CSS/JS running in a sandboxed iframe.
           Call <code>SPSkill.setAnswer(value)</code> to submit answers and <code>SPSkill.ready()</code> when loaded.
           Save to your library and test it in your own survey before submitting for public review.
@@ -276,7 +274,6 @@ export default function SkillEditorPage() {
             )}
           </Stack>
         </Stack>
-      </Container>
-    </Box>
+    </AdminShell>
   );
 }

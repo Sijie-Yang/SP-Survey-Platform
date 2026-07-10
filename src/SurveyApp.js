@@ -555,6 +555,12 @@ export default function SurveyApp() {
                     console.error(`Error loading random images for question ${element.name}:`, error);
                   }
                 }
+
+                if (element.type === 'imageannotation') {
+                  // SAM assist is intentionally disabled for live respondents —
+                  // annotation stays point / line / region / bbox only.
+                  element.enableSamAssist = false;
+                }
               }
             }
           }
@@ -987,6 +993,12 @@ export default function SurveyApp() {
             type: surveyQuestionTypeMap[questionName] || null,
             answer: mappedAnswer,
             shown_images: shownImages,
+            shown_media_ids: (shownImages || []).map((u) => {
+              if (!u) return null;
+              const pool = projectData?.preloadedImages || [];
+              const hit = pool.find((img) => img.url === u || img.name === u);
+              return hit?.media_id || hit?.key || String(u).split('?')[0].split('/').pop() || u;
+            }).filter(Boolean),
             shown_media_group: displayedMediaGroups[questionName] || null,
             shown_media_categories: displayedMediaCategories[questionName] || null,
           };

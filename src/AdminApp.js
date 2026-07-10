@@ -40,11 +40,13 @@ import {
   EditNote,
 } from '@mui/icons-material';
 import { themes, createCustomTheme } from './themes/themeConfig';
+import ConfirmDialog from './components/layout/ConfirmDialog';
 import SurveyBuilder from './components/admin/SurveyBuilder';
 import SurveyPreview from './components/admin/SurveyPreview';
 import ImageDataset from './components/admin/ImageDataset';
 import WebsiteSetup from './components/admin/WebsiteSetup';
 import ResultsAnalysis from './components/admin/ResultsAnalysis';
+import ResearcherPractice from './components/admin/ResearcherPractice';
 import ProjectSidebar from './components/admin/ProjectSidebar';
 import BackendStatus from './components/admin/BackendStatus';
 import { isSupabaseConfigured } from './lib/supabase';
@@ -95,6 +97,7 @@ export default function AdminApp() {
   const [surveyConfig, setSurveyConfig] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [hasUnsavedImageDatasetChanges, setHasUnsavedImageDatasetChanges] = useState(false);
   const [saveStatus, setSaveStatus] = useState('saved'); // saved | saving | unsaved | error
@@ -593,7 +596,7 @@ export default function AdminApp() {
     }
   };
 
-  const handleProjectUpdate = async (updatedProject) => {
+  const handleProjectUpdate = async (updatedProject, opts = {}) => {
     console.log('🔄 Updating project:', updatedProject.name);
     console.log('🔄 Current tabValue:', tabValue);
     
@@ -617,6 +620,9 @@ export default function AdminApp() {
     }
     
     setCurrentProject(updatedProject);
+
+    // Batch feature jobs (L0/Seg) may pass skipSave to avoid full project write every image
+    if (opts?.skipSave) return;
 
     try {
       await saveProjectFull(updatedProject, surveyConfig);
@@ -648,40 +654,41 @@ export default function AdminApp() {
   };
 
   const handleCleanLocalStorage = () => {
-    const confirmMessage = 'Clear all temporary editing states?\n\n' +
-      'This will:\n' +
-      '• Clear all project editing states (sessionStorage)\n' +
-      '• Reload the page to start fresh\n\n' +
-      'Your saved projects will NOT be affected.\n\n' +
-      'Continue?';
-    
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-    
-    try {
-      // Clear sessionStorage editing states
-      sessionStorage.removeItem('project_editing_states');
-      console.log('✅ Cleared sessionStorage editing states');
-      
-      setSnackbar({
-        open: true,
-        message: 'Session storage cleared. Reloading...',
-        severity: 'success'
-      });
-      
-      // Reload page after a short delay
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
-    } catch (error) {
-      console.error('❌ Error cleaning session storage:', error);
-      setSnackbar({
-        open: true,
-        message: 'Error clearing session storage: ' + error.message,
-        severity: 'error'
-      });
-    }
+    setConfirmDialog({
+      title: 'Clear editing state',
+      message:
+        'Clear all temporary editing states?\n\n' +
+        'This will:\n' +
+        '• Clear all project editing states (sessionStorage)\n' +
+        '• Reload the page to start fresh\n\n' +
+        'Your saved projects will NOT be affected.',
+      confirmLabel: 'Clear & reload',
+      confirmColor: 'warning',
+      onConfirm: () => {
+        setConfirmDialog(null);
+        try {
+          sessionStorage.removeItem('project_editing_states');
+          console.log('✅ Cleared sessionStorage editing states');
+
+          setSnackbar({
+            open: true,
+            message: 'Session storage cleared. Reloading...',
+            severity: 'success'
+          });
+
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        } catch (error) {
+          console.error('❌ Error cleaning session storage:', error);
+          setSnackbar({
+            open: true,
+            message: 'Error clearing session storage: ' + error.message,
+            severity: 'error'
+          });
+        }
+      },
+    });
   };
 
   const performSave = useCallback(async ({ silent = false } = {}) => {
@@ -825,15 +832,11 @@ export default function AdminApp() {
     <RegionProvider>
     <ThemeProvider theme={theme}>
     <Box sx={{ flexGrow: 1 }}>
-        <AppBar 
-          position="fixed" 
-          sx={{ 
+        <AppBar
+          position="fixed"
+          color="primary"
+          sx={{
             zIndex: (theme) => theme.zIndex.drawer + 1,
-            bgcolor: 'primary.main',
-            transition: 'background-color 0.3s ease',
-            '&:hover': {
-              bgcolor: 'primary.dark'
-            }
           }}
         >
           <Toolbar>
@@ -1244,6 +1247,7 @@ export default function AdminApp() {
                 <Tab label="Step 2 - Survey Builder" />
                 <Tab label="Step 3 - Share Survey" />
                 <Tab label="Step 4 - Results Analysis" />
+                <Tab label="Researcher Practice" />
               </Tabs>
             </Box>
 
@@ -1293,6 +1297,13 @@ export default function AdminApp() {
                 onSurveyConfigChange={handleResultsConfigSync}
               />
             </TabPanel>
+
+            <TabPanel value={tabValue} index={4}>
+              <ResearcherPractice
+                currentProject={currentProject}
+                surveyConfig={surveyConfig}
+              />
+            </TabPanel>
           </Paper>
         )}
       </Container>
@@ -1329,6 +1340,15 @@ export default function AdminApp() {
           {snackbar.message}
         </Alert>
       </Snackbar>
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'primary'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </Box>
     </ThemeProvider>
     </RegionProvider>

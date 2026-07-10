@@ -19,6 +19,7 @@ import {
   Refresh,
   Info
 } from '@mui/icons-material';
+import ConfirmDialog from '../layout/ConfirmDialog';
 
 /**
  * Backend Status Monitor Component
@@ -28,6 +29,7 @@ export default function BackendStatus() {
   const [status, setStatus] = useState('checking'); // 'online', 'offline', 'checking'
   const [lastCheck, setLastCheck] = useState(null);
   const [errorCount, setErrorCount] = useState(0);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
 
@@ -109,7 +111,13 @@ export default function BackendStatus() {
       });
       
       if (response.ok) {
-        alert('✅ Backend server restart initiated!\n\nPlease wait 5-10 seconds for the server to restart.');
+        setConfirmDialog({
+          title: 'Restart initiated',
+          message: 'Backend server restart initiated. Please wait 5–10 seconds for the server to restart.',
+          confirmLabel: 'OK',
+          confirmColor: 'primary',
+          onConfirm: () => setConfirmDialog(null),
+        });
         
         // Check status after delay
         setTimeout(() => {
@@ -123,19 +131,21 @@ export default function BackendStatus() {
       // If restart endpoint doesn't work, fallback to copy command
       console.warn('Auto-restart failed, showing manual instructions:', error);
       
-      const confirmed = window.confirm(
-        '⚠️ Backend Server is Offline\n\n' +
-        'Auto-restart requires the server to be running.\n\n' +
-        'Would you like to:\n' +
-        '✅ Copy the startup command to clipboard?\n\n' +
-        'You can then paste and run it in your terminal.'
-      );
-      
-      if (confirmed) {
-        await copyStartCommand();
-      }
-      
-      setIsRestarting(false);
+      setConfirmDialog({
+        title: 'Backend offline',
+        message:
+          'Auto-restart requires the server to be running.\n\n' +
+          'Copy the startup command to your clipboard so you can paste and run it in your terminal?',
+        confirmLabel: 'Copy command',
+        confirmColor: 'primary',
+        onConfirm: async () => {
+          setConfirmDialog(null);
+          await copyStartCommand();
+          setIsRestarting(false);
+        },
+      });
+      // If user cancels via dialog, still clear restarting — handled in onCancel below via wrapper
+      // Keep isRestarting true until dialog closes
     }
   };
 
@@ -344,6 +354,19 @@ export default function BackendStatus() {
           <Button onClick={() => setDetailsOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        confirmColor={confirmDialog?.confirmColor || 'primary'}
+        cancelLabel={confirmDialog?.confirmLabel === 'OK' ? undefined : 'Cancel'}
+        onConfirm={() => confirmDialog?.onConfirm?.()}
+        onCancel={() => {
+          setConfirmDialog(null);
+          setIsRestarting(false);
+        }}
+      />
     </>
   );
 }
