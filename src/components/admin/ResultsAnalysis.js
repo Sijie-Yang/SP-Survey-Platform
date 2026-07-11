@@ -29,6 +29,9 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import {
   Refresh,
@@ -2551,6 +2554,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             size="small"
             value={sessionFilter}
             onChange={(e) => setSessionFilter(e.target.value)}
+            InputLabelProps={{ shrink: true }}
             SelectProps={{ native: true }}
             sx={{ minWidth: 180 }}
           >
@@ -2585,68 +2589,72 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
 
       {/* Data quality panel */}
       {!loading && dateFilteredResponses.length > 0 && surveyConfig && (
-        <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-            <VerifiedUser color="primary" />
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Data Quality</Typography>
-            <Box flex={1} />
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={excludeFlagged}
-                  onChange={(e) => handleExcludeFlaggedChange(e.target.checked)}
-                  disabled={savingExcludePref}
-                  size="small"
-                />
-              }
-              label="Exclude flagged responses from analysis"
-            />
-          </Box>
-          {excludePrefError && (
-            <Alert severity="warning" sx={{ mb: 1, py: 0 }}>{excludePrefError}</Alert>
-          )}
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
-            <Chip label={`${qualitySummary.clean} clean`} color="success" size="small" variant="outlined" />
-            <Chip label={`${qualitySummary.flagged} flagged`} color="warning" size="small" variant="outlined" />
-            <Chip label={`${filteredResponses.length} in analysis`} size="small" variant="outlined" />
-          </Box>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            Flags: {Object.entries(QUALITY_FLAG_LABELS).map(([k, v]) => `${k} (${v})`).join(' · ')}
-          </Typography>
-          {qualitySummary.flagged > 0 && (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Participant</TableCell>
-                    <TableCell>Flags</TableCell>
-                    <TableCell>Duration (s)</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {dateFilteredResponses
-                    .filter((r) => (qualitySummary.perResponse[r.id ?? r.participant_id] || []).length)
-                    .slice(0, 20)
-                    .map((r) => {
-                      const key = r.id ?? r.participant_id;
-                      const flags = qualitySummary.perResponse[key] || [];
-                      return (
-                        <TableRow key={key}>
-                          <TableCell>{r.participant_id}</TableCell>
-                          <TableCell>
-                            {flags.map((f) => (
-                              <Chip key={f} label={QUALITY_FLAG_LABELS[f] || f} size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-                            ))}
-                          </TableCell>
-                          <TableCell>{r.survey_metadata?.timing?.total_seconds ?? '—'}</TableCell>
-                        </TableRow>
-                      );
-                    })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </Paper>
+        <Accordion defaultExpanded={false} sx={{ mb: 2 }}>
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', width: '100%', pr: 1 }}>
+              <VerifiedUser color="primary" fontSize="small" />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Data Quality</Typography>
+              <Chip label={`${qualitySummary.clean} clean`} color="success" size="small" variant="outlined" />
+              <Chip label={`${qualitySummary.flagged} flagged`} color="warning" size="small" variant="outlined" />
+              <Chip label={`${filteredResponses.length} in analysis`} size="small" variant="outlined" />
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
+              <Box flex={1} />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={excludeFlagged}
+                    onChange={(e) => handleExcludeFlaggedChange(e.target.checked)}
+                    disabled={savingExcludePref}
+                    size="small"
+                  />
+                }
+                label="Exclude flagged responses from analysis"
+              />
+            </Box>
+            {excludePrefError && (
+              <Alert severity="warning" sx={{ mb: 1, py: 0 }}>{excludePrefError}</Alert>
+            )}
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+              Flags: {Object.entries(QUALITY_FLAG_LABELS).map(([k, v]) => `${k} (${v})`).join(' · ')}
+            </Typography>
+            {qualitySummary.flagged > 0 && (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Participant</TableCell>
+                      <TableCell>Flags</TableCell>
+                      <TableCell>Duration (s)</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {dateFilteredResponses
+                      .filter((r) => (qualitySummary.perResponse[r.id ?? r.participant_id] || []).length)
+                      .slice(0, 20)
+                      .map((r) => {
+                        const key = r.id ?? r.participant_id;
+                        const flags = qualitySummary.perResponse[key] || [];
+                        return (
+                          <TableRow key={key}>
+                            <TableCell>{r.participant_id}</TableCell>
+                            <TableCell>
+                              {flags.map((f) => (
+                                <Chip key={f} label={QUALITY_FLAG_LABELS[f] || f} size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+                              ))}
+                            </TableCell>
+                            <TableCell>{r.survey_metadata?.timing?.total_seconds ?? '—'}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </AccordionDetails>
+        </Accordion>
       )}
 
       {/* Overview cards */}
@@ -2698,92 +2706,103 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
 
       {/* Response records — view & delete */}
       {!loading && dateFilteredResponses.length > 0 && (
-        <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-            Response records
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Remove individual submissions from this project. Deletion is permanent.
-          </Typography>
-          {deleteError && (
-            <Alert severity="error" sx={{ mb: 1.5 }} onClose={() => setDeleteError(null)}>
-              {deleteError}
-            </Alert>
-          )}
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Participant</TableCell>
-                  <TableCell>Submitted</TableCell>
-                  <TableCell>Completion code</TableCell>
-                  <TableCell>Quality</TableCell>
-                  <TableCell align="right">Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {dateFilteredResponses.map((row) => {
-                  const key = responseRecordKey(row);
-                  const qKey = row.id ?? row.participant_id;
-                  const flags = surveyConfig
-                    ? (qualitySummary.perResponse[qKey] || [])
-                    : [];
-                  return (
-                    <TableRow key={key} hover>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
-                        {row.participant_id || '—'}
-                        {row.survey_metadata?.practice_mode && (
-                          <Chip
-                            size="small"
-                            label={row.survey_metadata?.practice_question
-                              ? `practice: ${row.survey_metadata.practice_question}`
-                              : 'practice'}
-                            color="secondary"
-                            variant="outlined"
-                            sx={{ ml: 1, height: 20, fontSize: '0.65rem' }}
-                          />
-                        )}
-                      </TableCell>
-                      <TableCell>{formatResponseTime(row)}</TableCell>
-                      <TableCell sx={{ fontFamily: 'monospace' }}>
-                        {row.survey_metadata?.completion_code || '—'}
-                      </TableCell>
-                      <TableCell>
-                        {flags.length === 0 ? (
-                          <Chip label="clean" color="success" size="small" variant="outlined" />
-                        ) : (
-                          flags.map((f) => (
+        <Accordion defaultExpanded={false} sx={{ mb: 3 }}>
+          <AccordionSummary expandIcon={<ExpandMore />}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                Response records
+              </Typography>
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`${dateFilteredResponses.length} submissions`}
+              />
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              Remove individual submissions from this project. Deletion is permanent.
+            </Typography>
+            {deleteError && (
+              <Alert severity="error" sx={{ mb: 1.5 }} onClose={() => setDeleteError(null)}>
+                {deleteError}
+              </Alert>
+            )}
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Participant</TableCell>
+                    <TableCell>Submitted</TableCell>
+                    <TableCell>Completion code</TableCell>
+                    <TableCell>Quality</TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {dateFilteredResponses.map((row) => {
+                    const key = responseRecordKey(row);
+                    const qKey = row.id ?? row.participant_id;
+                    const flags = surveyConfig
+                      ? (qualitySummary.perResponse[qKey] || [])
+                      : [];
+                    return (
+                      <TableRow key={key} hover>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                          {row.participant_id || '—'}
+                          {row.survey_metadata?.practice_mode && (
                             <Chip
-                              key={f}
-                              label={QUALITY_FLAG_LABELS[f] || f}
-                              color="warning"
                               size="small"
-                              sx={{ mr: 0.5, mb: 0.5 }}
+                              label={row.survey_metadata?.practice_question
+                                ? `practice: ${row.survey_metadata.practice_question}`
+                                : 'practice'}
+                              color="secondary"
+                              variant="outlined"
+                              sx={{ ml: 1, height: 20, fontSize: '0.65rem' }}
                             />
-                          ))
-                        )}
-                      </TableCell>
-                      <TableCell align="right">
-                        <Tooltip title="Delete this response">
-                          <IconButton
-                            size="small"
-                            color="error"
-                            onClick={() => {
-                              setDeleteError(null);
-                              setDeleteTarget(row);
-                            }}
-                          >
-                            <DeleteOutline fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
+                          )}
+                        </TableCell>
+                        <TableCell>{formatResponseTime(row)}</TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace' }}>
+                          {row.survey_metadata?.completion_code || '—'}
+                        </TableCell>
+                        <TableCell>
+                          {flags.length === 0 ? (
+                            <Chip label="clean" color="success" size="small" variant="outlined" />
+                          ) : (
+                            flags.map((f) => (
+                              <Chip
+                                key={f}
+                                label={QUALITY_FLAG_LABELS[f] || f}
+                                color="warning"
+                                size="small"
+                                sx={{ mr: 0.5, mb: 0.5 }}
+                              />
+                            ))
+                          )}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Delete this response">
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => {
+                                setDeleteError(null);
+                                setDeleteTarget(row);
+                              }}
+                            >
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </AccordionDetails>
+        </Accordion>
       )}
 
       {/* Loading */}
