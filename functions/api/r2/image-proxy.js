@@ -39,11 +39,16 @@ export const onRequestGet = async ({ request, env }) => {
 
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
     const body = await upstream.arrayBuffer();
+    const pathLower = parsed.pathname.toLowerCase();
+    const isMutableSidecar =
+      /text\/csv|application\/json|text\/plain/i.test(contentType)
+      || pathLower.endsWith('.csv')
+      || pathLower.endsWith('.json');
     return new Response(body, {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': isMutableSidecar ? 'no-store' : 'private, max-age=300',
         'Access-Control-Allow-Origin': '*',
       },
     });

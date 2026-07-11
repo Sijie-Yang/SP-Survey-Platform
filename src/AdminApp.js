@@ -63,17 +63,18 @@ import { supabase } from './lib/supabase';
 import { checkIsAdmin } from './lib/templateManager';
 import { useNavigate } from 'react-router-dom';
 
-function TabPanel({ children, value, index, ...other }) {
+function TabPanel({ children, value, index, keepMounted = false, ...other }) {
+  const active = value === index;
   return (
     <div
       role="tabpanel"
-      hidden={value !== index}
+      hidden={!active}
       id={`admin-tabpanel-${index}`}
       aria-labelledby={`admin-tab-${index}`}
       {...other}
     >
-      {value === index && (
-        <Box sx={{ p: 3 }}>
+      {(active || keepMounted) && (
+        <Box sx={{ p: 3, display: active ? 'block' : 'none' }}>
           {children}
         </Box>
       )}
@@ -94,6 +95,11 @@ export default function AdminApp() {
   const theme = createCustomTheme(currentTheme);
   
   const [tabValue, setTabValue] = useState(0);
+  // Keep Researcher Practice mounted only while an explicit practice session is running.
+  const [practiceKeepAlive, setPracticeKeepAlive] = useState(false);
+  const handlePracticeSessionActive = useCallback((active) => {
+    setPracticeKeepAlive(!!active);
+  }, []);
   const [surveyConfig, setSurveyConfig] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -158,6 +164,22 @@ export default function AdminApp() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentProject, setCurrentProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(true);
+
+  // If a practice session was persisted for this project, keep the Practice tab mounted
+  // even before the user navigates back to it (e.g. after refresh on another tab).
+  useEffect(() => {
+    if (!currentProject?.id) {
+      setPracticeKeepAlive(false);
+      return;
+    }
+    try {
+      const all = JSON.parse(sessionStorage.getItem('researcher_practice_sessions') || '{}') || {};
+      const row = all[currentProject.id];
+      if (row?.active && row?.sessionId) setPracticeKeepAlive(true);
+    } catch {
+      /* ignore */
+    }
+  }, [currentProject?.id]);
 
 
   useEffect(() => {
@@ -1298,10 +1320,11 @@ export default function AdminApp() {
               />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={4}>
+            <TabPanel value={tabValue} index={4} keepMounted={practiceKeepAlive}>
               <ResearcherPractice
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
+                onSessionActiveChange={handlePracticeSessionActive}
               />
             </TabPanel>
           </Paper>

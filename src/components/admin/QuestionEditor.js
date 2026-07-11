@@ -48,6 +48,7 @@ import {
   getPresetBuilderTypeOptions,
   resolveBuilderSkill,
 } from '../../lib/presetSkills';
+import { enrichEmotionColorConfig } from '../../lib/emotionColor';
 import { listSkillPreviewMedia, pickPreviewMedia } from '../../lib/skillPreviewMedia';
 import {
   getQuestionMediaConstraints,
@@ -571,6 +572,13 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
       });
       const n = getMediaCategories(pool).length;
       if (n > 0) updates.imageCount = n;
+    }
+
+    if (field === 'imageCount') {
+      const mode = editedQuestion.pairingMode || 'random';
+      if (mode === 'uncertain' || mode === 'high_sigma') {
+        updates.pairingMode = 'balanced';
+      }
     }
 
     // Set default properties when question type changes to image type
@@ -1171,6 +1179,29 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         </FormControl>
                       )}
                       <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
+                      {(() => {
+                        const skillKey = String(editedQuestion.skillId || '').replace(/^preset_/, '');
+                        if (skillKey !== 'best_worst_choice') return null;
+                        if ((editedQuestion.mediaAssignmentMode || 'individual') !== 'individual') return null;
+                        return (
+                          <FormControl fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
+                            <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Sampling Mode</InputLabel>
+                            <Select
+                              value={(() => {
+                                const mode = editedQuestion.pairingMode || 'random';
+                                if (mode === 'uncertain' || mode === 'high_sigma') return 'balanced';
+                                return mode;
+                              })()}
+                              onChange={(e) => handleQuestionChange('pairingMode', e.target.value)}
+                              label="Sampling Mode"
+                            >
+                              <MenuItem value="random">Random — uniform from the pool</MenuItem>
+                              <MenuItem value="balanced">Balanced — prefer least-exposed images</MenuItem>
+                              <MenuItem value="adaptive">Adaptive — μ bands + cold-start for new images</MenuItem>
+                            </Select>
+                          </FormControl>
+                        );
+                      })()}
                     </>
                   );
                 })() : (
@@ -1306,13 +1337,17 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         <FormControl key={field.key} fullWidth variant="outlined" sx={{ bgcolor: 'white' }}>
                           <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>{field.label || field.key}</InputLabel>
                           <Select
-                            value={val ?? ''}
+                            value={val ?? field.defaultValue ?? ''}
                             label={field.label || field.key}
                             onChange={(e) => setCfg(field.key, e.target.value)}
                           >
-                            {field.options.map((opt) => (
-                              <MenuItem key={String(opt)} value={opt}>{String(opt)}</MenuItem>
-                            ))}
+                            {field.options.map((opt) => {
+                              const value = typeof opt === 'object' && opt != null ? opt.value : opt;
+                              const label = typeof opt === 'object' && opt != null ? (opt.label || opt.value) : opt;
+                              return (
+                                <MenuItem key={String(value)} value={value}>{label}</MenuItem>
+                              );
+                            })}
                           </Select>
                         </FormControl>
                       );
@@ -1354,18 +1389,21 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       }
                       label="Allow Multiple Selection - participants can choose more than one image"
                     />
-                    {(editedQuestion.imageCount || 4) === 2
-                      && (editedQuestion.mediaAssignmentMode || 'individual') === 'individual' && (
+                    {(editedQuestion.mediaAssignmentMode || 'individual') === 'individual' && (
                       <FormControl fullWidth variant="outlined">
-                        <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Pairing Mode</InputLabel>
+                        <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Sampling Mode</InputLabel>
                         <Select
-                          value={editedQuestion.pairingMode || 'random'}
+                          value={(() => {
+                            const mode = editedQuestion.pairingMode || 'random';
+                            if (mode === 'uncertain' || mode === 'high_sigma') return 'balanced';
+                            return mode;
+                          })()}
                           onChange={(e) => handleQuestionChange('pairingMode', e.target.value)}
-                          label="Pairing Mode"
+                          label="Sampling Mode"
                         >
-                          <MenuItem value="random">Random — uniform random pairs</MenuItem>
-                          <MenuItem value="balanced">Balanced — prioritize least-exposed images</MenuItem>
-                          <MenuItem value="adaptive">Adaptive — prioritize similar-score images (TrueSkill)</MenuItem>
+                          <MenuItem value="random">Random — uniform from the pool</MenuItem>
+                          <MenuItem value="balanced">Balanced — prefer least-exposed images</MenuItem>
+                          <MenuItem value="adaptive">Adaptive — μ bands + cold-start for new images</MenuItem>
                         </Select>
                       </FormControl>
                     )}
@@ -1638,12 +1676,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   if (!previewHtml) {
                     return <Alert severity="info" sx={{ py: 0.5 }}>No skill HTML available to preview.</Alert>;
                   }
-                  const mergedCfg = {
+                  const mergedCfgRaw = {
                     ...(skillDef?.defaultConfig || {}),
                     ...cfg,
                     mediaCount: displayMediaCount,
                     mediaType: effectiveMediaType,
                   };
+                  const skillKey = String(editedQuestion.skillId || '').replace(/^preset_/, '');
+                  const mergedCfg = skillKey === 'emotion_color_picker'
+                    ? enrichEmotionColorConfig(mergedCfgRaw)
+                    : mergedCfgRaw;
                   let previewImages = [];
                   if (currentProject?.preloadedImages?.length) {
                     previewImages = filterPoolForQuestion(currentProject.preloadedImages, {
@@ -1940,7 +1982,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                           e.target.value = '';
                         }
                       }}
-                      helperText="Type a column label and press Enter or click Add"
+                      helperText="Type a column label and press Enter or click Add (value is auto-filled; you can edit it below)"
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
                     <Button
@@ -1963,26 +2005,61 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   </Box>
                   {editedQuestion.columns && editedQuestion.columns.length > 0 ? (
                     <List sx={{ bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
-                      {editedQuestion.columns.map((col, index) => (
-                        <ListItem key={index} divider={index < editedQuestion.columns.length - 1}>
-                          <ListItemText
-                            primary={typeof col === 'object' ? col.text : col}
-                            secondary={typeof col === 'object' ? `Value: ${col.value}` : null}
-                          />
-                          <ListItemSecondaryAction>
-                            <IconButton
-                              edge="end"
-                              onClick={() => {
-                                const newColumns = editedQuestion.columns.filter((_, i) => i !== index);
-                                setEditedQuestion({ ...editedQuestion, columns: newColumns });
-                              }}
-                              color="error"
-                            >
-                              <Delete />
-                            </IconButton>
-                          </ListItemSecondaryAction>
-                        </ListItem>
-                      ))}
+                      {editedQuestion.columns.map((col, index) => {
+                        const colObj = typeof col === 'object' && col !== null
+                          ? col
+                          : { value: String(col ?? ''), text: String(col ?? '') };
+                        const updateColumn = (field, next) => {
+                          const columns = [...(editedQuestion.columns || [])];
+                          columns[index] = {
+                            value: colObj.value ?? '',
+                            text: colObj.text ?? '',
+                            ...colObj,
+                            [field]: next,
+                          };
+                          setEditedQuestion({ ...editedQuestion, columns });
+                        };
+                        return (
+                          <ListItem
+                            key={index}
+                            divider={index < editedQuestion.columns.length - 1}
+                            alignItems="flex-start"
+                            sx={{ flexDirection: 'column', alignItems: 'stretch', gap: 1, py: 1.5 }}
+                          >
+                            <Box sx={{ display: 'flex', gap: 1, width: '100%', alignItems: 'flex-start' }}>
+                              <TextField
+                                fullWidth
+                                size="small"
+                                variant="outlined"
+                                label="Label (shown to participants)"
+                                value={colObj.text ?? ''}
+                                onChange={(e) => updateColumn('text', e.target.value)}
+                                sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                              />
+                              <TextField
+                                fullWidth
+                                size="small"
+                                variant="outlined"
+                                label="Value (stored in data)"
+                                value={colObj.value ?? ''}
+                                onChange={(e) => updateColumn('value', e.target.value)}
+                                helperText="Used in exports / analysis"
+                                sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                              />
+                              <IconButton
+                                onClick={() => {
+                                  const newColumns = editedQuestion.columns.filter((_, i) => i !== index);
+                                  setEditedQuestion({ ...editedQuestion, columns: newColumns });
+                                }}
+                                color="error"
+                                sx={{ mt: 0.5 }}
+                              >
+                                <Delete />
+                              </IconButton>
+                            </Box>
+                          </ListItem>
+                        );
+                      })}
                     </List>
                   ) : (
                     <Box sx={{ textAlign: 'center', py: 2, bgcolor: 'grey.50', borderRadius: 1 }}>

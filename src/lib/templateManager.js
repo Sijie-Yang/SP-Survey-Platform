@@ -10,12 +10,13 @@
  *   Functions return empty arrays / throw – callers fall back to
  *   fileSystemManager.js logic.
  *
- * Required Supabase SQL additions for template image folders (run once):
+ * Required Supabase SQL additions (run once — see also supabase/template_pin.sql):
  * ─────────────────────────────────────────────────────────────────────
  * ALTER TABLE templates
  *   ADD COLUMN IF NOT EXISTS preloaded_images JSONB DEFAULT '[]'::jsonb,
  *   ADD COLUMN IF NOT EXISTS preloaded_at     TIMESTAMPTZ,
- *   ADD COLUMN IF NOT EXISTS preloaded_source TEXT;
+ *   ADD COLUMN IF NOT EXISTS preloaded_source TEXT,
+ *   ADD COLUMN IF NOT EXISTS is_pinned        BOOLEAN NOT NULL DEFAULT false;
  * ─────────────────────────────────────────────────────────────────────
  */
 
@@ -41,6 +42,7 @@ export function isValidTemplateId(id) {
 
 function applyTemplateFieldUpdates(row, updates) {
   if ('is_approved'     in updates) row.is_approved     = updates.is_approved;
+  if ('is_pinned'       in updates) row.is_pinned       = updates.is_pinned;
   if ('show_on_landing' in updates) {
     row.show_on_landing = updates.show_on_landing;
     row.is_active       = updates.show_on_landing;
@@ -85,6 +87,7 @@ function rowToTemplate(row) {
     // review flags
     is_approved:       row.is_approved        ?? false,
     show_on_landing:   row.show_on_landing    ?? false,
+    is_pinned:         row.is_pinned          ?? false,
     // timestamps
     createdAt:         row.created_at,
     updatedAt:         row.updated_at,
@@ -159,9 +162,10 @@ export async function listTemplates(userId) {
       .select(
         'id, name, description, author, year, category, tags, paper_url, ' +
         'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
-        'is_approved, show_on_landing, preloaded_images, preloaded_at, ' +
+        'is_approved, show_on_landing, is_pinned, preloaded_images, preloaded_at, ' +
         'preloaded_source, created_at, updated_at'
       )
+      .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false });
 
     if (userId) {
@@ -196,7 +200,7 @@ export async function getTemplateById(id) {
       .select(
         'id, name, description, author, year, category, tags, paper_url, ' +
         'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
-        'is_approved, show_on_landing, preloaded_images, preloaded_at, ' +
+        'is_approved, show_on_landing, is_pinned, preloaded_images, preloaded_at, ' +
         'preloaded_source, created_at, updated_at'
       )
       .eq('id', id)
@@ -219,6 +223,7 @@ export async function listAllTemplates() {
     const { data, error } = await supabase
       .from('templates')
       .select('*')
+      .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false });
     if (error) { console.error('listAllTemplates:', error); return []; }
     return (data || []).map(rowToTemplate);
@@ -264,6 +269,7 @@ export async function saveTemplateToSupabase(template) {
     submitter_email:     user.email           || null,
     is_approved:         false,
     show_on_landing:     false,
+    is_pinned:           false,
     is_active:           false,
     created_at:          new Date().toISOString(),
     updated_at:          new Date().toISOString(),
@@ -675,6 +681,7 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
         survey_config:       tpl.config       || {},
         is_approved:         true,
         show_on_landing:     true,
+        is_pinned:           !!(tpl.isPinned ?? tpl.is_pinned),
         is_active:           true,
         preloaded_images:    Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages : [],
         preloaded_at:        tpl.preloadedAt  || null,

@@ -215,7 +215,7 @@ Interactive iframe tasks with media injection (random images/videos from your da
 - **Best–Worst Choice (MaxDiff)** — Best–worst scaling with BWS scores
 - **Video Key Moment Tagging** — Mark start/end of key events on a timeline
 - **Continuous Video Rating** — Moment-by-moment slider ratings while watching
-- **Emotion Color Picker** — Color wheel + intensity for place emotion
+- **Emotion Color Picker** — Configurable palette (12 hue bins / basic colors / Plutchik-inspired), or wheel / image sampling; intensity derived from color
 - **Composite Blocks** — Configurable blocks (media, sliders, word chips, choice, text)
 
 Import custom skills from the Skill Library or author HTML/JS with the `SPSkill` SDK. Skills support `skillConfig`, random media assignment, and structured `resultSchema` for analysis.
@@ -324,6 +324,8 @@ Each skill question runs in its own iframe. If multiple skills appear on one pag
 ## 🤝 Contributing
 
 We welcome contributions! Please open an issue or pull request to discuss your ideas.
+
+**Production already has users.** For schema, R2, survey JSON, or live-link changes, follow **[COMPATIBILITY.md](./COMPATIBILITY.md)** (safe release order, checklist, and breaking-change playbook).
 
 ---
 

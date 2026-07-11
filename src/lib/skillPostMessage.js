@@ -1,4 +1,7 @@
 /** Clone skill iframe init payload — postMessage requires structured-clone-safe data only. */
+
+import { enrichEmotionColorConfig } from './emotionColor';
+
 function absUrl(url) {
   if (!url || typeof url !== 'string') return url;
   if (/^(https?:|data:|blob:)/i.test(url)) return url;
@@ -74,8 +77,13 @@ export function toSkillInitPayload(config, images, value) {
 
 /** Read plain skill fields from a SurveyJS question model. */
 export function readSkillQuestionFields(question) {
-  const config = safeJsonClone(question?.skillConfig, {}) || {};
+  let config = safeJsonClone(question?.skillConfig, {}) || {};
   if (question?.skillId && !config.skillId) config.skillId = question.skillId;
+
+  const skillKey = String(question?.skillId || config.skillId || '').replace(/^preset_/, '');
+  if (skillKey === 'emotion_color_picker') {
+    config = enrichEmotionColorConfig(config);
+  }
 
   const images = toPlainArray(question?.skillImages).map(normImage).filter(Boolean);
 

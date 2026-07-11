@@ -54,6 +54,12 @@ export function generateMethodsText({
 
   const attentionQs = getAttentionCheckQuestions(surveyConfig);
   const pairwiseQs = allQuestions.filter((q) => q.type === 'imagepicker');
+  const maxDiffQs = allQuestions.filter(
+    (q) => q.type === 'skillquestion'
+      && (q.skillId === 'preset_best_worst_choice'
+        || q.skillId === 'best_worst_choice'
+        || String(q.skillId || '').endsWith('best_worst_choice')),
+  );
   const forcedChoiceQs = allQuestions.filter(
     (q) => q.type === 'skillquestion'
       && (q.skillId === 'preset_image_preference_forced'
@@ -94,6 +100,16 @@ export function generateMethodsText({
       + `${modes.join('/')} pairing where configured. `
       + `Each selected image was treated as winning over non-selected shown alternatives; `
       + `scores were estimated with TrueSkill (μ − 3σ conservative rating).`,
+    );
+  }
+
+  if (maxDiffQs.length) {
+    const modes = [...new Set(maxDiffQs.map((q) => q.pairingMode || 'random'))];
+    lines.push(
+      `Best–Worst (MaxDiff) questions (${maxDiffQs.length} question(s)) used `
+      + `${modes.join('/')} sampling where configured. `
+      + `Within each trial, the best option beat all other shown options and each non-worst option beat the worst; `
+      + `TrueSkill ratings were estimated alongside classical BWS scores.`,
     );
   }
 

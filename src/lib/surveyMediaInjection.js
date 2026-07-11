@@ -7,6 +7,7 @@ import {
 } from './mediaUtils';
 import { getSkillById } from './skillManager';
 import { getPresetSkill } from './presetSkills';
+import { enrichEmotionColorConfig } from './emotionColor';
 
 /** Build justified image gallery HTML (same layout as imagerating panels). */
 export function buildImageGalleryHtml(selectedImages) {
@@ -255,14 +256,148 @@ export function getGroupTrackingKey(group) {
   return group?.groupKey || group?.groupId || null;
 }
 
+const DEFAULT_TS_MU = 25;
+
+/** Normalize legacy / invalid pairingMode values. */
+export function normalizePairingMode(mode) {
+  // Legacy "uncertain" (high-σ) ≈ exposure balancing with current stats
+  if (mode === 'uncertain' || mode === 'high_sigma') return 'balanced';
+  if (mode === 'balanced' || mode === 'adaptive' || mode === 'random') return mode;
+  return 'random';
+}
+
+function pickLeastExposed(candidates, imageCount, pairStats) {
+  if (!candidates?.length) return [];
+  const exposure = (img) => {
+    const key = getImageKey(img);
+    return pairStats?.[key]?.exposures ?? 0;
+  };
+  const sorted = [...candidates].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
+  // Prefer the least-exposed band, then shuffle within it for variety
+  if (sorted.length <= imageCount) return sorted;
+  const bandSize = Math.min(sorted.length, Math.max(imageCount * 2, Math.ceil(sorted.length / 2)));
+  const band = sorted.slice(0, bandSize);
+  return [...band].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+}
+
+/**
+ * Adaptive sampling (best-effort for multi-image TrueSkill learning):
+ *
+ * A) Rated images (have μ): sort by μ → equal-count quantile buckets (2–6) →
+ *    pick a bucket uniformly → random draw. Equal chance for low/mid/high bands.
+ *
+ * B) New images (no μ / never shown): never “1 bucket among N” (that starves them).
+ *    Instead each trial chooses one of:
+ *      1. all-new set — when many are new (new-vs-new cold start)
+ *      2. 1 new + (k−1) from one μ bucket — places a new image inside a coherent band
+ *      3. pure μ-bucket set — band learning without new images
+ *    Probabilities scale with unseen share, with a floor so a few new images still appear.
+ */
+function pickSimilarMuSet(candidates, imageCount, pairStats) {
+  if (!candidates?.length) return [];
+  if (candidates.length <= imageCount) {
+    return [...candidates].sort(() => 0.5 - Math.random());
+  }
+
+  const shuffleTake = (list, n) => [...list].sort(() => 0.5 - Math.random()).slice(0, n);
+
+  const unseen = [];
+  const rated = [];
+  candidates.forEach((img) => {
+    const key = getImageKey(img);
+    const row = key ? pairStats?.[key] : null;
+    const hasMu = row?.mu != null && Number.isFinite(Number(row.mu));
+    const exposed = (row?.exposures ?? 0) > 0;
+    if (!row || (!hasMu && !exposed)) {
+      unseen.push(img);
+    } else {
+      rated.push({
+        img,
+        mu: hasMu ? Number(row.mu) : DEFAULT_TS_MU,
+      });
+    }
+  });
+
+  const buildMuBuckets = (ratedList) => {
+    if (ratedList.length < imageCount) return [];
+    const sorted = [...ratedList].sort((a, b) => a.mu - b.mu || Math.random() - 0.5);
+    const numBuckets = Math.min(6, Math.max(2, Math.floor(sorted.length / imageCount)));
+    const bucketSize = Math.ceil(sorted.length / numBuckets);
+    const buckets = [];
+    for (let b = 0; b < numBuckets; b += 1) {
+      const start = b * bucketSize;
+      const slice = sorted.slice(start, Math.min(sorted.length, start + bucketSize));
+      if (slice.length >= imageCount) {
+        buckets.push(slice.map((r) => r.img));
+      } else if (slice.length && buckets.length) {
+        // merge undersized final slice into previous bucket
+        buckets[buckets.length - 1] = [...buckets[buckets.length - 1], ...slice.map((r) => r.img)];
+      }
+    }
+    return buckets;
+  };
+
+  const pickFromMuBucket = () => {
+    const buckets = buildMuBuckets(rated);
+    if (!buckets.length) {
+      return shuffleTake(rated.map((r) => r.img), imageCount);
+    }
+    const bucket = buckets[Math.floor(Math.random() * buckets.length)];
+    return shuffleTake(bucket, imageCount);
+  };
+
+  // --- mostly / entirely new pool ---
+  if (rated.length < imageCount) {
+    return shuffleTake(unseen.length ? unseen : candidates, imageCount);
+  }
+
+  const share = unseen.length / candidates.length; // 0..1
+  const roll = Math.random();
+
+  if (unseen.length > 0) {
+    // (1) All-new trial: likely when new images are a large fraction of the pool
+    const pAllNew = Math.min(0.45, share);
+    if (unseen.length >= imageCount && roll < pAllNew) {
+      return shuffleTake(unseen, imageCount);
+    }
+
+    // (2) Inject one new into a μ-band trial — floor so small unseen sets are not starved
+    //     e.g. 5% new → ~25% mixed trials; 20% new → ~40%; capped at 50%
+    const pMixed = Math.min(0.5, Math.max(0.25, share * 2));
+    if (roll < pAllNew + pMixed) {
+      const newbie = shuffleTake(unseen, 1)[0];
+      const band = pickFromMuBucket().filter((img) => getImageKey(img) !== getImageKey(newbie));
+      const rest = shuffleTake(band, imageCount - 1);
+      // if band somehow collided, fill from rated
+      while (rest.length < imageCount - 1) {
+        const fill = rated.map((r) => r.img).find((img) => (
+          getImageKey(img) !== getImageKey(newbie)
+          && !rest.some((x) => getImageKey(x) === getImageKey(img))
+        ));
+        if (!fill) break;
+        rest.push(fill);
+      }
+      return shuffleTake([newbie, ...rest], imageCount);
+    }
+  }
+
+  // (3) Pure μ-band trial
+  return pickFromMuBucket();
+}
+
 /**
  * Pick media for a question — individual files or a fixed-size filename group.
  * Returns { images, groupKey, groupId }.
+ *
+ * Sampling modes (pairingMode):
+ * - random: uniform shuffle
+ * - balanced: prefer least-exposed images (any imageCount)
+ * - adaptive: μ quantile buckets + cold-start injection for new images
  */
 export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys, globallyUsedGroupKeys, pairStats = null) {
   const imageCount = element.imageCount || defaultMediaCount(element);
   const excludeUsed = element.excludePreviouslyUsedImages !== false;
-  const pairingMode = element.pairingMode || 'random';
+  const pairingMode = normalizePairingMode(element.pairingMode || 'random');
 
   if (usesCategoryMediaAssignment(element)) {
     const picked = pickOnePerCategory(pool, element, globallyUsedImageKeys);
@@ -287,60 +422,33 @@ export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys,
     };
   }
 
-  // Pairwise pairing modes (imageCount === 2, individual assignment)
-  if (imageCount === 2 && pairingMode !== 'random' && pool.length >= 2) {
-    let candidates = [...pool];
-    if (excludeUsed && globallyUsedImageKeys) {
-      candidates = candidates.filter((img) => {
-        const key = getImageKey(img);
-        return key && !globallyUsedImageKeys.has(key);
-      });
-    }
-    if (candidates.length < 2) {
-      candidates = [...pool];
-    }
-
-    const exposure = (img) => {
-      const key = getImageKey(img);
-      return pairStats?.[key]?.exposures ?? 0;
-    };
-    const mu = (img) => {
-      const key = getImageKey(img);
-      return pairStats?.[key]?.mu ?? 25;
-    };
-
-    if (pairingMode === 'balanced') {
-      const sorted = [...candidates].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
-      return { images: sorted.slice(0, 2), groupKey: null, groupId: null };
-    }
-
-    if (pairingMode === 'adaptive') {
-      let bestPair = null;
-      let bestGap = Infinity;
-      for (let i = 0; i < candidates.length; i += 1) {
-        for (let j = i + 1; j < candidates.length; j += 1) {
-          const gap = Math.abs(mu(candidates[i]) - mu(candidates[j]));
-          const expSum = exposure(candidates[i]) + exposure(candidates[j]);
-          const score = gap + expSum * 0.01;
-          if (score < bestGap) {
-            bestGap = score;
-            bestPair = [candidates[i], candidates[j]];
-          }
-        }
-      }
-      if (bestPair) return { images: bestPair, groupKey: null, groupId: null };
-    }
-  }
-
-  const shuffled = [...pool].sort(() => 0.5 - Math.random());
-  let candidates = shuffled;
+  let candidates = [...pool];
   if (excludeUsed && globallyUsedImageKeys) {
-    candidates = shuffled.filter((img) => {
+    const filtered = candidates.filter((img) => {
       const key = getImageKey(img);
       return key && !globallyUsedImageKeys.has(key);
     });
+    if (filtered.length >= imageCount) candidates = filtered;
   }
-  return { images: candidates.slice(0, imageCount), groupKey: null, groupId: null };
+
+  if (pairingMode === 'balanced' && candidates.length >= imageCount) {
+    return {
+      images: pickLeastExposed(candidates, imageCount, pairStats),
+      groupKey: null,
+      groupId: null,
+    };
+  }
+
+  if (pairingMode === 'adaptive' && candidates.length >= imageCount) {
+    return {
+      images: pickSimilarMuSet(candidates, imageCount, pairStats),
+      groupKey: null,
+      groupId: null,
+    };
+  }
+
+  const shuffled = [...candidates].sort(() => 0.5 - Math.random());
+  return { images: shuffled.slice(0, imageCount), groupKey: null, groupId: null };
 }
 
 export function trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys) {
@@ -483,7 +591,10 @@ export async function resolveSkillQuestions(surveyJson) {
         el.skillHtml = skill.sourceHtml || el.skillHtml;
         const merged = { ...(skill.defaultConfig || {}), ...(el.skillConfig || {}) };
         delete merged.demoImages;
-        el.skillConfig = merged;
+        const skillKey = String(el.skillId || '').replace(/^preset_/, '');
+        el.skillConfig = skillKey === 'emotion_color_picker'
+          ? enrichEmotionColorConfig(merged)
+          : merged;
       } else if (!el.skillHtml && el.skillId?.startsWith('preset_')) {
         const preset = skillFromPreset(el.skillId);
         if (preset) el.skillHtml = preset.sourceHtml;

@@ -213,7 +213,12 @@ function csvRowsToRecords(rows, model) {
 }
 
 async function fetchViaProxy(url) {
-  const res = await fetch(`${SERVER_URL}/api/r2/image-proxy?url=${encodeURIComponent(url)}`);
+  // Feature CSVs / preannotation JSON are rewritten during batch jobs. Never use
+  // the browser HTTP cache here — a stale snapshot causes saveFeatureCsv merges
+  // to drop earlier batches (looks like "only a few finished" after refresh).
+  const proxyUrl =
+    `${SERVER_URL}/api/r2/image-proxy?url=${encodeURIComponent(url)}&_=${Date.now()}`;
+  const res = await fetch(proxyUrl, { cache: 'no-store' });
   if (res.status === 404) return null;
   if (!res.ok) {
     const text = await res.text();
@@ -241,9 +246,13 @@ export async function loadFeatureCsv(r2Prefix, model) {
 }
 
 /** Merge records by media_id (incoming wins) and upload CSV. */
-export async function saveFeatureCsv(r2Prefix, model, records) {
+export async function saveFeatureCsv(r2Prefix, model, records, options = {}) {
   if (!isR2Configured()) throw new Error('R2 is not configured');
-  const existing = await loadFeatureCsv(r2Prefix, model);
+  // When the caller already holds the full set (batch job accumulator), skip
+  // re-reading R2 so we never merge against a stale cached snapshot.
+  const existing = options.replace
+    ? []
+    : (Array.isArray(options.baseRecords) ? options.baseRecords : await loadFeatureCsv(r2Prefix, model));
   const byId = new Map();
   existing.forEach((r) => {
     if (r.media_id) byId.set(r.media_id, r);
@@ -252,7 +261,7 @@ export async function saveFeatureCsv(r2Prefix, model, records) {
   records.forEach((r) => {
     const id = r.media_id || (r.name ? `name:${r.name}` : null);
     if (!id) return;
-    byId.set(r.media_id || id, {
+    byId.set(id, {
       ...r,
       model,
       media_id: r.media_id || '',
@@ -265,6 +274,11 @@ export async function saveFeatureCsv(r2Prefix, model, records) {
   const result = await uploadImageToR2(blob, key);
   if (!result.success) throw new Error(result.error || 'Failed to upload feature CSV');
   return { success: true, key: result.key, url: result.url, count: merged.length };
+}
+
+/** Overwrite the model CSV with the given records (no R2 re-read). */
+export async function writeFeatureCsv(r2Prefix, model, records) {
+  return saveFeatureCsv(r2Prefix, model, records, { replace: true });
 }
 
 /** Upsert one record into R2 CSV for a model. */
@@ -334,8 +348,8 @@ export async function loadFeaturesMapFromR2(r2Prefix, models = FEATURE_MODELS) {
   await Promise.all(models.map(async (model) => {
     const rows = await loadFeatureCsv(r2Prefix, model);
     rows.forEach((r) => {
-      if (!r.media_id) return;
-      map[featureStorageKey(r.media_id, model)] = r;
+      if (!r.media_id && !r.name) return;
+      if (r.media_id) map[featureStorageKey(r.media_id, model)] = r;
       if (r.name) map[featureStorageKey(r.name, model)] = r;
     });
   }));

@@ -31,7 +31,10 @@ export const loadTemplatesFromFiles = async () => {
           // Validate that it's actually a template (has required fields)
           if (template.id && template.name && template.config) {
             console.log(`✅ Successfully loaded template: ${template.name} (ID: ${template.id}, Pages: ${template.config.pages?.length || 0})`);
-            templates.push(template);
+            templates.push({
+              ...template,
+              is_pinned: !!(template.isPinned ?? template.is_pinned),
+            });
           } else {
             console.warn(`⚠️ File ${filename} is not a valid template (missing required fields)`, {
               hasId: !!template.id,

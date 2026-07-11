@@ -64,7 +64,11 @@ import {
   attentionCheckQuestionStats,
 } from '../../lib/quality';
 import { computeQuestionIrr } from '../../lib/reliability';
-import { computeQuestionTrueSkill } from '../../lib/trueskill';
+import {
+  computeQuestionTrueSkill,
+  computeTrueSkillFromMatches,
+  matchesFromOrderedRanking,
+} from '../../lib/trueskill';
 import { average, pct, descriptiveStats, wilsonCI } from '../../lib/stats';
 import { computeBordaScores, kendallW, interpretKendallW } from '../../lib/rankingStats';
 import { wordFrequency, textLengthStats } from '../../lib/textStats';
@@ -76,6 +80,13 @@ import {
   WordFrequencyChart,
 } from './analysisCharts';
 import { getPresetSkillAnalysis } from './skillAnalysis';
+import {
+  TrueSkillMuChart,
+  TrueSkillTable,
+  exportTrueSkillCsv,
+  TRUESKILL_SORT_COLUMNS,
+  RANKING_EXTRA_COLUMNS,
+} from './trueSkillAnalysisUi';
 import { enrichSkillAnswers, buildResponseMediaUrlMap, stripSkillAnswerContext, formatSkillAnswerForDisplay, filterAnswersForSkill } from '../../lib/skillMediaUtils';
 import { saveProjectFull } from '../../lib/projectManager';
 import { deleteSurveyResponse, responseRecordKey } from '../../lib/surveyResponses';
@@ -87,6 +98,33 @@ const BAR_COLORS = [
   '#1976d2', '#2196f3', '#0288d1', '#0097a7', '#00838f',
   '#388e3c', '#689f38', '#f57c00', '#e64a19', '#7b1fa2'
 ];
+/** High-contrast palette for matrix stacked distributions (avoid similar blues). */
+const MATRIX_DIST_COLORS = [
+  '#1565c0', '#c62828', '#2e7d32', '#f9a825', '#6a1b9a',
+  '#00838f', '#ef6c00', '#ad1457', '#4527a0', '#558b2f',
+];
+
+function matrixDistColor(index) {
+  return MATRIX_DIST_COLORS[index % MATRIX_DIST_COLORS.length];
+}
+
+function columnKeysAreNumeric(colKeys) {
+  return (colKeys || []).length > 0
+    && colKeys.every((c) => c !== '' && c != null && !Number.isNaN(Number(c)));
+}
+
+/** Weighted mean from column-value → count map when column keys are numeric. */
+function meanFromColumnCounts(cols, colKeys) {
+  let sum = 0;
+  let n = 0;
+  (colKeys || []).forEach((c) => {
+    const count = cols?.[c] || 0;
+    if (!count) return;
+    sum += Number(c) * count;
+    n += count;
+  });
+  return n > 0 ? sum / n : null;
+}
 
 /** Questions that show content only — excluded from coverage stats. */
 const DISPLAY_ONLY_QUESTION_TYPES = new Set([
@@ -109,7 +147,7 @@ function isAnswerableQuestion(question) {
  * Full survey submissions count for every question; researcher practice rows only
  * count for the single question they practiced (survey_metadata.practice_question).
  */
-function responsesEligibleForQuestion(questionName, responses) {
+export function responsesEligibleForQuestion(questionName, responses) {
   return (responses || []).filter((row) => {
     if (row.survey_metadata?.practice_mode) {
       return row.survey_metadata?.practice_question === questionName;
@@ -122,7 +160,7 @@ function responsesEligibleForQuestion(questionName, responses) {
 // Handles two formats:
 //   New: responses[name] = { type, answer, shown_images }
 //   Old: responses[name] = <raw_answer>, displayed_images[name] = [...]
-function collectAnswers(questionName, responses) {
+export function collectAnswers(questionName, responses) {
   const result = [];
   for (const row of responsesEligibleForQuestion(questionName, responses)) {
     const qData = row.responses?.[questionName];
@@ -167,27 +205,32 @@ function imageKeyFromShown(entry) {
   return s.split('?')[0].split('/').pop() || s;
 }
 
-function TrueSkillMuChart({ rankings, getImageUrl }) {
-  if (!rankings?.length) return null;
-  const items = [...rankings].sort((a, b) => (b.muStd5 ?? 0) - (a.muStd5 ?? 0));
-  const scores = items.map((r) => r.muStd5 ?? 0);
-  return (
-    <DensityHistogramChart
-      scores={scores}
-      domainMin={0}
-      domainMax={5}
-      title="Standardized μ distribution (0–5)"
-      caption="Blue bars: histogram of standardized μ (density = count / n / bin width). Orange curve: fitted normal PDF."
-      xLabel="Standardized μ (0–5)"
-      bottomMarkers={items.map((item) => ({
-        key: item.imageKey,
-        value: item.muStd5 ?? 0,
-        imageUrl: getImageUrl?.(item.imageKey),
-        label: item.imageKey.length > 10 ? `${item.imageKey.slice(0, 9)}…` : item.imageKey,
-        subLabel: (item.muStd5 ?? 0).toFixed(2),
-      }))}
-    />
-  );
+/** Map imagepicker/imageranking choice values (image_N or URL) to a stable filename key. */
+function resolveImageChoiceKey(value, shownImages) {
+  if (value == null || value === '') return '';
+  const str = String(value);
+  const match = str.match(/^image_(\d+)$/);
+  if (match && Array.isArray(shownImages) && shownImages.length) {
+    const img = shownImages[Number(match[1])];
+    if (img != null) return imageKeyFromShown(img) || String(img);
+  }
+  return imageKeyFromShown(str) || str;
+}
+
+/** Best-effort display URL for a choice value given that trial's shown_images. */
+function resolveImageChoiceUrl(value, shownImages) {
+  if (value == null || value === '') return null;
+  const str = String(value);
+  const match = str.match(/^image_(\d+)$/);
+  if (match && Array.isArray(shownImages) && shownImages.length) {
+    const img = shownImages[Number(match[1])];
+    if (img == null) return null;
+    return typeof img === 'string' ? img : (img.url || img.name || null);
+  }
+  if (str.startsWith('http') || str.startsWith('/')) return str;
+  const fromShown = (shownImages || []).find((s) => imageKeyFromShown(s) === imageKeyFromShown(str));
+  if (fromShown) return typeof fromShown === 'string' ? fromShown : (fromShown.url || null);
+  return str;
 }
 
 function typeIcon(type) {
@@ -341,82 +384,6 @@ function IrrSummary({ responses, question }) {
   );
 }
 
-function TrueSkillTable({ rankings, onExport }) {
-  const resolvedUrl = useContext(ImageResolverContext);
-  if (!rankings?.length) return null;
-
-  const resolveImg = (key) => {
-    if (key?.startsWith('http')) return key;
-    return resolvedUrl?.get(key) || null;
-  };
-
-  return (
-    <Box sx={{ mt: 2 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>TrueSkill image rankings</Typography>
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-          Each selection counts as a win over every non-selected image shown in that trial (supports multi-select).
-        </Typography>
-        {onExport && (
-          <Button size="small" variant="outlined" startIcon={<Download />} onClick={onExport}>
-            Export scores CSV
-          </Button>
-        )}
-      </Box>
-      <TableContainer component={Paper} variant="outlined">
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>#</TableCell>
-              <TableCell>Image</TableCell>
-              <TableCell align="right">μ</TableCell>
-              <TableCell align="right">Std. μ (0–5)</TableCell>
-              <TableCell align="right">σ</TableCell>
-              <TableCell align="right">Conservative (μ−3σ)</TableCell>
-              <TableCell align="right">Games</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rankings.map((row) => (
-              <TableRow key={row.imageKey}>
-                <TableCell>{row.rank}</TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {resolveImg(row.imageKey) && (
-                      <Box
-                        component="img"
-                        src={resolveImg(row.imageKey)}
-                        alt={row.imageKey}
-                        sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 0.5 }}
-                      />
-                    )}
-                    <Typography variant="caption">{row.imageKey}</Typography>
-                  </Box>
-                </TableCell>
-                <TableCell align="right">{row.mu.toFixed(2)}</TableCell>
-                <TableCell align="right">{(row.muStd5 ?? 0).toFixed(2)}</TableCell>
-                <TableCell align="right">{row.sigma.toFixed(2)}</TableCell>
-                <TableCell align="right">{row.conservative.toFixed(2)}</TableCell>
-                <TableCell align="right">{row.games}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Box>
-  );
-}
-
-function exportTrueSkillCsv(questionName, rankings) {
-  const headers = ['rank', 'image', 'mu', 'mu_std5', 'sigma', 'conservative', 'wins', 'losses', 'games'];
-  const rows = rankings.map((r) => [
-    r.rank, r.imageKey, r.mu.toFixed(4), (r.muStd5 ?? 0).toFixed(4), r.sigma.toFixed(4),
-    r.conservative.toFixed(4), r.wins, r.losses, r.games,
-  ]);
-  const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-  downloadTextFile(csv, `${questionName}_trueskill_${new Date().toISOString().slice(0, 10)}.csv`);
-}
-
 function CompactImageRanking({ title, items, getImageUrl, formatLabel, maxValue }) {
   if (!items?.length) return null;
   const peak = maxValue ?? Math.max(...items.map((i) => i.value), 0.001);
@@ -460,82 +427,18 @@ function compareByColumnProportions(a, b, colKeys) {
   return 0;
 }
 
-function ImagePickerDistribution({ answers, choices, question, allResponses }) {
-  const resolvedUrl = useContext(ImageResolverContext);
-
-  const choiceMap = {};
-  if (choices) {
-    for (const c of choices) {
-      const val = typeof c === 'object' ? String(c.value ?? '') : String(c);
-      const imgLink = typeof c === 'object' ? (c.imageLink || c.value || '') : c;
-      choiceMap[val] = { imageUrl: imgLink };
-    }
-  }
-
-  const getImageUrl = (value) => {
-    if (choiceMap[value]?.imageUrl) return choiceMap[value].imageUrl;
-    if (value && (value.startsWith('http') || value.startsWith('/'))) return value;
-    if (resolvedUrl?.has(value)) return resolvedUrl.get(value);
-    // Try filename key from URL / displayed images
-    const key = imageKeyFromShown(value);
-    if (key && resolvedUrl?.has(key)) return resolvedUrl.get(key);
-    if (key && choiceMap[key]?.imageUrl) return choiceMap[key].imageUrl;
-    return null;
-  };
-
-  const pickFreqItems = useMemo(() => {
-    const freq = {};
-    let totalPicks = 0;
-    for (const { answer } of answers) {
-      const vals = Array.isArray(answer) ? answer : (answer != null && answer !== '' ? [answer] : []);
-      for (const v of vals) {
-        const key = imageKeyFromShown(v) || String(v);
-        if (!key) continue;
-        if (!freq[key]) freq[key] = { key, url: typeof v === 'string' ? v : key, count: 0 };
-        freq[key].count += 1;
-        totalPicks += 1;
-        if (typeof v === 'string' && (v.startsWith('http') || v.startsWith('/'))) {
-          freq[key].url = v;
-        } else if (choiceMap[String(v)]?.imageUrl) {
-          freq[key].url = choiceMap[String(v)].imageUrl;
-        }
-      }
-    }
-    const respondentCount = answers.length || 1;
-    return Object.values(freq)
-      .map(({ key, url, count }) => ({
-        key,
-        url,
-        value: count,
-        label: `${count} pick${count === 1 ? '' : 's'} · ${pct(count, respondentCount)}% of respondents · ${totalPicks ? pct(count, totalPicks) : 0}% of picks`,
-      }))
-      .sort((a, b) => b.value - a.value);
-  }, [answers, choices]);
-
+function ImagePickerDistribution({ question, allResponses }) {
   const trueskillResult = useMemo(() => {
     if (!allResponses?.length || !question?.name) return { matches: [], rankings: [] };
-    return computeQuestionTrueSkill(allResponses, question.name);
+    const eligible = responsesEligibleForQuestion(question.name, allResponses);
+    return computeQuestionTrueSkill(eligible, question.name);
   }, [allResponses, question?.name]);
 
   const { matches, rankings } = trueskillResult;
-  const isMulti = !!question?.multiSelect;
 
   return (
     <Box>
-      {pickFreqItems.length > 0 && (
-        <CompactImageRanking
-          title={isMulti ? 'Selection frequency (multi-select)' : 'Selection frequency'}
-          items={pickFreqItems}
-          getImageUrl={getImageUrl}
-          maxValue={Math.max(...pickFreqItems.map((i) => i.value), 1)}
-          formatLabel={(_v, label) => label}
-        />
-      )}
-      {pickFreqItems.length === 0 && matches.length === 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>No responses yet.</Typography>
-      )}
-
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1, mt: pickFreqItems.length ? 2 : 0 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
         TrueSkill (pairwise from selections vs non-selected shown images)
       </Typography>
       {matches.length === 0 ? (
@@ -544,9 +447,10 @@ function ImagePickerDistribution({ answers, choices, question, allResponses }) {
         </Alert>
       ) : (
         <>
-          <TrueSkillMuChart rankings={rankings} getImageUrl={getImageUrl} />
+          <TrueSkillMuChart rankings={rankings} />
           <TrueSkillTable
             rankings={rankings}
+            caption="Each selection counts as a win over every non-selected image shown in that trial. Click a column header to sort (default: μ descending)."
             onExport={() => exportTrueSkillCsv(question.name, rankings)}
           />
         </>
@@ -684,15 +588,19 @@ function MatrixDistribution({ answers, rows, columns }) {
     colKeys.push(...seen);
   }
 
-  const allNumeric = colKeys.every((c) => !Number.isNaN(Number(c)));
+  const colLabel = (col) => {
+    if (!columns) return String(col);
+    const def = columns.find((c) => (typeof c === 'object' ? c.value : c) === col);
+    if (!def) return String(col);
+    return typeof def === 'object' ? (def.text || def.value) : def;
+  };
+
+  const allNumeric = columnKeysAreNumeric(colKeys);
   const rowMeans = allNumeric ? rowKeys.map((row) => {
     const counts = rowData[row] || {};
-    let sum = 0; let n = 0;
-    for (const [col, count] of Object.entries(counts)) {
-      sum += Number(col) * count;
-      n += count;
-    }
-    return { row, mean: n > 0 ? sum / n : null, n };
+    const mean = meanFromColumnCounts(counts, colKeys);
+    const n = Object.values(counts).reduce((s, v) => s + v, 0);
+    return { row, mean, n };
   }).sort((a, b) => (b.mean ?? 0) - (a.mean ?? 0)) : [];
 
   if (!rowKeys.length) return <Typography variant="body2" color="text.secondary">No data.</Typography>;
@@ -717,15 +625,23 @@ function MatrixDistribution({ answers, rows, columns }) {
           })}
         </Box>
       )}
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 1.5 }}>
+        {colKeys.map((col, idx) => (
+          <Box key={col} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <Box sx={{ width: 12, height: 12, borderRadius: 0.5, bgcolor: matrixDistColor(idx), flexShrink: 0 }} />
+            <Typography variant="caption" color="text.secondary">{colLabel(col)}</Typography>
+          </Box>
+        ))}
+      </Box>
       <TableContainer component={Paper} variant="outlined" sx={{ maxWidth: '100%', overflowX: 'auto' }}>
         <Table size="small">
           <TableHead>
             <TableRow>
               <TableCell sx={{ fontWeight: 'bold' }}>Question Row</TableCell>
               {colKeys.map(col => (
-                <TableCell key={col} align="center" sx={{ fontWeight: 'bold' }}>{col}</TableCell>
+                <TableCell key={col} align="center" sx={{ fontWeight: 'bold' }}>{colLabel(col)}</TableCell>
               ))}
-              <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 120 }}>Distribution</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 160 }}>Distribution</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -752,12 +668,24 @@ function MatrixDistribution({ answers, rows, columns }) {
                     );
                   })}
                   <TableCell align="center">
-                    <Box sx={{ display: 'flex', height: 8, borderRadius: 1, overflow: 'hidden', bgcolor: 'grey.100' }}>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        height: 16,
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                        bgcolor: 'grey.200',
+                        border: '1px solid',
+                        borderColor: 'grey.300',
+                      }}
+                    >
                       {colKeys.map((col, idx) => {
                         const count = rowData[row]?.[col] || 0;
                         const w = total > 0 ? (count / total) * 100 : 0;
                         return w > 0 ? (
-                          <Box key={col} sx={{ width: `${w}%`, bgcolor: BAR_COLORS[idx % BAR_COLORS.length] }} />
+                          <Tooltip key={col} title={`${colLabel(col)}: ${pct(count, total)}% (${count})`}>
+                            <Box sx={{ width: `${w}%`, bgcolor: matrixDistColor(idx), minWidth: w > 0 ? 2 : 0 }} />
+                          </Tooltip>
                         ) : null;
                       })}
                     </Box>
@@ -866,6 +794,122 @@ function ShownImagesContext({ imageUrls, label }) {
   );
 }
 
+function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
+  const mediaLabel = type === 'mediaranking' ? 'Media' : 'Image';
+
+  const { matches, rankings, kendallWVal } = useMemo(() => {
+    const imageRankPositions = {};
+    const imageUrls = {};
+    const rankingLists = [];
+    const allMatches = [];
+
+    for (const { answer, shown_images: shown } of answers || []) {
+      const ranked = Array.isArray(answer) ? answer : [];
+      if (!ranked.length) continue;
+      const keys = ranked
+        .map((val) => {
+          const key = resolveImageChoiceKey(val, shown);
+          if (!key) return null;
+          const url = resolveImageChoiceUrl(val, shown);
+          if (url && !imageUrls[key]) imageUrls[key] = url;
+          return key;
+        })
+        .filter(Boolean);
+      if (keys.length < 2) continue;
+      rankingLists.push(keys);
+      allMatches.push(...matchesFromOrderedRanking(keys));
+      keys.forEach((key, rankIdx) => {
+        if (!imageRankPositions[key]) imageRankPositions[key] = [];
+        imageRankPositions[key].push(rankIdx + 1);
+      });
+    }
+
+    const items = Object.keys(imageRankPositions);
+    const nItems = items.length;
+    const w = kendallW(rankingLists, items);
+    const bordaMap = computeBordaScores(imageRankPositions, nItems);
+    const { matches: m, rankings: tsRows } = computeTrueSkillFromMatches(allMatches);
+
+    const byKey = new Map((tsRows || []).map((r) => [r.imageKey, r]));
+    // Include images that only appear in rank stats (edge case: single-item lists)
+    items.forEach((key) => {
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          imageKey: key,
+          mu: null,
+          muStd5: null,
+          sigma: null,
+          conservative: null,
+          wins: 0,
+          losses: 0,
+          games: 0,
+        });
+      }
+    });
+
+    const merged = [...byKey.values()].map((row) => {
+      const ranks = imageRankPositions[row.imageKey] || [];
+      const avg = ranks.length ? average(ranks) : null;
+      const sd = ranks.length > 1
+        ? Math.sqrt(ranks.reduce((s, r) => s + (r - avg) ** 2, 0) / ranks.length)
+        : 0;
+      return {
+        ...row,
+        displayUrl: imageUrls[row.imageKey] || null,
+        avgRank: avg,
+        rankSd: sd,
+        borda: bordaMap[row.imageKey]?.borda ?? null,
+        nRanks: ranks.length,
+      };
+    });
+
+    return { matches: m, rankings: merged, kendallWVal: w };
+  }, [answers]);
+
+  if (!answers?.length || (!rankings.length && !matches.length)) {
+    return <Typography variant="body2" color="text.secondary">No responses yet.</Typography>;
+  }
+
+  const rankingColumns = [...RANKING_EXTRA_COLUMNS, ...TRUESKILL_SORT_COLUMNS];
+
+  return (
+    <Box>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+        {mediaLabel} ranking — TrueSkill
+      </Typography>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+        From each full ranking, every higher-ranked image beats every lower-ranked image
+        ({matches.length} pairwise outcomes).
+      </Typography>
+      {kendallWVal != null && (
+        <Alert severity={kendallWVal >= 0.5 ? 'success' : 'info'} sx={{ mb: 2 }}>
+          Kendall&apos;s W = {kendallWVal.toFixed(3)} — {interpretKendallW(kendallWVal)}
+        </Alert>
+      )}
+      {matches.length === 0 ? (
+        <Alert severity="warning">Not enough ranking comparisons for TrueSkill yet.</Alert>
+      ) : (
+        <>
+          <TrueSkillMuChart rankings={rankings.filter((r) => r.mu != null)} />
+          <TrueSkillTable
+            rankings={rankings}
+            columns={rankingColumns}
+            title={`${mediaLabel} TrueSkill + ranking stats`}
+            caption="Higher rank beats lower rank in each trial. Avg rank / Borda / n are classical ranking summaries. Default sort: μ descending."
+            onExport={() => exportTrueSkillCsv(
+              question?.name || 'ranking',
+              rankings,
+              'mu',
+              'desc',
+              RANKING_EXTRA_COLUMNS,
+            )}
+          />
+        </>
+      )}
+    </Box>
+  );
+}
+
 function ImageQuestionAnalysis({ answers, type, question }) {
   const resolvedUrl = useContext(ImageResolverContext);
   const getImageUrl = (value) => {
@@ -875,79 +919,9 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     return resolvedUrl?.get(key) || resolvedUrl?.get(value) || null;
   };
 
-  // ── image_ranking / media_ranking ─────────────────────────────────────────
+  // ── image_ranking / media_ranking → TrueSkill (+ avg rank / Borda columns) ─
   if (type === 'image_ranking' || type === 'imageranking' || type === 'mediaranking') {
-    const imageRankPositions = {};
-    const rankingLists = [];
-    for (const { answer } of answers) {
-      const ranked = Array.isArray(answer) ? answer : [];
-      if (ranked.length) rankingLists.push(ranked);
-      ranked.forEach((url, rankIdx) => {
-        if (!imageRankPositions[url]) imageRankPositions[url] = [];
-        imageRankPositions[url].push(rankIdx + 1);
-      });
-    }
-
-    const items = Object.keys(imageRankPositions);
-    const nItems = items.length;
-    const w = kendallW(rankingLists, items);
-    const bordaMap = computeBordaScores(imageRankPositions, nItems);
-    const maxRank = Math.max(nItems, 1);
-    const mediaLabel = type === 'mediaranking' ? 'Media' : 'Image';
-
-    const sorted = Object.entries(imageRankPositions)
-      .map(([url, ranks]) => ({
-        val: url,
-        avg: average(ranks),
-        sd: ranks.length > 1
-          ? Math.sqrt(ranks.reduce((s, r) => s + (r - average(ranks)) ** 2, 0) / ranks.length)
-          : 0,
-        borda: bordaMap[url]?.borda,
-        n: ranks.length,
-      }))
-      .sort((a, b) => (a.avg ?? 999) - (b.avg ?? 999));
-
-    const rankedItems = sorted.map(({ val, avg, borda, n, sd }) => ({
-      key: val,
-      url: val,
-      value: maxRank > 0 ? (maxRank - (avg ?? maxRank) + 1) / maxRank : 0,
-      label: `avg ${avg?.toFixed(2) ?? '–'} ±${sd?.toFixed(2)} · Borda ${borda?.toFixed(1) ?? '–'} · n=${n}`,
-    }));
-
-    return (
-      <Box>
-        {w != null && (
-          <Alert severity={w >= 0.5 ? 'success' : 'info'} sx={{ mb: 2 }}>
-            Kendall&apos;s W = {w.toFixed(3)} — {interpretKendallW(w)}
-          </Alert>
-        )}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            Average rank (1 = top) · Borda score · SD
-          </Typography>
-          {question?.name && sorted.length > 0 && (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<Download />}
-              onClick={() => exportRankingCsv(question.name, sorted, w, items)}
-            >
-              Export ranking CSV
-            </Button>
-          )}
-        </Box>
-        <CompactImageRanking
-          title={`${mediaLabel} ranking (rank 1 = most preferred)`}
-          items={rankedItems}
-          getImageUrl={getImageUrl}
-          maxValue={1}
-          formatLabel={(_v, label) => label}
-        />
-        {rankedItems.length === 0 && (
-          <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
-        )}
-      </Box>
-    );
+    return <ImageRankingTrueSkillAnalysis answers={answers} question={question} type={type} />;
   }
 
   // ── image_rating / media_rating ───────────────────────────────────────────
@@ -1068,9 +1042,15 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     }
 
     const lastCol = colKeys[colKeys.length - 1];
+    const numericCols = columnKeysAreNumeric(colKeys);
 
     return (
       <Box>
+        {numericCols && (
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+            Column values are numeric — images are ranked by mean score (higher first); percentages still shown.
+          </Typography>
+        )}
         {rowKeys.map((row) => {
           const rowDef = rowDefs.find((r) => (typeof r === 'object' ? r.value : r) === row);
           const rowLabel = rowDef ? (typeof rowDef === 'object' ? (rowDef.text || rowDef.value) : rowDef) : row;
@@ -1078,21 +1058,36 @@ function ImageQuestionAnalysis({ answers, type, question }) {
           const imageStats = Object.entries(perImage).map(([key, data]) => {
             const cols = data.rows[row] || {};
             const total = Object.values(cols).reduce((s, v) => s + v, 0);
-            return { key, url: data.url, cols, total };
+            const mean = numericCols ? meanFromColumnCounts(cols, colKeys) : null;
+            return { key, url: data.url, cols, total, mean };
           }).filter((s) => s.total > 0);
 
-          const sorted = [...imageStats].sort((a, b) => compareByColumnProportions(a, b, colKeys));
-          const rankedItems = sorted.map(({ key, url, cols, total }) => {
+          const sorted = [...imageStats].sort((a, b) => {
+            if (numericCols) {
+              const diff = (b.mean ?? -Infinity) - (a.mean ?? -Infinity);
+              if (Math.abs(diff) > 1e-9) return diff;
+            }
+            return compareByColumnProportions(a, b, colKeys);
+          });
+
+          const maxMean = numericCols
+            ? Math.max(...sorted.map((s) => s.mean ?? 0), Number(colKeys[colKeys.length - 1]) || 1)
+            : 1;
+
+          const rankedItems = sorted.map(({ key, url, cols, total, mean }) => {
             const colParts = colKeys.map((c) => {
               const colDef = colDefs.find((col) => (typeof col === 'object' ? col.value : col) === c);
-              const colLabel = colDef ? (typeof colDef === 'object' ? (colDef.text || colDef.value) : colDef) : c;
-              return `${colLabel}: ${pct(cols[c] || 0, total)}%`;
+              const cLabel = colDef ? (typeof colDef === 'object' ? (colDef.text || colDef.value) : colDef) : c;
+              return `${cLabel}: ${pct(cols[c] || 0, total)}%`;
             });
+            const meanPart = numericCols && mean != null ? `avg ${mean.toFixed(2)} · ` : '';
             return {
               key,
               url,
-              value: total > 0 ? (cols[lastCol] || 0) / total : 0,
-              label: colParts.join(' · '),
+              value: numericCols
+                ? (mean ?? 0)
+                : (total > 0 ? (cols[lastCol] || 0) / total : 0),
+              label: `${meanPart}${colParts.join(' · ')}`,
             };
           });
 
@@ -1102,7 +1097,7 @@ function ImageQuestionAnalysis({ answers, type, question }) {
               title={rowLabel}
               items={rankedItems}
               getImageUrl={getImageUrl}
-              maxValue={1}
+              maxValue={numericCols ? maxMean : 1}
               formatLabel={(_, label) => label}
             />
           );
@@ -1522,7 +1517,7 @@ function useImageUrlResolver() {
   };
 }
 
-/** Per-dimension compact image ranking (imageslidergroup). */
+/** Per-dimension score distribution + per-image ranking (imageslidergroup). */
 function ImageSliderGroupAnalysis({ question, answers }) {
   const getImageUrl = useImageUrlResolver();
   const dims = question.dimensions || [];
@@ -1536,11 +1531,13 @@ function ImageSliderGroupAnalysis({ question, answers }) {
   return (
     <Box>
       {dims.map((d) => {
+        const allVals = [];
         const perImage = {};
         for (const { answer, shown_images } of answers) {
           if (!shown_images?.length || typeof answer !== 'object') continue;
           const val = Number(answer[d.id]);
           if (Number.isNaN(val)) continue;
+          allVals.push(val);
           for (const img of shown_images) {
             const key = imageKeyFromShown(img) || img;
             if (!perImage[key]) perImage[key] = { url: img, vals: [] };
@@ -1549,6 +1546,11 @@ function ImageSliderGroupAnalysis({ question, answers }) {
         }
 
         const dimTitle = d.label || `${d.left} ↔ ${d.right}`;
+        const mean = average(allVals);
+        const sd = allVals.length > 1
+          ? Math.sqrt(allVals.reduce((s, v) => s + (v - mean) ** 2, 0) / allVals.length)
+          : 0;
+
         const rankedItems = Object.entries(perImage)
           .map(([key, { url, vals }]) => {
             const avg = average(vals);
@@ -1562,14 +1564,45 @@ function ImageSliderGroupAnalysis({ question, answers }) {
           .sort((a, b) => b.value - a.value);
 
         return (
-          <CompactImageRanking
-            key={d.id}
-            title={dimTitle}
-            items={rankedItems}
-            getImageUrl={getImageUrl}
-            maxValue={scaleMax}
-            formatLabel={(_, label) => label}
-          />
+          <Box key={d.id} sx={{ mb: 3.5 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+              {dimTitle}
+            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+              <Typography variant="caption" color="text.secondary">{d.left}</Typography>
+              <Typography variant="caption" fontWeight={700}>
+                {mean != null
+                  ? `avg ${mean.toFixed(2)} ± ${sd.toFixed(2)} (n=${allVals.length})`
+                  : 'no data'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">{d.right}</Typography>
+            </Box>
+            {allVals.length > 0 && <DescriptiveStatsLine nums={allVals} />}
+            {allVals.length >= 3 && (
+              <DensityHistogramChart
+                scores={allVals}
+                domainMin={scaleMin}
+                domainMax={scaleMax}
+                title={`${dimTitle} — score distribution`}
+                caption="Blue bars: histogram (density). Orange curve: fitted normal PDF."
+                xLabel={`Score (${scaleMin}–${scaleMax})`}
+                padB={40}
+                chartH={200}
+              />
+            )}
+            {rankedItems.length > 0 && (
+              <CompactImageRanking
+                title="By image (mean score)"
+                items={rankedItems}
+                getImageUrl={getImageUrl}
+                maxValue={scaleMax}
+                formatLabel={(_, label) => label}
+              />
+            )}
+            {allVals.length === 0 && (
+              <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
+            )}
+          </Box>
         );
       })}
     </Box>
@@ -1726,7 +1759,7 @@ function PointAllocationAnalysis({ question, answers }) {
 
 // ─── Question Card ────────────────────────────────────────────────────────────
 
-function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses }) {
+export function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses }) {
   const [expanded, setExpanded] = useState(false);
   const type = question.type || 'text';
   const responseCount = answers.length;
@@ -1787,8 +1820,6 @@ function QuestionCard({ question, answers, totalResponses, questionNumber, allRe
           <>
             <IrrSummary responses={allResponses} question={question} />
             <ImagePickerDistribution
-              answers={answers}
-              choices={question.choices}
               question={question}
               allResponses={allResponses}
             />

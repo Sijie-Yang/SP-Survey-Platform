@@ -54,6 +54,7 @@ import {
   Search,
   FilterList,
   Public,
+  PushPin,
 } from '@mui/icons-material';
 import { 
   getUserProjects, 
@@ -176,7 +177,7 @@ export default function ProjectSidebar({
   // Template search / filter / sort
   const [templateSearch, setTemplateSearch] = useState('');
   const [templateCategory, setTemplateCategory] = useState('');
-  const [templateSort, setTemplateSort] = useState('name');
+  const [templateSort, setTemplateSort] = useState('year_desc');
 
   useEffect(() => {
     // Capture current user id once (needed for pending-badge logic)
@@ -990,6 +991,8 @@ export default function ProjectSidebar({
                     return matchSearch && matchCat;
                   });
                   list = [...list].sort((a, b) => {
+                    const pinDiff = Number(!!b.is_pinned) - Number(!!a.is_pinned);
+                    if (pinDiff) return pinDiff;
                     if (templateSort === 'name')      return (a.name || '').localeCompare(b.name || '');
                     if (templateSort === 'name_desc') return (b.name || '').localeCompare(a.name || '');
                     if (templateSort === 'year_desc') return (b.year || '').localeCompare(a.year || '');
@@ -1019,7 +1022,9 @@ export default function ProjectSidebar({
                           '&:hover': {
                             bgcolor: 'grey.100',
                           },
-                          bgcolor: isUserTemplate(template) ? 'primary.50' : 'transparent',
+                          bgcolor: template.is_pinned
+                            ? 'warning.50'
+                            : isUserTemplate(template) ? 'primary.50' : 'transparent',
                         }}
                         onClick={() => {
                           setSelectedTemplate(template);
@@ -1030,7 +1035,9 @@ export default function ProjectSidebar({
                         }}
                       >
                         <ListItemIcon sx={{ minWidth: 28, minHeight: 'unset' }}>
-                          {getTemplateIcon(template.category)}
+                          {template.is_pinned
+                            ? <PushPin sx={{ fontSize: 18, color: 'warning.main', transform: 'rotate(45deg)' }} />
+                            : getTemplateIcon(template.category)}
                         </ListItemIcon>
                         <ListItemText
                           primary={
@@ -1038,6 +1045,15 @@ export default function ProjectSidebar({
                               <Typography variant="body2" sx={{ fontSize: '0.875rem', lineHeight: 1.3 }}>
                                 {template.name}
                               </Typography>
+                              {template.is_pinned && (
+                                <Chip
+                                  label="Pinned"
+                                  size="small"
+                                  color="warning"
+                                  variant="outlined"
+                                  sx={{ height: 16, fontSize: '0.6rem', '& .MuiChip-label': { px: 0.5 } }}
+                                />
+                              )}
                               {/* Show "Pending Review" badge for user's own pending templates */}
                               {supabase && !template.is_approved && template.user_id === currentUserId && (
                                 <Chip

@@ -1,14 +1,33 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Box, Typography, Slider, TextField, Chip } from '@mui/material';
 import { ImageGalleryGrid } from './MediaWidgets';
 
 /**
  * Slider group (semantic differential): multiple bipolar dimensions rated
  * on a shared numeric scale. value = { [dimensionId]: number }
+ * Defaults every dimension to the scale midpoint until the participant moves it.
  */
 export function SliderGroupContent({ dimensions = [], scaleMin = 1, scaleMax = 7, value, onChange, readOnly }) {
-  const mid = Math.round((scaleMin + scaleMax) / 2);
-  const current = value || {};
+  const mid = Math.round((Number(scaleMin) + Number(scaleMax)) / 2);
+  const current = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
+
+  // Persist midpoint defaults so submit / required checks see real scores
+  // without requiring the participant to touch every slider.
+  useEffect(() => {
+    if (readOnly || !onChange || !dimensions.length) return;
+    let changed = false;
+    const next = { ...current };
+    dimensions.forEach((d) => {
+      if (!d?.id) return;
+      if (next[d.id] === undefined || next[d.id] === null || next[d.id] === '') {
+        next[d.id] = mid;
+        changed = true;
+      }
+    });
+    if (changed) onChange(next);
+    // Only re-run when scale / dimension set changes — not on every value tweak.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dimensions, scaleMin, scaleMax, mid, readOnly]);
 
   if (!dimensions.length) {
     return (
@@ -22,21 +41,32 @@ export function SliderGroupContent({ dimensions = [], scaleMin = 1, scaleMax = 7
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       {dimensions.map((d) => {
         const v = current[d.id] ?? mid;
-        const answered = current[d.id] !== undefined;
         return (
           <Box key={d.id} sx={{ px: 1 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: -0.5 }}>
-              <Typography variant="body2" color="text.secondary">{d.left}</Typography>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '1fr auto 1fr',
+                alignItems: 'center',
+                columnGap: 1,
+                mb: -0.5,
+              }}
+            >
+              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'left' }}>
+                {d.left}
+              </Typography>
               <Chip
                 size="small"
-                label={answered ? v : '–'}
-                color={answered ? 'primary' : 'default'}
-                sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700 }}
+                label={v}
+                color="primary"
+                sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700, justifySelf: 'center' }}
               />
-              <Typography variant="body2" color="text.secondary">{d.right}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'right' }}>
+                {d.right}
+              </Typography>
             </Box>
             <Slider
-              value={v}
+              value={Number(v)}
               min={scaleMin}
               max={scaleMax}
               step={1}

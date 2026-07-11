@@ -11,7 +11,7 @@ import {
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
   EditNote, PhotoLibrary, DeleteForever, Videocam, Audiotrack, PermMedia,
-  ExpandMore,
+  ExpandMore, PushPin, AutoFixHigh, Stop,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -45,6 +45,7 @@ import SurveyBuilder from '../components/admin/SurveyBuilder';
 import FeatureExtractionJobs from '../components/admin/FeatureExtractionJobs';
 import MediaPreannotateDialog from '../components/admin/MediaPreannotateDialog';
 import { loadUserSpatialSettings } from '../lib/spatialSettingsStore';
+import { runAllFeaturesForPrefix } from '../lib/runFeatureExtraction';
 import { useAuth } from '../contexts/AuthContext';
 import {
   featureCsvKey,
@@ -737,6 +738,8 @@ function compareTemplateSort(a, b, sortBy) {
       return String(a.category || '').localeCompare(String(b.category || ''), undefined, { sensitivity: 'base' });
     case 'approved':
       return Number(!!a.is_approved) - Number(!!b.is_approved);
+    case 'pinned':
+      return Number(!!a.is_pinned) - Number(!!b.is_pinned);
     case 'landing':
       return Number(!!a.show_on_landing) - Number(!!b.show_on_landing);
     case 'images':
@@ -766,6 +769,7 @@ function TemplateSortLabel({ column, label, align, sortBy, sortOrder, onSort }) 
 }
 
 function TemplateManagement() {
+  const { user } = useAuth();
   const [templates, setTemplates]         = useState([]);
   const [loading, setLoading]             = useState(false);
   const [editTarget, setEditTarget]       = useState(null);
@@ -782,9 +786,20 @@ function TemplateManagement() {
   const [seedConfirmOpen, setSeedConfirmOpen] = useState(false);
   const [seedPreview, setSeedPreview]     = useState(null);
   const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
-  const [sortBy, setSortBy]               = useState('createdAt');
+  const [sortBy, setSortBy]               = useState('year');
   const [sortOrder, setSortOrder]         = useState('desc');
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [bulkFeat, setBulkFeat]           = useState({
+    active: false,
+    phase: '',
+    templateIndex: 0,
+    templateTotal: 0,
+    templateName: '',
+    imageDone: 0,
+    imageTotal: 0,
+    log: '',
+  });
+  const bulkAbortRef = useRef(false);
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
@@ -793,7 +808,7 @@ function TemplateManagement() {
       setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortBy(column);
-      setSortOrder(['createdAt', 'year', 'images', 'approved', 'landing'].includes(column) ? 'desc' : 'asc');
+      setSortOrder(['createdAt', 'year', 'images', 'approved', 'landing', 'pinned'].includes(column) ? 'desc' : 'asc');
     }
   };
 
@@ -811,6 +826,157 @@ function TemplateManagement() {
 
   useEffect(() => { load(); }, [load]);
 
+  const handleBulkFeatures = async ({ runL0 = true, runSeg = true } = {}) => {
+    if (!isR2Configured()) {
+      showSnack('R2 未配置，无法写入 feature CSV', 'error');
+      return;
+    }
+    if (runSeg) {
+      const settings = user?.id ? await loadUserSpatialSettings(user.id) : null;
+      if (!String(settings?.huggingFaceToken || '').trim()) {
+        showSnack('请先在任意项目的 Spatial Intelligence 中保存 HuggingFace token', 'error');
+        return;
+      }
+    }
+
+    const candidates = templates;
+    if (!candidates.length) {
+      showSnack('暂无模板', 'warning');
+      return;
+    }
+
+    const label = runL0 && runSeg ? 'L0 + Seg' : runL0 ? 'L0' : 'Seg';
+    const estimatedWithImages = candidates.filter((t) => (t.preloadedImages?.length || 0) > 0).length;
+    setConfirmDialog({
+      title: `一键提取全部模板 ${label}`,
+      message:
+        `将扫描全部 ${candidates.length} 个模板（约 ${estimatedWithImages} 个已登记图片），`
+        + `对实际有图的依次提取 ${label}；已完成的图片会跳过，写入方式与单模板图片页相同。可随时停止。`,
+      confirmLabel: '开始',
+      confirmColor: 'primary',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        bulkAbortRef.current = false;
+        const settings = user?.id ? await loadUserSpatialSettings(user.id) : null;
+        const hfToken = settings?.huggingFaceToken || '';
+
+        let templatesDone = 0;
+        let templatesWithImages = 0;
+        let imagesL0 = 0;
+        let imagesSeg = 0;
+        let imagesSkippedL0 = 0;
+        let imagesSkippedSeg = 0;
+        const errors = [];
+
+        setBulkFeat({
+          active: true,
+          phase: 'scan',
+          templateIndex: 0,
+          templateTotal: candidates.length,
+          templateName: '',
+          imageDone: 0,
+          imageTotal: 0,
+          log: `开始批量 ${label}：扫描 ${candidates.length} 个模板…`,
+        });
+
+        for (let i = 0; i < candidates.length; i += 1) {
+          if (bulkAbortRef.current) break;
+          const t = candidates[i];
+          const prefix = templateImagePrefix(t.id);
+          setBulkFeat((s) => ({
+            ...s,
+            phase: 'list',
+            templateIndex: i + 1,
+            templateName: t.name || t.id,
+            imageDone: 0,
+            imageTotal: 0,
+            log: `[${i + 1}/${candidates.length}] ${t.name || t.id} — 列出图片…`,
+          }));
+
+          let images = [];
+          try {
+            const listed = await listImagesFromR2(prefix);
+            if (listed.success && listed.images?.length) {
+              images = listed.images
+                .filter((img) => {
+                  const key = String(img.key || img.name || '');
+                  return !key.includes('/features/') && !key.includes('/preannotations/');
+                })
+                .map((img) => normalizeMediaEntry({
+                  url: img.url,
+                  name: img.name,
+                  type: img.type || inferMediaType(img.name),
+                }))
+                .filter((m) => m && m.type === 'image' && m.url);
+            }
+          } catch (err) {
+            console.warn(err);
+          }
+          if (!images.length && t.preloadedImages?.length) {
+            images = t.preloadedImages
+              .map((img) => normalizeMediaEntry(img))
+              .filter((m) => m && m.type === 'image' && m.url);
+          }
+          if (!images.length) continue;
+
+          templatesWithImages += 1;
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const result = await runAllFeaturesForPrefix({
+              r2Prefix: prefix,
+              images,
+              hfToken,
+              runL0,
+              runSeg,
+              shouldAbort: () => bulkAbortRef.current,
+              onProgress: ({ phase, done, total }) => {
+                setBulkFeat((s) => ({
+                  ...s,
+                  phase,
+                  templateIndex: i + 1,
+                  templateName: t.name || t.id,
+                  imageDone: done,
+                  imageTotal: total,
+                  log: `[${i + 1}/${candidates.length}] ${t.name || t.id} — ${phase.toUpperCase()} ${done}/${total}`,
+                }));
+              },
+            });
+            imagesL0 += result.l0?.done || 0;
+            imagesSeg += result.seg?.done || 0;
+            imagesSkippedL0 += result.l0?.skipped || 0;
+            imagesSkippedSeg += result.seg?.skipped || 0;
+            templatesDone += 1;
+            if (result.stopped) break;
+          } catch (err) {
+            errors.push(`${t.id}: ${err.message || String(err)}`);
+            setBulkFeat((s) => ({
+              ...s,
+              log: `[${i + 1}/${candidates.length}] ${t.name || t.id} — 失败: ${err.message || err}`,
+            }));
+          }
+        }
+
+        const stopped = bulkAbortRef.current;
+        setBulkFeat((s) => ({
+          ...s,
+          active: false,
+          phase: '',
+          log: stopped
+            ? `已停止。处理 ${templatesDone}/${templatesWithImages} 个有图模板（共扫描 ${candidates.length}）。L0 新写 ${imagesL0}（跳过 ${imagesSkippedL0}），Seg 新写 ${imagesSeg}（跳过 ${imagesSkippedSeg}）。`
+            : `完成。处理 ${templatesDone}/${templatesWithImages} 个有图模板（共扫描 ${candidates.length}）。L0 新写 ${imagesL0}（跳过 ${imagesSkippedL0}），Seg 新写 ${imagesSeg}（跳过 ${imagesSkippedSeg}）。`
+              + (errors.length ? ` 错误 ${errors.length} 条。` : ''),
+        }));
+        showSnack(
+          stopped ? '批量特征提取已停止' : (errors.length ? `批量完成，有 ${errors.length} 个错误` : '批量特征提取完成'),
+          errors.length ? 'warning' : 'success',
+        );
+        if (errors.length) {
+          console.warn('Bulk feature errors:', errors);
+        }
+      },
+    });
+  };
+
   const handleApprove = async (id, value) => {
     try {
       await updateTemplate(id, { is_approved: value });
@@ -825,6 +991,16 @@ function TemplateManagement() {
     try {
       await updateTemplate(id, { show_on_landing: value });
       showSnack(value ? '已设为首页展示' : '已取消首页展示');
+      load();
+    } catch (err) {
+      showSnack(err.message, 'error');
+    }
+  };
+
+  const handlePin = async (id, value) => {
+    try {
+      await updateTemplate(id, { is_pinned: value });
+      showSnack(value ? '已置顶（所有用户模板库优先显示）' : '已取消置顶');
       load();
     } catch (err) {
       showSnack(err.message, 'error');
@@ -908,27 +1084,71 @@ function TemplateManagement() {
 
   return (
     <Box>
-      <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center">
+      <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
         <Typography variant="h6">模板管理</Typography>
         <Box flex={1} />
+        <Tooltip title="对所有有图片的模板依次跑 L0 + Seg（跳过已完成，写入 R2 CSV）">
+          <span>
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={bulkFeat.active ? <CircularProgress size={16} color="inherit" /> : <AutoFixHigh />}
+              onClick={() => handleBulkFeatures({ runL0: true, runSeg: true })}
+              disabled={bulkFeat.active || seeding || loading}
+            >
+              一键提取全部 Features
+            </Button>
+          </span>
+        </Tooltip>
+        {bulkFeat.active && (
+          <Button
+            variant="outlined"
+            color="warning"
+            startIcon={<Stop />}
+            onClick={() => { bulkAbortRef.current = true; }}
+          >
+            停止
+          </Button>
+        )}
         <Tooltip title="导入本地内置模板到 Supabase">
           <Button
             variant="outlined"
             startIcon={seeding ? <CircularProgress size={16} /> : <CloudUpload />}
             onClick={handleOpenSeedConfirm}
-            disabled={seeding || seedPreviewLoading}
+            disabled={seeding || seedPreviewLoading || bulkFeat.active}
           >
             导入内置模板
           </Button>
         </Tooltip>
-        <Button startIcon={<Refresh />} onClick={load} disabled={loading}>
+        <Button startIcon={<Refresh />} onClick={load} disabled={loading || bulkFeat.active}>
           刷新
         </Button>
       </Stack>
 
-      {seedLog && (
-        <Alert severity="info" sx={{ mb: 2 }} onClose={() => setSeedLog('')}>
-          {seedLog}
+      {(seedLog || bulkFeat.log) && (
+        <Alert
+          severity={bulkFeat.active ? 'info' : 'info'}
+          sx={{ mb: 2 }}
+          onClose={bulkFeat.active ? undefined : () => {
+            setSeedLog('');
+            setBulkFeat((s) => ({ ...s, log: '' }));
+          }}
+        >
+          {bulkFeat.log || seedLog}
+          {bulkFeat.active && bulkFeat.imageTotal > 0 && (
+            <Box sx={{ mt: 1 }}>
+              <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
+                模板 {bulkFeat.templateIndex}/{bulkFeat.templateTotal}
+                {bulkFeat.templateName ? ` · ${bulkFeat.templateName}` : ''}
+                {' · '}
+                {(bulkFeat.phase || '').toUpperCase()} {bulkFeat.imageDone}/{bulkFeat.imageTotal}
+              </Typography>
+              <LinearProgress
+                variant="determinate"
+                value={(100 * bulkFeat.imageDone) / bulkFeat.imageTotal}
+              />
+            </Box>
+          )}
         </Alert>
       )}
 
@@ -946,6 +1166,7 @@ function TemplateManagement() {
                 <TemplateSortLabel column="submitter" label="提交者" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TemplateSortLabel column="category" label="分类" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TemplateSortLabel column="approved" label="已批准" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TemplateSortLabel column="pinned" label="置顶" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TemplateSortLabel column="landing" label="首页展示" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TemplateSortLabel column="images" label="图片" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TemplateSortLabel column="createdAt" label="提交时间" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
@@ -955,16 +1176,23 @@ function TemplateManagement() {
             <TableBody>
               {sortedTemplates.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={10} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     暂无模板数据
                   </TableCell>
                 </TableRow>
               )}
               {sortedTemplates.map(t => (
-                <TableRow key={t.id} hover>
+                <TableRow key={t.id} hover sx={t.is_pinned ? { bgcolor: 'warning.50' } : undefined}>
                   <TableCell>
-                    <Typography variant="body2" fontWeight={600}>{t.name}</Typography>
-                    <Typography variant="caption" color="text.secondary">{t.id}</Typography>
+                    <Stack direction="row" spacing={0.75} alignItems="center">
+                      {t.is_pinned && (
+                        <PushPin fontSize="small" color="warning" sx={{ transform: 'rotate(45deg)' }} />
+                      )}
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>{t.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{t.id}</Typography>
+                      </Box>
+                    </Stack>
                   </TableCell>
                   <TableCell align="center">
                     <Typography variant="body2">{t.year || '—'}</Typography>
@@ -982,6 +1210,17 @@ function TemplateManagement() {
                       onChange={e => handleApprove(t.id, e.target.checked)}
                       color="success"
                     />
+                  </TableCell>
+                  <TableCell align="center">
+                    <Tooltip title="置顶后，所有用户在编辑页模板库中优先看到此模板">
+                      <Switch
+                        size="small"
+                        checked={!!t.is_pinned}
+                        onChange={e => handlePin(t.id, e.target.checked)}
+                        color="warning"
+                        disabled={!t.is_approved}
+                      />
+                    </Tooltip>
                   </TableCell>
                   <TableCell align="center">
                     <Switch

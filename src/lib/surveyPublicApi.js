@@ -13,7 +13,7 @@ export async function countProjectResponses(projectId) {
   }
 }
 
-/** Anonymous RPC: per-image exposure / win stats for adaptive pairing. */
+/** Anonymous RPC: per-image exposure / win stats for balanced & adaptive sampling. */
 export async function fetchPairStats(projectId) {
   if (!supabase || !projectId) return null;
   try {
@@ -28,6 +28,7 @@ export async function fetchPairStats(projectId) {
         wins: Number(row.wins) || 0,
         losses: Number(row.losses) || 0,
         mu: row.mu != null ? Number(row.mu) : 25,
+        sigma: row.sigma != null ? Number(row.sigma) : null,
       };
     });
     return map;

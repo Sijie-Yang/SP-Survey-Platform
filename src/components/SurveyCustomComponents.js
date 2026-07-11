@@ -819,6 +819,26 @@ export function registerImageAnnotationWidget() {
 
 // ── Native response types (slider group / point allocation) ──────────────────
 
+function ensureSliderGroupMidDefaults(q) {
+  const dims = q.dimensions || [];
+  if (!dims.length) return;
+  const min = q.scaleMin ?? 1;
+  const max = q.scaleMax ?? 7;
+  const mid = Math.round((Number(min) + Number(max)) / 2);
+  const val = (q.value && typeof q.value === 'object' && !Array.isArray(q.value))
+    ? { ...q.value }
+    : {};
+  let changed = false;
+  dims.forEach((d) => {
+    if (!d?.id) return;
+    if (val[d.id] === undefined || val[d.id] === null || val[d.id] === '') {
+      val[d.id] = mid;
+      changed = true;
+    }
+  });
+  if (changed) q.value = val;
+}
+
 export function registerSliderGroupWidget() {
   class Q extends Question {
     getType() { return 'slidergroup'; }
@@ -841,6 +861,7 @@ export function registerSliderGroupWidget() {
 
   ReactQuestionFactory.Instance.registerQuestion('slidergroup', (props) => {
     const q = props.question;
+    ensureSliderGroupMidDefaults(q);
     return React.createElement(SliderGroupContent, {
       dimensions: q.dimensions || [],
       scaleMin: q.scaleMin ?? 1,
@@ -911,6 +932,7 @@ export function registerImageSliderGroupWidget() {
 
   ReactQuestionFactory.Instance.registerQuestion('imageslidergroup', (props) => {
     const q = props.question;
+    ensureSliderGroupMidDefaults(q);
     const urls = q.imageLinks?.length ? q.imageLinks : [];
     return React.createElement(ImageSliderGroupContent, {
       imageUrls: urls,

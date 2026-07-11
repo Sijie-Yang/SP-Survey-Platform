@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
-  Box, Button, ButtonGroup, Typography, FormControl, InputLabel, Select, MenuItem, Chip, TextField, CircularProgress, Alert,
+  Box, Button, ButtonGroup, Typography, FormControl, InputLabel, Select, MenuItem, Chip, TextField, CircularProgress, Alert, IconButton,
 } from '@mui/material';
+import { Check, Close } from '@mui/icons-material';
 import { runSam3, loadMaskUrlToCanvas, maskCanvasToPolygon } from '../lib/falInference';
 
 const TOOL_COLORS = {
@@ -73,7 +74,7 @@ function drawLabelTag(ctx, text, x, y, color) {
 }
 
 export function drawAnnotationShape(ctx, shape, w, h, {
-  color, alpha = 1, fillAlpha = 0.35, selected = false, showLabel = true,
+  color, alpha = 1, fillAlpha = 0.35, selected = false, showLabel = true, showVertices = false,
 } = {}) {
   const tool = inferShapeTool(shape);
   const pts = (shape.points || []).map((p) => ({ x: p.x * w, y: p.y * h }));
@@ -122,6 +123,18 @@ export function drawAnnotationShape(ctx, shape, w, h, {
     ctx.strokeStyle = baseColor;
     ctx.stroke();
     if (showLabel && shape.label) drawLabelTag(ctx, shape.label, pts[0].x, pts[0].y - 4, baseColor);
+  }
+
+  if (showVertices && pts.length) {
+    pts.forEach((p) => {
+      ctx.beginPath();
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = baseColor;
+      ctx.lineWidth = 2;
+      ctx.arc(p.x, p.y, selected ? 6 : 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
   }
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
@@ -187,6 +200,88 @@ function hitTestShape(shape, pt, w, h, thresholdPx = 8) {
   return false;
 }
 
+function hitTestVertex(shape, pt, w, h, thresholdPx = 10) {
+  const pts = shape?.points || [];
+  const px = { x: pt.x * w, y: pt.y * h };
+  for (let i = 0; i < pts.length; i += 1) {
+    if (dist(px, { x: pts[i].x * w, y: pts[i].y * h }) <= thresholdPx) return i;
+  }
+  return -1;
+}
+
+const BOX_HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+function bboxHandlePositions(box, w, h) {
+  const x1 = box.x1 * w;
+  const y1 = box.y1 * h;
+  const x2 = box.x2 * w;
+  const y2 = box.y2 * h;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  return {
+    nw: { x: x1, y: y1 },
+    n: { x: cx, y: y1 },
+    ne: { x: x2, y: y1 },
+    e: { x: x2, y: cy },
+    se: { x: x2, y: y2 },
+    s: { x: cx, y: y2 },
+    sw: { x: x1, y: y2 },
+    w: { x: x1, y: cy },
+  };
+}
+
+function hitTestBboxHandle(box, pt, w, h, thresholdPx = 10) {
+  const positions = bboxHandlePositions(box, w, h);
+  const px = { x: pt.x * w, y: pt.y * h };
+  for (const name of BOX_HANDLES) {
+    if (dist(px, positions[name]) <= thresholdPx) return name;
+  }
+  return null;
+}
+
+function applyBboxResize(box, handle, pt) {
+  let { x1, y1, x2, y2 } = box;
+  const x = Math.min(1, Math.max(0, pt.x));
+  const y = Math.min(1, Math.max(0, pt.y));
+  if (handle.includes('n')) y1 = y;
+  if (handle.includes('s')) y2 = y;
+  if (handle.includes('w')) x1 = x;
+  if (handle.includes('e')) x2 = x;
+  return {
+    x1: Math.min(x1, x2),
+    y1: Math.min(y1, y2),
+    x2: Math.max(x1, x2),
+    y2: Math.max(y1, y2),
+  };
+}
+
+function boxToPoints(box) {
+  return [
+    { x: box.x1, y: box.y1 },
+    { x: box.x2, y: box.y2 },
+  ];
+}
+
+function draftReady(draft) {
+  if (!draft?.points?.length) return false;
+  if (draft.tool === 'point') return draft.points.length >= 1;
+  if (draft.tool === 'line') return draft.points.length >= 2;
+  if (draft.tool === 'region') return draft.points.length >= 3;
+  if (draft.tool === 'bbox') return draft.points.length >= 2;
+  return false;
+}
+
+function draftCentroidPx(draft, w, h) {
+  const pts = draft?.points || [];
+  if (!pts.length || !w || !h) return { x: 16, y: 16 };
+  if (draft.tool === 'bbox' && pts.length >= 2) {
+    const box = bboxCorners(pts);
+    return { x: ((box.x1 + box.x2) / 2) * w, y: box.y2 * h + 8 };
+  }
+  const sx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+  const sy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+  return { x: sx * w, y: sy * h + 12 };
+}
 export default function ImageAnnotationCanvas({
   imageUrl,
   value,
@@ -206,25 +301,36 @@ export default function ImageAnnotationCanvas({
   const imgRef = useRef(null);
   const tools = allowedTools?.length ? allowedTools : ['point', 'line', 'region'];
   const [tool, setTool] = useState(tools[0] || 'point');
-  const [drawing, setDrawing] = useState([]);
+  const [draft, setDraft] = useState(null); // { tool, points } | null
+  const [drag, setDrag] = useState(null); // { mode, index?, handle?, startPt, origPoints, moved }
   const [shapes, setShapes] = useState(value?.shapes || []);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [imgError, setImgError] = useState(false);
   const [imgSrc, setImgSrc] = useState(imageUrl);
   const [selectedId, setSelectedId] = useState(null);
   const [activeLabel, setActiveLabel] = useState(annotationLabels?.[0] || '');
-  const [bboxDrag, setBboxDrag] = useState(null); // { start, current } normalized
   const [samMode, setSamMode] = useState(false);
   const [samPrompt, setSamPrompt] = useState('');
   const [samBusy, setSamBusy] = useState(false);
   const [samError, setSamError] = useState(null);
+
   const shapesRef = useRef(shapes);
   shapesRef.current = shapes;
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const dragRef = useRef(drag);
+  dragRef.current = drag;
+  const dimsRef = useRef(dims);
+  dimsRef.current = dims;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
   useEffect(() => {
     const incoming = (value?.shapes || []).map((s) => (s.id ? s : { ...s, id: newShapeId() }));
     setShapes(incoming);
-  }, [value]);
+  }, [value?.shapes]);
 
   useEffect(() => {
     if (!tools.includes(tool)) setTool(tools[0] || 'point');
@@ -240,6 +346,27 @@ export default function ImageAnnotationCanvas({
     setShapes(nextShapes);
     onChange?.({ image: imageUrl, shapes: nextShapes });
   }, [imageUrl, onChange]);
+
+  const cancelDraft = useCallback(() => {
+    setDraft(null);
+    setDrag(null);
+  }, []);
+
+  const confirmDraft = useCallback(() => {
+    const d = draftRef.current;
+    if (!draftReady(d)) return;
+    if (maxAnnotations > 0 && shapesRef.current.length >= maxAnnotations) return;
+    const shape = {
+      id: newShapeId(),
+      tool: d.tool,
+      points: d.points,
+      label: activeLabel || null,
+    };
+    setDraft(null);
+    setDrag(null);
+    setSelectedId(shape.id);
+    emitChange([...shapesRef.current, shape]);
+  }, [activeLabel, emitChange, maxAnnotations]);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -260,17 +387,37 @@ export default function ImageAnnotationCanvas({
         selected: s.id && s.id === selectedId,
       });
     });
-    if (drawing.length) {
-      drawAnnotationShape(ctx, { tool, points: drawing, label: activeLabel || null }, w, h, { alpha: 0.7 });
-    }
-    if (bboxDrag?.start && bboxDrag?.current) {
+
+    if (draft?.points?.length) {
       drawAnnotationShape(ctx, {
-        tool: 'bbox',
-        points: [bboxDrag.start, bboxDrag.current],
+        tool: draft.tool,
+        points: draft.points,
         label: activeLabel || null,
-      }, w, h, { alpha: 0.7 });
+      }, w, h, {
+        alpha: 0.75,
+        fillAlpha: 0.3,
+        selected: true,
+        showVertices: draft.tool !== 'bbox',
+      });
+
+      if (draft.tool === 'bbox' && draft.points.length >= 2) {
+        const box = bboxCorners(draft.points);
+        if (box) {
+          const positions = bboxHandlePositions(box, w, h);
+          BOX_HANDLES.forEach((name) => {
+            const p = positions[name];
+            ctx.beginPath();
+            ctx.fillStyle = '#fff';
+            ctx.strokeStyle = TOOL_COLORS.bbox;
+            ctx.lineWidth = 2;
+            ctx.rect(p.x - 4, p.y - 4, 8, 8);
+            ctx.fill();
+            ctx.stroke();
+          });
+        }
+      }
     }
-  }, [shapes, drawing, tool, selectedId, bboxDrag, activeLabel]);
+  }, [shapes, draft, selectedId, activeLabel]);
 
   useEffect(() => {
     redraw();
@@ -283,9 +430,8 @@ export default function ImageAnnotationCanvas({
     if (!imageUrl) return undefined;
     setImgError(false);
     setSelectedId(null);
-    setDrawing([]);
-    setBboxDrag(null);
-    // Keep showing previous frame until the next image is ready (avoids height jiggle)
+    setDraft(null);
+    setDrag(null);
     let cancelled = false;
     const probe = new window.Image();
     probe.onload = () => {
@@ -301,68 +447,34 @@ export default function ImageAnnotationCanvas({
     return () => { cancelled = true; };
   }, [imageUrl]);
 
-  const commitShape = (pts, shapeTool = tool) => {
-    if (!pts.length) return;
-    if (maxAnnotations > 0 && shapes.length >= maxAnnotations) return;
-    const shape = {
-      id: newShapeId(),
-      tool: shapeTool,
-      points: pts,
-      label: activeLabel || null,
-    };
-    const next = [...shapes, shape];
-    setDrawing([]);
-    setBboxDrag(null);
-    setSelectedId(shape.id);
-    emitChange(next);
-  };
-
   const canvasPoint = (e) => {
+    const { w, h } = dimsRef.current;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    return normalizePoint(x, y, dims.w, dims.h);
+    return normalizePoint(x, y, w, h);
   };
 
   const findHitShape = (pt) => {
-    // Top-most first
-    for (let i = shapes.length - 1; i >= 0; i -= 1) {
-      if (hitTestShape(shapes[i], pt, dims.w, dims.h)) return shapes[i];
+    const { w, h } = dimsRef.current;
+    const list = shapesRef.current;
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      if (hitTestShape(list[i], pt, w, h)) return list[i];
     }
     return null;
   };
 
-  const handleClick = (e) => {
-    if (readOnly || !dims.w || imgError) return;
-    if (tool === 'bbox') return; // handled by pointer drag
-    const pt = canvasPoint(e);
+  const switchTool = (next) => {
+    setTool(next);
+    setDraft(null);
+    setDrag(null);
+  };
 
-    if (samMode && enableSamAssist) {
-      runSamAtPoint(pt);
-      return;
-    }
-
-    // Selection mode when clicking existing shape without drawing mid-stroke
-    if (!drawing.length) {
-      const hit = findHitShape(pt);
-      if (hit) {
-        setSelectedId(hit.id || null);
-        return;
-      }
-      setSelectedId(null);
-    }
-
-    if (maxAnnotations > 0 && shapes.length >= maxAnnotations) return;
-
-    if (tool === 'point') {
-      commitShape([pt]);
-    } else if (tool === 'line') {
-      const next = [...drawing, pt];
-      setDrawing(next);
-      if (next.length >= 2) commitShape(next);
-    } else if (tool === 'region') {
-      setDrawing([...drawing, pt]);
-    }
+  const putSamPolygonInDraft = (poly) => {
+    if (!poly?.length) return;
+    setSelectedId(null);
+    setDraft({ tool: 'region', points: poly });
+    setDrag(null);
   };
 
   const runSamAtPoint = async (pt) => {
@@ -380,9 +492,39 @@ export default function ImageAnnotationCanvas({
       const canvas = await loadMaskUrlToCanvas(result.maskUrl);
       const poly = maskCanvasToPolygon(canvas, 6);
       if (poly.length < 3) throw new Error('Could not convert mask to polygon');
-      commitShape(poly, 'region');
+      putSamPolygonInDraft(poly);
     } catch (err) {
       setSamError(err.message || String(err));
+    } finally {
+      setSamBusy(false);
+    }
+  };
+
+  const runSamWithBox = async (start, end) => {
+    setSamBusy(true);
+    setSamError(null);
+    try {
+      const box = {
+        x1: Math.min(start.x, end.x),
+        y1: Math.min(start.y, end.y),
+        x2: Math.max(start.x, end.x),
+        y2: Math.max(start.y, end.y),
+      };
+      const result = await runSam3({
+        falKey: falKey || undefined,
+        projectId: projectId || undefined,
+        imageUrl,
+        prompt: samPrompt || undefined,
+        box,
+      });
+      if (!result.maskUrl) throw new Error('No mask returned from SAM3');
+      const canvas = await loadMaskUrlToCanvas(result.maskUrl);
+      const poly = maskCanvasToPolygon(canvas, 6);
+      if (poly.length < 3) throw new Error('Could not convert mask to polygon');
+      putSamPolygonInDraft(poly);
+    } catch (err) {
+      setSamError(err.message || String(err));
+      setDraft({ tool: 'bbox', points: [start, end] });
     } finally {
       setSamBusy(false);
     }
@@ -393,6 +535,11 @@ export default function ImageAnnotationCanvas({
       setSamError('Enter a text prompt (e.g. tree, car)');
       return;
     }
+    if (draftRef.current) {
+      setSamError('Confirm or cancel the current draft first');
+      return;
+    }
+    if (maxAnnotations > 0 && shapesRef.current.length >= maxAnnotations) return;
     setSamBusy(true);
     setSamError(null);
     try {
@@ -406,16 +553,7 @@ export default function ImageAnnotationCanvas({
       const canvas = await loadMaskUrlToCanvas(result.maskUrl);
       const poly = maskCanvasToPolygon(canvas, 6);
       if (poly.length < 3) throw new Error('Could not convert mask to polygon');
-      const label = activeLabel || samPrompt.trim();
-      const shape = {
-        id: newShapeId(),
-        tool: 'region',
-        points: poly,
-        label: label || null,
-      };
-      if (maxAnnotations > 0 && shapes.length >= maxAnnotations) return;
-      emitChange([...shapes, shape]);
-      setSelectedId(shape.id);
+      putSamPolygonInDraft(poly);
     } catch (err) {
       setSamError(err.message || String(err));
     } finally {
@@ -423,94 +561,181 @@ export default function ImageAnnotationCanvas({
     }
   };
 
-  const handleDblClick = () => {
-    if (readOnly || tool !== 'region' || drawing.length < 3) return;
-    commitShape(drawing);
-  };
-
   const handlePointerDown = (e) => {
-    if (readOnly || !dims.w || imgError || tool !== 'bbox') return;
-    if (maxAnnotations > 0 && shapes.length >= maxAnnotations) return;
+    if (readOnly || !dimsRef.current.w || imgError || samBusy) return;
+    if (samMode && enableSamAssist) return; // SAM uses click / bbox-up paths
     e.preventDefault();
     const pt = canvasPoint(e);
-    const hit = findHitShape(pt);
-    if (hit && !e.shiftKey) {
-      setSelectedId(hit.id || null);
-      return;
-    }
-    setSelectedId(null);
-    setBboxDrag({ start: pt, current: pt });
-    canvasRef.current?.setPointerCapture?.(e.pointerId);
-  };
+    const { w, h } = dimsRef.current;
+    const d = draftRef.current;
 
-  const handlePointerMove = (e) => {
-    if (!bboxDrag) return;
-    setBboxDrag({ ...bboxDrag, current: canvasPoint(e) });
-  };
+    if (d) {
+      if (d.tool === 'bbox' && d.points.length >= 2) {
+        const box = bboxCorners(d.points);
+        const handle = hitTestBboxHandle(box, pt, w, h);
+        if (handle) {
+          setDrag({ mode: 'resize', handle, startPt: pt, origPoints: d.points.map((p) => ({ ...p })), moved: false });
+          canvasRef.current?.setPointerCapture?.(e.pointerId);
+          return;
+        }
+        if (hitTestShape(d, pt, w, h)) {
+          setDrag({ mode: 'move', startPt: pt, origPoints: d.points.map((p) => ({ ...p })), moved: false });
+          canvasRef.current?.setPointerCapture?.(e.pointerId);
+          return;
+        }
+        return; // must confirm/cancel
+      }
 
-  const handlePointerUp = async (e) => {
-    if (!bboxDrag) return;
-    const end = canvasPoint(e);
-    const { start } = bboxDrag;
-    setBboxDrag(null);
-    const dx = Math.abs(end.x - start.x);
-    const dy = Math.abs(end.y - start.y);
-    if (dx < 0.005 && dy < 0.005) return;
-
-    // SAM box prompt when assist mode is on
-    if (samMode && enableSamAssist) {
-      setSamBusy(true);
-      setSamError(null);
-      try {
-        const box = {
-          x1: Math.min(start.x, end.x),
-          y1: Math.min(start.y, end.y),
-          x2: Math.max(start.x, end.x),
-          y2: Math.max(start.y, end.y),
-        };
-        const result = await runSam3({
-          falKey: falKey || undefined,
-          projectId: projectId || undefined,
-          imageUrl,
-          prompt: samPrompt || undefined,
-          box,
-        });
-        if (!result.maskUrl) throw new Error('No mask returned from SAM3');
-        const canvas = await loadMaskUrlToCanvas(result.maskUrl);
-        const poly = maskCanvasToPolygon(canvas, 6);
-        if (poly.length < 3) throw new Error('Could not convert mask to polygon');
-        commitShape(poly, 'region');
-      } catch (err) {
-        setSamError(err.message || String(err));
-        commitShape([start, end], 'bbox'); // fallback to hand-drawn box
-      } finally {
-        setSamBusy(false);
+      if (d.tool === 'point' || d.tool === 'line' || d.tool === 'region') {
+        const vi = hitTestVertex(d, pt, w, h);
+        if (vi >= 0) {
+          setDrag({ mode: 'vertex', index: vi, startPt: pt, origPoints: d.points.map((p) => ({ ...p })), moved: false });
+          canvasRef.current?.setPointerCapture?.(e.pointerId);
+          return;
+        }
+        if ((d.tool === 'line' || d.tool === 'region') && toolRef.current === d.tool) {
+          setDrag({ mode: 'pending-add', startPt: pt, origPoints: d.points.map((p) => ({ ...p })), moved: false });
+          canvasRef.current?.setPointerCapture?.(e.pointerId);
+          return;
+        }
+        return; // must confirm/cancel
       }
       return;
     }
 
-    commitShape([start, end], 'bbox');
+    const hit = findHitShape(pt);
+    if (hit) {
+      setSelectedId(hit.id || null);
+      return;
+    }
+    setSelectedId(null);
+    if (maxAnnotations > 0 && shapesRef.current.length >= maxAnnotations) return;
+
+    const t = toolRef.current;
+    if (t === 'point') {
+      setDraft({ tool: 'point', points: [pt] });
+    } else if (t === 'line' || t === 'region') {
+      setDraft({ tool: t, points: [pt] });
+    } else if (t === 'bbox') {
+      setDraft({ tool: 'bbox', points: [pt, pt] });
+      setDrag({ mode: 'draw-bbox', startPt: pt, origPoints: [pt, pt], moved: false });
+      canvasRef.current?.setPointerCapture?.(e.pointerId);
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    const cur = dragRef.current;
+    if (!cur) return;
+    const pt = canvasPoint(e);
+    const { w, h } = dimsRef.current;
+
+    if (cur.mode === 'vertex') {
+      setDraft((d) => {
+        if (!d) return d;
+        const pts = d.points.map((p) => ({ ...p }));
+        pts[cur.index] = pt;
+        return { ...d, points: pts };
+      });
+      setDrag({ ...cur, moved: true });
+    } else if (cur.mode === 'move') {
+      const dx = pt.x - cur.startPt.x;
+      const dy = pt.y - cur.startPt.y;
+      setDraft((d) => {
+        if (!d) return d;
+        return {
+          ...d,
+          points: cur.origPoints.map((p) => ({
+            x: Math.min(1, Math.max(0, p.x + dx)),
+            y: Math.min(1, Math.max(0, p.y + dy)),
+          })),
+        };
+      });
+      setDrag({ ...cur, moved: true });
+    } else if (cur.mode === 'resize') {
+      const box = bboxCorners(cur.origPoints);
+      const next = applyBboxResize(box, cur.handle, pt);
+      setDraft((d) => (d ? { ...d, points: boxToPoints(next) } : d));
+      setDrag({ ...cur, moved: true });
+    } else if (cur.mode === 'draw-bbox') {
+      setDraft({ tool: 'bbox', points: [cur.startPt, pt] });
+      setDrag({ ...cur, moved: true });
+    } else if (cur.mode === 'pending-add') {
+      const px = Math.hypot((pt.x - cur.startPt.x) * w, (pt.y - cur.startPt.y) * h);
+      if (px > 6) setDrag({ ...cur, moved: true });
+    }
+  };
+
+  const handlePointerUp = async (e) => {
+    const cur = dragRef.current;
+    if (!cur) return;
+    const pt = canvasPoint(e);
+
+    if (cur.mode === 'pending-add' && !cur.moved) {
+      setDraft((d) => {
+        if (!d) return d;
+        return { ...d, points: [...d.points, cur.startPt] };
+      });
+      setDrag(null);
+      return;
+    }
+
+    if (cur.mode === 'draw-bbox') {
+      const start = cur.startPt;
+      const end = pt;
+      const dx = Math.abs(end.x - start.x);
+      const dy = Math.abs(end.y - start.y);
+      setDrag(null);
+      if (dx < 0.005 && dy < 0.005) {
+        setDraft(null);
+        return;
+      }
+      if (samMode && enableSamAssist) {
+        setDraft(null);
+        await runSamWithBox(start, end);
+        return;
+      }
+      setDraft({ tool: 'bbox', points: [start, end] });
+      return;
+    }
+
+    setDrag(null);
+  };
+
+  const handleClick = (e) => {
+    if (readOnly || !dimsRef.current.w || imgError || samBusy) return;
+    if (!(samMode && enableSamAssist)) return;
+    if (draftRef.current) {
+      setSamError('Confirm or cancel the current draft first');
+      return;
+    }
+    if (maxAnnotations > 0 && shapesRef.current.length >= maxAnnotations) return;
+    const pt = canvasPoint(e);
+    runSamAtPoint(pt);
   };
 
   const undo = () => {
-    const next = shapes.slice(0, -1);
+    if (draftRef.current) {
+      cancelDraft();
+      return;
+    }
+    const next = shapesRef.current.slice(0, -1);
     setSelectedId(null);
     emitChange(next);
   };
 
   const clear = () => {
     setSelectedId(null);
-    setDrawing([]);
-    setBboxDrag(null);
+    setDraft(null);
+    setDrag(null);
     emitChange([]);
   };
 
   const deleteSelected = useCallback(() => {
-    if (!selectedId) return;
-    const next = shapesRef.current.filter((s) => s.id !== selectedId);
+    if (!selectedIdRef.current) return;
+    const next = shapesRef.current.filter((s) => s.id !== selectedIdRef.current);
     setSelectedId(null);
     emitChange(next);
-  }, [selectedId, emitChange]);
+  }, [emitChange]);
 
   const updateSelectedLabel = (label) => {
     if (!selectedId) return;
@@ -521,25 +746,58 @@ export default function ImageAnnotationCanvas({
   useEffect(() => {
     if (readOnly) return undefined;
     const onKey = (e) => {
+      const tag = (e.target?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setDraft(null);
+        setDrag(null);
+        setSelectedId(null);
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (draftReady(draftRef.current)) {
+          e.preventDefault();
+          confirmDraft();
+        }
+        return;
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        const tag = (e.target?.tagName || '').toLowerCase();
-        if (tag === 'input' || tag === 'textarea') return;
-        if (selectedId) {
+        if (draftRef.current) {
+          e.preventDefault();
+          setDraft(null);
+          setDrag(null);
+          return;
+        }
+        if (selectedIdRef.current) {
           e.preventDefault();
           deleteSelected();
         }
       }
-      if (e.key === 'Escape') {
-        setDrawing([]);
-        setBboxDrag(null);
-        setSelectedId(null);
-      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [readOnly, selectedId, deleteSelected]);
+  }, [readOnly, confirmDraft, deleteSelected]);
 
   const selectedShape = shapes.find((s) => s.id === selectedId);
+  const showDraftUi = !readOnly && !!draft?.points?.length && dims.w > 0 && !imgError;
+  const confirmPos = showDraftUi ? draftCentroidPx(draft, dims.w, dims.h) : null;
+  const canConfirm = draftReady(draft);
+
+  const toolHint = (() => {
+    if (draft) {
+      if (draft.tool === 'line') return 'Click to add more points · drag vertices to edit · ✓ confirm · ✕ discard';
+      if (draft.tool === 'region') return 'Click to add vertices · drag to edit · ✓ confirm (≥3) · ✕ discard';
+      if (draft.tool === 'bbox') return 'Drag body to move · handles to resize · ✓ confirm · ✕ discard';
+      if (draft.tool === 'point') return 'Drag to adjust · ✓ confirm · ✕ discard';
+    }
+    if (tool === 'point') return 'Click to place a point, then ✓ to confirm';
+    if (tool === 'line') return 'Click to add polyline points, then ✓ to confirm (Esc cancels)';
+    if (tool === 'region') return 'Click to add polygon vertices, then ✓ to confirm (no double-click)';
+    if (tool === 'bbox') return 'Drag to draw a box, then ✓ to confirm';
+    return '';
+  })();
 
   return (
     <Box
@@ -550,34 +808,29 @@ export default function ImageAnnotationCanvas({
         <Box sx={{ mb: 1, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
           <ButtonGroup size="small">
             {tools.includes('point') && (
-              <Button variant={tool === 'point' ? 'contained' : 'outlined'} onClick={() => { setTool('point'); setDrawing([]); setBboxDrag(null); }}>Point</Button>
+              <Button variant={tool === 'point' ? 'contained' : 'outlined'} onClick={() => switchTool('point')}>Point</Button>
             )}
             {tools.includes('line') && (
-              <Button variant={tool === 'line' ? 'contained' : 'outlined'} onClick={() => { setTool('line'); setDrawing([]); setBboxDrag(null); }}>Line</Button>
+              <Button variant={tool === 'line' ? 'contained' : 'outlined'} onClick={() => switchTool('line')}>Line</Button>
             )}
             {tools.includes('region') && (
-              <Button variant={tool === 'region' ? 'contained' : 'outlined'} onClick={() => { setTool('region'); setDrawing([]); setBboxDrag(null); }}>Region</Button>
+              <Button variant={tool === 'region' ? 'contained' : 'outlined'} onClick={() => switchTool('region')}>Region</Button>
             )}
             {tools.includes('bbox') && (
-              <Button variant={tool === 'bbox' ? 'contained' : 'outlined'} onClick={() => { setTool('bbox'); setDrawing([]); setBboxDrag(null); }}>Box</Button>
+              <Button variant={tool === 'bbox' ? 'contained' : 'outlined'} onClick={() => switchTool('bbox')}>Box</Button>
             )}
           </ButtonGroup>
-          <Button size="small" onClick={undo} disabled={!shapes.length}>Undo</Button>
-          <Button size="small" color="error" onClick={clear} disabled={!shapes.length}>Clear</Button>
-          <Button size="small" color="error" onClick={deleteSelected} disabled={!selectedId}>Delete</Button>
+          <Button size="small" onClick={undo} disabled={!shapes.length && !draft}>Undo</Button>
+          <Button size="small" color="error" onClick={clear} disabled={!shapes.length && !draft}>Clear</Button>
+          <Button size="small" color="error" onClick={deleteSelected} disabled={!selectedId || !!draft}>Delete</Button>
           {(minAnnotations > 0 || maxAnnotations > 0) && (
             <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
               Annotations: {shapes.length}{maxAnnotations > 0 ? ` / ${maxAnnotations}` : ''}{minAnnotations > 0 ? ` (min ${minAnnotations})` : ''}
             </Typography>
           )}
-          {tool === 'region' && (
+          {toolHint && (
             <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-              Double-click to close polygon
-            </Typography>
-          )}
-          {tool === 'bbox' && (
-            <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-              Drag to draw a box
+              {toolHint}
             </Typography>
           )}
           {enableSamAssist && (
@@ -586,7 +839,7 @@ export default function ImageAnnotationCanvas({
               variant={samMode ? 'contained' : 'outlined'}
               color="secondary"
               disabled={samBusy}
-              onClick={() => { setSamMode((v) => !v); setDrawing([]); setBboxDrag(null); }}
+              onClick={() => { setSamMode((v) => !v); setDraft(null); setDrag(null); }}
             >
               {samBusy ? 'SAM…' : (samMode ? 'SAM on' : 'SAM')}
             </Button>
@@ -609,7 +862,7 @@ export default function ImageAnnotationCanvas({
           {samBusy && <CircularProgress size={18} />}
           {samMode && (
             <Typography variant="caption" color="text.secondary">
-              Click for point · drag bbox tool for box · or use text prompt
+              Click for point · drag box tool for box · result stays editable until ✓ · Esc cancels
             </Typography>
           )}
           {samError && <Alert severity="warning" sx={{ py: 0 }} onClose={() => setSamError(null)}>{samError}</Alert>}
@@ -675,35 +928,71 @@ export default function ImageAnnotationCanvas({
             <Button size="small" onClick={() => { setImgError(false); setImgSrc(`${imageUrl}${imageUrl.includes('?') ? '&' : '?'}retry=${Date.now()}`); }}>Retry</Button>
           </Box>
         ) : (
-        <img
-          ref={imgRef}
-          src={imgSrc}
-          alt="annotate"
-          style={{ maxWidth: '100%', display: 'block', borderRadius: 8 }}
-          onLoad={redraw}
-          onError={() => setImgError(true)}
-        />
+          <img
+            ref={imgRef}
+            src={imgSrc}
+            alt="annotate"
+            style={{ maxWidth: '100%', display: 'block', borderRadius: 8 }}
+            onLoad={redraw}
+            onError={() => setImgError(true)}
+          />
         )}
         {!imgError && (
-        <canvas
-          ref={canvasRef}
-          onClick={handleClick}
-          onDoubleClick={handleDblClick}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          style={{
-            position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-            cursor: readOnly ? 'default' : 'crosshair',
-            touchAction: 'none',
-          }}
-        />
+          <canvas
+            ref={canvasRef}
+            onClick={handleClick}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={() => setDrag(null)}
+            style={{
+              position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+              cursor: readOnly ? 'default' : 'crosshair',
+              touchAction: 'none',
+            }}
+          />
+        )}
+        {showDraftUi && confirmPos && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: Math.min(dims.w - 76, Math.max(4, confirmPos.x - 36)),
+              top: Math.min(dims.h - 36, Math.max(4, confirmPos.y)),
+              display: 'flex',
+              gap: 0.5,
+              zIndex: 3,
+              bgcolor: 'rgba(255,255,255,0.92)',
+              borderRadius: 1,
+              boxShadow: 1,
+              p: 0.25,
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <IconButton
+              size="small"
+              color="success"
+              aria-label="Confirm annotation"
+              onClick={confirmDraft}
+              disabled={!canConfirm}
+              title={canConfirm ? 'Confirm' : 'Add more points first'}
+            >
+              <Check fontSize="small" />
+            </IconButton>
+            <IconButton
+              size="small"
+              color="error"
+              aria-label="Discard annotation"
+              onClick={cancelDraft}
+              title="Discard"
+            >
+              <Close fontSize="small" />
+            </IconButton>
+          </Box>
         )}
       </Box>
     </Box>
   );
 }
-
 /** Overlay multiple participants' annotations on one image (for ResultsAnalysis). */
 export function AnnotationOverlay({ imageUrl, annotations, width = 500, labelFilter = null }) {
   const canvasRef = useRef(null);

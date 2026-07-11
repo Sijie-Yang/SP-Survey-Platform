@@ -2541,7 +2541,17 @@ app.get('/api/r2/image-proxy', async (req, res) => {
     const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
     const buf = Buffer.from(await upstream.arrayBuffer());
     res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'private, max-age=300');
+    // Images can be cached briefly; CSV/JSON feature sidecars must not — batch
+    // L0/Seg jobs re-read them between flushes and stale cache truncates results.
+    const pathLower = parsed.pathname.toLowerCase();
+    const isMutableSidecar =
+      /text\/csv|application\/json|text\/plain/i.test(contentType)
+      || pathLower.endsWith('.csv')
+      || pathLower.endsWith('.json');
+    res.setHeader(
+      'Cache-Control',
+      isMutableSidecar ? 'no-store' : 'private, max-age=300',
+    );
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.send(buf);
   } catch (error) {

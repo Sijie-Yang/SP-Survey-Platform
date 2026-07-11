@@ -1029,10 +1029,26 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       const batches = Math.ceil(totalImages / batchSize);
       let newCount = 0;
       let skipCount = 0;
+      let failCount = 0;
+      let lastFailReason = null;
 
       // Sanitize an HF filename so it's safe to use as an R2 key segment.
       // Matches the rule used by the direct-upload path.
       const safeKey = (name) => name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+      // Only attach the HF bearer token to Hub resolve URLs that actually
+      // need it (gated datasets). Signed CDN / datasets-server cached-asset
+      // URLs already carry auth in the query string — adding Authorization
+      // forces a CORS preflight that CloudFront rejects with 403, so every
+      // download fails with "Failed to fetch" in the browser.
+      const fetchOptsForHfImage = (imgUrl) => {
+        const token = hfConfig.token && hfConfig.token.trim();
+        if (!token || !imgUrl) return undefined;
+        if (/[?&](?:Expires|Signature|Key-Pair-Id)=/i.test(imgUrl)) return undefined;
+        if (/datasets-server\.huggingface\.co/i.test(imgUrl)) return undefined;
+        if (!/^https:\/\/(?:[a-z0-9-]+\.)*huggingface\.co\//i.test(imgUrl)) return undefined;
+        return { headers: { Authorization: `Bearer ${token}` } };
+      };
 
       for (let b = 0; b < batches; b++) {
         const offset = b * batchSize;
@@ -1055,6 +1071,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
         const result = await getImagesFromHuggingFace(hfConfig.token, hfConfig.datasetName, limit, offset);
         if (!result.success || !result.images) throw new Error(result.error || 'Failed to fetch images');
+        if (!result.images.length) {
+          failCount += limit;
+          lastFailReason = `HuggingFace returned 0 images for offset ${offset}`;
+          continue;
+        }
 
         for (let k = 0; k < result.images.length; k++) {
           const gi = offset + k;
@@ -1067,26 +1088,36 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           if (existingFileNames.has(fname)) { skipCount++; continue; }
 
           try {
-            // Gated datasets serve their "permanent" image URLs from
-            // huggingface.co/datasets/.../resolve/main/... which 401s
-            // without an Authorization header. Signed CDN URLs already
-            // carry auth in the query string, so we only attach the
-            // bearer token when the request actually targets huggingface.co.
             const imgUrl = result.images[k].url;
-            const fetchOpts = (hfConfig.token && hfConfig.token.trim() && /^https:\/\/(?:[a-z0-9-]+\.)*huggingface\.co\//i.test(imgUrl))
-              ? { headers: { Authorization: `Bearer ${hfConfig.token.trim()}` } }
-              : undefined;
-            const resp = await fetch(imgUrl, fetchOpts);
-            if (!resp.ok) continue;
+            if (!imgUrl) {
+              failCount++;
+              lastFailReason = `Missing image URL for ${fname}`;
+              continue;
+            }
+            const resp = await fetch(imgUrl, fetchOptsForHfImage(imgUrl));
+            if (!resp.ok) {
+              failCount++;
+              lastFailReason = `Download HTTP ${resp.status} for ${fname}`;
+              continue;
+            }
             const blob = await resp.blob();
+            // datasets-server often serves images as binary/octet-stream;
+            // normalize so R2/content-type and the compressor stay consistent.
+            const mime = (blob.type && blob.type !== 'binary/octet-stream')
+              ? blob.type
+              : 'image/jpeg';
             // Run HF-fetched images through the same ≤300KB compressor used
             // for direct uploads, so every R2 object served to participants
             // is on the same size/quality budget regardless of source.
-            const wrapped = new File([blob], fname, { type: blob.type || 'image/jpeg' });
+            const wrapped = new File([blob], fname, { type: mime });
             const compressed = await compressImage(wrapped);
             const r2Key = `${projectPrefix}/${fname}`;
             const uploadResult = await uploadImageToR2(compressed, r2Key);
-            if (!uploadResult.success) continue;
+            if (!uploadResult.success) {
+              failCount++;
+              lastFailReason = uploadResult.error || `R2 upload failed for ${fname}`;
+              continue;
+            }
             // Track the filename we used so a re-run skips it from
             // existingFileNames without an extra R2 list round-trip.
             existingFileNames.add(fname);
@@ -1109,7 +1140,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                 preloadedSource: 'r2',
               });
             }
-          } catch {}
+          } catch (err) {
+            failCount++;
+            lastFailReason = err?.message || String(err);
+            console.error('HF preload image failed:', fname, err);
+          }
         }
       }
 
@@ -1122,10 +1157,20 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       };
       onProjectUpdate(updatedProject);
 
-      setPreloadStatus({
-        loading: false, progress: allImages.length, total: totalImages, error: null,
-        success: `Completed! ${allImages.length} images available (${newCount} new, ${skipCount} skipped).`,
-      });
+      const failNote = failCount > 0
+        ? ` ${failCount} failed${lastFailReason ? ` (last: ${lastFailReason})` : ''}.`
+        : '';
+      if (newCount === 0 && failCount > 0 && allImages.length === 0) {
+        setPreloadStatus({
+          loading: false, progress: 0, total: totalImages, success: null,
+          error: `Preload finished with 0 images uploaded (${failCount} failed).${lastFailReason ? ` Last error: ${lastFailReason}` : ''}`,
+        });
+      } else {
+        setPreloadStatus({
+          loading: false, progress: allImages.length, total: totalImages, error: null,
+          success: `Completed! ${allImages.length} images available (${newCount} new, ${skipCount} skipped).${failNote}`,
+        });
+      }
     } catch (error) {
       setPreloadStatus({ loading: false, progress: 0, total: 0, error: error.message, success: null });
     }
