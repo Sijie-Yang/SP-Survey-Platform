@@ -125,6 +125,13 @@ export default function LandingPage() {
       {/* ── Hero ── */}
       <Box sx={{ bgcolor: 'primary.main', color: 'white', py: { xs: 6, md: 10 }, textAlign: 'center' }}>
         <Container maxWidth="md">
+          <Box
+            component="img"
+            src="/logo-centre.png"
+            alt="SP-Survey"
+            sx={{ height: { xs: 120, md: 180 }, objectFit: 'contain', mb: 3 }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
           <Typography variant="h3" fontWeight={800} sx={{ mb: 2, fontSize: { xs: '2rem', md: '2.8rem' }, letterSpacing: '-0.02em' }}>
             Streetscape Perception Survey
           </Typography>
