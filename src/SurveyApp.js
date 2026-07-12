@@ -22,6 +22,7 @@ import {
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
 import { getProjectLiveAccess, formatLiveWindow } from './lib/liveSurveyManager';
+import { enrichSurveyResponses } from './lib/enrichSurveyResponses';
 
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
@@ -192,6 +193,8 @@ export default function SurveyApp() {
         surveyData: { ...model.data },
         currentPageNo: model.currentPageNo,
         displayedImages: { ...imageTracker },
+        displayedMediaGroups: { ...(displayedMediaGroupsRef.current || {}) },
+        displayedMediaCategories: { ...(displayedMediaCategoriesRef.current || {}) },
         finalSurveyJson: JSON.parse(JSON.stringify(finalSurveyJson)),
       });
     }, 800);
@@ -972,42 +975,19 @@ export default function SurveyApp() {
           surveyQuestionTypeMap[question.name] = question.getType();
         });
 
-        const mapImageChoiceAnswerToNames = (answerValue, shownImages) => {
-          if (!shownImages || shownImages.length === 0) return answerValue;
-
-          const mapSingleValue = (value) => {
-            if (typeof value !== 'string') return value;
-            const match = value.match(/^image_(\d+)$/);
-            if (!match) return value;
-            const imageIndex = parseInt(match[1], 10);
-            return shownImages[imageIndex] || value;
-          };
-
-          if (Array.isArray(answerValue)) {
-            return answerValue.map(mapSingleValue);
-          }
-          return mapSingleValue(answerValue);
-        };
-
-        const enrichedResponses = Object.entries(responses).reduce((acc, [questionName, answerValue]) => {
-          const shownImages = displayedImages[questionName] || [];
-          const mappedAnswer = mapImageChoiceAnswerToNames(answerValue, shownImages);
-          acc[questionName] = {
-            type: surveyQuestionTypeMap[questionName] || null,
-            answer: mappedAnswer,
-            shown_images: shownImages,
-            shown_media_ids: (shownImages || []).map((u) => {
-              if (!u) return null;
-              const pool = projectData?.preloadedImages || [];
-              const hit = pool.find((img) => img.url === u || img.name === u);
-              return hit?.media_id || hit?.key || String(u).split('?')[0].split('/').pop() || u;
-            }).filter(Boolean),
-            shown_media_set: displayedMediaGroups[questionName] || null,
-            shown_media_group: displayedMediaGroups[questionName] || null,
-            shown_media_categories: displayedMediaCategories[questionName] || null,
-          };
-          return acc;
-        }, {});
+        const {
+          enrichedResponses,
+          displayed_images,
+          displayed_media_groups,
+          displayed_media_categories,
+        } = enrichSurveyResponses({
+          responses,
+          questionTypeMap: surveyQuestionTypeMap,
+          displayedImages,
+          displayedMediaGroups,
+          displayedMediaCategories,
+          preloadedImages: projectData?.preloadedImages || [],
+        });
         
         // Check Supabase configuration before saving
         const currentSupabaseConfig = sessionStorage.getItem('supabase_config');
@@ -1031,9 +1011,9 @@ export default function SurveyApp() {
           participant_id: participantId,
           responses: enrichedResponses,
           raw_responses: responses,
-          displayed_images: displayedImages,
-          displayed_media_groups: displayedMediaGroups,
-          displayed_media_categories: displayedMediaCategories,
+          displayed_images,
+          displayed_media_groups,
+          displayed_media_categories,
           survey_metadata: {
             completion_time: new Date().toISOString(),
             completion_code: completionCode,
@@ -1105,8 +1085,17 @@ export default function SurveyApp() {
           model.currentPageNo = existingDraft.draft.currentPageNo;
         }
         if (existingDraft.draft.displayedImages) {
+          Object.keys(imageTracker).forEach((k) => delete imageTracker[k]);
           Object.assign(imageTracker, existingDraft.draft.displayedImages);
           displayedImagesRef.current = existingDraft.draft.displayedImages;
+        }
+        if (existingDraft.draft.displayedMediaGroups) {
+          Object.keys(mediaGroupTracker).forEach((k) => delete mediaGroupTracker[k]);
+          Object.assign(mediaGroupTracker, existingDraft.draft.displayedMediaGroups);
+        }
+        if (existingDraft.draft.displayedMediaCategories) {
+          Object.keys(mediaCategoryTracker).forEach((k) => delete mediaCategoryTracker[k]);
+          Object.assign(mediaCategoryTracker, existingDraft.draft.displayedMediaCategories);
         }
         if (existingDraft.draft.participantId) {
           participantIdRef.current = existingDraft.draft.participantId;
@@ -1340,6 +1329,8 @@ export default function SurveyApp() {
               model.currentPageNo = 0;
               Object.keys(imageTracker).forEach((k) => delete imageTracker[k]);
               displayedImagesRef.current = imageTracker;
+              displayedMediaGroupsRef.current = {};
+              displayedMediaCategoriesRef.current = {};
               setDisplayedImagesMap(imageTracker);
               setSurveyModel(model);
               setSurveyPhase('active');
@@ -1357,9 +1348,16 @@ export default function SurveyApp() {
                 model.currentPageNo = draft.currentPageNo;
               }
               if (draft.displayedImages) {
+                Object.keys(imageTracker).forEach((k) => delete imageTracker[k]);
                 Object.assign(imageTracker, draft.displayedImages);
                 displayedImagesRef.current = draft.displayedImages;
               }
+              displayedMediaGroupsRef.current = {
+                ...(draft.displayedMediaGroups || {}),
+              };
+              displayedMediaCategoriesRef.current = {
+                ...(draft.displayedMediaCategories || {}),
+              };
               if (draft.participantId) {
                 participantIdRef.current = draft.participantId;
               }

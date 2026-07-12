@@ -139,11 +139,12 @@ export default function SurveyPreview({ config, currentProject }) {
                       result = {
                         success: true,
                         images: selectedImages,
-                        groupId: assignment.groupId,
+                        setId: assignment.setId || assignment.groupId,
+                        groupId: assignment.setId || assignment.groupId,
                         categories: assignment.categories,
                         _assigned: true,
                       };
-                      console.log(`✅ Preview: Selected ${selectedImages.length} media file(s) from preloaded pool${assignment.groupId ? ` (group: ${assignment.groupId})` : ''}${assignment.categories?.length ? ` (categories: ${assignment.categories.join(', ')})` : ''}`);
+                      console.log(`✅ Preview: Selected ${selectedImages.length} media file(s) from preloaded pool${(assignment.setId || assignment.groupId) ? ` (set: ${assignment.setId || assignment.groupId})` : ''}${assignment.categories?.length ? ` (categories: ${assignment.categories.join(', ')})` : ''}`);
                     }
                     // PRIORITY 2: Use global imageDatasetConfig if available
                     else if (currentProject?.imageDatasetConfig?.enabled && currentProject.imageDatasetConfig.datasetName) {
@@ -193,7 +194,14 @@ export default function SurveyPreview({ config, currentProject }) {
                       if (supabaseResult.success && supabaseResult.images.length > 0) {
                         const pool = filterPoolForQuestion(supabaseResult.images, element);
                         const assignment = finalizeMediaSelection(element, pool);
-                        result = { success: true, images: assignment.images, groupId: assignment.groupId, categories: assignment.categories, _assigned: true };
+                        result = {
+                          success: true,
+                          images: assignment.images,
+                          setId: assignment.setId || assignment.groupId,
+                          groupId: assignment.setId || assignment.groupId,
+                          categories: assignment.categories,
+                          _assigned: true,
+                        };
                       } else {
                         result = supabaseResult;
                       }
@@ -209,7 +217,7 @@ export default function SurveyPreview({ config, currentProject }) {
                     
                     if (result?.success && result.images.length > 0) {
                       let selectedImages = result.images;
-                      let groupId = result.groupId || null;
+                      let setId = result.setId || result.groupId || null;
                       let categories = result.categories || null;
                       if (!result._assigned) {
                         const assignment = finalizeMediaSelection(
@@ -218,12 +226,15 @@ export default function SurveyPreview({ config, currentProject }) {
                           usesSetMediaAssignment(element) ? null : result.images,
                         );
                         selectedImages = assignment.images;
-                        groupId = assignment.groupId;
+                        setId = assignment.setId || assignment.groupId;
                         categories = assignment.categories;
                       }
-                      if (groupId) element.assignedMediaGroupId = groupId;
+                      if (setId) {
+                        element.assignedMediaSetId = setId;
+                        element.assignedMediaGroupId = setId;
+                      }
                       if (categories?.length) element.assignedMediaCategories = categories;
-                      mediaAssignmentLog.push(buildMediaAssignmentLogEntry(element, selectedImages, groupId, categories));
+                      mediaAssignmentLog.push(buildMediaAssignmentLogEntry(element, selectedImages, setId, categories));
                       applyMediaToElement(element, selectedImages);
                       console.log(`Preview loaded ${selectedImages.length} random media for question: ${element.name}`);
                     } else if (element.type === 'skillquestion') {
@@ -545,7 +556,7 @@ export default function SurveyPreview({ config, currentProject }) {
               This preview&apos;s media assignment (simulated participant draw)
             </Typography>
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-              Refresh preview to re-roll random sets. Group mode shows which <strong>group ID</strong> was picked per question.
+              Refresh preview to re-roll random sets. Set mode shows which <strong>set ID</strong> was picked per question.
             </Typography>
             <TableContainer component={Paper} variant="outlined">
               <Table size="small">
@@ -553,7 +564,7 @@ export default function SurveyPreview({ config, currentProject }) {
                   <TableRow sx={{ '& th': { fontWeight: 700 } }}>
                     <TableCell>Question</TableCell>
                     <TableCell>Mode</TableCell>
-                    <TableCell>Group ID</TableCell>
+                    <TableCell>Set ID</TableCell>
                     <TableCell>Categories</TableCell>
                     <TableCell>Assigned files</TableCell>
                   </TableRow>
@@ -569,13 +580,13 @@ export default function SurveyPreview({ config, currentProject }) {
                         <Chip
                           size="small"
                           label={row.mode === 'group' || row.mode === 'set' ? 'Fixed set' : row.mode === 'category' ? 'Per category' : 'Individual'}
-                          color={row.mode === 'group' || row.mode === 'category' ? 'primary' : 'default'}
+                          color={row.mode === 'set' || row.mode === 'group' || row.mode === 'category' ? 'primary' : 'default'}
                           variant="outlined"
                         />
                       </TableCell>
                       <TableCell>
-                        {row.groupId ? (
-                          <Typography variant="body2" fontWeight={600} color="primary.main">{row.groupId}</Typography>
+                        {(row.setId || row.groupId) ? (
+                          <Typography variant="body2" fontWeight={600} color="primary.main">{row.setId || row.groupId}</Typography>
                         ) : (
                           <Typography variant="caption" color="text.secondary">—</Typography>
                         )}

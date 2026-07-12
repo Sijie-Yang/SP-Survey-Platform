@@ -43,6 +43,8 @@
     "dev:safe": "concurrently \"npm run server:watch\" \"npm start\"",
     "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
+    "test:ci": "cross-env CI=true react-scripts test --watchAll=false",
+    "test:media-pipeline": "node scripts/test-media-set-category.mjs",
     "eject": "react-scripts eject",
     "deploy": "npm run build && wrangler deploy",
     "preview": "npm run build && wrangler dev"

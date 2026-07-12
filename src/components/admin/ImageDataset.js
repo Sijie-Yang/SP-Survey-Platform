@@ -137,10 +137,6 @@ async function copyTemplateImagesWithRealProgress(todo, setStatus) {
   return { copiedImages, errors, completed: progressRef.current };
 }
 
-function safeR2Name(name = '') {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
 function mediaEntryKey(entry, userId, projectId) {
   const prefix = projectR2Prefix(userId, projectId);
   if (!prefix) return null;
@@ -157,7 +153,16 @@ function mediaEntryKey(entry, userId, projectId) {
     if (isTemplateR2Key(fromUrl)) return null;
   }
   if (!entry?.name) return null;
-  return `${prefix}${safeR2Name(entry.name)}`;
+  // Nested folders must keep their relative path; basename-only keys collide.
+  return buildProjectMediaKey(prefix, entry.folder || '', entry.name);
+}
+
+function mediaEntryIdentity(entry, userId, projectId) {
+  return getMediaId(entry)
+    || mediaEntryKey(entry, userId, projectId)
+    || entry?.url
+    || entry?.name
+    || null;
 }
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
@@ -348,12 +353,19 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             }
           }
 
-          const removeNames = new Set(entries.map((e) => e.name));
-          const remaining = (currentProject.preloadedImages || []).filter((m) => !removeNames.has(m.name));
+          const removeIds = new Set(
+            entries.map((entry) => mediaEntryIdentity(entry, userId, projectId)).filter(Boolean),
+          );
+          const remaining = (currentProject.preloadedImages || []).filter((m) => {
+            const id = mediaEntryIdentity(m, userId, projectId);
+            return !id || !removeIds.has(id);
+          });
           persistPreloadedImages(remaining);
           setSelectedMedia((prev) => {
             const next = new Set(prev);
-            removeNames.forEach((n) => next.delete(n));
+            entries.forEach((entry) => {
+              if (entry?.name) next.delete(entry.name);
+            });
             return next;
           });
           setMediaActionStatus({
@@ -1278,6 +1290,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           preloadedImages: [],
           preloadedAt: null,
           preloadedSource: null,
+          imageDatasetConfig: {
+            ...(currentProject.imageDatasetConfig || {}),
+            mediaFolderTags: {},
+            mediaFolders: [],
+          },
         };
         onProjectUpdate(updatedProject);
         setSelectedMedia(new Set());

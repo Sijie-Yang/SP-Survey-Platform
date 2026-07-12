@@ -190,3 +190,34 @@ export function r2NotConfiguredError(env) {
 export function publicBaseUrl(env) {
   return String(env.R2_PUBLIC_URL || '').replace(/\/$/, '');
 }
+
+export function isTemplateR2Key(key) {
+  return typeof key === 'string' && key.startsWith('templates/');
+}
+
+/**
+ * Only allow deletes under an explicit prefix.
+ * Template keys (`templates/…`) are blocked unless allowTemplateKeys=true.
+ * Mirrors src/lib/r2.js so Pages Functions cannot rely on client filtering alone.
+ */
+export function filterDeletableR2Keys(keys, {
+  allowedPrefix = null,
+  allowTemplateKeys = false,
+} = {}) {
+  const out = [];
+  const skipped = [];
+  for (const raw of keys || []) {
+    const key = String(raw || '').replace(/^\/+/, '');
+    if (!key) continue;
+    if (!allowTemplateKeys && isTemplateR2Key(key)) {
+      skipped.push(key);
+      continue;
+    }
+    if (allowedPrefix && !key.startsWith(allowedPrefix)) {
+      skipped.push(key);
+      continue;
+    }
+    out.push(key);
+  }
+  return { keys: [...new Set(out)], skipped: [...new Set(skipped)] };
+}

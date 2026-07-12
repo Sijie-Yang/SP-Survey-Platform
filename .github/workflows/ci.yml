@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit/integration tests
+        run: npm run test:ci
+
+      - name: Media pipeline smoke
+        run: npm run test:media-pipeline
+
+      - name: Check supabase SQL idempotency guards
+        run: |
+          set -e
+          for f in supabase/*.sql; do
+            if ! grep -qE 'IF NOT EXISTS|DROP POLICY IF EXISTS' "$f"; then
+              echo "Non-idempotent SQL script: $f"
+              exit 1
+            fi
+            echo "OK $f"
+          done
+
+      - name: Production build
+        run: npm run build

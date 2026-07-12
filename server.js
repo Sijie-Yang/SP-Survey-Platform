@@ -2383,7 +2383,7 @@ app.delete('/api/r2/delete', async (req, res) => {
     if (!isR2Configured()) {
       return res.status(503).json({ success: false, error: 'Cloudflare R2 is not configured on the server.' });
     }
-    const { keys, allowTemplateKeys = false } = req.body || {};
+    const { keys, allowTemplateKeys = false, allowedPrefix = null } = req.body || {};
     if (!keys || !keys.length) {
       return res.status(400).json({ success: false, error: '"keys" array is required.' });
     }
@@ -2396,10 +2396,14 @@ app.delete('/api/r2/delete', async (req, res) => {
         blocked.push(key);
         continue;
       }
+      if (allowedPrefix && !key.startsWith(allowedPrefix)) {
+        blocked.push(key);
+        continue;
+      }
       safeKeys.push(key);
     }
     if (blocked.length) {
-      console.warn(`🛡️ R2 delete blocked ${blocked.length} templates/ key(s)`);
+      console.warn(`🛡️ R2 delete blocked ${blocked.length} key(s) outside allowed scope`);
     }
     if (!safeKeys.length) {
       return res.json({ success: true, deleted: 0, blocked: blocked.length });

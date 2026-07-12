@@ -289,7 +289,7 @@ async function handleDelete(request, env) {
   if (!backend) return json({ success: false, error: r2NotConfiguredError(env) }, { status: 503 });
 
   const body = await request.json();
-  const { keys, allowTemplateKeys = false } = body || {};
+  const { keys, allowTemplateKeys = false, allowedPrefix = null } = body || {};
   if (!Array.isArray(keys) || keys.length === 0)
     return json({ success: false, error: '"keys" array is required.' }, { status: 400 });
 
@@ -302,9 +302,13 @@ async function handleDelete(request, env) {
       blocked += 1;
       continue;
     }
+    if (allowedPrefix && !key.startsWith(allowedPrefix)) {
+      blocked += 1;
+      continue;
+    }
     safeKeys.push(key);
   }
-  if (blocked) console.warn(`R2 delete blocked ${blocked} templates/ key(s)`);
+  if (blocked) console.warn(`R2 delete blocked ${blocked} key(s) outside allowed scope`);
   if (safeKeys.length) await backend.delete(safeKeys);
   return json({ success: true, deleted: safeKeys.length, blocked });
 }

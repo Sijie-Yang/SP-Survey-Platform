@@ -153,7 +153,7 @@ export async function deleteImagesFromR2(keys, options = {}) {
     const res = await fetch(`${SERVER_URL}/api/r2/delete`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keys: safeKeys, allowTemplateKeys }),
+      body: JSON.stringify({ keys: safeKeys, allowTemplateKeys, allowedPrefix }),
     });
     if (!res.ok) throw await describeNonOk(res, 'R2 delete');
     const json = await res.json();

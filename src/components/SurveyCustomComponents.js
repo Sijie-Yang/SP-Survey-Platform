@@ -669,6 +669,11 @@ export function registerMediaPairingProps() {
       category: 'general',
     });
     Serializer.addProperty(typeName, {
+      name: 'mediaPerCategory:number',
+      default: 1,
+      category: 'general',
+    });
+    Serializer.addProperty(typeName, {
       name: 'assignedMediaSetId',
       category: 'general',
     });

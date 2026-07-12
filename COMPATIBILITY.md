@@ -91,6 +91,8 @@ Copy into the PR or release note:
 | `supabase/admin_projects_rls.sql` | `admins` + `is_platform_admin()` + admin SELECT/UPDATE/DELETE on `projects` |
 | `supabase/template_media_folders.sql` | `templates.image_dataset_config` for folder / set / category tags on templates |
 
+**Prod checklist for media folders:** confirm `supabase/template_media_folders.sql` has been run in the Supabase SQL Editor before relying on template folder/tag round-trip in production. Mark release notes: SQL run / not-run.
+
 Conventions:
 
 - Scripts should be **re-runnable** (`IF NOT EXISTS`, `DROP POLICY IF EXISTS` + recreate).
