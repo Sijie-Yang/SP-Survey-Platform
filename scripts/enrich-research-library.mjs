@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Enrich Scopus shortlist JSON with rule-based analysis_meta.
+ * Enrich Scopus shortlist JSON with rule-based analysis_meta (taxonomy v4).
  *
  * Usage:
  *   node scripts/enrich-research-library.mjs
@@ -40,22 +40,42 @@ const payload = JSON.parse(fs.readFileSync(inPath, 'utf8'));
 const papers = payload.papers || [];
 const extractedAt = new Date().toISOString();
 
-let withPerception = 0;
-let withImagery = 0;
-let withScale = 0;
-let withSurvey = 0;
-let withSample = 0;
-let withLocation = 0;
+const counters = {
+  human_evaluation: 0,
+  computational_only: 0,
+  review_conceptual: 0,
+  uncertain: 0,
+  perception: 0,
+  visual_source: 0,
+  presentation: 0,
+  scale: 0,
+  response_protocol: 0,
+  measurement_channel: 0,
+  recruitment: 0,
+  sample_size: 0,
+  country: 0,
+  region: 0,
+  methods: 0,
+  reporting: 0,
+};
 
 const enriched = papers.map((paper) => {
   const analysis_meta = extractAnalysisMeta(paper, { extractedAt });
   const flags = analysis_meta.coverage_flags || {};
-  if (flags.perception) withPerception += 1;
-  if (flags.imagery) withImagery += 1;
-  if (flags.scale) withScale += 1;
-  if (flags.survey) withSurvey += 1;
-  if (flags.sample_size) withSample += 1;
-  if (flags.location) withLocation += 1;
+  const scope = analysis_meta.analysis_scope || 'uncertain';
+  if (counters[scope] != null) counters[scope] += 1;
+  if (flags.perception) counters.perception += 1;
+  if (flags.visual_source) counters.visual_source += 1;
+  if (flags.presentation) counters.presentation += 1;
+  if (flags.scale) counters.scale += 1;
+  if (flags.response_protocol) counters.response_protocol += 1;
+  if (flags.measurement_channel) counters.measurement_channel += 1;
+  if (flags.recruitment) counters.recruitment += 1;
+  if (flags.sample_size) counters.sample_size += 1;
+  if (flags.country) counters.country += 1;
+  if (flags.region) counters.region += 1;
+  if (flags.methods) counters.methods += 1;
+  if (flags.reporting) counters.reporting += 1;
   return { ...paper, analysis_meta };
 });
 
@@ -66,12 +86,7 @@ const next = {
     extracted_at: extractedAt,
     coverage: {
       total: enriched.length,
-      perception: withPerception,
-      imagery: withImagery,
-      scale: withScale,
-      survey: withSurvey,
-      sample_size: withSample,
-      location: withLocation,
+      ...counters,
     },
   },
   papers: enriched,

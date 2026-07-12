@@ -36,7 +36,7 @@ ALTER TABLE public.research_papers
   ADD COLUMN IF NOT EXISTS analysis_meta JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 COMMENT ON COLUMN public.research_papers.analysis_meta IS
-  'Rule-extracted public analytics tags (perception, imagery, scale, survey, sample size).';
+  'Rule-extracted public analytics tags (v4: scope, constructs, visual sources, protocols, channels, countries/regions).';
 
 CREATE UNIQUE INDEX IF NOT EXISTS research_papers_doi_unique
   ON public.research_papers (lower(doi))

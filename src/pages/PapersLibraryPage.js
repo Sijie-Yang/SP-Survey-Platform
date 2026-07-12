@@ -8,7 +8,7 @@ import { Clear, OpenInNew, Search } from '@mui/icons-material';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { listPublicResearchPapers } from '../lib/researchPaperStore';
 import { ensureAnalysisMeta } from '../lib/researchPaperMeta.mjs';
-import { paperMatchesMetaFilters } from '../lib/researchPaperAnalytics';
+import { normalizeMetaFilters, paperMatchesMetaFilters } from '../lib/researchPaperAnalytics';
 import PaperLibraryAnalytics from '../components/papers/PaperLibraryAnalytics';
 
 const ROW_H = 56;
@@ -255,6 +255,12 @@ export default function PapersLibraryPage() {
     });
   }, [papers, activeFilter, metaFilters]);
 
+  /** Metadata-only subset for analytics (text search must not drift method charts). */
+  const metaSubset = useMemo(
+    () => papers.filter((p) => paperMatchesMetaFilters(p, metaFilters)),
+    [papers, metaFilters],
+  );
+
   const runSearch = useCallback(() => {
     setActiveFilter((searchRef.current?.value || '').trim());
   }, []);
@@ -266,12 +272,26 @@ export default function PapersLibraryPage() {
 
   const toggleMetaFilter = useCallback((next) => {
     setMetaFilters((prev) => {
-      const exists = prev.find((f) => f.dimension === next.dimension && f.id === next.id);
-      if (exists) return prev.filter((f) => !(f.dimension === next.dimension && f.id === next.id));
-      // One active value per dimension (replace)
-      const withoutDim = prev.filter((f) => f.dimension !== next.dimension);
-      return [...withoutDim, next];
+      const normalizedNext = normalizeMetaFilters([next])[0];
+      if (!normalizedNext) return prev;
+      const exists = prev.find(
+        (f) => f.dimension === normalizedNext.dimension && f.id === normalizedNext.id,
+      );
+      if (exists) {
+        return prev.filter(
+          (f) => !(f.dimension === normalizedNext.dimension && f.id === normalizedNext.id),
+        );
+      }
+      // One active value per canonical meta field (replace)
+      return normalizeMetaFilters([
+        ...prev.filter((f) => f.dimension !== normalizedNext.dimension),
+        normalizedNext,
+      ]);
     });
+  }, []);
+
+  const setMetaFiltersReplace = useCallback((nextFilters) => {
+    setMetaFilters(normalizeMetaFilters(nextFilters));
   }, []);
 
   const clearMetaFilters = useCallback(() => setMetaFilters([]), []);
@@ -335,14 +355,17 @@ export default function PapersLibraryPage() {
           <>
             <PaperLibraryAnalytics
               papers={papers}
+              subsetPapers={metaSubset}
               filters={metaFilters}
               onToggleFilter={toggleMetaFilter}
+              onSetFilters={setMetaFiltersReplace}
               onClearFilters={clearMetaFilters}
             />
             <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
               {activeFilter || metaFilters.length
                 ? `Showing ${filtered.length} / ${papers.length} papers`
                 : `${filtered.length} papers`}
+              {metaFilters.length ? ` · ${metaSubset.length} match metadata filters` : ''}
               {activeFilter ? ` · text “${activeFilter}”` : ''}
             </Typography>
             <PapersList rows={filtered} />

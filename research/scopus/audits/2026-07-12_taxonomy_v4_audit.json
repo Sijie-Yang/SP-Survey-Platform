@@ -1,0 +1,1060 @@
+{
+  "extraction_version": "v4",
+  "total": 1464,
+  "stale_or_missing_v4": 0,
+  "scopes": {
+    "computational_only": 234,
+    "uncertain": 105,
+    "human_evaluation": 1118,
+    "review_conceptual": 7
+  },
+  "invariant_violations": {},
+  "street_view_scale_leak": 0,
+  "legacy_alias_hits": 0,
+  "top_labels": {
+    "perception_constructs": [
+      [
+        "greenness",
+        267
+      ],
+      [
+        "aesthetics",
+        228
+      ],
+      [
+        "walkability",
+        131
+      ],
+      [
+        "liveliness",
+        114
+      ],
+      [
+        "enclosure",
+        100
+      ],
+      [
+        "safety",
+        48
+      ],
+      [
+        "restorativeness",
+        47
+      ],
+      [
+        "comfort",
+        37
+      ]
+    ],
+    "visual_data_sources": [
+      [
+        "unspecified_street_view",
+        324
+      ],
+      [
+        "google_street_view",
+        316
+      ],
+      [
+        "other_street_view",
+        51
+      ],
+      [
+        "rendered_synthetic",
+        16
+      ]
+    ],
+    "presentation_modes": [
+      [
+        "static_2d",
+        67
+      ],
+      [
+        "immersive_vr",
+        66
+      ],
+      [
+        "panorama_360",
+        53
+      ]
+    ],
+    "view_contexts": [
+      [
+        "window_view",
+        101
+      ]
+    ],
+    "spatial_scales": [
+      [
+        "street",
+        464
+      ],
+      [
+        "neighborhood",
+        228
+      ],
+      [
+        "building",
+        133
+      ],
+      [
+        "indoor",
+        68
+      ],
+      [
+        "city",
+        61
+      ],
+      [
+        "campus",
+        23
+      ]
+    ],
+    "response_protocols": [
+      [
+        "rating_scale",
+        38
+      ],
+      [
+        "pairwise",
+        31
+      ],
+      [
+        "ranking",
+        30
+      ],
+      [
+        "discrete_choice",
+        19
+      ],
+      [
+        "open_ended",
+        7
+      ],
+      [
+        "categorical_annotation",
+        2
+      ]
+    ],
+    "measurement_channels": [
+      [
+        "self_report",
+        1039
+      ],
+      [
+        "interview",
+        88
+      ],
+      [
+        "physiological",
+        46
+      ],
+      [
+        "eye_tracking",
+        40
+      ]
+    ],
+    "recruitment_modes": [
+      [
+        "lab_convenience",
+        16
+      ],
+      [
+        "crowdsourced",
+        13
+      ],
+      [
+        "field_intercept",
+        11
+      ]
+    ],
+    "research_methods": [
+      [
+        "machine_learning",
+        447
+      ],
+      [
+        "regression",
+        254
+      ],
+      [
+        "gis",
+        170
+      ]
+    ],
+    "study_countries": [
+      [
+        "china",
+        327
+      ],
+      [
+        "uk",
+        107
+      ],
+      [
+        "usa",
+        80
+      ],
+      [
+        "japan",
+        41
+      ],
+      [
+        "korea",
+        32
+      ],
+      [
+        "italy",
+        25
+      ],
+      [
+        "netherlands",
+        23
+      ],
+      [
+        "singapore",
+        22
+      ]
+    ],
+    "study_regions": [
+      [
+        "east_asia",
+        373
+      ],
+      [
+        "europe",
+        145
+      ],
+      [
+        "north_america",
+        83
+      ],
+      [
+        "southeast_asia",
+        22
+      ],
+      [
+        "oceania",
+        20
+      ]
+    ]
+  },
+  "evidence_samples": {
+    "perception_constructs": {
+      "aesthetics": [
+        {
+          "title": "Identifying environmental factors related to pedestrian crash frequency across age groups",
+          "evidence": "ived safety, greenness, pleasantness, and bikeability, the s",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "How Streetscape Design Shapes Everyday Street Vitality: The Mediating Role of Commercial Satisfaction within a Servicescape Framework",
+          "evidence": "tual factors, perceived beauty emerges as the primary",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "The Influence of the Spatial Characteristics of Living Streets on Residents’ Physical and Psychological Safety Perception: The Case of Shenyang",
+          "evidence": "asis of which a spatial visual quality (SVQ) evaluation model",
+          "field": "perception_constructs"
+        }
+      ],
+      "greenness": [
+        {
+          "title": "Identifying environmental factors related to pedestrian crash frequency across age groups",
+          "evidence": "lity, perceived safety, greenness, pleasantness, and bike",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "Visual perception-informed urban design toolkit: Computational urban morphology optimisation to inform real-time perceived safety",
+          "evidence": "features, particularly greenery, to visual safety perce",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "Explaining walkability with a zero-shot multimodal LLM: Validation and empirical application",
+          "evidence": "o the amount of visible greenery, which partly accounts",
+          "field": "perception_constructs"
+        }
+      ],
+      "walkability": [
+        {
+          "title": "Identifying environmental factors related to pedestrian crash frequency across age groups",
+          "evidence": "n indicators related to walkability, perceived safety, gree",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": "tor, spatial enclosure, walkability, crowding, public trans",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "Explaining walkability with a zero-shot multimodal LLM: Validation and empirical application",
+          "evidence": "Explaining walkability with a zero-shot multim",
+          "field": "perception_constructs"
+        }
+      ],
+      "enclosure": [
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": "ky view factor, spatial enclosure, walkability, crowding,",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "Unveiling the nonlinear effects of street-level audiovisual environments on urban cycling volume",
+          "evidence": "ets with greater visual openness, stronger presence of n",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "A study of balcony design characteristics promoting perceived restorativeness: a stated preference method",
+          "evidence": "ng PR. Structure types, enclosure types and furniture are",
+          "field": "perception_constructs"
+        }
+      ],
+      "complexity": [
+        {
+          "title": "Modeling adolescents’ perception of cycling safety: A new approach using graph neural networks and street view imagery",
+          "evidence": "y Urban spatial context Visual complexity Motor transportation Ro",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "Evaluating the linkage between visual complexity and aesthetics of street-elevations using the fractal dimension assessment method",
+          "evidence": "ing the linkage between visual complexity and aesthetics of stree",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "Scalable transfer learning framework for capturing human perceptions of place through visual-aural data integration",
+          "evidence": "ings also highlight how architectural diversity, active street life, an",
+          "field": "perception_constructs"
+        }
+      ],
+      "safety": [
+        {
+          "title": "Unveiling the nonlinear effects of street-level audiovisual environments on urban cycling volume",
+          "evidence": "vironmental comfort and perceived safety. Method This study inte",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "Visual perception-informed urban design toolkit: Computational urban morphology optimisation to inform real-time perceived safety",
+          "evidence": "ion to inform real-time perceived safety The perceived safety of",
+          "field": "perception_constructs"
+        },
+        {
+          "title": "How Streetscape Design Shapes Everyday Street Vitality: The Mediating Role of Commercial Satisfaction within a Servicescape Framework",
+          "evidence": "erceptual driver, while perceived safety appears to function pri",
+          "field": "perception_constructs"
+        }
+      ]
+    },
+    "visual_data_sources": {
+      "unspecified_street_view": [
+        {
+          "title": "Multi-frequency street-level urban noise modeling and mapping through street view and remote sensing image fusion",
+          "evidence": "a method that combines street view imagery (SVI) and remote sensin",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "Identifying environmental factors related to pedestrian crash frequency across age groups",
+          "evidence": "s in Taipei City. Using Street View Imagery (SVI) and SVI-derived p",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": "ess. A runner-eye-level street-view image dataset was constructed",
+          "field": "visual_data_sources"
+        }
+      ],
+      "google_street_view": [
+        {
+          "title": "Exploring Before-and-After visual preferences of street interventions using Google Street View time travel",
+          "evidence": "eet interventions using Google Street View time travel Urban space",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "Residential proximity to transport facilities as urban determinants of individual-level per- and poly-fluoroalkyl substance (PFAS) exposures: Analysis of two longitudinal cohorts in Singapore",
+          "evidence": "automated extraction of Google Street View data. Findings: Adjusti",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "Endovenous Microwave Ablation Alone versus High Ligation Combined with Microwave Ablation for Great Saphenous Vein Incompetence: A Propensity Score-Matched Study",
+          "evidence": "r great saphenous vein (GSV) incompetence. Methods",
+          "field": "visual_data_sources"
+        }
+      ],
+      "other_street_view": [
+        {
+          "title": "How Streetscape Design Shapes Everyday Street Vitality: The Mediating Role of Commercial Satisfaction within a Servicescape Framework",
+          "evidence": "ncluding OpenStreetMap, Baidu Street View images, Dazhong Dianpin",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "Enhancing the Understanding of Urban Street Perception With LLMs and Street View Imagery",
+          "evidence": "machine learning. Using Baidu Street View imagery from Xihu (Hang",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "Fine-timestamped street view imagery reveals patterns of pedestrian dynamics associated with urban functional characteristics",
+          "evidence": "hidden timestamps from Baidu Street View (BSV) data and applied",
+          "field": "visual_data_sources"
+        }
+      ],
+      "rendered_synthetic": [
+        {
+          "title": "Visual perception analysis of Yanji streetscape using eye-tracking technology",
+          "evidence": "e selected to construct visual stimulus materials containing 15",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "Artificial Intelligence-Simulated Cognition of a Pedestrian Assessing a Built Environment",
+          "evidence": "odel human responses to visual stimuli based on subjective cri",
+          "field": "visual_data_sources"
+        },
+        {
+          "title": "The Felt City: Sensory–Cognitive Mapping of Urban Atmospheres in İzmir, Turkey",
+          "evidence": "across both corridors. Visual stimuli emerge as the dominant",
+          "field": "visual_data_sources"
+        }
+      ]
+    },
+    "presentation_modes": {
+      "panorama_360": [
+        {
+          "title": "Exploring Before-and-After visual preferences of street interventions using Google Street View time travel",
+          "evidence": "dents with an immersive 360-degree environment that allow",
+          "field": "presentation_modes"
+        },
+        {
+          "title": "Trees from afar: Urban tree classification using mobile terrestrial LiDAR and street view images",
+          "evidence": "le laser scanning (MLS) Panoramic image Remote sensing Sp",
+          "field": "presentation_modes"
+        },
+        {
+          "title": "From satellite to street: a hybrid framework integrating stable diffusion and PanoGAN for consistent cross–view synthesis",
+          "evidence": "ographically consistent panoramic street views. Furthermo",
+          "field": "presentation_modes"
+        }
+      ],
+      "static_2d": [
+        {
+          "title": "Social Relations and the Making of Urban Space in Informal Settlements: Everyday Appropriation and Public Space Production",
+          "evidence": "ires, activity mapping, photographic documentation, and spat",
+          "field": "presentation_modes"
+        },
+        {
+          "title": "Dataset on informal recyclable waste aggregators (‘Đồng nát’) in Hanoi, Vietnam",
+          "evidence": "structured interviews, photographic documentation, and syst",
+          "field": "presentation_modes"
+        },
+        {
+          "title": "Identify local residents' attention and perceived well-being of townscape in traditional villages",
+          "evidence": "s viewing 24 real-scene photographs. A combination of Eye-T",
+          "field": "presentation_modes"
+        }
+      ],
+      "immersive_vr": [
+        {
+          "title": "Uncovering pedestrian stress and crossing strategies via mixed-reality encounters with autonomous vehicles",
+          "evidence": "eHMI and road design. A head-mounted mixed reality (MR) expe",
+          "field": "presentation_modes"
+        },
+        {
+          "title": "A study of balcony design characteristics promoting perceived restorativeness: a stated preference method",
+          "evidence": "ethod Structural design Virtual reality Balcony design Discrete",
+          "field": "presentation_modes"
+        },
+        {
+          "title": "The Influence of the Spatial Characteristics of Living Streets on Residents’ Physical and Psychological Safety Perception: The Case of Shenyang",
+          "evidence": "s employed, integrating virtual reality (VR) scene stimulation,",
+          "field": "presentation_modes"
+        }
+      ]
+    },
+    "view_contexts": {
+      "window_view": [
+        {
+          "title": "A study of balcony design characteristics promoting perceived restorativeness: a stated preference method",
+          "evidence": "29) that balcony areas, window views and plants are key desi",
+          "field": "view_contexts"
+        },
+        {
+          "title": "Green space and child development: Exposure-specific associations with neurobehavioral profiles identified through latent profile and network analysis",
+          "evidence": "ompassed accessibility, window views, indoor plants, usage p",
+          "field": "view_contexts"
+        },
+        {
+          "title": "Influence of objective and perceived exposures to urban nature on people’s happiness",
+          "evidence": "direct exposure through window views, incidental exposure wh",
+          "field": "view_contexts"
+        }
+      ]
+    },
+    "spatial_scales": {
+      "street": [
+        {
+          "title": "Multi-frequency street-level urban noise modeling and mapping through street view and remote sensing image fusion",
+          "evidence": "Multi-frequency street-level urban noise modeling an",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Identifying environmental factors related to pedestrian crash frequency across age groups",
+          "evidence": "es and perception-based streetscape measures within a Multi",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Modeling adolescents’ perception of cycling safety: A new approach using graph neural networks and street view imagery",
+          "evidence": "le approach for mapping street-level safety perception, prov",
+          "field": "spatial_scales"
+        }
+      ],
+      "building": [
+        {
+          "title": "UAV based falling-object risk assessment of damaged building façades using visible and thermal infrared images",
+          "evidence": "ent of damaged building façades using visible and therm",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Urban-scale facade material mapping from street view images using vision–language models for circular construction planning",
+          "evidence": "Urban-scale facade material mapping from s",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "ArchiExplain: Multi-Level Evidence Chains for Precedent-Based Interpretability in Architectural Image Understanding",
+          "evidence": "upporting tasks such as facade recognition, floor-plan",
+          "field": "spatial_scales"
+        }
+      ],
+      "neighborhood": [
+        {
+          "title": "Residential proximity to transport facilities as urban determinants of individual-level per- and poly-fluoroalkyl substance (PFAS) exposures: Analysis of two longitudinal cohorts in Singapore",
+          "evidence": "n predictors and within-neighborhood unobserved spatial hete",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Has COVID-19 changed homebuyers' environmental preferences? Evidence from the Hangzhou housing market using street view images",
+          "evidence": "buyers' preferences for neighborhood environments. This stud",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Beyond single snapshots: Quantifying multi-scale heterogeneity from street-view imagery and what it reveals about perception",
+          "evidence": "e heterogeneity at both neighborhood (500 m) and streetscape",
+          "field": "spatial_scales"
+        }
+      ],
+      "indoor": [
+        {
+          "title": "Green space and child development: Exposure-specific associations with neurobehavioral profiles identified through latent profile and network analysis",
+          "evidence": "sibility, window views, indoor plants, usage patterns,",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "The Influence of Plant Features on Affect, Perceived Restorativeness and Use Intention in Indoor Public Spaces",
+          "evidence": "ss and Use Intention in Indoor Public Spaces Urban nat",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Staff, Patient, and Designer Perspectives on Outpatient Rehabilitation Therapy Environments: A Pilot Study",
+          "evidence": "struction Female Humans Interior Design and Furnishings",
+          "field": "spatial_scales"
+        }
+      ],
+      "city": [
+        {
+          "title": "Urban-scale facade material mapping from street view images using vision–language models for circular construction planning",
+          "evidence": "Urban-scale facade material mapping",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Desirable bikeshare routes: Nonlinear impacts of micro-level street environments",
+          "evidence": "However, due to limited urban-scale trajectory data, the in",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Imagining the city: Evaluating visual realism and identity in AI-generated cityscapes using DALL·E 2",
+          "evidence": "y. Additionally, larger metropolitan areas received higher a",
+          "field": "spatial_scales"
+        }
+      ],
+      "campus": [
+        {
+          "title": "Explainable Vision Analytics for Adaptive Campus Design: Diagnosing Multi-Dimensional Perceptual Differences",
+          "evidence": "Analytics for Adaptive Campus Design: Diagnosing Mult",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "The psychological mediations of green window view exposure on campus and freshman adaptation: a cross-sectional study in Nanjing, China",
+          "evidence": "window view exposure on campus and freshman adaptation",
+          "field": "spatial_scales"
+        },
+        {
+          "title": "Navigating Walkability in Indian Urban Spaces from a Sample of Campus Users",
+          "evidence": "Spaces from a Sample of Campus Users This research pap",
+          "field": "spatial_scales"
+        }
+      ]
+    },
+    "response_protocols": {
+      "discrete_choice": [
+        {
+          "title": "Exploring Before-and-After visual preferences of street interventions using Google Street View time travel",
+          "evidence": "development of a visual stated preference survey methodology desi",
+          "field": "response_protocols"
+        },
+        {
+          "title": "A study of balcony design characteristics promoting perceived restorativeness: a stated preference method",
+          "evidence": "ived restorativeness: a stated preference method Purpose – The op",
+          "field": "response_protocols"
+        },
+        {
+          "title": "What street do you like? Exploring the subjective perception of public spaces in unequal and segregated cities",
+          "evidence": "ncy were captured via a stated preference survey using these imag",
+          "field": "response_protocols"
+        }
+      ],
+      "pairwise": [
+        {
+          "title": "Exploring Before-and-After visual preferences of street interventions using Google Street View time travel",
+          "evidence": "ualizations that enable pairwise comparisons between pre",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Explaining walkability with a zero-shot multimodal LLM: Validation and empirical application",
+          "evidence": "all walkability through pairwise visual comparison accom",
+          "field": "response_protocols"
+        },
+        {
+          "title": "It is not always greener on the other side: Greenery perception across demographics and personalities in multiple cities",
+          "evidence": "ubjective scores (e.g., pairwise ratings), examining whe",
+          "field": "response_protocols"
+        }
+      ],
+      "open_ended": [
+        {
+          "title": "Evaluating the aesthetic quality of urban façades with deep learning approaches",
+          "evidence": "were derived through an open-ended questionnaire, qualitat",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Demographic Patterns in the Aesthetic Acceptance of Building-Integrated Photovoltaics in Apartment Housing: Implications for Solar Energy Design and Policy",
+          "evidence": "nd thematic analysis of open-ended responses. The results",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Environment-Based Prompt Framework for AI-Generated Façade Design",
+          "evidence": "decorative complexity. Open-ended feedback was subjected",
+          "field": "response_protocols"
+        }
+      ],
+      "ranking": [
+        {
+          "title": "Constructing determinants of urban brownfield redevelopment in China through the fuzzy Delphi method",
+          "evidence": "degree of influence and ranking of the factors were det",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Modeling block-scale urban vitality: integrating streetscape perception and service accessibility",
+          "evidence": "bles’ contributions are ranked as lively score (0.31),",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Evaluating Pedestrian and Cyclist Friendliness in Urban Neighborhoods Using an Active Travel Index System: Application in 52 Chinese City Sub-Districts",
+          "evidence": "dex was used to produce ranked evaluations of 52 subdi",
+          "field": "response_protocols"
+        }
+      ],
+      "categorical_annotation": [
+        {
+          "title": "Pavement condition index estimation from google street view images using distress detection and regression models",
+          "evidence": "data consisting of 3000 labelled images thus being able to be e",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Assessing walkability with deep CNNs by integrating objective and subjective urban qualities: The case of ‘Cittaslow’ neighborhoods",
+          "evidence": "D) which contains 5,440 labeled images by experts with a quest",
+          "field": "response_protocols"
+        }
+      ],
+      "rating_scale": [
+        {
+          "title": "Psychological well-being benefits of urban greenness: A mixed methods approach using psycho-physiological indicators and interviews",
+          "evidence": "reported questionnaire (Semantic Differential (SD) scale), and interv",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Comparison of the safety and efficacy between endovenous laser ablation and radiofrequency ablation for great saphenous vein incompetence",
+          "evidence": "ups included: Numerical Rating Scale (NRS) pain scores, cuta",
+          "field": "response_protocols"
+        },
+        {
+          "title": "Artificial Intelligence-Simulated Cognition of a Pedestrian Assessing a Built Environment",
+          "evidence": "te three sidewalks on a Likert scale. The investigatio",
+          "field": "response_protocols"
+        }
+      ]
+    },
+    "measurement_channels": {
+      "self_report": [
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": "ected through an online questionnaire in which 137 respondent",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "Modeling adolescents’ perception of cycling safety: A new approach using graph neural networks and street view imagery",
+          "evidence": "applied to a perception survey focusing on adolescents",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "Exploring Before-and-After visual preferences of street interventions using Google Street View time travel",
+          "evidence": "isual stated preference survey methodology designed to",
+          "field": "measurement_channels"
+        }
+      ],
+      "interview": [
+        {
+          "title": "Social Relations and the Making of Urban Space in Informal Settlements: Everyday Appropriation and Public Space Production",
+          "evidence": "ations, semi-structured interviews, questionnaires, activi",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "Dataset on informal recyclable waste aggregators (‘Đồng nát’) in Hanoi, Vietnam",
+          "evidence": "mic surveys, structured interviews, photographic documenta",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "Staff, Patient, and Designer Perspectives on Outpatient Rehabilitation Therapy Environments: A Pilot Study",
+          "evidence": "d outpatients. Methods: Interviews (n = 21) and questionna",
+          "field": "measurement_channels"
+        }
+      ],
+      "physiological": [
+        {
+          "title": "Uncovering pedestrian stress and crossing strategies via mixed-reality encounters with autonomous vehicles",
+          "evidence": "cues, and pedestrians’ physiological states. However, studie",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "The Influence of the Spatial Characteristics of Living Streets on Residents’ Physical and Psychological Safety Perception: The Case of Shenyang",
+          "evidence": "logical assessment, and heart rate variability (HRV) monit",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "Comparing physiological emotional responses to traditional hutongs and modern streets in Beijing through EEG and an interpretable machine learning approach",
+          "evidence": "Comparing physiological emotional responses to",
+          "field": "measurement_channels"
+        }
+      ],
+      "eye_tracking": [
+        {
+          "title": "Visual perception analysis of Yanji streetscape using eye-tracking technology",
+          "evidence": "Yanji streetscape using eye-tracking technology This study f",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "Visual Attention in Beijing’s Historic Parks: An Exploration Integrating Cognitive Maps, Eye-Tracking Experiments, Computational Vision Analysis, and GIS Analysis",
+          "evidence": "grating Cognitive Maps, Eye-Tracking Experiments, Computatio",
+          "field": "measurement_channels"
+        },
+        {
+          "title": "Identify local residents' attention and perceived well-being of townscape in traditional villages",
+          "evidence": "raphs. A combination of Eye-Tracking (ET), Electrodermal Act",
+          "field": "measurement_channels"
+        }
+      ]
+    },
+    "recruitment_modes": {
+      "lab_convenience": [
+        {
+          "title": "Urban Comfort Perception Under Induced Emotional Conditions: A Multi-Method Analysis of Architectural and Streetscape Imagery Using Fractal Analysis, Self-Report, and Eye-Tracking",
+          "evidence": "erception. A controlled laboratory experiment was conducted with 17 p",
+          "field": "recruitment_modes"
+        },
+        {
+          "title": "Psychological well-being benefits of urban greenness: A mixed methods approach using psycho-physiological indicators and interviews",
+          "evidence": "This study recruited 94 university students in Nanjing, China to co",
+          "field": "recruitment_modes"
+        },
+        {
+          "title": "Navigating Walkability in Indian Urban Spaces from a Sample of Campus Users",
+          "evidence": "rvey conducted with 300 university students and staff, exploring th",
+          "field": "recruitment_modes"
+        }
+      ],
+      "crowdsourced": [
+        {
+          "title": "City landscape in sight: A crowdsourced framework for unlocking urban-scale window view perceptions from real estate imagery",
+          "evidence": "y landscape in sight: A crowdsourced framework for unlocking",
+          "field": "recruitment_modes"
+        },
+        {
+          "title": "Predicting perceptions of workplace design: a multi-attribute machine learning approach",
+          "evidence": "mage ranking survey, we crowdsourced 24,888 rankings from 21",
+          "field": "recruitment_modes"
+        },
+        {
+          "title": "Using street view imagery and localized crowdsourcing survey to model perceived safety of the visual built environment by gender",
+          "evidence": "w imagery and localized crowdsourcing survey to model perceiv",
+          "field": "recruitment_modes"
+        }
+      ],
+      "field_intercept": [
+        {
+          "title": "Pavement condition index estimation from google street view images using distress detection and regression models",
+          "evidence": "where the traditional, on-site surveying is not feasible or too",
+          "field": "recruitment_modes"
+        },
+        {
+          "title": "Thermal comfort in sight: Thermal affordance and its visual assessment for sustainable streetscape design",
+          "evidence": "agery (SVI), online and in-field surveys, and statistica",
+          "field": "recruitment_modes"
+        },
+        {
+          "title": "Using digital tools to identify and analyze vernacular buildings in remote regions",
+          "evidence": "mpossible to conduct an on-site survey of these communities as",
+          "field": "recruitment_modes"
+        }
+      ]
+    },
+    "research_methods": {
+      "machine_learning": [
+        {
+          "title": "Multi-frequency street-level urban noise modeling and mapping through street view and remote sensing image fusion",
+          "evidence": "gement; (3) explainable machine learning models revealed that bu",
+          "field": "research_methods"
+        },
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": "is dataset, a SegFormer semantic segmentation model pretrained on ADE",
+          "field": "research_methods"
+        },
+        {
+          "title": "Modeling adolescents’ perception of cycling safety: A new approach using graph neural networks and street view imagery",
+          "evidence": "ew approach using graph neural networks and street view imagery",
+          "field": "research_methods"
+        }
+      ],
+      "gis": [
+        {
+          "title": "Identifying environmental factors related to pedestrian crash frequency across age groups",
+          "evidence": "ellite imagery software spatial analysis transportation policy t",
+          "field": "research_methods"
+        },
+        {
+          "title": "Integrating Street Perception and Multidimensional Geo-Spatial Analytics: An Algorithm-Driven Framework for Assessing Green Exposure and Gender Equity",
+          "evidence": "location social justice spatial analysis travel behavior",
+          "field": "research_methods"
+        },
+        {
+          "title": "Measuring Street Spatial Form Using Street View Imagery and Computer Vision: A Case Study of the Greater Bay Area, China",
+          "evidence": "nts, thereby supporting spatial analysis and policymaking. Howev",
+          "field": "research_methods"
+        }
+      ],
+      "regression": [
+        {
+          "title": "Identifying environmental factors related to pedestrian crash frequency across age groups",
+          "evidence": "ghted Negative Binomial Regression (MGWNBR) framework. The",
+          "field": "research_methods"
+        },
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": "sis and multiple linear regression to assess how visual fe",
+          "field": "research_methods"
+        },
+        {
+          "title": "The Influence of the Spatial Characteristics of Living Streets on Residents’ Physical and Psychological Safety Perception: The Case of Shenyang",
+          "evidence": "eloped. Correlation and regression analyses revealed a sig",
+          "field": "research_methods"
+        }
+      ]
+    },
+    "study_countries": {
+      "china": [
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": "ng street-view study of Qingdao's coastal greenway With",
+          "field": "study_countries"
+        },
+        {
+          "title": "A study of balcony design characteristics promoting perceived restorativeness: a stated preference method",
+          "evidence": "vironment, conducted in Shanghai using a blended online-",
+          "field": "study_countries"
+        },
+        {
+          "title": "As cities sprawl: Unraveling the nonlinear impacts of urban spatial evolution on outdoor crime patterns through machine learning and causal inference",
+          "evidence": "nt relationships across Shanghai's five ring zones. Anal",
+          "field": "study_countries"
+        }
+      ],
+      "singapore": [
+        {
+          "title": "Residential proximity to transport facilities as urban determinants of individual-level per- and poly-fluoroalkyl substance (PFAS) exposures: Analysis of two longitudinal cohorts in Singapore",
+          "evidence": "longitudinal cohorts in Singapore Background: Policy-rele",
+          "field": "study_countries"
+        },
+        {
+          "title": "Quantitative feasibility assessment approach for building-integrated photovoltaic (BIPV) retrofits on building façades",
+          "evidence": "public housing block in Singapore, results indicate that",
+          "field": "study_countries"
+        },
+        {
+          "title": "Unpacking visual perception of urban public space using social media images and street view imagery: Insights from Singapore riverfront",
+          "evidence": "imagery: Insights from Singapore riverfront Visual perce",
+          "field": "study_countries"
+        }
+      ],
+      "australia": [
+        {
+          "title": "Urban-scale facade material mapping from street view images using vision–language models for circular construction planning",
+          "evidence": "(Zurich, San Francisco, Melbourne, Mumbai, Cape Town, and",
+          "field": "study_countries"
+        },
+        {
+          "title": "Streetscape intervention influencing the perception of traffic safety for active school travel",
+          "evidence": "l has been declining in Melbourne, Australia, and parenta",
+          "field": "study_countries"
+        },
+        {
+          "title": "Community perceptions on the contribution of bicycle paths to street quality in cities new to cycling infrastructure",
+          "evidence": "a separated cycleway in Sydney, Australia. The results",
+          "field": "study_countries"
+        }
+      ],
+      "usa": [
+        {
+          "title": "Urban-scale facade material mapping from street view images using vision–language models for circular construction planning",
+          "evidence": "ncome contexts (Zurich, San Francisco, Melbourne, Mumbai, Cap",
+          "field": "study_countries"
+        },
+        {
+          "title": "Does weather matter? Examining measurement bias in street view image-based urban perception assessments",
+          "evidence": "orical GSV imagery from Los Angeles (CA), Seattle (WA), and",
+          "field": "study_countries"
+        },
+        {
+          "title": "From satellite to street: a hybrid framework integrating stable diffusion and PanoGAN for consistent cross–view synthesis",
+          "evidence": "challenging Cross-View USA (CVUSA) dataset, a stan",
+          "field": "study_countries"
+        }
+      ],
+      "italy": [
+        {
+          "title": "Risk-mitigation priorities for road networks exposed to slow-moving landslides at municipal scale",
+          "evidence": "licata region, southern Italy), which are highly affe",
+          "field": "study_countries"
+        },
+        {
+          "title": "GEDI and Sentinel data integration for quantifying agroforestry tree height and stocks",
+          "evidence": "46,000 km2 in northern Italy. To achieve this, we de",
+          "field": "study_countries"
+        },
+        {
+          "title": "Predictive control of polymer dispersed liquid crystal glazing for smart façade applications",
+          "evidence": "tudy office in Bolzano, Italy. The control framework",
+          "field": "study_countries"
+        }
+      ],
+      "japan": [
+        {
+          "title": "Influence of objective and perceived exposures to urban nature on people’s happiness",
+          "evidence": "re, impact happiness in Tokyo, Japan. To measure the",
+          "field": "study_countries"
+        },
+        {
+          "title": "Urban Comfort Perception Under Induced Emotional Conditions: A Multi-Method Analysis of Architectural and Streetscape Imagery Using Fractal Analysis, Self-Report, and Eye-Tracking",
+          "evidence": "an areas in Kitakyushu, Japan (Wakamatsu, Tobata, Moj",
+          "field": "study_countries"
+        },
+        {
+          "title": "Cross-Modal Urban Sensing: Evaluating Sound–Vision Alignment Across Street-Level and Aerial Imagery",
+          "evidence": "m London, New York, and Tokyo with corresponding stre",
+          "field": "study_countries"
+        }
+      ]
+    },
+    "study_regions": {
+      "east_asia": [
+        {
+          "title": "How blue-green coastal landscapes shape runners' perceptions: A deep-learning street-view study of Qingdao's coastal greenway",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "A study of balcony design characteristics promoting perceived restorativeness: a stated preference method",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "As cities sprawl: Unraveling the nonlinear impacts of urban spatial evolution on outdoor crime patterns through machine learning and causal inference",
+          "evidence": null,
+          "field": "study_regions"
+        }
+      ],
+      "southeast_asia": [
+        {
+          "title": "Residential proximity to transport facilities as urban determinants of individual-level per- and poly-fluoroalkyl substance (PFAS) exposures: Analysis of two longitudinal cohorts in Singapore",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "Quantitative feasibility assessment approach for building-integrated photovoltaic (BIPV) retrofits on building façades",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "Unpacking visual perception of urban public space using social media images and street view imagery: Insights from Singapore riverfront",
+          "evidence": null,
+          "field": "study_regions"
+        }
+      ],
+      "oceania": [
+        {
+          "title": "Urban-scale facade material mapping from street view images using vision–language models for circular construction planning",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "Streetscape intervention influencing the perception of traffic safety for active school travel",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "Community perceptions on the contribution of bicycle paths to street quality in cities new to cycling infrastructure",
+          "evidence": null,
+          "field": "study_regions"
+        }
+      ],
+      "north_america": [
+        {
+          "title": "Urban-scale facade material mapping from street view images using vision–language models for circular construction planning",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "Does weather matter? Examining measurement bias in street view image-based urban perception assessments",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "From satellite to street: a hybrid framework integrating stable diffusion and PanoGAN for consistent cross–view synthesis",
+          "evidence": null,
+          "field": "study_regions"
+        }
+      ],
+      "europe": [
+        {
+          "title": "Walking and freight delivery operations. Space-sharing conflicts in Nairobi",
+          "evidence": "reets. While studies in European and US cities (Global N",
+          "field": "study_regions"
+        },
+        {
+          "title": "HCI methods supporting urban design evaluation using virtual environments",
+          "evidence": null,
+          "field": "study_regions"
+        },
+        {
+          "title": "Cross-Modal Urban Sensing: Evaluating Sound–Vision Alignment Across Street-Level and Aerial Imagery",
+          "evidence": null,
+          "field": "study_regions"
+        }
+      ]
+    }
+  }
+}

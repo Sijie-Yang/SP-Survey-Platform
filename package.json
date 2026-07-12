@@ -48,6 +48,7 @@
     "test:media-pipeline": "node scripts/test-media-set-category.mjs",
     "research:filter": "python3 scripts/filter-scopus-coarse.py --csv research/scopus/exports/2026-07-12.csv --out research/scopus/shortlists/2026-07-12_library_coarse.json --also public/research/scopus-shortlist.json",
     "research:enrich": "node scripts/enrich-research-library.mjs --also public/research/scopus-shortlist.json",
+    "research:audit": "node scripts/audit-research-taxonomy.mjs",
     "research:rebuild": "npm run research:filter && npm run research:enrich",
     "eject": "react-scripts eject",
     "deploy": "npm run build && wrangler deploy",
