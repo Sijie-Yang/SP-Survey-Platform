@@ -16,7 +16,7 @@ import {
   PRESET_QUERIES,
   searchBothProviders,
   mergeCandidates,
-} from './functions/_lib/researchProviders.js';
+} from './worker-lib/researchProviders.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -287,7 +287,7 @@ async function handleList(request, env) {
     })
     .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
   return json({ success: true, images });
-
+}
 
 async function handleDelete(request, env) {
   const backend = getR2Backend(env);
