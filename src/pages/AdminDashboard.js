@@ -57,6 +57,7 @@ import {
 } from '../lib/imageFeaturesR2';
 import AdminShell from '../components/layout/AdminShell';
 import ConfirmDialog from '../components/layout/ConfirmDialog';
+import AdminScopedMediaLibrary from '../components/admin/AdminScopedMediaLibrary';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 
@@ -354,20 +355,11 @@ function compressImage(file, maxBytes = 300 * 1024, quality = 0.85) {
 
 function TemplateImagesDialog({ template, open, onClose, onSaved }) {
   const { user } = useAuth();
-  const [images, setImages]       = useState([]);
-  const [loading, setLoading]     = useState(false);
-  const [syncing, setSyncing]     = useState(false);
-  const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
-  const [error, setError]         = useState('');
-  const [info, setInfo]           = useState('');
-  const [hfToken, setHfToken]     = useState('');
-  const [falKey, setFalKey]       = useState('');
+  const [hfToken, setHfToken] = useState('');
+  const [falKey, setFalKey] = useState('');
   const [r2FeatureMap, setR2FeatureMap] = useState({});
+  const [images, setImages] = useState([]);
   const [preannotateTarget, setPreannotateTarget] = useState(null);
-  const [confirmDialog, setConfirmDialog] = useState(null);
-  const fileInputRef = useRef(null);
-  // Keep onSaved in a ref so refresh() can call it without becoming a new
-  // function on every parent render (which would re-trigger the effect).
   const onSavedRef = useRef(onSaved);
   useEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
 
@@ -396,178 +388,50 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
     }
   }, [template?.id]);
 
-  const refresh = useCallback(async () => {
-    if (!template) return;
-    setSyncing(true);
-    setError('');
-    const result = await listImagesFromR2(templateImagePrefix(template.id));
-    setSyncing(false);
-    if (!result.success) { setError(result.error || 'Failed to list images'); return; }
-    const mapped = sortMediaByName(result.images.map((img) => normalizeMediaEntry({
-      url: img.url, name: img.name, type: img.type || inferMediaType(img.name),
-    })));
-    setImages(mapped);
-    reloadFeatures();
-    // Persist the canonical list back to Supabase so listTemplates() and the
-    // preview pipeline always see the same picture set the admin sees.
-    if (mapped.length !== (template.preloadedImages?.length || 0)) {
-      try {
-        await updateTemplate(template.id, {
-          preloaded_images: mapped.map(({ url, name, type }) => ({ url, name, type: type || 'image' })),
-          preloaded_at:     new Date().toISOString(),
-          preloaded_source: 'r2',
-        });
-        if (onSavedRef.current) onSavedRef.current({ silent: true });
-      } catch (err) {
-        console.warn('Could not sync template image list:', err);
-      }
-    }
-  }, [template, reloadFeatures]);
-
   useEffect(() => {
     if (open && template) {
-      setError(''); setInfo('');
-      refresh();
+      setImages(template.preloadedImages || []);
+      reloadFeatures();
     }
-  }, [open, template, refresh]);
+  }, [open, template, reloadFeatures]);
 
-  const handleUpload = async (fileList) => {
+  const handlePersist = useCallback(async (payload) => {
     if (!template) return;
-    if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-
-    setUploading({ active: true, progress: 0, total: files.length });
-    setError(''); setInfo('');
-
-    const uploaded = [...images];
-    let okCount = 0;
-    let failCount = 0;
-    let completed = 0;
-
-    const results = await asyncPool(6, files, async (file) => {
-      try {
-        const compressed = await compressImage(file);
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const key = `${templateImagePrefix(template.id)}${safeName}`;
-        const result = await uploadImageToR2(compressed, key);
-        return { file, safeName, result };
-      } catch (e) {
-        return { file, safeName: file.name, result: { success: false, error: e.message } };
-      } finally {
-        completed += 1;
-        setUploading((s) => ({ ...s, progress: completed }));
-      }
-    });
-
-    results.forEach(({ safeName, result }) => {
-      if (result.success) {
-        const filtered = uploaded.filter((img) => img.name !== safeName);
-        filtered.push({ url: result.url, name: safeName, key: `${templateImagePrefix(template.id)}${safeName}` });
-        uploaded.splice(0, uploaded.length, ...filtered);
-        okCount++;
-      } else {
-        failCount++;
-        if (!error) setError(`Upload failed: ${result.error}`);
-      }
-    });
-
-    setUploading({ active: false, progress: files.length, total: files.length });
-    setImages(uploaded);
-
-    try {
-      await updateTemplate(template.id, {
-        preloaded_images: uploaded.map(({ url, name }) => ({ url, name })),
-        preloaded_at:     new Date().toISOString(),
-        preloaded_source: 'r2',
-      });
-      setInfo(failCount > 0
-        ? `Uploaded ${okCount}, ${failCount} failed.`
-        : `Uploaded ${okCount} image(s).`);
-      if (onSavedRef.current) onSavedRef.current();
-    } catch (err) {
-      setError('Saved to R2 but failed to update template record: ' + err.message);
-    }
-  };
-
-  const handleClear = () => {
-    if (!template) return;
-    setConfirmDialog({
-      title: '清空模板图片',
-      message: `确认清空模板 "${template.name}" 的全部图片吗？此操作不可恢复。`,
-      confirmLabel: '清空',
-      confirmColor: 'error',
-      onConfirm: async () => {
-        setConfirmDialog(null);
-        setLoading(true); setError(''); setInfo('');
-        try {
-          const listed = await listImagesFromR2(templateImagePrefix(template.id));
-          const keys = listed.success ? listed.images.map((img) => img.key) : [];
-          FEATURE_MODELS.forEach((model) => {
-            keys.push(featureCsvKey(templateImagePrefix(template.id), model));
-          });
-          (listed.success ? listed.images : []).forEach((img) => {
-            keys.push(preannotationKey(templateImagePrefix(template.id), img.name, img.name));
-          });
-          if (keys.length > 0) {
-            await deleteImagesFromR2(keys, { allowTemplateKeys: true });
-          }
-          await updateTemplate(template.id, {
-            preloaded_images: [],
-            preloaded_at:     null,
-            preloaded_source: null,
-          });
-          setImages([]);
-          setR2FeatureMap({});
-          setInfo('已清空模板图片、特征 CSV 与预标注。');
-          if (onSavedRef.current) onSavedRef.current();
-        } catch (err) {
-          setError(err.message);
-        } finally {
-          setLoading(false);
-        }
-      },
-    });
-  };
+    await updateTemplate(template.id, payload);
+    if (payload.preloaded_images) setImages(payload.preloaded_images);
+    if (onSavedRef.current) onSavedRef.current({ silent: true });
+  }, [template]);
 
   if (!template) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth
-      PaperProps={{ sx: { minHeight: '70vh' } }}>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
+      PaperProps={{ sx: { minHeight: '80vh' } }}>
       <DialogTitle>
-        模板图片 — {template.name}
+        模板媒体 — {template.name}
         <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
           (R2: {templateImagePrefix(template.id)})
         </Typography>
       </DialogTitle>
       <DialogContent dividers>
-        {!isR2Configured() && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Cloudflare R2 未配置，无法上传或浏览图片。
-          </Alert>
-        )}
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
-        {info  && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo('')}>{info}</Alert>}
-
         <Accordion defaultExpanded={false} sx={{ mb: 2 }}>
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Box>
               <Typography variant="subtitle2" fontWeight={700}>Spatial features (L0 / Seg)</Typography>
               <Typography variant="caption" color="text.secondary">
-                为模板图片预计算特征，存到 R2 CSV；项目导入模板时会按文件名自动带上
+                为模板媒体预计算特征；项目导入时会按文件名自动带上
               </Typography>
             </Box>
           </AccordionSummary>
           <AccordionDetails>
             {!hfToken && (
               <Alert severity="info" sx={{ mb: 1.5 }}>
-                SegFormer 需要 HuggingFace token。请先在任意项目的 Media Dataset → Spatial Intelligence 里保存 HF token（会同步到你的账号）。
+                SegFormer 需要 HuggingFace token（在 Media Dataset → Spatial Intelligence 保存）。
               </Alert>
             )}
             {!falKey && (
               <Alert severity="info" sx={{ mb: 1.5 }}>
-                SAM3 预标注需要 fal key。请在 Media Dataset → Spatial Intelligence 保存 fal key。
+                SAM 预标注需要 fal key（同上）。
               </Alert>
             )}
             <FeatureExtractionJobs
@@ -576,123 +440,38 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
               hfToken={hfToken}
               onFeaturesUpdated={setR2FeatureMap}
             />
+            {images.length > 0 && (
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+                {images.slice(0, 24).map((img) => {
+                  const feat = featureStatusFromMap(r2FeatureMap, img, FEATURE_MODELS);
+                  const samOk = feat?.status?.[SAM_PREANNOT_MODEL] === 'ready';
+                  return (
+                    <Chip
+                      key={img.key || img.name}
+                      size="small"
+                      label={`${img.name}${samOk ? ' · SAM' : ''}`}
+                      onClick={() => setPreannotateTarget(img)}
+                      variant="outlined"
+                    />
+                  );
+                })}
+                {images.length > 24 && (
+                  <Typography variant="caption" color="text.secondary">+{images.length - 24} more</Typography>
+                )}
+              </Stack>
+            )}
           </AccordionDetails>
         </Accordion>
 
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-          <Chip
-            label={syncing ? '同步中…' : `${images.length} 张图片`}
-            color={images.length > 0 ? 'success' : 'default'}
-            variant="outlined"
-            icon={syncing ? <CircularProgress size={14} /> : undefined}
-          />
-          <Box flex={1} />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }}
-          />
-          <Button
-            startIcon={<CloudUpload />}
-            variant="contained"
-            size="small"
-            disabled={!isR2Configured() || uploading.active}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            上传图片
-          </Button>
-          <Button
-            startIcon={<Refresh />}
-            size="small"
-            disabled={syncing || uploading.active}
-            onClick={refresh}
-          >
-            刷新
-          </Button>
-          <Tooltip title="清空模板图片">
-            <span>
-              <Button
-                startIcon={<DeleteForever />}
-                size="small"
-                color="error"
-                disabled={images.length === 0 || loading || uploading.active}
-                onClick={handleClear}
-              >
-                清空
-              </Button>
-            </span>
-          </Tooltip>
-        </Stack>
-
-        {uploading.active && (
-          <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography variant="body2">Uploading…</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {uploading.progress} / {uploading.total}
-              </Typography>
-            </Box>
-            <LinearProgress
-              variant="determinate"
-              value={uploading.total > 0 ? (uploading.progress / uploading.total) * 100 : 0}
-              sx={{ height: 8, borderRadius: 4 }}
-            />
-          </Box>
-        )}
-
-        {images.length === 0 ? (
-          <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>
-            <PhotoLibrary sx={{ fontSize: 48, opacity: 0.4 }} />
-            <Typography variant="body2" sx={{ mt: 1 }}>
-              当前模板还没有图片。上传后将存放在 <code>{templateImagePrefix(template.id)}</code>，
-              并会在模板预览以及基于此模板新建的项目中自动使用。
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {images.map((img) => {
-              const feat = featureStatusFromMap(r2FeatureMap, img, FEATURE_MODELS);
-              const samOk = feat?.status?.[SAM_PREANNOT_MODEL] === 'ready';
-              return (
-              <Box key={img.key || img.name}
-                sx={{ width: 110, position: 'relative' }}>
-                <Box sx={{ width: 110, height: 110, borderRadius: 1, overflow: 'hidden',
-                  border: '1px solid', borderColor: 'divider', bgcolor: 'grey.100' }}>
-                  <img
-                    src={img.url}
-                    alt={img.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      e.target.parentElement.innerHTML =
-                        '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10px;color:#999;">Failed</div>';
-                    }}
-                  />
-                </Box>
-                <Typography variant="caption" sx={{
-                  display: 'block', mt: 0.5,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {img.name}
-                </Typography>
-                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.25 }}>
-                  {samOk && <Chip size="small" label="SAM" color="secondary" sx={{ height: 18, fontSize: '0.65rem' }} />}
-                  <Chip
-                    size="small"
-                    label="Pre-annotate"
-                    variant="outlined"
-                    sx={{ height: 18, fontSize: '0.65rem' }}
-                    onClick={() => setPreannotateTarget(img)}
-                  />
-                </Stack>
-              </Box>
-              );
-            })}
-          </Box>
-        )}
+        <AdminScopedMediaLibrary
+          r2Prefix={templateImagePrefix(template.id)}
+          owner={template}
+          allowTemplateKeys
+          rootLabel="(template root)"
+          userId={user?.id || 'admin'}
+          onPersist={handlePersist}
+          onImagesChange={setImages}
+        />
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>关闭</Button>
@@ -706,16 +485,6 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
         falKey={falKey}
         projectId=""
         onSaved={() => reloadFeatures()}
-      />
-
-      <ConfirmDialog
-        open={Boolean(confirmDialog)}
-        title={confirmDialog?.title}
-        message={confirmDialog?.message}
-        confirmLabel={confirmDialog?.confirmLabel}
-        confirmColor={confirmDialog?.confirmColor || 'error'}
-        onConfirm={() => confirmDialog?.onConfirm?.()}
-        onCancel={() => setConfirmDialog(null)}
       />
     </Dialog>
   );
@@ -1643,288 +1412,45 @@ function ProjectPreviewDialog({ project, open, onClose }) {
 // ─── Project Images Dialog ───────────────────────────────────────────────────
 
 function ProjectImagesDialog({ project, open, onClose, onSaved }) {
-  const [images, setImages]       = useState([]);
-  const [loading, setLoading]     = useState(false);
-  const [syncing, setSyncing]     = useState(false);
-  const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
-  const [error, setError]         = useState('');
-  const [info, setInfo]           = useState('');
-  const [confirmDialog, setConfirmDialog] = useState(null);
-  const fileInputRef = useRef(null);
   const onSavedRef = useRef(onSaved);
   useEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
 
-  const refresh = useCallback(async () => {
+  const handlePersist = useCallback(async (payload) => {
     if (!project) return;
-    if (!project.user_id) {
-      setError('项目缺少 user_id，无法定位 R2 图片路径。');
-      return;
-    }
-    setSyncing(true);
-    setError('');
-    const result = await listImagesFromR2(projectImagePrefix(project));
-    setSyncing(false);
-    if (!result.success) { setError(result.error || 'Failed to list images'); return; }
-    const mapped = sortMediaByName(result.images.map((img) => normalizeMediaEntry({
-      url: img.url, name: img.name, type: img.type || inferMediaType(img.name),
-    })));
-    setImages(mapped);
-    if (mapped.length !== (project.preloadedImages?.length || 0)) {
-      try {
-        await updateProjectAdmin(project.id, {
-          preloaded_images: mapped.map(({ url, name, type }) => ({ url, name, type: type || 'image' })),
-          preloaded_at:     new Date().toISOString(),
-          preloaded_source: 'r2',
-        });
-        if (onSavedRef.current) onSavedRef.current({ silent: true });
-      } catch (err) {
-        console.warn('Could not sync project image list:', err);
-      }
-    }
+    await updateProjectAdmin(project.id, payload);
+    if (onSavedRef.current) onSavedRef.current({ silent: true });
   }, [project]);
-
-  useEffect(() => {
-    if (open && project) {
-      setError(''); setInfo('');
-      refresh();
-    }
-  }, [open, project, refresh]);
-
-  const handleUpload = async (fileList) => {
-    if (!project) return;
-    if (!project.user_id) { setError('项目缺少 user_id，无法上传图片。'); return; }
-    if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-
-    setUploading({ active: true, progress: 0, total: files.length });
-    setError(''); setInfo('');
-
-    const uploaded = [...images];
-    let okCount = 0;
-    let failCount = 0;
-    let completed = 0;
-    const prefix = projectImagePrefix(project);
-
-    const results = await asyncPool(6, files, async (file) => {
-      try {
-        const compressed = await compressImage(file);
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const key = `${prefix}${safeName}`;
-        const result = await uploadImageToR2(compressed, key);
-        return { safeName, key, result };
-      } catch (e) {
-        return { safeName: file.name, key: null, result: { success: false, error: e.message } };
-      } finally {
-        completed += 1;
-        setUploading((s) => ({ ...s, progress: completed }));
-      }
-    });
-
-    results.forEach(({ safeName, key, result }) => {
-      if (result.success) {
-        const filtered = uploaded.filter((img) => img.name !== safeName);
-        filtered.push({ url: result.url, name: safeName, key });
-        uploaded.splice(0, uploaded.length, ...filtered);
-        okCount++;
-      } else {
-        failCount++;
-        if (!error) setError(`Upload failed: ${result.error}`);
-      }
-    });
-
-    setUploading({ active: false, progress: files.length, total: files.length });
-    setImages(uploaded);
-
-    try {
-      await updateProjectAdmin(project.id, {
-        preloaded_images: uploaded.map(({ url, name }) => ({ url, name })),
-        preloaded_at:     new Date().toISOString(),
-        preloaded_source: 'r2',
-      });
-      setInfo(failCount > 0
-        ? `Uploaded ${okCount}, ${failCount} failed.`
-        : `Uploaded ${okCount} image(s).`);
-      if (onSavedRef.current) onSavedRef.current();
-    } catch (err) {
-      setError('Saved to R2 but failed to update project record: ' + err.message);
-    }
-  };
-
-  const handleClear = () => {
-    if (!project) return;
-    setConfirmDialog({
-      title: '清空项目图片',
-      message: `确认清空项目 "${project.name}" 的全部图片吗？此操作不可恢复。`,
-      confirmLabel: '清空',
-      confirmColor: 'error',
-      onConfirm: async () => {
-        setConfirmDialog(null);
-        setLoading(true); setError(''); setInfo('');
-        try {
-          const listed = await listImagesFromR2(projectImagePrefix(project));
-          if (listed.success && listed.images.length > 0) {
-            const prefix = projectImagePrefix(project);
-            await deleteImagesFromR2(
-              listed.images.map((img) => img.key),
-              { allowedPrefix: prefix },
-            );
-          }
-          await updateProjectAdmin(project.id, {
-            preloaded_images: [],
-            preloaded_at:     null,
-            preloaded_source: null,
-          });
-          setImages([]);
-          setInfo('已清空项目图片。');
-          if (onSavedRef.current) onSavedRef.current();
-        } catch (err) {
-          setError(err.message);
-        } finally {
-          setLoading(false);
-        }
-      },
-    });
-  };
 
   if (!project) return null;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth
-      PaperProps={{ sx: { minHeight: '70vh' } }}>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
+      PaperProps={{ sx: { minHeight: '80vh' } }}>
       <DialogTitle>
-        项目图片 — {project.name}
+        项目媒体 — {project.name}
         <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-          (R2: {projectImagePrefix(project)})
+          (R2: {project.user_id ? projectImagePrefix(project) : 'n/a'})
         </Typography>
       </DialogTitle>
       <DialogContent dividers>
         {!project.user_id && (
           <Alert severity="warning" sx={{ mb: 2 }}>
-            该项目没有 user_id，无法管理 R2 图片。
+            该项目没有 user_id，无法管理 R2 媒体。
           </Alert>
         )}
-        {!isR2Configured() && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Cloudflare R2 未配置，无法上传或浏览图片。
-          </Alert>
-        )}
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
-        {info  && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo('')}>{info}</Alert>}
-
-        <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-          <Chip
-            label={syncing ? '同步中…' : `${images.length} 张图片`}
-            color={images.length > 0 ? 'success' : 'default'}
-            variant="outlined"
-            icon={syncing ? <CircularProgress size={14} /> : undefined}
+        {project.user_id && (
+          <AdminScopedMediaLibrary
+            r2Prefix={projectImagePrefix(project)}
+            owner={project}
+            rootLabel="(project root)"
+            userId={project.user_id}
+            onPersist={handlePersist}
           />
-          <Box flex={1} />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }}
-          />
-          <Button
-            startIcon={<CloudUpload />}
-            variant="contained"
-            size="small"
-            disabled={!isR2Configured() || !project.user_id || uploading.active}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            上传图片
-          </Button>
-          <Button
-            startIcon={<Refresh />}
-            size="small"
-            disabled={syncing || uploading.active}
-            onClick={refresh}
-          >
-            刷新
-          </Button>
-          <Tooltip title="清空项目图片">
-            <span>
-              <Button
-                startIcon={<DeleteForever />}
-                size="small"
-                color="error"
-                disabled={images.length === 0 || loading || uploading.active}
-                onClick={handleClear}
-              >
-                清空
-              </Button>
-            </span>
-          </Tooltip>
-        </Stack>
-
-        {uploading.active && (
-          <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography variant="body2">Uploading…</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {uploading.progress} / {uploading.total}
-              </Typography>
-            </Box>
-            <LinearProgress
-              variant="determinate"
-              value={uploading.total > 0 ? (uploading.progress / uploading.total) * 100 : 0}
-              sx={{ height: 8, borderRadius: 4 }}
-            />
-          </Box>
-        )}
-
-        {images.length === 0 ? (
-          <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>
-            <PhotoLibrary sx={{ fontSize: 48, opacity: 0.4 }} />
-            <Typography variant="body2" sx={{ mt: 1 }}>
-              当前项目还没有图片。上传后将存放在 <code>{projectImagePrefix(project)}</code>，
-              并会在项目预览以及调查中自动使用。
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {images.map((img) => (
-              <Box key={img.key || img.name} sx={{ width: 110, position: 'relative' }}>
-                <Box sx={{ width: 110, height: 110, borderRadius: 1, overflow: 'hidden',
-                  border: '1px solid', borderColor: 'divider', bgcolor: 'grey.100' }}>
-                  <img
-                    src={img.url}
-                    alt={img.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      e.target.parentElement.innerHTML =
-                        '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10px;color:#999;">Failed</div>';
-                    }}
-                  />
-                </Box>
-                <Typography variant="caption" sx={{
-                  display: 'block', mt: 0.5,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {img.name}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
         )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>关闭</Button>
       </DialogActions>
-
-      <ConfirmDialog
-        open={Boolean(confirmDialog)}
-        title={confirmDialog?.title}
-        message={confirmDialog?.message}
-        confirmLabel={confirmDialog?.confirmLabel}
-        confirmColor={confirmDialog?.confirmColor || 'error'}
-        onConfirm={() => confirmDialog?.onConfirm?.()}
-        onCancel={() => setConfirmDialog(null)}
-      />
     </Dialog>
   );
 }

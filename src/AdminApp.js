@@ -1265,7 +1265,7 @@ export default function AdminApp() {
           <Paper sx={{ width: '100%' }}>
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
               <Tabs value={tabValue} onChange={handleTabChange} aria-label="admin tabs" variant="scrollable" scrollButtons="auto">
-                <Tab label="Step 1 - Image Dataset" />
+                <Tab label="Step 1 - Media Dataset" />
                 <Tab label="Step 2 - Survey Builder" />
                 <Tab label="Step 3 - Share Survey" />
                 <Tab label="Step 4 - Results Analysis" />

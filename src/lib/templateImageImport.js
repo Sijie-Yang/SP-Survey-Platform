@@ -1,7 +1,11 @@
 /** Template → project image import helpers (R2 copy + progress tracking). */
 
 import { listImagesFromR2 } from './r2';
-import { inferMediaType, compareMediaNames } from './mediaUtils';
+import {
+  inferMediaType, compareMediaNames, mediaRelativePathFromListing,
+  normalizeMediaEntry, folderFromR2Key, sanitizeMediaFolderConfig,
+  mergeMediaFolderConfigs,
+} from './mediaUtils';
 
 export function getTemplateImportHistory(project) {
   return project?.imageDatasetConfig?.templateImportHistory || {};
@@ -23,10 +27,8 @@ export function mergeTemplateImportHistory(project, templateId, entry) {
 }
 
 /**
- * Compare template R2 folder vs project folder by filename.
+ * Compare template R2 folder vs project folder by relative path (folder/name).
  * Used to skip already-copied files when importing/resuming ONE template.
- * Do NOT treat filename overlap as proof that other templates were imported —
- * many templates share the same streetscape filenames.
  */
 export async function computeTemplateImportProgress(templateId, userId, projectId) {
   if (!templateId || !projectId) {
@@ -60,9 +62,13 @@ export async function computeTemplateImportProgress(templateId, userId, projectI
     };
   }
 
-  const existingNames = new Set((existing.images || []).map((i) => i.name));
+  const existingPaths = new Set(
+    (existing.images || []).map((i) => mediaRelativePathFromListing(i, projectPrefix)),
+  );
   const templateImages = listed.images || [];
-  const importedCount = templateImages.filter((img) => existingNames.has(img.name)).length;
+  const importedCount = templateImages.filter(
+    (img) => existingPaths.has(mediaRelativePathFromListing(img, templatePrefix)),
+  ).length;
   const totalInTemplate = templateImages.length;
   const remaining = Math.max(0, totalInTemplate - importedCount);
   const hasStarted = importedCount > 0;
@@ -71,46 +77,78 @@ export async function computeTemplateImportProgress(templateId, userId, projectI
     totalInTemplate,
     importedCount,
     remaining,
-    // Empty template folder is not "complete import" — nothing to copy.
     isComplete: totalInTemplate > 0 && remaining === 0,
     hasStarted,
     templateImages,
-    existingNames,
+    existingNames: existingPaths,
+    existingPaths,
     error: null,
   };
 }
 
-export function buildTemplateCopyTodo(templateImages, existingNames, projectPrefix) {
+export function buildTemplateCopyTodo(templateImages, existingPaths, projectPrefix, templatePrefix = '') {
+  const existing = existingPaths instanceof Set
+    ? existingPaths
+    : new Set(existingPaths || []);
+  const tPrefix = templatePrefix || (
+    templateImages[0]?.key
+      ? String(templateImages[0].key).replace(/[^/]+$/, '')
+      : ''
+  );
   return templateImages
-    .filter((img) => !existingNames.has(img.name))
-    .map((img) => ({ from: img.key, to: `${projectPrefix}${img.name}` }));
+    .filter((img) => !existing.has(mediaRelativePathFromListing(img, tPrefix)))
+    .map((img) => {
+      const rel = mediaRelativePathFromListing(img, tPrefix);
+      return { from: img.key, to: `${projectPrefix}${rel}` };
+    });
 }
 
-export function mergeCopiedIntoProjectImages(existingImages, copiedImages, r2PublicUrl) {
-  const byName = new Map();
+export function mergeCopiedIntoProjectImages(existingImages, copiedImages, r2PublicUrl, projectPrefix = '') {
+  const byPath = new Map();
   (existingImages || []).forEach((img) => {
-    byName.set(img.name, {
-      url: img.url || (r2PublicUrl && img.key ? `${r2PublicUrl}/${img.key}` : ''),
-      name: img.name,
-      key: img.key,
-      type: img.type || inferMediaType(img.name),
+    const e = normalizeMediaEntry(img, projectPrefix);
+    const rel = mediaRelativePathFromListing(e, projectPrefix)
+      || (e.folder ? `${e.folder}/${e.name}` : e.name);
+    byPath.set(rel, {
+      url: e.url || (r2PublicUrl && e.key ? `${r2PublicUrl}/${e.key}` : ''),
+      name: e.name,
+      key: e.key,
+      type: e.type || inferMediaType(e.name),
+      folder: e.folder || folderFromR2Key(e.key, projectPrefix),
+      media_id: e.media_id || e.key || e.name,
     });
   });
   copiedImages.forEach((c) => {
     const name = c.to.split('/').pop();
-    byName.set(name, {
+    const folder = folderFromR2Key(c.to, projectPrefix);
+    const rel = folder ? `${folder}/${name}` : name;
+    byPath.set(rel, {
       url: c.url || (r2PublicUrl ? `${r2PublicUrl}/${c.to}` : ''),
       name,
       key: c.to,
       type: inferMediaType(name),
+      folder,
+      media_id: c.to,
     });
   });
-  return [...byName.values()].sort((a, b) => compareMediaNames(a.name, b.name));
+  return [...byPath.values()].sort((a, b) => compareMediaNames(
+    a.folder ? `${a.folder}/${a.name}` : a.name,
+    b.folder ? `${b.folder}/${b.name}` : b.name,
+  ));
+}
+
+/** Apply template folder tags into a project's imageDatasetConfig. */
+export function mergeTemplateMediaFoldersIntoProject(projectConfig, templateMediaConfig) {
+  const merged = mergeMediaFolderConfigs(projectConfig, templateMediaConfig);
+  return {
+    ...(projectConfig || {}),
+    ...sanitizeMediaFolderConfig(merged),
+  };
 }
 
 /**
  * Label for the template picker.
- * @param {object|null} progress - live R2 filename overlap
+ * @param {object|null} progress - live R2 path overlap
  * @param {object|null} historyEntry - explicit import history for this template
  */
 export function formatTemplateImportStatus(progress, historyEntry = null) {
@@ -135,8 +173,6 @@ export function formatTemplateImportStatus(progress, historyEntry = null) {
 export function formatTemplateImportButtonLabel(progress, historyEntry = null, { loading = false } = {}) {
   if (loading) return 'Importing…';
   const hasHistory = Boolean(historyEntry?.lastImportAt);
-  // Only history proves this template was imported. Shared filenames across
-  // templates must not flip a fresh pick into Resume / Re-check.
   if (hasHistory && progress?.remaining > 0) {
     return `Resume import (${progress.remaining} remaining)`;
   }

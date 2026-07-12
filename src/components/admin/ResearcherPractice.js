@@ -475,6 +475,7 @@ export default function ResearcherPractice({
         randomMedia: true,
         showNavigationButtons: false,
         trackUsed: selectedQuestion.excludePreviouslyUsedImages !== false,
+        folderTags: currentProject?.imageDatasetConfig?.mediaFolderTags || {},
       });
       if (built.surveyJson?.pages) {
         for (const page of built.surveyJson.pages) {
@@ -552,6 +553,7 @@ export default function ResearcherPractice({
           answer: mappedAnswer,
           shown_images: shownImages,
           shown_media_ids: shownMediaIds,
+          shown_media_set: meta.shownMediaGroup || null,
           shown_media_group: meta.shownMediaGroup || null,
           shown_media_categories: meta.shownMediaCategories || null,
         },

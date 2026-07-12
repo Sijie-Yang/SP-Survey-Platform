@@ -182,6 +182,7 @@ export function resolveQuestionMedia(question, projectImages, options = {}) {
     usedImageKeys = null,
     usedGroupKeys = null,
     random = false,
+    folderTags = {},
   } = options;
 
   // Text / structured questions must never pull from the media pool — otherwise
@@ -211,6 +212,8 @@ export function resolveQuestionMedia(question, projectImages, options = {}) {
       { ...question, imageCount: count },
       usedImageKeys,
       usedGroupKeys,
+      null,
+      folderTags,
     );
   }
 
@@ -229,6 +232,7 @@ export function buildSingleQuestionSurvey({
   randomMedia = false,
   showNavigationButtons = false,
   trackUsed = false,
+  folderTags = {},
 }) {
   if (!question?.type) {
     throw new Error('Question type is required');
@@ -240,6 +244,7 @@ export function buildSingleQuestionSurvey({
     usedImageKeys,
     usedGroupKeys,
     random: randomMedia,
+    folderTags,
   });
   const images = assignment.images || [];
   if (images.length) {

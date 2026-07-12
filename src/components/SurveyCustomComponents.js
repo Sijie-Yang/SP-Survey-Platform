@@ -661,7 +661,15 @@ export function registerMediaPairingProps() {
     Serializer.addProperty(typeName, {
       name: 'mediaAssignmentMode',
       default: 'individual',
-      choices: ['individual', 'group', 'category'],
+      choices: ['individual', 'set', 'group', 'category'],
+      category: 'general',
+    });
+    Serializer.addProperty(typeName, {
+      name: 'mediaFolders',
+      category: 'general',
+    });
+    Serializer.addProperty(typeName, {
+      name: 'assignedMediaSetId',
       category: 'general',
     });
     Serializer.addProperty(typeName, {

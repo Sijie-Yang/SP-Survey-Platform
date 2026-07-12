@@ -16,7 +16,8 @@
  *   ADD COLUMN IF NOT EXISTS preloaded_images JSONB DEFAULT '[]'::jsonb,
  *   ADD COLUMN IF NOT EXISTS preloaded_at     TIMESTAMPTZ,
  *   ADD COLUMN IF NOT EXISTS preloaded_source TEXT,
- *   ADD COLUMN IF NOT EXISTS is_pinned        BOOLEAN NOT NULL DEFAULT false;
+ *   ADD COLUMN IF NOT EXISTS is_pinned        BOOLEAN NOT NULL DEFAULT false,
+ *   ADD COLUMN IF NOT EXISTS image_dataset_config JSONB DEFAULT '{}'::jsonb;
  * ─────────────────────────────────────────────────────────────────────
  */
 
@@ -24,7 +25,7 @@ import { supabase } from './supabase';
 import {
   isR2Configured, listImagesFromR2, copyImagesInR2, deleteImagesFromR2,
 } from './r2';
-import { normalizeMediaEntry } from './mediaUtils';
+import { normalizeMediaEntry, sanitizeMediaFolderConfig } from './mediaUtils';
 
 export function templateImagePrefix(templateId) {
   return `templates/${templateId}/`;
@@ -59,6 +60,9 @@ function applyTemplateFieldUpdates(row, updates) {
   if ('preloaded_images' in updates) row.preloaded_images = updates.preloaded_images;
   if ('preloaded_at'     in updates) row.preloaded_at     = updates.preloaded_at;
   if ('preloaded_source' in updates) row.preloaded_source = updates.preloaded_source;
+  if ('image_dataset_config' in updates) {
+    row.image_dataset_config = sanitizeMediaFolderConfig(updates.image_dataset_config);
+  }
   return row;
 }
 
@@ -81,6 +85,8 @@ function rowToTemplate(row) {
     preloadedImages:   row.preloaded_images   || [],
     preloadedAt:       row.preloaded_at       || null,
     preloadedSource:   row.preloaded_source   || null,
+    // Folder / set / category tags (safe subset — no tokens)
+    imageDatasetConfig: sanitizeMediaFolderConfig(row.image_dataset_config || {}),
     // submitter info
     user_id:           row.user_id            || null,
     submitter_email:   row.submitter_email    || null,
@@ -163,7 +169,7 @@ export async function listTemplates(userId) {
         'id, name, description, author, year, category, tags, paper_url, ' +
         'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
         'is_approved, show_on_landing, is_pinned, preloaded_images, preloaded_at, ' +
-        'preloaded_source, created_at, updated_at'
+        'preloaded_source, image_dataset_config, created_at, updated_at'
       )
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false });
@@ -201,7 +207,7 @@ export async function getTemplateById(id) {
         'id, name, description, author, year, category, tags, paper_url, ' +
         'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
         'is_approved, show_on_landing, is_pinned, preloaded_images, preloaded_at, ' +
-        'preloaded_source, created_at, updated_at'
+        'preloaded_source, image_dataset_config, created_at, updated_at'
       )
       .eq('id', id)
       .maybeSingle();
@@ -265,6 +271,9 @@ export async function saveTemplateToSupabase(template) {
     preloaded_images:    Array.isArray(template.preloadedImages) ? template.preloadedImages : [],
     preloaded_at:        template.preloadedAt || null,
     preloaded_source:    template.preloadedSource || null,
+    image_dataset_config: sanitizeMediaFolderConfig(
+      template.imageDatasetConfig || template.image_dataset_config || {},
+    ),
     user_id:             user.id,
     submitter_email:     user.email           || null,
     is_approved:         false,
@@ -402,16 +411,33 @@ export async function renameTemplateId(oldId, newId, updates = {}, onProgress) {
           url: img.url,
           name: img.name,
           type: img.type,
-        })).filter((m) => m?.url);
+          key: String(img.key).replace(oldPrefix, newPrefix),
+          folder: img.folder,
+        }, newPrefix)).filter((m) => m?.url);
+      } else {
+        preloaded_images = preloaded_images.map((entry) => {
+          const next = { ...entry };
+          if (next.url) next.url = String(next.url).replace(oldPrefix, newPrefix);
+          if (next.key) next.key = String(next.key).replace(oldPrefix, newPrefix);
+          return normalizeMediaEntry(next, newPrefix);
+        }).filter((m) => m?.url);
       }
+    } else {
+      preloaded_images = preloaded_images.map((entry) => {
+        const next = { ...entry };
+        if (next.url) next.url = String(next.url).replace(oldPrefix, newPrefix);
+        if (next.key) next.key = String(next.key).replace(oldPrefix, newPrefix);
+        return normalizeMediaEntry(next, newPrefix);
+      }).filter((m) => m?.url);
     }
+  } else {
+    preloaded_images = preloaded_images.map((entry) => {
+      const next = { ...entry };
+      if (next.url) next.url = String(next.url).replace(oldPrefix, newPrefix);
+      if (next.key) next.key = String(next.key).replace(oldPrefix, newPrefix);
+      return normalizeMediaEntry(next, newPrefix);
+    }).filter((m) => m?.url);
   }
-
-  preloaded_images = preloaded_images.map((entry) => {
-    const next = { ...entry };
-    if (next.url) next.url = String(next.url).replace(oldPrefix, newPrefix);
-    return normalizeMediaEntry(next);
-  }).filter((m) => m?.url);
 
   report('正在更新数据库…');
   const newRow = applyTemplateFieldUpdates({
@@ -419,6 +445,7 @@ export async function renameTemplateId(oldId, newId, updates = {}, onProgress) {
     id: normalized,
     preloaded_images,
     preloaded_source: preloaded_images.length ? (row.preloaded_source || 'r2') : row.preloaded_source,
+    image_dataset_config: sanitizeMediaFolderConfig(row.image_dataset_config || {}),
     updated_at: new Date().toISOString(),
   }, updates);
 
@@ -458,6 +485,7 @@ function rowToAdminProject(row) {
     preloadedImages: row.preloaded_images || [],
     preloadedAt:     row.preloaded_at    || null,
     preloadedSource: row.preloaded_source || null,
+    imageDatasetConfig: row.image_dataset_config || {},
     created_at:      row.created_at,
     updated_at:      row.updated_at,
   };
@@ -496,6 +524,9 @@ export async function updateProjectAdmin(id, updates) {
   if ('preloaded_images' in updates) row.preloaded_images  = updates.preloaded_images;
   if ('preloaded_at'     in updates) row.preloaded_at      = updates.preloaded_at;
   if ('preloaded_source' in updates) row.preloaded_source  = updates.preloaded_source;
+  if ('image_dataset_config' in updates) {
+    row.image_dataset_config = updates.image_dataset_config;
+  }
 
   const { data, error } = await supabase
     .from('projects')

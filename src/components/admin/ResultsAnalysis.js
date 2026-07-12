@@ -62,7 +62,6 @@ import { getPresetSkill } from '../../lib/presetSkills';
 import { ImageResolverContext } from './imageResolverContext';
 import {
   summarizeQuality,
-  evaluateResponseQuality,
   QUALITY_FLAG_LABELS,
   attentionCheckQuestionStats,
 } from '../../lib/quality';
@@ -72,10 +71,16 @@ import {
   computeTrueSkillFromMatches,
   matchesFromOrderedRanking,
 } from '../../lib/trueskill';
-import { average, pct, descriptiveStats, wilsonCI } from '../../lib/stats';
+import { average, pct, wilsonCI } from '../../lib/stats';
 import { computeBordaScores, kendallW, interpretKendallW } from '../../lib/rankingStats';
 import { wordFrequency, textLengthStats } from '../../lib/textStats';
 import { generateMethodsText, downloadTextFile } from '../../lib/methodsExport';
+import { buildResponsesWideCsv, downloadResponsesWideCsv } from '../../lib/responsesWideExport';
+import {
+  downloadQuestionExportZip,
+  downloadResultsExportZip,
+  downloadDataQualityCsv,
+} from '../../lib/questionSummaryExport';
 import {
   DensityHistogramChart,
   DescriptiveStatsLine,
@@ -86,7 +91,6 @@ import { getPresetSkillAnalysis } from './skillAnalysis';
 import {
   TrueSkillMuChart,
   TrueSkillTable,
-  exportTrueSkillCsv,
   TRUESKILL_SORT_COLUMNS,
   RANKING_EXTRA_COLUMNS,
 } from './trueSkillAnalysisUi';
@@ -454,7 +458,6 @@ function ImagePickerDistribution({ question, allResponses }) {
           <TrueSkillTable
             rankings={rankings}
             caption="Each selection counts as a win over every non-selected image shown in that trial. Click a column header to sort (default: μ descending)."
-            onExport={() => exportTrueSkillCsv(question.name, rankings)}
           />
         </>
       )}
@@ -899,13 +902,6 @@ function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
             columns={rankingColumns}
             title={`${mediaLabel} TrueSkill + ranking stats`}
             caption="Higher rank beats lower rank in each trial. Avg rank / Borda / n are classical ranking summaries. Default sort: μ descending."
-            onExport={() => exportTrueSkillCsv(
-              question?.name || 'ranking',
-              rankings,
-              'mu',
-              'desc',
-              RANKING_EXTRA_COLUMNS,
-            )}
           />
         </>
       )}
@@ -1421,21 +1417,7 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
 
 // ─── Text ranking analysis ────────────────────────────────────────────────────
 // answer = [choiceValue_rank1, choiceValue_rank2, ...]
-function exportRankingCsv(questionName, sorted, kendallWVal, items) {
-  const headers = ['rank', 'item', 'avg_rank', 'borda_score', 'n'];
-  const rows = sorted.map(({ val, avg, borda, n }, idx) => [
-    idx + 1,
-    val,
-    avg != null ? avg.toFixed(4) : '',
-    borda != null ? borda.toFixed(4) : '',
-    n,
-  ]);
-  const meta = [`kendall_w,${kendallWVal != null ? kendallWVal.toFixed(4) : ''}`, ''];
-  const csv = [...meta, headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-  downloadTextFile(csv, `${questionName}_ranking_${new Date().toISOString().slice(0, 10)}.csv`);
-}
-
-function RankingDistribution({ answers, choices, questionName }) {
+function RankingDistribution({ answers, choices }) {
   const labelMap = {};
   (choices || []).forEach((c) => {
     if (typeof c === 'object' && c !== null) labelMap[c.value] = c.text || c.value;
@@ -1475,13 +1457,8 @@ function RankingDistribution({ answers, choices, questionName }) {
       )}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
         <Typography variant="caption" color="text.secondary">
-          Average rank (1 = top) · Borda score · SD
+          Average rank (1 = top) · Borda score · SD · use card Export for CSV
         </Typography>
-        {questionName && sorted.length > 0 && (
-          <Button size="small" variant="outlined" startIcon={<Download />} onClick={() => exportRankingCsv(questionName, sorted, w, items)}>
-            Export ranking CSV
-          </Button>
-        )}
       </Box>
       {sorted.map(({ val, avg, sd, borda, n }, idx) => (
         <Box key={val} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
@@ -1762,7 +1739,7 @@ function PointAllocationAnalysis({ question, answers }) {
 
 // ─── Question Card ────────────────────────────────────────────────────────────
 
-export function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses }) {
+export function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses, surveyConfig, exportResponses }) {
   const [expanded, setExpanded] = useState(false);
   const type = question.type || 'text';
   const responseCount = answers.length;
@@ -1806,7 +1783,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         );
 
       case 'ranking':
-        return <RankingDistribution answers={answers} choices={question.choices} questionName={question.name} />;
+        return <RankingDistribution answers={answers} choices={question.choices} />;
 
       case 'expression':
       case 'image':
@@ -1856,7 +1833,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         return (
           <Typography variant="body2" color="text.secondary">
             Display-only question — no participant answers are collected.
-            The shown media files are exported in the __shown_images / __shown_media_group /
+            The shown media files are exported in the __shown_images / __shown_media_set /
             __shown_media_categories CSV columns.
           </Typography>
         );
@@ -1901,6 +1878,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
 
   const responseRate = pct(responseCount, totalResponses);
   const displayOnly = isDisplayOnlyQuestion(question);
+  const canExport = !displayOnly && responseCount > 0;
 
   return (
     <Card variant="outlined" sx={{ mb: 2 }}>
@@ -1960,6 +1938,25 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
           </Box>
         </Box>
 
+        {canExport && (
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Download />}
+            sx={{ mr: 1, flexShrink: 0 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              downloadQuestionExportZip(
+                question,
+                exportResponses || allResponses,
+                surveyConfig,
+              );
+            }}
+          >
+            Export
+          </Button>
+        )}
+
         <IconButton size="small">
           {expanded ? <ExpandLess /> : <ExpandMore />}
         </IconButton>
@@ -1980,186 +1977,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
   );
 }
 
-// ─── CSV Export ───────────────────────────────────────────────────────────────
-
-function exportToCSV(responses, allQuestions, surveyConfig) {
-  if (!responses.length) return;
-
-  const questionNames = allQuestions.map(q => q.name);
-
-  // For each image question, add a companion "shown_images" column.
-  // NOTE: SurveyJS's built-in display-only "image" question has no answer
-  // value in survey.data, but its randomly-selected image is still tracked
-  // in row.displayed_images (saved to Supabase). Including 'image' here
-  // ensures the CSV exposes that filename via the __shown_images column.
-  const imageTypes = new Set([
-    'imagerating', 'image_rating',
-    'imageranking', 'image_ranking',
-    'mediaranking',
-    'imageboolean', 'image_boolean',
-    'imagematrix', 'image_matrix',
-    'imagepicker',
-    'image',
-    'mediadisplay', 'mediarating', 'mediaboolean',
-    'imageannotation',
-    'skillquestion',
-    'imageslidergroup',
-    'imagepointallocation',
-  ]);
-  const isImageQuestion = q => imageTypes.has(q.type);
-
-  // Per-dimension / per-choice / per-schema-key sub-columns for structured answer types
-  const subKeysFor = (q) => {
-    if (q.type === 'slidergroup' || q.type === 'imageslidergroup') {
-      return (q.dimensions || []).map((d) => d.id).filter(Boolean);
-    }
-    if (q.type === 'pointallocation' || q.type === 'imagepointallocation') {
-      return (q.choices || []).map((c) => (typeof c === 'object' ? c.value : c)).filter(Boolean);
-    }
-    if (q.type === 'matrix' || q.type === 'imagematrix') {
-      return (q.rows || []).map((r) => (typeof r === 'object' ? r.value : r)).filter(Boolean);
-    }
-    if (q.type === 'ranking' || q.type === 'imageranking' || q.type === 'mediaranking') {
-      // rank positions: item_1 (best) … from first response or choices
-      const sample = null; // filled per-row below via dynamic length — use fixed choice list when available
-      if (q.type === 'ranking' && q.choices?.length) {
-        return q.choices.map((_, i) => `rank_${i + 1}`);
-      }
-      if ((q.type === 'imageranking' || q.type === 'mediaranking') && q.imageCount) {
-        return Array.from({ length: q.imageCount }, (_, i) => `rank_${i + 1}`);
-      }
-      return sample;
-    }
-    if (q.type === 'skillquestion') {
-      let schema = q.skillResultSchema;
-      if (!schema?.length && q.skillId?.startsWith('preset_')) {
-        schema = getPresetSkill(q.skillId.replace(/^preset_/, ''))?.resultSchema;
-      }
-      return (schema || []).map((f) => f.key).filter(Boolean);
-    }
-    return null;
-  };
-
-  // Build header columns: answer column + shown_images column (for image questions)
-  const headerCols = [];
-  for (const q of allQuestions) {
-    headerCols.push(q.name);
-    const subKeys = subKeysFor(q);
-    if (subKeys) {
-      subKeys.forEach((k) => headerCols.push(`${q.name}__${String(k).replace(/\./g, '_')}`));
-    }
-    if (isImageQuestion(q)) {
-      headerCols.push(`${q.name}__shown_images`);
-      headerCols.push(`${q.name}__shown_media_ids`);
-      headerCols.push(`${q.name}__shown_media_group`);
-      headerCols.push(`${q.name}__shown_media_categories`);
-    }
-  }
-
-  const headers = ['participant_id', 'created_at', 'completion_code', 'session_id', 'attempt_index', 'quality_flags', ...headerCols];
-
-  const rows = responses.map(row => {
-    const flags = surveyConfig
-      ? evaluateResponseQuality(row, surveyConfig, responses)
-      : [];
-    const cols = [
-      row.participant_id || '',
-      row.created_at || row.survey_metadata?.completion_time || '',
-      row.survey_metadata?.completion_code || '',
-      row.survey_metadata?.session_id || '',
-      row.survey_metadata?.attempt_index ?? '',
-      flags.join('|'),
-    ];
-    for (const q of allQuestions) {
-      const qName = q.name;
-      const qData = row.responses?.[qName];
-
-      // Answer value
-      let ans, shownImgs;
-      if (qData !== null && qData !== undefined && typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
-        ans = qData.answer;
-        shownImgs = qData.shown_images?.length ? qData.shown_images : (row.displayed_images?.[qName] || []);
-      } else {
-        ans = qData ?? '';
-        shownImgs = row.displayed_images?.[qName] || [];
-      }
-
-      // For image questions, convert URL answers to filenames
-      let ansForCsv = ans;
-      if (q.type === 'skillquestion' && ans && typeof ans === 'object' && !Array.isArray(ans)) {
-        ansForCsv = stripSkillAnswerContext(ans);
-      }
-      if (isImageQuestion(q)) {
-        const urlToName = v => (v && typeof v === 'string') ? v.split('?')[0].split('/').pop() : v;
-        if (Array.isArray(ans)) ansForCsv = ans.map(urlToName);
-        else if (typeof ans === 'string') ansForCsv = urlToName(ans);
-      }
-      cols.push(typeof ansForCsv === 'object' ? JSON.stringify(ansForCsv) : String(ansForCsv ?? ''));
-
-      // Per-dimension / per-choice / per-schema-key / rank-position sub-columns
-      const subKeys = subKeysFor(q);
-      if (subKeys) {
-        if (q.type === 'ranking' || q.type === 'imageranking' || q.type === 'mediaranking') {
-          const ranked = Array.isArray(ans) ? ans : [];
-          const urlToName = (v) => (v && typeof v === 'string') ? v.split('?')[0].split('/').pop() : v;
-          subKeys.forEach((k, i) => {
-            const v = ranked[i];
-            cols.push(v == null ? '' : String(urlToName(v) ?? v));
-          });
-        } else if (q.type === 'matrix' || q.type === 'imagematrix') {
-          const rawObj = (ans && typeof ans === 'object' && !Array.isArray(ans)) ? ans : {};
-          subKeys.forEach((k) => {
-            const v = rawObj[k];
-            cols.push(v === undefined || v === null
-              ? ''
-              : (typeof v === 'object' ? JSON.stringify(v) : v));
-          });
-        } else {
-          const rawObj = (ans && typeof ans === 'object' && !Array.isArray(ans)) ? ans : {};
-          const obj = q.type === 'skillquestion' ? stripSkillAnswerContext(rawObj) : rawObj;
-          subKeys.forEach((k) => {
-            const v = getPath(obj, k);
-            cols.push(v === undefined || v === null
-              ? ''
-              : (typeof v === 'object' ? JSON.stringify(v) : v));
-          });
-        }
-      }
-
-      // Shown images column (only for image questions) — use filenames, not full URLs
-      if (isImageQuestion(q)) {
-        const imgNames = Array.isArray(shownImgs)
-          ? shownImgs.map(v => v ? v.split('?')[0].split('/').pop() : v)
-          : [shownImgs ?? ''];
-        cols.push(imgNames.join('|'));
-        const mediaIds = (typeof qData === 'object' && qData && Array.isArray(qData.shown_media_ids))
-          ? qData.shown_media_ids
-          : [];
-        cols.push(mediaIds.join('|'));
-        const mediaGroup = (typeof qData === 'object' && qData && 'shown_media_group' in qData)
-          ? (qData.shown_media_group || '')
-          : (row.displayed_media_groups?.[qName] || '');
-        cols.push(mediaGroup || '');
-        const mediaCategories = (typeof qData === 'object' && qData && qData.shown_media_categories)
-          ? (Array.isArray(qData.shown_media_categories) ? qData.shown_media_categories.join('|') : qData.shown_media_categories)
-          : (Array.isArray(row.displayed_media_categories?.[qName])
-            ? row.displayed_media_categories[qName].join('|')
-            : (row.displayed_media_categories?.[qName] || ''));
-        cols.push(mediaCategories || '');
-      }
-    }
-    return cols.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',');
-  });
-
-  const csvContent = [headers.join(','), ...rows].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `survey_responses_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+// Wide CSV lives in src/lib/responsesWideExport.js
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -2482,10 +2300,37 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             variant="outlined"
             startIcon={<Download />}
             disabled={!filteredResponses.length}
-            onClick={() => exportToCSV(filteredResponses, allQuestions, surveyConfig)}
+            onClick={() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)}
             size="small"
           >
             Export CSV
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Download />}
+            disabled={!filteredResponses.length || !surveyConfig}
+            onClick={() => {
+              const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
+              downloadResultsExportZip({
+                project: currentProject,
+                surveyConfig,
+                questions: allQuestions,
+                filteredResponses,
+                dateFilteredResponses,
+                excludeFlagged,
+                wideCsv,
+                filters: {
+                  date_from: dateFrom || null,
+                  date_to: dateTo || null,
+                  session_id: sessionFilter || null,
+                  include_practice: includePractice,
+                  exclude_flagged: excludeFlagged,
+                },
+              });
+            }}
+            size="small"
+          >
+            Export All
           </Button>
           <Button
             variant="outlined"
@@ -2601,6 +2446,22 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
           </AccordionSummary>
           <AccordionDetails>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Download />}
+                onClick={() => {
+                  const includedKeys = new Set(
+                    (filteredResponses || []).map((r) => String(r.id ?? `${r.participant_id}|${r.created_at}|${r.survey_metadata?.session_id}`)),
+                  );
+                  downloadDataQualityCsv(dateFilteredResponses, surveyConfig, {
+                    excludeFlagged,
+                    includedKeys,
+                  });
+                }}
+              >
+                Export
+              </Button>
               <Box flex={1} />
               <FormControlLabel
                 control={
@@ -2871,6 +2732,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                     totalResponses={questionDenominators[question.name] || 0}
                     questionNumber={answerableNumberByName.get(question.name) ?? null}
                     allResponses={questionResponsePools[question.name] || []}
+                    exportResponses={filteredResponses}
+                    surveyConfig={surveyConfig}
                   />
                 ))}
               </Box>

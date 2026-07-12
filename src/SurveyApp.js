@@ -17,7 +17,7 @@ import { getBrowserId, generateCompletionCode } from './lib/browserId';
 import { countProjectResponses, fetchPairStats } from './lib/surveyPublicApi';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
-  ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesGroupMediaAssignment,
+  ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
@@ -221,7 +221,8 @@ export default function SurveyApp() {
       const globallyUsedGroupKeys = new Set();
       const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
       const finalizeMediaSelection = (element, pool, preselected) => {
-        if (preselected?.length && !usesGroupMediaAssignment(element) && !usesCategoryMediaAssignment(element)) {
+        const folderTags = projectData?.imageDatasetConfig?.mediaFolderTags || {};
+        if (preselected?.length && !usesSetMediaAssignment(element) && !usesCategoryMediaAssignment(element)) {
           const imageCount = element.imageCount || defaultMediaCount(element);
           const excludeUsed = shouldExcludePreviouslyUsedImages(element);
           let selected = preselected;
@@ -233,7 +234,7 @@ export default function SurveyApp() {
           } else {
             selected = preselected.slice(0, imageCount);
           }
-          const assignment = { images: selected, groupKey: null, groupId: null };
+          const assignment = { images: selected, groupKey: null, groupId: null, setKey: null, setId: null };
           trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
           return assignment;
         }
@@ -243,6 +244,7 @@ export default function SurveyApp() {
           globallyUsedImageKeys,
           globallyUsedGroupKeys,
           pairStatsRef.current,
+          folderTags,
         );
         trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
         return assignment;
@@ -431,7 +433,7 @@ export default function SurveyApp() {
                       let assignment = finalizeMediaSelection(element, pool);
                       let selectedImages = assignment.images;
                       // Skill questions: reuse pool images rather than falling back to demo media
-                      if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesGroupMediaAssignment(element)) {
+                      if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
                         const imageCount = element.imageCount || defaultMediaCount(element);
                         selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
                         assignment = { images: selectedImages, groupKey: null, groupId: null };
@@ -518,13 +520,14 @@ export default function SurveyApp() {
                         const assignment = finalizeMediaSelection(
                           element,
                           filterPoolForQuestion(result.images, element),
-                          usesGroupMediaAssignment(element) ? null : result.images,
+                          usesSetMediaAssignment(element) ? null : result.images,
                         );
                         selectedImages = assignment.images;
-                        groupId = assignment.groupId;
+                        groupId = assignment.setId || assignment.groupId;
                         categories = assignment.categories;
                       }
                       if (groupId) {
+                        element.assignedMediaSetId = groupId;
                         element.assignedMediaGroupId = groupId;
                         mediaGroupTracker[element.name] = groupId;
                       }
@@ -999,6 +1002,7 @@ export default function SurveyApp() {
               const hit = pool.find((img) => img.url === u || img.name === u);
               return hit?.media_id || hit?.key || String(u).split('?')[0].split('/').pop() || u;
             }).filter(Boolean),
+            shown_media_set: displayedMediaGroups[questionName] || null,
             shown_media_group: displayedMediaGroups[questionName] || null,
             shown_media_categories: displayedMediaCategories[questionName] || null,
           };

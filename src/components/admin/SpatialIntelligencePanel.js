@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Accordion, AccordionSummary, AccordionDetails, Box, Button, TextField, Typography,
+  Box, Button, TextField, Typography,
   Alert, Chip, Stack,
 } from '@mui/material';
-import { ExpandMore } from '@mui/icons-material';
 import { testFalKey } from '../../lib/falInference';
 import { testHuggingFaceToken } from '../../lib/huggingface';
 import {
@@ -20,6 +19,18 @@ function keyHint(key) {
   if (!key || key.length < 4) return '';
   return key.slice(-4);
 }
+
+const cardSx = (borderColor) => ({
+  p: 2.5,
+  borderRadius: 1.5,
+  border: '2px solid',
+  borderColor,
+  bgcolor: (t) => (t.palette.mode === 'dark' ? 'background.paper' : 'action.hover'),
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+  height: '100%',
+});
 
 /**
  * Spatial intelligence: HF + fal keys (researcher) + L0/Seg jobs.
@@ -184,31 +195,40 @@ export default function SpatialIntelligencePanel({
   };
 
   return (
-    <Accordion defaultExpanded={false} sx={{ mb: 2 }}>
-      <AccordionSummary expandIcon={<ExpandMore />}>
-        <Box>
-          <Typography variant="subtitle1" fontWeight={700}>
-            Spatial Intelligence — Features & API keys
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            L0 / Seg → R2 CSV · SAM3 pre-annotate in Uploaded Media (not in surveys)
-          </Typography>
-        </Box>
-      </AccordionSummary>
-      <AccordionDetails>
-        <Stack spacing={2}>
+    <Box sx={{ mb: 3 }}>
+      <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1, letterSpacing: 1 }}>
+        Spatial intelligence (Optional)
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        API keys for feature extraction. Live surveys never use SAM — SAM3 is only under Media library → Pre-annotate.
+        {!userSettingsLoaded ? ' Loading account settings…' : ''}
+      </Typography>
+
+      {(message || error) && (
+        <Stack spacing={1} sx={{ mb: 1.5 }}>
           {message && <Alert severity="success" onClose={() => setMessage(null)}>{message}</Alert>}
           {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
+        </Stack>
+      )}
 
-          <Alert severity="info">
-            Live surveys never use SAM. Use SAM3 under Uploaded Media → Pre-annotate.
-            SegFormer needs HF; SAM3 pre-annotate needs fal.
-            {!userSettingsLoaded ? ' Loading account settings…' : ''}
-          </Alert>
-
-          <Typography variant="subtitle2">HuggingFace token</Typography>
+      <Box
+        sx={{
+          display: 'grid',
+          gap: 2,
+          alignItems: 'stretch',
+          gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' },
+        }}
+      >
+        {/* HF token */}
+        <Box sx={cardSx('info.light')}>
+          <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700 }}>
+            HuggingFace token
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Needed for SegFormer streetscape segmentation.
+          </Typography>
           {!editingHf && (savedHfToken || hfKey) ? (
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 1.5 }}>
               <Chip label={`HF saved · …${keyHint(savedHfToken || hfKey)}`} color="success" size="small" />
               <Button size="small" onClick={() => setEditingHf(true)}>Replace</Button>
             </Box>
@@ -220,24 +240,30 @@ export default function SpatialIntelligencePanel({
               label="HF_TOKEN"
               value={hfKey}
               onChange={(e) => setHfKey(e.target.value)}
-              helperText="From huggingface.co/settings/tokens — SegFormer streetscape."
+              helperText="huggingface.co/settings/tokens"
+              sx={{ mb: 1.5 }}
             />
           )}
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 'auto' }}>
             <Button size="small" variant="outlined" disabled={!hfKey || busy === 'test-hf'} onClick={handleTestHf}>
               Test HF
             </Button>
             <Button size="small" color="error" variant="text" disabled={!savedHfToken && !hfKey} onClick={clearHfKey}>
-              Clear HF
+              Clear
             </Button>
           </Box>
+        </Box>
 
-          <Typography variant="subtitle2" sx={{ pt: 1 }}>fal.ai API key</Typography>
-          <Typography variant="body2" color="text.secondary">
-            For SAM3 pre-annotation in Media Dataset only (researcher tool).
+        {/* fal key */}
+        <Box sx={cardSx('success.light')}>
+          <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700 }}>
+            fal.ai API key
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            For SAM3 pre-annotation in Media library only (not surveys).
           </Typography>
           {!editingFal && (savedFalKey || falKey) ? (
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 1.5 }}>
               <Chip label={`fal saved · …${keyHint(savedFalKey || falKey)}`} color="success" size="small" />
               <Button size="small" onClick={() => setEditingFal(true)}>Replace</Button>
             </Box>
@@ -249,10 +275,11 @@ export default function SpatialIntelligencePanel({
               label="FAL_KEY"
               value={falKey}
               onChange={(e) => setFalKey(e.target.value)}
-              helperText="From fal.ai/dashboard/keys — full key_id:secret."
+              helperText="fal.ai/dashboard/keys — key_id:secret"
+              sx={{ mb: 1.5 }}
             />
           )}
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 'auto' }}>
             <Button
               size="small"
               variant="contained"
@@ -265,22 +292,28 @@ export default function SpatialIntelligencePanel({
               Test fal
             </Button>
             <Button size="small" color="error" variant="text" disabled={!savedFalKey && !falKey} onClick={clearFalKey}>
-              Clear fal
+              Clear
             </Button>
           </Box>
-
           {busy === 'save-settings' && (
-            <Typography variant="caption" color="text.secondary">Saving settings…</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>Saving…</Typography>
           )}
+        </Box>
 
+        {/* Feature jobs */}
+        <Box sx={cardSx('primary.light')}>
+          <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 700 }}>
+            Feature extraction
+          </Typography>
           <FeatureExtractionJobs
+            compact
             r2Prefix={r2Prefix}
             images={currentProject?.preloadedImages || []}
             hfToken={hfKey || savedHfToken}
             onFeaturesUpdated={onFeaturesUpdated}
           />
-        </Stack>
-      </AccordionDetails>
-    </Accordion>
+        </Box>
+      </Box>
+    </Box>
   );
 }

@@ -253,6 +253,29 @@ export async function copyImagesInR2(copies, options = {}) {
 }
 
 /**
+ * Move R2 objects via copy + delete.
+ * @param {Array<{from: string, to: string}>} moves
+ */
+export async function moveImagesInR2(moves, options = {}) {
+  const list = (moves || []).filter((m) => m?.from && m?.to && m.from !== m.to);
+  if (!list.length) return { success: true, moved: [], errors: [] };
+  const copyResult = await copyImagesInR2(list, options);
+  const copiedOk = (copyResult.copied || []).map((c) => c.from);
+  if (copiedOk.length) {
+    await deleteImagesFromR2(copiedOk, {
+      allowTemplateKeys: options.allowTemplateKeys,
+      allowedPrefix: options.allowedPrefix,
+    });
+  }
+  return {
+    success: copyResult.success && !(copyResult.errors || []).length,
+    moved: copyResult.copied || [],
+    errors: copyResult.errors || [],
+    error: copyResult.error,
+  };
+}
+
+/**
  * Check whether R2 is reachable from the server.
  * Returns { configured, connected, bucketName?, error? }
  */

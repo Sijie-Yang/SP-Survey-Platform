@@ -262,18 +262,27 @@ async function handleList(request, env) {
     .filter((o) => MEDIA_FILE_RE.test(o.key))
     .map((o) => {
       const name = o.key.split('/').pop();
+      const prefixNorm = String(prefix || '').replace(/\/?$/, '/');
+      let rel = o.key;
+      if (prefixNorm && rel.startsWith(prefixNorm)) {
+        rel = rel.slice(prefixNorm.length);
+      }
+      const relParts = rel.split('/').filter(Boolean);
+      const folder = relParts.length > 1 ? relParts.slice(0, -1).join('/') : '';
       return {
         name,
+        folder,
         key: o.key,
         url: publicBase ? `${publicBase}/${o.key}` : '',
         size: o.size,
         lastModified: o.uploaded,
         type: inferMediaType(name),
+        media_id: o.key,
       };
     })
     .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
   return json({ success: true, images });
-}
+
 
 async function handleDelete(request, env) {
   const backend = getR2Backend(env);

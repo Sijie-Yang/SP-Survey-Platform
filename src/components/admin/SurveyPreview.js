@@ -10,7 +10,7 @@ import registerImageRankingWidget, {
 } from '../SurveyCustomComponents';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
-  ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesGroupMediaAssignment,
+  ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
 } from '../../lib/surveyMediaInjection';
 
@@ -42,7 +42,8 @@ export default function SurveyPreview({ config, currentProject }) {
         const globallyUsedGroupKeys = new Set();
         const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
         const finalizeMediaSelection = (element, pool, preselected) => {
-          if (!usesGroupMediaAssignment(element) && !usesCategoryMediaAssignment(element) && preselected?.length) {
+          const folderTags = currentProject?.imageDatasetConfig?.mediaFolderTags || {};
+          if (!usesSetMediaAssignment(element) && !usesCategoryMediaAssignment(element) && preselected?.length) {
             const imageCount = element.imageCount || defaultMediaCount(element);
             const excludeUsed = shouldExcludePreviouslyUsedImages(element);
             let selected = preselected;
@@ -54,7 +55,7 @@ export default function SurveyPreview({ config, currentProject }) {
             } else {
               selected = preselected.slice(0, imageCount);
             }
-            const assignment = { images: selected, groupKey: null, groupId: null };
+            const assignment = { images: selected, groupKey: null, groupId: null, setKey: null, setId: null };
             trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
             return assignment;
           }
@@ -63,6 +64,8 @@ export default function SurveyPreview({ config, currentProject }) {
             element,
             globallyUsedImageKeys,
             globallyUsedGroupKeys,
+            null,
+            folderTags,
           );
           trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
           return assignment;
@@ -126,7 +129,7 @@ export default function SurveyPreview({ config, currentProject }) {
                       const pool = filterPoolForQuestion(currentProject.preloadedImages, element);
                       let assignment = finalizeMediaSelection(element, pool);
                       let selectedImages = assignment.images;
-                      if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesGroupMediaAssignment(element)) {
+                      if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
                         const imageCount = element.imageCount || defaultMediaCount(element);
                         selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
                         assignment = { images: selectedImages, groupKey: null, groupId: null };
@@ -212,7 +215,7 @@ export default function SurveyPreview({ config, currentProject }) {
                         const assignment = finalizeMediaSelection(
                           element,
                           filterPoolForQuestion(result.images, element),
-                          usesGroupMediaAssignment(element) ? null : result.images,
+                          usesSetMediaAssignment(element) ? null : result.images,
                         );
                         selectedImages = assignment.images;
                         groupId = assignment.groupId;
@@ -565,7 +568,7 @@ export default function SurveyPreview({ config, currentProject }) {
                       <TableCell>
                         <Chip
                           size="small"
-                          label={row.mode === 'group' ? 'Fixed set' : row.mode === 'category' ? 'One per category' : 'Individual'}
+                          label={row.mode === 'group' || row.mode === 'set' ? 'Fixed set' : row.mode === 'category' ? 'Per category' : 'Individual'}
                           color={row.mode === 'group' || row.mode === 'category' ? 'primary' : 'default'}
                           variant="outlined"
                         />

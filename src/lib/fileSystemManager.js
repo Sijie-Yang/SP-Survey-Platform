@@ -1,6 +1,8 @@
 // File system manager for templates and projects
 // Uses API calls to backend server for file operations
 
+import { sanitizeMediaFolderConfig } from './mediaUtils';
+
 const API_BASE_URL = 'http://localhost:3001/api';
 const TEMPLATES_PATH = '/project_templates';
 const PROJECTS_PATH = '/projects';
@@ -463,6 +465,7 @@ export const saveProjectAsTemplate = async (project, surveyConfig) => {
       preloadedImages: Array.isArray(project.preloadedImages) ? project.preloadedImages : [],
       preloadedAt: project.preloadedAt || null,
       preloadedSource: project.preloadedSource || null,
+      imageDatasetConfig: sanitizeMediaFolderConfig(project.imageDatasetConfig || {}),
       createdAt: new Date().toISOString(),
       config: cleanedConfig
     };

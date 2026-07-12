@@ -85,6 +85,12 @@ import {
   findAvailableTemplateId,
 } from '../../lib/templateManager';
 import {
+  mediaRelativePathFromListing,
+  folderFromR2Key,
+  inferMediaType,
+  sanitizeMediaFolderConfig,
+} from '../../lib/mediaUtils';
+import {
   applyLiveListing,
   getLiveListingForProject,
   toDatetimeLocalValue,
@@ -292,6 +298,13 @@ export default function ProjectSidebar({
         preloadedImages: [],
         preloadedAt: null,
         preloadedSource: null,
+        // Seed folder / set / category tags so Import Template Images lands in the same layout
+        imageDatasetConfig: {
+          enabled: true,
+          huggingFaceToken: '',
+          datasetName: selectedTemplate.huggingfaceDataset || '',
+          ...sanitizeMediaFolderConfig(selectedTemplate.imageDatasetConfig || {}),
+        },
       };
       const createResult = await createProject(projectData);
       if (!createResult.success) {
@@ -521,22 +534,25 @@ export default function ProjectSidebar({
       return [];
     }
 
-    const allCopies = listed.images.map((img) => ({
-      from: img.key,
-      to: `${templatePrefix}${img.name}`,
-    }));
+    const allCopies = listed.images.map((img) => {
+      const rel = mediaRelativePathFromListing(img, projectPrefix);
+      return {
+        from: img.key,
+        to: `${templatePrefix}${rel}`,
+        rel,
+        name: img.name,
+        type: img.type || inferMediaType(img.name),
+        folder: folderFromR2Key(img.key, projectPrefix) || img.folder || '',
+      };
+    });
     const total = allCopies.length;
     onProgress?.({ current: 0, total });
 
-    // Batch the copies so the LinearProgress can advance smoothly instead
-    // of waiting for the whole set to finish in one request. The server
-    // processes copies sequentially per request anyway, so batching just
-    // moves the await boundaries — total wall time is similar.
     const BATCH_SIZE = 200;
     const copied = [];
     const errors = [];
     for (let i = 0; i < allCopies.length; i += BATCH_SIZE) {
-      const batch = allCopies.slice(i, i + BATCH_SIZE);
+      const batch = allCopies.slice(i, i + BATCH_SIZE).map(({ from, to }) => ({ from, to }));
       const result = await copyImagesInR2(batch);
       if (result.copied?.length) copied.push(...result.copied);
       if (result.errors?.length) errors.push(...result.errors);
@@ -546,11 +562,18 @@ export default function ProjectSidebar({
     if (errors.length) {
       console.warn(`⚠️ ${errors.length} image(s) failed to copy to template:`, errors);
     }
-    // Build the preloadedImages payload from successful copies.
-    return copied.map(({ to, url }) => ({
-      url: url || (r2PublicUrl ? `${r2PublicUrl}/${to}` : ''),
-      name: to.split('/').pop(),
-    }));
+    const metaByTo = new Map(allCopies.map((c) => [c.to, c]));
+    return copied.map(({ to, url }) => {
+      const meta = metaByTo.get(to) || {};
+      return {
+        url: url || (r2PublicUrl ? `${r2PublicUrl}/${to}` : ''),
+        name: meta.name || to.split('/').pop(),
+        key: to,
+        type: meta.type || 'image',
+        folder: meta.folder || '',
+        media_id: to,
+      };
+    });
   };
 
   const confirmSaveAsTemplate = async () => {
@@ -634,6 +657,8 @@ export default function ProjectSidebar({
         preloadedImages: templateImages,
         preloadedAt: templateImages.length > 0 ? new Date().toISOString() : null,
         preloadedSource: templateImages.length > 0 ? 'r2' : null,
+        // Carry folder / set / category tags (no tokens)
+        imageDatasetConfig: sanitizeMediaFolderConfig(projectToTemplate.imageDatasetConfig || {}),
       };
 
       setTemplateProgress({ label: 'Saving template…', current: 0, total: 0 });

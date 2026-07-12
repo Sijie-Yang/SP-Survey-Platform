@@ -2,8 +2,10 @@
  * Shared media/random-pool injection for SurveyApp and SurveyPreview.
  */
 import {
-  filterMediaByType, inferMediaType, normalizeMediaEntry, getEligibleMediaGroups,
-  buildMediaByCategory, getMediaCategories, parseMediaCategory, summarizeMediaGroupsBySize,
+  filterMediaByType, inferMediaType, normalizeMediaEntry,
+  getEligibleMediaSets, buildMediaByFolderCategory, getFolderCategories,
+  summarizeTaggedSetsBySize, normalizeMediaAssignmentMode, normalizeFolderPath,
+  getRecursiveMedia,
 } from './mediaUtils';
 import { getSkillById } from './skillManager';
 import { getPresetSkill } from './presetSkills';
@@ -177,27 +179,37 @@ export function filterPoolForQuestion(pool, element) {
   return filterMediaByType(pool, mediaType).map(normalizeMediaEntry).filter(Boolean);
 }
 
-/** Admin UI: project-wide vs question-filtered media/pairing/category counts. */
-export function getMediaPoolStatus(projectPool, question = null) {
+/** Admin UI: project-wide vs question-filtered media/set/category counts. */
+export function getMediaPoolStatus(projectPool, question = null, folderTags = {}) {
   const totalFileCount = (projectPool || []).length;
   const matchingFiles = question
     ? filterPoolForQuestion(projectPool, question)
-    : (projectPool || []).map(normalizeMediaEntry).filter(Boolean);
+    : (projectPool || []).map((e) => normalizeMediaEntry(e)).filter(Boolean);
   const matchingFileCount = matchingFiles.length;
   const mediaTypeFilter = question ? getMediaTypeFilter(question) : 'any';
-  const pairedSummary = summarizeMediaGroupsBySize(matchingFiles);
-  const projectCategoryCount = getMediaCategories(
-    (projectPool || []).map(normalizeMediaEntry).filter(Boolean),
+  const pairedSummary = summarizeTaggedSetsBySize(matchingFiles, folderTags);
+  const projectCategoryCount = getFolderCategories(
+    (projectPool || []).map((e) => normalizeMediaEntry(e)).filter(Boolean),
+    folderTags,
   ).length;
-  const matchingCategoryLabels = getMediaCategories(matchingFiles);
+  const matchingCategoryLabels = getFolderCategories(matchingFiles, folderTags, {
+    scopeFolders: question?.mediaFolders,
+  });
   const matchingCategoryCount = matchingCategoryLabels.length;
+  const mediaPerCategory = question ? getMediaPerCategory(question) : 1;
   const filesPerSet = question
     ? (question.imageCount || defaultMediaCount(question))
     : null;
-  const eligibleGroupCount = question?.mediaAssignmentMode === 'group'
+  const mode = normalizeMediaAssignmentMode(question?.mediaAssignmentMode);
+  const eligibleSetCount = mode === 'set'
     ? (matchingFileCount > 0 && filesPerSet
-      ? getEligibleMediaGroups(matchingFiles, filesPerSet).length
+      ? getEligibleMediaSets(matchingFiles, filesPerSet, folderTags, {
+        scopeFolders: question?.mediaFolders,
+      }).length
       : 0)
+    : null;
+  const expectedCategoryTotal = mode === 'category' && matchingCategoryCount > 0
+    ? matchingCategoryCount * mediaPerCategory
     : null;
 
   return {
@@ -209,24 +221,57 @@ export function getMediaPoolStatus(projectPool, question = null) {
     projectCategoryCount,
     matchingCategoryCount,
     matchingCategoryLabels,
-    eligibleGroupCount,
+    eligibleGroupCount: eligibleSetCount,
+    eligibleSetCount,
     filesPerSet,
+    mediaPerCategory,
+    expectedCategoryTotal,
+    taggedSetCount: pairedSummary.total,
+    folderTags,
   };
 }
 
+export function usesSetMediaAssignment(element) {
+  return normalizeMediaAssignmentMode(element?.mediaAssignmentMode) === 'set';
+}
+
+/** @deprecated Use usesSetMediaAssignment */
 export function usesGroupMediaAssignment(element) {
-  return element?.mediaAssignmentMode === 'group';
+  return usesSetMediaAssignment(element);
 }
 
 export function usesCategoryMediaAssignment(element) {
-  return element?.mediaAssignmentMode === 'category';
+  return normalizeMediaAssignmentMode(element?.mediaAssignmentMode) === 'category';
 }
 
-function pickOnePerCategory(pool, element, globallyUsedImageKeys) {
-  const byCategory = buildMediaByCategory(pool);
+/** How many files to draw from each tagged category folder (question setting). */
+export function getMediaPerCategory(element) {
+  const n = parseInt(element?.mediaPerCategory, 10);
+  if (Number.isFinite(n) && n > 0) return Math.min(50, n);
+  return 1;
+}
+
+/**
+ * Expected total media count for category mode = categories × per-category.
+ * Returns null if not in category mode or no categories.
+ */
+export function expectedCategoryImageCount(pool, element, folderTags = {}) {
+  if (!usesCategoryMediaAssignment(element)) return null;
+  const labels = getFolderCategories(pool, folderTags, {
+    scopeFolders: element?.mediaFolders,
+  });
+  if (!labels.length) return null;
+  return labels.length * getMediaPerCategory(element);
+}
+
+function pickOnePerCategory(pool, element, globallyUsedImageKeys, folderTags = {}) {
+  const byCategory = buildMediaByFolderCategory(pool, folderTags, {
+    scopeFolders: element?.mediaFolders,
+  });
   const categories = [...byCategory.keys()].sort((a, b) =>
     String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }),
   );
+  const perCategory = getMediaPerCategory(element);
   const excludeUsed = element.excludePreviouslyUsedImages !== false;
   const images = [];
   const assignedCategories = [];
@@ -241,11 +286,21 @@ function pickOnePerCategory(pool, element, globallyUsedImageKeys) {
     }
     if (!catPool.length) continue;
     const shuffled = [...catPool].sort(() => 0.5 - Math.random());
-    images.push(shuffled[0]);
+    const take = shuffled.slice(0, Math.min(perCategory, shuffled.length));
+    if (!take.length) continue;
+    images.push(...take);
     assignedCategories.push(cat);
   }
 
-  return { images, groupKey: null, groupId: null, categories: assignedCategories };
+  return {
+    images,
+    setKey: null,
+    setId: null,
+    groupKey: null,
+    groupId: null,
+    categories: assignedCategories,
+    mediaPerCategory: perCategory,
+  };
 }
 
 export function getImageKey(image) {
@@ -253,7 +308,7 @@ export function getImageKey(image) {
 }
 
 export function getGroupTrackingKey(group) {
-  return group?.groupKey || group?.groupId || null;
+  return group?.setKey || group?.groupKey || group?.setId || group?.groupId || null;
 }
 
 const DEFAULT_TS_MU = 25;
@@ -386,43 +441,90 @@ function pickSimilarMuSet(candidates, imageCount, pairStats) {
 }
 
 /**
- * Pick media for a question — individual files or a fixed-size filename group.
- * Returns { images, groupKey, groupId }.
+ * Pick media for a question — individual files, a tagged folder set, or one-per-category.
+ * Returns { images, setKey, setId, groupKey, groupId, categories }.
+ * (groupKey/groupId mirror setKey/setId for older callers.)
  *
- * Sampling modes (pairingMode):
- * - random: uniform shuffle
- * - balanced: prefer least-exposed images (any imageCount)
- * - adaptive: μ quantile buckets + cold-start injection for new images
+ * folderTags: project imageDatasetConfig.mediaFolderTags
  */
-export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys, globallyUsedGroupKeys, pairStats = null) {
+export function pickRandomMediaForQuestion(
+  pool,
+  element,
+  globallyUsedImageKeys,
+  globallyUsedSetKeys,
+  pairStats = null,
+  folderTags = {},
+) {
   const imageCount = element.imageCount || defaultMediaCount(element);
   const excludeUsed = element.excludePreviouslyUsedImages !== false;
   const pairingMode = normalizePairingMode(element.pairingMode || 'random');
+  const mode = normalizeMediaAssignmentMode(element.mediaAssignmentMode);
+  const scopeFolders = Array.isArray(element.mediaFolders)
+    ? element.mediaFolders.map(normalizeFolderPath).filter(Boolean)
+    : null;
 
-  if (usesCategoryMediaAssignment(element)) {
-    const picked = pickOnePerCategory(pool, element, globallyUsedImageKeys);
-    return picked;
+  let workingPool = [...(pool || [])].map((e) => normalizeMediaEntry(e)).filter(Boolean);
+  if (scopeFolders?.length && mode === 'individual') {
+    const scoped = [];
+    scopeFolders.forEach((folder) => {
+      scoped.push(...getRecursiveMedia(workingPool, folder));
+    });
+    const seen = new Set();
+    workingPool = scoped.filter((img) => {
+      const k = getImageKey(img);
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
   }
 
-  if (usesGroupMediaAssignment(element)) {
-    let eligible = getEligibleMediaGroups(pool, imageCount);
-    if (excludeUsed && globallyUsedGroupKeys) {
+  if (mode === 'category') {
+    return pickOnePerCategory(workingPool, element, globallyUsedImageKeys, folderTags);
+  }
+
+  if (mode === 'set') {
+    let eligible = getEligibleMediaSets(workingPool, imageCount, folderTags, {
+      scopeFolders,
+    });
+    if (excludeUsed && globallyUsedSetKeys) {
       eligible = eligible.filter((g) => {
         const key = getGroupTrackingKey(g);
-        return key && !globallyUsedGroupKeys.has(key);
+        return key && !globallyUsedSetKeys.has(key);
       });
     }
-    const shuffled = [...eligible].sort(() => 0.5 - Math.random());
-    const picked = shuffled[0];
-    if (!picked) return { images: [], groupKey: null, groupId: null };
+    if (!eligible.length) {
+      return { images: [], setKey: null, setId: null, groupKey: null, groupId: null };
+    }
+
+    let picked = null;
+    if (pairingMode === 'balanced' && pairStats) {
+      const exposure = (s) => pairStats?.[s.setKey]?.exposures
+        ?? pairStats?.[s.setId]?.exposures
+        ?? 0;
+      const sorted = [...eligible].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
+      picked = sorted[0];
+    } else if (pairingMode === 'adaptive' && pairStats) {
+      // Adaptive on sets: prefer least-exposed sets (same as balanced without per-file μ)
+      const exposure = (s) => pairStats?.[s.setKey]?.exposures
+        ?? pairStats?.[s.setId]?.exposures
+        ?? 0;
+      const sorted = [...eligible].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
+      picked = sorted[0];
+    } else {
+      const shuffled = [...eligible].sort(() => 0.5 - Math.random());
+      picked = shuffled[0];
+    }
+
     return {
       images: picked.members,
-      groupKey: picked.groupKey,
-      groupId: picked.groupId,
+      setKey: picked.setKey,
+      setId: picked.setId,
+      groupKey: picked.setKey,
+      groupId: picked.setId,
     };
   }
 
-  let candidates = [...pool];
+  let candidates = [...workingPool];
   if (excludeUsed && globallyUsedImageKeys) {
     const filtered = candidates.filter((img) => {
       const key = getImageKey(img);
@@ -434,6 +536,8 @@ export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys,
   if (pairingMode === 'balanced' && candidates.length >= imageCount) {
     return {
       images: pickLeastExposed(candidates, imageCount, pairStats),
+      setKey: null,
+      setId: null,
       groupKey: null,
       groupId: null,
     };
@@ -442,43 +546,50 @@ export function pickRandomMediaForQuestion(pool, element, globallyUsedImageKeys,
   if (pairingMode === 'adaptive' && candidates.length >= imageCount) {
     return {
       images: pickSimilarMuSet(candidates, imageCount, pairStats),
+      setKey: null,
+      setId: null,
       groupKey: null,
       groupId: null,
     };
   }
 
   const shuffled = [...candidates].sort(() => 0.5 - Math.random());
-  return { images: shuffled.slice(0, imageCount), groupKey: null, groupId: null };
+  return {
+    images: shuffled.slice(0, imageCount),
+    setKey: null,
+    setId: null,
+    groupKey: null,
+    groupId: null,
+  };
 }
 
-export function trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys) {
+export function trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedSetKeys) {
   if (element.excludePreviouslyUsedImages === false) return;
-  const { images, groupKey } = assignment;
-  if (groupKey && globallyUsedGroupKeys) globallyUsedGroupKeys.add(groupKey);
+  const setKey = assignment?.setKey || assignment?.groupKey;
+  if (setKey && globallyUsedSetKeys) globallyUsedSetKeys.add(setKey);
   if (!globallyUsedImageKeys) return;
-  (images || []).forEach((img) => {
+  (assignment?.images || []).forEach((img) => {
     const key = getImageKey(img);
     if (key) globallyUsedImageKeys.add(key);
   });
 }
 
 /** Build a log entry describing what media was injected into a question. */
-export function buildMediaAssignmentLogEntry(element, selectedImages, groupId = null, categories = null) {
+export function buildMediaAssignmentLogEntry(element, selectedImages, setId = null, categories = null) {
   return {
     questionName: element.name,
     questionTitle: element.title || element.name,
-    mode: element.mediaAssignmentMode || 'individual',
-    groupId: groupId || element.assignedMediaGroupId || null,
+    mode: normalizeMediaAssignmentMode(element.mediaAssignmentMode),
+    setId: setId || element.assignedMediaSetId || element.assignedMediaGroupId || null,
+    groupId: setId || element.assignedMediaSetId || element.assignedMediaGroupId || null,
     categories: categories || element.assignedMediaCategories || null,
     fileNames: (selectedImages || []).map((img) => img.name).filter(Boolean),
     files: (selectedImages || []).map((img) => ({
       name: img.name,
       type: img.type || inferMediaType(img.name || img.url),
       url: img.url,
-      category: (() => {
-        const { category, hasCategory } = parseMediaCategory(img.name);
-        return hasCategory ? category : null;
-      })(),
+      folder: img.folder || '',
+      category: null,
     })),
   };
 }

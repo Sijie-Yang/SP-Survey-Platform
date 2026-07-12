@@ -461,6 +461,109 @@ export function CorrelationBarChart({
   );
 }
 
+/**
+ * Horizontal bars for non-negative feature importance in [0, 1]
+ * (same layout language as CorrelationBarChart).
+ */
+export function ImportanceBarChart({
+  items,
+  title = 'Top features',
+  caption = 'Relative importance (normalized). Longer bar = stronger contribution in this model.',
+  maxItems = 12,
+  chartW = 560,
+}) {
+  const rows = (items || [])
+    .filter((d) => d && d.feature && Number.isFinite(d.importance))
+    .slice(0, maxItems)
+    .map((d) => ({
+      feature: d.feature,
+      importance: Math.max(0, Math.min(1, Number(d.importance))),
+    }));
+  if (!rows.length) return null;
+
+  const padL = 156;
+  const padR = 56;
+  const padT = 28;
+  const padB = 28;
+  const rowH = 26;
+  const chartH = padT + padB + rows.length * rowH;
+  const plotW = chartW - padL - padR;
+  const xAt = (v) => padL + v * plotW;
+  const barColor = '#1565c0';
+
+  return (
+    <Box sx={{ mb: 2, overflowX: 'auto', width: '100%' }}>
+      {title && (
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>{title}</Typography>
+      )}
+      {caption && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          {caption}
+        </Typography>
+      )}
+      <svg width={chartW} height={chartH} role="img" aria-label={title} style={{ maxWidth: '100%' }}>
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+          <g key={t}>
+            <line
+              x1={xAt(t)}
+              y1={padT - 4}
+              x2={xAt(t)}
+              y2={chartH - padB}
+              stroke={t === 0 ? '#9e9e9e' : '#eeeeee'}
+              strokeWidth={t === 0 ? 1.4 : 1}
+              strokeDasharray={t === 0 ? undefined : '3 3'}
+            />
+            <text x={xAt(t)} y={padT - 10} textAnchor="middle" fontSize={10} fill="#757575">
+              {t === 0 || t === 1 ? t.toFixed(0) : t.toFixed(2)}
+            </text>
+          </g>
+        ))}
+
+        {rows.map((d, i) => {
+          const y = padT + i * rowH + rowH / 2;
+          const barH = 14;
+          const x1 = xAt(d.importance);
+          const width = Math.max(x1 - padL, 1.5);
+          const label = d.feature.length > 20 ? `${d.feature.slice(0, 18)}…` : d.feature;
+          const valueLabel = `${(d.importance * 100).toFixed(0)}%`;
+          return (
+            <g key={d.feature}>
+              <text
+                x={padL - 8}
+                y={y + 4}
+                textAnchor="end"
+                fontSize={11}
+                fill="#424242"
+              >
+                {label}
+              </text>
+              <title>{`${d.feature}: ${(d.importance * 100).toFixed(1)}%`}</title>
+              <rect
+                x={padL}
+                y={y - barH / 2}
+                width={width}
+                height={barH}
+                rx={2}
+                fill={barColor}
+                opacity={0.85}
+              />
+              <text
+                x={x1 + 4}
+                y={y + 4}
+                textAnchor="start"
+                fontSize={10}
+                fill="#616161"
+              >
+                {valueLabel}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </Box>
+  );
+}
+
 function niceExtent(vals, padFrac = 0.06) {
   const finite = vals.filter((v) => Number.isFinite(v));
   if (!finite.length) return [0, 1];

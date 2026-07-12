@@ -27,6 +27,7 @@ import {
  *   images: array,
  *   hfToken: string,
  *   onFeaturesUpdated?: (map) => void,
+ *   compact?: boolean,
  * }} props
  */
 export default function FeatureExtractionJobs({
@@ -34,6 +35,7 @@ export default function FeatureExtractionJobs({
   images: rawImages,
   hfToken = '',
   onFeaturesUpdated,
+  compact = false,
 }) {
   const [busy, setBusy] = useState(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -141,29 +143,29 @@ export default function FeatureExtractionJobs({
   };
 
   return (
-    <Stack spacing={1.5}>
-      {message && <Alert severity="success" onClose={() => setMessage(null)}>{message}</Alert>}
-      {error && <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>}
-      <Typography variant="body2" color="text.secondary">
-        Features stored on R2 as CSV under <code>{r2Prefix}features/</code> (keyed by media_id / filename — migrates with template→project).
-        {loadingMap ? ' Loading existing CSV…' : ''}
-      </Typography>
+    <Stack spacing={compact ? 1 : 1.5}>
+      {message && <Alert severity="success" onClose={() => setMessage(null)} sx={compact ? { py: 0 } : undefined}>{message}</Alert>}
+      {error && <Alert severity="error" onClose={() => setError(null)} sx={compact ? { py: 0 } : undefined}>{error}</Alert>}
+      {!compact && (
+        <Typography variant="body2" color="text.secondary">
+          Features stored on R2 as CSV under <code>{r2Prefix}features/</code> (keyed by media_id / filename — migrates with template→project).
+          {loadingMap ? ' Loading existing CSV…' : ''}
+        </Typography>
+      )}
+      {compact && loadingMap && (
+        <Typography variant="caption" color="text.secondary">Loading status…</Typography>
+      )}
 
-      <Typography variant="subtitle2">L0 ({L0_MODEL})</Typography>
-      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <Chip size="small" label={`L0 ready: ${l0Ready}/${images.length}`} color={l0Ready ? 'success' : 'default'} />
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+        <Chip size="small" label={`L0 ${l0Ready}/${images.length}`} color={l0Ready ? 'success' : 'default'} />
         <Button size="small" variant="contained" disabled={!!busy || !images.length} onClick={runL0}>
-          Extract L0 features
+          {compact ? 'Run L0' : 'Extract L0 features'}
         </Button>
         {busy === 'l0' && <Button size="small" color="warning" variant="outlined" onClick={requestStop}>Stop</Button>}
       </Stack>
 
-      <Typography variant="subtitle2">Streetscape Seg ({SEG_MODEL})</Typography>
-      <Typography variant="caption" color="text.secondary">
-        {SEGFORMER_HF_MODEL} via HuggingFace — needs HF token saved above.
-      </Typography>
-      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <Chip size="small" label={`Seg ready: ${segReady}/${images.length}`} color={segReady ? 'success' : 'default'} />
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+        <Chip size="small" label={`Seg ${segReady}/${images.length}`} color={segReady ? 'success' : 'default'} />
         <Button
           size="small"
           variant="contained"
@@ -171,19 +173,30 @@ export default function FeatureExtractionJobs({
           disabled={!!busy || !images.length || !String(hfToken || '').trim()}
           onClick={runSeg}
         >
-          Run streetscape segmentation
+          {compact ? 'Run Seg' : 'Run streetscape segmentation'}
         </Button>
         {busy === 'seg' && <Button size="small" color="warning" variant="outlined" onClick={requestStop}>Stop</Button>}
       </Stack>
+      {!compact && (
+        <Typography variant="caption" color="text.secondary">
+          Seg: {SEGFORMER_HF_MODEL} via HuggingFace — needs HF token.
+        </Typography>
+      )}
+      {compact && !String(hfToken || '').trim() && (
+        <Typography variant="caption" color="warning.main">
+          Seg needs HF token
+        </Typography>
+      )}
 
       {busy && (
         <Box>
           <Typography variant="caption">
-            {busy === 'l0' ? 'Extracting L0…' : 'Segmenting…'} {progress.done}/{progress.total}
+            {busy === 'l0' ? 'L0…' : 'Seg…'} {progress.done}/{progress.total}
           </Typography>
           <LinearProgress
             variant={progress.total ? 'determinate' : 'indeterminate'}
             value={progress.total ? (100 * progress.done) / progress.total : 0}
+            sx={{ height: 6, borderRadius: 3 }}
           />
         </Box>
       )}

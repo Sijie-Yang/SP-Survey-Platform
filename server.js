@@ -2351,13 +2351,22 @@ app.get('/api/r2/list', async (req, res) => {
       .filter(obj => MEDIA_FILE_RE.test(obj.Key))
       .map(obj => {
         const name = obj.Key.split('/').pop();
+        const prefixNorm = String(prefix || '').replace(/\/?$/, '/');
+        let rel = obj.Key;
+        if (prefixNorm && rel.startsWith(prefixNorm)) {
+          rel = rel.slice(prefixNorm.length);
+        }
+        const relParts = rel.split('/').filter(Boolean);
+        const folder = relParts.length > 1 ? relParts.slice(0, -1).join('/') : '';
         return {
           name,
+          folder,
           key: obj.Key,
           url: `${r2PublicUrl}/${obj.Key}`,
           size: obj.Size,
           lastModified: obj.LastModified,
           type: inferType(name),
+          media_id: obj.Key,
         };
       })
       .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));

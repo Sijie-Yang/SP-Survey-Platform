@@ -39,8 +39,10 @@ import {
   filterPoolForQuestion,
   getMediaPoolStatus,
   applyMediaToElement,
+  getMediaPerCategory,
+  expectedCategoryImageCount,
 } from '../../lib/surveyMediaInjection';
-import { getMediaCategories, sortMediaByName } from '../../lib/mediaUtils';
+import { sortMediaByName, normalizeMediaAssignmentMode } from '../../lib/mediaUtils';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
 import SkillQuestionFrame from '../SkillQuestionWidget';
 import {
@@ -56,8 +58,8 @@ import {
   isMediaStimulusQuestion,
   isCuratedSelectionMode,
 } from '../../lib/questionTypeConstraints';
-import { MediaPairingGuide } from './MediaPairingGuide';
-import { MediaCategoryGuide } from './MediaCategoryGuide';
+import MediaPairingGuide from './MediaPairingGuide';
+import MediaCategoryGuide from './MediaCategoryGuide';
 import QuestionParticipantPreview from './QuestionParticipantPreview';
 
 const CURATED_STIMULUS_TYPES = [
@@ -316,10 +318,15 @@ function AttentionCheckFields({ question, onChange }) {
 }
 
 function MediaAssignmentFields({ question, onChange, currentProject }) {
-  const mode = question.mediaAssignmentMode || 'individual';
-  const isGroup = mode === 'group';
+  const mode = question.mediaAssignmentMode === 'group' ? 'set' : (question.mediaAssignmentMode || 'individual');
+  const isSet = mode === 'set';
   const isCategory = mode === 'category';
   const count = question.imageCount || 1;
+  const folderTags = currentProject?.imageDatasetConfig?.mediaFolderTags || {};
+  const taggedFolderOptions = React.useMemo(() => {
+    const tags = folderTags || {};
+    return Object.keys(tags).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [folderTags]);
   const poolStatus = React.useMemo(() => {
     if (!currentProject?.preloadedImages?.length) {
       return {
@@ -330,12 +337,13 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
         projectCategoryCount: 0,
         matchingCategoryCount: 0,
         matchingCategoryLabels: [],
-        eligibleGroupCount: isGroup ? 0 : null,
+        eligibleSetCount: isSet ? 0 : null,
         filesPerSet: count,
       };
     }
-    return getMediaPoolStatus(currentProject.preloadedImages, question);
-  }, [currentProject?.preloadedImages, question, isGroup, count]);
+    const q = { ...question, mediaAssignmentMode: mode };
+    return getMediaPoolStatus(currentProject.preloadedImages, q, folderTags);
+  }, [currentProject?.preloadedImages, question, isSet, count, mode, folderTags]);
 
   const mediaTypeHint = poolStatus.mediaTypeFilter !== 'any'
     ? ` (${poolStatus.mediaTypeFilter} only)`
@@ -351,28 +359,72 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
           label="Media Assignment"
         >
           <MenuItem value="individual">Random individual files</MenuItem>
-          <MenuItem value="group">Random fixed sets (filename pairs/groups)</MenuItem>
-          <MenuItem value="category">One per category (random within each class)</MenuItem>
+          <MenuItem value="set">Random fixed sets (tagged folders)</MenuItem>
+          <MenuItem value="category">Per category (tagged folders)</MenuItem>
         </Select>
       </FormControl>
-      {isGroup && (
+      {isCategory && (
+        <TextField
+          fullWidth
+          type="number"
+          size="small"
+          variant="outlined"
+          label="Files per category"
+          value={question.mediaPerCategory ?? 1}
+          onChange={(e) => {
+            const n = Math.max(1, Math.min(50, parseInt(e.target.value, 10) || 1));
+            onChange('mediaPerCategory', n);
+          }}
+          inputProps={{ min: 1, max: 50 }}
+          helperText={
+            poolStatus.matchingCategoryCount > 0
+              ? `${poolStatus.matchingCategoryCount} categor${poolStatus.matchingCategoryCount === 1 ? 'y' : 'ies'} × ${poolStatus.mediaPerCategory} = ${poolStatus.expectedCategoryTotal} file(s) total`
+              : 'How many files to draw from each tagged category folder'
+          }
+          sx={{ mt: 1 }}
+        />
+      )}
+      {(isSet || isCategory) && taggedFolderOptions.length > 0 && (
+        <FormControl fullWidth variant="outlined" sx={{ mt: 1 }}>
+          <InputLabel shrink sx={{ backgroundColor: 'white', px: 1 }}>Folder scope (optional)</InputLabel>
+          <Select
+            multiple
+            displayEmpty
+            value={Array.isArray(question.mediaFolders) ? question.mediaFolders : []}
+            onChange={(e) => onChange('mediaFolders', e.target.value)}
+            label="Folder scope (optional)"
+            renderValue={(selected) => (selected?.length ? selected.join(', ') : 'All tagged folders')}
+          >
+            {taggedFolderOptions
+              .filter((f) => {
+                const tag = folderTags[f];
+                if (isSet) return tag === 'set';
+                if (isCategory) return tag === 'category';
+                return true;
+              })
+              .map((f) => (
+                <MenuItem key={f} value={f}>{f} ({folderTags[f]})</MenuItem>
+              ))}
+          </Select>
+        </FormControl>
+      )}
+      {isSet && (
         <>
           {poolStatus.totalFileCount === 0 ? (
-            <Alert severity="warning">No media in project — upload files in Image Dataset first.</Alert>
+            <Alert severity="warning">No media in project — upload files in Media Dataset first.</Alert>
           ) : poolStatus.matchingFileCount === 0 ? (
             <Alert severity="warning">
               {poolStatus.totalFileCount} file(s) in project, but none match this question&apos;s media type
               filter{mediaTypeHint}.
             </Alert>
-          ) : poolStatus.eligibleGroupCount === 0 ? (
+          ) : (poolStatus.eligibleSetCount ?? poolStatus.eligibleGroupCount) === 0 ? (
             <Alert severity="warning">
-              No paired sets in matching media ({poolStatus.matchingFileCount} individual file(s){mediaTypeHint}).
-              Filenames need <code>__</code> (e.g. <code>scene__1.jpg</code> + <code>scene__2.jpg</code>).
-              Files like <code>image_1.jpg</code> are not sets.
+              No eligible set folders (need folders tagged <code>set</code> with exactly {poolStatus.filesPerSet} direct file(s)
+              {mediaTypeHint}). Tag folders in Media Dataset.
             </Alert>
           ) : (
             <Alert severity="success">
-              {poolStatus.eligibleGroupCount} paired set(s) of size {poolStatus.filesPerSet} available
+              {poolStatus.eligibleSetCount ?? poolStatus.eligibleGroupCount} set(s) of size {poolStatus.filesPerSet} available
               ({poolStatus.matchingFileCount} matching file(s){mediaTypeHint}).
             </Alert>
           )}
@@ -383,7 +435,7 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
             matchingFileCount={poolStatus.matchingFileCount}
             mediaTypeFilter={poolStatus.mediaTypeFilter}
             pairedSetCount={poolStatus.pairedSetCount}
-            eligibleGroupCount={poolStatus.eligibleGroupCount}
+            eligibleSetCount={poolStatus.eligibleSetCount ?? poolStatus.eligibleGroupCount}
             filesPerSet={poolStatus.filesPerSet}
           />
         </>
@@ -391,31 +443,21 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
       {isCategory && (
         <>
           {poolStatus.totalFileCount === 0 ? (
-            <Alert severity="warning">No media in project — upload files in Image Dataset first.</Alert>
+            <Alert severity="warning">No media in project — upload files in Media Dataset first.</Alert>
           ) : poolStatus.matchingCategoryCount > 0 ? (
             <Alert severity="success">
-              This question will show <strong>{poolStatus.matchingCategoryCount} file(s)</strong>
-              {' '}— one from each category:{' '}
-              {poolStatus.matchingCategoryLabels.map((c) => (
+              Will show <strong>{poolStatus.expectedCategoryTotal}</strong> file(s):
+              {' '}<strong>{poolStatus.mediaPerCategory}</strong> from each of{' '}
+              <strong>{poolStatus.matchingCategoryCount}</strong> categor
+              {poolStatus.matchingCategoryCount === 1 ? 'y' : 'ies'}
+              {' '}({poolStatus.matchingCategoryLabels.map((c) => (
                 <code key={c} style={{ marginRight: 6 }}>{c}</code>
-              ))}
+              ))})
               {mediaTypeHint && <span>{mediaTypeHint}</span>}
-            </Alert>
-          ) : poolStatus.projectCategoryCount > 0 && poolStatus.matchingFileCount === 0 ? (
-            <Alert severity="warning">
-              {poolStatus.projectCategoryCount} categor{poolStatus.projectCategoryCount === 1 ? 'y' : 'ies'} in project,
-              but no media matches this question&apos;s type filter{mediaTypeHint}.
-            </Alert>
-          ) : poolStatus.projectCategoryCount > 0 ? (
-            <Alert severity="warning">
-              {poolStatus.projectCategoryCount} categor{poolStatus.projectCategoryCount === 1 ? 'y' : 'ies'} in project,
-              but none in the {poolStatus.matchingFileCount} matching file(s){mediaTypeHint}.
-              Check category <code>@</code> prefixes on filtered media types.
             </Alert>
           ) : (
             <Alert severity="warning">
-              No categorized media in project ({poolStatus.totalFileCount} file(s) without <code>category@</code> prefix).
-              Example: <code>street@photo.jpg</code>, <code>park@photo.jpg</code>.
+              No category folders tagged yet (or none match this filter). Tag folders as <code>category</code> in Media Dataset.
             </Alert>
           )}
           <MediaCategoryGuide
@@ -427,15 +469,16 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
             totalFileCount={poolStatus.totalFileCount}
             matchingFileCount={poolStatus.matchingFileCount}
             mediaTypeFilter={poolStatus.mediaTypeFilter}
+            mediaPerCategory={poolStatus.mediaPerCategory}
           />
         </>
       )}
-      {!isGroup && !isCategory && (
+      {!isSet && !isCategory && (
         <Typography variant="caption" color="text.secondary" display="block">
           Randomly samples {count} file(s) from the project media pool
           {poolStatus.totalFileCount > 0
             ? ` (${poolStatus.matchingFileCount} matching${mediaTypeHint}).`
-            : ' — upload media in Image Dataset first.'}
+            : ' — upload media in Media Dataset first.'}
         </Typography>
       )}
     </>
@@ -565,13 +608,29 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const handleQuestionChange = (field, value) => {
     const updates = { [field]: value };
     
-    if (field === 'mediaAssignmentMode' && value === 'category' && currentProject?.preloadedImages?.length) {
-      const pool = filterPoolForQuestion(currentProject.preloadedImages, {
+    if (
+      (field === 'mediaAssignmentMode' && value === 'category')
+      || (field === 'mediaPerCategory' && normalizeMediaAssignmentMode(editedQuestion.mediaAssignmentMode) === 'category')
+      || (field === 'mediaFolders' && normalizeMediaAssignmentMode(editedQuestion.mediaAssignmentMode) === 'category')
+    ) {
+      const nextQ = {
         ...editedQuestion,
-        mediaAssignmentMode: value,
-      });
-      const n = getMediaCategories(pool).length;
-      if (n > 0) updates.imageCount = n;
+        ...updates,
+        mediaAssignmentMode: field === 'mediaAssignmentMode' ? value : editedQuestion.mediaAssignmentMode,
+      };
+      if (normalizeMediaAssignmentMode(nextQ.mediaAssignmentMode) === 'category' && currentProject?.preloadedImages?.length) {
+        const pool = filterPoolForQuestion(currentProject.preloadedImages, nextQ);
+        const tags = currentProject?.imageDatasetConfig?.mediaFolderTags || {};
+        const total = expectedCategoryImageCount(pool, {
+          ...nextQ,
+          mediaPerCategory: field === 'mediaPerCategory' ? updates.mediaPerCategory : getMediaPerCategory(nextQ),
+        }, tags);
+        if (total > 0) updates.imageCount = total;
+      }
+    }
+
+    if (field === 'mediaAssignmentMode' && value === 'category' && updates.mediaPerCategory == null && editedQuestion.mediaPerCategory == null) {
+      updates.mediaPerCategory = 1;
     }
 
     if (field === 'imageCount') {

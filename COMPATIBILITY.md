@@ -89,6 +89,7 @@ Copy into the PR or release note:
 |--------|---------|
 | `supabase/spatial_intelligence.sql` | Spatial settings table; features live on R2 CSV, not legacy feature tables |
 | `supabase/admin_projects_rls.sql` | `admins` + `is_platform_admin()` + admin SELECT/UPDATE/DELETE on `projects` |
+| `supabase/template_media_folders.sql` | `templates.image_dataset_config` for folder / set / category tags on templates |
 
 Conventions:
 
