@@ -2572,6 +2572,217 @@ app.get('/api/r2/image-proxy', async (req, res) => {
   }
 });
 
+// ── Urban Perception Deep Search (Semantic Scholar + Crossref) ───────────────
+const {
+  PRESET_QUERIES,
+  searchBothProviders,
+  mergeCandidates,
+} = require('./researchProviders');
+
+app.get('/api/research/presets', (_req, res) => {
+  res.json({
+    success: true,
+    presets: Object.entries(PRESET_QUERIES).map(([id, query]) => ({ id, query })),
+  });
+});
+
+app.get('/api/research/status', (_req, res) => {
+  const hasS2 = Boolean(process.env.SEMANTIC_SCHOLAR_API_KEY);
+  const hasMailto = Boolean(process.env.CROSSREF_MAILTO);
+  res.json({
+    success: true,
+    semanticScholarConfigured: hasS2,
+    crossrefMailtoConfigured: hasMailto,
+    note: hasS2
+      ? 'Semantic Scholar API key present.'
+      : 'SEMANTIC_SCHOLAR_API_KEY not set — unauthenticated S2 calls may be rate-limited.',
+  });
+});
+
+app.post('/api/research/search', async (req, res) => {
+  try {
+    const {
+      query,
+      limit = 20,
+      yearFrom = null,
+      yearTo = null,
+    } = req.body || {};
+    if (!query || !String(query).trim()) {
+      return res.status(400).json({ success: false, error: 'query is required' });
+    }
+    const result = await searchBothProviders({
+      query: String(query).trim(),
+      limit: Number(limit) || 20,
+      yearFrom: yearFrom == null || yearFrom === '' ? null : Number(yearFrom),
+      yearTo: yearTo == null || yearTo === '' ? null : Number(yearTo),
+    });
+    return res.json({
+      success: true,
+      papers: result.papers,
+      sourcesUsed: result.sourcesUsed,
+      warnings: result.errors,
+      count: result.papers.length,
+    });
+  } catch (error) {
+    console.error('research/search:', error);
+    return res.status(502).json({
+      success: false,
+      error: error.message || String(error),
+      errors: error.errors || [],
+    });
+  }
+});
+
+app.post('/api/research/scan', async (req, res) => {
+  try {
+    const {
+      preset = 'streetscape_perception',
+      query: customQuery = null,
+      limit = 15,
+      yearFrom = null,
+      yearTo = null,
+      mode = 'latest',
+    } = req.body || {};
+
+    const queries = customQuery
+      ? [String(customQuery).trim()]
+      : (preset === 'all'
+        ? Object.values(PRESET_QUERIES)
+        : [PRESET_QUERIES[preset] || PRESET_QUERIES.streetscape_perception]);
+
+    let yFrom = yearFrom == null || yearFrom === '' ? null : Number(yearFrom);
+    let yTo = yearTo == null || yearTo === '' ? null : Number(yearTo);
+    const nowY = new Date().getFullYear();
+    if (mode === 'latest' && yFrom == null) yFrom = nowY - 5;
+    if (mode === 'classic' && yTo == null) yTo = nowY - 6;
+
+    const allPapers = [];
+    const sourcesUsed = new Set();
+    const warnings = [];
+
+    for (const q of queries) {
+      try {
+        const result = await searchBothProviders({
+          query: q,
+          limit: Number(limit) || 15,
+          yearFrom: yFrom,
+          yearTo: yTo,
+        });
+        allPapers.push(...result.papers);
+        result.sourcesUsed.forEach((s) => sourcesUsed.add(s));
+        warnings.push(...(result.errors || []));
+      } catch (err) {
+        warnings.push(`${q}: ${err.message}`);
+      }
+    }
+
+    const papers = mergeCandidates([allPapers]);
+
+    return res.json({
+      success: true,
+      papers,
+      sourcesUsed: [...sourcesUsed],
+      warnings,
+      count: papers.length,
+      queries,
+      yearFrom: yFrom,
+      yearTo: yTo,
+      mode,
+      preset,
+    });
+  } catch (error) {
+    console.error('research/scan:', error);
+    return res.status(502).json({ success: false, error: error.message || String(error) });
+  }
+});
+
+/**
+ * Generate an unpublished survey_config draft from paper metadata (BYOK OpenAI).
+ * Client persists the template via Supabase templateManager.
+ */
+app.post('/api/research/draft-template', async (req, res) => {
+  try {
+    const { paper, apiKey } = req.body || {};
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'apiKey is required (BYOK)' });
+    }
+    if (!paper?.title) {
+      return res.status(400).json({ success: false, error: 'paper.title is required' });
+    }
+
+    const ai = resolveAiRequest(apiKey);
+    if (!ai) {
+      return res.status(400).json({ success: false, error: 'Invalid API key' });
+    }
+
+    const { PROMPTS } = require('./prompts.config.js');
+    const userPayload = [
+      `Title: ${paper.title}`,
+      paper.authors?.length ? `Authors: ${paper.authors.join(', ')}` : null,
+      paper.year ? `Year: ${paper.year}` : null,
+      paper.venue ? `Venue: ${paper.venue}` : null,
+      paper.doi ? `DOI: ${paper.doi}` : null,
+      paper.paper_url ? `URL: ${paper.paper_url}` : null,
+      '',
+      'Abstract:',
+      paper.abstract || '(no abstract available — produce a conservative visual perception survey)',
+    ].filter(Boolean).join('\n');
+
+    const completion = await aiChat(ai, 'default', {
+      temperature: 0.4,
+      messages: [
+        { role: 'system', content: PROMPTS.paperToTemplate },
+        { role: 'user', content: userPayload },
+      ],
+    });
+
+    const raw = completion.choices?.[0]?.message?.content || '';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res.status(502).json({
+        success: false,
+        error: 'Model did not return JSON survey config',
+        raw: raw.slice(0, 500),
+      });
+    }
+    let surveyConfig;
+    try {
+      surveyConfig = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      return res.status(502).json({ success: false, error: `Invalid JSON: ${e.message}` });
+    }
+    if (!surveyConfig.pages || !Array.isArray(surveyConfig.pages)) {
+      return res.status(502).json({ success: false, error: 'survey config missing pages[]' });
+    }
+
+    const author = Array.isArray(paper.authors) && paper.authors.length
+      ? paper.authors.slice(0, 3).join(', ')
+      : 'Unknown';
+    const year = paper.year ? String(paper.year) : String(new Date().getFullYear());
+
+    return res.json({
+      success: true,
+      surveyConfig,
+      templateMeta: {
+        name: surveyConfig.title || paper.title,
+        description: surveyConfig.description
+          || `Draft survey inspired by: ${paper.title}`,
+        author,
+        year,
+        category: 'Academic Research',
+        tags: ['deep-search', 'urban-perception', ...(paper.keywords || []).slice(0, 5)],
+        website: paper.paper_url || (paper.doi ? `https://doi.org/${paper.doi}` : null),
+      },
+    });
+  } catch (error) {
+    console.error('research/draft-template:', error);
+    return res.status(500).json({
+      success: false,
+      error: formatAiError(error),
+    });
+  }
+});
+
 // ── Serve React production build (production mode only) ───────────────────────
 // When NODE_ENV=production the React app sets SERVER_URL='' so all /api/* calls
 // hit the same origin.  Serve the built React app from this Express server so

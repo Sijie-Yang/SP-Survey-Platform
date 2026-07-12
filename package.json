@@ -12,6 +12,7 @@
     "@mui/icons-material": "^7.3.1",
     "@mui/material": "^7.3.1",
     "@supabase/supabase-js": "^2.50.0",
+    "@tanstack/react-virtual": "^3.14.5",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
@@ -45,6 +46,9 @@
     "test": "react-scripts test",
     "test:ci": "cross-env CI=true react-scripts test --watchAll=false",
     "test:media-pipeline": "node scripts/test-media-set-category.mjs",
+    "research:filter": "python3 scripts/filter-scopus-coarse.py --csv research/scopus/exports/2026-07-12.csv --out research/scopus/shortlists/2026-07-12_library_coarse.json --also public/research/scopus-shortlist.json",
+    "research:enrich": "node scripts/enrich-research-library.mjs --also public/research/scopus-shortlist.json",
+    "research:rebuild": "npm run research:filter && npm run research:enrich",
     "eject": "react-scripts eject",
     "deploy": "npm run build && wrangler deploy",
     "preview": "npm run build && wrangler dev"

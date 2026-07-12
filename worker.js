@@ -12,6 +12,11 @@
 // other source paths.
 
 import { AwsClient } from 'aws4fetch';
+import {
+  PRESET_QUERIES,
+  searchBothProviders,
+  mergeCandidates,
+} from './functions/_lib/researchProviders.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -459,6 +464,200 @@ async function handleImageProxy(request, env) {
   });
 }
 
+// ── Research Deep Search ──────────────────────────────────────────────────────
+
+async function handleResearchPresets() {
+  return json({
+    success: true,
+    presets: Object.entries(PRESET_QUERIES).map(([id, query]) => ({ id, query })),
+  });
+}
+
+async function handleResearchStatus(_request, env) {
+  const hasS2 = Boolean(env.SEMANTIC_SCHOLAR_API_KEY);
+  const hasMailto = Boolean(env.CROSSREF_MAILTO);
+  return json({
+    success: true,
+    semanticScholarConfigured: hasS2,
+    crossrefMailtoConfigured: hasMailto,
+    note: hasS2
+      ? 'Semantic Scholar API key present.'
+      : 'SEMANTIC_SCHOLAR_API_KEY not set — unauthenticated S2 calls may be rate-limited.',
+  });
+}
+
+async function handleResearchSearch(request, env) {
+  try {
+    const body = await request.json();
+    const { query, limit = 20, yearFrom = null, yearTo = null } = body || {};
+    if (!query || !String(query).trim()) {
+      return json({ success: false, error: 'query is required' }, { status: 400 });
+    }
+    const result = await searchBothProviders({
+      query: String(query).trim(),
+      limit: Number(limit) || 20,
+      yearFrom: yearFrom == null || yearFrom === '' ? null : Number(yearFrom),
+      yearTo: yearTo == null || yearTo === '' ? null : Number(yearTo),
+      semanticScholarApiKey: env.SEMANTIC_SCHOLAR_API_KEY || '',
+      crossrefMailto: env.CROSSREF_MAILTO || '',
+    });
+    return json({
+      success: true,
+      papers: result.papers,
+      sourcesUsed: result.sourcesUsed,
+      warnings: result.errors,
+      count: result.papers.length,
+    });
+  } catch (error) {
+    return json({
+      success: false,
+      error: error.message || String(error),
+      errors: error.errors || [],
+    }, { status: 502 });
+  }
+}
+
+async function handleResearchScan(request, env) {
+  try {
+    const body = await request.json();
+    const {
+      preset = 'streetscape_perception',
+      query: customQuery = null,
+      limit = 15,
+      yearFrom = null,
+      yearTo = null,
+      mode = 'latest',
+    } = body || {};
+
+    const queries = customQuery
+      ? [String(customQuery).trim()]
+      : (preset === 'all'
+        ? Object.values(PRESET_QUERIES)
+        : [PRESET_QUERIES[preset] || PRESET_QUERIES.streetscape_perception]);
+
+    let yFrom = yearFrom == null || yearFrom === '' ? null : Number(yearFrom);
+    let yTo = yearTo == null || yearTo === '' ? null : Number(yearTo);
+    const nowY = new Date().getFullYear();
+    if (mode === 'latest' && yFrom == null) yFrom = nowY - 5;
+    if (mode === 'classic' && yTo == null) yTo = nowY - 6;
+
+    const allPapers = [];
+    const sourcesUsed = new Set();
+    const warnings = [];
+    const providerOpts = {
+      semanticScholarApiKey: env.SEMANTIC_SCHOLAR_API_KEY || '',
+      crossrefMailto: env.CROSSREF_MAILTO || '',
+    };
+
+    for (const q of queries) {
+      try {
+        const result = await searchBothProviders({
+          query: q,
+          limit: Number(limit) || 15,
+          yearFrom: yFrom,
+          yearTo: yTo,
+          ...providerOpts,
+        });
+        allPapers.push(...result.papers);
+        result.sourcesUsed.forEach((s) => sourcesUsed.add(s));
+        warnings.push(...(result.errors || []));
+      } catch (err) {
+        warnings.push(`${q}: ${err.message}`);
+      }
+    }
+
+    const papers = mergeCandidates([allPapers]);
+    return json({
+      success: true,
+      papers,
+      sourcesUsed: [...sourcesUsed],
+      warnings,
+      count: papers.length,
+      queries,
+      yearFrom: yFrom,
+      yearTo: yTo,
+      mode,
+      preset,
+    });
+  } catch (error) {
+    return json({ success: false, error: error.message || String(error) }, { status: 502 });
+  }
+}
+
+async function handleResearchDraftTemplate(request, env) {
+  try {
+    const body = await request.json();
+    const { paper, apiKey } = body || {};
+    if (!apiKey) return json({ success: false, error: 'apiKey is required (BYOK)' }, { status: 400 });
+    if (!paper?.title) return json({ success: false, error: 'paper.title is required' }, { status: 400 });
+
+    const isOpenRouter = String(apiKey).startsWith('sk-or-');
+    const baseURL = isOpenRouter ? 'https://openrouter.ai/api/v1' : 'https://api.openai.com/v1';
+    const model = isOpenRouter ? 'openai/gpt-4o' : 'gpt-4o';
+    const system = `You are an expert survey designer specialising in urban / streetscape perception research.
+Given paper metadata, produce COMPLETE survey JSON for SP-Survey.
+No standalone streetscape text questions. Image questions need imageSelectionMode huggingface_random, imageCount, choices: [].
+Return ONLY valid JSON: {"title":"...","description":"...","pages":[...]}`;
+    const userPayload = [
+      `Title: ${paper.title}`,
+      paper.authors?.length ? `Authors: ${paper.authors.join(', ')}` : null,
+      paper.year ? `Year: ${paper.year}` : null,
+      paper.venue ? `Venue: ${paper.venue}` : null,
+      paper.doi ? `DOI: ${paper.doi}` : null,
+      '',
+      'Abstract:',
+      paper.abstract || '(no abstract — conservative visual perception survey)',
+    ].filter(Boolean).join('\n');
+
+    const res = await fetch(`${baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        ...(isOpenRouter ? {
+          'HTTP-Referer': env.APP_URL || 'https://sp-survey.org',
+          'X-Title': env.APP_NAME || 'SP-Survey-Platform',
+        } : {}),
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.4,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userPayload },
+        ],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return json({ success: false, error: data?.error?.message || `AI HTTP ${res.status}` }, { status: 502 });
+    }
+    const raw = data.choices?.[0]?.message?.content || '';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return json({ success: false, error: 'Model did not return JSON' }, { status: 502 });
+    const surveyConfig = JSON.parse(jsonMatch[0]);
+    if (!surveyConfig.pages) return json({ success: false, error: 'missing pages[]' }, { status: 502 });
+    const author = Array.isArray(paper.authors) && paper.authors.length
+      ? paper.authors.slice(0, 3).join(', ')
+      : 'Unknown';
+    return json({
+      success: true,
+      surveyConfig,
+      templateMeta: {
+        name: surveyConfig.title || paper.title,
+        description: surveyConfig.description || `Draft survey inspired by: ${paper.title}`,
+        author,
+        year: paper.year ? String(paper.year) : String(new Date().getFullYear()),
+        category: 'Academic Research',
+        tags: ['deep-search', 'urban-perception', ...(paper.keywords || []).slice(0, 5)],
+        website: paper.paper_url || (paper.doi ? `https://doi.org/${paper.doi}` : null),
+      },
+    });
+  } catch (error) {
+    return json({ success: false, error: error.message || String(error) }, { status: 500 });
+  }
+}
+
 // ── Worker entry ──────────────────────────────────────────────────────────────
 
 export default {
@@ -484,6 +683,21 @@ export default {
       }
       if (pathname === '/api/r2/image-proxy' && request.method === 'GET') {
         return await handleImageProxy(request, env);
+      }
+      if (pathname === '/api/research/presets' && request.method === 'GET') {
+        return await handleResearchPresets();
+      }
+      if (pathname === '/api/research/status' && request.method === 'GET') {
+        return await handleResearchStatus(request, env);
+      }
+      if (pathname === '/api/research/search' && request.method === 'POST') {
+        return await handleResearchSearch(request, env);
+      }
+      if (pathname === '/api/research/scan' && request.method === 'POST') {
+        return await handleResearchScan(request, env);
+      }
+      if (pathname === '/api/research/draft-template' && request.method === 'POST') {
+        return await handleResearchDraftTemplate(request, env);
       }
 
       // Anything else: defer to the static React app served as Workers Assets.

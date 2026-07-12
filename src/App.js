@@ -11,6 +11,7 @@ import AdminApp from './AdminApp';
 import LoginPage from './pages/LoginPage';
 import LandingPage from './pages/LandingPage';
 import LiveSurveysPage from './pages/LiveSurveysPage';
+import PapersLibraryPage from './pages/PapersLibraryPage';
 import AdminDashboard from './pages/AdminDashboard';
 import SkillEditorPage from './pages/SkillEditorPage';
 import SkillLibraryPage from './pages/SkillLibraryPage';
@@ -98,6 +99,7 @@ export default function App() {
           <Router>
             <Routes>
               <Route path="/" element={<LandingPage />} />
+              <Route path="/papers" element={<PapersLibraryPage />} />
               <Route path="/live" element={<LiveSurveysPage />} />
               <Route path="/survey" element={<SurveyApp />} />
               <Route path="/login" element={<LoginPage />} />

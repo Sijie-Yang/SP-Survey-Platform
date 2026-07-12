@@ -90,8 +90,11 @@ Copy into the PR or release note:
 | `supabase/spatial_intelligence.sql` | Spatial settings table; features live on R2 CSV, not legacy feature tables |
 | `supabase/admin_projects_rls.sql` | `admins` + `is_platform_admin()` + admin SELECT/UPDATE/DELETE on `projects` |
 | `supabase/template_media_folders.sql` | `templates.image_dataset_config` for folder / set / category tags on templates |
+| `supabase/research_papers.sql` | Admin paper library + optional import audit (`research_papers`, `research_paper_scans`) |
 
 **Prod checklist for media folders:** confirm `supabase/template_media_folders.sql` has been run in the Supabase SQL Editor before relying on template folder/tag round-trip in production. Mark release notes: SQL run / not-run.
+
+**Prod checklist for 论文库:** run `supabase/admin_projects_rls.sql` (if not already) then `supabase/research_papers.sql` once. No Semantic Scholar / Crossref env vars required for the library UI. Draft templates remain unpublished until approved in 模板管理.
 
 Conventions:
 

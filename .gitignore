@@ -29,6 +29,10 @@ yarn-error.log*
 *.tmp
 *.temp
 
+# Scopus raw exports (keep shortlists; drop CSVs locally under research/scopus/exports/)
+/research/scopus/exports/*.csv
+!/research/scopus/exports/README.md
+
 # Survey data (saved locally during development)
 /public/responses
 /public/projects/*.json

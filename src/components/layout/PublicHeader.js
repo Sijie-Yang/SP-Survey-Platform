@@ -15,7 +15,7 @@ function BrandLogo({ src, alt, height }) {
 }
 
 /**
- * Shared public-site header (Landing, Live, Login).
+ * Shared public-site header (Landing, Papers, Live, Login).
  */
 export default function PublicHeader({
   brand = 'SP Survey Platform',
@@ -53,6 +53,14 @@ export default function PublicHeader({
             <BrandLogo src="/UAL%20Logo.jpg" alt="Urban Analytics Lab, NUS" height={44} />
             <BrandLogo src="/DoA%20Logo.jpg" alt="Department of Architecture, NUS" height={44} />
           </Box>
+          <Button
+            component={RouterLink}
+            to="/papers"
+            color={isActive('/papers') ? 'primary' : 'inherit'}
+            sx={{ fontWeight: isActive('/papers') ? 700 : 500 }}
+          >
+            Paper library
+          </Button>
           <Button
             component={RouterLink}
             to="/live"

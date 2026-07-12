@@ -1,0 +1,1037 @@
+{
+  "source": "2026-07-12.csv",
+  "generated_at": "2026-07-12T05:30:36Z",
+  "template_refined": [],
+  "paper": [
+    {
+      "title": "Thermal comfort in sight: Thermal affordance and its visual assessment for sustainable streetscape design",
+      "year": 2025,
+      "authors": "Yang S.; Chong A.; Liu P.; Biljecki F.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2025.112569",
+      "url": "https://www.scopus.com/pages/publications/85215849800?origin=resultslist",
+      "cited_by": 20,
+      "score": 18,
+      "tier": "paper",
+      "task": "imagematrix",
+      "dims": [
+        "thermal",
+        "comfort",
+        "greenness",
+        "enclosure",
+        "safety",
+        "beauty"
+      ],
+      "abstract": "In response to climate change and urban heat island effects, enhancing human thermal comfort in cities is crucial for sustainable urban development. Traditional methods for investigating the urban thermal environment and corresponding human thermal comfort level are often resource intensive, inefficient, and limited in scope. To address these challenges, we (1) introduce a new concept named thermal affordance, which formalises the integrated inherent capacity of a streetscape to influence human thermal comfort based on its visual and physical features; and (2) an efficient method to evaluate it (visual assessment of thermal affordance — VATA), which combines street view imagery (SVI), online and in-field surveys, and statistical learning algorithms. VATA extracts five categories of image features from SVI data and establishes 19 visual-perceptual indicators for streetscape visual assessment. Using a multi-task neural network and elastic net regression, we model their chained relationship to predict and comprehend thermal affordance for Singapore. VATA predictions are validated with field-investigated OTC data, providing a cost-effective, scalable, and transferable method to assess the thermal comfort potential of urban streetscape. Moreover, we demonstrate its utility by generating a geospatially explicit mapping of thermal affordance, outlining a model update workflow for long-term urban-scale analysis, and implementing a two-stage prediction and inference approach (IF-VPI-V",
+      "keywords": "Heat mitigation; Human-centric geoAI; Perception; Sustainability; Urban design; Urban planning"
+    },
+    {
+      "title": "The Role of Subjective Perceptions and Objective Measurements of the Urban Environment in Explaining House Prices in Greater London: A Multi-Scale Urban Morphology Analysis",
+      "year": 2023,
+      "authors": "Yang S.; Krenz K.; Qiu W.; Li W.",
+      "venue": "ISPRS International Journal of Geo-Information",
+      "doi": "10.3390/ijgi12060249",
+      "url": "https://www.scopus.com/pages/publications/85163953011?origin=resultslist",
+      "cited_by": 26,
+      "score": 12,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "enclosure",
+        "comfort",
+        "safety"
+      ],
+      "abstract": "House prices have long been closely related to the built environment of cities, yet whether the subjective perception (SP) of these environments has a differing effect on prices at multiple urban scales is unclear. This study sheds light on the impact of people’s SP of the urban environment on house prices in a multi-scale urban morphology analysis. We trained a machine learning (ML) model to predict people’s SP of the urban environment around properties across Greater London with survey response data from an online survey evaluating people’s SP of street view image (SVI) and linked this to house price data. This information was used to construct a hedonic price model (HPM) and to evaluate the association between SP and house price data in a series of linear regression models controlling location information and urban morphological characteristics such as street network centralities at multiple urban scales, quantified using space syntax (SS) methods. The findings show that SP influences house prices, but this influence differs depending on the urban scale of analysis. Particularly, a sense of ‘enclosure’ and ‘comfort’ are important factors influencing house price variation. This study contributes by introducing SP of the urban environment as a new dimension into the traditional HPM and by exploring the economic impact of SP on the house price market at multiple urban scales. © 2023 by the authors.",
+      "keywords": "house price; machine learning; space syntax; street view image; subjective perception"
+    },
+    {
+      "title": "Measuring human perceptions of streetscapes to better inform urban renewal: A perspective of scene semantic parsing",
+      "year": 2021,
+      "authors": "Ma X.; Ma C.; Wu C.; Xi Y.; Yang R.; Peng N.; Zhang C.; Ren F.",
+      "venue": "Cities",
+      "doi": "10.1016/j.cities.2020.103086",
+      "url": "https://www.scopus.com/pages/publications/85099003510?origin=resultslist",
+      "cited_by": 323,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [],
+      "abstract": "Ubiquitous and up-to-date geotagged data are increasingly employed to uncover the visual traits of the built environment. However, few prior studies currently link this theoretical knowledge of street appraisals with operable practices to inform streetscape transformation. This study proposes a proof-of-concept analytical framework that sheds light on the connections between urban renewal and the quantification of streetscape visual traits. By virtue of a million intensively collected panoramic street view images in Shenzhen, China, the image-segmentation technique SegNet automatically extracts pixelwise semantical information and classifies visual elements. The throughput of the eye-level perception of the street canyon is formed by five indices. Additionally, the framework-derived scores (FDSs) are contrasted with the subjective rating scores (SRSs) to report the divergence and coherence between the visually experienced and the quantitative estimated methods. Furthermore, we investigate the spatial heterogeneity of five perception aspects, discuss the variations of the perception outcomes across different function streets, and analyze the net effect of urban renewal projects (URP",
+      "keywords": "Semantic segmentation; Street-level imagery; Streetscape perception; Urban renewal; Visual trait"
+    },
+    {
+      "title": "Effects of skeletal streetscape design on perceived safety",
+      "year": 2015,
+      "authors": "Harvey C.; Aultman-Hall L.; Hurley S.E.; Troy A.",
+      "venue": "Landscape and Urban Planning",
+      "doi": "10.1016/j.landurbplan.2015.05.007",
+      "url": "https://www.scopus.com/pages/publications/84930683978?origin=resultslist",
+      "cited_by": 153,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "enclosure",
+        "comfort"
+      ],
+      "abstract": "It is important for planners and urban designers to understand how physical characteristics of urban streetscapes contribute to perceptions of them as safe, comfortable urban spaces. While urban design theory offers numerous suggestions for successful streetscapes there is meager empirical evidence of their effects. We suggest that this is largely due to precision and sample size limitations on audit-based physical design and human perception measurements. This paper overcomes these limitations by identifying a key set of \"streetscape skeleton\" design variables that can be efficiently measured using a GIS-based method. It then measures these variables on a large and diverse sample of streetscapes, and examines their relationship to crowdsourced perceived safety scores, a useful indicator of environmental comfort. Regression modeling indicates that factors related to streetscape enclosure have a substantial positive effect on perceived safety. These include street tree canopy, the number of buildings along a block, and the cross-sectional proportion-the ratio of building height to width across the street between building façades. Importantly, these streetscape-scale skeleton variabl",
+      "keywords": "GIS; Perceived safety; Street tree; Streetscape; Urban design"
+    },
+    {
+      "title": "Predicting perceptions of the built environment using GIS, satellite and street view image approaches",
+      "year": 2021,
+      "authors": "Larkin A.; Gu X.; Chen L.; Hystad P.",
+      "venue": "Landscape and Urban Planning",
+      "doi": "10.1016/j.landurbplan.2021.104257",
+      "url": "https://www.scopus.com/pages/publications/85115947027?origin=resultslist",
+      "cited_by": 132,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "greenness",
+        "liveliness"
+      ],
+      "abstract": "Background: High quality built environments are important for human health and wellbeing. Numerous studies have characterized built environment physical features and environmental exposures, but few have examined urban perceptions at geographic scales needed for population-based research. The degree to which urban perceptions are associated with different environmental features, and traditional environmental exposures such as air pollution or urban green space, is largely unknown. Objective: To determine built environment factors associated with safety, lively and beauty perceptions across 56 cities. Methods: We examined perceptions collected in the open source Place Pulse 2.0 dataset, which assigned safety, lively and beauty scores to street view images based on crowd-sourced labelling. We derived built environment measures for the locations of these images (110,000 locations across 56 global cities) using GIS and remote sensing datasets as well as street view imagery features (e.g. trees, cars) using deep learning image segmentation. Linear regression models were developed using Lasso penalized variable selection to predict perceptions based on visible (street level images) and G",
+      "keywords": "Beauty; Built environment; Health; Lively; Perceptions; Safety"
+    },
+    {
+      "title": "Window View to the Sky as a Restorative Resource for Residents in Densely Populated Cities",
+      "year": 2020,
+      "authors": "Masoudinejad S.; Hartig T.",
+      "venue": "Environment and Behavior",
+      "doi": "10.1177/0013916518807274",
+      "url": "https://www.scopus.com/pages/publications/85059276842?origin=resultslist",
+      "cited_by": 127,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "greenness",
+        "preference",
+        "restorativeness"
+      ],
+      "abstract": "We investigated the extent to which the amount of sky and other contents affect expectations that window views will support psychological restoration in an urban context. The study involved 102 digital view images across which the amount of sky and other contents were varied systematically through manipulation of variables relevant to urban densification. University students (N = 212) rated images on restorative quality (being away, fascination), restoration likelihood, or preference. We aggregated the ratings for each variable for each image and used the images as cases in analyses. Amount of sky and presence of a window box with greenery had direct positive effects on restoration likelihood judgments, as well as indirect effects mediated by being away and fascination. Ground-level views with people and street trees evoked ratings similar to those for some views with sky, but the views judged most restorative and most liked were those with the most sky. © The Author(s) 2018.",
+      "keywords": "attention restoration theory; mediation analysis; preference–restoration relationship; restorative environments; urban greenery; window views"
+    },
+    {
+      "title": "Measuring visual walkability perception using panoramic street view images, virtual reality, and deep learning",
+      "year": 2022,
+      "authors": "Li Y.; Yabuki N.; Fukuda T.",
+      "venue": "Sustainable Cities and Society",
+      "doi": "10.1016/j.scs.2022.104140",
+      "url": "https://www.scopus.com/pages/publications/85137123518?origin=resultslist",
+      "cited_by": 125,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "walkability"
+      ],
+      "abstract": "Measuring perceptions of visual walkability in urban streets and exploring the associations between the visual features of the street built environment that make walking attractive to humans are both theoretically and practically important. Previous studies have used either environmental audits and subjective evaluations that have limitations in terms of cost, time, and measurement scale, or computer-aided audits based on natural street view images (SVIs) but with gaps in real perception. In this study, a virtual reality panoramic image-based deep learning framework is proposed for measuring visual walkability perception (VWP) and then quantifying and visualizing the contributing visual features. A VWP classification deep multitask learning (VWPCL) model was first developed and trained on human ratings of panoramic SVIs in virtual reality to predict VWP in six categories. Second, a regression model was used to determine the degree of correlation of various objects with one of the six VWP categories based on semantic segmentation. Furthermore, an interpretable deep learning model was used to assist in identifying and visualizing elements that contribute to VWP. The experiment valida",
+      "keywords": "Built environment; Deep learning; Panoramic street view images; Virtual reality; Visual walkability perception (VWP)"
+    },
+    {
+      "title": "Extracting human perceptions from street view images for better assessing urban renewal potential",
+      "year": 2023,
+      "authors": "He J.; Zhang J.; Yao Y.; Li X.",
+      "venue": "Cities",
+      "doi": "10.1016/j.cities.2023.104189",
+      "url": "https://www.scopus.com/pages/publications/85145821748?origin=resultslist",
+      "cited_by": 107,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "greenness",
+        "liveliness"
+      ],
+      "abstract": "Accurate and efficient assessment of large-scale urban renewal potential is an indispensable prerequisite for managing and facilitating projects. However, few studies consider the built environment when assessing urban renewal potential because it is difficult to measure. Street view images can show the physical setting of a place for humans to perceive the built environment. Hence, we separately extracted emotional and visual perceptions from street view images to construct a new comprehensive indicator set to assess multi-class urban renewal potentials. To establish the assessment model, we applied a backpropagation neural network based on the presence and background learning (PBL-BPNN). The renewal potential assessment based on the proposed indicator set can reach the highest accuracy. Emotional perceptions contribute more to assessing renewal potential than visual perceptions because they are more consistent in portraying the blighted built environment. Emotionally, the ratings of safety, boring, depression, and lively are stable in the blighted built environment. Visually, greenness and imageability often remain at lower values, highlighting the importance of greenspace and ur",
+      "keywords": "Human perceptions; Presence and background learning (PBL); Street view images; Urban renewal potential assessment"
+    },
+    {
+      "title": "Integrating restorative perception into urban street planning: A framework using street view images, deep learning, and space syntax",
+      "year": 2024,
+      "authors": "Wu Y.; Liu Q.; Hang T.; Yang Y.; Wang Y.; Cao L.",
+      "venue": "Cities",
+      "doi": "10.1016/j.cities.2024.104791",
+      "url": "https://www.scopus.com/pages/publications/85183104059?origin=resultslist",
+      "cited_by": 92,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "restorativeness"
+      ],
+      "abstract": "Existing urban street planning often neglects human perception despite being designed for human utility. Therefore, exploring the relationship between urban street planning and human perception, especially restorative perception, is crucial for sustainable urban planning. In this study, we analyzed restorative perception of urban streets among different population groups and accessibility of urban streets using Baidu Street View Images, deep learning, and space syntax. Furthermore, we clarified the impacts of various street elements on restorative perception using correlation and ridge regression analyses. Based on restorative perception and accessibility coupling assessment, streets were classified into four types, identifying “inefficient segments” and “prioritized segments”. The results showed that: 1) the level of restorative perception of streets in Nanjing was relatively limited and exhibited variation across different population groups; 2) the impacts of different street elements on restorative perception varied, with trees having the highest positive impact (β = 0.378), while walls had the greatest negative impact (β = − 0.182); and 3) “prioritized segments” and “inefficien",
+      "keywords": "Deep learning; Restorative perception; Space syntax; Street view image; Urban street planning"
+    },
+    {
+      "title": "Predicting human perception of the urban environment in a spatiotemporal urban setting using locally acquired street view images and audio clips",
+      "year": 2020,
+      "authors": "Verma D.; Jana A.; Ramamritham K.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2020.107340",
+      "url": "https://www.scopus.com/pages/publications/85092254642?origin=resultslist",
+      "cited_by": 85,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [],
+      "abstract": "This study investigates people's perception of visual and auditory landscapes in a mixed-use urban environment. A set of audio and visual data is collected at different intervals during the day in local streets with the help of an audio recorder and camera setup. The High and Low-level features from the collected audio and visual datasets are captured with the help of custom Deep Learning (DL) models and other standard algorithms. The collected data is used in the perception survey, which included human subjects (n = 73). The evaluation of the individual perception is done with the help of eight and six auditory and visual perceptual attributes, respectively. The results from the survey are then studied in relation to the features extracted from algorithms. Finally, a street of 10 km length is chosen within the study area where a spatiotemporal street-level visual and auditory data is collected. Statistical analysis and Machine Learning modeling are performed in the surveyed dataset to predict the human perception of audio and visual scenes in the chosen street. The results helped in understanding specific audio and visual features that are related to individual perceptions. Furthe",
+      "keywords": "Audio classification; Deep Learning; Environment perception; Perception mapping; Street-view"
+    },
+    {
+      "title": "Equity in microscale urban design and walkability: A photographic survey of six Pittsburgh streetscapes",
+      "year": 2017,
+      "authors": "Bereitschaft B.",
+      "venue": "Sustainability (Switzerland)",
+      "doi": "10.3390/su9071233",
+      "url": "https://www.scopus.com/pages/publications/85023778138?origin=resultslist",
+      "cited_by": 68,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "walkability",
+        "enclosure",
+        "complexity",
+        "thermal"
+      ],
+      "abstract": "This paper explores inequity in neighborhood walkability at the micro-scale level by qualitatively examining six streetscapes in Pittsburgh, Pennsylvania. A photographic survey is used to highlight differences in the quality and design of the built environment among pairs of streetscapes with high or low social vulnerability but approximately equal quantitative Walk Scores®. The survey revealed discernable differences in the quality and maintenance of the built environment among those in more and less disadvantaged neighborhoods. This was true of several characteristics expected to affect walkability, including enclosure, transparency, complexity, and tidiness. Streetscapes in neighborhoods with high social vulnerability exhibited less contiguous street walls, fewer windows and less transparent storefronts, less well maintained infrastructure, fewer street cafés, and overall less complexity than those in neighborhoods with low social vulnerability. Implications for planning and policy are discussed. © 2017 by the authors.",
+      "keywords": "Environmental justice; Equity; Social vulnerability; Streetscapes; Walk score; Walkability"
+    },
+    {
+      "title": "Evaluating human perception of building exteriors using street view imagery",
+      "year": 2024,
+      "authors": "Liang X.; Chang J.H.; Gao S.; Zhao T.; Biljecki F.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2024.111875",
+      "url": "https://www.scopus.com/pages/publications/85200238056?origin=resultslist",
+      "cited_by": 62,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "complexity"
+      ],
+      "abstract": "Building appearances profoundly shape the urban visual landscape, influencing city images and the quality of urban life. Traditional methods for evaluating the perceptual and aesthetic qualities of building facades are often limited in scope. Despite recent studies that have sought to understand human perception of urban streetscapes, our grasp of how individuals perceive building exteriors on a broader scale and the subsequent impact on holistic street experiences, remains largely unexplored. In this study, we integrate a traditional survey-based evaluation framework with machine learning techniques to analyse human perception of over 250,000 building images from Singapore, San Francisco, and Amsterdam. Specifically, deep learning models trained on crowdsourced ratings of 1200 building images across six perceptual attributes — complex, original, ordered, pleasing, boring, and style — achieve over 72% accuracy. This novel approach enables adaptive and comparative analyses of building appearances across regions, revealing spatial patterns in the perception of architectural exteriors and their relationships with functions, age, and location. Moreover, by applying propensity score mat",
+      "keywords": "Architectural design; Building facade; Built environment; Computer vision; Street-level imagery"
+    },
+    {
+      "title": "An interpretable machine learning framework for measuring urban perceptions from panoramic street view images",
+      "year": 2023,
+      "authors": "Liu Y.; Chen M.; Wang M.; Huang J.; Thomas F.; Rahimi K.; Mamouei M.",
+      "venue": "iScience",
+      "doi": "10.1016/j.isci.2023.106132",
+      "url": "https://www.scopus.com/pages/publications/85148336811?origin=resultslist",
+      "cited_by": 58,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "liveliness"
+      ],
+      "abstract": "The proliferation of street view images (SVIs) and the constant advancements in deep learning techniques have enabled urban analysts to extract and evaluate urban perceptions from large-scale urban streetscapes. However, many existing analytical frameworks have been found to lack interpretability due to their end-to-end structure and “black-box” nature, thereby limiting their value as a planning support tool. In this context, we propose a five-step machine learning framework for extracting neighborhood-level urban perceptions from panoramic SVIs, specifically emphasizing feature and result interpretability. By utilizing the MIT Place Pulse data, the developed framework can systematically extract six dimensions of urban perceptions from the given panoramas, including perceptions of wealth, boredom, depression, beauty, safety, and liveliness. The practical utility of this framework is demonstrated through its deployment in Inner London, where it was used to visualize urban perceptions at the Output Area (OA) level and to verify against real-world crime rate. © 2023 The Authors",
+      "keywords": "Artificial Intelligence; Environmental sciences"
+    },
+    {
+      "title": "Modelling people's perceived scene complexity of real-world environments using street-view panoramas and open geodata",
+      "year": 2022,
+      "authors": "Guan F.; Fang Z.; Wang L.; Zhang X.; Zhong H.; Huang H.",
+      "venue": "ISPRS Journal of Photogrammetry and Remote Sensing",
+      "doi": "10.1016/j.isprsjprs.2022.02.012",
+      "url": "https://www.scopus.com/pages/publications/85125574085?origin=resultslist",
+      "cited_by": 57,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "complexity",
+        "thermal"
+      ],
+      "abstract": "Scene complexity refers to the difficulty of human perception and understanding of the specific environment. An environment is complex when it has many parts or components, and those parts or components interrelate with each other in multiple and random ways. People's daily behaviors and spatial activities are often influenced by such complexity of real-world environments. The existing computational methods on modelling the perceived scene complexity of humans primarily focus on either visual or structural characteristics of the environment. This work presents a computational method to quantify the scene complexity of real-world environments comprehensively based on the visual, structural, and semantic characteristics, and assesses the performance of the technical approach with human-labelled “ground-truth” data. Specifically, we proposed a set of features to model the visual (e.g. color, shape, texture, and field of vision), structural (e.g. branches and nodes), and semantic (e.g. the number of POIs and their spatial patterns, well-known signs) aspects, based on street-view panoramas, road network data, POI data, and building footprint data. The results of the evaluation show that",
+      "keywords": "Human perception; Scene complexity of real-world environments; Scene features; Street-view panorama"
+    },
+    {
+      "title": "Assessment of Perceived and Physical Walkability Using Street View Images and Deep Learning Technology",
+      "year": 2023,
+      "authors": "Kang Y.; Kim J.; Park J.; Lee J.",
+      "venue": "ISPRS International Journal of Geo-Information",
+      "doi": "10.3390/ijgi12050186",
+      "url": "https://www.scopus.com/pages/publications/85160294369?origin=resultslist",
+      "cited_by": 55,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "walkability"
+      ],
+      "abstract": "As neighborhood walkability has gradually become an important topic in various fields, many cities around the world are promoting an eco-friendly and people-centered walking environment as a top priority in urban planning. The purpose of this study is to visualize physical and perceived walkability in detail and analyze the differences to prepare alternatives for improving the neighborhood’s walking environment. The study area is Jeonju City, one of the medium-sized cities in Korea. For the evaluation of perceived walkability, 196,624 street view images were crawled and 127,317 pairs of training datasets were constructed. After developing a convolutional neural network model, the scores of perceived walkability are predicted. For the evaluation of physical walkability, eight indicators are selected, and the score of overall physical walkability is calculated by combining the scores of the eight indicators. After that, the scores of perceived and physical walkability are visualized, and the difference between them is analyzed. This study is novel in three aspects. First, we develop a deep learning model that can improve the accuracy of perceived walkability using street view images,",
+      "keywords": "crowdsourced data; deep learning technology; difference between perceived and physical walkability; perceived walkability; physical walkability; semantic segmentation; street view images"
+    },
+    {
+      "title": "Modelling perceived oppressiveness and noise annoyance responses to window views of densely packed residential high-rise environments",
+      "year": 2019,
+      "authors": "Chung W.K.; Chau C.K.; Masullo M.; Pascale A.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2019.04.042",
+      "url": "https://www.scopus.com/pages/publications/85064760992?origin=resultslist",
+      "cited_by": 50,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "oppressiveness"
+      ],
+      "abstract": "This paper studies the effects of densely packed high-rise residential settings on human perceptions of oppressiveness and annoyance induced by road traffic noise. Earlier studies have discovered that negative oppressive feeling would be developed when people on the streets were surrounded by high-rises at proximity. However, little has been understood about whether the spacing between tall buildings and the distance separating them from the viewers living in opposite high-rises affect their perceptions of oppressiveness and noise annoyance. This study aimed at developing multivariate models to predict the probability of evoking the feeling of oppressiveness when dwellers come across views restricted and obstructed by closing-in high-rises, and the response of noise annoyance in relation to the visual attributes associated with the oppressing environment. 46 cases were used for statistical analyses after the recruits were successfully administered in 2 stages of laboratory experiments where they were exposed to 12 scenarios through projected composite images and to 18 scenarios experienced in immersive virtual reality. The results showed that separation distance and building spacin",
+      "keywords": "High-rises; Immersive virtual reality; Noise annoyance; Oppressiveness"
+    },
+    {
+      "title": "Towards safer streets: A framework for unveiling pedestrians’ perceived road safety using street view imagery",
+      "year": 2024,
+      "authors": "Hamim O.F.; Ukkusuri S.V.",
+      "venue": "Accident Analysis and Prevention",
+      "doi": "10.1016/j.aap.2023.107400",
+      "url": "https://www.scopus.com/pages/publications/85178335830?origin=resultslist",
+      "cited_by": 49,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety"
+      ],
+      "abstract": "Road safety has become a global concern but its impact in low- and middle-income countries is widespread mainly due to lack of appropriate crash database system and under-reporting. In this context, the primary objective of this paper is to provide a scalable framework for unveiling pedestrians’ perceived road safety that can also be applied in regions where accessible crash data are limited or near-crashes are left unreported. In the first step of our methodology, a deep learning architecture-based semantic segmentation model (HRNet+OCR) is trained using labeled Google Street View (GSV) images from specific study areas in Dhaka, Bangladesh, which facilitates the identification of both man-made components (such as roads, sidewalks, buildings, and vehicles) and natural elements (including trees and sky). The developed model showed excellent performance in identifying different features in an image by achieving high precision (0.95), recall (0.97), F1-score (0.96), and intersection over union (IoU) (91.86). Secondly, a group of trained raters scored the perceived road safety on an ordinal scale from 0 to 10 (extremely unsafe to extremely safe to walk in terms of road crashes) by asse",
+      "keywords": "Machine learning; Pedestrian; Perceived road safety; Street view image"
+    },
+    {
+      "title": "Visual aesthetic quality assessment of the streetscape from the perspective of landscape-perception coupling",
+      "year": 2024,
+      "authors": "Fang Y.-N.; Tian J.; Namaiti A.; Zhang S.; Zeng J.; Zhu X.",
+      "venue": "Environmental Impact Assessment Review",
+      "doi": "10.1016/j.eiar.2024.107535",
+      "url": "https://www.scopus.com/pages/publications/85192063136?origin=resultslist",
+      "cited_by": 49,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty"
+      ],
+      "abstract": "Although significant progress has been made in both the description of landscape biophysical characteristics (LBC) and the assessment of public aesthetic perceptions (PAP) stimulated by these characteristics, there is still a lack of theoretical research and practical exploration in coupling the dual assessment factors of LBC and PAP. This study aims to propose an assessment method based on the coupled interaction of LBC and PAP. The Wudadao historic district was selected as the empirical study area. First, the assessment indicators describing the biophysical characteristics of the landscape were identified, and the indicators were quantified. Multi-source data, GIS technology, and deep learning algorithms were comprehensively utilized to optimize the indicator algorithm while enriching the indicator types. Then, a network research survey and the scenic beauty estimation (SBE) method were combined to quantify the public perception assessment results. Finally, a back-propagation neural network (BP NN) streetscape aesthetic quality assessment model based on the coupling of BCL and PAP was established. In addition, based on the quantitative data of LBC and PAP, the landscape character",
+      "keywords": "Aesthetic perception; Deep learning; Eye-tracking; Machine learning; Semantic segmentation; Urban streetscape assessment; Visual quality"
+    },
+    {
+      "title": "Luminous and visual preferences of young children in their classrooms: Curtain use, artificial lighting and window views",
+      "year": 2019,
+      "authors": "Vásquez N.G.; Felippe M.L.; Pereira F.O.R.; Kuhnen A.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2019.01.049",
+      "url": "https://www.scopus.com/pages/publications/85061374855?origin=resultslist",
+      "cited_by": 45,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "comfort",
+        "preference"
+      ],
+      "abstract": "Existing research on visual comfort conducted with children has focused on the impacts of lighting on their academic performance and not specifically on preferences. The aim of this study is to present a multimethod approach to identify children's preferences for luminous environments and window views in preschool classrooms. The study was conducted in six classrooms in Florianópolis (Brazil) in 2016, with approximately 84 children. More than 240 preference votes for luminous environment and 83 preference votes for window views were obtained, and 253 drawings of preferred elements of the views were produced. The reasons for the preferences of the children were investigated by reviewing the content of the surveys and drawings. The association of age, gender and physical environment with the preferences was investigated. The results indicated that young children can differentiate lighting needs according to the activity performed. Visual contact with the view seen through the classroom window was important to the children, with a higher preference for natural views. Of the relationships tested, “age” was the personal variable that was neither associated with the preference for the us",
+      "keywords": "Children; Luminous preferences; Preschool classrooms; Views; Windows"
+    },
+    {
+      "title": "Measuring cyclists’ subjective perceptions of the street riding environment using K-means SMOTE-RF model and street view imagery",
+      "year": 2024,
+      "authors": "Zeng Q.; Gong Z.; Wu S.; Zhuang C.; Li S.",
+      "venue": "International Journal of Applied Earth Observation and Geoinformation",
+      "doi": "10.1016/j.jag.2024.103739",
+      "url": "https://www.scopus.com/pages/publications/85186695480?origin=resultslist",
+      "cited_by": 43,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty"
+      ],
+      "abstract": "Cyclists' willingness to ride is usually influenced by their subjective perception of the street riding environment. Measuring this perception is crucial for enhancing residents' willingness to ride. We propose an SSB framework (Public Security, Traffic Safety, Scenic Beauty) to quantify cyclists' subjective perception using street view imagery (SVI) and volunteer rating data. To address the issue of imbalanced class distribution in the volunteer rating data and enhance the model's ability to distinguish between positive and negative perception scenes, we employed a combination of the Kmeans Synthetic Minority Over-Sampling Technique (Kmeans-SMOTE) and the Random Forest (RF) classifier. The Kmeans SMOTE-RF model improved Area Under the Curve (AUC) by 0.327 for public safety, 0.2 for traffic safety, and 0.209 for scenic beauty compared to the RF model. Additionally, we incorporated Shapley Additive Explanations (SHAP) to examine how the visual features of SVI impact cyclists' subjective perception. Trees had a positive impact on all dimensions. Fence and sidewalk were key features for enhancing traffic safety perception, while roads positively affected public security and scenic bea",
+      "keywords": "Cyclists; K-means SMOTE; Machine learning; Street environment; Street view imagery; Subjective perceptions"
+    },
+    {
+      "title": "A Spatial Analysis of Urban Streets under Deep Learning Based on Street View Imagery: Quantifying Perceptual and Elemental Perceptual Relationships",
+      "year": 2023,
+      "authors": "Sun H.; Xu H.; He H.; Wei Q.; Yan Y.; Chen Z.; Li X.; Zheng J.; Li T.",
+      "venue": "Sustainability (Switzerland)",
+      "doi": "10.3390/su152014798",
+      "url": "https://www.scopus.com/pages/publications/85187914104?origin=resultslist",
+      "cited_by": 35,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "liveliness"
+      ],
+      "abstract": "Measuring the human perception of urban street space and exploring the street space elements that influence this perception have always interested geographic information and urban planning fields. However, most traditional efforts to investigate urban street perception are based on manual, usually time-consuming, inefficient, and subjective judgments. This shortcoming has a crucial impact on large-scale street spatial analyses. Fortunately, in recent years, deep learning models have gained robust element extraction capabilities for images and achieved very competitive results in semantic segmentation. In this paper, we propose a Street View imagery (SVI)-driven deep learning approach to automatically measure six perceptions of large-scale urban areas, including “safety”, “lively”, “beautiful”, “wealthy”, “depressing”, and “boring”. The model was trained on millions of people’s ratings of SVIs with a high accuracy. First, this paper maps the distribution of the six human perceptions of urban street spaces within the third ring road of Wuhan (appearing as Wuhan later). Secondly, we constructed a multiple linear regression model of “street constituents–human perception” by segmenting ",
+      "keywords": "deep learning; street view images; urban perception; urban planning"
+    },
+    {
+      "title": "Urban Perception Evaluation and Street Refinement Governance Supported by Street View Visual Elements Analysis",
+      "year": 2024,
+      "authors": "Tang F.; Zeng P.; Wang L.; Zhang L.; Xu W.",
+      "venue": "Remote Sensing",
+      "doi": "10.3390/rs16193661",
+      "url": "https://www.scopus.com/pages/publications/85206313090?origin=resultslist",
+      "cited_by": 32,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "complexity",
+        "greenness"
+      ],
+      "abstract": "As street imagery and big data techniques evolve, opportunities for refined urban governance emerge. This study delves into effective methods for urban perception evaluation and street refinement governance by using street view data and deep learning. Employing DeepLabV3+ and VGGNet models, we analyzed street view images from Nanshan District, Shenzhen, identifying critical factors that shape residents’ spatial perceptions, such as urban greenery, road quality, and infrastructure. The findings indicate that robust vegetation, well-maintained roads, and well-designed buildings significantly enhance positive perceptions, whereas detractors like fences reduce quality. Furthermore, Moran’s I statistical analysis and multi-scale geographically weighted regression (MGWR) models highlight spatial heterogeneity and the clustering of perceptions, underscoring the need for location-specific planning. The study also points out that complex street networks in accessible areas enhance living convenience and environmental satisfaction. This research shows that integrating street view data with deep learning provides valuable tools for urban planners and policymakers, aiding in the development of",
+      "keywords": "deep learning; neural networks; spatial heterogeneity; street view data; urban perception"
+    },
+    {
+      "title": "Evaluating and Comparing Human Perceptions of Streets in Two Megacities by Integrating Street-View Images, Deep Learning, and Space Syntax",
+      "year": 2024,
+      "authors": "Lei Y.; Zhou H.; Xue L.; Yuan L.; Liu Y.; Wang M.; Wang C.",
+      "venue": "Buildings",
+      "doi": "10.3390/buildings14061847",
+      "url": "https://www.scopus.com/pages/publications/85197242119?origin=resultslist",
+      "cited_by": 28,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [],
+      "abstract": "Street quality plays a crucial role in promoting urban development. There is still no consensus on how to quantify human street quality perception on a large scale or explore the relationship between street quality and street composition elements. This study investigates a new approach for evaluating and comparing street quality perception and accessibility in Shanghai and Chengdu, two megacities with distinct geographic characteristics, using street-view images, deep learning, and space syntax. The result indicates significant differences in street quality perception between Shanghai and Chengdu. In Chengdu, there is a curvilinear distribution of the highest positive perceptions along the riverfront space and a radioactive spatial distribution of the highest negative perceptions along the ring road and main roads. Shanghai displays a fragmented cross-aggregation and polycentric distribution of the streets with the highest positive and negative perceptions. Thus, it is reasonable to hypothesize that street quality perception closely correlates with the urban planning and construction process of streets. Moreover, we used multiple linear regression to explain the relationship betwee",
+      "keywords": "deep learning; space syntax; street quality perception; street-view images"
+    },
+    {
+      "title": "Research on Campus Space Features and Visual Quality Based on Street View Images: A Case Study on the Chongshan Campus of Liaoning University",
+      "year": 2023,
+      "authors": "Meng Y.; Li Q.; Ji X.; Yu Y.; Yue D.; Gan M.; Wang S.; Niu J.; Fukuda H.",
+      "venue": "Buildings",
+      "doi": "10.3390/buildings13051332",
+      "url": "https://www.scopus.com/pages/publications/85160616859?origin=resultslist",
+      "cited_by": 24,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "enclosure",
+        "greenness"
+      ],
+      "abstract": "As the university campus is a place for learning, conducting scientific research, and communication, campus street spatial quality has an impact on its users. Therefore, refinement evaluations of campus spatial quality are essential for constructing high-quality campuses. In this study, machine learning was used to conduct semantic segmentation and spatial perception prediction on street view images. The physical features and perception quality of the surrounding areas of the Chongshan campus of Liaoning University were obtained. The study found that the visual beautiful quality (VBQ) of the student living area was the highest, and the VBQ of the teacher living area was the lowest when compared to the research and study area, student living area, sports area, and surrounding area. Greenness and openness had positive influences on VBQ, while enclosure had a negative influence. This study analyzed the influence mechanism operating between spatial physical features and VBQ. The results provide theoretical and technical support for campus space spatial quality construction and improvement. © 2023 by the authors.",
+      "keywords": "campus street space; physical features; semantic segmentation; spatial perception prediction; visual beautiful quality (VBQ)"
+    },
+    {
+      "title": "Predicting Window View Preferences Using the Environmental Information Criteria",
+      "year": 2023,
+      "authors": "Kent M.G.; Schiavon S.",
+      "venue": "LEUKOS - Journal of Illuminating Engineering Society of North America",
+      "doi": "10.1080/15502724.2022.2077753",
+      "url": "https://www.scopus.com/pages/publications/85134849861?origin=resultslist",
+      "cited_by": 23,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "preference"
+      ],
+      "abstract": "Daylighting standards provide an assessment method that can be used to evaluate the quality of window views. As part of this evaluation process, designers must achieve five environmental information criteria (location, time, weather, nature, and people) to obtain an excellent view. To the best of our knowledge, these criteria have not yet been verified and their scientific validity remains conjectural. In a two-stage experiment, a total of 451 persons evaluated six window view images. Using machine learning models, we found that the five criteria could provide accurate predictions for window view preferences. When one view was largely preferred over the other, the accuracy of decision tree models ranged from 83% to 90%. For smaller differences in preference, the accuracy was 67%. As ratings given to the five criteria increased, so did evaluations for psychological restoration and positive affect. Although causation was not established, the role of most environmental information criteria was important for predicting window view preferences, with nature generally outweighed the others. We recommend the use of the environmental information criteria in practice, but suggest some altera",
+      "keywords": "design; machine learning; nature; standards; Window view"
+    },
+    {
+      "title": "How do design aspects influence the attractiveness of cycling streetscapes: Results of virtual reality experiments in the Netherlands",
+      "year": 2022,
+      "authors": "Bialkova S.; Ettema D.; Dijst M.",
+      "venue": "Transportation Research Part A: Policy and Practice",
+      "doi": "10.1016/j.tra.2022.06.002",
+      "url": "https://www.scopus.com/pages/publications/85133310800?origin=resultslist",
+      "cited_by": 22,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "greenness"
+      ],
+      "abstract": "Understanding the determinants of cycling and thus creating optimal cycling conditions is still a challenge. The current study addresses this challenge by providing in-depth exploration of attributes of bicycle infrastructure, traffic volume, gradients, urbanisation degrees in stimulating cycling for various population categories. Participants had to cycle in a simulated VR environment mirroring the streetscape of a real Dutch city. The cognitive (e.g., safety perception) and affective (e.g., enjoyment, attractiveness) response was measured, real time. The results suggest that various attributes impact the cognitive and affective components to different extents. In particular, bicycle path presence and intersection absence had a positive impact on safety perception. Greenness of the environment contributed for lifting the attractiveness of the cycling experience. Hight car traffic had a negative impact on the way safety, enjoyment and attractiveness of cycling was perceived. Current outcomes should be implemented in creating bicycle infrastructure that appropriately meets the demand for attractive cycling experience that is safe and enjoyable for all. © 2022",
+      "keywords": "Attractiveness; Cycling experience; Infrastructure; safety; Virtual reality"
+    },
+    {
+      "title": "Deep learning meets urban design: Assessing streetscape aesthetic and design quality through AI and cluster analysis",
+      "year": 2025,
+      "authors": "Ma H.; Li J.; Ye X.",
+      "venue": "Cities",
+      "doi": "10.1016/j.cities.2025.105939",
+      "url": "https://www.scopus.com/pages/publications/105001506613?origin=resultslist",
+      "cited_by": 21,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "walkability",
+        "greenness"
+      ],
+      "abstract": "Urban streetscapes possess unique aesthetic qualities, yet the link between street design and aesthetic quality, particularly across different streetscape types, remains underexplored due to evaluation limitations. This study bridges the gap by integrating deep learning and cluster analysis. We constructed a dataset through manual aesthetic ratings of 500 sampled street images by 150 participants, then fine-tuned a ResNet-50 to automatically predict the aesthetic of 16,455 streetscape images from Wuhan. Street design quality was assessed using visual landscape elements derived from semantic segmentation, while the HDBSCAN algorithm was employed to cluster streetscape types. Multiple linear regression and grouped regression analysis were employed to examine design-aesthetic relationships across six streetscape types. Key findings include: (1) the model's high accuracy in assessing aesthetics, with vegetation and water as key factors; (2) streetscapes were categorized into six clusters, with highways and bridges rated as having the highest aesthetic quality, and overpasses rated the lowest; (3) greenness, openness, and walkability strongly correlated with aesthetics, especially in re",
+      "keywords": "Aesthetic quality; Deep learning; Design quality; Street view image; Urban streetscapes"
+    },
+    {
+      "title": "The interactive effects of traffic sound and window views on indoor soundscape perceptions in the residential area",
+      "year": 2023,
+      "authors": "Lu Y.; Tan J.K.A.; Hasegawa Y.; Lau S.-K.",
+      "venue": "Journal of the Acoustical Society of America",
+      "doi": "10.1121/10.0017203",
+      "url": "https://www.scopus.com/pages/publications/85147793726?origin=resultslist",
+      "cited_by": 21,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "complexity",
+        "comfort"
+      ],
+      "abstract": "Environmental noise has long been considered one of the unwelcome aspects of urban life at home. An increasing number of scholars have studied improving indoor acoustic comfort by using the soundscape approach. However, much uncertainty still exists about the relationship between the audio-visual environment and indoor soundscape perception. The current study investigates the interaction effects of traffic sound and window views on indoor soundscape perceptions in residential contexts. Thirty-two participants were presented with 51 scenarios (a combination of 17 window views and three aural stimuli) and requested to assess their soundscape perceptions in a VR experiment. Results showed that traffic noise could moderate the impact of nature, road, and building views on pleasantness, while it can also moderate the effect of water sound and road view on eventfulness. In particular, natural window views were found not to lead to a more pleasant indoor soundscape necessarily; natural window views even decrease the pleasantness of indoor soundscape in the case of heavy traffic noise outside the window. Besides, overall visual indicators, including complexity and openness, have an interac",
+      "keywords": ""
+    },
+    {
+      "title": "Impact of window views on cognitive functions and perceived comfort in healthcare environments",
+      "year": 2025,
+      "authors": "Elnaklah R.; AlWaer H.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2024.112482",
+      "url": "https://www.scopus.com/pages/publications/85213214166?origin=resultslist",
+      "cited_by": 20,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "comfort",
+        "restorativeness"
+      ],
+      "abstract": "Integrating natural elements into built environments has enhanced comfort and well-being. Healthcare environments with unique requirements for infection control, patient privacy, and hygiene present a distinct context. By connecting occupants to the outdoors, windows play a crucial role in fostering a more restorative and cognitively supportive healthcare environment. This study investigates the impact of different window views on cognitive functions and perceived comfort related to indoor environmental quality (IEQ) in healthcare spaces during the cooling season. A sample of 133 participants, including healthcare providers and inpatients, were recruited from eight healthcare buildings in Amman, Jordan. Self-administered surveys assessed comfort perception, while continuous physical measures recorded indoor temperature, relative humidity, and CO₂. A standardised objective test evaluated participants' cognitive abilities across five aspects: short-term memory, language, attention, executive function, and visuospatial skills. Findings revealed that participants exposed to natural views reported significantly higher comfort perception of IEQ and cognitive functions than those in rooms",
+      "keywords": "Cognitive functions; Healthcare environments; Indoor environmental quality; Jordan; Perceived comfort; Well-being"
+    },
+    {
+      "title": "Assessing the nonlinear impact of green space exposure on psychological stress perception using machine learning and street view images",
+      "year": 2024,
+      "authors": "Zhang T.; Wang L.; Zhang Y.; Hu Y.; Zhang W.",
+      "venue": "Frontiers in Public Health",
+      "doi": "10.3389/fpubh.2024.1402536",
+      "url": "https://www.scopus.com/pages/publications/85205361582?origin=resultslist",
+      "cited_by": 20,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "complexity"
+      ],
+      "abstract": "Introduction: Urban green space (GS) exposure is recognized as a nature-based strategy for addressing urban challenges. However, the stress relieving effects and mechanisms of GS exposure are yet to be fully explored. The development of machine learning and street view images offers a method for large-scale measurement and precise empirical analysis. Methods: This study focuses on the central area of Shanghai, examining the complex effects of GS exposure on psychological stress perception. By constructing a multidimensional psychological stress perception scale and integrating machine learning algorithms with extensive street view images data, we successfully developed a framework for measuring urban stress perception. Using the scores from the psychological stress perception scale provided by volunteers as labeled data, we predicted the psychological stress perception in Shanghai's central urban area through the Support Vector Machine (SVM) algorithm. Additionally, this study employed the interpretable machine learning model eXtreme Gradient Boosting (XGBoost) algorithm to reveal the nonlinear relationship between GS exposure and residents' psychological stress. Results: Results i",
+      "keywords": "health planning; human perception; street view; sustainable environment; urban greening"
+    },
+    {
+      "title": "Spatiotemporal availability of pollinator attractive trees in a tropical streetscape: unequal distribution for pollinators and people",
+      "year": 2023,
+      "authors": "Gomes I.N.; Bosenbecker C.; Silva V.H.D.; Cardoso J.C.F.; Pena J.C.; Maruyama P.K.",
+      "venue": "Urban Forestry and Urban Greening",
+      "doi": "10.1016/j.ufug.2023.127900",
+      "url": "https://www.scopus.com/pages/publications/85150303791?origin=resultslist",
+      "cited_by": 19,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty"
+      ],
+      "abstract": "Street trees integrate the urban green infrastructure and are important elements for the maintenance of biodiversity, including pollinators. Thus, assessments of the spatiotemporal distribution and composition of these trees can subsidize strategies of conservation for different groups of pollinators in the cities. Here, we evaluated the spatiotemporal distribution of trees attractive to pollinators across the streetscape of a large Brazilian metropolis with more than 2.5 million inhabitants. We used the georeferenced data of ca. 300,000 woody plant individuals cataloged across the streetscape. These plants were characterized according to their geographical origin, flowering season, and the floral visitor groups that are attracted based on a literature survey. We also tested the “luxury effect” hypothesis on the resource availability to pollinators by evaluating the relationship between the average family income of the population and the richness and abundance of trees. We found that the streetscape was characterized by the dominance of a few tree species, with a balanced representation of both native and non-native species. Bees were the most favored group (94.86%) while bats (1.4",
+      "keywords": "Conservation; Green infrastructure; Luxury effect; Street trees; Tropical cities; Urban ecology"
+    },
+    {
+      "title": "Is there an emotional dimension to road safety? A spatial analysis for traffic crashes considering streetscape perception and built environment",
+      "year": 2025,
+      "authors": "Liu Y.; Chen T.; Chung H.; Jang K.; Xu P.",
+      "venue": "Analytic Methods in Accident Research",
+      "doi": "10.1016/j.amar.2025.100374",
+      "url": "https://www.scopus.com/pages/publications/85218626799?origin=resultslist",
+      "cited_by": 18,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "greenness",
+        "liveliness"
+      ],
+      "abstract": "Modern streetview image data provide two types of valuable information: the objective built environment and humans’ subjective perception of the streetscape. In the road safety domain, the built environment has been identified as playing a significant role while indicators of human perception are commonly used to evaluate street quality in urban planning. However, studies examining the association between humans’ perceptions of the streetscape and traffic crashes remain limited. This study aims to address this question and to inform safety considerations at the micro level in the planning process for the targeted streets. To answer the question, this study integrates databases on motor vehicle crashes, points of interest, street view images, and road networks for the urban area of Daejeon city in South Korea in 2019. A deep learning model was employed to calculate six perceptual indicators–wealthy, lively, boring, depressing, safety, and beautiful–based on a crowdsourcing dataset. Furthermore, a Bayesian multivariate Poisson-lognormal model with spatial-varying coefficients was introduced to simultaneously account for spatial random effect and the shared unobserved effect across cr",
+      "keywords": "Bayesian multivariate model; Built environment; Crash frequency; Spatial heterogeneity; Streetscape; Subjective perception"
+    },
+    {
+      "title": "Integrating street view images and deep learning to explore the association between human perceptions of the built environment and cardiovascular disease in older adults",
+      "year": 2023,
+      "authors": "Xu J.; Liu Y.; Liu Y.; An R.; Tong Z.",
+      "venue": "Social Science and Medicine",
+      "doi": "10.1016/j.socscimed.2023.116304",
+      "url": "https://www.scopus.com/pages/publications/85175088949?origin=resultslist",
+      "cited_by": 18,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "liveliness"
+      ],
+      "abstract": "Understanding how built environment attributes affect health remains important. While many studies have explored the objective characteristics of built environments that affect health outcomes, few have examined the role of human perceptions of built environments on physical health. Baidu Street View images and computer vision technological advances have helped researchers overcome the constraints of traditional methods of measuring human perceptions (e.g., these methods are laborious, time-consuming, and costly), allowing for large-scale measurements of human perceptions. This study estimated human perceptions of the built environment (e.g., beauty, boredom, depression, safety, vitality, and wealth) by adopting Baidu Street View images and deep learning algorithms. Negative binomial regression models were employed to analyze the relationship between human perceptions and cardiovascular disease in older adults (e.g., ischemic heart disease and cerebrovascular disease). The results indicated that wealth perception is negatively related to the risk of cardiovascular disease. However, depression and vitality perceptions are positively associated with the risk of cardiovascular disease",
+      "keywords": "Built environment; Cardiovascular disease; Healthy city planning; Human perception; Negative binomial regression; Street view images"
+    },
+    {
+      "title": "Impact of Streetscape Built Environment Characteristics on Human Perceptions Using Street View Imagery and Deep Learning: A Case Study of Changbai Island, Shenyang",
+      "year": 2025,
+      "authors": "Lu X.; Li Q.; Ji X.; Sun D.; Meng Y.; Yu Y.; Lyu M.",
+      "venue": "Buildings",
+      "doi": "10.3390/buildings15091524",
+      "url": "https://www.scopus.com/pages/publications/105005028818?origin=resultslist",
+      "cited_by": 17,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "enclosure",
+        "greenness",
+        "liveliness"
+      ],
+      "abstract": "Since the reform and opening-up policy, the accelerated urbanization rate has triggered extensive construction of new towns, leading to architectural homogenization and environmental quality degradation. As urban development transitions toward a “quality improvement” paradigm, there is an urgent need to synergistically enhance the health performance of human settlements through the optimization of public space environments. The purpose of this study is to explore the impact of the built environment of urban streets on residents’ perceptions. In particular, in the context of rapid urbanization, how to improve the mental health and quality of life of residents by improving the street environment. Changbai Island Street in the Heping District of Shenyang City was selected for the study. Baidu Street View images combined with machine learning were employed to quantify physical characterizations like street plants and buildings. The ‘Place Pulse 2.0’ dataset was utilized to obtain data on residents’ perceptions of streets as beautiful, safe, boring, and lively. Correlation and regression analyses were used to reveal the relationship between physical characteristics such as green visual ",
+      "keywords": "built environment; city street; human perception; semantic segmentation; street view image"
+    },
+    {
+      "title": "Impact of Physical Features on Visual Walkability Perception in Urban Commercial Streets by Using Street-View Images and Deep Learning",
+      "year": 2025,
+      "authors": "Huang G.; Yu Y.; Lyu M.; Sun D.; Dewancker B.; Gao W.",
+      "venue": "Buildings",
+      "doi": "10.3390/buildings15010113",
+      "url": "https://www.scopus.com/pages/publications/85214494821?origin=resultslist",
+      "cited_by": 17,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "beauty",
+        "walkability",
+        "greenness",
+        "comfort"
+      ],
+      "abstract": "Urban commercial streets are a crucial component of urban life, serving as the central hubs of commercial activity and providing vital spaces for both residents and visitors to engage in various activities. Walkability is commonly used as a key indicator of environmental quality, playing a significant role in improving residents’ health, community interaction, and environmental quality of life. Therefore, promoting the development of a high-quality walking environment in commercial districts is crucial for fostering urban economic growth and the creation of livable cities. However, existing studies predominantly focus on the impact of the built environment on walkability at the urban scale, with limited attention given to commercial streets, particularly the influence of their physical features on walking-need perceptions. In this study, we utilized Google Street-View Panorama (GSVP) images of the Tenjin commercial district and applied the Semantic Differential (SD) method to assess four walking-need perceptions of visual walkability perception, including usefulness, comfort, safety, and attractiveness. Additionally, deep-learning-based semantic segmentation was employed to extract",
+      "keywords": "commercial streets; deep learning; physical features; street-view images; visual walkability perception"
+    },
+    {
+      "title": "Spatial Quality Optimization Analysis of Streets in Historical Urban Areas Based on Street View Perception and Multisource Data",
+      "year": 2024,
+      "authors": "Xu J.; Wang J.; Zuo X.; Han X.",
+      "venue": "Journal of Urban Planning and Development",
+      "doi": "10.1061/JUPDDM.UPENG-4770",
+      "url": "https://www.scopus.com/pages/publications/85201150502?origin=resultslist",
+      "cited_by": 17,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "complexity",
+        "greenness",
+        "liveliness",
+        "preference"
+      ],
+      "abstract": "Historic urban areas are unique spaces that carry collective memories and cultural identities, and their spatial quality significantly contributes to urban development and vitality. The sustainable development of these areas is a complex subject that continually garners attention in the field of urban planning. Optimizing their spatial quality necessitates an in-depth understanding of public needs, along with careful consideration of the connection between physical attributes and public perception. Advancements in big data and machine learning have paved the way for the multidimensional evaluation of spatial quality in historic urban areas. In this light, our research proposed a new evaluation system and optimization strategy rooted in the unique attributes and cultural values of these areas. Our empirical research focused on Suzhou Ancient Urban, a representative historic urban area in China. First, we identified six indicators, including appearance, order, atmosphere, and scale, to evaluate the public's perception of the streets in Suzhou Ancient Urban, a place rich with cultural history and local characteristics. This evaluation resulted in a perception map of this area. Second,",
+      "keywords": "Historic urban areas; Points of interest; Social media posts; Space syntax; Street view; Urban perception"
+    },
+    {
+      "title": "Multiscale geographical random forest: A novel spatial ML approach for traffic safety modeling integrating street-view semantic visual features",
+      "year": 2025,
+      "authors": "Cui P.; Abdel-Aty M.; Han L.; Yang X.",
+      "venue": "Transportation Research Part C: Emerging Technologies",
+      "doi": "10.1016/j.trc.2025.105299",
+      "url": "https://www.scopus.com/pages/publications/105013740289?origin=resultslist",
+      "cited_by": 16,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety"
+      ],
+      "abstract": "Macro-level traffic safety modeling aims to identify critical risk factors to reginal crashes, providing essential basis for effective countermeasures by traffic managers. Previous work mainly incorporated macro and static socio-demographic and infrastructure features, overlooking drivers’ visual perception of environment, which crucially influences their driving behavior and thus safety. Moreover, spatial machine learning (ML) has gained prominence for its strong crash prediction performance. However, existing spatial ML typically apply spatial effects at a fixed or homogeneous scale (e.g., specific Euclidean distances), limiting their ability to capture the multiscale spatial heterogeneity of features. To address these gaps, emerging image semantic segmentation technique is employed to extract visual environment features (e.g., buildings, trees) from Google Street View (GSV) images. A novel spatial ML method, Multiscale Geographical Random Forest (MGRF), is proposed to overcome fixed-spatial scale constraints to adaptive multiscale spatial modeling. Empirical experiments on Southeast Florida show that the inclusion of visual environment features from 228,352 street view images le",
+      "keywords": "Google Street View; Image Semantic Segmentation; Multiscale Geographical Random Forest; Spatial Machine Learning; Traffic Safety; Visual Environment"
+    },
+    {
+      "title": "Perception of window views in VR: Impact of display and type of motion on subjective and physiological responses",
+      "year": 2025,
+      "authors": "Cho Y.; Karmann C.; Andersen M.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2025.112757",
+      "url": "https://www.scopus.com/pages/publications/85218410125?origin=resultslist",
+      "cited_by": 14,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "preference"
+      ],
+      "abstract": "This study investigates the effect of dynamic and static representations of window views on visual perception in a virtual reality environment. Across two experimental sessions, participants were exposed to fifteen different views-out scenes of passive natural movement, pedestrian activities, and vehicular traffic, presented both as dynamic videos and still images. Participant impressions were collected through numerical ratings and verbal feedback, in addition to measurements of physiological responses and eye movement patterns. The experiment identified three key findings: (1) enhanced visual engagement, reflected in longer fixation duration and higher fixation count, for videos of human and traffic movements; (2) stronger preference for scenes with pedestrian movement compared to passive or traffic movements, where images of human motion elicited greater physiological arousal; and (3) higher perceptual ratings for images of passive movement, despite videos of passive movement being observed for longer durations. These findings highlight the importance of dynamically representing movement and considering diverse types of movements to improve realism and validity in views-out rese",
+      "keywords": "Dynamism; Movement perception; Real-time videos; Views-out representation; Virtual Reality (VR); Window view perception"
+    },
+    {
+      "title": "Characterizing the perception of urban spaces from visual analytics of street-level imagery",
+      "year": 2023,
+      "authors": "Freitas F.; Berreth T.; Chen Y.-C.; Jhala A.",
+      "venue": "AI and Society",
+      "doi": "10.1007/s00146-022-01592-y",
+      "url": "https://www.scopus.com/pages/publications/85143281877?origin=resultslist",
+      "cited_by": 13,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "thermal"
+      ],
+      "abstract": "This project uses machine learning and computer vision techniques and a novel interactive visualization tool to provide street-level characterization of urban spaces such as safety and maintenance in urban neighborhoods. This is achieved by collecting and annotating street-view images, extracting objective metrics through computer vision techniques, and using crowdsourcing to statistically model the perception of subjective metrics such as safety and maintenance. For modeling human perception and scaling it up with a predictive algorithm, we evaluate perception predictions across two points in time separated by economic changes in the urban core of Raleigh, North Carolina, in the aftermath of the 2008 Great Recession. We hypothesize specific socioeconomic processes can be substantially reflected in the built environment of cities and, thus, render themselves visible at the street level. This paper describes the process of incorporating subjective visual ratings across two datasets of temporally separated street-view images, an algorithm, and a visualization tool. This work serves as a case study for utilizing AI and visualization techniques in a richer characterization of urban spa",
+      "keywords": "Computer vision; Feature mapping; Geographic information systems; Interactive analytics; Machine learning; Streetscape photography; Urban studies"
+    },
+    {
+      "title": "Impacts of temporary pedestrian streetscape improvements on pedestrian and vehicle activity and community perceptions",
+      "year": 2019,
+      "authors": "Carlson J.A.; Grimes A.; Green M.; Morefield T.; Steel C.; Reddy A.; Bejarano C.; Shook R.P.; Moore T.; Steele L.; Campbell K.; Rogers E.",
+      "venue": "Journal of Transport and Health",
+      "doi": "10.1016/j.jth.2019.100791",
+      "url": "https://www.scopus.com/pages/publications/85074777061?origin=resultslist",
+      "cited_by": 13,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "walkability"
+      ],
+      "abstract": "Introduction: Micro-scale streetscape built environment attributes can support or inhibit physical activity over and above macro-scale community design factors. Quick build projects involve rapid and low-cost approaches for modifying streetscape design elements to improve pedestrian safety and support walking. This study evaluated quick build projects at two intersections in low-income neighborhoods. Methods: Two intersections were identified using a participatory process with community residents. The projects included painted crosswalks and temporary curb extensions to narrow the vehicle traffic lanes. Video and in-person direct observations were conducted before and during implementation to assess the number of pedestrians and vehicles using the intersection and vehicle/driver behaviors. Resident and stakeholder (e.g., public service workers) attitudes towards the projects were captured through surveys and interviews. Results: Pedestrian activity increased by 23% (p = 0.030) and vehicle activity did not change. The number of vehicles that failed to come to a complete stop at a stop sign decreased by 9% (p = 0.040) and the proportion of vehicles creating two lanes of traffic at th",
+      "keywords": "Built environment; Microscale; Physical activity; Transportation; Walkability"
+    },
+    {
+      "title": "Can ChatGPT-4o assess the perceptions of streetscape change? Evidence from Shanghai, China",
+      "year": 2025,
+      "authors": "Xiao Y.; Tang Y.",
+      "venue": "Sustainable Cities and Society",
+      "doi": "10.1016/j.scs.2025.106674",
+      "url": "https://www.scopus.com/pages/publications/105011768996?origin=resultslist",
+      "cited_by": 12,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "complexity"
+      ],
+      "abstract": "Traditional urban planning approaches faced significant challenges in addressing complex problems, particularly in maintaining consistent evaluation standards over time. These limitations hindered effective, evidence-based decision-making for sustainable development. This study presented a real-world case demonstrating how artificial intelligence could help overcome these challenges through large-scale, intelligent assessment of streetscape change. We implemented an AI-driven framework that combined ChatGPT-4o's multimodal capabilities with deep learning techniques to evaluate streetscape transformations. This unsupervised, multi-feature integration method enabled a fully automated process—from training set generation to model generalization—offering a replicable approach for dynamic urban analysis. Findings revealed that the multimodal large language model assessed perceived changes in streetscapes holistically, prioritizing complex urban dynamics over superficial visual alterations. Empirical results showed that improvements in streetscape quality (70.6 %) outweighed deterioration (17.6 %) by a factor of four, with severe decline accounting for <1 %. Areas with average initial qu",
+      "keywords": "Multimodal large language models; Real-world application; Streetscape assessment; Streetscape change"
+    },
+    {
+      "title": "Heat exposure assessment and comfort path recommendations for leisure jogging based on street view imagery and GPS trajectories",
+      "year": 2025,
+      "authors": "Yang W.; Zhang G.; Liu Y.; An Z.",
+      "venue": "Sustainable Cities and Society",
+      "doi": "10.1016/j.scs.2024.106099",
+      "url": "https://www.scopus.com/pages/publications/85212965696?origin=resultslist",
+      "cited_by": 12,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "comfort",
+        "preference",
+        "thermal"
+      ],
+      "abstract": "Heat exposure significantly affects outdoor leisure activities and health. However, limited research has investigated the dynamic heat exposure assessments and comfort-based route recommendations for leisure jogging. This study addresses this gap by developing a framework that assesses real-time heat exposure and recommends comfortable routes for joggers based on street view images and GPS tracks. Specifically, we utilize Baidu street view images to dynamically estimate the mean radiant temperature (MRT). Individual joggers’ heat exposure is then assessed using real-time MRT measurements and jogging trajectories. To enhance jogger comfort, we developed a dynamic route recommendation method that combines the jogging comfort index with user preferences using a genetic algorithm, offering personalized jogging routes. Empirical analysis using actual data in Chengdu reveals that (1) MRT and heat risk areas exhibit significant spatiotemporal heterogeneity and clustering. (2) About 33.8 % of jogging tracks overlap with thermal risk regions, with 11 % intersecting high-risk areas, indicating substantial heat exposure for joggers in July. (3) The recommended jogging routes reduce heat expos",
+      "keywords": "Baidu street view; Heat exposure; Jogging comfort; Leisure jogging; Route recommendation"
+    },
+    {
+      "title": "From seeing to hearing: A feasibility study on utilizing regenerated sounds from street view images to assess place perceptions",
+      "year": 2025,
+      "authors": "Le Q.H.; Moon H.; Ho J.; Ahn Y.",
+      "venue": "Building and Environment",
+      "doi": "10.1016/j.buildenv.2024.112468",
+      "url": "https://www.scopus.com/pages/publications/85212559268?origin=resultslist",
+      "cited_by": 12,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [],
+      "abstract": "The impact of sound integration on Human Perception of Place (HPP) measurement remains unexplored due to the challenge of real-sound integration, as large-scale sound data acquisition is time-consuming. Additionally, the underdevelopment of HPP measurement through visual-aural integration stems from the widespread acceptance of vision as the most objective sense, despite the significance of auditory perception. This restricts the advancement of HPP measurements, which are restricted by the limitations of visual-based approaches to delivering real-life experiences and intangible factors. Incorporating pseudo-sounds, generated from street view images, could be a feasible alternative for real sounds to overcome current challenges. Thus, this study investigates the efficiency of regenerated sounds using the cross-modal technique in HPP measurements and evaluates its effects on six perceptual indicators. Through experiments in various settings, including visual-only, visual-sound integration, and field experience, we found that regenerated sounds can be a feasible substitute for real sound sources to produce more realistic outcomes. This study contributes to the urban planning and desig",
+      "keywords": "Convolutional neural network; Environmental psychology; NeuroUrbanism; Place perception; Sense of place; Street view image"
+    },
+    {
+      "title": "Te Ara Mua – Future Streets: Can a streetscape upgrade designed to increase active travel change residents’ perceptions of neighbourhood safety?",
+      "year": 2022,
+      "authors": "Witten K.; Macmillan A.; Mackie H.; van der Werf B.; Smith M.; Field A.; Woodward A.; Hosking J.",
+      "venue": "Wellbeing, Space and Society",
+      "doi": "10.1016/j.wss.2022.100079",
+      "url": "https://www.scopus.com/pages/publications/85129564219?origin=resultslist",
+      "cited_by": 11,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "complexity"
+      ],
+      "abstract": "We aim to understand how a streetscape intervention, Te Ara Mua- Future Streets, designed to improve the ease and safety of active modes, influenced perceptions of neighbourhood safety and security in Māngere, New Zealand. In this controlled intervention study, survey, focus group and in-depth interview data on neighbourhood perceptions were gathered from adults and children in 2014 and 2017, before and after the intervention. General Linear Mixed Modelling (GLMM) was used to undertake a difference in differences analysis of the individual level survey data on traffic and neighbourhood safety perceptions. Focus group and interview data were analysed thematically. Survey data indicate improvements in neighbourhood safety but not traffic safety perceptions after the streetscape upgrade. Conversely, focus group and interview data suggest enduring fears around people and dogs, but an easing of traffic-related fears attributed to safer crossings and slower vehicle speeds. Our contrasting quantitative and qualitative findings demonstrate a complex interplay of neighbourhood people and place attributes in shaping residents’ experiences of safety and security, and therefore the importance ",
+      "keywords": "Active travel; Neighbourhood safety; Spatial stigma; Street design"
+    },
+    {
+      "title": "Fusing multi-source social media data and street view imagery to inform urban space quality: a study of user perceptions at Kampong Glam and Haji Lane",
+      "year": 2024,
+      "authors": "Wang Y.",
+      "venue": "Urban Informatics",
+      "doi": "10.1007/s44212-024-00052-w",
+      "url": "https://www.scopus.com/pages/publications/105029670557?origin=resultslist",
+      "cited_by": 10,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "liveliness",
+        "preference"
+      ],
+      "abstract": "This study proposes a novel approach to urban perception studies by integrating street view imagery and multi-source social media data to infer user perceptions and preferences of urban spaces, thereby informing placemaking strategies. With advanced pre-trained Google Cloud Vision AI, this study regards street view imagery as a baseline to compare with user-generated content from social media platforms, namely, Flickr, TripAdvisor, and X (formerly Twitter), together revealing spatial elements perceived by users and diverse demands across users groups. The research evaluates urban space qualities at two spatial levels through a case study at Kampong Glam district and Haji Lane, focusing on Uniqueness, Vitality, and Liveability derived from classic urban theories. The transition in user focus from spatial and transport features in Google Street View to activities and decorations in Flickr imagery emphasizes the spatial features that contribute to Uniqueness and Vitality. In addition, textual data from Twitter and TripAdvisor differentiate residents' and tourists' perceptions of Liveability, encompassing aspects like History, Religion, Space, and Activity. The findings articulate alig",
+      "keywords": "Google Cloud Vision AI; Social media; Street view imagery; Urban perception; Urban space quality"
+    },
+    {
+      "title": "Cyclists’ perception of streetscape and its influence on route choice: A pilot study with a mixed-methods approach",
+      "year": 2023,
+      "authors": "Ramirez Juarez R.N.; Grigolon A.B.; Madureira A.M.",
+      "venue": "Transportation Research Part F: Traffic Psychology and Behaviour",
+      "doi": "10.1016/j.trf.2023.10.029",
+      "url": "https://www.scopus.com/pages/publications/85175567861?origin=resultslist",
+      "cited_by": 10,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "greenness",
+        "preference"
+      ],
+      "abstract": "To encourage behavioural changes that reduce car use, understanding travel behaviour and interventions in infrastructure are necessary. Understanding the route choices of cyclists and their motivation based on their preferences regarding their trip attributes is essential to improve cycling infrastructure and encourage active travel modes such as cycling. This research aims to explore the influence of streetscape design features (SDFs) on cyclists' route choices by developing a mixed-method approach to collect objective and subjective data from 22 volunteers. We used a survey (Maptionnaire) with a virtual reality (VR) and eye-tracking experiment to simulate a bicycle trip in Enschede, The Netherlands. Results showed that despite differences between usual and ideal routes regarding SDFs (such as the presence of vegetation, water bodies, and road intersections), factors such as infrastructure provision and quality have a more significant impact when choosing a route. The novelty of the proposed methodology lies in combining data from the different methods to improve understanding regarding the influence of SDFs in cyclists' route choices and raise awareness among the participants abo",
+      "keywords": "Cycling; Eye-tracking; Mixed-method; Route choice; Streetscape; Travel Behaviour; Virtual Reality"
+    },
+    {
+      "title": "Community, Aesthetics, and Authenticity: The Retail Curatorship of a Rapidly Gentrifying Australian Streetscape",
+      "year": 2021,
+      "authors": "Molnar L.; Walters P.",
+      "venue": "Space and Culture",
+      "doi": "10.1177/1206331218821283",
+      "url": "https://www.scopus.com/pages/publications/85059884946?origin=resultslist",
+      "cited_by": 10,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "thermal"
+      ],
+      "abstract": "While change to the retail landscape is a vital component of the gentrification narrative, most literature engages with the gentrification of retail from an objective position. In this article, we explore the process of rapid gentrification of Boundary Street, West End in Brisbane, Australia through the eyes of retailers themselves using photo elicitation. Retailers to varying degrees see themselves as custodians of the street and a disappearing public realm. We explore their narratives of change and authenticity in a rapidly changing spatial environment, driven by top-down capital-led gentrification. We use the perspective of retailers as newcomers, “voyeurs”; or more longstanding players, “curators,” to argue that the transformation of retail in a gentrifying neighborhood can be used to signify moments in the shift of the “authentic” from community to aestheticization and then to outright commodification. © The Author(s) 2019.",
+      "keywords": "aesthetics; Australia; authenticity; gentrification; retail; West End"
+    },
+    {
+      "title": "Rural Local Landscape Perception Evaluation: Integrating Street View Images and Machine Learning",
+      "year": 2025,
+      "authors": "Gong S.; Zhang L.; Zhang J.; Duan Y.",
+      "venue": "ISPRS International Journal of Geo-Information",
+      "doi": "10.3390/ijgi14070251",
+      "url": "https://www.scopus.com/pages/publications/105011661453?origin=resultslist",
+      "cited_by": 9,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "complexity"
+      ],
+      "abstract": "Rural landscape perception is of great significance in understanding the emotional connection between people and rural local environments. Seeking to rectify the problem of incomplete or biased results owing to the separation of objective and subjective landscape perception in previous studies, this study took the village of Chongming District in Shanghai, China, as an example and built an evaluation model that integrated four dimensions and 20 indicators of objective and subjective landscape perception, and used machine learning technology to analyze street view images. Subjective perception has been influenced by landscape color, style, and element perception. Notable spatial disparities have been observed in the distribution of rural landscape indicators across Chongming. This study refines key subjective and objective factors affecting rural landscape perception, and the model provides a new method for the perception evaluation of complex landscapes, providing a theoretical basis and practical reference for rural landscape planning. © 2025 by the authors.",
+      "keywords": "landscape perception; machine learning; rural local landscape; street view image"
+    },
+    {
+      "title": "Which Factors Enhance the Perceived Restorativeness of Streetscapes: Sound, Vision, or Their Combined Effects? Insights from Four Street Types in Nanjing, China",
+      "year": 2025,
+      "authors": "Lu X.; Xu J.; Lange E.; Cao J.",
+      "venue": "Land",
+      "doi": "10.3390/land14040757",
+      "url": "https://www.scopus.com/pages/publications/105003738679?origin=resultslist",
+      "cited_by": 9,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [
+        "comfort",
+        "restorativeness"
+      ],
+      "abstract": "Streetscapes play a critical role in restorative landscapes, offering opportunities for promoting public well-being. Previous studies have predominantly examined the influence of visual and auditory stimuli on perceived restorativeness independently. There is a limited understanding of their interactive effects. In this research, 360 participants completed a series of experiments considering four distinct street types, including visual comfort assessment, acoustic environment assessment, and perceived restorativeness. They were assigned to a control group and one of three experimental groups, each receiving specific enhancement: visual stimuli, auditory stimuli, or a combination of audiovisual stimuli. The findings revealed that the experimental groups reported a greater sense of restorativeness compared to the control group. Notably, auditory stimuli demonstrated a more pronounced restorative effect than visual stimuli, while limited differences were found between auditory and audiovisual stimuli. The differences in experimental outcomes among the four street types are compared and discussed, highlighting context-specific guidelines for enhancing streetscape restorativeness. The r",
+      "keywords": "audiovisual interactions; restorativeness; sound; streetscape; vision"
+    },
+    {
+      "title": "An Integrative Investigation of Travel Satisfaction, Streetscape Perception, and Mental Health in Urban Environments",
+      "year": 2024,
+      "authors": "Iamtrakul P.; Chayphong S.; Hayashi Y.",
+      "venue": "Sustainability (Switzerland) ",
+      "doi": "10.3390/su16093526",
+      "url": "https://www.scopus.com/pages/publications/85192763912?origin=resultslist",
+      "cited_by": 9,
+      "score": 13,
+      "tier": "paper",
+      "task": "imagerating",
+      "dims": [],
+      "abstract": "A significant connection exists between mental health, particularly depression, and travel. This study aims to explore the relationship between travel satisfaction, perception of the streetscape, and depression by comparing non-older adults and older adults. Subjective well-being serves as a concept for measuring mental health derived from travel satisfaction and perception of the streetscape across age groups. Additionally, the Geriatric Depression Scale (15-item GDS) was employed to specifically assess depression. The survey was conducted among respondents residing in the Bangkok Metropolitan Region (BMR) with a sample size of 3600 which is segmented into three age groups for the study model: early adulthood (18–34 years), middle adulthood (35–59 years), and later maturity (60 years and above). Multiple regression analysis was employed to investigate the relationship between travel satisfaction, perception of the streetscape, and mental health. The results suggest that both travel satisfaction and perception of the streetscape have a statistically significant impact on mental health, particularly in relation to depression. Additionally, the analysis highlights variations in stres",
+      "keywords": "geriatric depression scale; mental health; quality of life; travel satisfaction; users’ perception; well-being"
+    }
+  ],
+  "drafts_generated": [
+    {
+      "id": "2024-ogawa-evaluating-subjective-perceptions",
+      "title": "Evaluating the subjective perceptions of streetscapes using street-view images",
+      "doi": "10.1016/j.landurbplan.2024.105073",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "liveliness"
+      ]
+    },
+    {
+      "id": "2021-qiu-subjectively-measured-streetscape",
+      "title": "Subjectively measured streetscape perceptions to inform urban design strategies for Shanghai",
+      "doi": "10.3390/ijgi10080493",
+      "task": "imagematrix",
+      "dims": [
+        "complexity"
+      ]
+    },
+    {
+      "id": "2022-lin-evaluation-window-view",
+      "title": "Evaluation of window view preference using quantitative and qualitative factors of window view content",
+      "doi": "10.1016/j.buildenv.2022.108886",
+      "task": "imagerating",
+      "dims": [
+        "greenness",
+        "preference",
+        "thermal"
+      ]
+    },
+    {
+      "id": "2022-du-impact-natural-window",
+      "title": "Impact of natural window views on perceptions of indoor environmental quality: An overground experimental study",
+      "doi": "10.1016/j.scs.2022.104133",
+      "task": "imagerating",
+      "dims": [
+        "comfort",
+        "thermal"
+      ]
+    },
+    {
+      "id": "2023-ma-high-or-low",
+      "title": "High or low? Exploring the restorative effects of visual levels on campus spaces using machine learning and street view imagery",
+      "doi": "10.1016/j.ufug.2023.128087",
+      "task": "imagerating",
+      "dims": [
+        "restorativeness"
+      ]
+    },
+    {
+      "id": "2023-huang-visual-preference-analysis",
+      "title": "Visual Preference Analysis and Planning Responses Based on Street View Images: A Case Study of Gulangyu Island, China",
+      "doi": "10.3390/land12010129",
+      "task": "imagerating",
+      "dims": [
+        "enclosure",
+        "preference"
+      ]
+    },
+    {
+      "id": "2023-wang-adolescents-environmental-perceptions",
+      "title": "Adolescents' environmental perceptions mediate associations between streetscape environments and active school travel",
+      "doi": "10.1016/j.trd.2022.103549",
+      "task": "imagerating",
+      "dims": [
+        "safety",
+        "walkability",
+        "greenness",
+        "liveliness"
+      ]
+    },
+    {
+      "id": "2019-sadeghifar-exploration-relationships-between",
+      "title": "An exploration of the relationships between urban building façade visual elements and people’s preferences in the city of Gorgan, Iran",
+      "doi": "10.1080/17452007.2018.1548340",
+      "task": "imagerating",
+      "dims": [
+        "complexity",
+        "preference",
+        "thermal"
+      ]
+    },
+    {
+      "id": "2023-phillips-living-street-not",
+      "title": "“A living street and not just green”: Exploring public preferences and concerns regarding nature-based solution implementation in urban streetscapes",
+      "doi": "10.1016/j.ufug.2023.128034",
+      "task": "imagerating",
+      "dims": [
+        "preference"
+      ]
+    },
+    {
+      "id": "2022-zhang-perception-pleasure-urban",
+      "title": "Perception of pleasure in the urban running environment with street view images and running routes",
+      "doi": "10.1007/s11442-022-2064-8",
+      "task": "imagerating",
+      "dims": [
+        "greenness"
+      ]
+    },
+    {
+      "id": "2025-danish-citizen-science-toolkit",
+      "title": "A citizen science toolkit to collect human perceptions of urban environments using open street view images",
+      "doi": "10.1016/j.compenvurbsys.2024.102207",
+      "task": "imagerating",
+      "dims": []
+    },
+    {
+      "id": "2019-eldarwish-fractal-design-streetscape",
+      "title": "Fractal design in streetscape: Rethinking the visual aesthetics of building elevation composition",
+      "doi": "10.1016/j.aej.2019.08.010",
+      "task": "imagerating",
+      "dims": [
+        "beauty",
+        "complexity",
+        "comfort"
+      ]
+    }
+  ],
+  "skipped_existing": [
+    [
+      "2026-peng-city-landscape-sight",
+      "City landscape in sight: A crowdsourced framework for unlock"
+    ]
+  ],
+  "drafts_generated_note": "Abstract shell JSON files removed; keep metadata as reading hints only."
+}

@@ -230,7 +230,27 @@ Be helpful and encourage the user to try creating or modifying their survey!`,
 - Keep question types diverse and engaging
 - ALWAYS include survey title and description at the top level
 
-Return ONLY valid JSON with complete structure: {"title": "...", "description": "...", "pages": [...]}`
+Return ONLY valid JSON with complete structure: {"title": "...", "description": "...", "pages": [...]}`,
+
+  // Paper → survey template draft (Deep Search)
+  paperToTemplate: `You are an expert survey designer specialising in urban / streetscape perception research.
+Given a research paper's metadata (title, abstract, venue, year), produce a COMPLETE survey configuration JSON that could reasonably replicate or approximate the paper's human-perception study design for the SP-Survey platform.
+
+**CRITICAL RULE: No standalone text questions about streetscapes. Text questions should be socioeconomic or should be with 'image display' right before them!**
+
+**PAGE TYPES:**
+1. Type 1: Socioeconomic text questions: age, gender, education, occupation, income, location, etc.
+2. Type 2: Image-based streetscape questions: imagerating, imagepicker, imageranking, imageboolean, imagematrix.
+3. Type 3: Image display + text questions about that image.
+
+**TECHNICAL:**
+- All image questions: "imageSelectionMode": "huggingface_random", "imageCount": number, "choices": []
+- Prefer random individual assignment unless the paper clearly needs paired/set comparisons (then use "mediaAssignmentMode": "set" or "category" only if justified).
+- Include a short introduction page acknowledging the source paper.
+- Keep 2–6 pages total; do not invent unsupported demographics.
+- If the abstract lacks method detail, produce a conservative Place-Pulse-style visual rating survey and note assumptions in the survey description.
+
+Return ONLY valid JSON: {"title":"...","description":"...","logo":"","logoWidth":100,"logoPosition":"right","pages":[...]}`
 };
 
 // Export for both CommonJS (Node.js) and ES6 modules
