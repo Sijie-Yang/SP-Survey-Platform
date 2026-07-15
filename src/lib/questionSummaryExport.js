@@ -80,13 +80,13 @@ function questionFamily(type) {
   if (t === 'boolean' || t === 'consent') return 'boolean';
   if (t === 'radiogroup' || t === 'dropdown' || t === 'checkbox') return 'choice';
   if (t === 'text' || t === 'comment') return 'text';
-  if (t === 'matrix' || t === 'imagematrix' || t === 'image_matrix') return 'matrix';
+  if (t === 'matrix' || t === 'imagematrix' || t === 'image_matrix' || t === 'mediamatrix') return 'matrix';
   if (t === 'ranking' || t === 'imageranking' || t === 'image_ranking' || t === 'mediaranking') return 'ranking';
   if (t === 'imagerating' || t === 'image_rating' || t === 'mediarating') return 'image_rating';
   if (t === 'imageboolean' || t === 'image_boolean' || t === 'mediaboolean') return 'image_boolean';
-  if (t === 'imagepicker') return 'imagepicker';
-  if (t === 'slidergroup' || t === 'imageslidergroup') return 'slider';
-  if (t === 'pointallocation' || t === 'imagepointallocation') return 'points';
+  if (t === 'imagepicker' || t === 'mediapicker') return 'imagepicker';
+  if (t === 'slidergroup' || t === 'imageslidergroup' || t === 'mediaslidergroup') return 'slider';
+  if (t === 'pointallocation' || t === 'imagepointallocation' || t === 'mediapointallocation') return 'points';
   if (t === 'skillquestion') return 'skill';
   if (t === 'imageannotation') return 'annotation';
   return 'text';

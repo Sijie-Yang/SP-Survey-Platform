@@ -2730,6 +2730,28 @@ app.patch('/api/template-request', async (req, res) => {
   }
 });
 
+app.post('/api/survey-design-request', async (req, res) => {
+  try {
+    const { createSurveyDesignRequest } = await import('./worker-lib/surveyDesignRequest.mjs');
+    const result = await createSurveyDesignRequest(req.body || {}, templateRequestEnv());
+    return res.status(result.success ? 200 : (result.status || 400)).json(result);
+  } catch (error) {
+    console.error('survey-design-request POST:', error);
+    return res.status(500).json({ success: false, error: error.message || String(error) });
+  }
+});
+
+app.patch('/api/survey-design-request', async (req, res) => {
+  try {
+    const { attachSurveyDesignFiles } = await import('./worker-lib/surveyDesignRequest.mjs');
+    const result = await attachSurveyDesignFiles(req.body || {}, templateRequestEnv());
+    return res.status(result.success ? 200 : (result.status || 400)).json(result);
+  } catch (error) {
+    console.error('survey-design-request PATCH:', error);
+    return res.status(500).json({ success: false, error: error.message || String(error) });
+  }
+});
+
 app.post('/api/research/draft-template', async (req, res) => {
   try {
     const { paper, apiKey } = req.body || {};

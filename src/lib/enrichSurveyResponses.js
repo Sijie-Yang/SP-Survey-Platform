@@ -3,13 +3,15 @@
  * Keeps media metadata contracts testable without SurveyJS/DOM.
  */
 
-/** Map SurveyJS image_N choice values back to shown image URLs/names. */
+import { slotsToShownMedia } from './mediaSlots';
+
+/** Map SurveyJS image_N / media_N choice values back to shown image URLs/names. */
 export function mapImageChoiceAnswerToNames(answerValue, shownImages) {
   if (!shownImages || shownImages.length === 0) return answerValue;
 
   const mapSingleValue = (value) => {
     if (typeof value !== 'string') return value;
-    const match = value.match(/^image_(\d+)$/);
+    const match = value.match(/^(?:image|media)_(\d+)$/);
     if (!match) return value;
     const imageIndex = parseInt(match[1], 10);
     return shownImages[imageIndex] || value;
@@ -30,15 +32,29 @@ function resolveShownMediaIds(shownImages, preloadedImages = []) {
   }).filter(Boolean);
 }
 
+function buildShownMedia(questionName, displayedMediaSlots, shownImages, preloadedImages) {
+  const slots = displayedMediaSlots?.[questionName];
+  if (Array.isArray(slots) && slots.length) {
+    return slotsToShownMedia(slots);
+  }
+  // Legacy flatten → synthetic slots for CSV consistency
+  return (shownImages || []).map((u, i) => {
+    const name = u ? String(u).split('?')[0].split('/').pop() : '';
+    const hit = (preloadedImages || []).find((img) => img.url === u || img.name === u || img.name === name);
+    return {
+      slotId: `legacy_${i}`,
+      role: 'stimulus',
+      type: hit?.type || 'image',
+      name: hit?.name || name,
+      media_id: hit?.media_id || hit?.key || name,
+      url: hit?.url || u || '',
+      setId: null,
+    };
+  });
+}
+
 /**
  * Build per-question enriched response objects and top-level displayed_* mirrors.
- *
- * @returns {{
- *   enrichedResponses: Object,
- *   displayed_images: Object,
- *   displayed_media_groups: Object,
- *   displayed_media_categories: Object,
- * }}
  */
 export function enrichSurveyResponses({
   responses = {},
@@ -46,11 +62,15 @@ export function enrichSurveyResponses({
   displayedImages = {},
   displayedMediaGroups = {},
   displayedMediaCategories = {},
+  displayedMediaSlots = {},
   preloadedImages = [],
 } = {}) {
   const enrichedResponses = Object.entries(responses || {}).reduce((acc, [questionName, answerValue]) => {
     const shownImages = displayedImages[questionName] || [];
     const mappedAnswer = mapImageChoiceAnswerToNames(answerValue, shownImages);
+    const shown_media = buildShownMedia(
+      questionName, displayedMediaSlots, shownImages, preloadedImages,
+    );
     acc[questionName] = {
       type: questionTypeMap[questionName] || null,
       answer: mappedAnswer,
@@ -59,6 +79,7 @@ export function enrichSurveyResponses({
       shown_media_set: displayedMediaGroups[questionName] || null,
       shown_media_group: displayedMediaGroups[questionName] || null,
       shown_media_categories: displayedMediaCategories[questionName] || null,
+      shown_media,
     };
     return acc;
   }, {});
@@ -68,5 +89,6 @@ export function enrichSurveyResponses({
     displayed_images: { ...(displayedImages || {}) },
     displayed_media_groups: { ...(displayedMediaGroups || {}) },
     displayed_media_categories: { ...(displayedMediaCategories || {}) },
+    displayed_media_slots: { ...(displayedMediaSlots || {}) },
   };
 }

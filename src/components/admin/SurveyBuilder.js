@@ -1273,7 +1273,12 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const getSurveyValidationWarnings = (cfg) => {
     if (!cfg?.pages) return [];
     const warnings = [];
-    const imageTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image', 'imageannotation', 'skillquestion', 'mediadisplay', 'mediarating', 'mediaboolean', 'imageslidergroup', 'imagepointallocation'];
+    const imageTypes = [
+      'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image',
+      'imageannotation', 'skillquestion', 'imageslidergroup', 'imagepointallocation',
+      'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+      'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+    ];
 
     findDuplicateQuestionNames(cfg).forEach((dup) => {
       warnings.push(
@@ -1294,7 +1299,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
             warnings.push(`"${el.title || el.name}" may have no images configured.`);
           }
         }
-        if ((el.type === 'slidergroup' || el.type === 'imageslidergroup') && !el.dimensions?.length) {
+        if ((el.type === 'slidergroup' || el.type === 'imageslidergroup' || el.type === 'mediaslidergroup') && !el.dimensions?.length) {
           warnings.push(`Slider group "${el.title || el.name}" has no dimensions configured.`);
         }
         if ((el.type === 'pointallocation' || el.type === 'imagepointallocation') && !el.choices?.length) {

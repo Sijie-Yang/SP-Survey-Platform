@@ -18,6 +18,12 @@ Use with [COMPATIBILITY.md](../COMPATIBILITY.md) §4 before shipping folder/set/
 5. **Draft resume** — start survey, answer page 1, reload, Continue → set/category metadata still present on submit.
 6. **R2 delete guard** — clear/delete project media; confirm `templates/` objects untouched; nested same-name files delete only the selected key.
 
+## Media slots smoke (multi-modal)
+
+7. **Fixed video + random audio** — `mediarating` with Media Slots preset “Fixed video + random audio”; preview plays both; submit; CSV has `q__shown_media` JSON plus `q__slot_stimulus_video_name` and `q__slot_stimulus_audio_name`, and rating answer column is filled.
+8. **Mixed-type set** — folder tagged `set` with video+audio+image; slots preset “Mixed set” (`set_member` + `setBinding: shared`); one shared set draw fills three slots; CSV slot columns match types.
+9. **Legacy individual (no slots)** — same `mediarating` with empty `mediaSlots` and `mediaType: video`; behavior unchanged; `shown_images` still populated; `shown_media` uses synthetic `legacy_N` slots.
+
 ## Notes
 
 - Record SQL status in the release note: `template_media_folders.sql` run / not-run.

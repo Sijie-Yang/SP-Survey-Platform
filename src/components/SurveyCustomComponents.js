@@ -4,13 +4,17 @@ import { Serializer, Question, CustomError } from 'survey-core';
 import ImageRankingWidget from './ImageRankingWidget';
 import ImageRatingWidget from './ImageRatingWidget';
 import ImageBooleanWidget from './ImageBooleanWidget';
-import { MediaDisplayContent, MediaRatingContent, MediaBooleanContent } from './MediaWidgets';
+import {
+  MediaDisplayContent, MediaRatingContent, MediaBooleanContent, MediaPickerContent,
+  MediaSlotLayout,
+} from './MediaWidgets';
 import { SliderGroupContent, PointAllocationContent, ImageSliderGroupContent, ImagePointAllocationContent } from './ResponseWidgets';
 import ImageAnnotationCanvas from './ImageAnnotationWidget';
 import SkillQuestionFrame from './SkillQuestionWidget';
 import { readSkillQuestionFields } from '../lib/skillPostMessage';
 import { inferMediaType } from '../lib/mediaUtils';
 import { resolveQuestionMediaItems } from '../lib/surveyMediaInjection';
+import { resolveQuestionSlots } from '../lib/mediaSlots';
 
 // Define the custom question type
 const WIDGET_NAME = 'imageranking';
@@ -652,8 +656,21 @@ export default registerImageRankingWidget;
 
 const MEDIA_PAIRING_TYPES = [
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix',
-  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation', 'skillquestion',
+  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'mediapicker',
+  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+  'imageannotation', 'skillquestion',
   'imageslidergroup', 'imagepointallocation',
+];
+
+const SLOT_PROPS = [
+  { name: 'mediaSlots', default: [], category: 'general' },
+  { name: 'mediaPresentation', default: 'stack', choices: ['stack', 'sequential'], category: 'general' },
+  { name: 'mediaSlotsResolved', category: 'general' },
+  { name: 'slotIds:string[]', category: 'general' },
+  { name: 'slotUrls:string[]', category: 'general' },
+  { name: 'slotTypes:string[]', category: 'general' },
+  { name: 'slotRoles:string[]', category: 'general' },
+  { name: 'slotNames:string[]', category: 'general' },
 ];
 
 export function registerMediaPairingProps() {
@@ -702,7 +719,24 @@ function makeMediaQuestion(typeName, parent = 'question') {
   class Q extends Question {
     getType() { return typeName; }
   }
-  Serializer.addClass(typeName, MEDIA_PROPS, () => new Q(), parent);
+  Serializer.addClass(typeName, [...MEDIA_PROPS, ...SLOT_PROPS], () => new Q(), parent);
+}
+
+function mediaStimulusProps(q) {
+  const items = resolveQuestionMediaItems(q);
+  const slots = resolveQuestionSlots(q);
+  const first = items[0] || slots[0];
+  const url = first?.url || q.mediaUrl || '';
+  const type = first?.type
+    || (q.mediaType === 'any' ? inferMediaType(url) : (q.mediaType || inferMediaType(url)));
+  return {
+    mediaUrl: url,
+    mediaType: type,
+    mediaName: first?.name || q.mediaName,
+    mediaItems: items.length ? items : null,
+    mediaSlots: slots.length ? slots : null,
+    mediaPresentation: q.mediaPresentation || 'stack',
+  };
 }
 
 export function registerMediaDisplayWidget() {
@@ -722,16 +756,8 @@ export function registerMediaDisplayWidget() {
   Serializer.addProperty('mediadisplay', { name: 'afterLabel', default: 'After', category: 'general' });
   ReactQuestionFactory.Instance.registerQuestion('mediadisplay', (props) => {
     const q = props.question;
-    const items = resolveQuestionMediaItems(q);
-    const first = items[0];
-    const url = first?.url || q.mediaUrl || '';
-    const type = first?.type
-      || (q.mediaType === 'any' ? inferMediaType(url) : (q.mediaType || inferMediaType(url)));
     return React.createElement(MediaDisplayContent, {
-      mediaUrl: url,
-      mediaType: type,
-      mediaName: first?.name || q.mediaName,
-      mediaItems: items.length ? items : null,
+      ...mediaStimulusProps(q),
       displayMode: q.displayMode || 'single',
       exposureSeconds: q.exposureSeconds || 5,
       beforeLabel: q.beforeLabel || 'Before',
@@ -750,15 +776,10 @@ export function registerMediaRatingWidget() {
   Serializer.addProperty('mediarating', { name: 'mediaTypes:string[]', category: 'general' });
   ReactQuestionFactory.Instance.registerQuestion('mediarating', (props) => {
     const q = props.question;
-    const items = resolveQuestionMediaItems(q);
-    const first = items[0];
-    const url = first?.url || q.mediaUrl || '';
-    const type = first?.type
-      || (q.mediaType === 'any' ? inferMediaType(url) : (q.mediaType || inferMediaType(url)));
     return React.createElement(MediaRatingContent, {
-      mediaUrl: url, mediaType: type, mediaName: first?.name || q.mediaName, mediaItems: items.length ? items : null,
+      ...mediaStimulusProps(q),
       value: q.value, rateMin: q.rateMin || 1, rateMax: q.rateMax || 5,
-      onChange: (v) => q.value = v,
+      onChange: (v) => { q.value = v; },
     });
   });
 }
@@ -771,16 +792,195 @@ export function registerMediaBooleanWidget() {
   Serializer.addProperty('mediaboolean', { name: 'mediaTypes:string[]', category: 'general' });
   ReactQuestionFactory.Instance.registerQuestion('mediaboolean', (props) => {
     const q = props.question;
-    const items = resolveQuestionMediaItems(q);
-    const first = items[0];
-    const url = first?.url || q.mediaUrl || '';
-    const type = first?.type
-      || (q.mediaType === 'any' ? inferMediaType(url) : (q.mediaType || inferMediaType(url)));
     return React.createElement(MediaBooleanContent, {
-      mediaUrl: url, mediaType: type, mediaName: first?.name || q.mediaName, mediaItems: items.length ? items : null,
+      ...mediaStimulusProps(q),
       value: q.value, labelTrue: q.labelTrue || 'Yes', labelFalse: q.labelFalse || 'No',
-      onChange: (v) => q.value = v,
+      onChange: (v) => { q.value = v; },
     });
+  });
+}
+
+export function registerMediaPickerWidget() {
+  makeMediaQuestion('mediapicker');
+  Serializer.addProperty('mediapicker', { name: 'mediaItems', default: [], category: 'general' });
+  Serializer.addProperty('mediapicker', { name: 'mediaUrls:string[]', category: 'general' });
+  Serializer.addProperty('mediapicker', { name: 'mediaNames:string[]', category: 'general' });
+  Serializer.addProperty('mediapicker', { name: 'mediaTypes:string[]', category: 'general' });
+  Serializer.addProperty('mediapicker', { name: 'choices:itemvalue[]', category: 'choices' });
+  Serializer.addProperty('mediapicker', { name: 'multiSelect:boolean', default: false, category: 'general' });
+  ReactQuestionFactory.Instance.registerQuestion('mediapicker', (props) => {
+    const q = props.question;
+    const items = resolveQuestionMediaItems(q);
+    const slots = resolveQuestionSlots(q);
+    return React.createElement(MediaPickerContent, {
+      mediaItems: items,
+      mediaSlots: slots,
+      choices: q.choices || [],
+      value: q.value,
+      multiSelect: !!q.multiSelect,
+      onChange: (v) => { q.value = v; },
+    });
+  });
+}
+
+export function registerMediaMatrixWidget() {
+  if (Serializer.findClass('mediamatrix')) return;
+
+  class MediaMatrixQuestion extends Question {
+    getType() { return 'mediamatrix'; }
+  }
+
+  Serializer.addClass(
+    'mediamatrix',
+    [
+      ...MEDIA_PROPS,
+      ...SLOT_PROPS,
+      { name: 'mediaItems', default: [], category: 'general' },
+      { name: 'mediaUrls:string[]', category: 'general' },
+      { name: 'mediaNames:string[]', category: 'general' },
+      { name: 'mediaTypes:string[]', category: 'general' },
+    ],
+    () => new MediaMatrixQuestion(''),
+    'matrix',
+  );
+
+  ReactQuestionFactory.Instance.registerQuestion('mediamatrix', (props) => {
+    const q = props.question;
+    const stim = mediaStimulusProps(q);
+    const rows = q.rows || [];
+    const columns = q.columns || [];
+    const handleCellClick = (rowValue, columnValue) => {
+      const currentValue = q.value || {};
+      q.value = { ...currentValue, [rowValue]: columnValue };
+    };
+    return React.createElement('div', { style: { width: '100%' } },
+      React.createElement(MediaSlotLayout, {
+        slots: stim.mediaSlots,
+        items: stim.mediaItems,
+        presentation: stim.mediaPresentation,
+      }),
+      rows.length > 0 && columns.length > 0
+        ? React.createElement('div', { style: { overflowX: 'auto' } },
+          React.createElement('table', {
+            style: {
+              width: '100%', borderCollapse: 'collapse', backgroundColor: 'white',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)', borderRadius: 8, overflow: 'hidden',
+            },
+          },
+          React.createElement('thead', null,
+            React.createElement('tr', { style: { backgroundColor: '#f8f9fa' } },
+              React.createElement('th', { style: { padding: 12, borderBottom: '2px solid #dee2e6' } }),
+              ...columns.map((col, index) => React.createElement('th', {
+                key: index,
+                style: {
+                  padding: 12, textAlign: 'center', borderBottom: '2px solid #dee2e6',
+                  fontWeight: 600, minWidth: 100,
+                },
+              }, typeof col === 'object' ? col.text : col)),
+            ),
+          ),
+          React.createElement('tbody', null,
+            ...rows.map((row, rowIndex) => {
+              const rowValue = typeof row === 'object' ? row.value : row;
+              const rowText = typeof row === 'object' ? row.text : row;
+              const currentValue = q.value || {};
+              return React.createElement('tr', {
+                key: rowIndex,
+                style: { borderBottom: rowIndex < rows.length - 1 ? '1px solid #dee2e6' : 'none' },
+              },
+              React.createElement('td', {
+                style: { padding: 12, fontWeight: 500, backgroundColor: '#f8f9fa' },
+              }, rowText),
+              ...columns.map((col, colIndex) => {
+                const colValue = typeof col === 'object' ? col.value : col;
+                const isSelected = currentValue[rowValue] === colValue;
+                return React.createElement('td', {
+                  key: colIndex,
+                  style: { padding: 8, textAlign: 'center' },
+                },
+                React.createElement('input', {
+                  type: 'radio',
+                  name: `mediamatrix_${q.name}_${rowValue}`,
+                  checked: isSelected,
+                  onChange: () => handleCellClick(rowValue, colValue),
+                }));
+              }));
+            }),
+          )),
+        )
+        : null,
+    );
+  });
+}
+
+export function registerMediaSliderGroupWidget() {
+  class Q extends Question {
+    getType() { return 'mediaslidergroup'; }
+  }
+  Serializer.addClass('mediaslidergroup', [
+    ...MEDIA_PROPS, ...SLOT_PROPS,
+    { name: 'mediaItems', default: [], category: 'general' },
+    { name: 'mediaUrls:string[]', category: 'general' },
+    { name: 'mediaNames:string[]', category: 'general' },
+    { name: 'mediaTypes:string[]', category: 'general' },
+    { name: 'dimensions', default: [], category: 'general' },
+    { name: 'scaleMin:number', default: 1, category: 'general' },
+    { name: 'scaleMax:number', default: 7, category: 'general' },
+  ], () => new Q(), 'question');
+
+  ReactQuestionFactory.Instance.registerQuestion('mediaslidergroup', (props) => {
+    const q = props.question;
+    ensureSliderGroupMidDefaults(q);
+    const stim = mediaStimulusProps(q);
+    return React.createElement('div', null,
+      React.createElement(MediaSlotLayout, {
+        slots: stim.mediaSlots,
+        items: stim.mediaItems,
+        presentation: stim.mediaPresentation,
+      }),
+      React.createElement(SliderGroupContent, {
+        dimensions: q.dimensions || [],
+        scaleMin: q.scaleMin ?? 1,
+        scaleMax: q.scaleMax ?? 7,
+        value: q.value,
+        onChange: (v) => { q.value = v; },
+        readOnly: q.isReadOnly,
+      }),
+    );
+  });
+}
+
+export function registerMediaPointAllocationWidget() {
+  class Q extends Question {
+    getType() { return 'mediapointallocation'; }
+  }
+  Serializer.addClass('mediapointallocation', [
+    ...MEDIA_PROPS, ...SLOT_PROPS,
+    { name: 'mediaItems', default: [], category: 'general' },
+    { name: 'mediaUrls:string[]', category: 'general' },
+    { name: 'mediaNames:string[]', category: 'general' },
+    { name: 'mediaTypes:string[]', category: 'general' },
+    { name: 'choices', default: [], category: 'general' },
+    { name: 'budget:number', default: 100, category: 'general' },
+  ], () => new Q(), 'question');
+
+  ReactQuestionFactory.Instance.registerQuestion('mediapointallocation', (props) => {
+    const q = props.question;
+    const stim = mediaStimulusProps(q);
+    return React.createElement('div', null,
+      React.createElement(MediaSlotLayout, {
+        slots: stim.mediaSlots,
+        items: stim.mediaItems,
+        presentation: stim.mediaPresentation,
+      }),
+      React.createElement(PointAllocationContent, {
+        choices: q.choices || [],
+        budget: q.budget || 100,
+        value: q.value,
+        onChange: (v) => { q.value = v; },
+        readOnly: q.isReadOnly,
+      }),
+    );
   });
 }
 
@@ -1055,6 +1255,11 @@ export function registerMediaRankingWidget() {
       { name: 'mediaType', default: 'any', choices: ['any', 'image', 'video', 'audio'], category: 'general' },
       { name: 'imageFit', default: 'contain', category: 'general' },
       { name: 'excludePreviouslyUsedImages:boolean', default: true, category: 'general' },
+      ...SLOT_PROPS,
+      { name: 'mediaItems', default: [], category: 'general' },
+      { name: 'mediaUrls:string[]', category: 'general' },
+      { name: 'mediaNames:string[]', category: 'general' },
+      { name: 'mediaTypes:string[]', category: 'general' },
     ],
     () => new MediaRankingQuestion(),
     'question',
@@ -1075,6 +1280,10 @@ export function registerAllExtendedWidgets() {
   registerMediaRatingWidget();
   registerMediaBooleanWidget();
   registerMediaRankingWidget();
+  registerMediaPickerWidget();
+  registerMediaMatrixWidget();
+  registerMediaSliderGroupWidget();
+  registerMediaPointAllocationWidget();
   registerImageAnnotationWidget();
   registerSliderGroupWidget();
   registerPointAllocationWidget();

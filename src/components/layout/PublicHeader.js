@@ -76,6 +76,14 @@ export default function PublicHeader({
           </Button>
           <Button
             component={RouterLink}
+            to="/request-survey-design"
+            color={isActive('/request-survey-design') ? 'primary' : 'inherit'}
+            sx={{ fontWeight: isActive('/request-survey-design') ? 700 : 500 }}
+          >
+            Request design
+          </Button>
+          <Button
+            component={RouterLink}
             to="/team"
             color={isActive('/team') ? 'primary' : 'inherit'}
             sx={{ fontWeight: isActive('/team') ? 700 : 500 }}

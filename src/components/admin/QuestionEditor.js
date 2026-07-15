@@ -62,11 +62,17 @@ import {
 import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import QuestionParticipantPreview from './QuestionParticipantPreview';
+import MediaSlotsEditor from './MediaSlotsEditor';
+
+const MEDIA_STAR_EDITOR_TYPES = [
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+];
 
 const CURATED_STIMULUS_TYPES = [
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix',
   'image', 'imageslidergroup', 'imagepointallocation',
-  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation',
+  ...MEDIA_STAR_EDITOR_TYPES, 'imageannotation',
 ];
 
 function SettingsSection({ step, title, hint, children }) {
@@ -586,10 +592,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     { value: 'imageannotation', label: 'Image Annotation', group: 'image' },
     { value: 'imageslidergroup', label: 'Image Slider Group', group: 'image' },
     { value: 'imagepointallocation', label: 'Image Point Allocation', group: 'image' },
-    { value: 'mediadisplay', label: 'Media Display (image / video / audio)', group: 'media' },
+    { value: 'mediapicker', label: 'Media Choice', group: 'media' },
+    { value: 'mediaranking', label: 'Media Ranking', group: 'media' },
     { value: 'mediarating', label: 'Media Rating Scale', group: 'media' },
     { value: 'mediaboolean', label: 'Media Yes/No', group: 'media' },
-    { value: 'mediaranking', label: 'Media Ranking', group: 'media' },
+    { value: 'mediamatrix', label: 'Media Matrix', group: 'media' },
+    { value: 'mediadisplay', label: 'Media Display (image / video / audio)', group: 'media' },
+    { value: 'mediaslidergroup', label: 'Media Slider Group', group: 'media' },
+    { value: 'mediapointallocation', label: 'Media Point Allocation', group: 'media' },
     // Built-in interactive questions — first-class types (not labeled "Skill")
     ...presetTypeOptions,
     // Advanced: blank custom HTML skill + user/library skills
@@ -687,15 +697,41 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
       // Types that should have 1 image/media by default
       if (value === 'imagerating' || value === 'imagematrix' || value === 'imageboolean' || value === 'image'
         || value === 'imageslidergroup' || value === 'imagepointallocation'
-        || value === 'mediadisplay' || value === 'mediarating' || value === 'mediaboolean' || value === 'imageannotation') {
+        || value === 'mediadisplay' || value === 'mediarating' || value === 'mediaboolean'
+        || value === 'mediamatrix' || value === 'mediaslidergroup' || value === 'mediapointallocation'
+        || value === 'imageannotation') {
         if (!editedQuestion.imageCount) updates.imageCount = 1;
         if (value === 'image') updates.imageCount = 1;
         updates.imageSelectionMode = 'huggingface_random';
         updates.randomImageSelection = true;
         updates.excludePreviouslyUsedImages = true;
         updates.choices = updates.choices || [];
-        if (['mediadisplay', 'mediarating', 'mediaboolean'].includes(value)) {
+        if (MEDIA_STAR_EDITOR_TYPES.includes(value)) {
           updates.mediaType = 'any';
+          if (!Array.isArray(editedQuestion.mediaSlots)) updates.mediaSlots = [];
+          if (!editedQuestion.mediaPresentation) updates.mediaPresentation = 'stack';
+        }
+        if (value === 'mediamatrix' && !editedQuestion.rows?.length) {
+          updates.rows = [{ value: 'row1', text: 'Criterion 1' }];
+          updates.columns = [
+            { value: '1', text: '1' }, { value: '2', text: '2' },
+            { value: '3', text: '3' }, { value: '4', text: '4' }, { value: '5', text: '5' },
+          ];
+        }
+        if (value === 'mediaslidergroup' && !editedQuestion.dimensions?.length) {
+          updates.dimensions = [
+            { id: 'd1', label: 'Dimension 1' },
+            { id: 'd2', label: 'Dimension 2' },
+          ];
+          updates.scaleMin = 1;
+          updates.scaleMax = 7;
+        }
+        if (value === 'mediapointallocation' && !editedQuestion.choices?.length) {
+          updates.choices = [
+            { value: 'a', text: 'Option A' },
+            { value: 'b', text: 'Option B' },
+          ];
+          updates.budget = 100;
         }
         if (value === 'imageannotation') {
           updates.allowedTools = ['point', 'line', 'region', 'bbox'];
@@ -704,13 +740,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           if (!Array.isArray(editedQuestion.annotationLabels)) updates.annotationLabels = [];
         }
       }
-      else if (value === 'mediaranking') {
+      else if (value === 'mediaranking' || value === 'mediapicker') {
         if (!editedQuestion.imageCount) updates.imageCount = 4;
         updates.imageSelectionMode = 'huggingface_random';
         updates.randomImageSelection = true;
         updates.excludePreviouslyUsedImages = true;
         updates.mediaType = editedQuestion.mediaType || 'any';
         updates.choices = updates.choices || [];
+        if (!Array.isArray(editedQuestion.mediaSlots)) updates.mediaSlots = [];
+        if (!editedQuestion.mediaPresentation) updates.mediaPresentation = 'stack';
       }
       else if (value === 'number') {
         updates.inputType = 'number';
@@ -1271,13 +1309,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   <>
                     <MediaAssignmentFields question={editedQuestion} onChange={handleQuestionChange} currentProject={currentProject} />
 
-                    {['mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking'].includes(editedQuestion.type) && (
+                    {MEDIA_STAR_EDITOR_TYPES.includes(editedQuestion.type) && (
                       <FormControl fullWidth variant="outlined">
                         <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Media Type Filter</InputLabel>
                         <Select
                           value={editedQuestion.mediaType || 'any'}
                           label="Media Type Filter"
                           onChange={(e) => handleQuestionChange('mediaType', e.target.value)}
+                          disabled={Array.isArray(editedQuestion.mediaSlots) && editedQuestion.mediaSlots.length > 0}
                         >
                           <MenuItem value="any">Any (image/video/audio)</MenuItem>
                           <MenuItem value="image">Image only</MenuItem>
@@ -1287,20 +1326,22 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       </FormControl>
                     )}
 
-                    {mediaConstraints.samplingModes && (
+                    {mediaConstraints.samplingModes && !(editedQuestion.mediaSlots?.length) && (
                       <SamplingModeSelect
                         question={editedQuestion}
                         onQuestionPatch={(patch) => setEditedQuestion((prev) => ({ ...prev, ...patch }))}
                       />
                     )}
 
-                    <StimulusCountField
-                      question={editedQuestion}
-                      onChange={handleQuestionChange}
-                      constraints={mediaConstraints}
-                    />
+                    {!(editedQuestion.mediaSlots?.length) && (
+                      <StimulusCountField
+                        question={editedQuestion}
+                        onChange={handleQuestionChange}
+                        constraints={mediaConstraints}
+                      />
+                    )}
 
-                    {isCuratedMode && (
+                    {isCuratedMode && !(editedQuestion.mediaSlots?.length) && (
                       <CuratedMediaPicker
                         availableImages={availableImages}
                         selectedImages={selectedImages}
@@ -1309,6 +1350,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         error={imageError}
                         onToggle={handleImageSelection}
                         title="Select files"
+                      />
+                    )}
+
+                    {MEDIA_STAR_EDITOR_TYPES.includes(editedQuestion.type) && (
+                      <MediaSlotsEditor
+                        question={editedQuestion}
+                        onChange={handleQuestionChange}
+                        availableImages={availableImages}
                       />
                     )}
                   </>
@@ -1525,7 +1574,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   </Alert>
                 )}
 
-                {editedQuestion.type === 'imagematrix' && (
+                {(editedQuestion.type === 'imagematrix' || editedQuestion.type === 'mediamatrix') && (
                   <Alert severity="info" sx={{ py: 0.5 }}>
                     Configure matrix rows and columns in the section below.
                   </Alert>
@@ -1669,7 +1718,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   </>
                 )}
 
-                {editedQuestion.type === 'imageslidergroup' && (
+                {(editedQuestion.type === 'imageslidergroup' || editedQuestion.type === 'mediaslidergroup') && (
                   <>
                     <SkillDimensionsEditor
                       value={editedQuestion.dimensions || []}
@@ -1700,7 +1749,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   </>
                 )}
 
-                {editedQuestion.type === 'imagepointallocation' && (
+                {(editedQuestion.type === 'imagepointallocation' || editedQuestion.type === 'mediapointallocation') && (
                   <TextField
                     fullWidth
                     variant="outlined"
@@ -1715,7 +1764,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 )}
 
                 {!['skillquestion', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image',
-                  'imagematrix', 'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation',
+                  'imagematrix', 'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediaranking',
+                  'mediamatrix', 'mediaslidergroup', 'mediapointallocation', 'imageannotation',
                   'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type) && (
                   <Alert severity="info" sx={{ py: 0.5 }}>No extra task options for this type.</Alert>
                 )}
@@ -1942,7 +1992,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           )}
 
           {/* Matrix Configuration */}
-          {(editedQuestion.type === 'matrix' || editedQuestion.type === 'imagematrix') && (
+          {(editedQuestion.type === 'matrix' || editedQuestion.type === 'imagematrix' || editedQuestion.type === 'mediamatrix') && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
                 Task options — matrix rows & columns
@@ -2335,7 +2385,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             questionToSave.imageCount = 1;
           }
 
-          if (['imagepicker','imageranking','imagerating','imageboolean','imagematrix','image','imageslidergroup','imagepointallocation','mediadisplay','mediarating','mediaboolean','mediaranking','imageannotation'].includes(questionToSave.type)) {
+          if ([
+            'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image',
+            'imageslidergroup', 'imagepointallocation',
+            'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediaranking',
+            'mediamatrix', 'mediaslidergroup', 'mediapointallocation', 'imageannotation',
+          ].includes(questionToSave.type)) {
             questionToSave.imageCount = clampQuestionImageCount(
               questionToSave.type,
               questionToSave,
@@ -2374,19 +2429,25 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             questionToSave.randomImageSelection = true;
           }
 
-          // Media display / rating / boolean / annotation — honor curated vs random
-          if (['mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation'].includes(questionToSave.type)) {
+          // Media* / annotation — honor curated vs random (skipped when slots drive selection)
+          if ([
+            'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediaranking',
+            'mediamatrix', 'mediaslidergroup', 'mediapointallocation', 'imageannotation',
+          ].includes(questionToSave.type)) {
             if (!questionToSave.imageSelectionMode) {
               questionToSave.imageSelectionMode = 'huggingface_random';
             }
-            const curated = isCuratedSelectionMode(questionToSave.imageSelectionMode);
-            questionToSave.randomImageSelection = !curated;
+            const hasSlots = Array.isArray(questionToSave.mediaSlots) && questionToSave.mediaSlots.length > 0;
+            const curated = !hasSlots && isCuratedSelectionMode(questionToSave.imageSelectionMode);
+            questionToSave.randomImageSelection = hasSlots || !curated;
             questionToSave.excludePreviouslyUsedImages = questionToSave.excludePreviouslyUsedImages !== false;
-            questionToSave.imageCount = clampQuestionImageCount(
-              questionToSave.type,
-              questionToSave,
-              questionToSave.imageCount,
-            );
+            if (!hasSlots) {
+              questionToSave.imageCount = clampQuestionImageCount(
+                questionToSave.type,
+                questionToSave,
+                questionToSave.imageCount,
+              );
+            }
             if (curated && questionToSave.selectedImageUrls?.length) {
               const pool = filterPoolForQuestion(currentProject?.preloadedImages || [], questionToSave);
               const byUrl = new Map(pool.map((img) => [img.url, img]));
@@ -2402,7 +2463,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           
           // Convert selectedImageUrls to SurveyJS choices format for imagepicker, imageranking, and image questions
           // Note: imageboolean, imagerating, imagematrix use imageHtml instead (handled above)
-          if (questionToSave.type === 'imagepicker' || questionToSave.type === 'imageranking' || questionToSave.type === 'mediaranking' || questionToSave.type === 'image') {
+          if (questionToSave.type === 'imagepicker' || questionToSave.type === 'imageranking' || questionToSave.type === 'mediaranking' || questionToSave.type === 'mediapicker' || questionToSave.type === 'image') {
             if (questionToSave.imageSelectionMode === 'huggingface_manual' && questionToSave.selectedImageUrls && questionToSave.selectedImageUrls.length > 0) {
               // Manual selection: use the specifically selected images
               if (questionToSave.type === 'image') {
@@ -2413,9 +2474,10 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   questionToSave.imageLinks = questionToSave.selectedImageUrls;
                 }
               } else {
-                // For imagepicker / imageranking / mediaranking, use choices
+                // For imagepicker / imageranking / media* choice types, use choices
+                const prefix = questionToSave.type === 'mediapicker' ? 'media_' : 'image_';
                 questionToSave.choices = questionToSave.selectedImageUrls.map((url, index) => ({
-                  value: `image_${index}`,
+                  value: `${prefix}${index}`,
                   imageLink: url
                 }));
               }

@@ -17,7 +17,8 @@ import { getBrowserId, generateCompletionCode } from './lib/browserId';
 import { countProjectResponses, fetchPairStats } from './lib/surveyPublicApi';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
-  ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
+  ensureSkillDemoMedia, pickMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
+  applyMediaAssignmentToElement, hasMediaSlots,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
   resolveMediaFolderTags,
 } from './lib/surveyMediaInjection';
@@ -53,6 +54,7 @@ export default function SurveyApp() {
   const projectIdRef = useRef(null);
   const displayedImagesRef = useRef({}); // Use ref to ensure onComplete has access to latest value
   const displayedMediaGroupsRef = useRef({});
+  const displayedMediaSlotsRef = useRef({});
   const displayedMediaCategoriesRef = useRef({});
   const surveyStartedAtRef = useRef(null);
   const pageEnteredAtRef = useRef(null);
@@ -221,12 +223,18 @@ export default function SurveyApp() {
       const imageTracker = {}; // Track displayed images for each question
       const mediaGroupTracker = {}; // questionName -> groupId (for paired assignment)
       const mediaCategoryTracker = {}; // questionName -> category[] (one-per-category mode)
+      const mediaSlotTracker = {}; // questionName -> shown_media slots[]
       const globallyUsedImageKeys = new Set();
       const globallyUsedGroupKeys = new Set();
       const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
       const finalizeMediaSelection = (element, pool, preselected) => {
         const folderTags = resolveMediaFolderTags(projectData, projectData?.config);
-        if (preselected?.length && !usesSetMediaAssignment(element) && !usesCategoryMediaAssignment(element)) {
+        if (
+          preselected?.length
+          && !hasMediaSlots(element)
+          && !usesSetMediaAssignment(element)
+          && !usesCategoryMediaAssignment(element)
+        ) {
           const imageCount = element.imageCount || defaultMediaCount(element);
           const excludeUsed = shouldExcludePreviouslyUsedImages(element);
           let selected = preselected;
@@ -238,11 +246,18 @@ export default function SurveyApp() {
           } else {
             selected = preselected.slice(0, imageCount);
           }
-          const assignment = { images: selected, groupKey: null, groupId: null, setKey: null, setId: null };
+          const assignment = {
+            images: selected, flatMedia: selected, slots: selected.map((img, i) => ({
+              slotId: `legacy_${i}`, role: 'stimulus',
+              type: img.type, url: img.url, name: img.name,
+              media_id: img.media_id || img.key || img.name,
+            })),
+            groupKey: null, groupId: null, setKey: null, setId: null,
+          };
           trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
           return assignment;
         }
-        const assignment = pickRandomMediaForQuestion(
+        const assignment = pickMediaForQuestion(
           pool,
           element,
           globallyUsedImageKeys,
@@ -250,7 +265,10 @@ export default function SurveyApp() {
           pairStatsRef.current,
           folderTags,
         );
-        trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
+        // Slot path already tracks keys; legacy still needs trackMediaAssignment
+        if (!hasMediaSlots(element)) {
+          trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
+        }
         return assignment;
       };
 
@@ -448,8 +466,10 @@ export default function SurveyApp() {
                       result = {
                         success: true,
                         images: selectedImages,
-                        groupId: assignment.groupId,
+                        groupId: assignment.setId || assignment.groupId,
                         categories: assignment.categories,
+                        slots: assignment.slots,
+                        assignment,
                         _assigned: true,
                       };
                       
@@ -502,7 +522,14 @@ export default function SurveyApp() {
                       if (supabaseResult.success && supabaseResult.images.length > 0) {
                         const pool = filterPoolForQuestion(supabaseResult.images, element);
                         const assignment = finalizeMediaSelection(element, pool);
-                        result = { success: true, images: assignment.images, groupId: assignment.groupId, categories: assignment.categories, _assigned: true };
+                        result = {
+                          success: true,
+                          images: assignment.images,
+                          groupId: assignment.groupId,
+                          categories: assignment.categories,
+                          assignment,
+                          _assigned: true,
+                        };
                       } else {
                         result = supabaseResult;
                       }
@@ -517,36 +544,43 @@ export default function SurveyApp() {
                     }
                     
                     if (result?.success && result.images.length > 0) {
-                      let selectedImages = result.images;
-                      let groupId = result.groupId || null;
-                      let categories = result.categories || null;
-                      if (!result._assigned) {
-                        const assignment = finalizeMediaSelection(
+                      let assignment = result.assignment;
+                      if (!result._assigned || !assignment) {
+                        assignment = finalizeMediaSelection(
                           element,
                           filterPoolForQuestion(result.images, element),
                           usesSetMediaAssignment(element) ? null : result.images,
                         );
-                        selectedImages = assignment.images;
-                        groupId = assignment.setId || assignment.groupId;
-                        categories = assignment.categories;
                       }
+                      const selectedImages = assignment.images || [];
+                      const groupId = assignment.setId || assignment.groupId || null;
+                      const categories = assignment.categories || null;
                       if (groupId) {
-                        element.assignedMediaSetId = groupId;
-                        element.assignedMediaGroupId = groupId;
                         mediaGroupTracker[element.name] = groupId;
                       }
                       if (categories?.length) {
-                        element.assignedMediaCategories = categories;
                         mediaCategoryTracker[element.name] = categories;
                       }
-                      
-                      const imageUrls = selectedImages.map(img => img.url);
-                      imageTracker[element.name] = imageUrls;
-                      console.log(`✅ Tracked ${imageUrls.length} image URLs for question: ${element.name}`, imageUrls);
+                      if (assignment.slots?.length) {
+                        mediaSlotTracker[element.name] = assignment.slots.map((s) => ({
+                          slotId: s.slotId,
+                          role: s.role,
+                          type: s.type,
+                          name: s.name,
+                          media_id: s.media_id || s.key || s.name,
+                          url: s.url,
+                          setId: s.setId || groupId || null,
+                        }));
+                      }
+
+                      const imageUrls = applyMediaAssignmentToElement(element, assignment);
+                      imageTracker[element.name] = imageUrls.length
+                        ? imageUrls
+                        : selectedImages.map((img) => img.url);
+                      console.log(`✅ Tracked ${imageTracker[element.name].length} media URLs for question: ${element.name}`, imageTracker[element.name]);
                       if (groupId) console.log(`🔗 Assigned media group "${groupId}" → ${selectedImages.map((i) => i.name).join(', ')}`);
                       if (categories?.length) console.log(`🏷️ Categories [${categories.join(', ')}] → ${selectedImages.map((i) => i.name).join(', ')}`);
-                      
-                      applyMediaToElement(element, selectedImages);
+                      if (assignment.slots?.length) console.log(`🎚️ Slots for ${element.name}:`, assignment.slots.map((s) => `${s.slotId}=${s.name}`).join(', '));
                       console.log(`Loaded ${selectedImages.length} random media for question: ${element.name}`);
                     } else if (element.type === 'skillquestion') {
                       ensureSkillDemoMedia(element);
@@ -728,66 +762,7 @@ export default function SurveyApp() {
                       }
                     ]
                   });
-                } else if (element.type === 'mediarating' && (element.imageHtml || element.randomImageSelection)) {
-                  if (!element.imageHtml) {
-                    console.warn(`mediarating ${element.name} has no imageHtml, skipping panel conversion`);
-                    newElements.push(element);
-                    continue;
-                  }
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:',
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml,
-                      },
-                      {
-                        type: 'rating',
-                        name: element.name,
-                        title: element.title,
-                        isRequired: element.isRequired,
-                        rateMin: element.rateMin || 1,
-                        rateMax: element.rateMax || 5,
-                        minRateDescription: element.minRateDescription,
-                        maxRateDescription: element.maxRateDescription,
-                      },
-                    ],
-                  });
-                } else if (element.type === 'mediaboolean' && (element.imageHtml || element.randomImageSelection)) {
-                  if (!element.imageHtml) {
-                    console.warn(`mediaboolean ${element.name} has no imageHtml, skipping panel conversion`);
-                    newElements.push(element);
-                    continue;
-                  }
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:',
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml,
-                      },
-                      {
-                        type: 'boolean',
-                        name: element.name,
-                        title: element.title,
-                        isRequired: element.isRequired,
-                        labelTrue: element.labelTrue || 'Yes',
-                        labelFalse: element.labelFalse || 'No',
-                        valueTrue: element.valueTrue,
-                        valueFalse: element.valueFalse,
-                      },
-                    ],
-                  });
+                // media* types keep custom widgets (slots + MediaPlayer); do not convert to html panels
                 } else if (element.type === 'imageslidergroup' && (element.imageHtml || element.randomImageSelection)) {
                   if (!element.imageHtml) {
                     console.warn(`imageslidergroup ${element.name} has no imageHtml, skipping panel conversion`);
@@ -971,6 +946,7 @@ export default function SurveyApp() {
         const displayedImages = displayedImagesRef.current || {};
         const displayedMediaGroups = displayedMediaGroupsRef.current || {};
         const displayedMediaCategories = displayedMediaCategoriesRef.current || {};
+        const displayedMediaSlots = displayedMediaSlotsRef.current || {};
         const surveyQuestionTypeMap = {};
         survey.getAllQuestions().forEach((question) => {
           surveyQuestionTypeMap[question.name] = question.getType();
@@ -987,6 +963,7 @@ export default function SurveyApp() {
           displayedImages,
           displayedMediaGroups,
           displayedMediaCategories,
+          displayedMediaSlots,
           preloadedImages: projectData?.preloadedImages || [],
         });
         
@@ -1109,9 +1086,11 @@ export default function SurveyApp() {
       displayedImagesRef.current = imageTracker; // Save to ref for onComplete callback
       displayedMediaGroupsRef.current = mediaGroupTracker;
       displayedMediaCategoriesRef.current = mediaCategoryTracker;
+      displayedMediaSlotsRef.current = mediaSlotTracker;
       console.log('📸 Displayed images tracker:', imageTracker);
       console.log('🔗 Media group assignments:', mediaGroupTracker);
       console.log('🏷️ Media category assignments:', mediaCategoryTracker);
+      console.log('🎚️ Media slot assignments:', mediaSlotTracker);
       console.log('📸 Number of questions with images:', Object.keys(imageTracker).length);
       
       // Record load time for staleness detection

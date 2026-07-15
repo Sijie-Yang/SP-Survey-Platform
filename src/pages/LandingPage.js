@@ -5,7 +5,7 @@ import {
   Avatar, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import {
-  Search, Article, Dataset,
+  Search, Article, Dataset, DesignServices,
   AutoAwesome, BarChart, CloudUpload, Share, Preview, Public, GitHub,
 } from '@mui/icons-material';
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
@@ -219,13 +219,28 @@ export default function LandingPage() {
           <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
             Start from peer-reviewed survey designs used in published research
           </Typography>
-          <Button
-            variant="outlined"
-            startIcon={<Article />}
-            onClick={() => navigate('/request-template')}
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1.5}
+            justifyContent="center"
+            alignItems="center"
           >
-            Request a Template for Your Paper
-          </Button>
+            <Button
+              variant="outlined"
+              startIcon={<Article />}
+              onClick={() => navigate('/request-template')}
+            >
+              Request a Template for Your Paper
+            </Button>
+            <Button
+              variant="outlined"
+              color="secondary"
+              startIcon={<DesignServices />}
+              onClick={() => navigate('/request-survey-design')}
+            >
+              Request Survey Design Help
+            </Button>
+          </Stack>
         </Box>
 
         <TextField

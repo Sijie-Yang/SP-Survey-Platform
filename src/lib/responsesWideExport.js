@@ -11,12 +11,13 @@ import { downloadTextFile } from './methodsExport';
 const IMAGE_TYPES = new Set([
   'imagerating', 'image_rating',
   'imageranking', 'image_ranking',
-  'mediaranking',
+  'mediaranking', 'mediapicker',
   'imageboolean', 'image_boolean',
-  'imagematrix', 'image_matrix',
+  'imagematrix', 'image_matrix', 'mediamatrix',
   'imagepicker',
   'image',
   'mediadisplay', 'mediarating', 'mediaboolean',
+  'mediaslidergroup', 'mediapointallocation',
   'imageannotation',
   'skillquestion',
   'imageslidergroup',
@@ -36,13 +37,13 @@ function getPath(obj, path) {
 }
 
 function subKeysFor(q) {
-  if (q.type === 'slidergroup' || q.type === 'imageslidergroup') {
+  if (q.type === 'slidergroup' || q.type === 'imageslidergroup' || q.type === 'mediaslidergroup') {
     return (q.dimensions || []).map((d) => d.id).filter(Boolean);
   }
-  if (q.type === 'pointallocation' || q.type === 'imagepointallocation') {
+  if (q.type === 'pointallocation' || q.type === 'imagepointallocation' || q.type === 'mediapointallocation') {
     return (q.choices || []).map((c) => (typeof c === 'object' ? c.value : c)).filter(Boolean);
   }
-  if (q.type === 'matrix' || q.type === 'imagematrix') {
+  if (q.type === 'matrix' || q.type === 'imagematrix' || q.type === 'mediamatrix') {
     return (q.rows || []).map((r) => (typeof r === 'object' ? r.value : r)).filter(Boolean);
   }
   if (q.type === 'ranking' || q.type === 'imageranking' || q.type === 'mediaranking') {
@@ -86,6 +87,7 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
 
   const questions = allQuestions || [];
   const headerCols = [];
+  const slotIdsByQuestion = new Map();
   for (const q of questions) {
     headerCols.push(q.name);
     const subKeys = subKeysFor(q);
@@ -98,6 +100,21 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
       headerCols.push(`${q.name}__shown_media_set`);
       headerCols.push(`${q.name}__shown_media_group`);
       headerCols.push(`${q.name}__shown_media_categories`);
+      headerCols.push(`${q.name}__shown_media`);
+      const slotIds = new Set();
+      (q.mediaSlots || []).forEach((s) => { if (s?.id) slotIds.add(String(s.id)); });
+      responses.forEach((row) => {
+        const qData = row.responses?.[q.name];
+        const shown = (typeof qData === 'object' && qData && Array.isArray(qData.shown_media))
+          ? qData.shown_media : [];
+        shown.forEach((s) => { if (s?.slotId) slotIds.add(String(s.slotId)); });
+      });
+      const sorted = [...slotIds].sort();
+      slotIdsByQuestion.set(q.name, sorted);
+      sorted.forEach((id) => {
+        headerCols.push(`${q.name}__slot_${id}_name`);
+        headerCols.push(`${q.name}__slot_${id}_type`);
+      });
     }
   }
 
@@ -158,7 +175,7 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
             const v = ranked[i];
             obj[`${qName}__${String(k).replace(/\./g, '_')}`] = v == null ? '' : String(urlToName(v) ?? v);
           });
-        } else if (q.type === 'matrix' || q.type === 'imagematrix') {
+        } else if (q.type === 'matrix' || q.type === 'imagematrix' || q.type === 'mediamatrix') {
           const rawObj = (ans && typeof ans === 'object' && !Array.isArray(ans)) ? ans : {};
           subKeys.forEach((k) => {
             const v = rawObj[k];
@@ -198,6 +215,16 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
             ? row.displayed_media_categories[qName].join('|')
             : (row.displayed_media_categories?.[qName] || ''));
         obj[`${qName}__shown_media_categories`] = mediaCategories || '';
+        const shownMedia = (typeof qData === 'object' && qData && Array.isArray(qData.shown_media))
+          ? qData.shown_media
+          : [];
+        obj[`${qName}__shown_media`] = shownMedia.length ? JSON.stringify(shownMedia) : '';
+        const bySlot = new Map(shownMedia.map((s) => [String(s.slotId), s]));
+        (slotIdsByQuestion.get(qName) || []).forEach((id) => {
+          const s = bySlot.get(id);
+          obj[`${qName}__slot_${id}_name`] = s?.name || '';
+          obj[`${qName}__slot_${id}_type`] = s?.type || '';
+        });
       }
     }
     return obj;

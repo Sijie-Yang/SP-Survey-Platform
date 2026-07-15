@@ -173,24 +173,85 @@ export function collectAnswers(questionName, responses) {
     const qData = row.responses?.[questionName];
     if (qData === undefined || qData === null) continue;
 
-    let ans, shown;
+    let ans, shown, shownMedia;
 
     if (qData !== null && typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
-      // New enriched format: { type, answer, shown_images }
+      // New enriched format: { type, answer, shown_images, shown_media }
       ans = qData.answer;
       shown = qData.shown_images?.length
         ? qData.shown_images
         : (row.displayed_images?.[questionName] || []);
+      shownMedia = Array.isArray(qData.shown_media) ? qData.shown_media : [];
     } else {
       // Old raw format: the value IS the answer
       ans = qData;
       shown = row.displayed_images?.[questionName] || [];
+      shownMedia = [];
     }
 
     if (ans === null || ans === undefined || ans === '') continue;
-    result.push({ answer: ans, shown_images: shown });
+    result.push({ answer: ans, shown_images: shown, shown_media: shownMedia });
   }
   return result;
+}
+
+/** Collect shown_media even when there is no answer (e.g. mediadisplay). */
+export function collectShownMedia(questionName, responses) {
+  const result = [];
+  for (const row of responsesEligibleForQuestion(questionName, responses)) {
+    const qData = row.responses?.[questionName];
+    let shownMedia = [];
+    let shown = [];
+    if (qData !== null && typeof qData === 'object' && !Array.isArray(qData)) {
+      shownMedia = Array.isArray(qData.shown_media) ? qData.shown_media : [];
+      shown = qData.shown_images || row.displayed_images?.[questionName] || [];
+    } else {
+      shown = row.displayed_images?.[questionName] || [];
+    }
+    if (!shownMedia.length && !shown.length) continue;
+    result.push({ answer: qData?.answer ?? null, shown_images: shown, shown_media: shownMedia });
+  }
+  return result;
+}
+
+function ShownMediaSummary({ answers, includeEmpty = false }) {
+  const rows = (answers || []).filter((a) => (a.shown_media || []).length > 0
+    || (includeEmpty && (a.shown_images || []).length > 0));
+  if (!rows.length) return null;
+  const sample = rows.slice(0, 8);
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Stimulus by slot (sample)</Typography>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+        Full detail is in CSV columns __shown_media and __slot_&lt;id&gt;_name.
+      </Typography>
+      {sample.map((row, i) => {
+        const slots = (row.shown_media || []).length
+          ? row.shown_media
+          : (row.shown_images || []).map((u, j) => ({
+            slotId: `legacy_${j}`,
+            name: String(u).split('/').pop(),
+            type: 'image',
+          }));
+        return (
+          <Box key={i} sx={{ mb: 0.75, fontSize: 13 }}>
+            <Typography variant="caption" color="text.secondary">Response {i + 1}</Typography>
+            <Box component="ul" sx={{ m: 0, pl: 2 }}>
+              {slots.map((s, j) => (
+                <li key={j}>
+                  <strong>{s.slotId || `slot_${j}`}</strong>
+                  {s.role ? ` (${s.role})` : ''}
+                  {': '}
+                  {s.name || s.media_id || '—'}
+                  {s.type ? ` · ${s.type}` : ''}
+                </li>
+              ))}
+            </Box>
+          </Box>
+        );
+      })}
+    </Box>
+  );
 }
 
 // Frequency map: { choice: count }
@@ -1012,8 +1073,8 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     );
   }
 
-  // ── image_matrix ──────────────────────────────────────────────────────────
-  if (type === 'image_matrix' || type === 'imagematrix') {
+  // ── image_matrix / mediamatrix ────────────────────────────────────────────
+  if (type === 'image_matrix' || type === 'imagematrix' || type === 'mediamatrix') {
     const perImage = {};
     for (const { answer, shown_images } of answers) {
       if (typeof answer !== 'object' || !answer || !shown_images?.length) continue;
@@ -1796,9 +1857,11 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         );
 
       case 'imagepicker':
+      case 'mediapicker':
         return (
           <>
             <IrrSummary responses={allResponses} question={question} />
+            <ShownMediaSummary answers={answers} />
             <ImagePickerDistribution
               question={question}
               allResponses={allResponses}
@@ -1815,6 +1878,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
       case 'imageboolean':
       case 'image_matrix':
       case 'imagematrix':
+      case 'mediamatrix':
       case 'mediarating':
       case 'mediaboolean':
         return (
@@ -1822,6 +1886,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
             {['imagerating', 'image_rating', 'mediarating'].includes(type) && (
               <IrrSummary responses={allResponses} question={question} />
             )}
+            <ShownMediaSummary answers={answers} />
             <ImageQuestionAnalysis answers={answers} type={type} question={question} />
           </>
         );
@@ -1831,11 +1896,13 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
 
       case 'mediadisplay':
         return (
-          <Typography variant="body2" color="text.secondary">
-            Display-only question — no participant answers are collected.
-            The shown media files are exported in the __shown_images / __shown_media_set /
-            __shown_media_categories CSV columns.
-          </Typography>
+          <>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Display-only question — no participant answers are collected.
+              Shown media are in __shown_images / __shown_media / slot columns in CSV.
+            </Typography>
+            <ShownMediaSummary answers={answers} includeEmpty />
+          </>
         );
 
       case 'slidergroup':
@@ -1847,9 +1914,11 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         );
 
       case 'imageslidergroup':
+      case 'mediaslidergroup':
         return (
           <>
             <IrrSummary responses={allResponses} question={question} />
+            <ShownMediaSummary answers={answers} />
             <ImageSliderGroupAnalysis question={question} answers={answers} />
           </>
         );
@@ -1858,7 +1927,13 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         return <PointAllocationAnalysis question={question} answers={answers} />;
 
       case 'imagepointallocation':
-        return <ImagePointAllocationAnalysis question={question} answers={answers} />;
+      case 'mediapointallocation':
+        return (
+          <>
+            <ShownMediaSummary answers={answers} />
+            <ImagePointAllocationAnalysis question={question} answers={answers} />
+          </>
+        );
 
       case 'imageannotation':
         return <AnnotationAnalysis answers={answers} questionName={question.name} responses={question._allResponses} />;
@@ -2203,7 +2278,9 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
   const questionAnswers = useMemo(() => {
     const map = {};
     for (const q of allQuestions) {
-      map[q.name] = collectAnswers(q.name, filteredResponses);
+      map[q.name] = q.type === 'mediadisplay'
+        ? collectShownMedia(q.name, filteredResponses)
+        : collectAnswers(q.name, filteredResponses);
     }
     return map;
   }, [allQuestions, filteredResponses]);

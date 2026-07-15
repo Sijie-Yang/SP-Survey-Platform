@@ -1,20 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Alert, Box, Button, Chip, Container, Stack, TextField, Typography,
+  Alert, Box, Button, Checkbox, Chip, Container, FormControlLabel, FormGroup,
+  Stack, TextField, Typography,
 } from '@mui/material';
 import {
-  AttachFile, CheckCircle, ContentCopy, CloudUpload, Description,
+  AttachFile, CheckCircle, ContentCopy, CloudUpload, DesignServices, Description,
 } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { isR2Configured } from '../lib/r2';
 import {
-  MAX_DATASET_IMAGES,
+  MAX_MEDIA_FILES,
   MAX_SUPPLEMENTARY_BYTES,
   MAX_SUPPLEMENTARY_FILES,
+  STIMULUS_OPTIONS,
   SUPPLEMENTARY_ACCEPT,
-  submitPaperTemplateRequest,
-} from '../lib/templateRequest';
+  submitSurveyDesignRequest,
+} from '../lib/surveyDesignRequest';
 
 function formatBytes(n) {
   if (!n && n !== 0) return '';
@@ -23,13 +25,16 @@ function formatBytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export default function RequestTemplatePage() {
+export default function RequestSurveyDesignPage() {
   const navigate = useNavigate();
-  const [name, setName] = useState('');
-  const [author, setAuthor] = useState('');
-  const [year, setYear] = useState('');
-  const [paperUrl, setPaperUrl] = useState('');
+  const [contactName, setContactName] = useState('');
   const [email, setEmail] = useState('');
+  const [affiliation, setAffiliation] = useState('');
+  const [studyTitle, setStudyTitle] = useState('');
+  const [researchBrief, setResearchBrief] = useState('');
+  const [stimulusTypes, setStimulusTypes] = useState([]);
+  const [timeline, setTimeline] = useState('');
+  const [relatedUrl, setRelatedUrl] = useState('');
   const [notes, setNotes] = useState('');
   const [files, setFiles] = useState([]);
   const [supplementary, setSupplementary] = useState([]);
@@ -38,17 +43,26 @@ export default function RequestTemplatePage() {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
-
   const [previews, setPreviews] = useState([]);
+
   useEffect(() => {
-    const next = files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
+    const imageFiles = files.filter((f) => f.type?.startsWith('image/'));
+    const next = imageFiles.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
     setPreviews(next);
     return () => next.forEach((p) => URL.revokeObjectURL(p.url));
   }, [files]);
 
-  const onPickImages = (e) => {
-    const picked = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
-    setFiles((prev) => [...prev, ...picked].slice(0, MAX_DATASET_IMAGES));
+  const toggleStimulus = (value) => {
+    setStimulusTypes((prev) => (
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    ));
+  };
+
+  const onPickMedia = (e) => {
+    const picked = Array.from(e.target.files || []).filter((f) => (
+      f.type.startsWith('image/') || f.type.startsWith('video/') || f.type.startsWith('audio/')
+    ));
+    setFiles((prev) => [...prev, ...picked].slice(0, MAX_MEDIA_FILES));
     e.target.value = '';
   };
 
@@ -63,16 +77,16 @@ export default function RequestTemplatePage() {
     setError('');
     setResult(null);
     setCopied(false);
-    if (!name.trim() || !author.trim() || !paperUrl.trim()) {
-      setError('Please fill in paper title, authors, and paper link.');
+    if (!contactName.trim() || !email.trim() || !studyTitle.trim() || !researchBrief.trim()) {
+      setError('Please fill in name, email, study title, and research brief.');
       return;
     }
-    if (year.trim() && !/^\d{4}$/.test(year.trim())) {
-      setError('Year must be a 4-digit year (e.g. 2025).');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError('Please enter a valid email so we can follow up.');
       return;
     }
-    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError('Please enter a valid email, or leave it blank.');
+    if (researchBrief.trim().length < 40) {
+      setError('Please describe your study in a bit more detail (at least a few sentences).');
       return;
     }
     const oversized = supplementary.find((f) => f.size > MAX_SUPPLEMENTARY_BYTES);
@@ -87,13 +101,16 @@ export default function RequestTemplatePage() {
     setSubmitting(true);
     setProgress('Starting…');
     try {
-      const res = await submitPaperTemplateRequest({
-        name: name.trim(),
-        author: author.trim(),
-        year: year.trim(),
-        paperUrl: paperUrl.trim(),
-        notes: notes.trim(),
+      const res = await submitSurveyDesignRequest({
+        contactName: contactName.trim(),
         email: email.trim(),
+        affiliation: affiliation.trim(),
+        studyTitle: studyTitle.trim(),
+        researchBrief: researchBrief.trim(),
+        stimulusTypes,
+        timeline: timeline.trim(),
+        relatedUrl: relatedUrl.trim(),
+        notes: notes.trim(),
         files,
         supplementaryFiles: supplementary,
         onProgress: (p) => {
@@ -116,9 +133,9 @@ export default function RequestTemplatePage() {
   };
 
   const copyId = async () => {
-    if (!result?.templateId) return;
+    if (!result?.requestId) return;
     try {
-      await navigator.clipboard.writeText(result.templateId);
+      await navigator.clipboard.writeText(result.requestId);
       setCopied(true);
     } catch {
       setCopied(false);
@@ -127,12 +144,15 @@ export default function RequestTemplatePage() {
 
   const resetForm = () => {
     setResult(null);
-    setName('');
-    setAuthor('');
-    setPaperUrl('');
-    setNotes('');
+    setContactName('');
     setEmail('');
-    setYear('');
+    setAffiliation('');
+    setStudyTitle('');
+    setResearchBrief('');
+    setStimulusTypes([]);
+    setTimeline('');
+    setRelatedUrl('');
+    setNotes('');
     setFiles([]);
     setSupplementary([]);
   };
@@ -143,19 +163,22 @@ export default function RequestTemplatePage() {
 
       <Container maxWidth="sm" sx={{ py: 5, flex: 1 }}>
         <Stack spacing={1} sx={{ mb: 3 }}>
-          <Typography variant="h4" fontWeight={800}>
-            Request a Template for Your Paper
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <DesignServices color="primary" />
+            <Typography variant="h4" fontWeight={800}>
+              Request Survey Design
+            </Typography>
+          </Stack>
           <Typography variant="body1" color="text.secondary">
-            No account needed. Share your paper details, optional survey dataset images,
-            and supplementary files (PDF, etc.). We create a pending template ID you can use after review.
-            Need help designing a custom study instead?{' '}
+            Planning a perception study and want help turning it into an SP-Survey?
+            Share a short research brief — this is best-effort research collaboration,
+            not a paid service. Prefer to convert a published paper into a reusable template?{' '}
             <Box
               component={RouterLink}
-              to="/request-survey-design"
+              to="/request-template"
               sx={{ color: 'primary.main', fontWeight: 600, textDecoration: 'none' }}
             >
-              Request survey design
+              Request a template instead
             </Box>
             .
           </Typography>
@@ -164,7 +187,7 @@ export default function RequestTemplatePage() {
         {result ? (
           <Stack spacing={2}>
             <Alert severity="success" icon={<CheckCircle />}>
-              Request submitted. Your pending template ID is ready — save it.
+              Request submitted. Save your request ID — we will follow up by email when we can help.
             </Alert>
             <Box
               sx={{
@@ -176,21 +199,21 @@ export default function RequestTemplatePage() {
               }}
             >
               <Typography variant="caption" color="text.secondary">
-                Template ID
+                Request ID
               </Typography>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
                 <Typography variant="h6" fontWeight={700} sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-                  {result.templateId}
+                  {result.requestId}
                 </Typography>
                 <Button size="small" startIcon={<ContentCopy />} onClick={copyId}>
                   {copied ? 'Copied' : 'Copy'}
                 </Button>
               </Stack>
-              {(result.imageCount > 0 || result.supplementaryCount > 0) && (
+              {(result.mediaCount > 0 || result.supplementaryCount > 0) && (
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   {[
-                    result.imageCount > 0
-                      ? `${result.imageCount} survey dataset image${result.imageCount === 1 ? '' : 's'}`
+                    result.mediaCount > 0
+                      ? `${result.mediaCount} media file${result.mediaCount === 1 ? '' : 's'}`
                       : null,
                     result.supplementaryCount > 0
                       ? `${result.supplementaryCount} supplementary file${result.supplementaryCount === 1 ? '' : 's'}`
@@ -199,13 +222,13 @@ export default function RequestTemplatePage() {
                 </Typography>
               )}
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-                Status: pending review (not on the public library yet). After approval, open the
-                researcher panel and use this template ID.
+                Status: pending. We review requests as capacity allows and will email you
+                if we can help design or scaffold your survey.
               </Typography>
             </Box>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <Button variant="contained" onClick={() => navigate('/login')}>
-                Researcher login
+                Or start building yourself
               </Button>
               <Button variant="outlined" onClick={resetForm}>
                 Submit another
@@ -220,61 +243,106 @@ export default function RequestTemplatePage() {
             <Stack spacing={2.5}>
               {error && <Alert severity="error">{error}</Alert>}
 
-              <TextField
-                label="Paper title"
-                required
-                fullWidth
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                disabled={submitting}
-              />
-              <TextField
-                label="Author name(s)"
-                required
-                fullWidth
-                value={author}
-                onChange={(e) => setAuthor(e.target.value)}
-                helperText="e.g. Yang, Sijie and Chong, Adrian and Liu, Pengyuan and Biljecki, Filip"
-                disabled={submitting}
-              />
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                 <TextField
-                  label="Year"
-                  fullWidth
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
-                  placeholder="e.g. 2025"
-                  disabled={submitting}
-                  inputProps={{ inputMode: 'numeric', maxLength: 4 }}
-                />
-                <TextField
-                  label="Paper link"
+                  label="Your name"
                   required
                   fullWidth
-                  value={paperUrl}
-                  onChange={(e) => setPaperUrl(e.target.value)}
-                  placeholder="https://doi.org/… or publisher URL"
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                  disabled={submitting}
+                />
+                <TextField
+                  label="Email"
+                  type="email"
+                  required
+                  fullWidth
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  helperText="Required so we can follow up."
+                  disabled={submitting}
+                  autoComplete="email"
+                />
+              </Stack>
+              <TextField
+                label="Affiliation (optional)"
+                fullWidth
+                value={affiliation}
+                onChange={(e) => setAffiliation(e.target.value)}
+                placeholder="e.g. Urban Analytics Lab, NUS"
+                disabled={submitting}
+              />
+              <TextField
+                label="Study title"
+                required
+                fullWidth
+                value={studyTitle}
+                onChange={(e) => setStudyTitle(e.target.value)}
+                disabled={submitting}
+              />
+              <TextField
+                label="Research brief"
+                required
+                fullWidth
+                multiline
+                minRows={4}
+                value={researchBrief}
+                onChange={(e) => setResearchBrief(e.target.value)}
+                helperText="What do you want to measure, with whom, and roughly how? A few sentences is enough."
+                disabled={submitting}
+              />
+
+              <Box>
+                <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
+                  Stimulus media (optional)
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  What participants will see or hear.
+                </Typography>
+                <FormGroup row>
+                  {STIMULUS_OPTIONS.map((opt) => (
+                    <FormControlLabel
+                      key={opt.value}
+                      control={(
+                        <Checkbox
+                          size="small"
+                          checked={stimulusTypes.includes(opt.value)}
+                          onChange={() => toggleStimulus(opt.value)}
+                          disabled={submitting}
+                        />
+                      )}
+                      label={opt.label}
+                    />
+                  ))}
+                </FormGroup>
+              </Box>
+
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <TextField
+                  label="Timeline (optional)"
+                  fullWidth
+                  value={timeline}
+                  onChange={(e) => setTimeline(e.target.value)}
+                  placeholder="e.g. pilot in August, full run in October"
+                  disabled={submitting}
+                />
+                <TextField
+                  label="Related link (optional)"
+                  fullWidth
+                  value={relatedUrl}
+                  onChange={(e) => setRelatedUrl(e.target.value)}
+                  placeholder="Paper, project page, or dataset URL"
                   disabled={submitting}
                 />
               </Stack>
               <TextField
-                label="Email (optional)"
-                type="email"
-                fullWidth
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                helperText="Optional — so we can reach you about this request. No account required."
-                disabled={submitting}
-                autoComplete="email"
-              />
-              <TextField
-                label="Notes (optional)"
+                label="Additional notes (optional)"
                 fullWidth
                 multiline
-                minRows={3}
+                minRows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                helperText="Method details, survey design hints, Hugging Face dataset, etc."
+                helperText="Question types you have in mind, sample size targets, constraints, etc."
                 disabled={submitting}
               />
 
@@ -290,22 +358,28 @@ export default function RequestTemplatePage() {
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
                   <CloudUpload fontSize="small" color="action" />
                   <Typography variant="subtitle2" fontWeight={700}>
-                    Survey dataset images (optional)
+                    Sample media (optional)
                   </Typography>
-                  <Chip size="small" label={`max ${MAX_DATASET_IMAGES}`} />
+                  <Chip size="small" label={`max ${MAX_MEDIA_FILES}`} />
                 </Stack>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  Images are auto-compressed before upload.
+                  Images, video, or audio examples. Images are auto-compressed before upload.
                 </Typography>
                 <Button
                   component="label"
                   variant="outlined"
                   size="small"
                   startIcon={<Description />}
-                  disabled={submitting || files.length >= MAX_DATASET_IMAGES}
+                  disabled={submitting || files.length >= MAX_MEDIA_FILES}
                 >
-                  Choose images
-                  <input hidden type="file" accept="image/*" multiple onChange={onPickImages} />
+                  Choose media
+                  <input
+                    hidden
+                    type="file"
+                    accept="image/*,video/*,audio/*"
+                    multiple
+                    onChange={onPickMedia}
+                  />
                 </Button>
                 {files.length > 0 && (
                   <Typography variant="caption" display="block" sx={{ mt: 1 }}>
@@ -365,7 +439,7 @@ export default function RequestTemplatePage() {
                   <Chip size="small" label={`max ${MAX_SUPPLEMENTARY_FILES}`} />
                 </Stack>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  PDF, Word, slides, spreadsheets, ZIP, etc. — up to{' '}
+                  Protocol notes, PDF, slides, spreadsheets, ZIP, etc. — up to{' '}
                   {Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024))} MB each.
                 </Typography>
                 <Button
@@ -411,6 +485,11 @@ export default function RequestTemplatePage() {
                   </Box>
                 )}
               </Box>
+
+              <Alert severity="info" variant="outlined">
+                Best-effort support from the SP-Survey team as capacity allows.
+                You can also create an account and build the survey yourself anytime.
+              </Alert>
 
               <Button
                 type="submit"

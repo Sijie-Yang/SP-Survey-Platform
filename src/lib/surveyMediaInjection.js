@@ -10,6 +10,15 @@ import {
 import { getSkillById } from './skillManager';
 import { getPresetSkill } from './presetSkills';
 import { enrichEmotionColorConfig } from './emotionColor';
+import {
+  hasMediaSlots, resolveMediaSlots, legacyAssignmentToSlots,
+  applyResolvedSlotsToElement, MEDIA_STAR_TYPES, isMediaStarType,
+} from './mediaSlots';
+
+export {
+  hasMediaSlots, resolveMediaSlots, legacyAssignmentToSlots,
+  applyResolvedSlotsToElement, MEDIA_STAR_TYPES, isMediaStarType,
+} from './mediaSlots';
 
 /**
  * Folder tags for set/category assignment.
@@ -63,7 +72,9 @@ function skillFromPreset(skillId) {
 
 export const RANDOM_MEDIA_TYPES = new Set([
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix',
-  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'imageannotation',
+  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'mediapicker',
+  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+  'imageannotation',
   'imageslidergroup', 'imagepointallocation',
 ]);
 
@@ -86,7 +97,10 @@ export function shouldInjectMedia(element) {
   if (isCuratedMediaMode(element)) {
     return false;
   }
-  if (['mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation'].includes(element.type)) {
+  if ([
+    'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation',
+    'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+  ].includes(element.type) || hasMediaSlots(element)) {
     return element.randomImageSelection !== false;
   }
   return !!element.randomImageSelection;
@@ -181,7 +195,12 @@ export function defaultMediaCount(element) {
   if (element.type === 'skillquestion') {
     return element.imageCount || element.skillConfig?.mediaCount || 1;
   }
-  if (['imagerating', 'imagematrix', 'imageboolean', 'image', 'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
+  if ([
+    'imagerating', 'imagematrix', 'imageboolean', 'image',
+    'mediadisplay', 'mediarating', 'mediaboolean', 'mediamatrix',
+    'mediaslidergroup', 'mediapointallocation', 'imageannotation',
+    'imageslidergroup', 'imagepointallocation',
+  ].includes(element.type)) {
     return 1;
   }
   return 4;
@@ -192,13 +211,38 @@ export function getMediaTypeFilter(element) {
     return element.skillConfig?.mediaType || 'image';
   }
   if (element.type === 'imageannotation') return 'image';
-  if (['mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking'].includes(element.type)) {
+  // Slots resolve per-slot types — pool stays unfiltered at question level
+  if (hasMediaSlots(element)) return 'any';
+  if (isMediaStarType(element.type)) {
     return element.mediaType || 'any';
   }
   if (['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
     return 'image';
   }
   return 'any';
+}
+
+/**
+ * Unified picker: mediaSlots path or legacy pickRandomMediaForQuestion.
+ * Always returns { images, slots, flatMedia, setId, ... }.
+ */
+export function pickMediaForQuestion(
+  pool,
+  element,
+  globallyUsedImageKeys,
+  globallyUsedSetKeys,
+  pairStats = null,
+  folderTags = {},
+) {
+  if (hasMediaSlots(element)) {
+    return resolveMediaSlots(
+      pool, element, globallyUsedImageKeys, globallyUsedSetKeys, folderTags,
+    );
+  }
+  const assignment = pickRandomMediaForQuestion(
+    pool, element, globallyUsedImageKeys, globallyUsedSetKeys, pairStats, folderTags,
+  );
+  return legacyAssignmentToSlots(assignment);
 }
 
 export function filterPoolForQuestion(pool, element) {
@@ -661,11 +705,16 @@ export function applyMediaToElement(element, selectedImages) {
     return;
   }
 
-  if (['mediadisplay', 'mediarating', 'mediaboolean'].includes(element.type)) {
+  if ([
+    'mediadisplay', 'mediarating', 'mediaboolean',
+    'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+  ].includes(element.type)) {
     setMediaItems(element, selectedImages);
     element.mediaUrl = first.url;
     element.mediaName = first.name;
-    element.mediaType = first.type || inferMediaType(first.url);
+    if (!hasMediaSlots(element)) {
+      element.mediaType = first.type || inferMediaType(first.url);
+    }
     const imageEntries = selectedImages.filter((img) => !img.type || img.type === 'image');
     if (imageEntries.length) {
       element.imageHtml = buildImageGalleryHtml(imageEntries);
@@ -687,18 +736,37 @@ export function applyMediaToElement(element, selectedImages) {
 
   // Only image/media choice types use choices-as-images. Never overwrite
   // text radiogroup / checkbox / dropdown / ranking choices.
-  if (!['imagepicker', 'imageranking', 'mediaranking'].includes(element.type)) {
+  if (!['imagepicker', 'imageranking', 'mediaranking', 'mediapicker'].includes(element.type)) {
     return;
   }
 
+  // mediapicker uses media_N; mediaranking keeps image_N for legacy response mappers
+  const choicePrefix = element.type === 'mediapicker' ? 'media_' : 'image_';
   element.choices = selectedImages.map((image, index) => ({
-    value: `image_${index}`,
+    value: `${choicePrefix}${index}`,
     imageLink: image.url,
     imageName: image.name,
   }));
   element.imageUrls = selectedImages.map((img) => img.url);
   element.imageNames = selectedImages.map((img) => img.name);
+  setMediaItems(element, selectedImages);
   if (!element.imageFit) element.imageFit = 'contain';
+}
+
+/** Apply assignment (with optional slots) to element + return urls for trackers. */
+export function applyMediaAssignmentToElement(element, assignment) {
+  const images = assignment?.flatMedia || assignment?.images || [];
+  const slots = assignment?.slots || [];
+  if (slots.length) applyResolvedSlotsToElement(element, slots);
+  applyMediaToElement(element, images);
+  if (assignment?.setId || assignment?.groupId) {
+    element.assignedMediaSetId = assignment.setId || assignment.groupId;
+    element.assignedMediaGroupId = assignment.setId || assignment.groupId;
+  }
+  if (assignment?.categories) {
+    element.assignedMediaCategories = assignment.categories;
+  }
+  return images.map((img) => img.url).filter(Boolean);
 }
 
 /**

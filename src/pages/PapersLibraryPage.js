@@ -340,14 +340,25 @@ export default function PapersLibraryPage() {
           Linked template IDs appear when admins match a paper to an existing survey template.
           {sourceNote ? ` (${sourceNote})` : ''}
         </Typography>
-        <Button
-          variant="outlined"
-          size="small"
-          sx={{ mb: 2, fontWeight: 700 }}
-          onClick={() => navigate('/request-template')}
-        >
-          Request a Template for Your Paper
-        </Button>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
+          <Button
+            variant="outlined"
+            size="small"
+            sx={{ fontWeight: 700 }}
+            onClick={() => navigate('/request-template')}
+          >
+            Request a Template for Your Paper
+          </Button>
+          <Button
+            variant="outlined"
+            color="secondary"
+            size="small"
+            sx={{ fontWeight: 700 }}
+            onClick={() => navigate('/request-survey-design')}
+          >
+            Request Survey Design Help
+          </Button>
+        </Stack>
 
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
           <Chip

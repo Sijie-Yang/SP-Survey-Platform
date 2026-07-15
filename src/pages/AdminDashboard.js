@@ -59,6 +59,7 @@ import AdminShell from '../components/layout/AdminShell';
 import ConfirmDialog from '../components/layout/ConfirmDialog';
 import AdminScopedMediaLibrary from '../components/admin/AdminScopedMediaLibrary';
 import ResearchDeepSearch from '../components/admin/ResearchDeepSearch';
+import SurveyDesignRequestManagement from '../components/admin/SurveyDesignRequestManagement';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 
@@ -2516,6 +2517,7 @@ export default function AdminDashboard() {
           <Tab label="Skill 审核" />
           <Tab label="Live Surveys" />
           <Tab label="论文库" />
+          <Tab label="Survey Design" />
         </Tabs>
       </Box>
       {tab === 0 && <TemplateManagement />}
@@ -2523,6 +2525,7 @@ export default function AdminDashboard() {
       {tab === 2 && <SkillManagement />}
       {tab === 3 && <LiveSurveyManagement />}
       {tab === 4 && <ResearchDeepSearch />}
+      {tab === 5 && <SurveyDesignRequestManagement />}
     </AdminShell>
   );
 }

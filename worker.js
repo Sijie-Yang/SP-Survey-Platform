@@ -21,6 +21,10 @@ import {
   createPaperTemplateRequest,
   attachPaperTemplateImages,
 } from './worker-lib/templateRequest.mjs';
+import {
+  createSurveyDesignRequest,
+  attachSurveyDesignFiles,
+} from './worker-lib/surveyDesignRequest.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -711,6 +715,16 @@ export default {
       if (pathname === '/api/template-request' && request.method === 'PATCH') {
         const body = await request.json();
         const result = await attachPaperTemplateImages(body, env);
+        return json(result, { status: result.success ? 200 : (result.status || 400) });
+      }
+      if (pathname === '/api/survey-design-request' && request.method === 'POST') {
+        const body = await request.json();
+        const result = await createSurveyDesignRequest(body, env);
+        return json(result, { status: result.success ? 200 : (result.status || 400) });
+      }
+      if (pathname === '/api/survey-design-request' && request.method === 'PATCH') {
+        const body = await request.json();
+        const result = await attachSurveyDesignFiles(body, env);
         return json(result, { status: result.success ? 200 : (result.status || 400) });
       }
 
