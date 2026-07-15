@@ -39,21 +39,26 @@ Design image-based questionnaires in a drag-and-drop admin panel, share a link w
 
 ### Hosted (recommended)
 
-Go to **[sp-survey.org](https://sp-survey.org)**, create an account, and start building. No server or deployment setup.
+Go to **[sp-survey.org](https://sp-survey.org)**, create an account, and start building. Cloud storage, auth, and live links are handled for you.
 
-### Self-host
+### Self-host (open source)
 
-Open-source code and setup live in **[Sijie-Yang/SP-Survey](https://github.com/Sijie-Yang/SP-Survey)**:
+Need a **login-free** admin panel and your own infrastructure? Use **[Sijie-Yang/SP-Survey](https://github.com/Sijie-Yang/SP-Survey)**:
+
+| | Hosted ([sp-survey.org](https://sp-survey.org)) | Self-host ([SP-Survey](https://github.com/Sijie-Yang/SP-Survey)) |
+|---|---|---|
+| Login | Account required | **None** — open `/admin` directly |
+| Media & responses | Managed for you | Your **Supabase** project |
+| Participant survey | Share platform link | Deploy yourself (**Vercel** / static host) |
 
 ```bash
 git clone https://github.com/Sijie-Yang/SP-Survey.git
 cd SP-Survey
-npm install
-cp .env.example .env   # add Supabase URL + anon key
-npm run dev
+npm install && npm run dev
+# Admin: http://localhost:3000/admin  (no login)
 ```
 
-Full self-host docs, issues, and releases: **https://github.com/Sijie-Yang/SP-Survey**
+Setup overview: configure Supabase Storage → build survey → create `survey_responses` → deploy survey site to Vercel with the **anon** key. Full steps: **https://github.com/Sijie-Yang/SP-Survey**
 
 ---
 
