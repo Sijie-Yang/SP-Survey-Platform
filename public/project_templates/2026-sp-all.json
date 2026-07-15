@@ -1,7 +1,7 @@
 {
   "id": "2026-sp-all",
   "name": "All Question Types (QA Template)",
-  "description": "Full coverage of every builder question type and all 7 Interactive presets. Upload media in Image Dataset before testing image / media / skill questions. Presets resolve via built-in skillId preset_*.",
+  "description": "Full coverage of every builder question type, all media* types (including mediaSlots multi-modal demos), and all 7 Interactive presets. Upload images / video / audio in Image Dataset before testing. Presets resolve via built-in skillId preset_*.",
   "author": "SP Survey Platform",
   "year": "2026",
   "category": "Platform",
@@ -37,7 +37,7 @@
             "type": "expression",
             "name": "qa_intro",
             "title": "How to use this template",
-            "description": "Work through each page in order. Before image / media / Interactive questions: open the project Image Dataset and upload a few images (and at least one video if you want to exercise video presets). Interactive presets use skillId preset_* built into the platform — no custom HTML required."
+            "description": "Work through each page in order. Before image / media / Interactive questions: open Image Dataset and upload images plus at least one video and one audio (same basename, e.g. clip01.mp4 + clip01.mp3, exercises basename pairing). For the Mixed set slot demo, tag a folder as set with video+audio+image. Interactive presets use skillId preset_* — no custom HTML required."
           },
           {
             "type": "consent",
@@ -403,7 +403,7 @@
       {
         "name": "media_types",
         "title": "Media questions",
-        "description": "mediadisplay (single · reveal · timed) · mediarating · mediaboolean · mediaranking",
+        "description": "mediadisplay · mediapicker · mediaranking · mediarating · mediaboolean · mediamatrix · mediaslidergroup · mediapointallocation (legacy single-pool; slots on next page)",
         "elements": [
           {
             "imageSelectionMode": "huggingface_random",
@@ -416,7 +416,9 @@
             "title": "[mediadisplay] Gallery — Image Choice layout (2+ images)",
             "displayMode": "single",
             "mediaType": "image",
-            "imageCount": 2
+            "imageCount": 2,
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
           },
           {
             "imageSelectionMode": "huggingface_random",
@@ -431,7 +433,9 @@
             "mediaType": "image",
             "imageCount": 2,
             "beforeLabel": "Before",
-            "afterLabel": "After"
+            "afterLabel": "After",
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
           },
           {
             "imageSelectionMode": "huggingface_random",
@@ -445,7 +449,38 @@
             "displayMode": "timed",
             "mediaType": "image",
             "imageCount": 1,
-            "exposureSeconds": 5
+            "exposureSeconds": 5,
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediapicker",
+            "name": "qa_mediapicker",
+            "title": "[mediapicker] Media Choice — pick preferred media",
+            "mediaType": "any",
+            "imageCount": 4,
+            "multiSelect": false,
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediaranking",
+            "name": "qa_mediaranking",
+            "title": "[mediaranking] Media Ranking — best first",
+            "mediaType": "any",
+            "imageCount": 4,
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
           },
           {
             "imageSelectionMode": "huggingface_random",
@@ -455,13 +490,33 @@
             "isRequired": false,
             "type": "mediarating",
             "name": "qa_mediarating",
-            "title": "[mediarating] Media Rating Scale",
+            "title": "[mediarating] Media Rating Scale (legacy single pool)",
             "mediaType": "image",
             "imageCount": 1,
             "rateMin": 1,
             "rateMax": 5,
             "minRateDescription": "Poor",
-            "maxRateDescription": "Excellent"
+            "maxRateDescription": "Excellent",
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediarating",
+            "name": "qa_mediarating_video",
+            "title": "[mediarating] Media Rating — video only (mediaType filter)",
+            "mediaType": "video",
+            "imageCount": 1,
+            "rateMin": 1,
+            "rateMax": 5,
+            "minRateDescription": "Poor",
+            "maxRateDescription": "Excellent",
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
           },
           {
             "imageSelectionMode": "huggingface_random",
@@ -475,7 +530,9 @@
             "mediaType": "image",
             "imageCount": 1,
             "labelTrue": "Yes",
-            "labelFalse": "No"
+            "labelFalse": "No",
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
           },
           {
             "imageSelectionMode": "huggingface_random",
@@ -483,11 +540,391 @@
             "excludePreviouslyUsedImages": false,
             "choices": [],
             "isRequired": false,
-            "type": "mediaranking",
-            "name": "qa_mediaranking",
-            "title": "[mediaranking] Media Ranking — best first",
-            "mediaType": "image",
-            "imageCount": 4
+            "type": "mediamatrix",
+            "name": "qa_mediamatrix",
+            "title": "[mediamatrix] Media Matrix — rate attributes of shown media",
+            "mediaType": "any",
+            "imageCount": 1,
+            "mediaSlots": [],
+            "mediaPresentation": "stack",
+            "columns": [
+              {
+                "value": "1",
+                "text": "Low"
+              },
+              {
+                "value": "2",
+                "text": "Medium"
+              },
+              {
+                "value": "3",
+                "text": "High"
+              }
+            ],
+            "rows": [
+              {
+                "value": "appeal",
+                "text": "Visual / sensory appeal"
+              },
+              {
+                "value": "comfort",
+                "text": "Comfort"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediaslidergroup",
+            "name": "qa_mediaslidergroup",
+            "title": "[mediaslidergroup] Media Slider Group",
+            "mediaType": "any",
+            "imageCount": 1,
+            "scaleMin": 1,
+            "scaleMax": 7,
+            "mediaSlots": [],
+            "mediaPresentation": "stack",
+            "dimensions": [
+              {
+                "id": "safe",
+                "left": "Unsafe",
+                "right": "Safe"
+              },
+              {
+                "id": "pleasant",
+                "left": "Unpleasant",
+                "right": "Pleasant"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [
+              {
+                "value": "greenery",
+                "text": "Greenery"
+              },
+              {
+                "value": "safety",
+                "text": "Safety"
+              },
+              {
+                "value": "activity",
+                "text": "Activity"
+              }
+            ],
+            "isRequired": false,
+            "type": "mediapointallocation",
+            "name": "qa_mediapointallocation",
+            "title": "[mediapointallocation] Media Point Allocation",
+            "mediaType": "any",
+            "imageCount": 1,
+            "budget": 100,
+            "mediaSlots": [],
+            "mediaPresentation": "stack"
+          }
+        ]
+      },
+      {
+        "name": "media_slots",
+        "title": "Media slots (multi-modal)",
+        "description": "mediaSlots demos: random video+audio · basename pair · sequential stack · mixed set_member · choice slots on mediapicker",
+        "elements": [
+          {
+            "type": "expression",
+            "name": "qa_media_slots_intro",
+            "title": "Media Slots QA",
+            "description": "Needs video + audio in Image Dataset. Basename demo needs matching stems (clip01.mp4 ↔ clip01.mp3). Mixed-set demo needs a folder tagged set with video+audio+image. CSV should show __shown_media and __slot_<id>_name columns."
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediarating",
+            "name": "qa_slots_video_audio_rating",
+            "title": "[slots] mediarating — random video + random audio (stack)",
+            "mediaType": "any",
+            "imageCount": 2,
+            "rateMin": 1,
+            "rateMax": 5,
+            "minRateDescription": "Poor",
+            "maxRateDescription": "Excellent",
+            "mediaPresentation": "stack",
+            "mediaSlots": [
+              {
+                "id": "stimulus_video",
+                "role": "stimulus",
+                "mediaType": "video",
+                "selection": "random",
+                "count": 1,
+                "order": 0,
+                "matchBy": "none"
+              },
+              {
+                "id": "stimulus_audio",
+                "role": "stimulus",
+                "mediaType": "audio",
+                "selection": "random",
+                "count": 1,
+                "order": 1,
+                "matchBy": "none"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediarating",
+            "name": "qa_slots_basename_pair",
+            "title": "[slots] mediarating — basename pair (video then matching audio)",
+            "mediaType": "any",
+            "imageCount": 2,
+            "rateMin": 1,
+            "rateMax": 5,
+            "mediaPresentation": "stack",
+            "mediaSlots": [
+              {
+                "id": "stimulus_video",
+                "role": "stimulus",
+                "mediaType": "video",
+                "selection": "random",
+                "count": 1,
+                "order": 0,
+                "matchBy": "none"
+              },
+              {
+                "id": "stimulus_audio",
+                "role": "stimulus",
+                "mediaType": "audio",
+                "selection": "random",
+                "count": 1,
+                "order": 1,
+                "matchBy": "basename"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediadisplay",
+            "name": "qa_slots_sequential",
+            "title": "[slots] mediadisplay — sequential video → audio (then continue)",
+            "displayMode": "single",
+            "mediaType": "any",
+            "imageCount": 2,
+            "mediaPresentation": "sequential",
+            "mediaSlots": [
+              {
+                "id": "step_video",
+                "role": "stimulus",
+                "mediaType": "video",
+                "selection": "random",
+                "count": 1,
+                "order": 0,
+                "matchBy": "none"
+              },
+              {
+                "id": "step_audio",
+                "role": "stimulus",
+                "mediaType": "audio",
+                "selection": "random",
+                "count": 1,
+                "order": 1,
+                "matchBy": "basename"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediaboolean",
+            "name": "qa_slots_boolean_composite",
+            "title": "[slots] mediaboolean — video + audio composite stimulus",
+            "mediaType": "any",
+            "imageCount": 2,
+            "labelTrue": "Comfortable",
+            "labelFalse": "Not comfortable",
+            "mediaPresentation": "stack",
+            "mediaSlots": [
+              {
+                "id": "stimulus_video",
+                "role": "stimulus",
+                "mediaType": "video",
+                "selection": "random",
+                "count": 1,
+                "order": 0,
+                "matchBy": "none"
+              },
+              {
+                "id": "stimulus_audio",
+                "role": "companion",
+                "mediaType": "audio",
+                "selection": "random",
+                "count": 1,
+                "order": 1,
+                "matchBy": "none"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediarating",
+            "name": "qa_slots_mixed_set",
+            "title": "[slots] mediarating — mixed set (set_member shared; tag a folder as set)",
+            "mediaType": "any",
+            "imageCount": 3,
+            "rateMin": 1,
+            "rateMax": 5,
+            "mediaAssignmentMode": "set",
+            "mediaPresentation": "stack",
+            "mediaSlots": [
+              {
+                "id": "set_video",
+                "role": "stimulus",
+                "mediaType": "video",
+                "selection": "set_member",
+                "setBinding": "shared",
+                "count": 1,
+                "order": 0
+              },
+              {
+                "id": "set_audio",
+                "role": "stimulus",
+                "mediaType": "audio",
+                "selection": "set_member",
+                "setBinding": "shared",
+                "count": 1,
+                "order": 1
+              },
+              {
+                "id": "set_image",
+                "role": "stimulus",
+                "mediaType": "image",
+                "selection": "set_member",
+                "setBinding": "shared",
+                "count": 1,
+                "order": 2
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediapicker",
+            "name": "qa_slots_mediapicker_choices",
+            "title": "[slots] mediapicker — two random video choices",
+            "mediaType": "video",
+            "imageCount": 2,
+            "multiSelect": false,
+            "mediaPresentation": "stack",
+            "mediaSlots": [
+              {
+                "id": "choice_a",
+                "role": "choice",
+                "mediaType": "video",
+                "selection": "random",
+                "count": 1,
+                "order": 0,
+                "matchBy": "none"
+              },
+              {
+                "id": "choice_b",
+                "role": "choice",
+                "mediaType": "video",
+                "selection": "random",
+                "count": 1,
+                "order": 1,
+                "matchBy": "none"
+              }
+            ]
+          },
+          {
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false,
+            "choices": [],
+            "isRequired": false,
+            "type": "mediamatrix",
+            "name": "qa_slots_mediamatrix",
+            "title": "[slots] mediamatrix — video + image context above matrix",
+            "mediaType": "any",
+            "imageCount": 2,
+            "mediaPresentation": "stack",
+            "mediaSlots": [
+              {
+                "id": "stimulus_video",
+                "role": "stimulus",
+                "mediaType": "video",
+                "selection": "random",
+                "count": 1,
+                "order": 0,
+                "matchBy": "none"
+              },
+              {
+                "id": "context_image",
+                "role": "context",
+                "mediaType": "image",
+                "selection": "random",
+                "count": 1,
+                "order": 1,
+                "matchBy": "none"
+              }
+            ],
+            "columns": [
+              {
+                "value": "1",
+                "text": "1"
+              },
+              {
+                "value": "2",
+                "text": "2"
+              },
+              {
+                "value": "3",
+                "text": "3"
+              },
+              {
+                "value": "4",
+                "text": "4"
+              },
+              {
+                "value": "5",
+                "text": "5"
+              }
+            ],
+            "rows": [
+              {
+                "value": "safety",
+                "text": "Perceived safety"
+              },
+              {
+                "value": "noise",
+                "text": "Noise comfort"
+              }
+            ]
           }
         ]
       },
@@ -693,7 +1130,7 @@
             "type": "expression",
             "name": "qa_complete",
             "title": "Results checklist",
-            "description": "In Results, confirm: text / number / rating / boolean / consent distributions; ranking Borda; matrix & slider profiles; image TrueSkill / ranking; MaxDiff BWS; forced-choice bars; emotion color; composite blocks; video timelines; annotation overlay (point / line / region / bbox); timed media exposure logged correctly."
+            "description": "In Results, confirm: text / number / rating / boolean / consent distributions; ranking Borda; matrix & slider profiles; image TrueSkill / ranking; media* summaries + slot sample; CSV __shown_media and __slot_*_name for slot questions; MaxDiff BWS; forced-choice bars; emotion color; composite blocks; video timelines; annotation overlay; timed media exposure logged correctly."
           }
         ]
       }

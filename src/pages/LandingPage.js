@@ -393,6 +393,7 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
               name: templateName,
               preloadedImages,
             }}
+            showMediaAssignment={false}
           />
         )}
       </DialogContent>

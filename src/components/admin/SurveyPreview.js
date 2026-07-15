@@ -16,7 +16,7 @@ import {
   resolveMediaFolderTags,
 } from '../../lib/surveyMediaInjection';
 
-export default function SurveyPreview({ config, currentProject }) {
+export default function SurveyPreview({ config, currentProject, showMediaAssignment = true }) {
   const [processedConfig, setProcessedConfig] = useState(null);
   const [mediaAssignments, setMediaAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -530,7 +530,7 @@ export default function SurveyPreview({ config, currentProject }) {
         }}>
           📋 Preview Mode - This shows exactly how your survey will appear to participants
         </Box>
-        {mediaAssignments.length > 0 && (
+        {showMediaAssignment && mediaAssignments.length > 0 && (
           <Box sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
             <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
               This preview&apos;s media assignment (simulated participant draw)
