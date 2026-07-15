@@ -201,7 +201,7 @@ export default function AdminApp() {
   useEffect(() => {
     const fetchGithubStars = async () => {
       try {
-        const response = await fetch('https://api.github.com/repos/Sijie-Yang/Streetscape-Perception-Survey');
+        const response = await fetch('https://api.github.com/repos/Sijie-Yang/SP-Survey');
         if (response.ok) {
           const data = await response.json();
           setGithubStars(data.stargazers_count);
@@ -886,7 +886,7 @@ export default function AdminApp() {
             {/* Custom GitHub Stars Badge */}
             <Box
               component="a"
-              href="https://github.com/Sijie-Yang/Streetscape-Perception-Survey"
+              href="https://github.com/Sijie-Yang/SP-Survey"
               target="_blank"
               rel="noopener noreferrer"
               sx={{

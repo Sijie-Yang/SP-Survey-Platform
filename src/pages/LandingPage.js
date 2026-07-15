@@ -6,14 +6,15 @@ import {
 } from '@mui/material';
 import {
   Search, Article, Dataset,
-  AutoAwesome, BarChart, CloudUpload, Share, Preview, Public,
+  AutoAwesome, BarChart, CloudUpload, Share, Preview, Public, GitHub,
 } from '@mui/icons-material';
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { projectTemplates } from '../lib/projectTemplates';
 import SurveyPreview from '../components/admin/SurveyPreview';
-import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
+import PublicHeader, { PublicFooter, GITHUB_REPO_URL } from '../components/layout/PublicHeader';
+import { useGithubStars } from '../lib/useGithubStars';
 
 const CLAMP = (lines) => ({
   display: '-webkit-box',
@@ -45,6 +46,7 @@ function getStaticTemplates() {
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const githubStars = useGithubStars();
   const [templates, setTemplates] = useState([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [search, setSearch] = useState('');
@@ -156,10 +158,22 @@ export default function LandingPage() {
               size="large"
               href="https://www.sciencedirect.com/science/article/pii/S0360132325000514"
               target="_blank"
+              rel="noopener noreferrer"
               startIcon={<Article />}
               sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' } }}
             >
               Read Paper
+            </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              startIcon={<GitHub />}
+              sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' } }}
+            >
+              {githubStars !== null ? `GitHub · ★ ${githubStars}` : 'GitHub'}
             </Button>
           </Stack>
         </Container>

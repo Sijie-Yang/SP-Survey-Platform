@@ -1,6 +1,10 @@
 import React from 'react';
-import { AppBar, Toolbar, Typography, Button, Box, Container } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, Container, Tooltip } from '@mui/material';
+import { GitHub, Star } from '@mui/icons-material';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
+import { useGithubStars } from '../../lib/useGithubStars';
+
+export const GITHUB_REPO_URL = 'https://github.com/Sijie-Yang/SP-Survey';
 
 function BrandLogo({ src, alt, height }) {
   return (
@@ -22,6 +26,7 @@ export default function PublicHeader({
   rightSlot = null,
 }) {
   const location = useLocation();
+  const githubStars = useGithubStars();
   const isActive = (path) => location.pathname === path;
 
   return (
@@ -77,6 +82,34 @@ export default function PublicHeader({
           >
             Live surveys
           </Button>
+          <Tooltip title="GitHub repository">
+            <Box
+              component="a"
+              href={GITHUB_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub"
+              sx={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 0.5,
+                px: 1,
+                py: 0.4,
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+                color: 'text.primary',
+                textDecoration: 'none',
+                '&:hover': { bgcolor: 'action.hover', borderColor: 'text.secondary' },
+              }}
+            >
+              <GitHub sx={{ fontSize: '1.1rem' }} />
+              <Star sx={{ fontSize: '0.95rem', color: '#e6b800' }} />
+              <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem', lineHeight: 1 }}>
+                {githubStars !== null ? githubStars : '…'}
+              </Typography>
+            </Box>
+          </Tooltip>
           <Button
             component={RouterLink}
             to="/login"
@@ -123,6 +156,16 @@ export function PublicFooter() {
             sx={{ color: 'primary.main', textDecoration: 'none', fontWeight: 600 }}
           >
             Urban Analytics Lab, NUS
+          </Box>
+          {' · '}
+          <Box
+            component="a"
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{ color: 'primary.main', textDecoration: 'none', fontWeight: 600 }}
+          >
+            GitHub
           </Box>
         </Typography>
       </Container>
