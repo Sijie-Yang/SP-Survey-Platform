@@ -41,6 +41,7 @@ import {
   applyMediaToElement,
   getMediaPerCategory,
   expectedCategoryImageCount,
+  resolveMediaFolderTags,
 } from '../../lib/surveyMediaInjection';
 import { sortMediaByName, normalizeMediaAssignmentMode } from '../../lib/mediaUtils';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
@@ -322,7 +323,10 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
   const isSet = mode === 'set';
   const isCategory = mode === 'category';
   const count = question.imageCount || 1;
-  const folderTags = currentProject?.imageDatasetConfig?.mediaFolderTags || {};
+  const folderTags = React.useMemo(
+    () => resolveMediaFolderTags(currentProject, { pages: [{ elements: [question] }] }),
+    [currentProject, question],
+  );
   const taggedFolderOptions = React.useMemo(() => {
     const tags = folderTags || {};
     return Object.keys(tags).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));

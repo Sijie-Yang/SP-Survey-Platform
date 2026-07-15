@@ -15,7 +15,7 @@ function BrandLogo({ src, alt, height }) {
 }
 
 /**
- * Shared public-site header (Landing, Papers, Live, Login).
+ * Shared public-site header (Landing, Papers, Team, Live, Login).
  */
 export default function PublicHeader({
   brand = 'SP Survey Platform',
@@ -60,6 +60,14 @@ export default function PublicHeader({
             sx={{ fontWeight: isActive('/papers') ? 700 : 500 }}
           >
             Paper library
+          </Button>
+          <Button
+            component={RouterLink}
+            to="/team"
+            color={isActive('/team') ? 'primary' : 'inherit'}
+            sx={{ fontWeight: isActive('/team') ? 700 : 500 }}
+          >
+            Team
           </Button>
           <Button
             component={RouterLink}

@@ -5,11 +5,38 @@ import {
   filterMediaByType, inferMediaType, normalizeMediaEntry,
   getEligibleMediaSets, buildMediaByFolderCategory, getFolderCategories,
   summarizeTaggedSetsBySize, normalizeMediaAssignmentMode, normalizeFolderPath,
-  getRecursiveMedia,
+  getRecursiveMedia, MEDIA_FOLDER_TAG_SET, MEDIA_FOLDER_TAG_CATEGORY,
 } from './mediaUtils';
 import { getSkillById } from './skillManager';
 import { getPresetSkill } from './presetSkills';
 import { enrichEmotionColorConfig } from './emotionColor';
+
+/**
+ * Folder tags for set/category assignment.
+ * Falls back to inferring tags from question mediaFolders when the project/template
+ * has not yet stored imageDatasetConfig (common in template preview before re-import).
+ */
+export function resolveMediaFolderTags(projectOrConfig, surveyConfig = null) {
+  const tags = {
+    ...(projectOrConfig?.imageDatasetConfig?.mediaFolderTags
+      || projectOrConfig?.mediaFolderTags
+      || {}),
+  };
+  const pages = surveyConfig?.pages || projectOrConfig?.config?.pages || [];
+  pages.forEach((page) => {
+    (page.elements || []).forEach((el) => {
+      const mode = normalizeMediaAssignmentMode(el?.mediaAssignmentMode);
+      const folders = Array.isArray(el?.mediaFolders) ? el.mediaFolders : [];
+      folders.forEach((raw) => {
+        const folder = normalizeFolderPath(raw);
+        if (!folder || tags[folder]) return;
+        if (mode === 'set') tags[folder] = MEDIA_FOLDER_TAG_SET;
+        if (mode === 'category') tags[folder] = MEDIA_FOLDER_TAG_CATEGORY;
+      });
+    });
+  });
+  return tags;
+}
 
 /** Build justified image gallery HTML (same layout as imagerating panels). */
 export function buildImageGalleryHtml(selectedImages) {

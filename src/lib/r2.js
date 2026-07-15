@@ -9,6 +9,43 @@ const SERVER_URL =
 // Returns true when the R2 public URL env var is set (synchronous, safe to call anywhere)
 export const isR2Configured = () => !!process.env.REACT_APP_R2_PUBLIC_URL;
 
+export function getR2ServerUrl() {
+  return SERVER_URL;
+}
+
+/** True after a network failure talking to the R2 API proxy (Express :3001 / Worker). */
+let r2ProxyUnreachable = false;
+let r2ProxyWarnLogged = false;
+
+export function isR2ProxyUnreachable() {
+  return r2ProxyUnreachable;
+}
+
+export function resetR2ProxyUnreachable() {
+  r2ProxyUnreachable = false;
+  r2ProxyWarnLogged = false;
+}
+
+function isR2ProxyNetworkError(err) {
+  const msg = err?.message || String(err || '');
+  return /load failed|failed to fetch|networkerror|network request failed|could not connect|econnrefused|err_connection/i.test(msg);
+}
+
+/** Soft-fail: log once when the local/prod R2 API proxy is down. */
+export function noteR2ProxyFailure(err, label) {
+  if (!isR2ProxyNetworkError(err)) return false;
+  r2ProxyUnreachable = true;
+  if (!r2ProxyWarnLogged) {
+    r2ProxyWarnLogged = true;
+    console.warn(
+      `R2 API proxy unreachable at ${SERVER_URL || '(same origin)'} (${label}). `
+      + 'Image thumbnails from public/static URLs still work; list/upload/delete need the Express server '
+      + '(npm run server / port 3001) or a deployed Worker. Set REACT_APP_SERVER_URL if the API is elsewhere.',
+    );
+  }
+  return true;
+}
+
 export function getR2PublicBase() {
   return (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
 }
@@ -70,12 +107,23 @@ export function filterDeletableR2Keys(keys, {
   return { keys: [...new Set(out)], skipped: [...new Set(skipped)] };
 }
 
-// Convert a File or Blob to a base64-encoded string (without the data-URL prefix)
-function toBase64(fileOrBlob) {
+// Convert a File or Blob to a base64-encoded string (without the data-URL prefix).
+// Prefer arrayBuffer + btoa: Safari FileReader often surfaces a vague "Load failed".
+async function toBase64(fileOrBlob) {
+  if (fileOrBlob?.arrayBuffer) {
+    const buf = await fileOrBlob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = () => reject(new Error(reader.error?.message || 'FileReader failed'));
     reader.readAsDataURL(fileOrBlob);
   });
 }
@@ -107,6 +155,13 @@ async function describeNonOk(res, label) {
  * @returns {{ success: boolean, url?: string, key?: string, error?: string }}
  */
 export async function uploadImageToR2(file, key) {
+  if (r2ProxyUnreachable) {
+    return {
+      success: false,
+      error: `R2 API proxy unreachable (${SERVER_URL || 'same origin'})`,
+      unreachable: true,
+    };
+  }
   try {
     const base64 = await toBase64(file);
     const contentType = file.type || 'image/jpeg';
@@ -120,8 +175,12 @@ export async function uploadImageToR2(file, key) {
     if (!json.success) throw new Error(json.error || 'Upload failed');
     return { success: true, url: json.url, key: json.key };
   } catch (error) {
-    console.error('uploadImageToR2:', error);
-    return { success: false, error: error.message };
+    if (!noteR2ProxyFailure(error, 'upload')) console.error('uploadImageToR2:', error);
+    return {
+      success: false,
+      error: error.message,
+      unreachable: isR2ProxyNetworkError(error),
+    };
   }
 }
 
@@ -135,6 +194,13 @@ export async function uploadImageToR2(file, key) {
  */
 export async function deleteImagesFromR2(keys, options = {}) {
   const { allowTemplateKeys = false, allowedPrefix = null } = options;
+  if (r2ProxyUnreachable) {
+    return {
+      success: false,
+      error: `R2 API proxy unreachable (${SERVER_URL || 'same origin'})`,
+      unreachable: true,
+    };
+  }
   try {
     const { keys: safeKeys, skipped } = filterDeletableR2Keys(keys, {
       allowTemplateKeys,
@@ -160,8 +226,12 @@ export async function deleteImagesFromR2(keys, options = {}) {
     if (!json.success) throw new Error(json.error || 'Delete failed');
     return { success: true, deleted: safeKeys.length, skipped: skipped.length };
   } catch (error) {
-    console.error('deleteImagesFromR2:', error);
-    return { success: false, error: error.message };
+    if (!noteR2ProxyFailure(error, 'delete')) console.error('deleteImagesFromR2:', error);
+    return {
+      success: false,
+      error: error.message,
+      unreachable: isR2ProxyNetworkError(error),
+    };
   }
 }
 
@@ -171,6 +241,14 @@ export async function deleteImagesFromR2(keys, options = {}) {
  * @returns {{ success: boolean, images: Array, error?: string }}
  */
 export async function listImagesFromR2(prefix = '') {
+  if (r2ProxyUnreachable) {
+    return {
+      success: false,
+      images: [],
+      error: `R2 API proxy unreachable (${SERVER_URL || 'same origin'})`,
+      unreachable: true,
+    };
+  }
   try {
     const res = await fetch(
       `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}`
@@ -180,8 +258,13 @@ export async function listImagesFromR2(prefix = '') {
     if (!json.success) throw new Error(json.error || 'List failed');
     return { success: true, images: json.images };
   } catch (error) {
-    console.error('listImagesFromR2:', error);
-    return { success: false, images: [], error: error.message };
+    if (!noteR2ProxyFailure(error, 'list')) console.error('listImagesFromR2:', error);
+    return {
+      success: false,
+      images: [],
+      error: error.message,
+      unreachable: isR2ProxyNetworkError(error),
+    };
   }
 }
 
@@ -229,6 +312,15 @@ async function readCopyStream(body, onProgress) {
 export async function copyImagesInR2(copies, options = {}) {
   const { onProgress } = options;
   const stream = typeof onProgress === 'function';
+  if (r2ProxyUnreachable) {
+    return {
+      success: false,
+      copied: [],
+      errors: [],
+      error: `R2 API proxy unreachable (${SERVER_URL || 'same origin'})`,
+      unreachable: true,
+    };
+  }
   try {
     const res = await fetch(`${SERVER_URL}/api/r2/copy`, {
       method: 'POST',
@@ -247,8 +339,14 @@ export async function copyImagesInR2(copies, options = {}) {
       error: json.error,
     };
   } catch (error) {
-    console.error('copyImagesInR2:', error);
-    return { success: false, copied: [], errors: [], error: error.message };
+    if (!noteR2ProxyFailure(error, 'copy')) console.error('copyImagesInR2:', error);
+    return {
+      success: false,
+      copied: [],
+      errors: [],
+      error: error.message,
+      unreachable: isR2ProxyNetworkError(error),
+    };
   }
 }
 
@@ -283,8 +381,17 @@ export async function checkR2Status() {
   try {
     const res = await fetch(`${SERVER_URL}/api/r2/status`);
     if (!res.ok) throw await describeNonOk(res, 'R2 status');
-    return await res.json();
+    const json = await res.json();
+    if (json?.connected || json?.configured) resetR2ProxyUnreachable();
+    return json;
   } catch (error) {
-    return { configured: false, connected: false, error: error.message };
+    noteR2ProxyFailure(error, 'status');
+    return {
+      configured: isR2Configured(),
+      connected: false,
+      error: error.message,
+      unreachable: isR2ProxyNetworkError(error),
+      serverUrl: SERVER_URL,
+    };
   }
 }

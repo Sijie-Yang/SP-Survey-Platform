@@ -197,6 +197,9 @@ export function joinFolderPath(...parts) {
 /**
  * Relative folder of an R2 object key under a project prefix.
  * e.g. key=user/proj/a/b/x.jpg, prefix=user/proj/ → folder "a/b"
+ * Also understands template library keys:
+ *   templates/{id}/study2/x.jpg → study2
+ *   builtin/{id}/study2/x.jpg → study2
  */
 export function folderFromR2Key(key, projectPrefix) {
   if (!key) return '';
@@ -204,6 +207,10 @@ export function folderFromR2Key(key, projectPrefix) {
   const prefix = projectPrefix ? String(projectPrefix).replace(/^\/+/, '').replace(/\/?$/, '/') : '';
   if (prefix && rel.startsWith(prefix)) {
     rel = rel.slice(prefix.length);
+  } else if (/^(templates|builtin)\//.test(rel)) {
+    // templates/{id}/... or builtin/{id}/... → strip owner + id
+    const segs = rel.split('/');
+    if (segs.length >= 3) rel = segs.slice(2).join('/');
   } else if (prefix) {
     // Not under this prefix — try stripping first two segments (userId/projectId/)
     const segs = rel.split('/');

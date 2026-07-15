@@ -12,6 +12,7 @@ import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
   ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
+  resolveMediaFolderTags,
 } from '../../lib/surveyMediaInjection';
 
 export default function SurveyPreview({ config, currentProject }) {
@@ -42,7 +43,7 @@ export default function SurveyPreview({ config, currentProject }) {
         const globallyUsedGroupKeys = new Set();
         const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
         const finalizeMediaSelection = (element, pool, preselected) => {
-          const folderTags = currentProject?.imageDatasetConfig?.mediaFolderTags || {};
+          const folderTags = resolveMediaFolderTags(currentProject, configCopy);
           if (!usesSetMediaAssignment(element) && !usesCategoryMediaAssignment(element) && preselected?.length) {
             const imageCount = element.imageCount || defaultMediaCount(element);
             const excludeUsed = shouldExcludePreviouslyUsedImages(element);

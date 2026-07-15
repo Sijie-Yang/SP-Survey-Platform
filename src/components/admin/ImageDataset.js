@@ -309,7 +309,17 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     setMediaActionStatus({ loading: false, error: null, success: null });
     try {
       const result = await listImagesFromR2(projectPrefix);
-      if (!result.success) throw new Error(result.error || 'Failed to list media from R2');
+      if (!result.success) {
+        if (result.unreachable || /load failed|failed to fetch|unreachable/i.test(result.error || '')) {
+          setMediaActionStatus({
+            loading: false,
+            error: 'Could not refresh the R2 file list (API proxy unreachable). Saved media is unchanged.',
+            success: null,
+          });
+          return;
+        }
+        throw new Error(result.error || 'Failed to list media from R2');
+      }
       const images = normalizeR2Listing(result.images);
       persistPreloadedImages(images);
       setSelectedMedia(new Set());

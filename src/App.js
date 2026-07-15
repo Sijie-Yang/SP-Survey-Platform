@@ -12,6 +12,7 @@ import LoginPage from './pages/LoginPage';
 import LandingPage from './pages/LandingPage';
 import LiveSurveysPage from './pages/LiveSurveysPage';
 import PapersLibraryPage from './pages/PapersLibraryPage';
+import TeamPage from './pages/TeamPage';
 import AdminDashboard from './pages/AdminDashboard';
 import SkillEditorPage from './pages/SkillEditorPage';
 import SkillLibraryPage from './pages/SkillLibraryPage';
@@ -100,6 +101,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/papers" element={<PapersLibraryPage />} />
+              <Route path="/team" element={<TeamPage />} />
               <Route path="/live" element={<LiveSurveysPage />} />
               <Route path="/survey" element={<SurveyApp />} />
               <Route path="/login" element={<LoginPage />} />

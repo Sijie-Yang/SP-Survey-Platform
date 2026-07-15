@@ -4,15 +4,18 @@
  * Pre-annotations: {r2Prefix}preannotations/{safeId}.json
  * Rows keyed by media_id; also keep `name` for remapping when keys change on copy.
  */
-import { uploadImageToR2, isR2Configured, copyImagesInR2 } from './r2';
+import {
+  uploadImageToR2,
+  isR2Configured,
+  copyImagesInR2,
+  getR2ServerUrl,
+  isR2ProxyUnreachable,
+  noteR2ProxyFailure,
+} from './r2';
 import { featureStorageKey } from './imageFeaturesStore';
 import { L0_MODEL } from './imageFeaturesL0';
 import { SEG_MODEL } from './falInference';
 import { getMediaId, normalizeMediaEntry } from './mediaUtils';
-
-const SERVER_URL =
-  process.env.REACT_APP_SERVER_URL ||
-  (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
 
 const R2_PUBLIC = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
 
@@ -216,15 +219,32 @@ async function fetchViaProxy(url) {
   // Feature CSVs / preannotation JSON are rewritten during batch jobs. Never use
   // the browser HTTP cache here — a stale snapshot causes saveFeatureCsv merges
   // to drop earlier batches (looks like "only a few finished" after refresh).
-  const proxyUrl =
-    `${SERVER_URL}/api/r2/image-proxy?url=${encodeURIComponent(url)}&_=${Date.now()}`;
-  const res = await fetch(proxyUrl, { cache: 'no-store' });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
+  // Prefer direct public R2 fetch so CRA-only local dev (no Express :3001) works.
+  try {
+    const direct = await fetch(url, { cache: 'no-store', mode: 'cors' });
+    if (direct.status === 404) return null;
+    if (direct.ok) return direct.text();
+  } catch {
+    /* CORS or network — fall through to API proxy */
   }
-  return res.text();
+
+  if (isR2ProxyUnreachable()) return null;
+
+  const proxyUrl =
+    `${getR2ServerUrl()}/api/r2/image-proxy?url=${encodeURIComponent(url)}&_=${Date.now()}`;
+  try {
+    const res = await fetch(proxyUrl, { cache: 'no-store' });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
+    }
+    return res.text();
+  } catch (err) {
+    // Soft-fail when Express/Worker proxy is down — features simply unavailable.
+    if (noteR2ProxyFailure(err, 'image-proxy')) return null;
+    throw err;
+  }
 }
 
 /** Load feature records for one model from R2 CSV (empty if missing). */

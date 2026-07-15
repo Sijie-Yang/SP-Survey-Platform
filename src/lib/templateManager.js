@@ -23,7 +23,7 @@
 
 import { supabase } from './supabase';
 import {
-  isR2Configured, listImagesFromR2, copyImagesInR2, deleteImagesFromR2,
+  isR2Configured, listImagesFromR2, copyImagesInR2, deleteImagesFromR2, uploadImageToR2,
 } from './r2';
 import { normalizeMediaEntry, sanitizeMediaFolderConfig } from './mediaUtils';
 
@@ -560,6 +560,146 @@ async function loadBuiltinTemplateFilenames() {
   return [...new Set(templates || [])];
 }
 
+/**
+ * Built-in templates may ship a sibling folder:
+ *   /project_templates/{id}/images.json + image files
+ * Used when seeding so "导入内置模板" also fills the template R2 image library.
+ */
+export async function loadBuiltinTemplateImageManifest(templateId) {
+  const id = normalizeTemplateId(templateId);
+  if (!id) return { templateId: id, images: [] };
+  try {
+    const res = await fetch(`/project_templates/${id}/images.json`);
+    if (!res.ok) return { templateId: id, images: [] };
+    const data = await res.json();
+    const images = Array.isArray(data.images)
+      ? data.images.map((n) => String(n || '').trim()).filter(Boolean)
+      : [];
+    return {
+      templateId: id,
+      images,
+      primary: Array.isArray(data.primary) ? data.primary : [],
+      source: data.source || null,
+    };
+  } catch {
+    return { templateId: id, images: [] };
+  }
+}
+
+function staticBuiltinImageEntry(templateId, relPath) {
+  const parts = String(relPath || '').split('/').filter(Boolean);
+  const name = parts[parts.length - 1] || String(relPath || '');
+  const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+  return {
+    url: `/project_templates/${templateId}/${relPath}`,
+    name,
+    key: `builtin/${templateId}/${relPath}`,
+    type: 'image',
+    ...(folder ? { folder } : {}),
+  };
+}
+
+/**
+ * Upload bundled `/project_templates/{id}/*` images into R2 `templates/{id}/`.
+ * Falls back to static public URLs when R2 is not configured or upload fails.
+ * Soft-falls-back: static URLs still populate the template library; R2 failures
+ * are returned as warnings (not fatal) when a usable static entry exists.
+ * @returns {Promise<{ preloadedImages: object[], uploaded: number, skipped: number, errors: string[], warnings: string[] }>}
+ */
+export async function syncBuiltinTemplateImages(templateId, { onProgress } = {}) {
+  const id = normalizeTemplateId(templateId);
+  const manifest = await loadBuiltinTemplateImageManifest(id);
+  // Prefer room photos for the survey library; keep *-card.jpg on disk only.
+  const names = (manifest.images || []).filter((n) => !/-card\.(jpe?g|png|webp)$/i.test(n));
+  if (!names.length) {
+    return { preloadedImages: [], uploaded: 0, skipped: 0, errors: [], warnings: [] };
+  }
+
+  const useR2 = isR2Configured();
+  const preloadedImages = [];
+  const errors = [];
+  const warnings = [];
+  let uploaded = 0;
+  let skipped = 0;
+  let r2ProxyUnreachable = false;
+
+  for (let i = 0; i < names.length; i++) {
+    const relPath = names[i];
+    const parts = String(relPath).split('/').filter(Boolean);
+    const baseName = parts[parts.length - 1] || relPath;
+    const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+    if (onProgress) onProgress({ current: relPath, index: i + 1, total: names.length });
+    const staticEntry = staticBuiltinImageEntry(id, relPath);
+    if (!useR2) {
+      preloadedImages.push(staticEntry);
+      skipped++;
+      continue;
+    }
+    if (r2ProxyUnreachable) {
+      preloadedImages.push(staticEntry);
+      skipped++;
+      continue;
+    }
+    try {
+      const res = await fetch(`/project_templates/${id}/${relPath}`);
+      if (!res.ok) {
+        warnings.push(`${relPath}: bundled fetch HTTP ${res.status}; using static URL`);
+        preloadedImages.push(staticEntry);
+        continue;
+      }
+      const blob = await res.blob();
+      if (!blob || blob.size < 32) {
+        warnings.push(`${relPath}: empty bundled file; using static URL`);
+        preloadedImages.push(staticEntry);
+        continue;
+      }
+      const type = blob.type || (baseName.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
+      const file = typeof File !== 'undefined'
+        ? new File([blob], baseName, { type })
+        : blob;
+      const key = `${templateImagePrefix(id)}${relPath}`;
+      const up = await uploadImageToR2(file, key);
+      if (!up.success) {
+        const msg = up.error || 'upload failed';
+        // One summary if the R2 proxy is down (common Safari "Load failed").
+        if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
+          r2ProxyUnreachable = true;
+          warnings.push(
+            `R2 upload proxy unreachable (${msg}); keeping static /project_templates/${id}/ URLs`,
+          );
+        } else {
+          warnings.push(`${relPath}: R2 ${msg}; using static URL`);
+        }
+        preloadedImages.push(staticEntry);
+        skipped++;
+        continue;
+      }
+      preloadedImages.push({
+        url: up.url,
+        name: baseName,
+        key: up.key || key,
+        type: 'image',
+        ...(folder ? { folder } : {}),
+      });
+      uploaded++;
+    } catch (err) {
+      const msg = err?.message || String(err);
+      if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
+        r2ProxyUnreachable = true;
+        warnings.push(
+          `R2 upload proxy unreachable (${msg}); keeping static /project_templates/${id}/ URLs`,
+        );
+      } else {
+        warnings.push(`${relPath}: ${msg}; using static URL`);
+      }
+      preloadedImages.push(staticEntry);
+      skipped++;
+    }
+  }
+
+  return { preloadedImages, uploaded, skipped, errors, warnings };
+}
+
 /** Resolve id for a built-in JSON template: prefer valid tpl.id, else derive from metadata. */
 export function resolveBuiltinTemplateId(tpl) {
   const fromJson = normalizeTemplateId(tpl.id);
@@ -571,8 +711,9 @@ export function resolveBuiltinTemplateId(tpl) {
   });
 }
 
-function describeBuiltinTemplateEntry(tpl, filename) {
+function describeBuiltinTemplateEntry(tpl, filename, bundledImageCount = 0) {
   const pages = tpl.config?.pages;
+  const fromJson = Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages.length : 0;
   return {
     filename,
     id: resolveBuiltinTemplateId(tpl),
@@ -581,12 +722,12 @@ function describeBuiltinTemplateEntry(tpl, filename) {
     year: tpl.year || '',
     category: tpl.category || '',
     pageCount: Array.isArray(pages) ? pages.length : 0,
-    imageCount: Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages.length : 0,
+    imageCount: Math.max(fromJson, bundledImageCount),
   };
 }
 
 /**
- * Preview which built-in templates would be imported vs skipped (existing id).
+ * Preview which built-in templates would be imported vs updated (existing id).
  * @param {string[]|null} existingIds - optional pre-fetched template ids
  */
 export async function previewBuiltinTemplateImport(existingIds = null) {
@@ -604,7 +745,9 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
   }
 
   const toInsert = [];
+  const toUpdate = [];
   const toSkip = [];
+  const toBackfillImages = [];
   const invalid = [];
   const errors = [];
 
@@ -621,9 +764,21 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
         continue;
       }
 
-      const meta = describeBuiltinTemplateEntry(tpl, filename);
+      const id = resolveBuiltinTemplateId(tpl);
+      const bundled = await loadBuiltinTemplateImageManifest(id);
+      const meta = describeBuiltinTemplateEntry(tpl, filename, bundled.images.length);
       if (existingSet.has(meta.id)) {
-        toSkip.push({ ...meta, reason: 'ID 已存在' });
+        toUpdate.push({
+          ...meta,
+          reason: bundled.images.length
+            ? '覆盖问卷配置并刷新内置图片'
+            : '覆盖问卷配置',
+          willRefreshImages: bundled.images.length > 0,
+        });
+        // Keep legacy key for older UI callers
+        if (bundled.images.length > 0) {
+          toBackfillImages.push({ ...meta, reason: '刷新内置图片到模板图库' });
+        }
       } else {
         toInsert.push(meta);
       }
@@ -645,7 +800,9 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
 
   return {
     toInsert: dedupedInsert,
+    toUpdate,
     toSkip,
+    toBackfillImages,
     invalid,
     errors,
     total: filenames.length,
@@ -655,7 +812,7 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
 /**
  * Seed built-in templates from the static /project_templates/*.json files
  * into Supabase as approved, show-on-landing templates.
- * Skips templates whose id already exists (no update).
+ * Existing ids are updated (survey config + metadata; bundled images refreshed when present).
  */
 export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
   if (!supabase) throw new Error('Supabase not configured');
@@ -665,8 +822,10 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
   const filenames = await loadBuiltinTemplateFilenames();
   const idFilter = idsToImport ? new Set(idsToImport) : null;
   let inserted = 0;
-  let skipped  = 0;
+  let updated = 0;
+  let skipped = 0;
   const errors = [];
+  const warnings = [];
 
   for (const filename of filenames) {
     try {
@@ -688,16 +847,80 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
         continue;
       }
 
+      const tags = Array.isArray(tpl.tags) ? [...tpl.tags] : [];
+      if (!tags.includes('official')) tags.push('official');
+
+      // Prefer R2 upload of sibling /project_templates/{id}/ folder; else static URLs from JSON.
+      let preloadedImages = Array.isArray(tpl.preloadedImages) ? [...tpl.preloadedImages] : [];
+      let preloadedSource = tpl.preloadedSource || (preloadedImages.length ? 'builtin' : null);
+      let preloadedAt = tpl.preloadedAt || null;
+      try {
+        const synced = await syncBuiltinTemplateImages(id, {
+          onProgress: ({ current, index, total }) => {
+            if (onProgress) {
+              onProgress({
+                inserted,
+                updated,
+                skipped,
+                total: filenames.length,
+                current: `${filename} · image ${index}/${total}: ${current}`,
+              });
+            }
+          },
+        });
+        if (synced.preloadedImages.length) {
+          preloadedImages = synced.preloadedImages;
+          preloadedSource = isR2Configured() && synced.uploaded > 0 ? 'r2' : 'builtin';
+          preloadedAt = new Date().toISOString();
+        }
+        if (synced.errors?.length) {
+          errors.push(...synced.errors.map((e) => `${filename} image: ${e}`));
+        }
+        if (synced.warnings?.length) {
+          warnings.push(...synced.warnings.map((e) => `${filename}: ${e}`));
+        }
+      } catch (imgErr) {
+        errors.push(`${filename} images: ${imgErr.message}`);
+      }
+
       if (existing) {
-        skipped++;
+        const patch = {
+          name: tpl.name,
+          description: tpl.description || '',
+          author: tpl.author || '',
+          year: tpl.year || '',
+          category: tpl.category || 'Academic Research',
+          tags,
+          paper_url: tpl.website || null,
+          huggingface_dataset: tpl.huggingfaceDataset || null,
+          survey_config: tpl.config || {},
+          image_dataset_config: sanitizeMediaFolderConfig(
+            tpl.imageDatasetConfig || tpl.image_dataset_config || {},
+          ),
+          is_approved: true,
+          show_on_landing: true,
+          is_active: true,
+          is_pinned: !!(tpl.isPinned ?? tpl.is_pinned),
+          updated_at: new Date().toISOString(),
+        };
+        // Only overwrite media library when builtin pack (or JSON) provides images.
+        if (preloadedImages.length) {
+          patch.preloaded_images = preloadedImages;
+          patch.preloaded_at = preloadedAt;
+          patch.preloaded_source = preloadedSource;
+        }
+        const { error: upErr } = await supabase
+          .from('templates')
+          .update(patch)
+          .eq('id', id);
+        if (upErr) errors.push(`${filename} update: ${upErr.message}`);
+        else updated++;
+
         if (onProgress) {
-          onProgress({ inserted, skipped, total: filenames.length, current: filename });
+          onProgress({ inserted, updated, skipped, total: filenames.length, current: filename });
         }
         continue;
       }
-
-      const tags = Array.isArray(tpl.tags) ? [...tpl.tags] : [];
-      if (!tags.includes('official')) tags.push('official');
 
       const row = {
         id,
@@ -714,9 +937,12 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
         show_on_landing:     true,
         is_pinned:           !!(tpl.isPinned ?? tpl.is_pinned),
         is_active:           true,
-        preloaded_images:    Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages : [],
-        preloaded_at:        tpl.preloadedAt  || null,
-        preloaded_source:    tpl.preloadedSource || null,
+        preloaded_images:    preloadedImages,
+        preloaded_at:        preloadedAt,
+        preloaded_source:    preloadedSource,
+        image_dataset_config: sanitizeMediaFolderConfig(
+          tpl.imageDatasetConfig || tpl.image_dataset_config || {},
+        ),
         user_id:             user.id,
         submitter_email:     user.email       || null,
         created_at:          tpl.createdAt    || new Date().toISOString(),
@@ -728,14 +954,21 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
       else inserted++;
 
       if (onProgress) {
-        onProgress({ inserted, skipped, total: filenames.length, current: filename });
+        onProgress({ inserted, updated, skipped, total: filenames.length, current: filename });
       }
     } catch (err) {
       errors.push(`${filename}: ${err.message}`);
     }
   }
 
-  return { inserted, skipped, imported: inserted, errors };
+  return {
+    inserted,
+    updated,
+    skipped,
+    imported: inserted + updated,
+    errors,
+    warnings,
+  };
 }
 
 /**

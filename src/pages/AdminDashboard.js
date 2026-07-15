@@ -4,7 +4,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   TableSortLabel,
   Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
-  DialogActions, TextField, Switch, Alert, Snackbar,
+  DialogActions, TextField, Switch, Alert, Snackbar, Checkbox,
   CircularProgress, Tooltip, Stack, Select, MenuItem, FormControl, InputLabel,
   LinearProgress, Accordion, AccordionSummary, AccordionDetails,
 } from '@mui/material';
@@ -247,6 +247,7 @@ function SurveyBuilderDialog({ template, open, onClose, onSaved }) {
     id: `tpl-${template.id}`,
     name: template.name,
     preloadedImages: Array.isArray(template.preloadedImages) ? template.preloadedImages : [],
+    imageDatasetConfig: template.imageDatasetConfig || template.image_dataset_config || {},
   };
 
   return (
@@ -295,6 +296,8 @@ function SurveyPreviewDialog({ template, open, onClose }) {
     id: `tpl-${template.id}`,
     name: template.name,
     preloadedImages: Array.isArray(template.preloadedImages) ? template.preloadedImages : [],
+    // Required for set/category assignment — tags live here, not on the question alone.
+    imageDatasetConfig: template.imageDatasetConfig || template.image_dataset_config || {},
   };
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
@@ -556,6 +559,8 @@ function TemplateManagement() {
   const [seedConfirmOpen, setSeedConfirmOpen] = useState(false);
   const [seedPreview, setSeedPreview]     = useState(null);
   const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
+  /** Selected builtin template ids in the import confirm dialog. */
+  const [seedSelectedIds, setSeedSelectedIds] = useState(() => new Set());
   const [sortBy, setSortBy]               = useState('year');
   const [sortOrder, setSortOrder]         = useState('desc');
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -812,10 +817,13 @@ function TemplateManagement() {
   const handleOpenSeedConfirm = async () => {
     setSeedPreviewLoading(true);
     setSeedPreview(null);
+    setSeedSelectedIds(new Set());
     setSeedConfirmOpen(true);
     try {
       const preview = await previewBuiltinTemplateImport(templates.map((t) => t.id));
       setSeedPreview(preview);
+      // Default: select new imports; leave updates unchecked so overwrite is intentional.
+      setSeedSelectedIds(new Set((preview.toInsert || []).map((item) => item.id)));
     } catch (err) {
       showSnack(err.message, 'error');
       setSeedConfirmOpen(false);
@@ -824,31 +832,71 @@ function TemplateManagement() {
     }
   };
 
+  const seedSelectableItems = useMemo(() => {
+    if (!seedPreview) return [];
+    return [
+      ...(seedPreview.toInsert || []).map((item) => ({ ...item, action: 'insert' })),
+      ...(seedPreview.toUpdate || []).map((item) => ({ ...item, action: 'update' })),
+    ];
+  }, [seedPreview]);
+
+  const toggleSeedSelected = (id) => {
+    setSeedSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const setSeedSelectionForAction = (action, checked) => {
+    setSeedSelectedIds((prev) => {
+      const next = new Set(prev);
+      seedSelectableItems
+        .filter((item) => item.action === action)
+        .forEach((item) => {
+          if (checked) next.add(item.id);
+          else next.delete(item.id);
+        });
+      return next;
+    });
+  };
+
   const handleConfirmSeed = async () => {
-    if (!seedPreview?.toInsert?.length) return;
+    const idsToImport = seedSelectableItems
+      .map((item) => item.id)
+      .filter((id) => seedSelectedIds.has(id));
+    if (!idsToImport.length) return;
+    const selectedInsert = (seedPreview?.toInsert || []).filter((i) => seedSelectedIds.has(i.id)).length;
+    const selectedUpdate = (seedPreview?.toUpdate || []).filter((i) => seedSelectedIds.has(i.id)).length;
     setSeeding(true);
     setSeedLog('');
     setSeedConfirmOpen(false);
     try {
-      const idsToImport = seedPreview.toInsert.map((item) => item.id);
       const result = await seedBuiltinTemplates({
         idsToImport,
-        onProgress: ({ inserted, skipped, total, current }) => {
-          setSeedLog(`进度: 新增 ${inserted} / 跳过 ${skipped} / 共 ${total} — ${current}`);
+        onProgress: ({ inserted, updated, skipped, total, current }) => {
+          setSeedLog(
+            `进度: 新增 ${inserted} / 更新 ${updated ?? 0} / 跳过 ${skipped} / 共 ${total} — ${current}`,
+          );
         },
       });
-      showSnack(`导入完成: 新增 ${result.inserted} 条, 跳过 ${result.skipped} 条`);
-      if (result.errors.length) {
-        setSeedLog('错误: ' + result.errors.join('; '));
-      } else {
-        setSeedLog('');
-      }
+      showSnack(
+        `导入完成: 新增 ${result.inserted} 条, 更新 ${result.updated ?? 0} 条`
+        + (result.skipped ? `, 跳过 ${result.skipped} 条` : '')
+        + `（勾选 ${selectedInsert} 新 / ${selectedUpdate} 更新）`,
+      );
+      const parts = [];
+      if (result.errors?.length) parts.push('错误: ' + result.errors.join('; '));
+      if (result.warnings?.length) parts.push('提示: ' + result.warnings.join('; '));
+      setSeedLog(parts.join('\n') || '');
       load();
     } catch (err) {
       showSnack(err.message, 'error');
     } finally {
       setSeeding(false);
       setSeedPreview(null);
+      setSeedSelectedIds(new Set());
     }
   };
 
@@ -880,7 +928,7 @@ function TemplateManagement() {
             停止
           </Button>
         )}
-        <Tooltip title="导入本地内置模板到 Supabase">
+        <Tooltip title="导入或更新本地内置模板到 Supabase（已存在的会覆盖问卷配置）">
           <Button
             variant="outlined"
             startIcon={seeding ? <CircularProgress size={16} /> : <CloudUpload />}
@@ -1095,24 +1143,56 @@ function TemplateManagement() {
           ) : seedPreview ? (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                将扫描 <strong>{seedPreview.total}</strong> 个内置模板文件。
-                已存在于数据库中的模板（ID 相同）不会导入或覆盖。
+                勾选要处理的内置模板。新模板会导入；已存在的会<strong>覆盖</strong>问卷配置与元数据（有图片包则刷新图库）。
+                默认只勾选「新建」项，更新项需手动勾选。
               </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                <Chip size="small" color="success" label={`将导入 ${seedPreview.toInsert.length} 个`} />
-                <Chip size="small" color="default" label={`已存在跳过 ${seedPreview.toSkip.length} 个`} />
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                <Chip
+                  size="small"
+                  color="success"
+                  label={`已选新建 ${(seedPreview.toInsert || []).filter((i) => seedSelectedIds.has(i.id)).length}/${seedPreview.toInsert.length}`}
+                />
+                <Chip
+                  size="small"
+                  color="warning"
+                  label={`已选更新 ${(seedPreview.toUpdate || []).filter((i) => seedSelectedIds.has(i.id)).length}/${(seedPreview.toUpdate || []).length}`}
+                />
+                <Button size="small" onClick={() => setSeedSelectionForAction('insert', true)}>全选新建</Button>
+                <Button size="small" onClick={() => setSeedSelectionForAction('update', true)}>全选更新</Button>
+                <Button size="small" onClick={() => setSeedSelectedIds(new Set())}>清空</Button>
                 {(seedPreview.invalid.length + seedPreview.errors.length) > 0 && (
                   <Chip
                     size="small"
-                    color="warning"
+                    color="default"
                     label={`无法处理 ${seedPreview.invalid.length + seedPreview.errors.length} 个`}
                   />
                 )}
               </Stack>
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
+              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 420 }}>
+                <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          size="small"
+                          indeterminate={
+                            seedSelectedIds.size > 0
+                            && seedSelectedIds.size < seedSelectableItems.length
+                          }
+                          checked={
+                            seedSelectableItems.length > 0
+                            && seedSelectedIds.size === seedSelectableItems.length
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSeedSelectedIds(new Set(seedSelectableItems.map((i) => i.id)));
+                            } else {
+                              setSeedSelectedIds(new Set());
+                            }
+                          }}
+                          inputProps={{ 'aria-label': '全选' }}
+                        />
+                      </TableCell>
                       <TableCell>状态</TableCell>
                       <TableCell>ID</TableCell>
                       <TableCell>名称</TableCell>
@@ -1124,45 +1204,52 @@ function TemplateManagement() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {seedPreview.toInsert.map((item) => (
-                      <TableRow key={`insert-${item.id}`}>
-                        <TableCell>
-                          <Chip size="small" color="success" label="将导入" />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption">{item.id}</Typography>
-                        </TableCell>
-                        <TableCell>{item.name}</TableCell>
-                        <TableCell>{item.author || '—'}</TableCell>
-                        <TableCell align="center">{item.year || '—'}</TableCell>
-                        <TableCell align="center">{item.pageCount}</TableCell>
-                        <TableCell align="center">{item.imageCount}</TableCell>
-                        <TableCell>
-                          <Typography variant="caption" color="text.secondary">{item.filename}</Typography>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {seedPreview.toSkip.map((item) => (
-                      <TableRow key={`skip-${item.id}`} sx={{ opacity: 0.72 }}>
-                        <TableCell>
-                          <Chip size="small" variant="outlined" label="已存在" />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption">{item.id}</Typography>
-                        </TableCell>
-                        <TableCell>{item.name}</TableCell>
-                        <TableCell>{item.author || '—'}</TableCell>
-                        <TableCell align="center">{item.year || '—'}</TableCell>
-                        <TableCell align="center">{item.pageCount}</TableCell>
-                        <TableCell align="center">{item.imageCount}</TableCell>
-                        <TableCell>
-                          <Typography variant="caption" color="text.secondary">{item.filename}</Typography>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {seedPreview.toInsert.length === 0 && seedPreview.toSkip.length === 0 && (
+                    {seedSelectableItems.map((item) => {
+                      const checked = seedSelectedIds.has(item.id);
+                      const isUpdate = item.action === 'update';
+                      return (
+                        <TableRow
+                          key={`${item.action}-${item.id}`}
+                          hover
+                          selected={checked}
+                          onClick={() => toggleSeedSelected(item.id)}
+                          sx={{ cursor: 'pointer' }}
+                        >
+                          <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              size="small"
+                              checked={checked}
+                              onChange={() => toggleSeedSelected(item.id)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              color={isUpdate ? 'warning' : 'success'}
+                              label={
+                                isUpdate
+                                  ? (item.willRefreshImages ? '更新+图片' : '更新')
+                                  : '新建'
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption">{item.id}</Typography>
+                          </TableCell>
+                          <TableCell>{item.name}</TableCell>
+                          <TableCell>{item.author || '—'}</TableCell>
+                          <TableCell align="center">{item.year || '—'}</TableCell>
+                          <TableCell align="center">{item.pageCount}</TableCell>
+                          <TableCell align="center">{item.imageCount}</TableCell>
+                          <TableCell>
+                            <Typography variant="caption" color="text.secondary">{item.filename}</Typography>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {seedSelectableItems.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={8} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                        <TableCell colSpan={9} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                           没有可预览的内置模板
                         </TableCell>
                       </TableRow>
@@ -1190,11 +1277,11 @@ function TemplateManagement() {
           <Button
             variant="contained"
             onClick={handleConfirmSeed}
-            disabled={seeding || seedPreviewLoading || !seedPreview?.toInsert?.length}
+            disabled={seeding || seedPreviewLoading || seedSelectedIds.size === 0}
           >
-            {seedPreview?.toInsert?.length
-              ? `确认导入 ${seedPreview.toInsert.length} 个模板`
-              : '无可导入项'}
+            {seedSelectedIds.size
+              ? `确认处理已选 ${seedSelectedIds.size} 个`
+              : '请先勾选模板'}
           </Button>
         </DialogActions>
       </Dialog>

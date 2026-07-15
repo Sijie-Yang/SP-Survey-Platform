@@ -151,13 +151,25 @@ export default function AdminScopedMediaLibrary({
     }
   }, [prefix, onImagesChange]);
 
-  const refreshFromR2 = useCallback(async () => {
+  const refreshFromR2 = useCallback(async ({ silent = false } = {}) => {
     if (!prefix || !isR2Configured()) return;
     setSyncing(true);
-    setError('');
+    if (!silent) setError('');
     try {
       const result = await listImagesFromR2(prefix);
-      if (!result.success) throw new Error(result.error || 'Failed to list media');
+      if (!result.success) {
+        // List API unavailable (e.g. local CRA without Express): keep DB/saved library.
+        // Do not label the library "offline" — public/static URLs are already synced.
+        if (result.unreachable || /load failed|failed to fetch|unreachable/i.test(result.error || '')) {
+          if (!silent) {
+            setError(
+              'Could not refresh the R2 file list (API proxy unreachable). Saved media is unchanged.',
+            );
+          }
+          return;
+        }
+        throw new Error(result.error || 'Failed to list media');
+      }
       const mapped = sortMediaByName(
         (result.images || []).map((img) => normalizeMediaEntry({
           url: img.url,
@@ -190,16 +202,16 @@ export default function AdminScopedMediaLibrary({
         preloaded_at: new Date().toISOString(),
         preloaded_source: 'r2',
       });
-      setInfo(`Synced ${mapped.length} file(s) from R2.`);
+      if (!silent) setInfo(`Synced ${mapped.length} file(s) from R2.`);
     } catch (err) {
-      setError(err.message || 'Refresh failed');
+      if (!silent) setError(err.message || 'Refresh failed');
     } finally {
       setSyncing(false);
     }
   }, [prefix, onImagesChange]);
 
   useEffect(() => {
-    if (owner?.id && prefix) refreshFromR2();
+    if (owner?.id && prefix) refreshFromR2({ silent: true });
     // intentionally once per owner open
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner?.id, prefix]);
@@ -441,7 +453,7 @@ export default function AdminScopedMediaLibrary({
           startIcon={<Refresh />}
           size="small"
           disabled={syncing || uploading.active || busy}
-          onClick={refreshFromR2}
+          onClick={() => refreshFromR2()}
         >
           Refresh
         </Button>

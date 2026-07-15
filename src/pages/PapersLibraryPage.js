@@ -198,6 +198,8 @@ export default function PapersLibraryPage() {
   const [sourceNote, setSourceNote] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
   const [metaFilters, setMetaFilters] = useState([]);
+  /** all | with | without — filter by linked survey template */
+  const [templateFilter, setTemplateFilter] = useState('all');
   const searchRef = useRef(null);
 
   useEffect(() => {
@@ -240,25 +242,37 @@ export default function PapersLibraryPage() {
     return () => { cancelled = true; };
   }, []);
 
+  const linkedTemplateCount = useMemo(
+    () => papers.filter((p) => !!p.template_id).length,
+    [papers],
+  );
+
   const filtered = useMemo(() => {
     const q = activeFilter.trim().toLowerCase();
     return papers.filter((p) => {
+      if (templateFilter === 'with' && !p.template_id) return false;
+      if (templateFilter === 'without' && p.template_id) return false;
       if (!paperMatchesMetaFilters(p, metaFilters)) return false;
       if (!q) return true;
       const hay = [
         p.title,
         p.doi,
         p.venue,
+        p.template_id,
         ...(p.authors || []),
       ].join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [papers, activeFilter, metaFilters]);
+  }, [papers, activeFilter, metaFilters, templateFilter]);
 
-  /** Metadata-only subset for analytics (text search must not drift method charts). */
+  /** Metadata-only subset for analytics (text search / template filter must not drift method charts). */
   const metaSubset = useMemo(
-    () => papers.filter((p) => paperMatchesMetaFilters(p, metaFilters)),
-    [papers, metaFilters],
+    () => papers.filter((p) => {
+      if (templateFilter === 'with' && !p.template_id) return false;
+      if (templateFilter === 'without' && p.template_id) return false;
+      return paperMatchesMetaFilters(p, metaFilters);
+    }),
+    [papers, metaFilters, templateFilter],
   );
 
   const runSearch = useCallback(() => {
@@ -310,9 +324,11 @@ export default function PapersLibraryPage() {
               <Chip size="small" label={`${papers.length} papers`} color="primary" variant="outlined" />
               <Chip
                 size="small"
-                label={`${papers.filter((p) => p.template_id).length} linked templates`}
-                color={papers.some((p) => p.template_id) ? 'success' : 'default'}
-                variant="outlined"
+                label={`${linkedTemplateCount} with template`}
+                color={linkedTemplateCount ? 'success' : 'default'}
+                variant={templateFilter === 'with' ? 'filled' : 'outlined'}
+                onClick={() => setTemplateFilter((prev) => (prev === 'with' ? 'all' : 'with'))}
+                title="Show only papers linked to a survey template"
               />
             </>
           )}
@@ -323,14 +339,38 @@ export default function PapersLibraryPage() {
           {sourceNote ? ` (${sourceNote})` : ''}
         </Typography>
 
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+          <Chip
+            size="small"
+            label="All papers"
+            color={templateFilter === 'all' ? 'primary' : 'default'}
+            variant={templateFilter === 'all' ? 'filled' : 'outlined'}
+            onClick={() => setTemplateFilter('all')}
+          />
+          <Chip
+            size="small"
+            label={`Has template (${linkedTemplateCount})`}
+            color={templateFilter === 'with' ? 'success' : 'default'}
+            variant={templateFilter === 'with' ? 'filled' : 'outlined'}
+            onClick={() => setTemplateFilter('with')}
+          />
+          <Chip
+            size="small"
+            label={`No template (${papers.length - linkedTemplateCount})`}
+            color={templateFilter === 'without' ? 'primary' : 'default'}
+            variant={templateFilter === 'without' ? 'filled' : 'outlined'}
+            onClick={() => setTemplateFilter('without')}
+          />
+        </Stack>
+
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
           <TextField
             size="small"
-            placeholder="Title / DOI / venue / author"
+            placeholder="Title / DOI / venue / author / template id"
             inputRef={searchRef}
             defaultValue=""
             onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
-            sx={{ width: 280 }}
+            sx={{ width: 320 }}
             inputProps={{ autoComplete: 'off' }}
           />
           <Button size="small" variant="contained" startIcon={<Search />} onClick={runSearch}>
@@ -362,9 +402,11 @@ export default function PapersLibraryPage() {
               onClearFilters={clearMetaFilters}
             />
             <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
-              {activeFilter || metaFilters.length
+              {activeFilter || metaFilters.length || templateFilter !== 'all'
                 ? `Showing ${filtered.length} / ${papers.length} papers`
                 : `${filtered.length} papers`}
+              {templateFilter === 'with' ? ' · has template' : ''}
+              {templateFilter === 'without' ? ' · no template' : ''}
               {metaFilters.length ? ` · ${metaSubset.length} match metadata filters` : ''}
               {activeFilter ? ` · text “${activeFilter}”` : ''}
             </Typography>

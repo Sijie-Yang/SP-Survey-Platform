@@ -19,6 +19,7 @@ import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
   ensureSkillDemoMedia, pickRandomMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
+  resolveMediaFolderTags,
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
 import { getProjectLiveAccess, formatLiveWindow } from './lib/liveSurveyManager';
@@ -224,7 +225,7 @@ export default function SurveyApp() {
       const globallyUsedGroupKeys = new Set();
       const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
       const finalizeMediaSelection = (element, pool, preselected) => {
-        const folderTags = projectData?.imageDatasetConfig?.mediaFolderTags || {};
+        const folderTags = resolveMediaFolderTags(projectData, projectData?.config);
         if (preselected?.length && !usesSetMediaAssignment(element) && !usesCategoryMediaAssignment(element)) {
           const imageCount = element.imageCount || defaultMediaCount(element);
           const excludeUsed = shouldExcludePreviouslyUsedImages(element);

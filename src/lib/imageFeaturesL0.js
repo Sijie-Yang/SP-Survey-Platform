@@ -3,12 +3,10 @@
  * Runs in the browser via Canvas — no API / no neural net.
  */
 
+import { getR2ServerUrl, isR2ProxyUnreachable, noteR2ProxyFailure } from './r2';
+
 export const L0_MODEL = 'sp_l0_v1';
 export const L0_MAX_SIDE = 512;
-
-const SERVER_URL =
-  process.env.REACT_APP_SERVER_URL ||
-  (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
@@ -125,22 +123,45 @@ function needsCorsProxy(url) {
   }
 }
 
-/** Fetch cross-origin image via Express/CF proxy → blob URL (canvas-safe). */
+/** Fetch cross-origin image via public URL (CORS) or Express/CF proxy → blob URL (canvas-safe). */
 async function resolveLoadableUrl(url) {
   if (!needsCorsProxy(url)) return { src: url, revoke: null };
-  const proxy = `${SERVER_URL}/api/r2/image-proxy?url=${encodeURIComponent(url)}`;
-  const res = await fetch(proxy);
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = text.slice(0, 200);
-    try {
-      msg = JSON.parse(text).error || msg;
-    } catch { /* ignore */ }
-    throw new Error(msg || `Image proxy failed (HTTP ${res.status})`);
+
+  // Prefer direct public fetch (R2.dev usually allows CORS) so CRA-only local
+  // dev does not require Express :3001 image-proxy.
+  try {
+    const direct = await fetch(url, { mode: 'cors', cache: 'no-store' });
+    if (direct.ok) {
+      const blob = await direct.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      return { src: objectUrl, revoke: () => URL.revokeObjectURL(objectUrl) };
+    }
+  } catch {
+    /* fall through to proxy */
   }
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  return { src: objectUrl, revoke: () => URL.revokeObjectURL(objectUrl) };
+
+  if (isR2ProxyUnreachable()) {
+    throw new Error('R2 image-proxy unreachable; cannot load cross-origin image for features');
+  }
+
+  const proxy = `${getR2ServerUrl()}/api/r2/image-proxy?url=${encodeURIComponent(url)}`;
+  try {
+    const res = await fetch(proxy);
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = text.slice(0, 200);
+      try {
+        msg = JSON.parse(text).error || msg;
+      } catch { /* ignore */ }
+      throw new Error(msg || `Image proxy failed (HTTP ${res.status})`);
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    return { src: objectUrl, revoke: () => URL.revokeObjectURL(objectUrl) };
+  } catch (err) {
+    noteR2ProxyFailure(err, 'image-proxy');
+    throw err;
+  }
 }
 
 /**
