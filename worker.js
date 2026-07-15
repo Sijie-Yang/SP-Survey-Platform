@@ -17,6 +17,10 @@ import {
   searchBothProviders,
   mergeCandidates,
 } from './worker-lib/researchProviders.mjs';
+import {
+  createPaperTemplateRequest,
+  attachPaperTemplateImages,
+} from './worker-lib/templateRequest.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -698,6 +702,16 @@ export default {
       }
       if (pathname === '/api/research/draft-template' && request.method === 'POST') {
         return await handleResearchDraftTemplate(request, env);
+      }
+      if (pathname === '/api/template-request' && request.method === 'POST') {
+        const body = await request.json();
+        const result = await createPaperTemplateRequest(body, env);
+        return json(result, { status: result.success ? 200 : (result.status || 400) });
+      }
+      if (pathname === '/api/template-request' && request.method === 'PATCH') {
+        const body = await request.json();
+        const result = await attachPaperTemplateImages(body, env);
+        return json(result, { status: result.success ? 200 : (result.status || 400) });
       }
 
       // Anything else: defer to the static React app served as Workers Assets.

@@ -1016,7 +1016,12 @@ function TemplateManagement() {
                     <Typography variant="body2">{t.year || '—'}</Typography>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="body2">{t.submitter_email || '—'}</Typography>
+                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Typography variant="body2">{t.submitter_email || '—'}</Typography>
+                      {Array.isArray(t.tags) && t.tags.includes('paper-request') && (
+                        <Chip size="small" color="info" variant="outlined" label="Paper request" />
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>
                     <Chip label={t.category} size="small" variant="outlined" />

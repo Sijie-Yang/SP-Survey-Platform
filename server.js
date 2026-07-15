@@ -2700,6 +2700,36 @@ app.post('/api/research/scan', async (req, res) => {
  * Generate an unpublished survey_config draft from paper metadata (BYOK OpenAI).
  * Client persists the template via Supabase templateManager.
  */
+function templateRequestEnv() {
+  return {
+    SUPABASE_URL: process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL,
+    REACT_APP_SUPABASE_URL: process.env.REACT_APP_SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  };
+}
+
+app.post('/api/template-request', async (req, res) => {
+  try {
+    const { createPaperTemplateRequest } = await import('./worker-lib/templateRequest.mjs');
+    const result = await createPaperTemplateRequest(req.body || {}, templateRequestEnv());
+    return res.status(result.success ? 200 : (result.status || 400)).json(result);
+  } catch (error) {
+    console.error('template-request POST:', error);
+    return res.status(500).json({ success: false, error: error.message || String(error) });
+  }
+});
+
+app.patch('/api/template-request', async (req, res) => {
+  try {
+    const { attachPaperTemplateImages } = await import('./worker-lib/templateRequest.mjs');
+    const result = await attachPaperTemplateImages(req.body || {}, templateRequestEnv());
+    return res.status(result.success ? 200 : (result.status || 400)).json(result);
+  } catch (error) {
+    console.error('template-request PATCH:', error);
+    return res.status(500).json({ success: false, error: error.message || String(error) });
+  }
+});
+
 app.post('/api/research/draft-template', async (req, res) => {
   try {
     const { paper, apiKey } = req.body || {};

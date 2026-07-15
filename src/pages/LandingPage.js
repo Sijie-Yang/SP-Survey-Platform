@@ -216,9 +216,16 @@ export default function LandingPage() {
           <Typography variant="h4" fontWeight={700} sx={{ mb: 1 }}>
             Template Library
           </Typography>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
             Start from peer-reviewed survey designs used in published research
           </Typography>
+          <Button
+            variant="outlined"
+            startIcon={<Article />}
+            onClick={() => navigate('/request-template')}
+          >
+            Request a Template for Your Paper
+          </Button>
         </Box>
 
         <TextField

@@ -5,6 +5,7 @@ import {
   Paper, Stack, TextField, Tooltip, Typography,
 } from '@mui/material';
 import { Clear, OpenInNew, Search } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { listPublicResearchPapers } from '../lib/researchPaperStore';
 import { ensureAnalysisMeta } from '../lib/researchPaperMeta.mjs';
@@ -192,6 +193,7 @@ const PapersList = memo(function PapersList({ rows }) {
 
 /** Public browse of the urban-perception paper library. */
 export default function PapersLibraryPage() {
+  const navigate = useNavigate();
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -338,6 +340,14 @@ export default function PapersLibraryPage() {
           Linked template IDs appear when admins match a paper to an existing survey template.
           {sourceNote ? ` (${sourceNote})` : ''}
         </Typography>
+        <Button
+          variant="outlined"
+          size="small"
+          sx={{ mb: 2, fontWeight: 700 }}
+          onClick={() => navigate('/request-template')}
+        >
+          Request a Template for Your Paper
+        </Button>
 
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
           <Chip

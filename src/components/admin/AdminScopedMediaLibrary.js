@@ -4,12 +4,13 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Checkbox, Chip, CircularProgress, LinearProgress,
+  Alert, Box, Button, Checkbox, Chip, CircularProgress, IconButton, LinearProgress,
   Stack, TextField, Typography, MenuItem, Select, FormControl, InputLabel,
+  Tooltip,
 } from '@mui/material';
 import {
-  CloudUpload, Refresh, DeleteForever, Delete, CloudDownload, SelectAll, Deselect,
-  DriveFileMove,
+  AttachFile, CloudUpload, Refresh, DeleteForever, Delete, CloudDownload, SelectAll, Deselect,
+  DriveFileMove, OpenInNew,
 } from '@mui/icons-material';
 import MediaFolderBrowser from './MediaFolderBrowser';
 import {
@@ -21,6 +22,29 @@ import {
   isR2Configured, listImagesFromR2, uploadImageToR2, deleteImagesFromR2,
 } from '../../lib/r2';
 import { asyncPool } from '../../lib/asyncPool';
+import {
+  MAX_SUPPLEMENTARY_BYTES,
+  MAX_SUPPLEMENTARY_FILES,
+  SUPPLEMENTARY_ACCEPT,
+} from '../../lib/templateRequest';
+
+function formatBytes(n) {
+  if (!n && n !== 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readSupplementaryFiles(owner) {
+  const fromConfig = owner?.config?._paperRequest?.supplementaryFiles;
+  if (Array.isArray(fromConfig)) return fromConfig;
+  if (Array.isArray(owner?.supplementaryFiles)) return owner.supplementaryFiles;
+  return [];
+}
+
+function readSurveyConfig(owner) {
+  return (owner?.config && typeof owner.config === 'object') ? owner.config : {};
+}
 
 function compressImage(file, maxBytes = 300 * 1024, quality = 0.85) {
   if (!file.type.startsWith('image/') || file.size <= maxBytes) {
@@ -66,6 +90,7 @@ function entryId(entry) {
  * @param {object} props.owner - { id, preloadedImages, imageDatasetConfig, preloadedSource }
  * @param {(next: object) => Promise<void>|void} props.onPersist
  * @param {boolean} [props.allowTemplateKeys]
+ * @param {boolean} [props.enableSupplementary] - show PDF/doc panel (defaults on for templates)
  * @param {string} [props.rootLabel]
  * @param {string} [props.userId] - optional; used only when r2Prefix not enough for MediaFolderBrowser
  */
@@ -74,11 +99,13 @@ export default function AdminScopedMediaLibrary({
   owner,
   onPersist,
   allowTemplateKeys = false,
+  enableSupplementary = null,
   rootLabel = '(root)',
   userId = 'admin',
   onImagesChange = null,
 }) {
   const prefix = String(r2Prefix || '').replace(/\/?$/, '/');
+  const showSupplementary = enableSupplementary ?? !!allowTemplateKeys;
   const [mediaOwner, setMediaOwner] = useState(() => ({
     id: owner?.id,
     preloadedImages: owner?.preloadedImages || [],
@@ -86,17 +113,21 @@ export default function AdminScopedMediaLibrary({
     preloadedSource: owner?.preloadedSource || 'r2',
     preloadedAt: owner?.preloadedAt || null,
   }));
+  const [surveyConfig, setSurveyConfig] = useState(() => readSurveyConfig(owner));
+  const [supplementaryFiles, setSupplementaryFiles] = useState(() => readSupplementaryFiles(owner));
   const [currentFolder, setCurrentFolder] = useState('');
   const [selected, setSelected] = useState(() => new Set());
   const [openMoveSignal, setOpenMoveSignal] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
+  const [suppUploading, setSuppUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [mediaSearch, setMediaSearch] = useState('');
   const [mediaFilter, setMediaFilter] = useState('all');
   const fileInputRef = useRef(null);
+  const suppInputRef = useRef(null);
   const persistRef = useRef(onPersist);
   useEffect(() => { persistRef.current = onPersist; }, [onPersist]);
 
@@ -117,6 +148,8 @@ export default function AdminScopedMediaLibrary({
       preloadedSource: owner?.preloadedSource || 'r2',
       preloadedAt: owner?.preloadedAt || null,
     });
+    setSurveyConfig(readSurveyConfig(owner));
+    setSupplementaryFiles(readSupplementaryFiles(owner));
     setCurrentFolder('');
     setSelected(new Set());
     setError('');
@@ -413,6 +446,92 @@ export default function AdminScopedMediaLibrary({
     }
   };
 
+  const persistSupplementary = async (nextFiles, { silent = false } = {}) => {
+    const nextConfig = {
+      ...surveyConfig,
+      _paperRequest: {
+        ...(surveyConfig._paperRequest || {}),
+        supplementaryFiles: nextFiles,
+      },
+    };
+    setSurveyConfig(nextConfig);
+    setSupplementaryFiles(nextFiles);
+    try {
+      await persistRef.current?.({ survey_config: nextConfig });
+      if (!silent) setInfo('Supplementary files updated.');
+    } catch (err) {
+      setError(err.message || 'Failed to save supplementary files');
+    }
+  };
+
+  const handleUploadSupplementary = async (fileList) => {
+    if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const room = MAX_SUPPLEMENTARY_FILES - supplementaryFiles.length;
+    if (room <= 0) {
+      setError(`Supplementary file limit reached (${MAX_SUPPLEMENTARY_FILES}).`);
+      return;
+    }
+    const batch = files.slice(0, room);
+    const oversized = batch.find((f) => f.size > MAX_SUPPLEMENTARY_BYTES);
+    if (oversized) {
+      setError(`"${oversized.name}" is too large (max ${Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024))} MB).`);
+      return;
+    }
+    setSuppUploading(true);
+    setError('');
+    setInfo('');
+    const uploaded = [...supplementaryFiles];
+    try {
+      for (let i = 0; i < batch.length; i++) {
+        const file = batch[i];
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const key = `${prefix}supplementary/${Date.now()}_${i}_${safeName}`;
+        const result = await uploadImageToR2(file, key);
+        if (!result.success) throw new Error(result.error || `Failed to upload ${file.name}`);
+        uploaded.push({
+          url: result.url,
+          name: file.name,
+          key: result.key || key,
+          contentType: file.type || 'application/octet-stream',
+          size: file.size,
+        });
+      }
+      await persistSupplementary(uploaded.slice(0, MAX_SUPPLEMENTARY_FILES));
+      setInfo(`Uploaded ${batch.length} supplementary file(s).`);
+    } catch (err) {
+      setError(err.message || 'Supplementary upload failed');
+    } finally {
+      setSuppUploading(false);
+    }
+  };
+
+  const handleDeleteSupplementary = async (file) => {
+    if (!file) return;
+    if (!window.confirm(`Delete supplementary file "${file.name}"?`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      if (file.key) {
+        const del = await deleteImagesFromR2([file.key], {
+          allowedPrefix: prefix,
+          allowTemplateKeys: !!allowTemplateKeys,
+        });
+        if (!del.success) throw new Error(del.error || 'Delete failed');
+      }
+      const next = supplementaryFiles.filter((f) => {
+        if (file.key && f.key) return f.key !== file.key;
+        return !(f.url === file.url && f.name === file.name);
+      });
+      await persistSupplementary(next);
+    } catch (err) {
+      setError(err.message || 'Delete failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Box>
       {!isR2Configured() && (
@@ -422,6 +541,105 @@ export default function AdminScopedMediaLibrary({
       )}
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {info && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo('')}>{info}</Alert>}
+
+      {showSupplementary && (
+        <Box
+          sx={{
+            mb: 2.5,
+            p: 2,
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'grey.50',
+          }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+            <AttachFile fontSize="small" color="action" />
+            <Typography variant="subtitle2" fontWeight={700}>
+              Supplementary files
+            </Typography>
+            <Chip size="small" label={`${supplementaryFiles.length} / ${MAX_SUPPLEMENTARY_FILES}`} />
+            <Box flex={1} />
+            <input
+              ref={suppInputRef}
+              type="file"
+              accept={SUPPLEMENTARY_ACCEPT}
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => { handleUploadSupplementary(e.target.files); e.target.value = ''; }}
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<CloudUpload />}
+              disabled={!isR2Configured() || suppUploading || busy
+                || supplementaryFiles.length >= MAX_SUPPLEMENTARY_FILES}
+              onClick={() => suppInputRef.current?.click()}
+            >
+              {suppUploading ? 'Uploading…' : 'Upload PDF / docs'}
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            Paper request attachments (PDF, Word, ZIP, etc.). Kept separate from survey dataset media.
+          </Typography>
+          {supplementaryFiles.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No supplementary files yet.
+            </Typography>
+          ) : (
+            <Stack spacing={0.75}>
+              {supplementaryFiles.map((f) => (
+                <Stack
+                  key={f.key || `${f.name}-${f.url}`}
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  sx={{
+                    px: 1,
+                    py: 0.5,
+                    borderRadius: 1,
+                    bgcolor: 'background.paper',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                  <AttachFile fontSize="small" color="action" />
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <Typography variant="body2" fontWeight={600} noWrap title={f.name}>
+                      {f.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {[f.contentType, formatBytes(f.size)].filter(Boolean).join(' · ')}
+                    </Typography>
+                  </Box>
+                  <Tooltip title="Open / download">
+                    <IconButton
+                      size="small"
+                      component="a"
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      disabled={!f.url}
+                    >
+                      <OpenInNew fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Delete">
+                    <IconButton
+                      size="small"
+                      color="error"
+                      disabled={busy || suppUploading}
+                      onClick={() => handleDeleteSupplementary(f)}
+                    >
+                      <Delete fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+              ))}
+            </Stack>
+          )}
+        </Box>
+      )}
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
         <Chip
