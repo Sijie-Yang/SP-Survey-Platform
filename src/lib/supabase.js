@@ -44,6 +44,7 @@ export async function saveSurveyResponse(completeData) {
         participant_id: participantId,
         project_id: completeData.project_id || null,
         responses: completeData.responses,
+        raw_responses: completeData.raw_responses || null,
         displayed_images: completeData.displayed_images,
         survey_metadata: completeData.survey_metadata,
         saved_at: new Date().toISOString(),

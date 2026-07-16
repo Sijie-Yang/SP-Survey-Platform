@@ -48,7 +48,7 @@ const createDefaultSurveyConfig = (title) => ({
   logo: '',
   logoPosition: 'right',
   showQuestionNumbers: 'off',
-  showProgressBar: 'aboveheader',
+  showProgressBar: 'top',
   progressBarType: 'questions',
   autoGrowComment: true,
   showPreviewBeforeComplete: 'showAllQuestions',

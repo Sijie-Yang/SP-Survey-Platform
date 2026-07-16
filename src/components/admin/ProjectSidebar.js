@@ -880,7 +880,9 @@ export default function ProjectSidebar({
     'basic-survey',
     'yang-2025',
     'my-template',
-    'test-template'
+    'test-template',
+    '2026-sp-all',
+    '2026-sp-multitrial',
   ];
 
   // Check if a template is user-created (can be deleted)

@@ -58,7 +58,9 @@ import {
   clampQuestionImageCount,
   isMediaStimulusQuestion,
   isCuratedSelectionMode,
+  supportsTrialCount,
 } from '../../lib/questionTypeConstraints';
+import { clampTrialCount, TRIAL_COUNT_MAX } from '../../lib/trialNavigation';
 import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import QuestionParticipantPreview from './QuestionParticipantPreview';
@@ -281,6 +283,24 @@ function StimulusCountField({ question, onChange, constraints }) {
       onFocus={(e) => e.target.select()}
       helperText="Randomly drawn from the project media pool (or your curated list)"
       inputProps={{ min: constraints.countMin, max: constraints.countMax, step: 1 }}
+      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+    />
+  );
+}
+
+function TrialCountField({ question, onChange }) {
+  if (!supportsTrialCount(question.type)) return null;
+  return (
+    <TextField
+      fullWidth
+      variant="outlined"
+      type="number"
+      label="Number of trials (repeat this question)"
+      value={question.trialCount ?? 1}
+      onChange={(e) => onChange('trialCount', clampTrialCount(e.target.value))}
+      onFocus={(e) => e.target.select()}
+      helperText="Each trial draws a new media set with the same sampling rules. Participants get progress dots and can jump back among reached trials."
+      inputProps={{ min: 1, max: TRIAL_COUNT_MAX, step: 1 }}
       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
     />
   );
@@ -528,7 +548,7 @@ function SkillJsonField({ label, value, onCommit }) {
   );
 }
 
-export default function QuestionEditor({ question, onSave, onCancel, images, currentProject }) {
+export default function QuestionEditor({ question, onSave, onCancel, images, currentProject, surveyConfig = null }) {
   // Convert ranking with isImageRanking back to imageranking for editing
   const initialQuestion = { ...question };
   if (initialQuestion.type === 'ranking' && initialQuestion.isImageRanking) {
@@ -711,7 +731,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           if (!Array.isArray(editedQuestion.mediaSlots)) updates.mediaSlots = [];
           if (!editedQuestion.mediaPresentation) updates.mediaPresentation = 'stack';
         }
-        if (value === 'mediamatrix' && !editedQuestion.rows?.length) {
+        if ((value === 'mediamatrix' || value === 'imagematrix') && !editedQuestion.rows?.length) {
           updates.rows = [{ value: 'row1', text: 'Criterion 1' }];
           updates.columns = [
             { value: '1', text: '1' }, { value: '2', text: '2' },
@@ -1341,6 +1361,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       />
                     )}
 
+                    <TrialCountField
+                      question={editedQuestion}
+                      onChange={handleQuestionChange}
+                    />
+
                     {isCuratedMode && !(editedQuestion.mediaSlots?.length) && (
                       <CuratedMediaPicker
                         availableImages={availableImages}
@@ -1757,7 +1782,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     label="Total points to allocate"
                     value={editedQuestion.budget ?? 100}
                     onChange={(e) => handleQuestionChange('budget', Math.max(1, parseInt(e.target.value, 10) || 100))}
-                    helperText="Participants distribute exactly this many points across the allocation categories below"
+                    helperText="Point budget shown to participants (they do not have to spend the full amount)"
                     inputProps={{ min: 1, step: 1 }}
                     sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                   />
@@ -1835,6 +1860,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   <QuestionParticipantPreview
                     question={editedQuestion}
                     currentProject={currentProject}
+                    surveyConfig={surveyConfig}
                   />
                 )}
               </SettingsSection>
@@ -2313,6 +2339,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 <QuestionParticipantPreview
                   question={editedQuestion}
                   currentProject={currentProject}
+                  surveyConfig={surveyConfig}
                 />
               </SettingsSection>
             </Box>

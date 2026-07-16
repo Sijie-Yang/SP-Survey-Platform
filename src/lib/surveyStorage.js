@@ -2,6 +2,7 @@
 // No localStorage dependency - all data saved to server
 
 import { paletteToSurveyJsVars } from '../themes/themeConfig';
+import { themeJson } from '../theme';
 
 const STORAGE_PREFIX = 'survey_config_';
 
@@ -297,8 +298,11 @@ export const generateCustomTheme = (adminConfig) => {
         "--sjs-editorpanel-backcolor": safeTheme.cardBackground,
         "--sjs-editorpanel-hovercolor": safeTheme.primaryLight,
         
-        // Progress bar
+        // Progress bar (native SurveyJS — live app uses ProgressChrome instead)
         "--sjs-progressbar-color": safeTheme.primaryColor,
+
+        // ProgressChrome (page / question / trial) — applied on host via buildProgressChromeCssVars
+        ...buildProgressChromeCssVars(safeTheme),
         
         // Question panel
         "--sjs-questionpanel-backcolor": safeTheme.cardBackground,
@@ -314,3 +318,49 @@ export const generateCustomTheme = (adminConfig) => {
     return null; // Fall back to default theme
   }
 };
+
+/**
+ * CSS variables for ProgressChrome (participant bar + theme preview).
+ * Primary = current / overall bar; Success = completed questions; track/muted for remaining chrome.
+ */
+export function buildProgressChromeCssVars(theme = {}) {
+  const primary = ensureColorString(theme?.primaryColor, '#1976d2');
+  const primaryLight = ensureColorString(theme?.primaryLight, '#42a5f5');
+  const success = ensureColorString(theme?.successColor, '#4caf50');
+  const border = ensureColorString(theme?.borderColor, '#e0e0e0');
+  const surface = ensureColorString(theme?.cardBackground || theme?.backgroundColor, '#ffffff');
+  const bg = ensureColorString(theme?.backgroundColor, '#ffffff');
+  const label = ensureColorString(theme?.secondaryText, '#757575');
+  const muted = ensureColorString(theme?.disabledText, '#bdbdbd');
+  return {
+    '--sp-progress-primary': primary,
+    '--sp-progress-primary-light': primaryLight,
+    '--sp-progress-success': success,
+    '--sp-progress-success-light': success,
+    '--sp-progress-track': border,
+    '--sp-progress-muted': muted,
+    '--sp-progress-surface': surface,
+    '--sp-progress-border': border,
+    '--sp-progress-label': label,
+    '--sp-progress-bg': bg,
+  };
+}
+
+/** Apply project survey skin to a SurveyJS model (custom theme, else default themeJson). */
+export function applyAdminThemeToSurveyModel(model, adminConfig) {
+  if (!model) return;
+  try {
+    const customTheme = generateCustomTheme(adminConfig);
+    if (customTheme) {
+      model.applyTheme(customTheme);
+      return;
+    }
+  } catch (err) {
+    console.warn('applyAdminThemeToSurveyModel: custom theme failed', err);
+  }
+  try {
+    if (themeJson) model.applyTheme(themeJson);
+  } catch (err) {
+    console.warn('applyAdminThemeToSurveyModel: default theme failed', err);
+  }
+}

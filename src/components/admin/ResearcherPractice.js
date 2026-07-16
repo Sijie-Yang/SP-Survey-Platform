@@ -36,9 +36,9 @@ import registerImageRankingWidget, {
   registerAllExtendedWidgets,
 } from '../SurveyCustomComponents';
 import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
+import { applyAdminThemeToSurveyModel } from '../../lib/surveyStorage';
 import { saveSurveyResponse, supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { getMediaId } from '../../lib/mediaUtils';
 import { buildResponseMediaUrlMap } from '../../lib/skillMediaUtils';
 import { ImageResolverContext } from './imageResolverContext';
 import {
@@ -46,6 +46,13 @@ import {
   collectAnswers,
   responsesEligibleForQuestion,
 } from './ResultsAnalysis';
+import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
+import {
+  clearTrialsAnswerStore,
+  collectSurveyDataWithTrials,
+} from '../../lib/trialNavigation';
+import { enrichSurveyResponses } from '../../lib/enrichSurveyResponses';
+import { syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
 
 let widgetsRegistered = false;
 function ensureWidgets() {
@@ -175,6 +182,8 @@ export default function ResearcherPractice({
   const [statusMsg, setStatusMsg] = useState(null); // durable messages only (session start/stop)
   const [toast, setToast] = useState(null); // brief overlay — no layout shift
   const [reloadToken, setReloadToken] = useState(0);
+  /** Bumps every loadRound so TrialShell nav state cannot leak across attempts. */
+  const [practiceNavKey, setPracticeNavKey] = useState(0);
   const [practiceCounts, setPracticeCounts] = useState({});
   const [countsLoading, setCountsLoading] = useState(false);
   const [analysisResponses, setAnalysisResponses] = useState([]);
@@ -467,6 +476,7 @@ export default function ResearcherPractice({
     setError(null);
     try {
       ensureWidgets();
+      clearTrialsAnswerStore();
       const built = buildSingleQuestionSurvey({
         question: selectedQuestion,
         projectImages: currentProject?.preloadedImages || [],
@@ -487,8 +497,11 @@ export default function ResearcherPractice({
       const m = new Model(built.surveyJson);
       m.showPreviewBeforeComplete = false;
       m.showCompletedPage = false;
+      applyAdminThemeToSurveyModel(m, surveyConfig);
+      syncInjectedMediaOntoSurveyModel(m, built.surveyJson);
       const meta = {
         shownImages: built.shownImages,
+        shownImagesByTrial: built.shownImagesByTrial || null,
         shownMediaGroup: built.shownMediaGroup,
         shownMediaCategories: built.shownMediaCategories,
         questionName: selectedQuestion.name,
@@ -496,6 +509,7 @@ export default function ResearcherPractice({
       };
       setRoundMeta(meta);
       roundMetaRef.current = meta;
+      setPracticeNavKey((k) => k + 1);
       setModel(m);
     } catch (err) {
       console.error('Practice round failed:', err);
@@ -507,38 +521,38 @@ export default function ResearcherPractice({
         writeSessionPersist(sessionRef.current);
       }
     }
-  }, [selectedQuestion, currentProject?.preloadedImages, currentProject?.id, currentProject?.imageDatasetConfig, reloadToken, writeSessionPersist]);
+  }, [selectedQuestion, currentProject?.preloadedImages, currentProject?.id, currentProject?.imageDatasetConfig, surveyConfig, reloadToken, writeSessionPersist]);
 
   useEffect(() => {
     loadRound();
   }, [loadRound]);
 
-  const enrichAndSave = async (surveyData) => {
+  const enrichAndSave = async (surveyModel) => {
     const meta = roundMetaRef.current;
     if (!meta?.questionName) throw new Error('No active question');
 
     const questionName = meta.questionName;
-    const answerValue = surveyData?.[questionName];
-    const pool = currentProject?.preloadedImages || [];
+    // Multi-trial answers live in trialsAnswerStore / spTrialsAnswer — not model.data alone.
+    const responses = collectSurveyDataWithTrials(surveyModel);
     const shownImages = meta.shownImages || [];
-    const shownMediaIds = shownImages.map((u) => {
-      if (!u) return null;
-      const hit = pool.find((img) => img.url === u || img.name === u);
-      return hit ? getMediaId(hit) : String(u).split('?')[0].split('/').pop() || u;
-    }).filter(Boolean);
+    const displayedImages = { [questionName]: shownImages };
+    if (Array.isArray(meta.shownImagesByTrial) && meta.shownImagesByTrial.length) {
+      displayedImages[`${questionName}__trials`] = meta.shownImagesByTrial;
+    }
 
-    // Map image_N choice slots → concrete shown URLs (same as live SurveyApp)
-    const mapImageChoiceAnswer = (value) => {
-      if (!shownImages.length) return value;
-      const mapOne = (v) => {
-        if (typeof v !== 'string') return v;
-        const m = v.match(/^image_(\d+)$/);
-        if (!m) return v;
-        return shownImages[Number(m[1])] || v;
-      };
-      return Array.isArray(value) ? value.map(mapOne) : mapOne(value);
-    };
-    const mappedAnswer = mapImageChoiceAnswer(answerValue);
+    const {
+      enrichedResponses,
+      displayed_images,
+      displayed_media_groups,
+      displayed_media_categories,
+    } = enrichSurveyResponses({
+      responses,
+      questionTypeMap: { [questionName]: meta.questionType },
+      displayedImages,
+      displayedMediaGroups: { [questionName]: meta.shownMediaGroup || null },
+      displayedMediaCategories: { [questionName]: meta.shownMediaCategories || null },
+      preloadedImages: currentProject?.preloadedImages || [],
+    });
 
     const sess = sessionRef.current;
     const participantId = sess?.participantId
@@ -547,19 +561,11 @@ export default function ResearcherPractice({
     const completeData = {
       project_id: currentProject?.id || null,
       participant_id: participantId,
-      responses: {
-        [questionName]: {
-          type: meta.questionType,
-          answer: mappedAnswer,
-          shown_images: shownImages,
-          shown_media_ids: shownMediaIds,
-          shown_media_set: meta.shownMediaGroup || null,
-          shown_media_group: meta.shownMediaGroup || null,
-          shown_media_categories: meta.shownMediaCategories || null,
-        },
-      },
-      displayed_images: { [questionName]: shownImages },
-      raw_responses: { [questionName]: answerValue },
+      responses: enrichedResponses,
+      displayed_images,
+      displayed_media_groups,
+      displayed_media_categories,
+      raw_responses: responses,
       survey_metadata: {
         completion_time: new Date().toISOString(),
         researcher_mode: true,
@@ -662,7 +668,7 @@ export default function ResearcherPractice({
         setSubmitting(false);
         return;
       }
-      await enrichAndSave(model.data);
+      await enrichAndSave(model);
       setPracticeCounts((prev) => ({
         ...prev,
         [selectedName]: (prev[selectedName] || 0) + 1,
@@ -886,7 +892,11 @@ export default function ResearcherPractice({
                     '& .sd-body': { padding: '12px !important' },
                   }}
                 >
-                  <Survey model={model} />
+                  {/* Remount nav each round — otherwise finished/trial index from the
+                      previous attempt sticks and opens the last trial for the same Q name. */}
+                  <SurveyTrialNavProvider key={`practice-nav-${practiceNavKey}`}>
+                    <Survey model={model} />
+                  </SurveyTrialNavProvider>
                 </Box>
               )}
             </Box>

@@ -13,6 +13,7 @@ import {
   matchesFromOrderedRanking,
   filenameKey,
 } from './trueskill';
+import { expandQuestionAnswerUnits } from './responseAnswerUnits';
 
 export { L0_MODEL, SEG_MODEL, SAM_PREANNOT_MODEL };
 
@@ -98,25 +99,19 @@ export function resolveShownMediaIds(qData, pool = []) {
   }).filter(Boolean);
 }
 
-function extractAnswerPayload(row, questionName) {
-  const qData = row.responses?.[questionName];
-  if (qData === undefined || qData === null) return null;
-  if (typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
-    return {
-      answer: qData.answer,
-      shown: qData.shown_images?.length
-        ? qData.shown_images
-        : (row.displayed_images?.[questionName] || []),
-      shownIds: qData.shown_media_ids || null,
-      qData,
-    };
-  }
-  return {
-    answer: qData,
-    shown: row.displayed_images?.[questionName] || [],
-    shownIds: null,
-    qData: { answer: qData, shown_images: row.displayed_images?.[questionName] },
-  };
+/** One payload per answered trial (or a single payload for non-trial questions). */
+function extractAnswerPayloads(row, questionName) {
+  return expandQuestionAnswerUnits(row, questionName, { requireAnswer: true }).map((u) => ({
+    answer: u.answer,
+    shown: u.shown_images,
+    shownIds: u.shown_media_ids?.length ? u.shown_media_ids : null,
+    trial_index: u.trial_index,
+    qData: {
+      answer: u.answer,
+      shown_images: u.shown_images,
+      shown_media_ids: u.shown_media_ids,
+    },
+  }));
 }
 
 function mediaIdsForTrial(payload, pool) {
@@ -335,13 +330,14 @@ export function listPerceptionAttributes(question) {
 export function discoverAnnotationLabels(responses, questionName) {
   const set = new Set();
   for (const row of responses || []) {
-    const payload = extractAnswerPayload(row, questionName);
-    const shapes = payload?.answer?.shapes;
-    if (!Array.isArray(shapes)) continue;
-    shapes.forEach((s) => {
-      const lab = String(s?.label || '').trim();
-      if (lab) set.add(lab);
-    });
+    for (const payload of extractAnswerPayloads(row, questionName)) {
+      const shapes = payload?.answer?.shapes;
+      if (!Array.isArray(shapes)) continue;
+      shapes.forEach((s) => {
+        const lab = String(s?.label || '').trim();
+        if (lab) set.add(lab);
+      });
+    }
   }
   return [...set].sort();
 }
@@ -382,14 +378,14 @@ export function listPerceptionRatingQuestions(questions) {
 function aggregateRatingLike(responses, questionName, pool, toScore) {
   const byMedia = {};
   for (const row of responses || []) {
-    const payload = extractAnswerPayload(row, questionName);
-    if (!payload) continue;
-    const score = toScore(payload.answer);
-    if (score == null || Number.isNaN(score)) continue;
-    const ids = mediaIdsForTrial(payload, pool);
-    ids.forEach((mediaId) => {
-      ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
-    });
+    for (const payload of extractAnswerPayloads(row, questionName)) {
+      const score = toScore(payload.answer);
+      if (score == null || Number.isNaN(score)) continue;
+      const ids = mediaIdsForTrial(payload, pool);
+      ids.forEach((mediaId) => {
+        ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
+      });
+    }
   }
   return byMedia;
 }
@@ -414,15 +410,15 @@ function aggregateTrueSkillPicker(responses, questionName, pool) {
 function aggregateTrueSkillRanking(responses, questionName, pool) {
   const allMatches = [];
   for (const row of responses || []) {
-    const payload = extractAnswerPayload(row, questionName);
-    if (!payload) continue;
-    const ranked = Array.isArray(payload.answer) ? payload.answer : [];
-    if (ranked.length < 2) continue;
-    const keys = ranked
-      .map((v) => resolveImageChoiceKey(v, payload.shown))
-      .filter(Boolean);
-    if (keys.length < 2) continue;
-    allMatches.push(...matchesFromOrderedRanking(keys));
+    for (const payload of extractAnswerPayloads(row, questionName)) {
+      const ranked = Array.isArray(payload.answer) ? payload.answer : [];
+      if (ranked.length < 2) continue;
+      const keys = ranked
+        .map((v) => resolveImageChoiceKey(v, payload.shown))
+        .filter(Boolean);
+      if (keys.length < 2) continue;
+      allMatches.push(...matchesFromOrderedRanking(keys));
+    }
   }
   const { rankings } = computeTrueSkillFromMatches(allMatches);
   return (rankings || []).map((r) => {
@@ -446,22 +442,23 @@ function aggregateMatrixAttribute(responses, question, pool, attributeId) {
   const numericCols = cols.length > 0 && cols.every((c) => c !== '' && !Number.isNaN(Number(c)));
 
   for (const row of responses || []) {
-    const payload = extractAnswerPayload(row, question.name);
-    if (!payload || !payload.answer || typeof payload.answer !== 'object') continue;
-    const colVal = payload.answer[attributeId];
-    if (colVal == null || colVal === '') continue;
-    let score = null;
-    if (numericCols || !Number.isNaN(Number(colVal))) {
-      score = Number(colVal);
-      if (Number.isNaN(score)) continue;
-    } else {
-      continue; // non-numeric matrix columns: skip for correlation join
+    for (const payload of extractAnswerPayloads(row, question.name)) {
+      if (!payload.answer || typeof payload.answer !== 'object') continue;
+      const colVal = payload.answer[attributeId];
+      if (colVal == null || colVal === '') continue;
+      let score = null;
+      if (numericCols || !Number.isNaN(Number(colVal))) {
+        score = Number(colVal);
+        if (Number.isNaN(score)) continue;
+      } else {
+        continue; // non-numeric matrix columns: skip for correlation join
+      }
+      // Match ResultsAnalysis: attribute score to first shown image primarily
+      const ids = mediaIdsForTrial(payload, pool);
+      const mediaId = ids[0];
+      if (!mediaId) continue;
+      ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
     }
-    // Match ResultsAnalysis: attribute score to first shown image primarily
-    const ids = mediaIdsForTrial(payload, pool);
-    const mediaId = ids[0];
-    if (!mediaId) continue;
-    ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
   }
   return finalizeMediaScores(byMedia, 'matrix_row');
 }
@@ -469,15 +466,16 @@ function aggregateMatrixAttribute(responses, question, pool, attributeId) {
 function aggregateObjectAttribute(responses, questionName, pool, attributeId, scoreKind) {
   const byMedia = {};
   for (const row of responses || []) {
-    const payload = extractAnswerPayload(row, questionName);
-    if (!payload || !payload.answer || typeof payload.answer !== 'object') continue;
-    const raw = payload.answer[attributeId];
-    const score = Number(raw);
-    if (Number.isNaN(score)) continue;
-    const ids = mediaIdsForTrial(payload, pool);
-    ids.forEach((mediaId) => {
-      ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
-    });
+    for (const payload of extractAnswerPayloads(row, questionName)) {
+      if (!payload.answer || typeof payload.answer !== 'object') continue;
+      const raw = payload.answer[attributeId];
+      const score = Number(raw);
+      if (Number.isNaN(score)) continue;
+      const ids = mediaIdsForTrial(payload, pool);
+      ids.forEach((mediaId) => {
+        ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
+      });
+    }
   }
   return finalizeMediaScores(byMedia, scoreKind);
 }
@@ -486,22 +484,22 @@ function aggregateAnnotation(responses, questionName, pool, attributeId) {
   const byMedia = {};
   const attr = attributeId || ANNOTATION_COUNT_ATTR;
   for (const row of responses || []) {
-    const payload = extractAnswerPayload(row, questionName);
-    if (!payload) continue;
-    const ans = payload.answer;
-    const shapes = Array.isArray(ans?.shapes) ? ans.shapes : [];
-    let score;
-    if (attr === ANNOTATION_COUNT_ATTR) {
-      score = shapes.length;
-    } else {
-      score = shapes.filter((s) => String(s?.label || '') === attr).length;
+    for (const payload of extractAnswerPayloads(row, questionName)) {
+      const ans = payload.answer;
+      const shapes = Array.isArray(ans?.shapes) ? ans.shapes : [];
+      let score;
+      if (attr === ANNOTATION_COUNT_ATTR) {
+        score = shapes.length;
+      } else {
+        score = shapes.filter((s) => String(s?.label || '') === attr).length;
+      }
+      const imgRef = ans?.image || payload.shown?.[0];
+      const mediaId = imgRef
+        ? resolveMediaIdFromKey(imgRef, pool)
+        : mediaIdsForTrial(payload, pool)[0];
+      if (!mediaId) continue;
+      ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
     }
-    const imgRef = ans?.image || payload.shown?.[0];
-    const mediaId = imgRef
-      ? resolveMediaIdFromKey(imgRef, pool)
-      : mediaIdsForTrial(payload, pool)[0];
-    if (!mediaId) continue;
-    ensureMediaRow(byMedia, mediaId, pool).scores.push(score);
   }
   return finalizeMediaScores(byMedia, attr === ANNOTATION_COUNT_ATTR ? 'annotation_count' : 'annotation_label_count');
 }

@@ -38,7 +38,13 @@ export function attentionCheckQuestionStats(question, responses = []) {
 
 function extractAnswer(qData) {
   if (qData === null || qData === undefined) return null;
-  if (typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) return qData.answer;
+  if (typeof qData === 'object' && !Array.isArray(qData)) {
+    // Multi-trial: prefer per-trial answers for attention / quality checks
+    if (Array.isArray(qData.trials) && qData.trials.length) {
+      return qData.trials.map((t) => t?.answer ?? t?.value);
+    }
+    if ('answer' in qData) return qData.answer;
+  }
   return qData;
 }
 
@@ -115,21 +121,27 @@ export function checkStraightLiningFlags(response, surveyConfig) {
       // single rating — skip
       continue;
     }
-    if (
-      (q.type === 'matrix' || q.type === 'imagematrix')
-      && typeof raw === 'object'
-      && !Array.isArray(raw)
-    ) {
-      const rowVals = Object.values(raw);
-      if (isStraightLineValues(rowVals)) flags.push('straight_lining');
+    const matrixTypes = new Set(['matrix', 'imagematrix', 'mediamatrix']);
+    const sliderTypes = new Set(['slidergroup', 'imageslidergroup', 'mediaslidergroup']);
+    const trialObjects = Array.isArray(raw)
+      ? raw.filter((v) => v && typeof v === 'object' && !Array.isArray(v))
+      : (raw && typeof raw === 'object' && !Array.isArray(raw) ? [raw] : []);
+
+    if (matrixTypes.has(q.type)) {
+      for (const obj of trialObjects) {
+        if (isStraightLineValues(Object.values(obj))) {
+          flags.push('straight_lining');
+          break;
+        }
+      }
     }
-    if (
-      (q.type === 'slidergroup' || q.type === 'imageslidergroup')
-      && typeof raw === 'object'
-      && !Array.isArray(raw)
-    ) {
-      const vals = Object.values(raw);
-      if (isStraightLineValues(vals)) flags.push('straight_lining');
+    if (sliderTypes.has(q.type)) {
+      for (const obj of trialObjects) {
+        if (isStraightLineValues(Object.values(obj))) {
+          flags.push('straight_lining');
+          break;
+        }
+      }
     }
   }
   return flags.length ? ['straight_lining'] : [];

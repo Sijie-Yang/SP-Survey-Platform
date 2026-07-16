@@ -179,3 +179,18 @@ export function usesStimulusSampling(type, question = {}) {
 export function isCuratedSelectionMode(mode) {
   return mode === 'huggingface_manual' || mode === 'manual';
 }
+
+/** Interactive media types that can repeat as multiple trials (see trialNavigation.js). */
+export const TRIAL_LOOP_EDITOR_TYPES = new Set([
+  'imagepicker', 'mediapicker',
+  'imagerating', 'mediarating', 'imageboolean', 'mediaboolean',
+  'imageranking', 'mediaranking',
+  'imagematrix', 'mediamatrix',
+  'imageslidergroup', 'mediaslidergroup',
+  'imagepointallocation', 'mediapointallocation',
+  'imageannotation',
+]);
+
+export function supportsTrialCount(type) {
+  return TRIAL_LOOP_EDITOR_TYPES.has(type);
+}

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Box, Typography, Rating, FormControlLabel, Radio, RadioGroup, Button, Chip } from '@mui/material';
+import { Box, Typography, Button, Chip } from '@mui/material';
 import { Visibility, TimerOutlined } from '@mui/icons-material';
+import { SurveyJsBooleanControl } from './ImageBooleanWidget';
+import { SurveyJsRatingControl } from './ImageRatingWidget';
 
 function isImageMedia(type) {
   return !type || type === 'image' || type === 'any';
@@ -380,39 +382,37 @@ export function MediaDisplayContent({
 export function MediaRatingContent({
   mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation,
   value, onChange, rateMin = 1, rateMax = 5,
+  minRateDescription = '', maxRateDescription = '',
 }) {
   return (
-    <Box>
+    <Box sx={{ width: '100%' }}>
       {renderStimulus({ mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation })}
-      <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-        <Typography variant="body2">{rateMin}</Typography>
-        <Rating
-          value={value || null}
-          max={rateMax - rateMin + 1}
-          onChange={(_, v) => onChange(v ? v + rateMin - 1 : null)}
-        />
-        <Typography variant="body2">{rateMax}</Typography>
-      </Box>
+      <SurveyJsRatingControl
+        rateMin={rateMin}
+        rateMax={rateMax}
+        minRateDescription={minRateDescription}
+        maxRateDescription={maxRateDescription}
+        value={value}
+        onChange={onChange}
+      />
     </Box>
   );
 }
 
 export function MediaBooleanContent({
   mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation,
-  value, onChange, labelTrue = 'Yes', labelFalse = 'No',
+  value, onChange, labelTrue = 'Yes', labelFalse = 'No', name = 'mediaboolean',
 }) {
   return (
-    <Box>
+    <Box sx={{ width: '100%' }}>
       {renderStimulus({ mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation })}
-      <RadioGroup
-        row
-        value={value === true ? 'yes' : value === false ? 'no' : ''}
-        onChange={(e) => onChange(e.target.value === 'yes')}
-        sx={{ mt: 2 }}
-      >
-        <FormControlLabel value="yes" control={<Radio />} label={labelTrue} />
-        <FormControlLabel value="no" control={<Radio />} label={labelFalse} />
-      </RadioGroup>
+      <SurveyJsBooleanControl
+        name={name}
+        labelTrue={labelTrue}
+        labelFalse={labelFalse}
+        value={value}
+        onChange={onChange}
+      />
     </Box>
   );
 }

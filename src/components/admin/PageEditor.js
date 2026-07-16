@@ -499,6 +499,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
           onCancel={() => setSelectedQuestion(null)}
           images={images}
           currentProject={currentProject}
+          surveyConfig={surveyConfig}
         />
       )}
       <ConfirmDialog

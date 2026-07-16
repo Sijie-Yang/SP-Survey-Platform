@@ -7,14 +7,23 @@ import { ImageGalleryGrid } from './MediaWidgets';
  * on a shared numeric scale. value = { [dimensionId]: number }
  * Defaults every dimension to the scale midpoint until the participant moves it.
  */
-export function SliderGroupContent({ dimensions = [], scaleMin = 1, scaleMax = 7, value, onChange, readOnly }) {
+export function SliderGroupContent({
+  dimensions = [],
+  scaleMin = 1,
+  scaleMax = 7,
+  value,
+  onChange,
+  readOnly,
+  /** Persist midpoint as the answer when the participant never moves a slider. */
+  autoPersistDefaults = true,
+}) {
   const mid = Math.round((Number(scaleMin) + Number(scaleMax)) / 2);
   const current = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
 
-  // Persist midpoint defaults so submit / required checks see real scores
+  // Persist midpoint defaults so submit / required / multi-trial checks see real scores
   // without requiring the participant to touch every slider.
   useEffect(() => {
-    if (readOnly || !onChange || !dimensions.length) return;
+    if (!autoPersistDefaults || readOnly || !onChange || !dimensions.length) return;
     let changed = false;
     const next = { ...current };
     dimensions.forEach((d) => {
@@ -27,7 +36,7 @@ export function SliderGroupContent({ dimensions = [], scaleMin = 1, scaleMax = 7
     if (changed) onChange(next);
     // Only re-run when scale / dimension set changes — not on every value tweak.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimensions, scaleMin, scaleMax, mid, readOnly]);
+  }, [dimensions, scaleMin, scaleMax, mid, readOnly, autoPersistDefaults]);
 
   if (!dimensions.length) {
     return (
@@ -91,7 +100,7 @@ export function SliderGroupContent({ dimensions = [], scaleMin = 1, scaleMax = 7
  * value = { [choiceValue]: number }
  */
 export function PointAllocationContent({ choices = [], budget = 100, value, onChange, readOnly }) {
-  const current = value || {};
+  const current = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
   const normalized = choices.map((c) => (typeof c === 'object' ? c : { value: c, text: c }));
   const allocated = normalized.reduce((sum, c) => sum + (Number(current[c.value]) || 0), 0);
   const remaining = budget - allocated;
@@ -160,6 +169,7 @@ export function ImageSliderGroupContent({
   value,
   onChange,
   readOnly,
+  autoPersistDefaults = true,
 }) {
   const items = (imageUrls || []).filter(Boolean).map((url, i) => ({
     url,
@@ -181,6 +191,7 @@ export function ImageSliderGroupContent({
         value={value}
         onChange={onChange}
         readOnly={readOnly}
+        autoPersistDefaults={autoPersistDefaults}
       />
     </Box>
   );

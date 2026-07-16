@@ -7,6 +7,7 @@ import { getPresetSkill } from './presetSkills';
 import { stripSkillAnswerContext } from './skillMediaUtils';
 import { objectsToCsv, exportDateStamp } from './csvUtil';
 import { downloadTextFile } from './methodsExport';
+import { supportsTrialCount } from './questionTypeConstraints';
 
 const IMAGE_TYPES = new Set([
   'imagerating', 'image_rating',
@@ -94,6 +95,10 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     if (subKeys) {
       subKeys.forEach((k) => headerCols.push(`${q.name}__${String(k).replace(/\./g, '_')}`));
     }
+    if (supportsTrialCount(q.type)) {
+      headerCols.push(`${q.name}__trial_count`);
+      headerCols.push(`${q.name}__trials_json`);
+    }
     if (isImageQuestion(q)) {
       headerCols.push(`${q.name}__shown_images`);
       headerCols.push(`${q.name}__shown_media_ids`);
@@ -149,7 +154,12 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
 
       let ans;
       let shownImgs;
-      if (qData !== null && qData !== undefined && typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
+      if (qData !== null && qData !== undefined && typeof qData === 'object' && !Array.isArray(qData) && Array.isArray(qData.trials)) {
+        ans = qData.trials.map((t) => t?.answer ?? t?.value);
+        shownImgs = qData.trials.flatMap((t) => t?.shown_images || []);
+        obj[`${qName}__trial_count`] = qData.trials.length;
+        obj[`${qName}__trials_json`] = JSON.stringify(qData.trials);
+      } else if (qData !== null && qData !== undefined && typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
         ans = qData.answer;
         shownImgs = qData.shown_images?.length ? qData.shown_images : (row.displayed_images?.[qName] || []);
       } else {
@@ -168,8 +178,14 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
       obj[qName] = typeof ansForCsv === 'object' ? JSON.stringify(ansForCsv) : String(ansForCsv ?? '');
 
       const subKeys = subKeysFor(q);
+      const isMultiTrialAns = Array.isArray(qData?.trials) && qData.trials.length > 1;
       if (subKeys) {
-        if (q.type === 'ranking' || q.type === 'imageranking' || q.type === 'mediaranking') {
+        if (isMultiTrialAns) {
+          // Sub-keys assume a single object/ranking; multi-trial detail is in __trials_json.
+          subKeys.forEach((k) => {
+            obj[`${qName}__${String(k).replace(/\./g, '_')}`] = '';
+          });
+        } else if (q.type === 'ranking' || q.type === 'imageranking' || q.type === 'mediaranking') {
           const ranked = Array.isArray(ans) ? ans : [];
           subKeys.forEach((k, i) => {
             const v = ranked[i];

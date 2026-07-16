@@ -20,11 +20,22 @@ import {
   ensureSkillDemoMedia, pickMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   applyMediaAssignmentToElement, hasMediaSlots,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
-  resolveMediaFolderTags,
+  resolveMediaFolderTags, pickTrialMediaSetsForQuestion, syncInjectedMediaOntoSurveyModel,
+  clearInjectedMediaStore,
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
 import { getProjectLiveAccess, formatLiveWindow } from './lib/liveSurveyManager';
 import { enrichSurveyResponses } from './lib/enrichSurveyResponses';
+import {
+  clearTrialsAnswerStore,
+  collectSurveyDataWithTrials,
+  getTrialCount,
+  rehydrateTrialsAnswerStoreFromSurvey,
+} from './lib/trialNavigation';
+import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
+import SurveyProgressBridge, {
+  normalizeShowProgressBar,
+} from './components/SurveyProgressBridge';
 
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
@@ -62,6 +73,8 @@ export default function SurveyApp() {
   const pairStatsRef = useRef(null);
   const lastPageNameRef = useRef(null);
   const submissionGuardRef = useRef(false);
+  const progressChromeEnabledRef = useRef(true);
+  const surveyThemeRef = useRef(null);
 
   // Monitor URL changes and reinitialize when project ID changes
   useEffect(() => {
@@ -193,7 +206,7 @@ export default function SurveyApp() {
     draftSaveTimerRef.current = setTimeout(() => {
       if (!draftSavingEnabledRef.current) return;
       saveDraft(projectIdRef.current, participantIdRef.current, {
-        surveyData: { ...model.data },
+        surveyData: collectSurveyDataWithTrials(model),
         currentPageNo: model.currentPageNo,
         displayedImages: { ...imageTracker },
         displayedMediaGroups: { ...(displayedMediaGroupsRef.current || {}) },
@@ -208,6 +221,8 @@ export default function SurveyApp() {
       submissionGuardRef.current = false;
       draftSavingEnabledRef.current = true;
       cancelPendingDraftSave();
+      clearTrialsAnswerStore();
+      clearInjectedMediaStore();
       setLoading(true);
       setLoadingMessage('Loading survey…');
       
@@ -447,11 +462,44 @@ export default function SurveyApp() {
                   console.log(`🔄 Loading random images for ${element.type} question: ${element.name}`);
                   try {
                     let result;
+                    const elementTrialCount = getTrialCount(element);
                     
                     // PRIORITY 1: Check if project has preloaded images
                     if (projectData?.preloadedImages && projectData.preloadedImages.length > 0) {
                       console.log(`📦 Using preloaded media from project (${projectData.preloadedImages.length} available)`);
                       const pool = filterPoolForQuestion(projectData.preloadedImages, element);
+                      const folderTags = resolveMediaFolderTags(projectData, projectData?.config);
+
+                      if (elementTrialCount > 1) {
+                        const { trialMediaSets, trialAssignments } = pickTrialMediaSetsForQuestion(
+                          pool,
+                          element,
+                          elementTrialCount,
+                          globallyUsedImageKeys,
+                          globallyUsedGroupKeys,
+                          pairStatsRef.current,
+                          folderTags,
+                        );
+                        element.trialMediaSets = trialMediaSets;
+                        element.trialCount = elementTrialCount;
+                        const assignment = trialAssignments[0] || { images: [] };
+                        let selectedImages = assignment.flatMedia || assignment.images || [];
+                        if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
+                          const imageCount = element.imageCount || defaultMediaCount(element);
+                          selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+                        }
+                        result = {
+                          success: selectedImages.length > 0 || trialMediaSets.some((s) => s?.length),
+                          images: selectedImages,
+                          groupId: assignment.setId || assignment.groupId,
+                          categories: assignment.categories,
+                          slots: assignment.slots,
+                          assignment,
+                          _assigned: true,
+                          trialMediaSets,
+                        };
+                        console.log(`✅ Pre-sampled ${trialMediaSets.length} trial media set(s) for ${element.name}`);
+                      } else {
                       let assignment = finalizeMediaSelection(element, pool);
                       let selectedImages = assignment.images;
                       // Skill questions: reuse pool images rather than falling back to demo media
@@ -474,6 +522,7 @@ export default function SurveyApp() {
                       };
                       
                       console.log(`✅ Selected ${selectedImages.length} media file(s) from preloaded pool${assignment.groupId ? ` (group: ${assignment.groupId})` : ''}${assignment.categories?.length ? ` (categories: ${assignment.categories.join(', ')})` : ''}`);
+                      }
                     }
                     // PRIORITY 2: Use global imageDatasetConfig if available
                     else if (projectData?.imageDatasetConfig?.enabled && projectData.imageDatasetConfig.datasetName) {
@@ -543,7 +592,7 @@ export default function SurveyApp() {
                       }
                     }
                     
-                    if (result?.success && result.images.length > 0) {
+                    if (result?.success && (result.images?.length > 0 || result.trialMediaSets?.length)) {
                       let assignment = result.assignment;
                       if (!result._assigned || !assignment) {
                         assignment = finalizeMediaSelection(
@@ -552,7 +601,10 @@ export default function SurveyApp() {
                           usesSetMediaAssignment(element) ? null : result.images,
                         );
                       }
-                      const selectedImages = assignment.images || [];
+                      if (result.trialMediaSets?.length) {
+                        element.trialMediaSets = result.trialMediaSets;
+                      }
+                      const selectedImages = assignment.images || assignment.flatMedia || [];
                       const groupId = assignment.setId || assignment.groupId || null;
                       const categories = assignment.categories || null;
                       if (groupId) {
@@ -577,6 +629,11 @@ export default function SurveyApp() {
                       imageTracker[element.name] = imageUrls.length
                         ? imageUrls
                         : selectedImages.map((img) => img.url);
+                      if (element.trialMediaSets?.length) {
+                        imageTracker[element.name + '__trials'] = element.trialMediaSets.map(
+                          (set) => (set || []).map((img) => img.url).filter(Boolean),
+                        );
+                      }
                       console.log(`✅ Tracked ${imageTracker[element.name].length} media URLs for question: ${element.name}`, imageTracker[element.name]);
                       if (groupId) console.log(`🔗 Assigned media group "${groupId}" → ${selectedImages.map((i) => i.name).join(', ')}`);
                       if (categories?.length) console.log(`🏷️ Categories [${categories.join(', ')}] → ${selectedImages.map((i) => i.name).join(', ')}`);
@@ -661,168 +718,9 @@ export default function SurveyApp() {
                   }
                 }
                 
-                // Check if element should be converted to panel (has imageHtml from manual or random selection)
-                if (element.type === 'imageboolean' && (element.imageHtml || element.randomImageSelection)) {
-                  // If no imageHtml yet, this means images weren't loaded (shouldn't happen after image loading loop)
-                  if (!element.imageHtml) {
-                    console.warn(`imageboolean ${element.name} has no imageHtml, skipping panel conversion`);
-                    newElements.push(element);
-                    continue;
-                  }
-                  // Convert imageboolean to panel - keeps everything in one frame
-                  console.log(`Converting imageboolean question ${element.name} to panel with HTML`);
-                  
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:', // Fixed instruction text
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml
-                      },
-                      {
-                        type: 'boolean',
-                        name: element.name,
-                        title: element.title, // Show actual question title
-                        isRequired: element.isRequired,
-                        labelTrue: element.labelTrue || 'Yes',
-                        labelFalse: element.labelFalse || 'No',
-                        valueTrue: element.valueTrue,
-                        valueFalse: element.valueFalse
-                      }
-                    ]
-                  });
-                } else if (element.type === 'imagerating' && (element.imageHtml || element.randomImageSelection)) {
-                  // If no imageHtml yet, this means images weren't loaded (shouldn't happen after image loading loop)
-                  if (!element.imageHtml) {
-                    console.warn(`imagerating ${element.name} has no imageHtml, skipping panel conversion`);
-                    newElements.push(element);
-                    continue;
-                  }
-                  // Convert imagerating to panel - keeps everything in one frame
-                  console.log(`Converting imagerating question ${element.name} to panel with HTML`);
-                  
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:', // Fixed instruction text
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml
-                      },
-                      {
-                        type: 'rating',
-                        name: element.name,
-                        title: element.title, // Show actual question title
-                        isRequired: element.isRequired,
-                        rateMin: element.rateMin || 1,
-                        rateMax: element.rateMax || 5,
-                        minRateDescription: element.minRateDescription,
-                        maxRateDescription: element.maxRateDescription
-                      }
-                    ]
-                  });
-                } else if (element.type === 'imagematrix' && (element.imageHtml || element.randomImageSelection)) {
-                  // If no imageHtml yet, this means images weren't loaded (shouldn't happen after image loading loop)
-                  if (!element.imageHtml) {
-                    console.warn(`imagematrix ${element.name} has no imageHtml, skipping panel conversion`);
-                    newElements.push(element);
-                    continue;
-                  }
-                  // Convert imagematrix to panel - keeps everything in one frame
-                  console.log(`Converting imagematrix question ${element.name} to panel with HTML`);
-                  
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:', // Fixed instruction text
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml
-                      },
-                      {
-                        type: 'matrix',
-                        name: element.name,
-                        title: element.title, // Show actual question title
-                        isRequired: element.isRequired,
-                        columns: element.columns,
-                        rows: element.rows
-                      }
-                    ]
-                  });
-                // media* types keep custom widgets (slots + MediaPlayer); do not convert to html panels
-                } else if (element.type === 'imageslidergroup' && (element.imageHtml || element.randomImageSelection)) {
-                  if (!element.imageHtml) {
-                    console.warn(`imageslidergroup ${element.name} has no imageHtml, skipping panel conversion`);
-                    newElements.push(element);
-                    continue;
-                  }
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:',
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml,
-                      },
-                      {
-                        type: 'slidergroup',
-                        name: element.name,
-                        title: element.title,
-                        isRequired: element.isRequired,
-                        dimensions: element.dimensions || [],
-                        scaleMin: element.scaleMin ?? 1,
-                        scaleMax: element.scaleMax ?? 7,
-                      },
-                    ],
-                  });
-                } else if (element.type === 'imagepointallocation' && (element.imageHtml || element.randomImageSelection)) {
-                  if (!element.imageHtml) {
-                    console.warn(`imagepointallocation ${element.name} has no imageHtml, skipping panel conversion`);
-                    newElements.push(element);
-                    continue;
-                  }
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:',
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml,
-                      },
-                      {
-                        type: 'pointallocation',
-                        name: element.name,
-                        title: element.title,
-                        isRequired: element.isRequired,
-                        choices: element.choices || [],
-                        budget: element.budget ?? 100,
-                      },
-                    ],
-                  });
-                } else {
-                  newElements.push(element);
-                }
+                // Keep custom image/media widgets as-is (no "See below images:" panel split).
+                // trial=1 and trial>1 both use the same React question components.
+                newElements.push(element);
               }
               page.elements = newElements;
               
@@ -854,17 +752,22 @@ export default function SurveyApp() {
         finalSurveyJson.showQuestionNumbers = finalSurveyJson.showQuestionNumbers ? 'on' : 'off';
         console.log('🔧 Survey: Fixed showQuestionNumbers boolean to string');
       }
-      if (typeof finalSurveyJson.showProgressBar === 'boolean') {
-        finalSurveyJson.showProgressBar = finalSurveyJson.showProgressBar ? 'top' : 'off';
-        console.log('🔧 Survey: Fixed showProgressBar boolean to string');
+      {
+        const normalizedProgress = normalizeShowProgressBar(finalSurveyJson.showProgressBar);
+        progressChromeEnabledRef.current = normalizedProgress !== 'off';
+        // ProgressChrome replaces the native SurveyJS bar
+        finalSurveyJson.showProgressBar = 'off';
       }
       
       // Create survey model (map builder-only types like number/consent)
       finalSurveyJson = normalizeBuilderSurveyJson(finalSurveyJson);
       const model = new Model(finalSurveyJson);
+      // Re-apply media fields SurveyJS may have stripped (esp. media* + trialMediaSets)
+      syncInjectedMediaOntoSurveyModel(model, finalSurveyJson);
       
       // Apply theme - with error handling
       try {
+        surveyThemeRef.current = (useAdminConfig && adminConfig?.theme) ? adminConfig.theme : null;
         if (useAdminConfig && adminConfig && adminConfig.theme) {
           // Use custom theme from admin config
           const customTheme = generateCustomTheme(adminConfig);
@@ -942,7 +845,7 @@ export default function SurveyApp() {
         setSurveyPhase('submitting');
 
         console.log("=== SURVEY COMPLETION STARTED ===");
-        const responses = survey.data;
+        const responses = collectSurveyDataWithTrials(survey);
         const displayedImages = displayedImagesRef.current || {};
         const displayedMediaGroups = displayedMediaGroupsRef.current || {};
         const displayedMediaCategories = displayedMediaCategoriesRef.current || {};
@@ -1015,6 +918,11 @@ export default function SurveyApp() {
         
         console.log("Survey completed with complete data:", completeData);
         console.log("📸 Displayed images in response:", displayedImages);
+        Object.entries(responses || {}).forEach(([qn, val]) => {
+          if (val && typeof val === 'object' && Array.isArray(val.trials)) {
+            console.log(`🔁 Multi-trial raw answer for ${qn}: ${val.trials.length} trials`, val.trials.map((t) => t?.value));
+          }
+        });
         console.log("Attempting to save to Supabase...");
 
         await submitSurveyResponse(completeData, { isRepeatMode, repeatTotal, attemptIndex });
@@ -1059,6 +967,7 @@ export default function SurveyApp() {
 
       if (resumeChoiceRef.current === 'resume' && existingDraft?.draft) {
         model.data = existingDraft.draft.surveyData || {};
+        rehydrateTrialsAnswerStoreFromSurvey(model);
         if (typeof existingDraft.draft.currentPageNo === 'number') {
           model.currentPageNo = existingDraft.draft.currentPageNo;
         }
@@ -1274,14 +1183,21 @@ export default function SurveyApp() {
       )}
       
       {surveyModel && surveyPhase === 'active' && (
-        <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }}>
-          {repeatProgress && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Research annotation mode: Round {repeatProgress.current} of {repeatProgress.total}
-            </Alert>
-          )}
-          <Survey model={surveyModel} />
-        </Box>
+        <SurveyTrialNavProvider>
+          <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }} className="sp-survey-with-progress">
+            <SurveyProgressBridge
+              surveyModel={surveyModel}
+              progressEnabled={progressChromeEnabledRef.current}
+              theme={surveyThemeRef.current}
+            />
+            {repeatProgress && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Research annotation mode: Round {repeatProgress.current} of {repeatProgress.total}
+              </Alert>
+            )}
+            <Survey model={surveyModel} />
+          </Box>
+        </SurveyTrialNavProvider>
       )}
 
       <Dialog open={!!resumeDialog} onClose={() => {}}>
@@ -1324,6 +1240,7 @@ export default function SurveyApp() {
             onClick={() => {
               const { draft, model, imageTracker } = resumeDialog;
               model.data = draft.surveyData || {};
+              rehydrateTrialsAnswerStoreFromSurvey(model);
               if (typeof draft.currentPageNo === 'number') {
                 model.currentPageNo = draft.currentPageNo;
               }

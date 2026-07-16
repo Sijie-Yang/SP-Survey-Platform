@@ -66,6 +66,8 @@ import {
   attentionCheckQuestionStats,
 } from '../../lib/quality';
 import { computeQuestionIrr } from '../../lib/reliability';
+import { expandQuestionAnswerUnits } from '../../lib/responseAnswerUnits';
+import { supportsTrialCount } from '../../lib/questionTypeConstraints';
 import {
   computeQuestionTrueSkill,
   computeTrueSkillFromMatches,
@@ -164,33 +166,12 @@ export function responsesEligibleForQuestion(questionName, responses) {
 }
 
 // Collect answers for a question from all responses.
-// Handles two formats:
-//   New: responses[name] = { type, answer, shown_images }
-//   Old: responses[name] = <raw_answer>, displayed_images[name] = [...]
+// Multi-trial → one analysis unit per answered trial (paired with that trial's media).
+// Single-answer → one unit (legacy + enriched).
 export function collectAnswers(questionName, responses) {
   const result = [];
   for (const row of responsesEligibleForQuestion(questionName, responses)) {
-    const qData = row.responses?.[questionName];
-    if (qData === undefined || qData === null) continue;
-
-    let ans, shown, shownMedia;
-
-    if (qData !== null && typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
-      // New enriched format: { type, answer, shown_images, shown_media }
-      ans = qData.answer;
-      shown = qData.shown_images?.length
-        ? qData.shown_images
-        : (row.displayed_images?.[questionName] || []);
-      shownMedia = Array.isArray(qData.shown_media) ? qData.shown_media : [];
-    } else {
-      // Old raw format: the value IS the answer
-      ans = qData;
-      shown = row.displayed_images?.[questionName] || [];
-      shownMedia = [];
-    }
-
-    if (ans === null || ans === undefined || ans === '') continue;
-    result.push({ answer: ans, shown_images: shown, shown_media: shownMedia });
+    result.push(...expandQuestionAnswerUnits(row, questionName, { requireAnswer: true }));
   }
   return result;
 }
@@ -199,59 +180,9 @@ export function collectAnswers(questionName, responses) {
 export function collectShownMedia(questionName, responses) {
   const result = [];
   for (const row of responsesEligibleForQuestion(questionName, responses)) {
-    const qData = row.responses?.[questionName];
-    let shownMedia = [];
-    let shown = [];
-    if (qData !== null && typeof qData === 'object' && !Array.isArray(qData)) {
-      shownMedia = Array.isArray(qData.shown_media) ? qData.shown_media : [];
-      shown = qData.shown_images || row.displayed_images?.[questionName] || [];
-    } else {
-      shown = row.displayed_images?.[questionName] || [];
-    }
-    if (!shownMedia.length && !shown.length) continue;
-    result.push({ answer: qData?.answer ?? null, shown_images: shown, shown_media: shownMedia });
+    result.push(...expandQuestionAnswerUnits(row, questionName, { requireAnswer: false }));
   }
   return result;
-}
-
-function ShownMediaSummary({ answers, includeEmpty = false }) {
-  const rows = (answers || []).filter((a) => (a.shown_media || []).length > 0
-    || (includeEmpty && (a.shown_images || []).length > 0));
-  if (!rows.length) return null;
-  const sample = rows.slice(0, 8);
-  return (
-    <Box sx={{ mb: 2 }}>
-      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Stimulus by slot (sample)</Typography>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-        Full detail is in CSV columns __shown_media and __slot_&lt;id&gt;_name.
-      </Typography>
-      {sample.map((row, i) => {
-        const slots = (row.shown_media || []).length
-          ? row.shown_media
-          : (row.shown_images || []).map((u, j) => ({
-            slotId: `legacy_${j}`,
-            name: String(u).split('/').pop(),
-            type: 'image',
-          }));
-        return (
-          <Box key={i} sx={{ mb: 0.75, fontSize: 13 }}>
-            <Typography variant="caption" color="text.secondary">Response {i + 1}</Typography>
-            <Box component="ul" sx={{ m: 0, pl: 2 }}>
-              {slots.map((s, j) => (
-                <li key={j}>
-                  <strong>{s.slotId || `slot_${j}`}</strong>
-                  {s.role ? ` (${s.role})` : ''}
-                  {': '}
-                  {s.name || s.media_id || '—'}
-                  {s.type ? ` · ${s.type}` : ''}
-                </li>
-              ))}
-            </Box>
-          </Box>
-        );
-      })}
-    </Box>
-  );
 }
 
 // Frequency map: { choice: count }
@@ -1803,7 +1734,16 @@ function PointAllocationAnalysis({ question, answers }) {
 export function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses, surveyConfig, exportResponses }) {
   const [expanded, setExpanded] = useState(false);
   const type = question.type || 'text';
-  const responseCount = answers.length;
+  const trialUnitCount = answers.length;
+  const participantCount = useMemo(() => {
+    const ids = new Set();
+    (answers || []).forEach((a, i) => {
+      ids.add(a.participant_id || `row_${i}`);
+    });
+    return ids.size;
+  }, [answers]);
+  // Completion rate is per participant; charts/stats use per-trial units in `answers`.
+  const responseCount = participantCount;
 
   const renderAnalysis = () => {
     switch (type) {
@@ -1861,7 +1801,6 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         return (
           <>
             <IrrSummary responses={allResponses} question={question} />
-            <ShownMediaSummary answers={answers} />
             <ImagePickerDistribution
               question={question}
               allResponses={allResponses}
@@ -1886,7 +1825,6 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
             {['imagerating', 'image_rating', 'mediarating'].includes(type) && (
               <IrrSummary responses={allResponses} question={question} />
             )}
-            <ShownMediaSummary answers={answers} />
             <ImageQuestionAnalysis answers={answers} type={type} question={question} />
           </>
         );
@@ -1896,13 +1834,9 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
 
       case 'mediadisplay':
         return (
-          <>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Display-only question — no participant answers are collected.
-              Shown media are in __shown_images / __shown_media / slot columns in CSV.
-            </Typography>
-            <ShownMediaSummary answers={answers} includeEmpty />
-          </>
+          <Typography variant="body2" color="text.secondary">
+            Display-only question — no participant answers are collected.
+          </Typography>
         );
 
       case 'slidergroup':
@@ -1918,7 +1852,6 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         return (
           <>
             <IrrSummary responses={allResponses} question={question} />
-            <ShownMediaSummary answers={answers} />
             <ImageSliderGroupAnalysis question={question} answers={answers} />
           </>
         );
@@ -1928,12 +1861,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
 
       case 'imagepointallocation':
       case 'mediapointallocation':
-        return (
-          <>
-            <ShownMediaSummary answers={answers} />
-            <ImagePointAllocationAnalysis question={question} answers={answers} />
-          </>
-        );
+        return <ImagePointAllocationAnalysis question={question} answers={answers} />;
 
       case 'imageannotation':
         return <AnnotationAnalysis answers={answers} questionName={question.name} responses={question._allResponses} />;
@@ -2008,6 +1936,9 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
             ) : (
               <Typography variant="caption" color="text.secondary">
                 {responseCount} / {totalResponses} responses ({responseRate}%)
+                {supportsTrialCount(type) && (
+                  <> · {trialUnitCount} trial ratings</>
+                )}
               </Typography>
             )}
           </Box>

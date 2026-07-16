@@ -39,6 +39,7 @@ export const LONG_PREFIX = [
   'quality_flags',
   'question_name',
   'question_type',
+  'trial_index',
   'shown_images',
   'shown_media_ids',
   'shown_media_set',
@@ -174,6 +175,47 @@ function parsePayload(row, questionName) {
   const qData = row.responses?.[questionName];
   if (qData === undefined || qData === null) return null;
 
+  // Multi-trial enriched shape: expand to one payload per trial
+  if (typeof qData === 'object' && !Array.isArray(qData) && Array.isArray(qData.trials)) {
+    return qData.trials.map((trial, trialIndex) => {
+      const answer = trial?.answer ?? trial?.value;
+      if (answer === null || answer === undefined || answer === '') return null;
+      const shownImages = trial?.shown_images?.length
+        ? trial.shown_images
+        : (row.displayed_images?.[`${questionName}__trials`]?.[trialIndex]
+          || row.displayed_images?.[questionName]
+          || []);
+      return {
+        answer,
+        shownImages,
+        shownMediaIds: Array.isArray(trial?.shown_media_ids) ? trial.shown_media_ids : [],
+        shownMediaGroup: '',
+        shownMediaSet: '',
+        shownMediaCategories: '',
+        trialIndex,
+      };
+    }).filter(Boolean);
+  }
+
+  // Recovery: answer[] paired with displayed_images[name__trials]
+  if (typeof qData === 'object' && !Array.isArray(qData) && Array.isArray(qData.answer) && !qData.trials) {
+    const trialShown = row.displayed_images?.[`${questionName}__trials`];
+    if (Array.isArray(trialShown) && trialShown.length >= 2 && qData.answer.length === trialShown.length) {
+      return qData.answer.map((answer, trialIndex) => {
+        if (answer === null || answer === undefined || answer === '') return null;
+        return {
+          answer,
+          shownImages: trialShown[trialIndex] || [],
+          shownMediaIds: [],
+          shownMediaGroup: '',
+          shownMediaSet: '',
+          shownMediaCategories: '',
+          trialIndex,
+        };
+      }).filter(Boolean);
+    }
+  }
+
   let answer;
   let shownImages = [];
   let shownMediaIds = [];
@@ -182,6 +224,7 @@ function parsePayload(row, questionName) {
 
   if (typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
     answer = qData.answer;
+    // If answer is array from enrich multi-trial without trials key, keep as-is
     shownImages = qData.shown_images?.length
       ? qData.shown_images
       : (row.displayed_images?.[questionName] || []);
@@ -209,8 +252,14 @@ function parsePayload(row, questionName) {
   };
 }
 
-function baseLongFields(row, question, flags) {
-  const payload = parsePayload(row, question.name);
+function payloadsForQuestion(row, questionName) {
+  const parsed = parsePayload(row, questionName);
+  if (!parsed) return [];
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+function baseLongFields(row, question, flags, payload = null) {
+  const p = payload || (payloadsForQuestion(row, question.name)[0] || null);
   return {
     participant_id: row.participant_id || '',
     created_at: row.created_at || row.survey_metadata?.completion_time || '',
@@ -220,11 +269,12 @@ function baseLongFields(row, question, flags) {
     quality_flags: (flags || []).join('|'),
     question_name: question.name,
     question_type: question.type || '',
-    shown_images: joinPipe(payload?.shownImages),
-    shown_media_ids: (payload?.shownMediaIds || []).join('|'),
-    shown_media_set: payload?.shownMediaSet || payload?.shownMediaGroup || '',
-    shown_media_categories: payload?.shownMediaCategories || '',
-    _payload: payload,
+    trial_index: p?.trialIndex ?? '',
+    shown_images: joinPipe(p?.shownImages),
+    shown_media_ids: (p?.shownMediaIds || []).join('|'),
+    shown_media_set: p?.shownMediaSet || p?.shownMediaGroup || '',
+    shown_media_categories: p?.shownMediaCategories || '',
+    _payload: p,
   };
 }
 
@@ -270,8 +320,9 @@ function buildLongObjects(question, responses, surveyConfig) {
     const flags = surveyConfig
       ? evaluateResponseQuality(row, surveyConfig, responses)
       : [];
-    const base = baseLongFields(row, question, flags);
-    const payload = base._payload;
+    const payloads = payloadsForQuestion(row, question.name);
+    for (const payload of payloads) {
+    const base = baseLongFields(row, question, flags, payload);
     delete base._payload;
     if (!payload) continue;
 
@@ -455,6 +506,7 @@ function buildLongObjects(question, responses, surveyConfig) {
         text: typeof answer === 'object' ? JSON.stringify(answer) : String(answer),
       });
     }
+    } // end payloads loop
   }
 
   return objects;

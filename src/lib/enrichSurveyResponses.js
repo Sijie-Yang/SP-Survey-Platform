@@ -66,6 +66,41 @@ export function enrichSurveyResponses({
   preloadedImages = [],
 } = {}) {
   const enrichedResponses = Object.entries(responses || {}).reduce((acc, [questionName, answerValue]) => {
+    // Multi-trial answers: { trials: [{ value, shown_images, shown_media_ids }, ...] }
+    if (answerValue && typeof answerValue === 'object' && Array.isArray(answerValue.trials)) {
+      const trials = answerValue.trials.map((trial, trialIndex) => {
+        const shownImages = trial?.shown_images?.length
+          ? trial.shown_images
+          : (displayedImages[`${questionName}__trials`]?.[trialIndex]
+            || displayedImages[questionName]
+            || []);
+        const mappedAnswer = mapImageChoiceAnswerToNames(trial?.value, shownImages);
+        return {
+          trial_index: trialIndex,
+          answer: mappedAnswer,
+          shown_images: shownImages,
+          shown_media_ids: trial?.shown_media_ids?.length
+            ? trial.shown_media_ids
+            : resolveShownMediaIds(shownImages, preloadedImages),
+          shown_media: buildShownMedia(
+            questionName, displayedMediaSlots, shownImages, preloadedImages,
+          ),
+        };
+      });
+      acc[questionName] = {
+        type: questionTypeMap[questionName] || null,
+        trials,
+        answer: trials.map((t) => t.answer),
+        shown_images: trials[0]?.shown_images || displayedImages[questionName] || [],
+        shown_media_ids: trials[0]?.shown_media_ids || [],
+        shown_media_set: displayedMediaGroups[questionName] || null,
+        shown_media_group: displayedMediaGroups[questionName] || null,
+        shown_media_categories: displayedMediaCategories[questionName] || null,
+        shown_media: trials[0]?.shown_media || [],
+      };
+      return acc;
+    }
+
     const shownImages = displayedImages[questionName] || [];
     const mappedAnswer = mapImageChoiceAnswerToNames(answerValue, shownImages);
     const shown_media = buildShownMedia(

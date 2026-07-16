@@ -4,6 +4,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSo
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Box, Typography, Card } from '@mui/material';
+import { resolveQuestionImageChoices } from '../lib/questionImageChoices';
 
 // Sortable Item Component
 function SortableItem({ id, image, index }) {
@@ -92,7 +93,7 @@ function SortableItem({ id, image, index }) {
 }
 
 // Main Image Ranking Widget Component
-export default function ImageRankingWidget({ question, value, onValueChanged }) {
+export default function ImageRankingWidget({ question, value, onValueChanged, trialStimulusMedia = null }) {
   const [items, setItems] = useState([]);
   
   const sensors = useSensors(
@@ -102,79 +103,36 @@ export default function ImageRankingWidget({ question, value, onValueChanged }) 
     })
   );
 
-  // Initialize items from question choices
+  const trialMediaKey = Array.isArray(trialStimulusMedia)
+    ? trialStimulusMedia.map((m) => (typeof m === 'string' ? m : m?.url)).filter(Boolean).join('|')
+    : '';
+
+  // Initialize items from choices / imageLinks / active trial media
   useEffect(() => {
-    console.log('ImageRankingWidget - question:', question);
-    console.log('ImageRankingWidget - question.choices:', question.choices);
-    
-    if (question.choices && question.choices.length > 0) {
-      console.log('ImageRankingWidget - raw choices:', question.choices);
-      
-      const initialItems = question.choices.map((choice, index) => {
-        console.log('Processing choice:', choice, 'Type:', typeof choice);
-        console.log('Choice keys:', Object.keys(choice));
-        console.log('Choice properties:', choice);
-        
-        // Handle SurveyJS ItemValue objects
-        let imageLink;
-        
-        // Try multiple ways to get imageLink
-        if (choice.imageLink) {
-          imageLink = choice.imageLink;
-          console.log('Found imageLink directly:', imageLink);
-        } else if (choice.getPropertyValue) {
-          // Try to get imageLink from SurveyJS ItemValue
-          imageLink = choice.getPropertyValue('imageLink');
-          console.log('Found imageLink via getPropertyValue:', imageLink);
-        } else if (choice.locText && choice.locText.renderedHtml) {
-          // Check if imageLink is in locText
-          console.log('Checking locText:', choice.locText);
-        }
-        
-        // Try accessing internal properties
-        if (!imageLink && choice.propertyHash) {
-          console.log('Checking propertyHash:', choice.propertyHash);
-          console.log('PropertyHash keys:', Object.keys(choice.propertyHash));
-          imageLink = choice.propertyHash.imageLink;
-          console.log('PropertyHash imageLink:', imageLink);
-        }
-        
-        // Try other common property names
-        if (!imageLink) {
-          imageLink = choice.image || choice.url || choice.src;
-          console.log('Trying fallback properties:', imageLink);
-        }
-        
-        console.log('Final extracted imageLink:', imageLink);
-        
-        return {
-          id: choice.value || `item-${index}`,
-          value: choice.value,
-          imageLink: imageLink,
-          originalIndex: index,
-        };
-      });
-      
-      console.log('ImageRankingWidget - initialItems:', initialItems);
-      
-      // If there's an existing value, restore the order
-      if (value && Array.isArray(value) && value.length > 0) {
-        const orderedItems = value.map(val => 
-          initialItems.find(item => item.value === val)
-        ).filter(Boolean);
-        
-        // Add any missing items at the end
-        const usedValues = new Set(value);
-        const missingItems = initialItems.filter(item => !usedValues.has(item.value));
-        
-        setItems([...orderedItems, ...missingItems]);
-      } else {
-        setItems(initialItems);
-      }
-    } else {
-      console.log('ImageRankingWidget - No choices found');
+    const resolved = resolveQuestionImageChoices(question, trialStimulusMedia);
+    if (!resolved.length) {
+      setItems([]);
+      return;
     }
-  }, [question.choices, value]);
+
+    const initialItems = resolved.map((choice, index) => ({
+      id: choice.value || `item-${index}`,
+      value: choice.value,
+      imageLink: choice.imageLink,
+      originalIndex: index,
+    }));
+
+    if (value && Array.isArray(value) && value.length > 0) {
+      const orderedItems = value.map((val) => (
+        initialItems.find((item) => item.value === val)
+      )).filter(Boolean);
+      const usedValues = new Set(value);
+      const missingItems = initialItems.filter((item) => !usedValues.has(item.value));
+      setItems([...orderedItems, ...missingItems]);
+    } else {
+      setItems(initialItems);
+    }
+  }, [question, question.choices, question.imageLinks, value, trialMediaKey, trialStimulusMedia]);
 
   // Handle drag end
   function handleDragEnd(event) {

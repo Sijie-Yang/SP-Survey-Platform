@@ -6,15 +6,20 @@ import { Box, Alert, CircularProgress, Typography, Chip, Table, TableBody, Table
 import { convertToSurveyJS, generateCustomTheme, normalizeBuilderSurveyJson } from '../../lib/surveyStorage';
 import { themeJson } from "../../theme";
 import registerImageRankingWidget, {
-  registerImageRatingWidget, registerImageBooleanWidget, registerAllExtendedWidgets,
+  registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget,
+  registerAllExtendedWidgets,
 } from '../SurveyCustomComponents';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, resolveSkillQuestions,
   ensureSkillDemoMedia, pickMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   applyMediaAssignmentToElement, hasMediaSlots,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
-  resolveMediaFolderTags,
+  resolveMediaFolderTags, pickTrialMediaSetsForQuestion, syncInjectedMediaOntoSurveyModel,
+  clearInjectedMediaStore,
 } from '../../lib/surveyMediaInjection';
+import { getTrialCount } from '../../lib/trialNavigation';
+import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
+import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
 
 export default function SurveyPreview({ config, currentProject, showMediaAssignment = true }) {
   const [processedConfig, setProcessedConfig] = useState(null);
@@ -30,11 +35,13 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
 
       try {
         console.log('🎨 Preview: Processing config at:', new Date().toISOString());
-        
+        clearInjectedMediaStore();
+
         // Register custom components
         registerImageRankingWidget();
         registerImageRatingWidget();
         registerImageBooleanWidget();
+        registerImageMatrixWidget();
         registerAllExtendedWidgets();
         
         const configCopy = JSON.parse(JSON.stringify(config));
@@ -145,6 +152,28 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                     if (currentProject?.preloadedImages && currentProject.preloadedImages.length > 0) {
                       console.log(`📦 Preview: Using preloaded images from project (${currentProject.preloadedImages.length} available)`);
                       const pool = filterPoolForQuestion(currentProject.preloadedImages, element);
+                      const elementTrialCount = getTrialCount(element);
+                      const folderTags = resolveMediaFolderTags(currentProject, currentProject?.config);
+                      if (elementTrialCount > 1) {
+                        const { trialMediaSets, trialAssignments } = pickTrialMediaSetsForQuestion(
+                          pool, element, elementTrialCount,
+                          globallyUsedImageKeys, globallyUsedGroupKeys, null, folderTags,
+                        );
+                        element.trialMediaSets = trialMediaSets;
+                        element.trialCount = elementTrialCount;
+                        const assignment = trialAssignments[0] || { images: [] };
+                        const selectedImages = assignment.flatMedia || assignment.images || [];
+                        result = {
+                          success: !!selectedImages.length || trialMediaSets.some((s) => s?.length),
+                          images: selectedImages,
+                          setId: assignment.setId || assignment.groupId,
+                          groupId: assignment.setId || assignment.groupId,
+                          categories: assignment.categories,
+                          assignment,
+                          _assigned: true,
+                          trialMediaSets,
+                        };
+                      } else {
                       let assignment = finalizeMediaSelection(element, pool);
                       let selectedImages = assignment.images;
                       if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
@@ -172,6 +201,7 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                         _assigned: true,
                       };
                       console.log(`✅ Preview: Selected ${selectedImages.length} media file(s) from preloaded pool${(assignment.setId || assignment.groupId) ? ` (set: ${assignment.setId || assignment.groupId})` : ''}${assignment.categories?.length ? ` (categories: ${assignment.categories.join(', ')})` : ''}`);
+                      }
                     }
                     // PRIORITY 2: Use global imageDatasetConfig if available
                     else if (currentProject?.imageDatasetConfig?.enabled && currentProject.imageDatasetConfig.datasetName) {
@@ -243,8 +273,8 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                       }
                     }
                     
-                    if (result?.success && result.images.length > 0) {
-                      let selectedImages = result.images;
+                    if (result?.success && (result.images?.length > 0 || result.trialMediaSets?.length)) {
+                      let selectedImages = result.images || [];
                       let setId = result.setId || result.groupId || null;
                       let categories = result.categories || null;
                       let assignment = result.assignment;
@@ -264,6 +294,9 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                       }
                       if (categories?.length) element.assignedMediaCategories = categories;
                       mediaAssignmentLog.push(buildMediaAssignmentLogEntry(element, selectedImages, setId, categories));
+                      if (result.trialMediaSets?.length) {
+                        element.trialMediaSets = result.trialMediaSets;
+                      }
                       applyMediaAssignmentToElement(element, assignment);
                       console.log(`Preview loaded ${selectedImages.length} random media for question: ${element.name}`);
                     } else if (element.type === 'skillquestion') {
@@ -287,139 +320,8 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
             if (page.elements) {
               const newElements = [];
               for (const element of page.elements) {
-                if (element.type === 'imageboolean' && element.imageHtml) {
-                  // Convert imageboolean to panel - keeps everything in one frame
-                  console.log(`Preview: Converting imageboolean question ${element.name} to panel with HTML`);
-                  
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:', // Fixed instruction text
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml
-                      },
-                      {
-                        type: 'boolean',
-                        name: element.name,
-                        title: element.title, // Show actual question title
-                        isRequired: element.isRequired,
-                        labelTrue: element.labelTrue || 'Yes',
-                        labelFalse: element.labelFalse || 'No',
-                        valueTrue: element.valueTrue,
-                        valueFalse: element.valueFalse
-                      }
-                    ]
-                  });
-                } else if (element.type === 'imagerating' && element.imageHtml) {
-                  // Convert imagerating to panel - keeps everything in one frame
-                  console.log(`Preview: Converting imagerating question ${element.name} to panel with HTML`);
-                  
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:', // Fixed instruction text
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml
-                      },
-                      {
-                        type: 'rating',
-                        name: element.name,
-                        title: element.title, // Show actual question title
-                        isRequired: element.isRequired,
-                        rateMin: element.rateMin || 1,
-                        rateMax: element.rateMax || 5,
-                        minRateDescription: element.minRateDescription,
-                        maxRateDescription: element.maxRateDescription
-                      }
-                    ]
-                  });
-                } else if (element.type === 'imagematrix' && element.imageHtml) {
-                  // Convert imagematrix to panel - keeps everything in one frame
-                  console.log(`Preview: Converting imagematrix question ${element.name} to panel with HTML`);
-                  
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:', // Fixed instruction text
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml
-                      },
-                      {
-                        type: 'matrix',
-                        name: element.name,
-                        title: element.title, // Show actual question title
-                        isRequired: element.isRequired,
-                        columns: element.columns,
-                        rows: element.rows
-                      }
-                    ]
-                  });
-                // media* keep custom widgets (slots); do not convert to html panels
-                } else if (element.type === 'imageslidergroup' && element.imageHtml) {
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:',
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml,
-                      },
-                      {
-                        type: 'slidergroup',
-                        name: element.name,
-                        title: element.title,
-                        isRequired: element.isRequired,
-                        dimensions: element.dimensions || [],
-                        scaleMin: element.scaleMin ?? 1,
-                        scaleMax: element.scaleMax ?? 7,
-                      },
-                    ],
-                  });
-                } else if (element.type === 'imagepointallocation' && element.imageHtml) {
-                  newElements.push({
-                    type: 'panel',
-                    name: `${element.name}_panel`,
-                    title: 'See below images:',
-                    description: element.description,
-                    state: 'expanded',
-                    elements: [
-                      {
-                        type: 'html',
-                        name: `${element.name}_images`,
-                        html: element.imageHtml,
-                      },
-                      {
-                        type: 'pointallocation',
-                        name: element.name,
-                        title: element.title,
-                        isRequired: element.isRequired,
-                        choices: element.choices || [],
-                        budget: element.budget ?? 100,
-                      },
-                    ],
-                  });
-                } else {
-                  newElements.push(element);
-                }
+                // Keep custom widgets as-is so trial=1 matches trial>1 (no "See below images:" panel).
+                newElements.push(element);
               }
               page.elements = newElements;
               
@@ -481,7 +383,9 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
     }
     
     // Directly use processed configuration (already in standard SurveyJS format)
-    const model = new Model(normalizeBuilderSurveyJson(configToUse));
+    const normalizedPreviewJson = normalizeBuilderSurveyJson(configToUse);
+    const model = new Model(normalizedPreviewJson);
+    syncInjectedMediaOntoSurveyModel(model, normalizedPreviewJson);
     
     // Apply theme (same as Live Survey) - with error handling
     try {
@@ -508,6 +412,12 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
     
     // Disable survey completion for preview
     model.mode = "display";
+
+    const progressEnabled = isProgressEnabled(configToUse);
+    try {
+      // Match live SurveyApp: ProgressChrome replaces the native SurveyJS bar
+      model.showProgressBar = 'off';
+    } catch { /* ignore */ }
     
     console.log('Preview using standard SurveyJS config:', {
       title: model.title,
@@ -515,7 +425,8 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
       logo: model.logo,
       logoPosition: model.logoPosition,
       showQuestionNumbers: model.showQuestionNumbers,
-      showProgressBar: model.showProgressBar
+      showProgressBar: model.showProgressBar,
+      progressChrome: progressEnabled,
     });
     
     return (
@@ -591,7 +502,14 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
           </Box>
         )}
         <Box sx={{ maxWidth: 900, mx: 'auto', px: 2 }}>
-          <Survey model={model} />
+          <SurveyTrialNavProvider>
+            <SurveyProgressBridge
+              surveyModel={model}
+              progressEnabled={progressEnabled}
+              theme={config?.theme || null}
+            />
+            <Survey model={model} />
+          </SurveyTrialNavProvider>
         </Box>
       </Box>
     );
