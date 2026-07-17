@@ -51,10 +51,37 @@ export function SliderGroupContent({
       {dimensions.map((d) => {
         const v = current[d.id] ?? mid;
         return (
-          <Box key={d.id} sx={{ px: 1 }}>
+          <Box key={d.id} sx={{ px: { xs: 0, sm: 1 } }}>
+            {/* Phones: labels above slider so long bipolar text does not crush mid-row */}
             <Box
               sx={{
-                display: 'grid',
+                display: { xs: 'flex', sm: 'none' },
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 1,
+                mb: 0.5,
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" sx={{ flex: 1, lineHeight: 1.3 }}>
+                {d.left}
+              </Typography>
+              <Chip
+                size="small"
+                label={v}
+                color="primary"
+                sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0 }}
+              />
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ flex: 1, lineHeight: 1.3, textAlign: 'right' }}
+              >
+                {d.right}
+              </Typography>
+            </Box>
+            <Box
+              sx={{
+                display: { xs: 'none', sm: 'grid' },
                 gridTemplateColumns: '1fr auto 1fr',
                 alignItems: 'center',
                 columnGap: 1,
@@ -121,25 +148,46 @@ export function PointAllocationContent({ choices = [], budget = 100, value, onCh
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       {normalized.map((c) => (
-        <Box key={c.value} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography variant="body2" sx={{ flex: 1 }}>{c.text}</Typography>
-          <Slider
-            value={Number(current[c.value]) || 0}
-            min={0}
-            max={budget}
-            step={1}
-            disabled={readOnly}
-            onChange={(_, val) => setPoints(c.value, val)}
-            sx={{ flex: 2, maxWidth: 260 }}
-          />
-          <TextField
-            type="number"
-            size="small"
-            value={current[c.value] ?? 0}
-            onChange={(e) => setPoints(c.value, e.target.value)}
-            disabled={readOnly}
-            inputProps={{ min: 0, max: budget, step: 1, style: { width: 56, textAlign: 'center' } }}
-          />
+        <Box
+          key={c.value}
+          sx={{
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            alignItems: { xs: 'stretch', sm: 'center' },
+            gap: { xs: 0.5, sm: 2 },
+          }}
+        >
+          <Typography variant="body2" sx={{ flex: { sm: 1 }, minWidth: 0 }}>
+            {c.text}
+          </Typography>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              width: { xs: '100%', sm: 'auto' },
+              flex: { sm: 2 },
+              minWidth: 0,
+            }}
+          >
+            <Slider
+              value={Number(current[c.value]) || 0}
+              min={0}
+              max={budget}
+              step={1}
+              disabled={readOnly}
+              onChange={(_, val) => setPoints(c.value, val)}
+              sx={{ flex: 1, maxWidth: { xs: 'none', sm: 260 } }}
+            />
+            <TextField
+              type="number"
+              size="small"
+              value={current[c.value] ?? 0}
+              onChange={(e) => setPoints(c.value, e.target.value)}
+              disabled={readOnly}
+              inputProps={{ min: 0, max: budget, step: 1, style: { width: 56, textAlign: 'center' } }}
+            />
+          </Box>
         </Box>
       ))}
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 1 }}>

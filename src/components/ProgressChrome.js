@@ -98,7 +98,12 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
       className="sp-progress-chrome"
       sx={{
         px: { xs: 1.5, sm: 2 },
-        py: 1.25,
+        pb: { xs: 1, sm: 1.25 },
+        // Notch / status bar clearance on phones; desktop keeps normal top padding.
+        pt: {
+          xs: 'calc(8px + env(safe-area-inset-top, 0px))',
+          sm: 1.25,
+        },
         borderBottom: '1px solid',
         borderColor: 'var(--sp-progress-border, #e0e0e0)',
         bgcolor: 'var(--sp-progress-bg, #ffffff)',
@@ -111,7 +116,7 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
         variant="caption"
         sx={{
           display: 'block',
-          mb: 0.75,
+          mb: { xs: 0.5, sm: 0.75 },
           fontWeight: 600,
           lineHeight: 1.4,
           color: 'var(--sp-progress-label, #757575)',
@@ -129,41 +134,121 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
       </Typography>
 
       {qChunks.length > 1 && (
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1 }}>
-          {qChunks.map((chunk, gi) => {
-            const start = gi * QUESTION_GROUP_SIZE + 1;
-            const end = gi * QUESTION_GROUP_SIZE + chunk.length;
-            return (
-              <Box
-                key={start}
-                component="button"
-                type="button"
-                onClick={() => setGroupIdx(gi)}
-                sx={{
-                  border: '1px solid',
-                  borderColor: gi === groupIdx
-                    ? 'var(--sp-progress-primary, #1976d2)'
-                    : 'var(--sp-progress-border, #e0e0e0)',
-                  bgcolor: gi === groupIdx
-                    ? 'color-mix(in srgb, var(--sp-progress-primary, #1976d2) 12%, transparent)'
-                    : 'transparent',
-                  borderRadius: 1,
-                  px: 1,
-                  py: 0.25,
-                  fontSize: '0.7rem',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  color: 'var(--sp-progress-label, #757575)',
-                }}
-              >
-                Q{start}–{end}
-              </Box>
-            );
-          })}
-        </Box>
+        <>
+          {/* Phones: one compact pager instead of wrapping chip rows */}
+          <Box
+            sx={{
+              display: { xs: 'flex', sm: 'none' },
+              alignItems: 'center',
+              gap: 1,
+              mb: 0.75,
+            }}
+          >
+            <Box
+              component="button"
+              type="button"
+              disabled={groupIdx <= 0}
+              onClick={() => setGroupIdx((g) => Math.max(0, g - 1))}
+              aria-label="Previous question group"
+              sx={{
+                minWidth: 28,
+                minHeight: 28,
+                border: '1px solid',
+                borderColor: 'var(--sp-progress-border, #e0e0e0)',
+                borderRadius: 1,
+                bgcolor: 'transparent',
+                cursor: groupIdx <= 0 ? 'not-allowed' : 'pointer',
+                opacity: groupIdx <= 0 ? 0.4 : 1,
+                fontFamily: 'inherit',
+                color: 'var(--sp-progress-label, #757575)',
+              }}
+            >
+              ‹
+            </Box>
+            <Typography
+              variant="caption"
+              sx={{ flex: 1, textAlign: 'center', fontWeight: 600, color: 'var(--sp-progress-label, #757575)' }}
+            >
+              {(() => {
+                const start = groupIdx * QUESTION_GROUP_SIZE + 1;
+                const end = groupIdx * QUESTION_GROUP_SIZE + activeChunk.length;
+                return `Q${start}–${end}`;
+              })()}
+            </Typography>
+            <Box
+              component="button"
+              type="button"
+              disabled={groupIdx >= qChunks.length - 1}
+              onClick={() => setGroupIdx((g) => Math.min(qChunks.length - 1, g + 1))}
+              aria-label="Next question group"
+              sx={{
+                minWidth: 28,
+                minHeight: 28,
+                border: '1px solid',
+                borderColor: 'var(--sp-progress-border, #e0e0e0)',
+                borderRadius: 1,
+                bgcolor: 'transparent',
+                cursor: groupIdx >= qChunks.length - 1 ? 'not-allowed' : 'pointer',
+                opacity: groupIdx >= qChunks.length - 1 ? 0.4 : 1,
+                fontFamily: 'inherit',
+                color: 'var(--sp-progress-label, #757575)',
+              }}
+            >
+              ›
+            </Box>
+          </Box>
+
+          {/* Desktop: chip row */}
+          <Box
+            sx={{
+              display: { xs: 'none', sm: 'flex' },
+              flexWrap: 'wrap',
+              gap: 0.5,
+              mb: 1,
+            }}
+          >
+            {qChunks.map((chunk, gi) => {
+              const start = gi * QUESTION_GROUP_SIZE + 1;
+              const end = gi * QUESTION_GROUP_SIZE + chunk.length;
+              return (
+                <Box
+                  key={start}
+                  component="button"
+                  type="button"
+                  onClick={() => setGroupIdx(gi)}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: gi === groupIdx
+                      ? 'var(--sp-progress-primary, #1976d2)'
+                      : 'var(--sp-progress-border, #e0e0e0)',
+                    bgcolor: gi === groupIdx
+                      ? 'color-mix(in srgb, var(--sp-progress-primary, #1976d2) 12%, transparent)'
+                      : 'transparent',
+                    borderRadius: 1,
+                    px: 1,
+                    py: 0.25,
+                    fontSize: '0.7rem',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    color: 'var(--sp-progress-label, #757575)',
+                  }}
+                >
+                  Q{start}–{end}
+                </Box>
+              );
+            })}
+          </Box>
+        </>
       )}
 
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, alignItems: 'center' }}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: { xs: 0.5, sm: 0.75 },
+          alignItems: 'center',
+        }}
+      >
         {activeChunk.map((group) => {
           const reached = group.unitStart <= furthest;
           const isViewing = currentUnit?.questionName === group.questionName;
@@ -178,6 +263,9 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
           const label = multi
             ? `Q${group.questionIndex + 1} · ${answered}/${total} trials`
             : `Q${group.questionIndex + 1}`;
+          const deskW = multi ? Math.min(56, 16 + total * 2) : 16;
+          // Compact on phones: still tappable (~22px) without dominating the viewport
+          const mobileW = multi ? Math.min(48, 22 + total * 2) : 22;
 
           return (
             <Tooltip
@@ -194,9 +282,9 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
                 aria-label={label}
                 sx={{
                   position: 'relative',
-                  height: 16,
-                  minWidth: multi ? 28 : 16,
-                  width: multi ? Math.min(56, 16 + total * 2) : 16,
+                  height: { xs: 22, sm: 16 },
+                  minWidth: multi ? { xs: 28, sm: 28 } : { xs: 22, sm: 16 },
+                  width: { xs: mobileW, sm: deskW },
                   borderRadius: multi ? 1 : '50%',
                   border: '2px solid',
                   borderColor: complete
@@ -210,7 +298,10 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
                   cursor: reached ? 'pointer' : 'not-allowed',
                   opacity: reached ? 1 : 0.35,
                   boxShadow: isViewing
-                    ? '0 0 0 2px var(--sp-progress-surface, #fff), 0 0 0 4px var(--sp-progress-primary, #1976d2)'
+                    ? {
+                      xs: '0 0 0 1px var(--sp-progress-surface, #fff), 0 0 0 2px var(--sp-progress-primary, #1976d2)',
+                      sm: '0 0 0 2px var(--sp-progress-surface, #fff), 0 0 0 4px var(--sp-progress-primary, #1976d2)',
+                    }
                     : 'none',
                   flexShrink: 0,
                 }}
@@ -235,7 +326,7 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
 
       <Box
         sx={{
-          mt: 1,
+          mt: { xs: 0.75, sm: 1 },
           height: 4,
           borderRadius: 2,
           bgcolor: 'var(--sp-progress-track, #e0e0e0)',

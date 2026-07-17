@@ -91,9 +91,11 @@ export default function ProgressChromeThemePreview({ theme = null, showProgress 
                 onClick={() => reached && setViewing(i)}
                 sx={{
                   position: 'relative',
-                  height: 16,
-                  minWidth: multi ? 28 : 16,
-                  width: multi ? Math.min(56, 16 + item.trialCount * 2) : 16,
+                  height: { xs: 22, sm: 16 },
+                  minWidth: multi ? { xs: 28, sm: 28 } : { xs: 22, sm: 16 },
+                  width: multi
+                    ? { xs: Math.min(48, 22 + item.trialCount * 2), sm: Math.min(56, 16 + item.trialCount * 2) }
+                    : { xs: 22, sm: 16 },
                   borderRadius: multi ? 1 : '50%',
                   border: '2px solid',
                   borderColor: complete
@@ -105,7 +107,10 @@ export default function ProgressChromeThemePreview({ theme = null, showProgress 
                   cursor: reached ? 'pointer' : 'not-allowed',
                   opacity: reached ? 1 : 0.35,
                   boxShadow: isViewing
-                    ? '0 0 0 2px var(--sp-progress-surface), 0 0 0 4px var(--sp-progress-primary)'
+                    ? {
+                      xs: '0 0 0 1px var(--sp-progress-surface), 0 0 0 2px var(--sp-progress-primary)',
+                      sm: '0 0 0 2px var(--sp-progress-surface), 0 0 0 4px var(--sp-progress-primary)',
+                    }
                     : 'none',
                   flexShrink: 0,
                 }}

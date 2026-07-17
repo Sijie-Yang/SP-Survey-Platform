@@ -89,7 +89,7 @@ export function MediaSlotLayout({
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           {choiceSlots.map((s, i) => (
-            <Box key={s.slotId || s.url || i} sx={{ flex: '1 1 0', minWidth: 160 }}>
+            <Box key={s.slotId || s.url || i} sx={{ flex: '1 1 0', minWidth: { xs: '100%', sm: 160 } }}>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5, fontWeight: 600 }}>
                 {s.name || s.slotId || `Option ${i + 1}`}
               </Typography>
@@ -129,9 +129,10 @@ function MediaSequentialSlots({ slots }) {
       </Typography>
       <MediaPlayer url={current.url} type={current.type} name={current.name} />
       <Button
-        sx={{ mt: 1.5 }}
+        sx={{ mt: 1.5, minHeight: { xs: 44, sm: 32 } }}
         variant="outlined"
-        size="small"
+        size="medium"
+        fullWidth
         onClick={() => setIdx((i) => i + 1)}
       >
         {idx + 1 < slots.length ? 'Next media' : 'Done viewing'}
@@ -160,7 +161,7 @@ export function MediaSideBySide({ items = [] }) {
   return (
     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
       {otherItems.map((item, i) => (
-        <Box key={item.url || i} sx={{ flex: '1 1 0', minWidth: 200 }}>
+        <Box key={item.url || i} sx={{ flex: '1 1 0', minWidth: { xs: '100%', sm: 200 } }}>
           <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block', textAlign: 'center', fontWeight: 600 }}>
             {item.label || item.name || `Option ${String.fromCharCode(65 + i)}`}
           </Typography>
@@ -264,13 +265,30 @@ export function MediaTimedExposure({ url, type, name, exposureSeconds = 5 }) {
   if (phase === 'idle') {
     return (
       <Box sx={{
-        height: 260, borderRadius: 2, border: '1px dashed', borderColor: 'divider',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5, bgcolor: 'grey.50',
+        minHeight: { xs: 200, sm: 260 },
+        height: { xs: 'auto', sm: 260 },
+        borderRadius: 2,
+        border: '1px dashed',
+        borderColor: 'divider',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        justifyContent: 'center',
+        gap: 1.5,
+        bgcolor: 'grey.50',
+        px: 2,
+        py: 2,
       }}>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
           You will see the media for {exposureSeconds} second{exposureSeconds === 1 ? '' : 's'}. Watch carefully — it will not be shown again.
         </Typography>
-        <Button variant="contained" startIcon={<Visibility />} onClick={() => { setRemaining(exposureSeconds); setPhase('showing'); }}>
+        <Button
+          variant="contained"
+          fullWidth
+          startIcon={<Visibility />}
+          sx={{ minHeight: { xs: 44, sm: 36 } }}
+          onClick={() => { setRemaining(exposureSeconds); setPhase('showing'); }}
+        >
           I'm ready — show it
         </Button>
       </Box>

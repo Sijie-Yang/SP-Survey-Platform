@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Box, Button, Typography, Tooltip } from '@mui/material';
+import { Box, Button, Typography, Tooltip, useMediaQuery } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
   applyMediaToElement,
   getRememberedInjectedMedia,
@@ -167,6 +168,10 @@ function resolveInitialTrialIndex(question, trialCount, nav, answers) {
 }
 
 function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
+  const theme = useTheme();
+  // Align with SurveyJS --sd-mobile-width (600px)
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
   // Stable across renders — resolveTrialMediaSets fallback builds a new array each call.
   const trialMediaSets = useMemo(
     () => resolveTrialMediaSets(question, trialCount),
@@ -451,9 +456,10 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
                 border: '1px solid',
                 borderColor: gi === groupIdx ? 'primary.main' : 'divider',
                 borderRadius: 1,
-                px: 1,
-                py: 0.25,
-                fontSize: '0.7rem',
+                px: { xs: 1, sm: 1 },
+                py: { xs: 0.5, sm: 0.25 },
+                minHeight: { xs: 28, sm: 'auto' },
+                fontSize: { xs: '0.75rem', sm: '0.7rem' },
                 cursor: 'pointer',
                 bgcolor: gi === groupIdx ? 'primary.50' : 'transparent',
                 fontFamily: 'inherit',
@@ -465,7 +471,7 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
         </Box>
       )}
 
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 1.5 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 0.75, sm: 0.5 }, mb: 1.5 }}>
         {Array.from({ length: groupEnd - groupStart }, (_, j) => {
           const i = groupStart + j;
           const reached = i <= furthest;
@@ -481,14 +487,14 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
                 disabled={!reached}
                 onClick={() => reached && goTo(i)}
                 sx={{
-                  width: 16,
-                  height: 16,
+                  width: { xs: 22, sm: 16 },
+                  height: { xs: 22, sm: 16 },
                   borderRadius: '50%',
                   border: '2px solid',
                   borderColor: answered ? 'success.main' : 'grey.400',
                   bgcolor: answered ? 'success.light' : 'transparent',
                   boxShadow: isViewing
-                    ? (theme) => `0 0 0 2px ${theme.palette.background.paper}, 0 0 0 4px ${theme.palette.primary.main}`
+                    ? (t) => `0 0 0 1px ${t.palette.background.paper}, 0 0 0 ${isMobile ? 2 : 4}px ${t.palette.primary.main}`
                     : 'none',
                   p: 0,
                   cursor: reached ? 'pointer' : 'not-allowed',
@@ -512,12 +518,17 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
       </Box>
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', mt: 1 }}>
-        <Button size="small" variant="outlined" disabled={index === 0} onClick={handleBack}>
+        <Button
+          size={isMobile ? 'medium' : 'small'}
+          variant="outlined"
+          disabled={index === 0}
+          onClick={handleBack}
+        >
           Back
         </Button>
         {!onLastTrial && (
           <Button
-            size="small"
+            size={isMobile ? 'medium' : 'small'}
             variant="contained"
             disabled={!trialHasAnswer(answers.trials?.[index], question)}
             onClick={handleNext}

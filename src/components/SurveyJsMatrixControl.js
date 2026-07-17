@@ -106,6 +106,11 @@ export default function SurveyJsMatrixControl({
                             onChange={() => setCell(row.value, col.value)}
                           />
                           <span className="sd-item__decorator sd-radio__decorator" />
+                          {/* SurveyJS mobile hides thead; ::before is disabled on
+                              .sd-matrix__cell — column labels must be this span. */}
+                          <span className="sd-matrix__responsive-title">
+                            {col.text}
+                          </span>
                         </label>
                       </td>
                     );

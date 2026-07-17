@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
-  Box, Button, ButtonGroup, Typography, FormControl, InputLabel, Select, MenuItem, Chip, TextField, CircularProgress, Alert, IconButton,
+  Box, Button, Typography, FormControl, InputLabel, Select, MenuItem, Chip, TextField, CircularProgress, Alert, IconButton,
 } from '@mui/material';
 import { Check, Close } from '@mui/icons-material';
 import { runSam3, loadMaskUrlToCanvas, maskCanvasToPolygon } from '../lib/falInference';
@@ -805,21 +805,35 @@ export default function ImageAnnotationCanvas({
       sx={centerContent ? { width: '100%' } : undefined}
     >
       {!readOnly && (
-        <Box sx={{ mb: 1, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
-          <ButtonGroup size="small">
+        <Box
+          className="sp-annotation-toolbar"
+          sx={{
+            mb: 1,
+            display: 'flex',
+            gap: 1,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            width: '100%',
+            '& .MuiButton-root': {
+              minHeight: { xs: 40, sm: 30 },
+            },
+          }}
+        >
+          {/* Individual buttons wrap on phones; ButtonGroup does not */}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
             {tools.includes('point') && (
-              <Button variant={tool === 'point' ? 'contained' : 'outlined'} onClick={() => switchTool('point')}>Point</Button>
+              <Button size="small" variant={tool === 'point' ? 'contained' : 'outlined'} onClick={() => switchTool('point')}>Point</Button>
             )}
             {tools.includes('line') && (
-              <Button variant={tool === 'line' ? 'contained' : 'outlined'} onClick={() => switchTool('line')}>Line</Button>
+              <Button size="small" variant={tool === 'line' ? 'contained' : 'outlined'} onClick={() => switchTool('line')}>Line</Button>
             )}
             {tools.includes('region') && (
-              <Button variant={tool === 'region' ? 'contained' : 'outlined'} onClick={() => switchTool('region')}>Region</Button>
+              <Button size="small" variant={tool === 'region' ? 'contained' : 'outlined'} onClick={() => switchTool('region')}>Region</Button>
             )}
             {tools.includes('bbox') && (
-              <Button variant={tool === 'bbox' ? 'contained' : 'outlined'} onClick={() => switchTool('bbox')}>Box</Button>
+              <Button size="small" variant={tool === 'bbox' ? 'contained' : 'outlined'} onClick={() => switchTool('bbox')}>Box</Button>
             )}
-          </ButtonGroup>
+          </Box>
           <Button size="small" onClick={undo} disabled={!shapes.length && !draft}>Undo</Button>
           <Button size="small" color="error" onClick={clear} disabled={!shapes.length && !draft}>Clear</Button>
           <Button size="small" color="error" onClick={deleteSelected} disabled={!selectedId || !!draft}>Delete</Button>
@@ -854,7 +868,7 @@ export default function ImageAnnotationCanvas({
             placeholder="e.g. tree, building"
             value={samPrompt}
             onChange={(e) => setSamPrompt(e.target.value)}
-            sx={{ minWidth: 200 }}
+            sx={{ minWidth: { xs: '100%', sm: 200 }, flex: { xs: '1 1 100%', sm: '0 1 auto' } }}
           />
           <Button size="small" variant="outlined" disabled={samBusy} onClick={runSamTextPrompt}>
             Segment prompt
@@ -870,7 +884,7 @@ export default function ImageAnnotationCanvas({
       )}
       {!readOnly && annotationLabels?.length > 0 && (
         <Box sx={{ mb: 1, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
-          <FormControl size="small" sx={{ minWidth: 160 }}>
+          <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 160 } }}>
             <InputLabel>Active label</InputLabel>
             <Select
               label="Active label"
@@ -883,7 +897,7 @@ export default function ImageAnnotationCanvas({
             </Select>
           </FormControl>
           {selectedShape && (
-            <FormControl size="small" sx={{ minWidth: 160 }}>
+            <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 160 } }}>
               <InputLabel>Selected label</InputLabel>
               <Select
                 label="Selected label"
@@ -956,8 +970,8 @@ export default function ImageAnnotationCanvas({
           <Box
             sx={{
               position: 'absolute',
-              left: Math.min(dims.w - 76, Math.max(4, confirmPos.x - 36)),
-              top: Math.min(dims.h - 36, Math.max(4, confirmPos.y)),
+              left: Math.min(dims.w - 100, Math.max(4, confirmPos.x - 44)),
+              top: Math.min(dims.h - 52, Math.max(4, confirmPos.y)),
               display: 'flex',
               gap: 0.5,
               zIndex: 3,
@@ -965,27 +979,29 @@ export default function ImageAnnotationCanvas({
               borderRadius: 1,
               boxShadow: 1,
               p: 0.25,
+              '& .MuiIconButton-root': {
+                minWidth: 44,
+                minHeight: 44,
+              },
             }}
             onPointerDown={(e) => e.stopPropagation()}
           >
             <IconButton
-              size="small"
               color="success"
               aria-label="Confirm annotation"
               onClick={confirmDraft}
               disabled={!canConfirm}
               title={canConfirm ? 'Confirm' : 'Add more points first'}
             >
-              <Check fontSize="small" />
+              <Check />
             </IconButton>
             <IconButton
-              size="small"
               color="error"
               aria-label="Discard annotation"
               onClick={cancelDraft}
               title="Discard"
             >
-              <Close fontSize="small" />
+              <Close />
             </IconButton>
           </Box>
         )}

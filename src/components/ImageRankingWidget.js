@@ -1,15 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { useSortable } from '@dnd-kit/sortable';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Box, Typography, Card } from '@mui/material';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { resolveQuestionImageChoices } from '../lib/questionImageChoices';
 
-// Sortable Item Component
 function SortableItem({ id, image, index }) {
-  console.log('SortableItem - id:', id, 'image:', image, 'index:', index);
-  
   const {
     attributes,
     listeners,
@@ -27,8 +38,8 @@ function SortableItem({ id, image, index }) {
 
   if (!image || !image.imageLink) {
     return (
-      <Card sx={{ mb: 2, p: 2, bgcolor: 'error.light' }}>
-        <Typography>Error: No image data - {JSON.stringify(image)}</Typography>
+      <Card sx={{ mb: 1, p: 2, bgcolor: 'error.light' }}>
+        <Typography>Error: No image data</Typography>
       </Card>
     );
   }
@@ -37,38 +48,27 @@ function SortableItem({ id, image, index }) {
     <Card
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
       className="sp-image-gallery__item"
       sx={{
-        cursor: 'grab',
-        '&:active': { cursor: 'grabbing' },
         position: 'relative',
-        '&:hover': {
-          boxShadow: 3,
-        },
-        // Card itself stays full row width so the entire row is a drag
-        // hit-area; only the inner image-container is sized to the image.
         width: '100%',
         background: 'transparent',
+        display: 'flex',
+        alignItems: 'stretch',
+        overflow: 'hidden',
+        mb: 0,
       }}
     >
       <Box
         className="sp-image-gallery__image-container"
-        sx={{ position: 'relative', lineHeight: 0 }}
+        sx={{ position: 'relative', lineHeight: 0, flex: '0 0 auto', minWidth: 0 }}
       >
         <Box
           component="img"
           src={image.imageLink}
           alt={`Image ${index + 1}`}
           sx={{ display: 'block' }}
-          onError={(e) => {
-            console.error('Image failed to load:', image.imageLink);
-            e.target.style.display = 'none';
-          }}
-          onLoad={() => {
-            console.log('Image loaded successfully:', image.imageLink);
-          }}
+          draggable={false}
         />
         <Box
           sx={{
@@ -83,31 +83,57 @@ function SortableItem({ id, image, index }) {
             fontSize: '0.875rem',
             fontWeight: 'bold',
             zIndex: 1,
+            pointerEvents: 'none',
           }}
         >
           #{index + 1}
         </Box>
       </Box>
+      {/* Drag only via handle — rest of row scrolls the page on touch */}
+      <Box
+        {...attributes}
+        {...listeners}
+        aria-label={`Drag to reorder image ${index + 1}`}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flex: '0 0 auto',
+          width: { xs: 44, sm: 40 },
+          touchAction: 'none',
+          cursor: 'grab',
+          bgcolor: 'action.hover',
+          borderLeft: '1px solid',
+          borderColor: 'divider',
+          '&:active': { cursor: 'grabbing' },
+        }}
+      >
+        <DragIndicatorIcon fontSize="small" color="action" />
+      </Box>
     </Card>
   );
 }
 
-// Main Image Ranking Widget Component
 export default function ImageRankingWidget({ question, value, onValueChanged, trialStimulusMedia = null }) {
   const [items, setItems] = useState([]);
-  
+
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(MouseSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+    // Long-press before drag so vertical scroll still works on phones
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 220, tolerance: 8 },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-    })
+    }),
   );
 
   const trialMediaKey = Array.isArray(trialStimulusMedia)
     ? trialStimulusMedia.map((m) => (typeof m === 'string' ? m : m?.url)).filter(Boolean).join('|')
     : '';
 
-  // Initialize items from choices / imageLinks / active trial media
   useEffect(() => {
     const resolved = resolveQuestionImageChoices(question, trialStimulusMedia);
     if (!resolved.length) {
@@ -134,59 +160,54 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
     }
   }, [question, question.choices, question.imageLinks, value, trialMediaKey, trialStimulusMedia]);
 
-  // Handle drag end
   function handleDragEnd(event) {
     const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-    if (active.id !== over?.id) {
-      setItems((items) => {
-        const oldIndex = items.findIndex(item => item.id === active.id);
-        const newIndex = items.findIndex(item => item.id === over.id);
-        
-        const newItems = arrayMove(items, oldIndex, newIndex);
-        
-        // Update the survey value with the new order
-        const newValue = newItems.map(item => item.value);
-        onValueChanged(newValue);
-        
-        return newItems;
-      });
-    }
+    setItems((prev) => {
+      const oldIndex = prev.findIndex((item) => item.id === active.id);
+      const newIndex = prev.findIndex((item) => item.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return prev;
+      const newItems = arrayMove(prev, oldIndex, newIndex);
+      onValueChanged(newItems.map((item) => item.value));
+      return newItems;
+    });
   }
-
-  console.log('ImageRankingWidget - render - items:', items);
-  console.log('ImageRankingWidget - render - items.length:', items.length);
 
   if (!items || items.length === 0) {
     return (
       <Box sx={{ p: 2, textAlign: 'center', color: 'text.secondary' }}>
         <Typography>No images available for ranking</Typography>
-        <Typography variant="caption">Items: {JSON.stringify(items)}</Typography>
       </Box>
     );
   }
 
   return (
-    <Box
-      className="sp-image-gallery sp-image-gallery--vertical"
-      sx={{ width: '100%', maxWidth: 600, mx: 'auto' }}
-    >
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
+    <Box sx={{ width: '100%', maxWidth: 600, mx: 'auto' }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        Drag the handle on the right to reorder (touch: press & hold).
+      </Typography>
+      <Box
+        className="sp-image-gallery sp-image-gallery--vertical sp-image-gallery--with-handle"
+        sx={{ width: '100%' }}
       >
-        <SortableContext items={items.map(item => item.id)} strategy={verticalListSortingStrategy}>
-          {items.map((item, index) => (
-            <SortableItem
-              key={item.id}
-              id={item.id}
-              image={item}
-              index={index}
-            />
-          ))}
-        </SortableContext>
-      </DndContext>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+            {items.map((item, index) => (
+              <SortableItem
+                key={item.id}
+                id={item.id}
+                image={item}
+                index={index}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+      </Box>
     </Box>
   );
 }

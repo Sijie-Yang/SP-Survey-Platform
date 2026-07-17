@@ -27,6 +27,8 @@ export function SurveyJsRatingControl({
     ? null
     : Number(value);
 
+  const hasEdgeLabels = !!(minRateDescription || maxRateDescription);
+
   return (
     <Box
       className="sd-scrollable-container sd-rating sd-rating--wrappable sp-surveyjs-rating"
@@ -35,16 +37,43 @@ export function SurveyJsRatingControl({
         width: '100%',
         '& fieldset': {
           display: 'flex',
-          flexWrap: 'wrap',
+          // Wide scales (e.g. 0–10) wrap on phones; short 1–5 stay one row
+          flexWrap: values.length > 7 ? 'wrap' : 'nowrap',
           alignItems: 'center',
-          gap: '4px',
+          justifyContent: { xs: values.length > 7 ? 'center' : 'space-between', sm: 'flex-start' },
+          gap: { xs: '2px', sm: '4px' },
           border: 0,
           margin: 0,
           padding: 0,
           minInlineSize: 0,
+          width: '100%',
         },
       }}
     >
+      {/* Phones: labels above scale so long Chinese text does not wrap mid-row */}
+      {hasEdgeLabels ? (
+        <Box
+          sx={{
+            display: { xs: 'flex', sm: 'none' },
+            justifyContent: 'space-between',
+            gap: 1,
+            mb: 0.75,
+            width: '100%',
+          }}
+        >
+          <Typography variant="caption" color="text.secondary" sx={{ flex: 1, lineHeight: 1.3 }}>
+            {minRateDescription || ''}
+          </Typography>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ flex: 1, lineHeight: 1.3, textAlign: 'right' }}
+          >
+            {maxRateDescription || ''}
+          </Typography>
+        </Box>
+      ) : null}
+
       <fieldset role="radiogroup" aria-label="Rating">
         {minRateDescription ? (
           <span className="sd-rating__item-text sd-rating__min-text">{minRateDescription}</span>

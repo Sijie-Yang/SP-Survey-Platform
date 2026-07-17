@@ -1184,7 +1184,16 @@ export default function SurveyApp() {
       
       {surveyModel && surveyPhase === 'active' && (
         <SurveyTrialNavProvider>
-          <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }} className="sp-survey-with-progress">
+          <Box
+            sx={{
+              maxWidth: 1200,
+              mx: 'auto',
+              // Phones: horizontal gutters come from SurveyJS .sd-body (see index.css)
+              px: { xs: 0, sm: 2 },
+              py: { xs: 1, sm: 3 },
+            }}
+            className="sp-survey-with-progress"
+          >
             <SurveyProgressBridge
               surveyModel={surveyModel}
               progressEnabled={progressChromeEnabledRef.current}

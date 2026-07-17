@@ -501,7 +501,10 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
             </TableContainer>
           </Box>
         )}
-        <Box sx={{ maxWidth: 900, mx: 'auto', px: 2 }}>
+        <Box
+          sx={{ maxWidth: 900, mx: 'auto', px: { xs: 0, sm: 2 } }}
+          className="sp-survey-with-progress"
+        >
           <SurveyTrialNavProvider>
             <SurveyProgressBridge
               surveyModel={model}
