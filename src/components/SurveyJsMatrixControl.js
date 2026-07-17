@@ -63,7 +63,8 @@ export default function SurveyJsMatrixControl({
                   key={String(col.value)}
                   className="sd-table__cell sd-table__cell--header"
                 >
-                  {col.text}
+                  {/* SurveyJS sets header font-size:0 and only restores it on span children */}
+                  <span>{col.text}</span>
                 </th>
               ))}
             </tr>
