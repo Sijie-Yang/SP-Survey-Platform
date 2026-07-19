@@ -1,4 +1,7 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+const API_BASE_URL =
+  process.env.REACT_APP_SERVER_URL
+  || process.env.REACT_APP_API_URL
+  || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
 
 /**
  * Generate or revise a custom skill via AI.

@@ -142,6 +142,30 @@ export function createCustomTheme(themeKey = DEFAULT_THEME_KEY) {
             textTransform: 'none',
             fontWeight: 600,
             borderRadius: 8,
+            '&.Mui-focusVisible': {
+              outline: `3px solid ${cfg.primary}55`,
+              outlineOffset: 2,
+            },
+          },
+        },
+      },
+      MuiIconButton: {
+        styleOverrides: {
+          root: {
+            '&.Mui-focusVisible': {
+              outline: `3px solid ${cfg.primary}55`,
+              outlineOffset: 2,
+            },
+          },
+        },
+      },
+      MuiTab: {
+        styleOverrides: {
+          root: {
+            '&.Mui-focusVisible': {
+              outline: `3px solid ${cfg.primary}55`,
+              outlineOffset: -3,
+            },
           },
         },
       },

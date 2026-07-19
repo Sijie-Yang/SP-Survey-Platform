@@ -26,8 +26,9 @@ Design image-based questionnaires in a drag-and-drop admin panel, share a link w
 
 ## Highlights
 
+- **ChatGPT (Codex) via MCP** — design surveys, upload media, share links, and analyze results from ChatGPT using the remote `sp_survey` MCP (OAuth; no API key on this site)
 - **No-code survey builder** — image choice, rating, ranking, matrix, annotation, media panels, and custom skill iframes
-- **AI-assisted design** — generate and refine surveys from natural language (optional OpenAI key)
+- **In-browser AI assistant** — optional OpenAI / OpenRouter key for the builder chat panel
 - **Research templates** — start from peer-reviewed designs (Place Pulse, SPECS, thermal affordance, and more)
 - **Cloud media** — upload images (browser-side compression) or import Hugging Face datasets
 - **Share & analyze** — live survey links, TrueSkill / reliability metrics, CSV export with `__shown_images`
@@ -35,11 +36,49 @@ Design image-based questionnaires in a drag-and-drop admin panel, share a link w
 
 ---
 
+## ChatGPT (Codex) + MCP
+
+Design and run a study almost entirely from **ChatGPT (Codex)** through the platform’s remote MCP:
+
+1. Sign in at **[sp-survey.org/admin](https://sp-survey.org/admin)**
+2. Open toolbar **AI** → **AI & Integrations**
+3. Set ChatGPT (Codex) permission to **Approve for me**, paste the setup message, and approve OAuth in your browser
+4. Start a **new** Codex chat and ask it to use `sp_survey` (topic, question types, media now or later)
+5. Share the live survey link with participants — **saves update the link immediately**
+6. Ask Codex to summarize / export results for a project when data comes in
+
+Example prompt:
+
+```text
+Using sp_survey MCP, create a survey about <your topic description>.
+Add question types <question type description>.
+I have media datasets <description> at <folder location>. (can be done later)
+```
+
+Local Codex config (`~/.codex/config.toml`):
+
+```toml
+mcp_oauth_credentials_store = "keyring"
+
+[mcp_servers.sp_survey]
+url = "https://sp-survey.org/mcp"
+auth = "oauth"
+scopes = ["surveys:read", "surveys:write", "surveys:publish", "media:write", "results:read"]
+```
+
+```bash
+codex mcp login sp_survey
+```
+
+MCP covers project lifecycle, draft editing (`survey_apply_operations`), media upload / set–category tags, and results list/export/summary. Full tool catalog and deploy notes: [`docs/agent-mcp.md`](./docs/agent-mcp.md) · agent workflow: [`AGENTS.md`](./AGENTS.md).
+
+---
+
 ## Use
 
 ### Hosted (recommended)
 
-Go to **[sp-survey.org](https://sp-survey.org)**, create an account, and start building. Cloud storage, auth, and live links are handled for you.
+Go to **[sp-survey.org](https://sp-survey.org)**, create an account, and start building. Cloud storage, auth, and live links are handled for you. Connect ChatGPT (Codex) under **Admin → AI** as above.
 
 ### Self-host (open source)
 

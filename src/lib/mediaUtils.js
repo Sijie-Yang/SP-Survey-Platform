@@ -67,8 +67,8 @@ export function normalizeMediaEntry(entry, projectPrefix = null) {
   }
   const name = entry.name || entry.url?.split('?')[0].split('/').pop() || '';
   const mediaId = entry.media_id || entry.key || name || entry.url || '';
-  const folder = entry.folder != null
-    ? normalizeFolderPath(entry.folder)
+  const folder = entry.folder != null && String(entry.folder).trim() !== ''
+    ? normalizeProjectRelativeFolder(entry.folder)
     : folderFromR2Key(entry.key, projectPrefix);
   return {
     name,
@@ -198,11 +198,32 @@ export function joinFolderPath(...parts) {
 }
 
 /**
+ * Strip platform ownership / template library prefixes from path segments.
+ * Tags and set/category matching use project-relative folders (e.g. "street"),
+ * never "userId/projectId/street".
+ */
+export function stripOwnershipPathSegments(segs) {
+  const parts = (segs || []).filter(Boolean);
+  if (parts.length < 2) return parts;
+  if (/^(templates|builtin)$/i.test(parts[0]) && parts.length >= 3) {
+    return parts.slice(2);
+  }
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  // Platform R2 keys: {userId}/{projectId}/... — strip even when projectPrefix is unknown.
+  if (uuidRe.test(parts[0]) || /^proj_/i.test(parts[1])) {
+    return parts.slice(2);
+  }
+  return parts;
+}
+
+/**
  * Relative folder of an R2 object key under a project prefix.
  * e.g. key=user/proj/a/b/x.jpg, prefix=user/proj/ → folder "a/b"
  * Also understands template library keys:
  *   templates/{id}/study2/x.jpg → study2
  *   builtin/{id}/study2/x.jpg → study2
+ * When projectPrefix is missing, still strips {userId}/{projectId}/ so runtime
+ * set/category tags (relative paths) match MCP / legacy preloadedImages.
  */
 export function folderFromR2Key(key, projectPrefix) {
   if (!key) return '';
@@ -210,18 +231,20 @@ export function folderFromR2Key(key, projectPrefix) {
   const prefix = projectPrefix ? String(projectPrefix).replace(/^\/+/, '').replace(/\/?$/, '/') : '';
   if (prefix && rel.startsWith(prefix)) {
     rel = rel.slice(prefix.length);
-  } else if (/^(templates|builtin)\//.test(rel)) {
-    // templates/{id}/... or builtin/{id}/... → strip owner + id
-    const segs = rel.split('/');
-    if (segs.length >= 3) rel = segs.slice(2).join('/');
-  } else if (prefix) {
-    // Not under this prefix — try stripping first two segments (userId/projectId/)
-    const segs = rel.split('/');
-    if (segs.length >= 3) rel = segs.slice(2).join('/');
+  } else {
+    const segs = stripOwnershipPathSegments(rel.split('/'));
+    rel = segs.join('/');
   }
   const parts = rel.split('/').filter(Boolean);
   if (parts.length <= 1) return '';
   return parts.slice(0, -1).join('/');
+}
+
+/** Ensure a stored folder field is project-relative (not userId/projectId/...). */
+export function normalizeProjectRelativeFolder(folder) {
+  const normalized = normalizeFolderPath(folder);
+  if (!normalized) return '';
+  return stripOwnershipPathSegments(normalized.split('/')).join('/');
 }
 
 /** Basename of a path or filename. */

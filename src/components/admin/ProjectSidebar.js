@@ -100,6 +100,9 @@ import {
 import { supabase } from '../../lib/supabase';
 import { isR2Configured, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix } from '../../lib/r2';
 
+import { useRegion } from '../../contexts/RegionContext';
+import { tf } from '../../contexts/adminI18n';
+
 export default function ProjectSidebar({ 
   open, 
   onClose, 
@@ -110,6 +113,7 @@ export default function ProjectSidebar({
   projectStates = {},
   width = 400 
 }) {
+  const { t } = useRegion();
   const [projects, setProjects] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState(null);
@@ -422,7 +426,7 @@ export default function ProjectSidebar({
   const handleApplyLiveSurvey = async () => {
     if (!menuProject) return;
     if (!supabase) {
-      setError('Live Surveys require platform mode (Supabase). Self-hosted installs use share links instead.');
+      setError('Publishing to the main page requires platform mode (Supabase). Self-hosted installs use share links instead.');
       handleMenuClose();
       return;
     }
@@ -479,11 +483,11 @@ export default function ProjectSidebar({
       setProjectForLive(null);
       const msg = result.mode === 'window_change'
         ? 'Online window change submitted for admin review. The current approved window stays active until approved.'
-        : 'Live Survey application submitted for admin review.';
+        : 'Main page application submitted for admin review.';
       alert(msg);
     } catch (err) {
       console.error('applyLiveListing failed:', err);
-      setError(err.message || 'Failed to submit Live Survey application');
+      setError(err.message || 'Failed to submit main page application');
     } finally {
       setIsSavingLiveListing(false);
     }
@@ -931,7 +935,7 @@ export default function ProjectSidebar({
         <Box sx={{ p: 1.5 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
             <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1.1rem' }}>
-              Projects
+              {t.sidebarProjects}
             </Typography>
             <IconButton onClick={onClose} size="small">
               <Close />
@@ -950,7 +954,7 @@ export default function ProjectSidebar({
               <ListItemText 
                 primary={
                   <Typography variant="subtitle2" sx={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
-                    Project Templates
+                    {t.sidebarTemplates}
                   </Typography>
                 } 
                 sx={{ my: 0 }}
@@ -964,7 +968,7 @@ export default function ProjectSidebar({
                 <Box sx={{ px: 1, pt: 0.5, pb: 1 }}>
                   <TextField
                     size="small"
-                    placeholder="Search templates..."
+                    placeholder={t.sidebarSearchTemplates}
                     fullWidth
                     value={templateSearch}
                     onChange={e => setTemplateSearch(e.target.value)}
@@ -1220,7 +1224,7 @@ export default function ProjectSidebar({
                 <ListItemText 
                   primary={
                     <Typography variant="subtitle2" sx={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
-                      My Projects ({projects.length})
+                      {tf(t.sidebarMyProjects, { n: projects.length })}
                     </Typography>
                   }
                   sx={{ my: 0 }}
@@ -1228,7 +1232,7 @@ export default function ProjectSidebar({
                 {projectsExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
               </ListItemButton>
               <Box sx={{ display: 'flex', gap: 0.5 }}>
-                <Tooltip title="Import Project">
+                <Tooltip title={t.sidebarImportProject}>
                   <IconButton component="label" size="small" color="primary">
                     <Upload />
                     <input
@@ -1239,7 +1243,7 @@ export default function ProjectSidebar({
                     />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title="Create New Project">
+                <Tooltip title={t.sidebarCreateProject}>
                   <IconButton 
                     onClick={() => setCreateDialog(true)}
                     size="small"
@@ -1258,7 +1262,7 @@ export default function ProjectSidebar({
                     <ListItemText 
                       primary={
                         <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', fontSize: '0.75rem' }}>
-                          No projects yet. Create your first project!
+                          {t.sidebarNoProjects}
                         </Typography>
                       }
                     />
@@ -1439,40 +1443,40 @@ export default function ProjectSidebar({
       >
         <MenuItem onClick={handleEditProject}>
           <ListItemIcon><Edit /></ListItemIcon>
-          <ListItemText>Edit Project</ListItemText>
+          <ListItemText>{t.sidebarEditProject}</ListItemText>
         </MenuItem>
         <MenuItem onClick={handleDuplicateProject}>
           <ListItemIcon><FileCopy /></ListItemIcon>
-          <ListItemText>Duplicate</ListItemText>
+          <ListItemText>{t.sidebarDuplicate}</ListItemText>
         </MenuItem>
         <MenuItem onClick={handleExportProject}>
           <ListItemIcon><Download /></ListItemIcon>
-          <ListItemText>Export Project</ListItemText>
+          <ListItemText>{t.sidebarExportProject}</ListItemText>
         </MenuItem>
         <MenuItem onClick={handleExportAsTemplate}>
           <ListItemIcon><Description /></ListItemIcon>
-          <ListItemText>Save as Template</ListItemText>
+          <ListItemText>{t.sidebarSaveAsTemplate}</ListItemText>
         </MenuItem>
         <MenuItem onClick={handleApplyLiveSurvey}>
           <ListItemIcon><Public /></ListItemIcon>
-          <ListItemText>Publish to Live Surveys</ListItemText>
+          <ListItemText>{t.sidebarPublishMain}</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem onClick={handleDeleteProject} sx={{ color: 'error.main' }}>
           <ListItemIcon><Delete color="error" /></ListItemIcon>
-          <ListItemText>Delete</ListItemText>
+          <ListItemText>{t.sidebarDelete}</ListItemText>
         </MenuItem>
       </Menu>
 
       {/* Create Project Dialog */}
       <Dialog open={createDialog} onClose={() => setCreateDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Create New Project</DialogTitle>
+        <DialogTitle>{t.sidebarCreateProject}</DialogTitle>
         <DialogContent>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           <TextField
             autoFocus
             margin="dense"
-            label="Project Name"
+            label={t.sidebarProjectName}
             fullWidth
             variant="outlined"
             value={newProjectName}
@@ -1481,7 +1485,7 @@ export default function ProjectSidebar({
           />
           <TextField
             margin="dense"
-            label="Description (Optional)"
+            label={t.sidebarDescriptionOptional}
             fullWidth
             multiline
             rows={3}
@@ -1491,8 +1495,8 @@ export default function ProjectSidebar({
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialog(false)}>Cancel</Button>
-          <Button onClick={handleCreateProject} variant="contained">Create</Button>
+          <Button onClick={() => setCreateDialog(false)}>{t.sidebarCancel}</Button>
+          <Button onClick={handleCreateProject} variant="contained">{t.sidebarCreate}</Button>
         </DialogActions>
       </Dialog>
 
@@ -1860,7 +1864,7 @@ export default function ProjectSidebar({
         </DialogActions>
       </Dialog>
 
-      {/* Publish to Live Surveys Dialog */}
+      {/* Publish to Main Page Dialog */}
       <Dialog
         open={liveListingDialog}
         onClose={(_, reason) => {
@@ -1874,15 +1878,15 @@ export default function ProjectSidebar({
       >
         <DialogTitle>
           {existingLiveListing?.status === 'approved'
-            ? 'Change Live Surveys window'
-            : 'Publish to Live Surveys'}
+            ? 'Change Main Page window'
+            : 'Publish to Main Page'}
         </DialogTitle>
         <DialogContent>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           <Alert severity="info" sx={{ mb: 2 }}>
             {existingLiveListing?.status === 'approved'
               ? 'Request a new online window. Your current approved window stays active until an admin approves the change. Survey content always stays in sync with this project.'
-              : 'Submit this project for the public Live Surveys page. An admin must approve it. Participants always take the latest project (not a snapshot).'}
+              : 'Submit this project for the main page. An admin must approve it. Participants always take the latest project (not a snapshot).'}
           </Alert>
           {existingLiveListing && (
             <Alert
@@ -1960,7 +1964,7 @@ export default function ProjectSidebar({
             value={liveEnd}
             onChange={(e) => setLiveEnd(e.target.value)}
             InputLabelProps={{ shrink: true }}
-            helperText="After this time the Live Surveys card turns grey / closed"
+            helperText="After this time the main page card turns grey / closed"
           />
         </DialogContent>
         <DialogActions>

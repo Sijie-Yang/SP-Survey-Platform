@@ -38,6 +38,7 @@ import {
   Avatar,
   Collapse
 } from '@mui/material';
+import { useRegion } from '../../contexts/RegionContext';
 import {
   ExpandMore,
   Add,
@@ -81,6 +82,7 @@ import ConfirmDialog from '../layout/ConfirmDialog';
 import QuestionEditor from './QuestionEditor';
 import ChatAssistant from './ChatAssistant';
 import SurveyThemePreviewPanel from '../SurveyThemePreviewPanel';
+import { AdminPageHeader } from './AdminPageLayout';
 import {
   allocateUniqueName,
   allocateUniquePageName,
@@ -92,7 +94,8 @@ import {
 import { getConversationHistory } from '../../lib/conversationHistory';
 import { getWorkingMemory } from '../../lib/workingMemory';
 import { getSessionLearning } from '../../lib/sessionLearning';
-import { sendChatMessage, validateApiKey as validateChatApiKey, triggerMultiAgentReviewStream } from '../../lib/chatApi';
+import { sendChatMessage, validateChatApiKey, triggerMultiAgentReviewStream } from '../../lib/chatApi';
+import { postProcessAiConfig, getSurveyValidationWarningStrings } from '../../lib/designProtocol';
 
 /** Compact color picker row for Theme Customization */
 function ThemeColorField({ label, hint, value, onChange }) {
@@ -278,6 +281,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
 }
 
 export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete }) {
+  const { t } = useRegion();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
 
@@ -313,13 +317,17 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     }
   }, [themeCustomizationCollapsed, themeCustomizationKey]);
   
-  // Chat Assistant states - with localStorage persistence
+  // Chat Assistant credentials — platform mode uses encrypted server storage.
+  const isPlatformMode = !!process.env.REACT_APP_SUPABASE_URL;
   const [openaiApiKey, setOpenaiApiKey] = useState(() => {
+    if (process.env.REACT_APP_SUPABASE_URL) return '';
     return localStorage.getItem('openaiApiKey') || '';
   });
   const [apiKeyValid, setApiKeyValid] = useState(() => {
+    if (process.env.REACT_APP_SUPABASE_URL) return false;
     return localStorage.getItem('apiKeyValid') === 'true';
   });
+  const [credentialHint, setCredentialHint] = useState('');
   const [userMessage, setUserMessage] = useState('');
   const aiUndoSnapshotRef = useRef(null);
   const [aiUndoAvailable, setAiUndoAvailable] = useState(false);
@@ -375,17 +383,44 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
     })
   );
 
-  // Persist settings to localStorage whenever they change
+  // Self-hosted only: legacy localStorage key persistence.
   useEffect(() => {
+    if (isPlatformMode) return;
     if (openaiApiKey) {
       localStorage.setItem('openaiApiKey', openaiApiKey);
-      console.log('💾 Saved API key to localStorage');
     }
-  }, [openaiApiKey]);
+  }, [openaiApiKey, isPlatformMode]);
 
   useEffect(() => {
+    if (isPlatformMode) return;
     localStorage.setItem('apiKeyValid', apiKeyValid.toString());
-  }, [apiKeyValid]);
+  }, [apiKeyValid, isPlatformMode]);
+
+  // Platform mode: load encrypted credential status from Worker
+  useEffect(() => {
+    if (!isPlatformMode) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getCredentialStatus } = await import('../../lib/agentApi');
+        const status = await getCredentialStatus();
+        if (cancelled) return;
+        if (status?.openai?.configured) {
+          setApiKeyValid(true);
+          setCredentialHint(status.openai.hint || '');
+          setOpenaiApiKey(''); // never keep plaintext in React state
+          localStorage.removeItem('openaiApiKey');
+          localStorage.removeItem('apiKeyValid');
+        } else {
+          setApiKeyValid(false);
+          setCredentialHint('');
+        }
+      } catch (err) {
+        console.warn('Credential status check failed:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isPlatformMode, currentProject?.id]);
 
   // Save settings to localStorage when they change (per project)
   useEffect(() => {
@@ -852,44 +887,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   };
 
   // ✅ Post-process AI-generated config to ensure all image questions have correct settings
-  const processAIGeneratedConfig = (surveyConfig) => {
-    const imageQuestionTypes = ['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'];
-    
-    const processedConfig = JSON.parse(JSON.stringify(surveyConfig)); // Deep clone
-    
-    if (processedConfig.pages && Array.isArray(processedConfig.pages)) {
-      processedConfig.pages.forEach(page => {
-        if (page.elements && Array.isArray(page.elements)) {
-          page.elements.forEach(element => {
-            if (imageQuestionTypes.includes(element.type)) {
-              // Ensure image questions have correct default settings
-              if (!element.imageSelectionMode || element.imageSelectionMode === 'random') {
-                element.imageSelectionMode = 'huggingface_random';
-              }
-              element.randomImageSelection = true;
-              if (element.excludePreviouslyUsedImages === undefined) {
-                element.excludePreviouslyUsedImages = true;
-              }
-              if (!element.choices) {
-                element.choices = [];
-              }
-              if (element.type === 'imagematrix' && !element.imageLinks) {
-                element.imageLinks = [];
-              }
-              
-              // ✅ Remove unnecessary global config fields that should not be saved per question
-              delete element.imageSource;
-              delete element.huggingFaceConfig;
-              
-              console.log(`✅ Post-processed ${element.type} question: ${element.name}`);
-            }
-          });
-        }
-      });
-    }
-    
-    return processedConfig;
-  };
+  const processAIGeneratedConfig = (surveyConfig) => postProcessAiConfig(surveyConfig);
 
   // AI Assistant handlers
   // Validate API Key
@@ -950,10 +948,12 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       return;
     }
     
-    if (!openaiApiKey || !apiKeyValid) {
+    if (!apiKeyValid && !(openaiApiKey && !isPlatformMode)) {
       if (conversationHistoryRef.current) {
-        conversationHistoryRef.current.addMessage('assistant', 
-          '⚠️ Please configure and validate your API key in settings first.',
+        conversationHistoryRef.current.addMessage('assistant',
+          isPlatformMode
+            ? '⚠️ Store an OpenAI / OpenRouter key under AI & Integrations first (toolbar AI button).'
+            : '⚠️ Please configure and validate your API key in settings first.',
           { actionType: 'system', error: true }
         );
         setConversationMessages(conversationHistoryRef.current.getAllMessages());
@@ -1341,45 +1341,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
   // Old handlers removed - now using unified handleSendMessage
 
-  const getSurveyValidationWarnings = (cfg) => {
-    if (!cfg?.pages) return [];
-    const warnings = [];
-    const imageTypes = [
-      'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image',
-      'imageannotation', 'skillquestion', 'imageslidergroup', 'imagepointallocation',
-      'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
-      'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-    ];
-
-    findDuplicateQuestionNames(cfg).forEach((dup) => {
-      warnings.push(
-        `Duplicate question id "${dup.name}" appears ${dup.count} times — answers will overwrite each other.`,
-      );
-    });
-
-    cfg.pages.forEach((page, pi) => {
-      const pageTitle = page.title || `Page ${pi + 1}`;
-      if (!page.elements?.length) {
-        warnings.push(`Page "${pageTitle}" has no questions.`);
-      }
-      (page.elements || []).forEach((el) => {
-        if (imageTypes.includes(el.type)) {
-          const hasManual = el.selectedImageUrls?.length || el.choices?.length || el.imageLinks?.length || el.annotationImageUrl;
-          const hasRandom = el.randomImageSelection !== false || el.imageSelectionMode === 'huggingface_random';
-          if (!hasManual && !hasRandom && el.type !== 'skillquestion') {
-            warnings.push(`"${el.title || el.name}" may have no images configured.`);
-          }
-        }
-        if ((el.type === 'slidergroup' || el.type === 'imageslidergroup' || el.type === 'mediaslidergroup') && !el.dimensions?.length) {
-          warnings.push(`Slider group "${el.title || el.name}" has no dimensions configured.`);
-        }
-        if ((el.type === 'pointallocation' || el.type === 'imagepointallocation') && !el.choices?.length) {
-          warnings.push(`Point allocation "${el.title || el.name}" has no choices configured.`);
-        }
-      });
-    });
-    return warnings;
-  };
+  const getSurveyValidationWarnings = (cfg) => getSurveyValidationWarningStrings(cfg);
 
   const validationWarnings = getSurveyValidationWarnings(config);
   const duplicateQuestionIssues = findDuplicateQuestionNames(config);
@@ -1437,13 +1399,11 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
   return (
     <Box>
-      <Typography variant="h5" sx={{ mb: 1, color: 'primary.main' }}>
-        🛠️ Survey Builder
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Build your survey with pages, questions, and theme. Use the AI assistant
-        below to draft and refine questions, then preview the result before sharing.
-      </Typography>
+      <AdminPageHeader
+        icon={<Edit />}
+        title={t.builderTitle}
+        description={t.builderDescription}
+      />
 
       {validationWarnings.length > 0 && (
         <Alert
@@ -1483,6 +1443,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         loadingStatus={loadingStatus}
         apiKeyValid={apiKeyValid}
         openaiApiKey={openaiApiKey}
+        credentialHint={credentialHint}
+        isPlatformMode={isPlatformMode}
         contextEnabled={contextEnabled}
         multiAgentReviewEnabled={multiAgentReviewEnabled}
         reviewMode={reviewMode}
@@ -1531,23 +1493,23 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       {/* Survey Settings - Unified Panel */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMore />}>
-          <Typography variant="h6">Survey Settings</Typography>
+          <Typography variant="h6">{t.builderSurveySettings}</Typography>
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {/* Basic Information */}
             <Box>
               <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-                📝 Basic Information
+                {t.builderBasicInfo}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TextField
                   fullWidth
                   variant="outlined"
-                  label="Survey Title"
+                  label={t.builderSurveyTitle}
                   value={config.title || ''}
                   onChange={(e) => handleBasicInfoChange('title', e.target.value)}
-                  helperText="The main title that appears at the top of your survey"
+                  helperText={t.builderSurveyTitleHelp}
                 />
                 
                 <TextField
@@ -1555,10 +1517,10 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   variant="outlined"
                   multiline
                   rows={3}
-                  label="Survey Description"
+                  label={t.builderSurveyDescription}
                   value={config.description || ''}
                   onChange={(e) => handleBasicInfoChange('description', e.target.value)}
-                  helperText="A brief description explaining the purpose of your survey"
+                  helperText={t.builderSurveyDescriptionHelp}
                 />
 
                 <TextField
@@ -1566,23 +1528,23 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   variant="outlined"
                   multiline
                   rows={2}
-                  label="Completion Message (optional)"
+                  label={t.builderCompletionMessage}
                   value={config.completionMessage || ''}
                   onChange={(e) => handleBasicInfoChange('completionMessage', e.target.value)}
-                  helperText="Shown to participants after they submit the survey"
+                  helperText={t.builderCompletionMessageHelp}
                 />
 
                 <TextField
                   fullWidth
                   variant="outlined"
                   type="number"
-                  label="Response Quota (optional)"
+                  label={t.builderResponseQuota}
                   value={config.responseQuota ?? ''}
                   onChange={(e) => {
                     const v = e.target.value;
                     handleBasicInfoChange('responseQuota', v === '' ? null : Math.max(1, parseInt(v, 10) || 1));
                   }}
-                  helperText="Close the survey automatically after this many responses (leave empty for unlimited)"
+                  helperText={t.builderResponseQuotaHelp}
                   inputProps={{ min: 1 }}
                 />
               </Box>
@@ -1593,7 +1555,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
             {/* Logo Settings */}
             <Box>
               <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-                🖼️ Logo Settings
+                {t.builderLogoSettings}
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 <TextField
@@ -1644,7 +1606,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   }}
                 />
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                  ⚙️ Display Settings
+                  {t.builderDisplaySettings}
                 </Typography>
               </Box>
               <Collapse in={!displaySettingsCollapsed} timeout="auto" unmountOnExit>
@@ -1728,7 +1690,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   }}
                 />
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                  🎨 Theme Customization
+                  {t.builderThemeCustomization}
                 </Typography>
               </Box>
               <Collapse in={!themeCustomizationCollapsed} timeout="auto" unmountOnExit>
@@ -2020,12 +1982,12 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       {/* Pages and Questions */}
       <Accordion defaultExpanded>
         <AccordionSummary expandIcon={<ExpandMore />}>
-          <Typography variant="h6">Pages & Questions</Typography>
+          <Typography variant="h6">{t.builderPagesQuestions}</Typography>
         </AccordionSummary>
         <AccordionDetails>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Organize your survey into pages. Drag pages to reorder them.
+              {t.builderPagesHelp}
             </Typography>
             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
               <Button
@@ -2034,7 +1996,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                 onClick={addNewPage}
                 size="large"
               >
-                Add New Page
+                {t.builderAddPage}
               </Button>
             </Box>
           </Box>

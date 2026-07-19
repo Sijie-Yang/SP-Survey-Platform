@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { RegionProvider } from './contexts/RegionContext';
+import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
+import { useRegion } from './contexts/RegionContext';
+import { tf } from './contexts/adminI18n';
 import RegionSwitcher from './components/admin/RegionSwitcher';
 import {
   AppBar,
@@ -21,7 +22,9 @@ import {
   Tooltip,
   Menu,
   MenuItem,
-  Divider
+  Divider,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 import {
@@ -35,20 +38,19 @@ import {
   Palette,
   Check,
   Logout,
-  AccountCircle,
   AdminPanelSettings,
   EditNote,
+  AutoAwesome,
+  OpenInNew,
+  MoreVert,
 } from '@mui/icons-material';
 import { themes, createCustomTheme } from './themes/themeConfig';
 import ConfirmDialog from './components/layout/ConfirmDialog';
-import SurveyBuilder from './components/admin/SurveyBuilder';
-import SurveyPreview from './components/admin/SurveyPreview';
-import ImageDataset from './components/admin/ImageDataset';
 import WebsiteSetup from './components/admin/WebsiteSetup';
-import ResultsAnalysis from './components/admin/ResultsAnalysis';
-import ResearcherPractice from './components/admin/ResearcherPractice';
+import AdminIntroduction from './components/admin/AdminIntroduction';
 import ProjectSidebar from './components/admin/ProjectSidebar';
 import BackendStatus from './components/admin/BackendStatus';
+import { AdminEmptyState, AdminLoadingState } from './components/admin/AdminPageLayout';
 import { isSupabaseConfigured } from './lib/supabase';
 import { loadSurveyConfig } from './lib/surveyStorage';
 import { demoSurveyConfig } from './lib/demoConfig';
@@ -62,6 +64,12 @@ import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { checkIsAdmin } from './lib/templateManager';
 import { useNavigate } from 'react-router-dom';
+
+const ImageDataset = lazy(() => import('./components/admin/ImageDataset'));
+const SurveyBuilder = lazy(() => import('./components/admin/SurveyBuilder'));
+const SurveyPreview = lazy(() => import('./components/admin/SurveyPreview'));
+const ResultsAnalysis = lazy(() => import('./components/admin/ResultsAnalysis'));
+const ResearcherPractice = lazy(() => import('./components/admin/ResearcherPractice'));
 
 function TabPanel({ children, value, index, keepMounted = false, ...other }) {
   const active = value === index;
@@ -82,7 +90,40 @@ function TabPanel({ children, value, index, keepMounted = false, ...other }) {
   );
 }
 
+function AdminWorkspaceTabs({ value, onChange }) {
+  const { t } = useRegion();
+  return (
+    <Tabs value={value} onChange={onChange} aria-label="admin tabs" variant="scrollable" scrollButtons="auto">
+      <Tab label={t.tabIntro} />
+      <Tab label={t.tabMedia} />
+      <Tab label={t.tabBuilder} />
+      <Tab label={t.tabShare} />
+      <Tab label={t.tabResults} />
+      <Tab label={t.tabPractice} />
+    </Tabs>
+  );
+}
+
+function formatSaveStatusLabel(t, saveStatus, lastSavedAt) {
+  if (saveStatus === 'saving') return t.saveStatusSaving;
+  if (saveStatus === 'error') return t.saveStatusError;
+  if (saveStatus === 'unsaved') return t.saveStatusUnsaved;
+  if (lastSavedAt) {
+    const secs = Math.floor((Date.now() - lastSavedAt) / 1000);
+    if (secs < 10) return t.saveStatusJustNow;
+    if (secs < 60) return tf(t.saveStatusSecsAgo, { n: secs });
+    return tf(t.saveStatusMinsAgo, { n: Math.floor(secs / 60) });
+  }
+  return t.saveStatusAllSaved;
+}
+
+function AdminLoadingLabel() {
+  const { t } = useRegion();
+  return <Typography>{t.loadingProjectSystem}</Typography>;
+}
+
 export default function AdminApp() {
+  const { t } = useRegion();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [isAdminUser, setIsAdminUser] = useState(false);
@@ -92,6 +133,7 @@ export default function AdminApp() {
     return localStorage.getItem('sp-survey-theme') || 'default';
   });
   const [themeMenuAnchor, setThemeMenuAnchor] = useState(null);
+  const [toolsMenuAnchor, setToolsMenuAnchor] = useState(null);
   const theme = createCustomTheme(currentTheme);
   
   const [tabValue, setTabValue] = useState(0);
@@ -265,6 +307,104 @@ export default function AdminApp() {
       setHasUnsavedImageDatasetChanges(false);
       setLatestImageDatasetConfig(null); // Clear cached config when switching projects
     }
+  }, [currentProject?.id]);
+
+  // Sync Admin UI when ChatGPT (Codex) / MCP updates the draft while this project stays open.
+  const remoteSyncInFlightRef = useRef(false);
+  const remoteConflictWarnedAtRef = useRef(null);
+  const draftUpdatedAtRef = useRef(null);
+  const hasUnsavedChangesRef = useRef(false);
+  const currentProjectIdRef = useRef(null);
+
+  useEffect(() => {
+    draftUpdatedAtRef.current = currentProject?.draftUpdatedAt || null;
+    hasUnsavedChangesRef.current = hasUnsavedChanges;
+    currentProjectIdRef.current = currentProject?.id || null;
+  }, [currentProject?.draftUpdatedAt, currentProject?.id, hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !currentProject?.id) return undefined;
+
+    const applyRemoteDraft = (latest) => {
+      const config = latest?._surveyConfig;
+      if (!config) return;
+      const projectId = latest.id;
+      const remoteAt = latest.draftUpdatedAt || null;
+      setCurrentProject(latest);
+      setSurveyConfig(config);
+      const savedCopy = JSON.parse(JSON.stringify(config));
+      setLastSavedConfig(savedCopy);
+      setHasUnsavedChanges(false);
+      draftUpdatedAtRef.current = remoteAt;
+      setProjectStates((prev) => {
+        const next = {
+          ...prev,
+          [projectId]: {
+            ...(prev[projectId] || {}),
+            surveyConfig: config,
+            lastSavedConfig: savedCopy,
+            hasUnsavedChanges: false,
+          },
+        };
+        saveProjectStatesToStorage(next);
+        return next;
+      });
+      setSnackbar({
+        open: true,
+        message: 'Loaded latest edits from ChatGPT (Codex).',
+        severity: 'info',
+      });
+    };
+
+    const syncRemoteDraft = async () => {
+      const projectId = currentProjectIdRef.current;
+      if (!projectId || remoteSyncInFlightRef.current || saveInFlightRef.current) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+
+      remoteSyncInFlightRef.current = true;
+      try {
+        const { getProjectById } = await import('./lib/projectManager');
+        const latest = await getProjectById(projectId);
+        if (!latest || currentProjectIdRef.current !== projectId) return;
+
+        const remoteAt = latest.draftUpdatedAt || null;
+        const localAt = draftUpdatedAtRef.current;
+        if (!remoteAt || remoteAt === localAt) return;
+
+        if (hasUnsavedChangesRef.current) {
+          if (remoteConflictWarnedAtRef.current !== remoteAt) {
+            remoteConflictWarnedAtRef.current = remoteAt;
+            setSnackbar({
+              open: true,
+              message: 'ChatGPT (Codex) updated this project. Save or discard your local edits to load the latest.',
+              severity: 'warning',
+            });
+          }
+          return;
+        }
+
+        applyRemoteDraft(latest);
+      } catch (err) {
+        console.warn('Remote draft sync failed:', err);
+      } finally {
+        remoteSyncInFlightRef.current = false;
+      }
+    };
+
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') syncRemoteDraft();
+    };
+
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    const intervalId = window.setInterval(syncRemoteDraft, 4000);
+    syncRemoteDraft();
+
+    return () => {
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      window.clearInterval(intervalId);
+    };
   }, [currentProject?.id]);
 
   // Monitor projectStates changes, ensure persistence
@@ -472,21 +612,34 @@ export default function AdminApp() {
     }
   });
 
+  // Tab indices: 0 Intro, 1 Media, 2 Builder, 3 Share, 4 Results, 5 Practice
+  const ADMIN_TABS_VERSION = 2;
+  const ADMIN_TAB_MAX = 5;
+
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
     // Also save current project's tab state
     if (currentProject) {
-      saveCurrentProjectState({ tabValue: newValue });
+      saveCurrentProjectState({ tabValue: newValue, tabsVersion: ADMIN_TABS_VERSION });
     }
   };
 
   const handleNextStep = () => {
-    const nextTab = Math.min(tabValue + 1, 3); // Max to Step 4 (index 3)
+    const nextTab = Math.min(tabValue + 1, 4); // Through Results (index 4); Practice is optional
     setTabValue(nextTab);
     if (currentProject) {
-      saveCurrentProjectState({ tabValue: nextTab });
+      saveCurrentProjectState({ tabValue: nextTab, tabsVersion: ADMIN_TABS_VERSION });
     }
     // Smooth scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const goToAdminTab = (index) => {
+    const next = Math.max(0, Math.min(Number(index) || 0, ADMIN_TAB_MAX));
+    setTabValue(next);
+    if (currentProject) {
+      saveCurrentProjectState({ tabValue: next, tabsVersion: ADMIN_TABS_VERSION });
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -499,6 +652,7 @@ export default function AdminApp() {
       lastSavedConfig,
       hasUnsavedChanges,
       tabValue,
+      tabsVersion: ADMIN_TABS_VERSION,
       ...updates
     };
     
@@ -531,7 +685,12 @@ export default function AdminApp() {
       setSurveyConfig(savedState.surveyConfig);
       setLastSavedConfig(savedState.lastSavedConfig);
       setHasUnsavedChanges(savedState.hasUnsavedChanges);
-      setTabValue(savedState.tabValue !== undefined ? savedState.tabValue : 0);
+      let restoredTab = savedState.tabValue !== undefined ? savedState.tabValue : 0;
+      // v1 tabs had no Introduction (0=Media…4=Practice). Shift once when upgrading.
+      if ((savedState.tabsVersion || 1) < ADMIN_TABS_VERSION) {
+        restoredTab = Math.min(restoredTab + 1, ADMIN_TAB_MAX);
+      }
+      setTabValue(restoredTab);
       return true;
     }
     
@@ -656,12 +815,21 @@ export default function AdminApp() {
 
   // ✅ Simplified - only clears sessionStorage editing states
   // Theme handlers
-  const handleThemeMenuOpen = (event) => {
-    setThemeMenuAnchor(event.currentTarget);
-  };
-
   const handleThemeMenuClose = () => {
     setThemeMenuAnchor(null);
+  };
+
+  const handleToolsMenuOpen = (event) => {
+    setToolsMenuAnchor(event.currentTarget);
+  };
+
+  const handleToolsMenuClose = () => {
+    setToolsMenuAnchor(null);
+  };
+
+  const handleThemeFromTools = () => {
+    setThemeMenuAnchor(toolsMenuAnchor);
+    setToolsMenuAnchor(null);
   };
 
   const handleThemeChange = (themeKey) => {
@@ -734,7 +902,12 @@ export default function AdminApp() {
 
       if (result.success) {
         setActiveProject(currentProject.id);
-        setCurrentProject(projectToSave);
+        const savedProject = {
+          ...projectToSave,
+          draftUpdatedAt: result.draftUpdatedAt || projectToSave.draftUpdatedAt,
+        };
+        setCurrentProject(savedProject);
+        draftUpdatedAtRef.current = savedProject.draftUpdatedAt || null;
 
         const savedConfig = JSON.parse(JSON.stringify(latestSurveyConfig));
         setLastSavedConfig(savedConfig);
@@ -827,31 +1000,15 @@ export default function AdminApp() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges, saveStatus]);
 
-  const formatSaveStatusLabel = () => {
-    if (saveStatus === 'saving') return 'Saving…';
-    if (saveStatus === 'error') return 'Save failed — click Save to retry';
-    if (saveStatus === 'unsaved') return 'Unsaved changes';
-    if (lastSavedAt) {
-      const secs = Math.floor((Date.now() - lastSavedAt) / 1000);
-      if (secs < 10) return 'Auto-saved just now';
-      if (secs < 60) return `Auto-saved ${secs}s ago`;
-      return `Auto-saved ${Math.floor(secs / 60)}m ago`;
-    }
-    return 'All changes saved';
-  };
-
-
-
   if (projectLoading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <Typography>Loading project system...</Typography>
+        <AdminLoadingLabel />
       </Box>
     );
   }
 
   return (
-    <RegionProvider>
     <ThemeProvider theme={theme}>
     <Box sx={{ flexGrow: 1 }}>
         <AppBar
@@ -862,7 +1019,7 @@ export default function AdminApp() {
           }}
         >
           <Toolbar>
-          <Tooltip title="Toggle Project Sidebar">
+          <Tooltip title={t.toggleSidebar}>
             <IconButton
               color="inherit"
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -963,18 +1120,13 @@ export default function AdminApp() {
             </Box>
           )}
 
-          {/* Region / Language Switcher */}
-          <Box sx={{ mr: 1 }}>
-            <RegionSwitcher />
-          </Box>
-          
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
             {currentProject && (
               <Typography variant="caption" sx={{ opacity: 0.9, minWidth: 140, textAlign: 'right' }}>
-                {formatSaveStatusLabel()}
+                {formatSaveStatusLabel(t, saveStatus, lastSavedAt)}
               </Typography>
             )}
-            <Tooltip title={hasUnsavedChanges ? "Save unsaved changes" : "Save project configuration"}>
+            <Tooltip title={hasUnsavedChanges ? t.saveTooltipDirty : t.saveTooltip}>
               <IconButton
                 type="button"
                 color="inherit"
@@ -1011,44 +1163,8 @@ export default function AdminApp() {
                 <Save fontSize="small" />
               </IconButton>
             </Tooltip>
-            
-            <Tooltip title="Clear session editing states (sessionStorage)">
-              <IconButton
-                color="inherit"
-                onClick={handleCleanLocalStorage}
-                size="small"
-                sx={{
-                  border: 1,
-                  borderColor: 'rgba(255, 255, 255, 0.5)',
-                  '&:hover': {
-                    borderColor: 'rgba(255, 255, 255, 0.8)',
-                    bgcolor: 'rgba(255, 255, 255, 0.1)'
-                  }
-                }}
-              >
-                <CleaningServices fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            
-            <Tooltip title="Change Theme">
-              <IconButton
-                color="inherit"
-                onClick={handleThemeMenuOpen}
-                size="small"
-                sx={{
-                  border: 1,
-                  borderColor: 'rgba(255, 255, 255, 0.5)',
-                  '&:hover': {
-                    borderColor: 'rgba(255, 255, 255, 0.8)',
-                    bgcolor: 'rgba(255, 255, 255, 0.1)'
-                  }
-                }}
-              >
-                <Palette fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            
-            <Tooltip title="Preview Survey">
+
+            <Tooltip title={t.previewSurvey}>
               <IconButton
                 color="inherit"
                 onClick={() => setPreviewOpen(true)}
@@ -1066,10 +1182,41 @@ export default function AdminApp() {
                 <Preview fontSize="small" />
               </IconButton>
             </Tooltip>
+
+            <Tooltip title={t.aiTooltip}>
+              <Button
+                color="inherit"
+                size="small"
+                startIcon={<AutoAwesome />}
+                onClick={() => navigate('/admin/integrations')}
+                sx={{
+                  ml: 0.5,
+                  px: 1.25,
+                  py: 0.35,
+                  minWidth: 0,
+                  fontWeight: 700,
+                  letterSpacing: 0.4,
+                  border: '1px solid',
+                  borderColor: 'rgba(255, 255, 255, 0.65)',
+                  bgcolor: 'rgba(255, 255, 255, 0.12)',
+                  textTransform: 'none',
+                  '&:hover': {
+                    borderColor: 'rgba(255, 255, 255, 0.95)',
+                    bgcolor: 'rgba(255, 255, 255, 0.22)',
+                  },
+                }}
+              >
+                {t.aiLabel}
+              </Button>
+            </Tooltip>
+
+            <RegionSwitcher />
           </Box>
           
           <Button
             color="inherit"
+            size="small"
+            startIcon={<OpenInNew />}
             onClick={() => {
               if (currentProject) {
                 window.open(`/survey?project=${currentProject.id}`, '_blank');
@@ -1079,61 +1226,86 @@ export default function AdminApp() {
             }}
             disabled={!currentProject || !surveyConfig}
             sx={{
-              bgcolor: 'rgba(255,255,255,0.1)',
-              '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' },
-              fontWeight: 'bold',
-              px: 2,
               mr: 1,
+              px: 1.25,
+              py: 0.35,
+              minWidth: 0,
+              fontWeight: 700,
+              letterSpacing: 0.2,
+              border: '1px solid',
+              borderColor: 'rgba(255, 255, 255, 0.65)',
+              bgcolor: 'rgba(255, 255, 255, 0.12)',
+              textTransform: 'none',
+              '&:hover': {
+                borderColor: 'rgba(255, 255, 255, 0.95)',
+                bgcolor: 'rgba(255, 255, 255, 0.22)',
+              },
+              '&.Mui-disabled': {
+                borderColor: 'rgba(255, 255, 255, 0.25)',
+                color: 'rgba(255, 255, 255, 0.4)',
+              },
             }}
           >
-            🚀 View Live Survey
+            {t.viewLive}
           </Button>
 
-          <Tooltip title="我的 Skill 库">
+          <Tooltip title={t.moreTools}>
             <IconButton
               color="inherit"
-              onClick={() => navigate('/skills')}
+              onClick={handleToolsMenuOpen}
               size="small"
-              sx={{ mr: 1, border: 1, borderColor: 'rgba(255,255,255,0.4)', '&:hover': { bgcolor: 'rgba(255,255,255,0.15)' } }}
+              aria-label={t.moreTools}
+              aria-controls={toolsMenuAnchor ? 'workspace-tools-menu' : undefined}
+              aria-haspopup="true"
+              aria-expanded={toolsMenuAnchor ? 'true' : undefined}
+              sx={{ border: 1, borderColor: 'rgba(255,255,255,0.4)', '&:hover': { bgcolor: 'rgba(255,255,255,0.15)' } }}
             >
-              <EditNote fontSize="small" />
+              <MoreVert fontSize="small" />
             </IconButton>
           </Tooltip>
-
-          {/* Admin Dashboard button — only visible to admin users */}
-          {isAdminUser && (
-            <Tooltip title="Admin Dashboard (Template & Project Management)">
-              <IconButton
-                color="inherit"
-                onClick={() => navigate('/admin-dashboard')}
-                size="small"
-                sx={{ mr: 1, border: 1, borderColor: 'rgba(255,255,255,0.4)', '&:hover': { bgcolor: 'rgba(255,255,255,0.15)' } }}
-              >
-                <AdminPanelSettings fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-
-          {/* User info & logout */}
-          {user && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Tooltip title={user.email}>
-                <AccountCircle sx={{ opacity: 0.8 }} />
-              </Tooltip>
-              <Tooltip title="Sign out">
-                <IconButton
-                  color="inherit"
-                  onClick={logout}
-                  size="small"
-                  sx={{ border: 1, borderColor: 'rgba(255,255,255,0.4)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
-                >
-                  <Logout fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          )}
         </Toolbar>
       </AppBar>
+
+      <Menu
+        id="workspace-tools-menu"
+        anchorEl={toolsMenuAnchor}
+        open={Boolean(toolsMenuAnchor)}
+        onClose={handleToolsMenuClose}
+        PaperProps={{ sx: { mt: 1, minWidth: 240 } }}
+      >
+        {user && (
+          <Box sx={{ px: 2, py: 1 }}>
+            <Typography variant="caption" color="text.secondary">{t.signedInAs}</Typography>
+            <Typography variant="body2" noWrap>{user.email}</Typography>
+          </Box>
+        )}
+        {user && <Divider />}
+        <MenuItem onClick={handleThemeFromTools}>
+          <ListItemIcon><Palette fontSize="small" /></ListItemIcon>
+          <ListItemText primary={t.changeTheme} />
+        </MenuItem>
+        <MenuItem onClick={() => { handleToolsMenuClose(); navigate('/skills'); }}>
+          <ListItemIcon><EditNote fontSize="small" /></ListItemIcon>
+          <ListItemText primary={t.skillsLibrary} />
+        </MenuItem>
+        {isAdminUser && (
+          <MenuItem onClick={() => { handleToolsMenuClose(); navigate('/admin-dashboard'); }}>
+            <ListItemIcon><AdminPanelSettings fontSize="small" /></ListItemIcon>
+            <ListItemText primary={t.adminDashboard} secondary={t.templatesAndProjects} />
+          </MenuItem>
+        )}
+        <MenuItem onClick={() => { handleToolsMenuClose(); handleCleanLocalStorage(); }}>
+          <ListItemIcon><CleaningServices fontSize="small" /></ListItemIcon>
+          <ListItemText primary={t.clearEditingState} />
+        </MenuItem>
+        {user && <Divider />}
+        {user && (
+          <MenuItem onClick={() => { handleToolsMenuClose(); logout(); }}>
+            <ListItemIcon><Logout fontSize="small" /></ListItemIcon>
+            <ListItemText primary={t.signOut} />
+          </MenuItem>
+        )}
+      </Menu>
 
       {/* Theme Selector Menu */}
       <Menu
@@ -1157,7 +1329,7 @@ export default function AdminApp() {
         <Box sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider' }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
             <Palette fontSize="small" />
-            Choose Theme
+            {t.chooseTheme}
           </Typography>
         </Box>
         {Object.entries(themes).map(([key, themeData]) => (
@@ -1243,37 +1415,26 @@ export default function AdminApp() {
       >
         {!currentProject ? (
           // Empty state - no project selected
-          <Paper sx={{ p: 4, textAlign: 'center' }}>
-            <FolderOpen sx={{ fontSize: '4rem', color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h5" sx={{ mb: 2 }}>
-              No Project Selected
-            </Typography>
-            <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-              Create a new project or select an existing one from the sidebar to get started.
-            </Typography>
-            <Button
-              variant="contained"
-              startIcon={<MenuIcon />}
-              onClick={() => setSidebarOpen(true)}
-              size="large"
-            >
-              Open Project Sidebar
-            </Button>
-          </Paper>
+          <AdminEmptyState
+            icon={<FolderOpen sx={{ fontSize: '4rem' }} />}
+            title={t.noProjectTitle}
+            description={t.noProjectBody}
+            actionLabel={t.openProjectSidebar}
+            onAction={() => setSidebarOpen(true)}
+          />
         ) : (
           // Project content
           <Paper sx={{ width: '100%' }}>
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <Tabs value={tabValue} onChange={handleTabChange} aria-label="admin tabs" variant="scrollable" scrollButtons="auto">
-                <Tab label="Step 1 - Media Dataset" />
-                <Tab label="Step 2 - Survey Builder" />
-                <Tab label="Step 3 - Share Survey" />
-                <Tab label="Step 4 - Results Analysis" />
-                <Tab label="Researcher Practice" />
-              </Tabs>
+              <AdminWorkspaceTabs value={tabValue} onChange={handleTabChange} />
             </Box>
 
+            <Suspense fallback={<AdminLoadingState label={t.loadingWorkspace} />}>
             <TabPanel value={tabValue} index={0}>
+              <AdminIntroduction onGoToTab={goToAdminTab} />
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={1}>
               <ImageDataset 
                 currentProject={currentProject}
                 onProjectUpdate={handleProjectUpdate}
@@ -1289,7 +1450,7 @@ export default function AdminApp() {
               />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={1}>
+            <TabPanel value={tabValue} index={2}>
               {surveyConfig ? (
                 <SurveyBuilder 
                   key={currentProject?.id || 'no-project'}
@@ -1305,14 +1466,14 @@ export default function AdminApp() {
               )}
             </TabPanel>
 
-            <TabPanel value={tabValue} index={2}>
+            <TabPanel value={tabValue} index={3}>
               <WebsiteSetup
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
               />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={3}>
+            <TabPanel value={tabValue} index={4}>
               <ResultsAnalysis
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
@@ -1320,13 +1481,14 @@ export default function AdminApp() {
               />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={4} keepMounted={practiceKeepAlive}>
+            <TabPanel value={tabValue} index={5} keepMounted={practiceKeepAlive}>
               <ResearcherPractice
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
                 onSessionActiveChange={handlePracticeSessionActive}
               />
             </TabPanel>
+            </Suspense>
           </Paper>
         )}
       </Container>
@@ -1337,11 +1499,13 @@ export default function AdminApp() {
           📋 Survey Preview - Exact Live Survey Replica
         </DialogTitle>
         <DialogContent>
-          {surveyConfig ? (
-            <SurveyPreview config={surveyConfig} currentProject={currentProject} />
-          ) : (
-            <Typography>No survey configuration available</Typography>
-          )}
+          <Suspense fallback={<AdminLoadingState label="Loading preview…" />}>
+            {surveyConfig ? (
+              <SurveyPreview config={surveyConfig} currentProject={currentProject} />
+            ) : (
+              <Typography>No survey configuration available</Typography>
+            )}
+          </Suspense>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPreviewOpen(false)}>Close</Button>
@@ -1374,6 +1538,5 @@ export default function AdminApp() {
       />
     </Box>
     </ThemeProvider>
-    </RegionProvider>
   );
 }

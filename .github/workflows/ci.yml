@@ -22,6 +22,10 @@ jobs:
       - name: Unit/integration tests
         run: npm run test:ci
 
+      - name: Design protocol + BYOK crypto tests
+        run: |
+          node --test worker-lib/crypto/byokAesGcm.test.mjs
+
       - name: Media pipeline smoke
         run: npm run test:media-pipeline
 
@@ -29,12 +33,21 @@ jobs:
         run: |
           set -e
           for f in supabase/*.sql; do
-            if ! grep -qE 'IF NOT EXISTS|DROP POLICY IF EXISTS' "$f"; then
+            if ! grep -qE 'IF NOT EXISTS|DROP POLICY IF EXISTS|CREATE OR REPLACE' "$f"; then
               echo "Non-idempotent SQL script: $f"
               exit 1
             fi
             echo "OK $f"
           done
+
+      - name: Worker module smoke import
+        run: |
+          node -e "import('./worker-lib/agent/router.mjs').then((m) => { if (typeof m.handleAgentAndMcpRoutes !== 'function') process.exit(1); })"
+          node -e "import('./worker-lib/mcp/server.mjs').then((m) => { if (typeof m.handleMcpRequest !== 'function') process.exit(1); })"
+
+      - name: Worker bundle dry-run
+        continue-on-error: true
+        run: npx wrangler deploy --dry-run --outdir=.wrangler-dry-run
 
       - name: Production build
         run: npm run build

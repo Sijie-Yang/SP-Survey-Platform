@@ -2,9 +2,23 @@
  * Client helpers for Urban Perception Deep Search API (Semantic Scholar + Crossref).
  */
 
+import { supabase } from './supabase';
+
 const SERVER_URL =
   process.env.REACT_APP_SERVER_URL ||
   (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
+
+async function authHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (!supabase) return headers;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  } catch {
+    // ignore
+  }
+  return headers;
+}
 
 async function readJson(res) {
   const text = await res.text();
@@ -65,11 +79,12 @@ export async function scanResearchPapers({
   return json;
 }
 
-export async function draftTemplateFromPaper(paper, apiKey) {
+export async function draftTemplateFromPaper(paper, apiKey = '') {
   const res = await fetch(`${SERVER_URL}/api/research/draft-template`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paper, apiKey }),
+    headers: await authHeaders({ 'Content-Type': 'application/json' }),
+    // apiKey optional — Worker uses encrypted server-stored BYOK when Authorization is present.
+    body: JSON.stringify({ paper, ...(apiKey ? { apiKey } : {}) }),
   });
   const json = await readJson(res);
   if (!res.ok || !json.success) {

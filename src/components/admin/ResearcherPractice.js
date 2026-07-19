@@ -53,6 +53,9 @@ import {
 } from '../../lib/trialNavigation';
 import { enrichSurveyResponses } from '../../lib/enrichSurveyResponses';
 import { syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
+import { AdminPageHeader } from './AdminPageLayout';
+import { useRegion } from '../../contexts/RegionContext';
+import { tf } from '../../contexts/adminI18n';
 
 let widgetsRegistered = false;
 function ensureWidgets() {
@@ -124,6 +127,7 @@ export default function ResearcherPractice({
   onSessionActiveChange,
 }) {
   const { user } = useAuth();
+  const { t } = useRegion();
   const projectId = currentProject?.id || null;
   const questions = useMemo(
     () => flattenQuestions(surveyConfig).filter(isPracticeable),
@@ -730,21 +734,27 @@ export default function ResearcherPractice({
 
   return (
     <ImageResolverContext.Provider value={imageNameToUrl}>
-    <Box sx={{ display: 'flex', gap: 2, minHeight: 480, flexDirection: { xs: 'column', md: 'row' } }}>
+    <Box>
+      <AdminPageHeader
+        icon={<PlayArrow />}
+        title={t.practiceTitle}
+        description={t.practiceDescription}
+      />
+      <Box sx={{ display: 'flex', gap: 2, minHeight: 480, flexDirection: { xs: 'column', md: 'row' } }}>
       <Paper variant="outlined" sx={{ width: { xs: '100%', md: 320 }, flexShrink: 0, maxHeight: 640, overflow: 'auto' }}>
         <Box sx={{ p: 2, pb: 1 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-            <Typography variant="subtitle1" fontWeight={700} sx={{ flex: 1 }}>Questions</Typography>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ flex: 1 }}>{t.practiceQuestions}</Typography>
             {!sessionActive && (
               <Button size="small" variant="outlined" startIcon={<PlayArrow />} onClick={openSetup}>
-                Start session
+                {t.practiceStartSession}
               </Button>
             )}
           </Stack>
           <Typography variant="caption" color="text.secondary" display="block">
             {sessionActive
-              ? 'Session locked — answer the queue, or stop the session to free-pick again.'
-              : 'Click any question to answer freely. Result analysis for the selected question is below (collapsed).'}
+              ? t.practiceSessionLocked
+              : t.practiceFreePick}
           </Typography>
         </Box>
         <Divider />
@@ -814,7 +824,7 @@ export default function ResearcherPractice({
             sx={{ mb: 2 }}
             action={(
               <Button color="inherit" size="small" startIcon={<Stop />} onClick={stopSession}>
-                End session
+                {t.practiceEndSession}
               </Button>
             )}
           >
@@ -823,7 +833,7 @@ export default function ResearcherPractice({
         )}
 
         {!selectedQuestion && (
-          <Alert severity="info">Choose a question on the left to practice.</Alert>
+          <Alert severity="info">{t.practiceChooseQuestion}</Alert>
         )}
 
         {selectedQuestion && (
@@ -836,7 +846,7 @@ export default function ResearcherPractice({
                 size="small"
                 color="primary"
                 variant="outlined"
-                label={`Practice total: ${practiceCounts[selectedQuestion.name] || 0}`}
+                label={tf(t.practiceTotal, { n: practiceCounts[selectedQuestion.name] || 0 })}
               />
               {!sessionActive && (
                 <Button
@@ -845,10 +855,10 @@ export default function ResearcherPractice({
                   onClick={() => {
                     usedImageKeysRef.current = new Set();
                     usedGroupKeysRef.current = new Set();
-                    setReloadToken((t) => t + 1);
+                    setReloadToken((token) => token + 1);
                   }}
                 >
-                  New round
+                  {t.practiceNewRound}
                 </Button>
               )}
             </Stack>
@@ -1064,6 +1074,7 @@ export default function ResearcherPractice({
           </Button>
         </DialogActions>
       </Dialog>
+      </Box>
     </Box>
     </ImageResolverContext.Provider>
   );

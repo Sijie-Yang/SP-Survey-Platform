@@ -2,9 +2,25 @@
 // All operations are proxied through a backend (Express in dev, Cloudflare
 // Worker in production) because R2 credentials must remain server-side.
 
+import { supabase } from './supabase';
+
 const SERVER_URL =
   process.env.REACT_APP_SERVER_URL ||
   (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
+
+async function authHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (!supabase) return headers;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
+  } catch {
+    // ignore — unauthenticated callers may still work in local Express mode
+  }
+  return headers;
+}
 
 // Returns true when the R2 public URL env var is set (synchronous, safe to call anywhere)
 export const isR2Configured = () => !!process.env.REACT_APP_R2_PUBLIC_URL;
@@ -167,7 +183,7 @@ export async function uploadImageToR2(file, key) {
     const contentType = file.type || 'image/jpeg';
     const res = await fetch(`${SERVER_URL}/api/r2/upload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ key, data: base64, contentType }),
     });
     if (!res.ok) throw await describeNonOk(res, 'R2 upload');
@@ -218,7 +234,7 @@ export async function deleteImagesFromR2(keys, options = {}) {
     }
     const res = await fetch(`${SERVER_URL}/api/r2/delete`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ keys: safeKeys, allowTemplateKeys, allowedPrefix }),
     });
     if (!res.ok) throw await describeNonOk(res, 'R2 delete');
@@ -251,7 +267,8 @@ export async function listImagesFromR2(prefix = '') {
   }
   try {
     const res = await fetch(
-      `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}`
+      `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}`,
+      { headers: await authHeaders() },
     );
     if (!res.ok) throw await describeNonOk(res, 'R2 list');
     const json = await res.json();
@@ -324,7 +341,7 @@ export async function copyImagesInR2(copies, options = {}) {
   try {
     const res = await fetch(`${SERVER_URL}/api/r2/copy`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ copies, stream }),
     });
     if (!res.ok) throw await describeNonOk(res, 'R2 copy');

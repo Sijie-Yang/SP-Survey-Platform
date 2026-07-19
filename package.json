@@ -45,6 +45,7 @@
     "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
     "test:ci": "cross-env CI=true react-scripts test --watchAll=false",
+    "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs",
     "test:media-pipeline": "node scripts/test-media-set-category.mjs",
     "research:filter": "python3 scripts/filter-scopus-coarse.py --csv research/scopus/exports/2026-07-12.csv --out research/scopus/shortlists/2026-07-12_library_coarse.json --also public/research/scopus-shortlist.json",
     "research:enrich": "node scripts/enrich-research-library.mjs --also public/research/scopus-shortlist.json",

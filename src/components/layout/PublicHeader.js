@@ -3,6 +3,8 @@ import { AppBar, Toolbar, Typography, Button, Box, Container, Tooltip } from '@m
 import { GitHub, Star } from '@mui/icons-material';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { useGithubStars } from '../../lib/useGithubStars';
+import { useRegion } from '../../contexts/RegionContext';
+import RegionSwitcher from '../admin/RegionSwitcher';
 
 export const GITHUB_REPO_URL = 'https://github.com/Sijie-Yang/SP-Survey';
 
@@ -27,6 +29,7 @@ export default function PublicHeader({
 }) {
   const location = useLocation();
   const githubStars = useGithubStars();
+  const { t } = useRegion();
   const isActive = (path) => location.pathname === path;
 
   return (
@@ -55,8 +58,6 @@ export default function PublicHeader({
             aria-label={brand}
           >
             <BrandLogo src="/logo-web-header.png" alt="SP-Survey" height={36} />
-            <BrandLogo src="/UAL%20Logo.jpg" alt="Urban Analytics Lab, NUS" height={44} />
-            <BrandLogo src="/DoA%20Logo.jpg" alt="Department of Architecture, NUS" height={44} />
           </Box>
           <Button
             component={RouterLink}
@@ -64,7 +65,7 @@ export default function PublicHeader({
             color={isActive('/papers') ? 'primary' : 'inherit'}
             sx={{ fontWeight: isActive('/papers') ? 700 : 500 }}
           >
-            Paper library
+            {t.navPaperLibrary}
           </Button>
           <Button
             component={RouterLink}
@@ -72,7 +73,7 @@ export default function PublicHeader({
             color={isActive('/request-template') ? 'primary' : 'inherit'}
             sx={{ fontWeight: isActive('/request-template') ? 700 : 500 }}
           >
-            Request template
+            {t.navRequestTemplate}
           </Button>
           <Button
             component={RouterLink}
@@ -80,7 +81,7 @@ export default function PublicHeader({
             color={isActive('/request-survey-design') ? 'primary' : 'inherit'}
             sx={{ fontWeight: isActive('/request-survey-design') ? 700 : 500 }}
           >
-            Request design
+            {t.navRequestDesign}
           </Button>
           <Button
             component={RouterLink}
@@ -88,7 +89,7 @@ export default function PublicHeader({
             color={isActive('/team') ? 'primary' : 'inherit'}
             sx={{ fontWeight: isActive('/team') ? 700 : 500 }}
           >
-            Team
+            {t.navTeam}
           </Button>
           <Button
             component={RouterLink}
@@ -96,8 +97,9 @@ export default function PublicHeader({
             color={isActive('/live') ? 'primary' : 'inherit'}
             sx={{ fontWeight: isActive('/live') ? 700 : 500 }}
           >
-            Live surveys
+            {t.navLiveSurveys}
           </Button>
+          <RegionSwitcher variant="public" />
           <Tooltip title="GitHub repository">
             <Box
               component="a"
@@ -132,7 +134,7 @@ export default function PublicHeader({
             variant={isActive('/login') ? 'contained' : 'outlined'}
             size="small"
           >
-            Researcher login
+            {t.navResearcherLogin}
           </Button>
           {rightSlot}
         </Toolbar>
@@ -142,6 +144,7 @@ export default function PublicHeader({
 }
 
 export function PublicFooter() {
+  const { t } = useRegion();
   return (
     <Box
       component="footer"
@@ -163,7 +166,7 @@ export function PublicFooter() {
           onError={(e) => { e.currentTarget.style.display = 'none'; }}
         />
         <Typography variant="body2" color="text.secondary" align="center">
-          Developed by{' '}
+          {t.footerDevelopedBy}{' '}
           <Box
             component="a"
             href="https://ual.sg"

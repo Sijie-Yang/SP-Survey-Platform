@@ -11,13 +11,14 @@ import {
   Tab,
   Divider,
 } from '@mui/material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [tab, setTab] = useState(0); // 0 = login, 1 = register
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,7 +34,8 @@ export default function LoginPage() {
     try {
       if (tab === 0) {
         await login(email, password);
-        navigate('/admin');
+        const next = searchParams.get('next');
+        navigate(next && next.startsWith('/') ? next : '/admin');
       } else {
         await register(email, password);
         setInfo('Registration successful! Please check your email to confirm your account, then log in.');

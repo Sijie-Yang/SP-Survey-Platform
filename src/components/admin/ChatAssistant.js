@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Card,
@@ -31,7 +32,8 @@ import {
   Alert,
   ButtonGroup,
   Collapse,
-  Snackbar
+  Snackbar,
+  Stack,
 } from '@mui/material';
 import { ExpandMore, Save, RestartAlt } from '@mui/icons-material';
 import ConfirmDialog from '../layout/ConfirmDialog';
@@ -50,10 +52,12 @@ import {
   Memory,
   WorkHistory,
   Chat,
-  Refresh
+  Refresh,
+  AutoAwesome,
 } from '@mui/icons-material';
 import { PROMPTS } from '../../config/prompts';
 import AgentsEditor from './AgentsEditor';
+import { listMcpConnections } from '../../lib/agentApi';
 
 /**
  * ChatAssistant Component
@@ -66,6 +70,8 @@ export default function ChatAssistant({
   loadingStatus = '',
   apiKeyValid,
   openaiApiKey,
+  credentialHint = '',
+  isPlatformMode = false,
   contextEnabled,
   multiAgentReviewEnabled = false,
   reviewMode = '1v1',
@@ -90,8 +96,33 @@ export default function ChatAssistant({
   aiUndoAvailable = false,
   onRevertAiChange,
 }) {
+  const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState(0);
+  const [codexConnected, setCodexConnected] = React.useState(false);
+  const [codexStatusLoading, setCodexStatusLoading] = React.useState(Boolean(isPlatformMode));
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!isPlatformMode) {
+      setCodexConnected(false);
+      setCodexStatusLoading(false);
+      return undefined;
+    }
+    setCodexStatusLoading(true);
+    listMcpConnections()
+      .then((result) => {
+        if (cancelled) return;
+        setCodexConnected(Boolean(result?.connections?.length));
+      })
+      .catch(() => {
+        if (!cancelled) setCodexConnected(false);
+      })
+      .finally(() => {
+        if (!cancelled) setCodexStatusLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isPlatformMode, apiKeyValid]);
   
   // States for viewing/editing data
   const [conversationData, setConversationData] = React.useState(null);
@@ -370,31 +401,28 @@ export default function ChatAssistant({
           '&:hover': { bgcolor: 'primary.dark' },
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
           <ExpandMore
             sx={{
               transition: 'transform 0.2s',
               transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+              flexShrink: 0,
             }}
           />
-          <SmartToy sx={{ fontSize: 28 }} />
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            🤖 AI Assistant
-          </Typography>
-          {apiKeyValid && (
-            <Chip 
-              label="Connected" 
-              size="small" 
-              color="success" 
-              icon={<CheckCircle />}
-              sx={{ bgcolor: 'success.light', color: 'white' }}
-            />
-          )}
+          <SmartToy sx={{ fontSize: 28, flexShrink: 0 }} />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+              AI
+            </Typography>
+            <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
+              Connect ChatGPT (Codex) or AI Assistant
+            </Typography>
+          </Box>
           {collapsed && messages.length > 0 && (
             <Chip
               label={`${messages.length} message${messages.length === 1 ? '' : 's'}`}
               size="small"
-              sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white' }}
+              sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white', flexShrink: 0 }}
             />
           )}
         </Box>
@@ -432,6 +460,103 @@ export default function ChatAssistant({
             </IconButton>
           </Tooltip>
         </Box>
+      </Box>
+
+      {/* One row, two columns: ChatGPT (Codex) | AI Assistant link status */}
+      <Box
+        onClick={(e) => e.stopPropagation()}
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+          gap: 1.5,
+          p: 1.5,
+          bgcolor: 'grey.50',
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.25,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1,
+            bgcolor: 'background.paper',
+          }}
+        >
+          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle2" fontWeight={700} noWrap>
+              ChatGPT (Codex)
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              Design via your ChatGPT app
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexShrink: 0 }}>
+            {codexStatusLoading ? (
+              <CircularProgress size={16} />
+            ) : (
+              <Chip
+                size="small"
+                icon={codexConnected ? <CheckCircle /> : undefined}
+                label={codexConnected ? 'Connected' : 'Not connected'}
+                color={codexConnected ? 'success' : 'default'}
+                variant={codexConnected ? 'filled' : 'outlined'}
+              />
+            )}
+            <Button
+              size="small"
+              variant={codexConnected ? 'text' : 'contained'}
+              startIcon={<AutoAwesome fontSize="small" />}
+              onClick={() => navigate('/admin/integrations')}
+            >
+              {codexConnected ? 'Manage' : 'Connect'}
+            </Button>
+          </Stack>
+        </Paper>
+
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.25,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 1,
+            bgcolor: 'background.paper',
+          }}
+        >
+          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle2" fontWeight={700} noWrap>
+              AI Assistant
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              Built-in chat in this panel
+            </Typography>
+          </Stack>
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexShrink: 0 }}>
+            <Chip
+              size="small"
+              icon={apiKeyValid ? <CheckCircle /> : undefined}
+              label={apiKeyValid ? 'Connected' : 'Not connected'}
+              color={apiKeyValid ? 'success' : 'default'}
+              variant={apiKeyValid ? 'filled' : 'outlined'}
+            />
+            <Button
+              size="small"
+              variant={apiKeyValid ? 'text' : 'contained'}
+              startIcon={<Settings fontSize="small" />}
+              onClick={() => {
+                if (isPlatformMode) navigate('/admin/integrations');
+                else setSettingsOpen(true);
+              }}
+            >
+              {apiKeyValid ? 'Manage' : 'Connect'}
+            </Button>
+          </Stack>
+        </Paper>
       </Box>
 
       <Collapse in={!collapsed} timeout="auto" unmountOnExit>
@@ -480,12 +605,12 @@ export default function ChatAssistant({
             }}>
               <SmartToy sx={{ fontSize: 64, mb: 2, opacity: 0.3 }} />
               <Typography variant="h6" sx={{ mb: 1 }}>
-                Welcome to AI Assistant!
+                Connect ChatGPT (Codex) or AI Assistant
               </Typography>
-              <Typography variant="body2" textAlign="center" sx={{ maxWidth: 400 }}>
-                {apiKeyValid 
-                  ? "I can help you create and modify surveys. Just type what you need, and I'll automatically figure out whether to generate a new survey or adjust your existing one!"
-                  : "Please configure your API key in settings to get started."}
+              <Typography variant="body2" textAlign="center" sx={{ maxWidth: 440 }}>
+                {apiKeyValid
+                  ? "AI Assistant is ready here. Or design in ChatGPT (Codex) — both edit the same live project."
+                  : 'Use Connect above: ChatGPT (Codex) via Integrations, or AI Assistant with your API key.'}
               </Typography>
             </Box>
           ) : (
@@ -681,11 +806,11 @@ export default function ChatAssistant({
           >
             <Tab icon={<Settings fontSize="small" />} label="Settings" iconPosition="start" />
             <Tab icon={<TipsAndUpdates fontSize="small" />} label="Research" iconPosition="start" />
-            <Tab icon={<SmartToy fontSize="small" />} label="Agents" iconPosition="start" />
-            <Tab icon={<Code fontSize="small" />} label="Prompts" iconPosition="start" />
-            <Tab icon={<Chat fontSize="small" />} label="Conversation" iconPosition="start" />
-            <Tab icon={<WorkHistory fontSize="small" />} label="Working Memory" iconPosition="start" />
-            <Tab icon={<Memory fontSize="small" />} label="Session Learning" iconPosition="start" />
+            <Tab icon={<SmartToy fontSize="small" />} label="Advanced: Agents" iconPosition="start" />
+            <Tab icon={<Code fontSize="small" />} label="Advanced: Prompts" iconPosition="start" />
+            <Tab icon={<Chat fontSize="small" />} label="Advanced: Conversation" iconPosition="start" />
+            <Tab icon={<WorkHistory fontSize="small" />} label="Advanced: Memory" iconPosition="start" />
+            <Tab icon={<Memory fontSize="small" />} label="Advanced: Learning" iconPosition="start" />
           </Tabs>
         </DialogTitle>
         
@@ -697,6 +822,18 @@ export default function ChatAssistant({
               <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
                 🔑 API Key
               </Typography>
+          {isPlatformMode ? (
+            <Alert severity={apiKeyValid ? 'success' : 'info'} sx={{ mb: 3 }}>
+              {apiKeyValid
+                ? `Server-stored key configured ${credentialHint || ''}. Manage it under AI & Integrations (toolbar AI button), or paste a new key below to replace it.`
+                : 'Store your OpenAI / OpenRouter key under AI & Integrations (toolbar AI button). Keys are encrypted server-side and never kept in localStorage.'}
+              <Box sx={{ mt: 1 }}>
+                <Button size="small" href="/admin/integrations" target="_self">
+                  Open AI & Integrations
+                </Button>
+              </Box>
+            </Alert>
+          ) : (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Use an{' '}
             <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI</a>
@@ -704,11 +841,12 @@ export default function ChatAssistant({
             <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">OpenRouter</a>
             {' '}API key. OpenRouter keys start with <code>sk-or-</code>.
           </Typography>
+          )}
           <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
             <TextField
               fullWidth
               type="password"
-              label="API Key"
+              label={isPlatformMode ? 'Replace API Key' : 'API Key'}
               value={openaiApiKey}
               onChange={(e) => onApiKeyChange(e.target.value)}
               placeholder="sk-or-... or sk-..."
@@ -726,7 +864,7 @@ export default function ChatAssistant({
               disabled={!openaiApiKey}
               sx={{ minWidth: 100 }}
             >
-              Validate
+              {isPlatformMode ? 'Save' : 'Validate'}
             </Button>
           </Box>
 

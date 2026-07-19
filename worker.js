@@ -25,6 +25,9 @@ import {
   createSurveyDesignRequest,
   attachSurveyDesignFiles,
 } from './worker-lib/surveyDesignRequest.mjs';
+import { handleAgentAndMcpRoutes } from './worker-lib/agent/router.mjs';
+import { getUserFromBearer } from './worker-lib/auth/supabaseJwt.mjs';
+import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -595,8 +598,29 @@ async function handleResearchScan(request, env) {
 async function handleResearchDraftTemplate(request, env) {
   try {
     const body = await request.json();
-    const { paper, apiKey } = body || {};
-    if (!apiKey) return json({ success: false, error: 'apiKey is required (BYOK)' }, { status: 400 });
+    const { paper } = body || {};
+    let apiKey = body?.apiKey || '';
+
+    // Prefer encrypted server-stored BYOK when the caller is authenticated.
+    if (!apiKey) {
+      const auth = await getUserFromBearer(request, env);
+      if (auth?.user?.id) {
+        const { loadDecryptedApiKey } = await import('./worker-lib/agent/credentials.mjs');
+        try {
+          const stored = await loadDecryptedApiKey(env, auth.user.id);
+          apiKey = stored.apiKey;
+        } catch {
+          // fall through
+        }
+      }
+    }
+
+    if (!apiKey) {
+      return json({
+        success: false,
+        error: 'API key required. Store one under AI & Integrations, or pass apiKey (legacy).',
+      }, { status: 400 });
+    }
     if (!paper?.title) return json({ success: false, error: 'paper.title is required' }, { status: 400 });
 
     const isOpenRouter = String(apiKey).startsWith('sk-or-');
@@ -668,22 +692,98 @@ Return ONLY valid JSON: {"title":"...","description":"...","pages":[...]}`;
 
 // ── Worker entry ──────────────────────────────────────────────────────────────
 
+function supabaseConfigured(env) {
+  return !!(env.SUPABASE_URL || env.REACT_APP_SUPABASE_URL);
+}
+
+async function resolveR2User(request, env) {
+  // Local / misconfigured deploys without Supabase keep open R2 (dev only).
+  if (!supabaseConfigured(env)) return { userId: null, kind: 'open' };
+
+  const supabaseAuth = await getUserFromBearer(request, env);
+  if (supabaseAuth?.user?.id) {
+    return { userId: supabaseAuth.user.id, kind: 'supabase' };
+  }
+  const header = request.headers.get('Authorization') || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  const mcp = await resolveMcpAccessToken(env, match[1]);
+  if (!mcp?.userId) return null;
+  if (!(mcp.scopes || []).includes('media:write') && !(mcp.scopes || []).includes('surveys:write')) {
+    return null;
+  }
+  return { userId: mcp.userId, kind: 'mcp', scopes: mcp.scopes };
+}
+
+function assertR2KeyOwned(userId, key) {
+  const normalized = String(key || '').replace(/^\/+/, '');
+  if (!normalized) return false;
+  // Allow template reads/copies for admins later; mutating user media must be under {userId}/
+  if (normalized.startsWith('templates/')) return true;
+  return normalized.startsWith(`${userId}/`);
+}
+
 export default {
   async fetch(request, env) {
     try {
       const url = new URL(request.url);
       const { pathname } = url;
 
+      // Agent / OAuth / MCP (returns Response or null if not matched)
+      const agentResponse = await handleAgentAndMcpRoutes(request, env);
+      if (agentResponse) return agentResponse;
+
       if (pathname === '/api/r2/upload' && request.method === 'POST') {
+        const user = await resolveR2User(request, env);
+        if (!user) return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
+        if (user.userId) {
+          const body = await request.clone().json().catch(() => ({}));
+          if (body?.key && !assertR2KeyOwned(user.userId, body.key)) {
+            return json({ success: false, error: 'Key must be under your user prefix', code: 'FORBIDDEN' }, { status: 403 });
+          }
+        }
         return await handleUpload(request, env);
       }
       if (pathname === '/api/r2/list' && request.method === 'GET') {
+        const user = await resolveR2User(request, env);
+        if (!user) return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
+        const prefix = url.searchParams.get('prefix') || '';
+        if (user.userId) {
+          if (prefix && !assertR2KeyOwned(user.userId, prefix) && !prefix.startsWith('templates/')) {
+            return json({ success: false, error: 'Prefix must be under your user prefix', code: 'FORBIDDEN' }, { status: 403 });
+          }
+          if (!prefix) {
+            const scoped = new URL(request.url);
+            scoped.searchParams.set('prefix', `${user.userId}/`);
+            return await handleList(new Request(scoped.toString(), request), env);
+          }
+        }
         return await handleList(request, env);
       }
       if (pathname === '/api/r2/delete' && request.method === 'DELETE') {
+        const user = await resolveR2User(request, env);
+        if (!user) return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
+        if (user.userId) {
+          const body = await request.clone().json().catch(() => ({}));
+          const keys = Array.isArray(body?.keys) ? body.keys : [];
+          if (keys.some((k) => !assertR2KeyOwned(user.userId, k))) {
+            return json({ success: false, error: 'One or more keys are outside your prefix', code: 'FORBIDDEN' }, { status: 403 });
+          }
+        }
         return await handleDelete(request, env);
       }
       if (pathname === '/api/r2/copy' && request.method === 'POST') {
+        const user = await resolveR2User(request, env);
+        if (!user) return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
+        if (user.userId) {
+          const body = await request.clone().json().catch(() => ({}));
+          const copies = Array.isArray(body?.copies) ? body.copies : [];
+          for (const c of copies) {
+            if (c?.to && !assertR2KeyOwned(user.userId, c.to) && !String(c.to).startsWith('templates/')) {
+              return json({ success: false, error: 'Copy destination must be under your prefix', code: 'FORBIDDEN' }, { status: 403 });
+            }
+          }
+        }
         return await handleCopy(request, env);
       }
       if (pathname === '/api/r2/status' && request.method === 'GET') {

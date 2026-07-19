@@ -1,29 +1,50 @@
 /**
- * Chat API for intelligent survey generation/adjustment
- * Automatically determines user intent and routes to appropriate handler
+ * Chat API for intelligent survey generation/adjustment.
+ * Platform mode: uses stored BYOK via /api/agent/chat (Supabase JWT).
+ * Self-hosted fallback: legacy /api/openai/chat with apiKey in body.
  */
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+import { supabase } from './supabase';
+import { sendAgentChat } from './agentApi';
+
+const API_BASE_URL =
+  process.env.REACT_APP_SERVER_URL
+  || process.env.REACT_APP_API_URL
+  || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
+
+const isPlatformMode = () => !!supabase;
 
 /**
  * Send a chat message and get AI response
- * @param {string} message - User's message
- * @param {Object} currentConfig - Current survey configuration (if any)
- * @param {Array} conversationHistory - Previous messages in OpenAI format
- * @param {string} apiKey - User's OpenAI or OpenRouter API key
- * @param {boolean} enableMultiAgentReview - Whether to trigger multi-agent review after generate/adjust
- * @param {string} reviewMode - Review mode: '1v1' or 'group'
- * @param {Object} customPrompts - Custom system prompts (optional)
- * @param {Object} researchContext - Research context (topic, requirements, scenario)
- * @returns {Promise<Object>} - { success, intent, surveyConfig?, message, error?, multiAgentReview? }
  */
-export async function sendChatMessage(message, currentConfig, conversationHistory, apiKey, enableMultiAgentReview = false, reviewMode = '1v1', customPrompts = null, researchContext = null) {
+export async function sendChatMessage(
+  message,
+  currentConfig,
+  conversationHistory,
+  apiKey,
+  enableMultiAgentReview = false,
+  reviewMode = '1v1',
+  customPrompts = null,
+  researchContext = null,
+) {
   try {
+    if (isPlatformMode()) {
+      // Prefer server-stored credentials; if a one-time key is provided,
+      // callers should store it first via Integrations.
+      return await sendAgentChat({
+        message,
+        currentConfig,
+        conversationHistory,
+        researchContext,
+        customPrompts,
+        enableMultiAgentReview,
+        reviewMode,
+      });
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/openai/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message,
         currentConfig,
@@ -32,145 +53,156 @@ export async function sendChatMessage(message, currentConfig, conversationHistor
         enableMultiAgentReview,
         reviewMode,
         customPrompts,
-        researchContext
-      })
+        researchContext,
+      }),
     });
-
-    const data = await response.json();
-    return data;
+    return await response.json();
   } catch (error) {
     return {
       success: false,
-      error: error.message || 'Failed to send message'
+      error: error.message || 'Failed to send message',
     };
   }
 }
 
 /**
  * Trigger Multi-Agent Review with Streaming (SSE)
- * @param {Object} surveyConfig - Survey configuration to review
- * @param {string} apiKey - User's OpenAI or OpenRouter API key
- * @param {string} mode - Review mode: '1v1' or 'group'
- * @param {number} maxRounds - Maximum number of review rounds
- * @param {Function} onEvent - Callback for each SSE event: (eventType, data) => void
- * @param {Object} customAgents - Custom agent configuration
- * @param {string} userRequest - User's original request for the survey
- * @param {Object} researchContext - Research context for alignment
- * @returns {Promise<Object>} - Final result
+ * Uses POST body (no apiKey in query string).
  */
-export async function triggerMultiAgentReviewStream(surveyConfig, apiKey, mode = '1v1', maxRounds = 3, onEvent, customAgents = null, userRequest = null, researchContext = null, projectId = null) {
-  return new Promise((resolve, reject) => {
+export async function triggerMultiAgentReviewStream(
+  surveyConfig,
+  apiKey,
+  mode = '1v1',
+  maxRounds = 3,
+  onEvent,
+  customAgents = null,
+  userRequest = null,
+  researchContext = null,
+  projectId = null,
+) {
+  return new Promise(async (resolve, reject) => {
     try {
-      // Load custom agents from localStorage if not provided (per project)
       let agentsConfig = customAgents;
       if (!agentsConfig && projectId) {
         agentsConfig = JSON.parse(localStorage.getItem(`customAgents_${projectId}`) || 'null');
       }
-      if (!agentsConfig) {
-        agentsConfig = null; // Will use default agents on backend
-      }
-      
-      const params = new URLSearchParams({
-        surveyConfig: JSON.stringify(surveyConfig),
-        apiKey,
-        mode,
-        maxRounds: maxRounds.toString()
-      });
-      
-      // Add custom agents if available
-      if (agentsConfig) {
-        params.append('customAgents', JSON.stringify(agentsConfig));
-      }
-      
-      // Add user's original request to keep review aligned with their needs
-      if (userRequest) {
-        params.append('userRequest', encodeURIComponent(userRequest));
-      }
-      
-      // Add research context for alignment
-      if (researchContext) {
-        params.append('researchContext', JSON.stringify(researchContext));
-      }
-      
-      const eventSource = new EventSource(`${API_BASE_URL}/api/openai/multi-agent-review-stream?${params}`);
-      
-      let finalResult = null;
-      
-      // Handle different event types
-      eventSource.addEventListener('start', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('start', data);
-      });
-      
-      eventSource.addEventListener('round-start', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('round-start', data);
-      });
-      
-      eventSource.addEventListener('agent-start', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('agent-start', data);
-      });
-      
-      eventSource.addEventListener('agent-review', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('agent-review', data);
-      });
-      
-      eventSource.addEventListener('agent-error', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('agent-error', data);
-      });
-      
-      eventSource.addEventListener('round-summary', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('round-summary', data);
-      });
-      
-      eventSource.addEventListener('revision-start', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('revision-start', data);
-      });
-      
-      eventSource.addEventListener('revision-thinking', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('revision-thinking', data);
-      });
-      
-      eventSource.addEventListener('revision-complete', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('revision-complete', data);
-      });
-      
-      eventSource.addEventListener('revision-error', (e) => {
-        const data = JSON.parse(e.data);
-        if (onEvent) onEvent('revision-error', data);
-      });
-      
-      eventSource.addEventListener('complete', (e) => {
-        const data = JSON.parse(e.data);
-        finalResult = data;
-        if (onEvent) onEvent('complete', data);
-        eventSource.close();
-        resolve({ success: true, ...data });
-      });
-      
-      eventSource.addEventListener('error', (e) => {
-        const data = e.data ? JSON.parse(e.data) : { message: 'Connection error' };
-        if (onEvent) onEvent('error', data);
-        eventSource.close();
-        reject(new Error(data.message || 'Stream error'));
-      });
-      
-      // Handle connection errors
-      eventSource.onerror = (error) => {
-        console.error('EventSource error:', error);
-        eventSource.close();
-        if (!finalResult) {
-          reject(new Error('Connection lost'));
+
+      const token = isPlatformMode()
+        ? (await supabase.auth.getSession()).data.session?.access_token
+        : null;
+
+      // Prefer POST streaming endpoint when available; fall back to EventSource for local Express.
+      if (isPlatformMode() && token) {
+        const res = await fetch(`${API_BASE_URL}/api/openai/multi-agent-review-stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            surveyConfig,
+            mode,
+            maxRounds,
+            customAgents: agentsConfig,
+            userRequest,
+            researchContext,
+            // apiKey intentionally omitted — server uses stored BYOK when ported
+          }),
+        });
+
+        if (!res.ok || !res.body) {
+          // Fall through to legacy GET if POST not implemented yet
+          return legacyEventSource();
         }
-      };
-      
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalResult = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop() || '';
+          for (const chunk of chunks) {
+            const lines = chunk.split('\n');
+            let eventType = 'message';
+            let dataLine = '';
+            lines.forEach((line) => {
+              if (line.startsWith('event:')) eventType = line.slice(6).trim();
+              if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+            });
+            if (!dataLine) continue;
+            try {
+              const data = JSON.parse(dataLine);
+              if (onEvent) onEvent(eventType, data);
+              if (eventType === 'complete' || eventType === 'done') finalResult = data;
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+        resolve(finalResult || { success: true });
+        return;
+      }
+
+      return legacyEventSource();
+
+      function legacyEventSource() {
+        const params = new URLSearchParams({
+          surveyConfig: JSON.stringify(surveyConfig),
+          mode,
+          maxRounds: maxRounds.toString(),
+        });
+        // Self-hosted only — never put platform keys in query strings.
+        if (!isPlatformMode() && apiKey) params.set('apiKey', apiKey);
+        if (agentsConfig) params.set('customAgents', JSON.stringify(agentsConfig));
+        if (userRequest) params.set('userRequest', userRequest);
+        if (researchContext) params.set('researchContext', JSON.stringify(researchContext));
+
+        const eventSource = new EventSource(
+          `${API_BASE_URL}/api/openai/multi-agent-review-stream?${params.toString()}`,
+        );
+
+        let finalResult = null;
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (onEvent) onEvent('message', data);
+          } catch {
+            // ignore
+          }
+        };
+
+        ['progress', 'agent', 'round', 'complete', 'done', 'error'].forEach((type) => {
+          eventSource.addEventListener(type, (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (onEvent) onEvent(type, data);
+              if (type === 'complete' || type === 'done') {
+                finalResult = data;
+                eventSource.close();
+                resolve(finalResult);
+              }
+              if (type === 'error') {
+                eventSource.close();
+                reject(new Error(data.error || 'Multi-agent review failed'));
+              }
+            } catch (err) {
+              eventSource.close();
+              reject(err);
+            }
+          });
+        });
+
+        eventSource.onerror = () => {
+          eventSource.close();
+          if (finalResult) resolve(finalResult);
+          else reject(new Error('Multi-agent review connection failed'));
+        };
+      }
     } catch (error) {
       reject(error);
     }
@@ -178,25 +210,24 @@ export async function triggerMultiAgentReviewStream(surveyConfig, apiKey, mode =
 }
 
 /**
- * Validate OpenAI API key
+ * Validate API key — platform stores via agent credentials; local uses OpenAI models ping.
  */
-export async function validateApiKey(apiKey) {
+export async function validateChatApiKey(apiKey) {
   try {
+    if (isPlatformMode()) {
+      const { validateOpenAiCredential, storeOpenAiCredential } = await import('./agentApi');
+      const validated = await validateOpenAiCredential(apiKey);
+      if (!validated.success) return validated;
+      return storeOpenAiCredential(apiKey);
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/openai/validate-key`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ apiKey })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
     });
-
-    const data = await response.json();
-    return data;
+    return await response.json();
   } catch (error) {
-    return {
-      success: false,
-      error: error.message || 'Failed to validate API key'
-    };
+    return { success: false, error: error.message || 'Validation failed' };
   }
 }
-

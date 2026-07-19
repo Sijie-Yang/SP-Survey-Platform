@@ -99,6 +99,9 @@ import {
 import { enrichSkillAnswers, buildResponseMediaUrlMap, stripSkillAnswerContext, formatSkillAnswerForDisplay, filterAnswersForSkill } from '../../lib/skillMediaUtils';
 import { saveProjectFull } from '../../lib/projectManager';
 import { deleteSurveyResponse, responseRecordKey } from '../../lib/surveyResponses';
+import { AdminPageHeader } from './AdminPageLayout';
+import { useRegion } from '../../contexts/RegionContext';
+import { tf } from '../../contexts/adminI18n';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -2000,6 +2003,7 @@ function readIncludePracticeFromConfig(surveyConfig) {
 }
 
 export default function ResultsAnalysis({ currentProject, surveyConfig, onSurveyConfigChange }) {
+  const { t } = useRegion();
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -2278,28 +2282,18 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
   return (
     <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
-      {/* Header */}
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 2,
-          flexWrap: 'wrap',
-          mb: 3,
-        }}
-      >
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="h5" sx={{ mb: 1, color: 'primary.main' }}>
-            📊 Results Analysis
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Analyze survey responses per question for project:{' '}
+      <AdminPageHeader
+        icon={<Assessment />}
+        title={t.resultsTitle}
+        description={(
+          <>
+            {t.resultsDescriptionPrefix}{' '}
             <strong>{currentProject?.name}</strong>.
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, flexShrink: 0 }}>
-          <Tooltip title="Refresh responses">
+          </>
+        )}
+        actions={(
+          <>
+          <Tooltip title={t.resultsRefresh}>
             <IconButton onClick={fetchResponses} disabled={loading} color="primary">
               <Refresh />
             </IconButton>
@@ -2311,7 +2305,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             onClick={() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)}
             size="small"
           >
-            Export CSV
+            {t.resultsExportCsv}
           </Button>
           <Button
             variant="contained"
@@ -2338,7 +2332,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             }}
             size="small"
           >
-            Export All
+            {t.resultsExportAll}
           </Button>
           <Button
             variant="outlined"
@@ -2359,17 +2353,18 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             }}
             size="small"
           >
-            Export Methods
+            {t.resultsExportMethods}
           </Button>
-        </Box>
-      </Box>
+          </>
+        )}
+      />
 
       {/* Data source badge */}
       {dataSource && (
         <Box sx={{ mb: 2 }}>
           <Chip
             icon={dataSource === 'supabase' ? <Cloud /> : <Storage />}
-            label={dataSource === 'supabase' ? 'Connected to Supabase' : 'Reading local response files'}
+            label={dataSource === 'supabase' ? t.resultsConnectedSupabase : t.resultsLocalFiles}
             color={dataSource === 'supabase' ? 'success' : 'info'}
             variant="outlined"
             size="small"
@@ -2446,10 +2441,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', width: '100%', pr: 1 }}>
               <VerifiedUser color="primary" fontSize="small" />
-              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Data Quality</Typography>
-              <Chip label={`${qualitySummary.clean} clean`} color="success" size="small" variant="outlined" />
-              <Chip label={`${qualitySummary.flagged} flagged`} color="warning" size="small" variant="outlined" />
-              <Chip label={`${filteredResponses.length} in analysis`} size="small" variant="outlined" />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t.resultsDataQuality}</Typography>
+              <Chip label={tf(t.resultsClean, { n: qualitySummary.clean })} color="success" size="small" variant="outlined" />
+              <Chip label={tf(t.resultsFlagged, { n: qualitySummary.flagged })} color="warning" size="small" variant="outlined" />
+              <Chip label={tf(t.resultsInAnalysis, { n: filteredResponses.length })} size="small" variant="outlined" />
             </Box>
           </AccordionSummary>
           <AccordionDetails>
@@ -2468,7 +2463,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                   });
                 }}
               >
-                Export
+                {t.resultsExportCsv}
               </Button>
               <Box flex={1} />
               <FormControlLabel
@@ -2480,7 +2475,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                     size="small"
                   />
                 }
-                label="Exclude flagged responses from analysis"
+                label={t.resultsExcludeFlagged}
               />
             </Box>
             {excludePrefError && (
@@ -2534,7 +2529,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
               {loading ? '–' : totalResponses}
             </Typography>
-            <Typography variant="body2" color="text.secondary">Total Responses</Typography>
+            <Typography variant="body2" color="text.secondary">{t.resultsTotalResponses}</Typography>
             {dateRange && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                 {dateRange}
@@ -2548,9 +2543,9 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
               {loading ? '–' : answerableQuestions.length}
             </Typography>
-            <Typography variant="body2" color="text.secondary">Answerable Questions</Typography>
+            <Typography variant="body2" color="text.secondary">{t.resultsAnswerableQuestions}</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              {answeredQuestions} with responses
+              {answeredQuestions} {t.resultsWithResponses}
               {displayOnlyQuestionCount > 0
                 ? ` · ${displayOnlyQuestionCount} display/instruction excluded`
                 : ''}
@@ -2565,9 +2560,9 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                 ? '–'
                 : `${pct(answeredQuestions, answerableQuestions.length)}%`}
             </Typography>
-            <Typography variant="body2" color="text.secondary">Question Coverage</Typography>
+            <Typography variant="body2" color="text.secondary">{t.resultsQuestionCoverage}</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              answerable questions with ≥1 response
+              {t.resultsCoverageHelp}
             </Typography>
           </Paper>
         </Grid>
@@ -2579,18 +2574,18 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                Response records
+                {t.resultsResponseRecords}
               </Typography>
               <Chip
                 size="small"
                 variant="outlined"
-                label={`${dateFilteredResponses.length} submissions`}
+                label={tf(t.resultsSubmissions, { n: dateFilteredResponses.length })}
               />
             </Box>
           </AccordionSummary>
           <AccordionDetails>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              Remove individual submissions from this project. Deletion is permanent.
+              {t.resultsRecordsHelp}
             </Typography>
             {deleteError && (
               <Alert severity="error" sx={{ mb: 1.5 }} onClose={() => setDeleteError(null)}>
@@ -2691,7 +2686,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       {/* No responses yet */}
       {!loading && surveyConfig && totalResponses === 0 && !error && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          No responses collected yet. Share your survey link and come back here to view results.
+          {t.resultsEmpty}
         </Alert>
       )}
 

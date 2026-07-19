@@ -127,7 +127,7 @@ export default function LiveSurveysPage() {
         ) : listings.length === 0 ? (
           <Alert severity="info">
             No live surveys are featured yet. Researchers can apply from their project menu
-            (Publish to Live Surveys); admins approve listings on the admin dashboard.
+            (Publish to Main Page); admins approve listings on the admin dashboard.
           </Alert>
         ) : (
           <>

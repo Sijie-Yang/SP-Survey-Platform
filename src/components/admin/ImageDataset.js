@@ -59,6 +59,7 @@ import MediaFolderBrowser from './MediaFolderBrowser';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
 import MediaPreannotatePanel from './MediaPreannotatePanel';
 import ConfirmDialog from '../layout/ConfirmDialog';
+import { AdminPageHeader } from './AdminPageLayout';
 import { L0_MODEL } from '../../lib/imageFeaturesL0';
 import { SEG_MODEL } from '../../lib/falInference';
 import {
@@ -81,6 +82,7 @@ import {
   formatTemplateImportButtonLabel,
 } from '../../lib/templateImageImport';
 import { useRegion } from '../../contexts/RegionContext';
+import { tf } from '../../contexts/adminI18n';
 import { useAuth } from '../../contexts/AuthContext';
 
 const MEDIA_PAGE_SIZE = 24;
@@ -166,7 +168,7 @@ function mediaEntryIdentity(entry, userId, projectId) {
 }
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
-  useRegion();
+  const { t } = useRegion();
   const { user } = useAuth();
 
   // Direct upload state
@@ -1364,13 +1366,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   return (
     <Box>
-      <Typography variant="h5" sx={{ mb: 1, color: 'primary.main', fontWeight: 700 }}>
-        Media Dataset
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5, maxWidth: 720 }}>
-        Add media, organize it in folders, then tag folders as <strong>set</strong> or <strong>category</strong>
-        for survey assignment. Files are stored on Cloudflare R2.
-      </Typography>
+      <AdminPageHeader
+        icon={<CloudUpload />}
+        title={t.mediaTitle}
+        description={t.mediaDescription}
+      />
 
       {!isR2Configured() && (
         <Alert severity="warning" sx={{ mb: 2.5 }}>
@@ -1386,23 +1386,23 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         {r2Syncing ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CircularProgress size={16} />
-            <Typography variant="body2" color="text.secondary">Checking R2 for existing images…</Typography>
+            <Typography variant="body2" color="text.secondary">{t.mediaCheckingR2}</Typography>
           </Box>
         ) : preloadedCount > 0 ? (
           <>
-            <Chip icon={<CheckCircle />} label={`${preloadedCount} media file(s) in R2`} color="success" variant="outlined" />
-            {Object.entries(mediaCounts).map(([t, n]) => (
-              <Chip key={t} size="small" label={`${n} ${t}`} variant="outlined" />
+            <Chip icon={<CheckCircle />} label={`${preloadedCount} ${t.mediaInR2}`} color="success" variant="outlined" />
+            {Object.entries(mediaCounts).map(([mediaType, n]) => (
+              <Chip key={mediaType} size="small" label={`${n} ${mediaType}`} variant="outlined" />
             ))}
             <Chip label="Cloudflare R2" color="primary" size="small" variant="outlined" />
             {currentProject?.preloadedAt && (
               <Typography variant="caption" color="text.secondary">
-                Last upload: {new Date(currentProject.preloadedAt).toLocaleString()}
+                {t.mediaLastUpload} {new Date(currentProject.preloadedAt).toLocaleString()}
               </Typography>
             )}
           </>
         ) : (
-          <Chip icon={<Warning />} label="No media uploaded yet" color="default" variant="outlined" />
+          <Chip icon={<Warning />} label={t.noMediaYet} color="default" variant="outlined" />
         )}
       </Box>
 
@@ -1431,7 +1431,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       </Box>
 
       <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1, letterSpacing: 1 }}>
-        1 · Add media
+        {t.mediaAddSection}
       </Typography>
 
       {/* ── Import / Upload / HF — three columns ── */}
@@ -1457,10 +1457,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         }}>
           <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
             <ContentCopy fontSize="small" color="secondary" />
-            Import Template Images
+            {t.mediaImportTemplateTitle}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Copy images from a published template. Existing files are skipped so imports can resume.
+            {t.mediaImportTemplateHelp}
           </Typography>
 
           {(() => {
@@ -1593,11 +1593,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         }}>
           <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
             <CloudUpload fontSize="small" color="primary" />
-            Upload Media
+            {t.mediaUploadTitle}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Upload into the <strong>current folder</strong> in Media library
-            ({currentFolder ? <code>{currentFolder}</code> : 'root'}). Images over 300 KB are compressed.
+            {t.mediaUploadHelpPrefix}
+            {' '}({currentFolder ? <code>{currentFolder}</code> : 'root'}).
           </Typography>
 
           <input
@@ -1611,11 +1611,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
             <Button size="small" variant="outlined" onClick={() => fileInputRef.current?.click()} disabled={directUploadStatus.loading}>
-              Choose files
+              {t.mediaChooseFiles}
             </Button>
             {selectedFiles.length > 0 && (
               <Typography variant="caption" color="text.secondary">
-                {selectedFiles.length} selected
+                {selectedFiles.length} {t.mediaSelected}
               </Typography>
             )}
           </Box>
@@ -1644,8 +1644,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               disabled={!selectedFiles.length || directUploadStatus.loading || !isR2Configured()}
               startIcon={directUploadStatus.loading ? <CircularProgress size={16} color="inherit" /> : <CloudUpload />}
             >
-              Upload{selectedFiles.length > 0 ? ` ${selectedFiles.length}` : ''}
-              {currentFolder ? ` → ${currentFolder}` : ' → root'}
+              {t.mediaUploadBtn}{selectedFiles.length > 0 ? ` ${selectedFiles.length}` : ''}
+              {currentFolder ? ` → ${currentFolder}` : ` ${t.mediaUploadRoot}`}
             </Button>
           </Box>
         </Box>
@@ -1662,37 +1662,35 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           minHeight: 0,
         }}>
           <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-            🤗 HF Dataset Import
+            {t.hfImportTitle}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Batch-import from HuggingFace. Use <code>owner/dataset</code> (rows)
-            or <code>owner/dataset/folder</code> (recursive; nested folders kept).
-            Resume reuses the first import destination to avoid nested duplicates.
+            {t.hfImportHelp}
           </Typography>
 
           <FormControlLabel
             sx={{ mb: 1, ml: 0 }}
             control={<Switch size="small" checked={hfConfig.enabled} onChange={(e) => setHfConfig(p => ({ ...p, enabled: e.target.checked }))} />}
-            label={<Typography variant="body2">Enable HF import</Typography>}
+            label={<Typography variant="body2">{t.hfEnable}</Typography>}
           />
           <TextField
-            fullWidth size="small" label="Token (optional)" type="password"
+            fullWidth size="small" label={t.hfToken} type="password"
             value={hfConfig.token}
             onChange={(e) => setHfConfig(p => ({ ...p, token: e.target.value }))}
             disabled={!hfConfig.enabled}
             sx={{ mb: 1 }}
           />
           <TextField
-            fullWidth size="small" label="Dataset"
+            fullWidth size="small" label={t.hfDataset}
             value={hfConfig.datasetName}
             onChange={(e) => setHfConfig(p => ({ ...p, datasetName: e.target.value }))}
-            placeholder="owner/dataset"
+            placeholder={t.hfPlaceholder}
             disabled={!hfConfig.enabled}
             sx={{ mb: 1 }}
           />
           <Box sx={{ display: 'flex', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
             <Button size="small" variant="outlined" onClick={saveHfConfig} disabled={!hfConfig.enabled || !hfConfig.datasetName}>
-              Save
+              {t.saveConfig}
             </Button>
             <Button
               size="small"
@@ -1701,7 +1699,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               disabled={!hfConfig.enabled || !hfConfig.datasetName || hfStatus.loading}
               startIcon={hfStatus.loading ? <CircularProgress size={14} /> : <Refresh />}
             >
-              Test
+              {t.testConnection}
             </Button>
           </Box>
 
@@ -1737,7 +1735,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               disabled={!hfStatus.connected || !isR2Configured() || preloadStatus.loading}
               startIcon={preloadStatus.loading ? <CircularProgress size={16} /> : <CloudDownload />}
             >
-              {preloadedCount > 0 ? 'Re-preload to R2' : 'Preload to R2'}
+              {preloadedCount > 0 ? t.hfRePreload : t.hfPreload}
             </Button>
           </Box>
         </Box>
@@ -1751,7 +1749,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       />
 
       <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1, letterSpacing: 1 }}>
-        2 · Organize in folders
+        {t.mediaOrganizeSection}
       </Typography>
 
       <MediaFolderBrowser
@@ -2075,24 +2073,22 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       </MediaFolderBrowser>
 
       <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1, mt: 0.5, letterSpacing: 1 }}>
-        3 · Tagged for assignment
+        {t.mediaTaggedSection}
       </Typography>
 
       {pairedGroups.length === 0 && mediaCategories.length === 0 && (
         <Alert severity="info" sx={{ mb: 2.5 }}>
-          No folders tagged yet. In <strong>Media library</strong>, check folders on the left and click
-          {' '}<strong>Set</strong> or <strong>Category</strong>. Tagged folders will appear here for survey assignment.
+          {t.mediaNoFoldersTagged}
         </Alert>
       )}
 
       {pairedGroups.length > 0 && (
         <Box sx={{ mb: 2.5, p: 2.5, bgcolor: 'background.paper', border: '2px solid', borderColor: 'info.light', borderRadius: 1.5 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-            Tagged sets ({pairedGroups.length})
+            {tf(t.mediaTaggedSets, { n: pairedGroups.length })}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            Folders tagged <code>set</code>. Each folder&apos;s direct files stay together when a question uses
-            &quot;Random fixed sets&quot; with a matching media count.
+            {t.mediaTaggedSetsHelp}
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
             {Object.entries(groupSummary.bySize)
@@ -2167,11 +2163,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       {mediaCategories.length > 0 && (
         <Box sx={{ mb: 2.5, p: 2.5, bgcolor: 'background.paper', border: '2px solid', borderColor: 'secondary.light', borderRadius: 1.5 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
-            Tagged categories ({mediaCategories.length})
+            {tf(t.mediaTaggedCategories, { n: mediaCategories.length })}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Folders tagged <code>category</code>. Use Survey Builder → Media Assignment → <strong>Per category</strong>
-            and set how many files to draw from each.
+            {t.mediaTaggedCategoriesHelp}
           </Typography>
           <TableContainer component={Paper} variant="outlined">
             <Table size="small">

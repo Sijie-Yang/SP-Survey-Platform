@@ -70,23 +70,58 @@ async function getCurrentUserId() {
 
 // ── Supabase helpers ──────────────────────────────────────────────────────────
 
-async function sbSaveProject(project, surveyConfig) {
+function buildProjectMetadata(project, existingMeta = {}) {
+  const base = (existingMeta && typeof existingMeta === 'object') ? { ...existingMeta } : {};
+  const assign = (key, value) => {
+    if (value === undefined) return;
+    if (Array.isArray(value)) {
+      const cleaned = value.map((t) => String(t || '').trim()).filter(Boolean);
+      if (cleaned.length) base[key] = cleaned;
+      else delete base[key];
+      return;
+    }
+    const s = String(value || '').trim();
+    if (s) base[key] = s;
+    else delete base[key];
+  };
+  assign('author', project.author ?? project.metadata?.author);
+  assign('year', project.year ?? project.metadata?.year);
+  assign('category', project.category ?? project.metadata?.category);
+  assign('website', project.website ?? project.metadata?.website);
+  assign('huggingfaceDataset', project.huggingfaceDataset ?? project.metadata?.huggingfaceDataset);
+  if (project.tags !== undefined || project.metadata?.tags !== undefined) {
+    assign('tags', project.tags !== undefined ? project.tags : project.metadata.tags);
+  }
+  return base;
+}
+
+async function sbSaveProject(project, surveyConfig, { writer = null } = {}) {
   const userId = await getCurrentUserId();
+  const now = new Date().toISOString();
+  const config = surveyConfig || {};
+  // Save = live: share / preview / view-live always follow the latest config.
+  // Dual-write draft + survey_config so owner RLS and anonymous RPC stay in sync.
   const row = {
     id: project.id,
     user_id: userId,
     name: project.name,
     description: project.description || '',
-    survey_config: surveyConfig || {},
+    survey_config: config,
+    survey_config_draft: config,
+    draft_updated_at: now,
     image_dataset_config: project.imageDatasetConfig || {},
     preloaded_images: project.preloadedImages || [],
     preloaded_at: project.preloadedAt || null,
     preloaded_source: project.preloadedSource || null,
     template_id: project.templateId || null,
-    updated_at: new Date().toISOString(),
+    metadata: buildProjectMetadata(project, project.metadata || {}),
+    updated_at: now,
+    last_writer: writer || { source: 'human', at: now },
   };
+
   const { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
   if (error) throw error;
+  return { draftUpdatedAt: now };
 }
 
 async function sbLoadProject(projectId) {
@@ -132,6 +167,10 @@ async function sbDeleteProject(projectId) {
 }
 
 function rowToProject(row) {
+  // Latest wins: draft and survey_config are kept in sync on save.
+  const latest = row.survey_config_draft ?? row.survey_config ?? {};
+  const draftUpdatedAt = row.draft_updated_at || row.updated_at || null;
+  const meta = (row.metadata && typeof row.metadata === 'object') ? row.metadata : {};
   return {
     id: row.id,
     name: row.name,
@@ -141,12 +180,22 @@ function rowToProject(row) {
     createdAt: row.created_at || null,
     lastModified: row.updated_at || null,
     templateId: row.template_id || null,
+    author: meta.author || '',
+    year: meta.year || '',
+    category: meta.category || '',
+    tags: Array.isArray(meta.tags) ? meta.tags : [],
+    website: meta.website || '',
+    huggingfaceDataset: meta.huggingfaceDataset || '',
+    metadata: meta,
     imageDatasetConfig: row.image_dataset_config || {},
     preloadedImages: row.preloaded_images || [],
     preloadedAt: row.preloaded_at || null,
     preloadedSource: row.preloaded_source || null,
-    // surveyConfig lives inside the row but is kept separate for callers
-    _surveyConfig: row.survey_config || {},
+    draftUpdatedAt,
+    publishedAt: row.published_at || null,
+    publishedVersion: row.published_version || 0,
+    lastWriter: row.last_writer || null,
+    _surveyConfig: latest,
   };
 }
 
@@ -294,7 +343,16 @@ export const updateProject = async (projectId, updates) => {
     if (isPlatformMode()) {
       const existing = await sbLoadProject(projectId);
       if (!existing) throw new Error('Project not found');
-      const merged = { ...existing, ...updates, id: projectId, lastModified: new Date().toISOString() };
+      const merged = {
+        ...existing,
+        ...updates,
+        id: projectId,
+        lastModified: new Date().toISOString(),
+        metadata: buildProjectMetadata(
+          { ...existing, ...updates },
+          existing.metadata || {},
+        ),
+      };
       await sbSaveProject(merged, merged._surveyConfig || {});
       return { success: true, project: merged };
     } else {
@@ -331,16 +389,101 @@ export const getProjectById = async (projectId) => {
   }
 };
 
-export const saveProjectFull = async (project, surveyConfig) => {
+export const saveProjectFull = async (project, surveyConfig, options = {}) => {
   try {
     if (isPlatformMode()) {
-      await sbSaveProject(project, surveyConfig);
-    } else {
-      await localSaveProject(project, surveyConfig);
+      const meta = await sbSaveProject(project, surveyConfig, {
+        writer: options.writer || { source: 'human' },
+      });
+      return { success: true, ...meta };
     }
-    return { success: true };
+    await localSaveProject(project, surveyConfig);
+    return { success: true, draftUpdatedAt: new Date().toISOString() };
   } catch (error) {
     console.error('saveProjectFull:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const publishProjectConfig = async (projectId, summary = '') => {
+  try {
+    if (!isPlatformMode()) {
+      return { success: false, error: 'Publish is only available in platform mode.' };
+    }
+    const { data, error } = await supabase.rpc('publish_project_config', {
+      p_project_id: projectId,
+      p_summary: summary || null,
+    });
+    if (error) throw error;
+    return { success: true, ...(data || {}) };
+  } catch (error) {
+    console.error('publishProjectConfig:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const listProjectVersions = async (projectId) => {
+  try {
+    if (!isPlatformMode()) return [];
+    const { data, error } = await supabase
+      .from('project_config_versions')
+      .select('version, published_at, change_summary, published_by')
+      .eq('project_id', projectId)
+      .order('version', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('listProjectVersions:', error);
+    return [];
+  }
+};
+
+export const rollbackProjectConfig = async (projectId, version) => {
+  try {
+    if (!isPlatformMode()) {
+      return { success: false, error: 'Rollback is only available in platform mode.' };
+    }
+    const { data, error } = await supabase.rpc('rollback_project_config', {
+      p_project_id: projectId,
+      p_version: version,
+    });
+    if (error) throw error;
+    return { success: true, ...(data || {}) };
+  } catch (error) {
+    console.error('rollbackProjectConfig:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const saveProjectDraftOptimistic = async (
+  projectId,
+  surveyConfig,
+  {
+    expectedDraftUpdatedAt = null,
+    writer = { source: 'human' },
+    clientMutationId = null,
+  } = {},
+) => {
+  try {
+    if (!isPlatformMode()) {
+      return saveProjectFull({ id: projectId }, surveyConfig, { writer });
+    }
+    const { data, error } = await supabase.rpc('save_project_draft', {
+      p_project_id: projectId,
+      p_survey_config: surveyConfig,
+      p_expected_draft_updated_at: expectedDraftUpdatedAt,
+      p_writer: writer,
+      p_client_mutation_id: clientMutationId,
+    });
+    if (error) {
+      if (String(error.message || '').includes('conflict')) {
+        return { success: false, conflict: true, error: error.message };
+      }
+      throw error;
+    }
+    return { success: true, ...(data || {}) };
+  } catch (error) {
+    console.error('saveProjectDraftOptimistic:', error);
     return { success: false, error: error.message };
   }
 };

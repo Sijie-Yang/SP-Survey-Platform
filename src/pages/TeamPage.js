@@ -266,7 +266,7 @@ export default function TeamPage() {
         <Typography variant="h4" fontWeight={800} sx={{ mb: 1 }}>
           Team
         </Typography>
-        <Typography variant="body1" color="text.secondary" sx={{ mb: 4, maxWidth: 720 }}>
+        <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
           SP-Survey is led by{' '}
           <Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>
             Sijie Yang
@@ -277,6 +277,39 @@ export default function TeamPage() {
           </Link>
           , National University of Singapore, with collaborators across partner institutions and supervised by Filip Biljecki.
         </Typography>
+
+        <Stack
+          direction="row"
+          spacing={{ xs: 2, sm: 3 }}
+          alignItems="center"
+          flexWrap="wrap"
+          useFlexGap
+          sx={{ mb: 4 }}
+        >
+          <Box
+            component="a"
+            href="https://ual.sg"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Urban Analytics Lab, NUS"
+            sx={{ display: 'inline-flex', lineHeight: 0 }}
+          >
+            <Box
+              component="img"
+              src="/UAL%20Logo.jpg"
+              alt="Urban Analytics Lab, NUS"
+              sx={{ height: { xs: 48, sm: 56 }, objectFit: 'contain', display: 'block' }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+          </Box>
+          <Box
+            component="img"
+            src="/DoA%20Logo.jpg"
+            alt="Department of Architecture, NUS"
+            sx={{ height: { xs: 48, sm: 56 }, objectFit: 'contain', display: 'block' }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
+        </Stack>
 
         <Box
           sx={{

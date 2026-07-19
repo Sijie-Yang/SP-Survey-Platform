@@ -19,8 +19,11 @@ import {
   Link as LinkIcon,
   OpenInNew,
 } from '@mui/icons-material';
+import { AdminPageHeader } from './AdminPageLayout';
+import { useRegion } from '../../contexts/RegionContext';
 
 export default function WebsiteSetup({ currentProject, surveyConfig }) {
+  const { t } = useRegion();
   const [copied, setCopied] = useState(false);
 
   const origin = window.location.origin;
@@ -40,20 +43,17 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
 
   return (
     <Box>
-      <Typography variant="h5" sx={{ mb: 1, color: 'primary.main' }}>
-        🔗 Share Your Survey
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Your survey is already live. Copy the link below and share it with participants.
-        No deployment required.
-      </Typography>
+      <AdminPageHeader
+        icon={<LinkIcon />}
+        title={t.shareTitle}
+        description={t.shareDescription}
+      />
 
-      {/* Survey Link Card */}
       <Card sx={{ mb: 3, border: '2px solid', borderColor: 'primary.main' }}>
         <CardContent>
           <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
             <LinkIcon color="primary" />
-            Your Survey Link
+            {t.shareYourLink}
           </Typography>
 
           {surveyUrl ? (
@@ -81,7 +81,7 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
                   onClick={() => copy(surveyUrl)}
                   color={copied ? 'success' : 'primary'}
                 >
-                  {copied ? 'Copied!' : 'Copy Link'}
+                  {copied ? t.shareCopied : t.shareCopyLink}
                 </Button>
                 <Button
                   variant="outlined"
@@ -90,52 +90,39 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  Open Survey
+                  {t.shareOpenSurvey}
                 </Button>
               </Box>
             </>
           ) : (
             <Alert severity="warning">
-              No project selected. Please select or create a project first.
+              {t.shareNoProject}
             </Alert>
           )}
         </CardContent>
       </Card>
 
-      {/* Tips */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2 }}>
-            💡 Sharing Tips
+            {t.shareTips}
           </Typography>
           <List dense>
             <ListItem>
               <ListItemIcon><CheckCircle color="success" fontSize="small" /></ListItemIcon>
-              <ListItemText
-                primary="Share the link directly"
-                secondary="Send it via email, WeChat, Slack, or any other channel"
-              />
+              <ListItemText primary={t.shareTip1Primary} secondary={t.shareTip1Secondary} />
             </ListItem>
             <ListItem>
               <ListItemIcon><CheckCircle color="success" fontSize="small" /></ListItemIcon>
-              <ListItemText
-                primary="Embed in a QR code"
-                secondary="Use any free QR code generator (e.g. qr-code-generator.com) to create a scannable code"
-              />
+              <ListItemText primary={t.shareTip2Primary} secondary={t.shareTip2Secondary} />
             </ListItem>
             <ListItem>
               <ListItemIcon><CheckCircle color="success" fontSize="small" /></ListItemIcon>
-              <ListItemText
-                primary="The link always stays up-to-date"
-                secondary="Any changes you save are instantly reflected for participants — no re-deployment needed"
-              />
+              <ListItemText primary={t.shareTip3Primary} secondary={t.shareTip3Secondary} />
             </ListItem>
             <ListItem>
               <ListItemIcon><CheckCircle color="success" fontSize="small" /></ListItemIcon>
-              <ListItemText
-                primary="Responses are saved automatically"
-                secondary="Results go to Supabase in real time and can be viewed in the Results Analysis tab"
-              />
+              <ListItemText primary={t.shareTip4Primary} secondary={t.shareTip4Secondary} />
             </ListItem>
           </List>
         </CardContent>
@@ -143,14 +130,13 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
 
       <Divider sx={{ my: 3 }} />
 
-      {/* Admin link */}
       <Card>
         <CardContent>
           <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
-            🔒 Admin Panel Link
+            {t.shareAdminLink}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Share this link with collaborators who need to edit the survey. They will need to sign in.
+            {t.shareAdminHelp}
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
             <Button
@@ -158,7 +144,7 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
               startIcon={<ContentCopy />}
               onClick={() => copy(`${origin}/admin`)}
             >
-              Copy Admin Link
+              {t.shareCopyAdmin}
             </Button>
             <Button variant="text" startIcon={<Launch />} href={`${origin}/admin`} target="_blank">
               {origin}/admin

@@ -490,11 +490,23 @@ export default function ResearchDeepSearch() {
   const confirmDraft = async () => {
     const paper = draftDialog;
     if (!paper) return;
-    const apiKey = localStorage.getItem('openaiApiKey') || sessionStorage.getItem('openai_api_key') || '';
-    if (!apiKey) {
-      showSnack('请先在 Survey Builder 设置里配置 OpenAI / OpenRouter API key', 'error');
-      setDraftDialog(null);
-      return;
+    // Platform: Worker uses encrypted BYOK via Authorization. Self-host may still pass a local key.
+    let apiKey = localStorage.getItem('openaiApiKey') || sessionStorage.getItem('openai_api_key') || '';
+    try {
+      const { getCredentialStatus } = await import('../../lib/agentApi');
+      const status = await getCredentialStatus();
+      if (status?.openai?.configured) apiKey = ''; // force server-stored path
+      else if (!apiKey) {
+        showSnack('请先在 AI & Integrations 中保存 OpenAI / OpenRouter API key', 'error');
+        setDraftDialog(null);
+        return;
+      }
+    } catch {
+      if (!apiKey) {
+        showSnack('请先在 AI & Integrations 中保存 OpenAI / OpenRouter API key', 'error');
+        setDraftDialog(null);
+        return;
+      }
     }
     setDraftingId(paper.id);
     try {

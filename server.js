@@ -51,6 +51,78 @@ app.use(cors({
 }));
 
 app.use(express.json({ limit: '100mb' }));
+// Codex / OAuth clients post token+revoke as application/x-www-form-urlencoded.
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+function buildBridgeBody(req, headers) {
+  if (['GET', 'HEAD'].includes(req.method)) return undefined;
+  // Incoming content-length no longer matches after we rebuild the body.
+  headers.delete('content-length');
+
+  const contentType = String(req.headers['content-type'] || '');
+  if (contentType.includes('application/x-www-form-urlencoded')) {
+    const params = new URLSearchParams();
+    Object.entries(req.body || {}).forEach(([key, value]) => {
+      if (value == null) return;
+      if (Array.isArray(value)) value.forEach((item) => params.append(key, String(item)));
+      else params.append(key, String(value));
+    });
+    headers.set('content-type', 'application/x-www-form-urlencoded');
+    return params.toString();
+  }
+
+  headers.set('content-type', 'application/json');
+  return typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {});
+}
+
+// Platform Agent / OAuth / MCP — shared Worker handlers (ESM) for local parity.
+app.use(async (req, res, next) => {
+  const pathName = req.path || '';
+  const isAgentRoute = pathName === '/api/agent'
+    || pathName.startsWith('/api/agent/')
+    || pathName.startsWith('/oauth/')
+    || pathName === '/mcp'
+    || pathName.startsWith('/.well-known/');
+  if (!isAgentRoute) return next();
+
+  try {
+    const { handleAgentAndMcpRoutes } = await import('./worker-lib/agent/router.mjs');
+    const url = `http://localhost:${PORT}${req.originalUrl}`;
+    const headers = new Headers();
+    Object.entries(req.headers || {}).forEach(([key, value]) => {
+      if (value == null) return;
+      if (Array.isArray(value)) value.forEach((v) => headers.append(key, v));
+      else headers.set(key, value);
+    });
+    const init = { method: req.method, headers };
+    const body = buildBridgeBody(req, headers);
+    if (body !== undefined) init.body = body;
+    const request = new Request(url, init);
+    const env = {
+      ...process.env,
+      APP_URL: process.env.APP_URL || 'http://localhost:3000',
+      SUPABASE_URL: process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL,
+      SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY,
+    };
+    const response = await handleAgentAndMcpRoutes(request, env);
+    if (!response) return next();
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      if (key.toLowerCase() === 'transfer-encoding') return;
+      res.setHeader(key, value);
+    });
+    if (response.status === 204 || response.status === 302) {
+      const location = response.headers.get('Location');
+      if (location) return res.redirect(response.status, location);
+      return res.end();
+    }
+    const buf = Buffer.from(await response.arrayBuffer());
+    return res.send(buf);
+  } catch (error) {
+    console.error('Agent/MCP bridge error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 const TEMPLATES_PATH = path.join(__dirname, 'public', 'project_templates');
 const PROJECTS_PATH = path.join(__dirname, 'public', 'projects');

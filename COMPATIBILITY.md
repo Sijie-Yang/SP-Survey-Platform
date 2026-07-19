@@ -159,3 +159,14 @@ Do not promise “no impact” if question names or storage ownership change.
 - SQL to run: supabase/….sql (yes/no, already on prod?)
 - R2 prefix impact: none | project only | templates (explicit)
 ```
+
+---
+
+## 11. Agent / MCP / draft-publish
+
+- Run `supabase/agent_mcp_platform.sql` and `supabase/survey_public_rpcs.sql` **before** deploying frontend that expects draft columns.
+- Participant links always load latest: `get_survey_project` returns `COALESCE(survey_config_draft, survey_config)`.
+- Create / builder / Codex saves dual-write `survey_config` + `survey_config_draft` (save = live). Product **Publish to Main Page** is the homepage listing flow, not gating the share URL.
+- R2 mutating routes require auth when Supabase is configured; clients must send `Authorization: Bearer <session>`.
+- BYOK keys must never appear in logs, SSE query strings, or MCP responses.
+- See `docs/agent-mcp.md` and `AGENTS.md`.
