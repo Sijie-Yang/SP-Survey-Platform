@@ -13,10 +13,12 @@ import {
 } from '@mui/material';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useRegion } from '../contexts/RegionContext';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
+  const { t } = useRegion();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState(0); // 0 = login, 1 = register
@@ -38,11 +40,11 @@ export default function LoginPage() {
         navigate(next && next.startsWith('/') ? next : '/admin');
       } else {
         await register(email, password);
-        setInfo('Registration successful! Please check your email to confirm your account, then log in.');
+        setInfo(t.loginRegisterSuccess);
         setTab(0);
       }
     } catch (err) {
-      setError(err.message || 'An error occurred');
+      setError(err.message || t.loginErrorGeneric);
     } finally {
       setLoading(false);
     }
@@ -81,18 +83,18 @@ export default function LoginPage() {
         >
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
             <Typography variant="h6" fontWeight={700}>
-              Streetscape Perception Survey
+              {t.loginBrand}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Researcher login
+              {t.loginSubtitle}
             </Typography>
           </Box>
 
           <Divider sx={{ mb: 3 }} />
 
           <Tabs value={tab} onChange={(_, v) => { setTab(v); setError(''); setInfo(''); }} sx={{ mb: 3 }}>
-            <Tab label="Sign In" />
-            <Tab label="Create Account" />
+            <Tab label={t.loginSignIn} />
+            <Tab label={t.loginCreateAccount} />
           </Tabs>
 
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -100,7 +102,7 @@ export default function LoginPage() {
 
           <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
-              label="Email"
+              label={t.loginEmail}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -109,13 +111,13 @@ export default function LoginPage() {
               autoComplete="email"
             />
             <TextField
-              label="Password"
+              label={t.loginPassword}
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete={tab === 0 ? 'current-password' : 'new-password'}
-              helperText={tab === 1 ? 'Minimum 6 characters' : ''}
+              helperText={tab === 1 ? t.loginPasswordHelp : ''}
             />
             <Button
               type="submit"
@@ -127,8 +129,8 @@ export default function LoginPage() {
               sx={{ mt: 1 }}
             >
               {loading
-                ? tab === 0 ? 'Signing in...' : 'Creating account...'
-                : tab === 0 ? 'Sign In' : 'Create Account'}
+                ? (tab === 0 ? t.loginSigningIn : t.loginCreating)
+                : (tab === 0 ? t.loginSignIn : t.loginCreateAccount)}
             </Button>
           </Box>
 
@@ -139,7 +141,7 @@ export default function LoginPage() {
             size="small"
             sx={{ mt: 2, alignSelf: 'center', display: 'block', mx: 'auto' }}
           >
-            ← Back to home
+            {t.loginBackHome}
           </Button>
         </Paper>
       </Box>

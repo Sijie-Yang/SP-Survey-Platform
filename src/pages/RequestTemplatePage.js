@@ -7,6 +7,8 @@ import {
 } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
+import { useRegion } from '../contexts/RegionContext';
+import { tf } from '../contexts/adminI18n';
 import { isR2Configured } from '../lib/r2';
 import {
   MAX_DATASET_IMAGES,
@@ -24,6 +26,7 @@ function formatBytes(n) {
 }
 
 export default function RequestTemplatePage() {
+  const { t } = useRegion();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [author, setAuthor] = useState('');
@@ -64,28 +67,28 @@ export default function RequestTemplatePage() {
     setResult(null);
     setCopied(false);
     if (!name.trim() || !author.trim() || !paperUrl.trim()) {
-      setError('Please fill in paper title, authors, and paper link.');
+      setError(t.reqTplNeedFields);
       return;
     }
     if (year.trim() && !/^\d{4}$/.test(year.trim())) {
-      setError('Year must be a 4-digit year (e.g. 2025).');
+      setError(t.reqTplBadYear);
       return;
     }
     if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError('Please enter a valid email, or leave it blank.');
+      setError(t.reqTplBadEmail);
       return;
     }
     const oversized = supplementary.find((f) => f.size > MAX_SUPPLEMENTARY_BYTES);
     if (oversized) {
-      setError(`"${oversized.name}" is too large (max ${Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024))} MB).`);
+      setError(tf(t.reqFileTooLarge, { name: oversized.name, mb: Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024)) }));
       return;
     }
     if ((files.length || supplementary.length) && !isR2Configured()) {
-      setError('File upload is not available right now. Submit without files, or try again later.');
+      setError(t.reqUploadUnavailable);
       return;
     }
     setSubmitting(true);
-    setProgress('Starting…');
+    setProgress(t.reqStarting);
     try {
       const res = await submitPaperTemplateRequest({
         name: name.trim(),
@@ -98,7 +101,7 @@ export default function RequestTemplatePage() {
         supplementaryFiles: supplementary,
         onProgress: (p) => {
           if (p.phase === 'upload' && p.total) {
-            setProgress(`Uploading (${p.current || 0}/${p.total})…`);
+            setProgress(tf(t.reqUploading, { current: p.current || 0, total: p.total }));
           } else {
             setProgress(p.message || '');
           }
@@ -144,18 +147,16 @@ export default function RequestTemplatePage() {
       <Container maxWidth="sm" sx={{ py: 5, flex: 1 }}>
         <Stack spacing={1} sx={{ mb: 3 }}>
           <Typography variant="h4" fontWeight={800}>
-            Request a Template for Your Paper
+            {t.reqTplTitle}
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            No account needed. Share your paper details, optional survey dataset images,
-            and supplementary files (PDF, etc.). We create a pending template ID you can use after review.
-            Need help designing a custom study instead?{' '}
+            {t.reqTplIntro}{' '}
             <Box
               component={RouterLink}
               to="/request-survey-design"
               sx={{ color: 'primary.main', fontWeight: 600, textDecoration: 'none' }}
             >
-              Request survey design
+              {t.reqTplLinkDesign}
             </Box>
             .
           </Typography>
@@ -164,7 +165,7 @@ export default function RequestTemplatePage() {
         {result ? (
           <Stack spacing={2}>
             <Alert severity="success" icon={<CheckCircle />}>
-              Request submitted. Your pending template ID is ready — save it.
+              {t.reqTplSuccess}
             </Alert>
             <Box
               sx={{
@@ -176,42 +177,41 @@ export default function RequestTemplatePage() {
               }}
             >
               <Typography variant="caption" color="text.secondary">
-                Template ID
+                {t.reqTplId}
               </Typography>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
                 <Typography variant="h6" fontWeight={700} sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
                   {result.templateId}
                 </Typography>
                 <Button size="small" startIcon={<ContentCopy />} onClick={copyId}>
-                  {copied ? 'Copied' : 'Copy'}
+                  {copied ? t.reqCopied : t.reqCopy}
                 </Button>
               </Stack>
               {(result.imageCount > 0 || result.supplementaryCount > 0) && (
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   {[
                     result.imageCount > 0
-                      ? `${result.imageCount} survey dataset image${result.imageCount === 1 ? '' : 's'}`
+                      ? tf(t.reqTplImagesCount, { n: result.imageCount })
                       : null,
                     result.supplementaryCount > 0
-                      ? `${result.supplementaryCount} supplementary file${result.supplementaryCount === 1 ? '' : 's'}`
+                      ? tf(t.reqTplSuppCount, { n: result.supplementaryCount })
                       : null,
-                  ].filter(Boolean).join(' · ') + ' uploaded.'}
+                  ].filter(Boolean).join(' · ') + t.reqUploaded}
                 </Typography>
               )}
               <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-                Status: pending review (not on the public library yet). After approval, open the
-                researcher panel and use this template ID.
+                {t.reqTplStatus}
               </Typography>
             </Box>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <Button variant="contained" onClick={() => navigate('/login')}>
-                Researcher login
+                {t.navResearcherLogin}
               </Button>
               <Button variant="outlined" onClick={resetForm}>
-                Submit another
+                {t.reqSubmitAnother}
               </Button>
               <Button variant="text" onClick={() => navigate('/')}>
-                Back to home
+                {t.reqBackHome}
               </Button>
             </Stack>
           </Stack>
@@ -221,7 +221,7 @@ export default function RequestTemplatePage() {
               {error && <Alert severity="error">{error}</Alert>}
 
               <TextField
-                label="Paper title"
+                label={t.reqTplPaperTitle}
                 required
                 fullWidth
                 value={name}
@@ -229,52 +229,52 @@ export default function RequestTemplatePage() {
                 disabled={submitting}
               />
               <TextField
-                label="Author name(s)"
+                label={t.reqTplAuthors}
                 required
                 fullWidth
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
-                helperText="e.g. Yang, Sijie and Chong, Adrian and Liu, Pengyuan and Biljecki, Filip"
+                helperText={t.reqTplAuthorsHelp}
                 disabled={submitting}
               />
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                 <TextField
-                  label="Year"
+                  label={t.reqTplYear}
                   fullWidth
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
-                  placeholder="e.g. 2025"
+                  placeholder={t.reqTplYearPh}
                   disabled={submitting}
                   inputProps={{ inputMode: 'numeric', maxLength: 4 }}
                 />
                 <TextField
-                  label="Paper link"
+                  label={t.reqTplLink}
                   required
                   fullWidth
                   value={paperUrl}
                   onChange={(e) => setPaperUrl(e.target.value)}
-                  placeholder="https://doi.org/… or publisher URL"
+                  placeholder={t.reqTplLinkPh}
                   disabled={submitting}
                 />
               </Stack>
               <TextField
-                label="Email (optional)"
+                label={t.reqTplEmail}
                 type="email"
                 fullWidth
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                helperText="Optional — so we can reach you about this request. No account required."
+                helperText={t.reqTplEmailHelp}
                 disabled={submitting}
                 autoComplete="email"
               />
               <TextField
-                label="Notes (optional)"
+                label={t.reqTplNotes}
                 fullWidth
                 multiline
                 minRows={3}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                helperText="Method details, survey design hints, Hugging Face dataset, etc."
+                helperText={t.reqTplNotesHelp}
                 disabled={submitting}
               />
 
@@ -290,12 +290,12 @@ export default function RequestTemplatePage() {
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
                   <CloudUpload fontSize="small" color="action" />
                   <Typography variant="subtitle2" fontWeight={700}>
-                    Survey dataset images (optional)
+                    {t.reqTplImages}
                   </Typography>
-                  <Chip size="small" label={`max ${MAX_DATASET_IMAGES}`} />
+                  <Chip size="small" label={tf(t.reqMax, { n: MAX_DATASET_IMAGES })} />
                 </Stack>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  Images are auto-compressed before upload.
+                  {t.reqTplImagesHelp}
                 </Typography>
                 <Button
                   component="label"
@@ -304,12 +304,12 @@ export default function RequestTemplatePage() {
                   startIcon={<Description />}
                   disabled={submitting || files.length >= MAX_DATASET_IMAGES}
                 >
-                  Choose images
+                  {t.reqTplChooseImages}
                   <input hidden type="file" accept="image/*" multiple onChange={onPickImages} />
                 </Button>
                 {files.length > 0 && (
                   <Typography variant="caption" display="block" sx={{ mt: 1 }}>
-                    {files.length} file{files.length === 1 ? '' : 's'} selected
+                    {tf(t.reqFilesSelected, { n: files.length })}
                     {' · '}
                     <Box
                       component="button"
@@ -320,7 +320,7 @@ export default function RequestTemplatePage() {
                         cursor: 'pointer', font: 'inherit',
                       }}
                     >
-                      Clear
+                      {t.reqClear}
                     </Box>
                   </Typography>
                 )}
@@ -341,7 +341,7 @@ export default function RequestTemplatePage() {
                     ))}
                     {previews.length > 24 && (
                       <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
-                        +{previews.length - 24} more
+                        {tf(t.reqMore, { n: previews.length - 24 })}
                       </Typography>
                     )}
                   </Box>
@@ -360,13 +360,12 @@ export default function RequestTemplatePage() {
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
                   <AttachFile fontSize="small" color="action" />
                   <Typography variant="subtitle2" fontWeight={700}>
-                    Supplementary files (optional)
+                    {t.reqTplSupp}
                   </Typography>
-                  <Chip size="small" label={`max ${MAX_SUPPLEMENTARY_FILES}`} />
+                  <Chip size="small" label={tf(t.reqMax, { n: MAX_SUPPLEMENTARY_FILES })} />
                 </Stack>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  PDF, Word, slides, spreadsheets, ZIP, etc. — up to{' '}
-                  {Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024))} MB each.
+                  {tf(t.reqTplSuppHelp, { mb: Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024)) })}
                 </Typography>
                 <Button
                   component="label"
@@ -375,7 +374,7 @@ export default function RequestTemplatePage() {
                   startIcon={<AttachFile />}
                   disabled={submitting || supplementary.length >= MAX_SUPPLEMENTARY_FILES}
                 >
-                  Choose files
+                  {t.reqChooseFiles}
                   <input
                     hidden
                     type="file"
@@ -387,7 +386,7 @@ export default function RequestTemplatePage() {
                 {supplementary.length > 0 && (
                   <Box sx={{ mt: 1.5 }}>
                     <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
-                      {supplementary.length} file{supplementary.length === 1 ? '' : 's'} selected
+                      {tf(t.reqFilesSelected, { n: supplementary.length })}
                       {' · '}
                       <Box
                         component="button"
@@ -398,7 +397,7 @@ export default function RequestTemplatePage() {
                           cursor: 'pointer', font: 'inherit',
                         }}
                       >
-                        Clear
+                        {t.reqClear}
                       </Box>
                     </Typography>
                     <Stack spacing={0.5}>
@@ -419,7 +418,7 @@ export default function RequestTemplatePage() {
                 disabled={submitting}
                 sx={{ fontWeight: 700, py: 1.25 }}
               >
-                {submitting ? (progress || 'Submitting…') : 'Submit request'}
+                {submitting ? (progress || t.reqSubmitting) : t.reqSubmit}
               </Button>
             </Stack>
           </Box>

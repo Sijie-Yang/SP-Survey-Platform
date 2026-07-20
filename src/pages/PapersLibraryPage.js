@@ -11,6 +11,8 @@ import { listPublicResearchPapers } from '../lib/researchPaperStore';
 import { ensureAnalysisMeta } from '../lib/researchPaperMeta.mjs';
 import { normalizeMetaFilters, paperMatchesMetaFilters } from '../lib/researchPaperAnalytics';
 import PaperLibraryAnalytics from '../components/papers/PaperLibraryAnalytics';
+import { useRegion } from '../contexts/RegionContext';
+import { tf } from '../contexts/adminI18n';
 
 const ROW_H = 56;
 const COLS = '52px minmax(0, 1fr) 64px 120px 56px';
@@ -63,6 +65,7 @@ async function loadShortlistFallback() {
 }
 
 const PapersList = memo(function PapersList({ rows }) {
+  const { t } = useRegion();
   const parentRef = useRef(null);
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -74,7 +77,7 @@ const PapersList = memo(function PapersList({ rows }) {
   if (!rows.length) {
     return (
       <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: 'center' }}>
-        No matching papers.
+        {t.papersNoMatch}
       </Typography>
     );
   }
@@ -97,10 +100,10 @@ const PapersList = memo(function PapersList({ rows }) {
         }}
       >
         <Box textAlign="right">#</Box>
-        <Box>Title</Box>
-        <Box textAlign="center">Year</Box>
-        <Box>Template</Box>
-        <Box textAlign="right">Link</Box>
+        <Box>{t.papersColTitle}</Box>
+        <Box textAlign="center">{t.papersColYear}</Box>
+        <Box>{t.papersColTemplate}</Box>
+        <Box textAlign="right">{t.papersColLink}</Box>
       </Box>
       <Box ref={parentRef} sx={{ height: '70vh', overflow: 'auto', position: 'relative' }}>
         <Box sx={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
@@ -167,7 +170,7 @@ const PapersList = memo(function PapersList({ rows }) {
                 </Box>
                 <Box display="flex" justifyContent="flex-end">
                   {href ? (
-                    <Tooltip title="Open paper">
+                    <Tooltip title={t.papersOpen}>
                       <IconButton
                         size="small"
                         component="a"
@@ -193,6 +196,7 @@ const PapersList = memo(function PapersList({ rows }) {
 
 /** Public browse of the urban-perception paper library. */
 export default function PapersLibraryPage() {
+  const { t } = useRegion();
   const navigate = useNavigate();
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -319,25 +323,24 @@ export default function PapersLibraryPage() {
       <Container maxWidth="lg" sx={{ py: 4, flex: 1 }}>
         <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" sx={{ mb: 1 }}>
           <Typography variant="h4" fontWeight={800}>
-            Paper library
+            {t.papersTitle}
           </Typography>
           {!loading && (
             <>
-              <Chip size="small" label={`${papers.length} papers`} color="primary" variant="outlined" />
+              <Chip size="small" label={tf(t.papersCount, { n: papers.length })} color="primary" variant="outlined" />
               <Chip
                 size="small"
-                label={`${linkedTemplateCount} with template`}
+                label={tf(t.papersWithTemplate, { n: linkedTemplateCount })}
                 color={linkedTemplateCount ? 'success' : 'default'}
                 variant={templateFilter === 'with' ? 'filled' : 'outlined'}
                 onClick={() => setTemplateFilter((prev) => (prev === 'with' ? 'all' : 'with'))}
-                title="Show only papers linked to a survey template"
+                title={t.papersWithTemplateTitle}
               />
             </>
           )}
         </Stack>
         <Typography variant="body1" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
-          Curated urban imagery × human-survey literature used to ground survey templates on this platform.
-          Linked template IDs appear when admins match a paper to an existing survey template.
+          {t.papersBody}
           {sourceNote ? ` (${sourceNote})` : ''}
         </Typography>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }}>
@@ -347,7 +350,7 @@ export default function PapersLibraryPage() {
             sx={{ fontWeight: 700 }}
             onClick={() => navigate('/request-template')}
           >
-            Request a Template for Your Paper
+            {t.landRequestTemplate}
           </Button>
           <Button
             variant="outlined"
@@ -356,28 +359,28 @@ export default function PapersLibraryPage() {
             sx={{ fontWeight: 700 }}
             onClick={() => navigate('/request-survey-design')}
           >
-            Request Survey Design Help
+            {t.landRequestDesign}
           </Button>
         </Stack>
 
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
           <Chip
             size="small"
-            label="All papers"
+            label={t.papersAll}
             color={templateFilter === 'all' ? 'primary' : 'default'}
             variant={templateFilter === 'all' ? 'filled' : 'outlined'}
             onClick={() => setTemplateFilter('all')}
           />
           <Chip
             size="small"
-            label={`Has template (${linkedTemplateCount})`}
+            label={tf(t.papersHasTemplate, { n: linkedTemplateCount })}
             color={templateFilter === 'with' ? 'success' : 'default'}
             variant={templateFilter === 'with' ? 'filled' : 'outlined'}
             onClick={() => setTemplateFilter('with')}
           />
           <Chip
             size="small"
-            label={`No template (${papers.length - linkedTemplateCount})`}
+            label={tf(t.papersNoTemplate, { n: papers.length - linkedTemplateCount })}
             color={templateFilter === 'without' ? 'primary' : 'default'}
             variant={templateFilter === 'without' ? 'filled' : 'outlined'}
             onClick={() => setTemplateFilter('without')}
@@ -387,7 +390,7 @@ export default function PapersLibraryPage() {
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
           <TextField
             size="small"
-            placeholder="Title / DOI / venue / author / template id"
+            placeholder={t.papersSearchPlaceholder}
             inputRef={searchRef}
             defaultValue=""
             onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
@@ -395,11 +398,11 @@ export default function PapersLibraryPage() {
             inputProps={{ autoComplete: 'off' }}
           />
           <Button size="small" variant="contained" startIcon={<Search />} onClick={runSearch}>
-            Search
+            {t.papersSearch}
           </Button>
           {activeFilter ? (
             <Button size="small" startIcon={<Clear />} onClick={clearSearch}>
-              Clear search
+              {t.papersClearSearch}
             </Button>
           ) : null}
         </Stack>
@@ -424,12 +427,12 @@ export default function PapersLibraryPage() {
             />
             <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
               {activeFilter || metaFilters.length || templateFilter !== 'all'
-                ? `Showing ${filtered.length} / ${papers.length} papers`
-                : `${filtered.length} papers`}
-              {templateFilter === 'with' ? ' · has template' : ''}
-              {templateFilter === 'without' ? ' · no template' : ''}
-              {metaFilters.length ? ` · ${metaSubset.length} match metadata filters` : ''}
-              {activeFilter ? ` · text “${activeFilter}”` : ''}
+                ? tf(t.papersShowing, { shown: filtered.length, total: papers.length })
+                : tf(t.papersCount, { n: filtered.length })}
+              {templateFilter === 'with' ? t.papersHasTemplateSuffix : ''}
+              {templateFilter === 'without' ? t.papersNoTemplateSuffix : ''}
+              {metaFilters.length ? ` · ${metaSubset.length}` : ''}
+              {activeFilter ? ` · “${activeFilter}”` : ''}
             </Typography>
             <PapersList rows={filtered} />
           </>

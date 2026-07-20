@@ -11,9 +11,12 @@ import {
   computeLiveStatus,
   formatLiveWindow,
 } from '../lib/liveSurveyManager';
+import { useRegion } from '../contexts/RegionContext';
+import { tf } from '../contexts/adminI18n';
 
 function LiveCard({ listing }) {
   const navigate = useNavigate();
+  const { t } = useRegion();
   const phase = computeLiveStatus(listing);
   const online = phase === 'online';
   const upcoming = phase === 'upcoming';
@@ -36,7 +39,7 @@ function LiveCard({ listing }) {
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
           <Chip
             size="small"
-            label={online ? 'Online' : upcoming ? 'Upcoming' : 'Closed'}
+            label={online ? t.liveOnline : upcoming ? t.liveUpcoming : t.liveClosed}
             color={online ? 'success' : upcoming ? 'info' : 'default'}
           />
           {listing.category && (
@@ -52,7 +55,7 @@ function LiveCard({ listing }) {
           </Typography>
         )}
         <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
-          {listing.description || 'No description provided.'}
+          {listing.description || t.liveNoDescription}
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
           <Schedule fontSize="inherit" />
@@ -64,7 +67,7 @@ function LiveCard({ listing }) {
           startIcon={<Public />}
           onClick={() => navigate(`/survey?project=${encodeURIComponent(listing.project_id)}`)}
         >
-          {online ? 'Take survey' : upcoming ? 'Not open yet' : 'Closed'}
+          {online ? t.liveTakeSurvey : upcoming ? t.liveNotOpenYet : t.liveClosed}
         </Button>
       </CardContent>
     </Card>
@@ -72,6 +75,7 @@ function LiveCard({ listing }) {
 }
 
 export default function LiveSurveysPage() {
+  const { t } = useRegion();
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -112,12 +116,10 @@ export default function LiveSurveysPage() {
 
       <Container maxWidth="lg" sx={{ py: 5, flex: 1 }}>
         <Typography variant="h4" fontWeight={800} sx={{ mb: 1 }}>
-          Live Surveys
+          {t.liveTitle}
         </Typography>
         <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
-          Community studies currently featured by the platform. While online, participant links always
-          load the researcher&apos;s latest project — not a frozen snapshot. Grey cards are outside
-          their approved time window.
+          {t.liveBody}
         </Typography>
 
         {loading ? (
@@ -126,15 +128,14 @@ export default function LiveSurveysPage() {
           </Box>
         ) : listings.length === 0 ? (
           <Alert severity="info">
-            No live surveys are featured yet. Researchers can apply from their project menu
-            (Publish to Main Page); admins approve listings on the admin dashboard.
+            {t.liveEmpty}
           </Alert>
         ) : (
           <>
             {online.length > 0 && (
               <Box sx={{ mb: 5 }}>
                 <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
-                  Now online ({online.length})
+                  {tf(t.liveNowOnline, { n: online.length })}
                 </Typography>
                 <Box
                   sx={{
@@ -152,7 +153,7 @@ export default function LiveSurveysPage() {
               <Box>
                 <Divider sx={{ mb: 3 }} />
                 <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
-                  Upcoming & closed
+                  {t.liveUpcomingClosed}
                 </Typography>
                 <Box
                   sx={{

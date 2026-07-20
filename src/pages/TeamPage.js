@@ -4,6 +4,18 @@ import {
 } from '@mui/material';
 import { OpenInNew } from '@mui/icons-material';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
+import { useRegion } from '../contexts/RegionContext';
+
+function localizeRole(t, role) {
+  const map = {
+    'PhD Researcher': t.teamRolePhd,
+    'Research Engineer': t.teamRoleEngineer,
+    'Research Fellow': t.teamRoleFellow,
+    'Visiting Scholar': t.teamRoleVisiting,
+    'Associate Professor': t.teamRoleAssocProf,
+  };
+  return map[role] || role;
+}
 
 /**
  * Team roster from the SP-Survey paper author list.
@@ -115,6 +127,7 @@ function AffilNums({ nums }) {
 }
 
 function MemberCard({ member }) {
+  const { t } = useRegion();
   return (
     <Box
       sx={{
@@ -153,7 +166,7 @@ function MemberCard({ member }) {
             <AffilNums nums={member.affils} />
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-            {member.role}
+            {localizeRole(t, member.role)}
           </Typography>
           <Link
             href={member.url}
@@ -168,7 +181,7 @@ function MemberCard({ member }) {
               fontWeight: 600,
             }}
           >
-            Profile
+            {t.teamProfile}
             <OpenInNew sx={{ fontSize: 12 }} />
           </Link>
         </Box>
@@ -178,7 +191,10 @@ function MemberCard({ member }) {
 }
 
 function FeaturedCard({ member, accent = 'primary' }) {
+  const { t } = useRegion();
   const isPrimary = accent === 'primary';
+  const projectRole = isPrimary ? t.teamProjectLead : t.teamPI;
+  const blurb = isPrimary ? t.teamLeadBlurb : t.teamPiBlurb;
   return (
     <Box
       sx={{
@@ -212,12 +228,12 @@ function FeaturedCard({ member, accent = 'primary' }) {
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
             <Chip
               size="small"
-              label={member.projectRole}
+              label={projectRole}
               color={isPrimary ? 'primary' : 'default'}
               sx={{ fontWeight: 700 }}
             />
             <Typography variant="body2" color="text.secondary">
-              {member.role}
+              {localizeRole(t, member.role)}
             </Typography>
           </Stack>
           <Typography variant="h5" fontWeight={800} component="div" sx={{ mb: 1 }}>
@@ -225,7 +241,7 @@ function FeaturedCard({ member, accent = 'primary' }) {
             <AffilNums nums={member.affils} />
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            {member.blurb}
+            {blurb}
           </Typography>
           <Link
             href={member.url}
@@ -240,7 +256,7 @@ function FeaturedCard({ member, accent = 'primary' }) {
               fontWeight: 600,
             }}
           >
-            Profile
+            {t.teamProfile}
             <OpenInNew sx={{ fontSize: 14 }} />
           </Link>
         </Box>
@@ -258,24 +274,25 @@ function SectionTitle({ children }) {
 }
 
 export default function TeamPage() {
+  const { t } = useRegion();
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
       <PublicHeader />
 
       <Container maxWidth="lg" sx={{ py: 5, flex: 1 }}>
         <Typography variant="h4" fontWeight={800} sx={{ mb: 1 }}>
-          Team
+          {t.teamTitle}
         </Typography>
         <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 720 }}>
-          SP-Survey is led by{' '}
+          {t.teamIntroBefore}{' '}
           <Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>
             Sijie Yang
           </Box>
-          {' '}at the{' '}
+          {' '}{t.teamIntroMid}{' '}
           <Link href="https://ual.sg" target="_blank" rel="noopener noreferrer" fontWeight={600}>
             Urban Analytics Lab
           </Link>
-          , National University of Singapore, with collaborators across partner institutions and supervised by Filip Biljecki.
+          {t.teamIntroAfter}
         </Typography>
 
         <Stack
@@ -325,7 +342,7 @@ export default function TeamPage() {
         </Box>
 
         <Box sx={{ mb: 5 }}>
-          <SectionTitle>Collaborators</SectionTitle>
+          <SectionTitle>{t.teamCollaborators}</SectionTitle>
           <Box
             sx={{
               display: 'grid',
@@ -351,7 +368,7 @@ export default function TeamPage() {
           }}
         >
           <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5 }}>
-            Affiliations
+            {t.teamAffiliations}
           </Typography>
           <Stack spacing={0.75}>
             {AFFILIATIONS.map((a) => (

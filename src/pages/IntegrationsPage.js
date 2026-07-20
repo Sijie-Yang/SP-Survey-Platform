@@ -22,6 +22,7 @@ import {
   deleteOpenAiCredential,
   getCredentialStatus,
   getMcpEndpoint,
+  getSameOriginMcpEndpoint,
   listMcpConnections,
   revokeMcpConnection,
   storeOpenAiCredential,
@@ -97,6 +98,8 @@ export default function IntegrationsPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const mcpEndpoint = getMcpEndpoint();
+  const localMcpEndpoint = getSameOriginMcpEndpoint();
+  const showLocalMcpHint = localMcpEndpoint !== mcpEndpoint;
 
   const refresh = useCallback(async () => {
     const [credentialResult, connectionResult] = await Promise.all([
@@ -209,9 +212,20 @@ Open the authorize URL in my system default browser (Safari / Chrome / Edge). Wa
                 <Chip icon={<CheckCircleIcon />} label={t.integConnected} color="success" size="small" />
               )}
             </Stack>
-            <Typography color="text.secondary" sx={{ mb: 3 }}>
+            <Typography color="text.secondary" sx={{ mb: 2 }}>
               {t.integConnectBody}
             </Typography>
+
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              {t.integMcpEndpoint}
+            </Typography>
+            <CopyBox value={mcpEndpoint} onCopy={copy} />
+            {showLocalMcpHint && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, mb: 2 }}>
+                {t.integLocalMcpHint}: {localMcpEndpoint}
+              </Typography>
+            )}
+            {!showLocalMcpHint && <Box sx={{ mb: 3 }} />}
 
             <SetupStep number={1} title={t.integStep1Title}>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>

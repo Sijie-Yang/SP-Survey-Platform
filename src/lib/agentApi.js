@@ -40,6 +40,12 @@ async function agentFetch(path, options = {}) {
   return data;
 }
 
+const DEFAULT_PUBLIC_APP_URL = 'https://sp-survey.org';
+
+function stripTrailingSlash(url) {
+  return String(url || '').replace(/\/$/, '');
+}
+
 export function getAgentApiBase() {
   // Prefer same-origin so CRA setupProxy can forward to Express in local dev.
   if (typeof window !== 'undefined' && window.location?.origin) {
@@ -48,11 +54,30 @@ export function getAgentApiBase() {
   return API_BASE || '';
 }
 
+/** Public site origin used in Codex / MCP setup (not localhost). */
+export function getPublicAppOrigin() {
+  const fromEnv = process.env.REACT_APP_APP_URL || process.env.REACT_APP_PUBLIC_APP_URL;
+  if (fromEnv) return stripTrailingSlash(fromEnv);
+
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    const { hostname, origin } = window.location;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return DEFAULT_PUBLIC_APP_URL;
+    }
+    return stripTrailingSlash(origin);
+  }
+
+  return DEFAULT_PUBLIC_APP_URL;
+}
+
+/** Codex-facing MCP URL (e.g. https://sp-survey.org/mcp). */
 export function getMcpEndpoint() {
-  // Same-origin MCP URL (e.g. http://localhost:3000/mcp) — CRA proxies to :3001.
-  // In production, Worker serves /mcp on the same host as the SPA.
-  const origin = getAgentApiBase();
-  return `${String(origin).replace(/\/$/, '')}/mcp`;
+  return `${getPublicAppOrigin()}/mcp`;
+}
+
+/** Same-origin MCP for local Worker/Express testing. */
+export function getSameOriginMcpEndpoint() {
+  return `${stripTrailingSlash(getAgentApiBase())}/mcp`;
 }
 
 export async function getCredentialStatus() {
