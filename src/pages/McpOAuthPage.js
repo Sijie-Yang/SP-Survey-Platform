@@ -154,8 +154,27 @@ export default function McpOAuthPage() {
     }
   };
 
+  if (!clientId || !redirectUri || !codeChallenge) {
+    return (
+      <Box sx={{ maxWidth: 560, mx: 'auto', p: 3, mt: 6 }}>
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="h5" gutterBottom>Authorize ChatGPT (Codex)</Typography>
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              Missing OAuth parameters. Close this window and run{' '}
+              <code>codex mcp login sp_survey</code> again from Codex.
+            </Alert>
+            <Button variant="contained" onClick={() => navigate('/admin/integrations')}>
+              Open Integrations
+            </Button>
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  }
+
   return (
-    <Box sx={{ maxWidth: 560, mx: 'auto', p: 3, mt: 6 }}>
+    <Box sx={{ maxWidth: 560, mx: 'auto', p: 3, mt: 6, bgcolor: 'background.default', minHeight: '100vh' }}>
       <Card variant="outlined">
         <CardContent>
           <Typography variant="h5" gutterBottom>Authorize ChatGPT (Codex)</Typography>

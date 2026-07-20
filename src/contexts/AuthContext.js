@@ -14,9 +14,17 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    // Restore session on mount
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Restore session on mount (timeout so OAuth popups never hang blank)
+    const sessionPromise = supabase.auth.getSession();
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => resolve({ data: { session: null }, timedOut: true }), 10000);
+    });
+    Promise.race([sessionPromise, timeoutPromise]).then((result) => {
+      const session = result?.data?.session ?? null;
       setUser(session?.user ?? null);
+      setLoading(false);
+    }).catch(() => {
+      setUser(null);
       setLoading(false);
     });
 
