@@ -37,7 +37,13 @@ export default function LoginPage() {
       if (tab === 0) {
         await login(email, password);
         const next = searchParams.get('next');
-        navigate(next && next.startsWith('/') ? next : '/admin');
+        if (next && next.startsWith('/')) {
+          const q = next.indexOf('?');
+          if (q === -1) navigate(next);
+          else navigate({ pathname: next.slice(0, q), search: next.slice(q) });
+        } else {
+          navigate('/admin');
+        }
       } else {
         await register(email, password);
         setInfo(t.loginRegisterSuccess);

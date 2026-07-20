@@ -24,6 +24,39 @@ const SCOPE_LABELS = {
   'results:read': 'List, export, and summarize survey responses for your projects',
 };
 
+const PENDING_KEY = 'mcp_oauth_pending_query';
+
+function readOAuthParams(searchParams) {
+  let clientId = searchParams.get('client_id') || '';
+  let redirectUri = searchParams.get('redirect_uri') || '';
+  let state = searchParams.get('state') || '';
+  let codeChallenge = searchParams.get('code_challenge') || '';
+  let codeChallengeMethod = searchParams.get('code_challenge_method') || 'S256';
+  let resource = searchParams.get('resource') || '';
+  let scope = searchParams.get('scope') || '';
+
+  // Restore after login redirect (avoids huge / fragile ?next= query strings).
+  if (!clientId && typeof sessionStorage !== 'undefined') {
+    try {
+      const raw = sessionStorage.getItem(PENDING_KEY);
+      if (raw) {
+        const saved = new URLSearchParams(raw);
+        clientId = saved.get('client_id') || '';
+        redirectUri = saved.get('redirect_uri') || '';
+        state = saved.get('state') || '';
+        codeChallenge = saved.get('code_challenge') || '';
+        codeChallengeMethod = saved.get('code_challenge_method') || 'S256';
+        resource = saved.get('resource') || '';
+        scope = saved.get('scope') || '';
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { clientId, redirectUri, state, codeChallenge, codeChallengeMethod, resource, scope };
+}
+
 export default function McpOAuthPage() {
   const { isAuthenticated, loading } = useAuth();
   const [params] = useSearchParams();
@@ -31,17 +64,21 @@ export default function McpOAuthPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const clientId = params.get('client_id') || '';
-  const redirectUri = params.get('redirect_uri') || '';
-  const state = params.get('state') || '';
-  const codeChallenge = params.get('code_challenge') || '';
-  const codeChallengeMethod = params.get('code_challenge_method') || 'S256';
-  const resource = params.get('resource') || '';
+  const oauth = useMemo(() => readOAuthParams(params), [params]);
+  const {
+    clientId,
+    redirectUri,
+    state,
+    codeChallenge,
+    codeChallengeMethod,
+    resource,
+  } = oauth;
+
   const requestedScopes = useMemo(() => {
-    const raw = params.get('scope')
+    const raw = oauth.scope
       || 'surveys:read surveys:write surveys:publish media:write results:read';
     return raw.split(/[+\s]+/).filter(Boolean).filter((s) => s !== 'offline_access');
-  }, [params]);
+  }, [oauth.scope]);
 
   const [scopes, setScopes] = useState(() => new Set(requestedScopes));
 
@@ -58,8 +95,13 @@ export default function McpOAuthPage() {
   }
 
   if (!isAuthenticated) {
-    const next = `/oauth/mcp?${params.toString()}`;
-    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+    try {
+      const q = params.toString();
+      if (q) sessionStorage.setItem(PENDING_KEY, q);
+    } catch {
+      /* ignore */
+    }
+    return <Navigate to="/login?next=/oauth/mcp" replace />;
   }
 
   const toggleScope = (scope) => {
@@ -76,7 +118,7 @@ export default function McpOAuthPage() {
     setError(null);
     try {
       if (!clientId || !redirectUri || !codeChallenge) {
-        throw new Error('Missing OAuth parameters from Codex.');
+        throw new Error('Missing OAuth parameters from Codex. Close this window and run codex mcp login again.');
       }
       const result = await approveMcpOAuth({
         client_id: clientId,
@@ -90,6 +132,7 @@ export default function McpOAuthPage() {
       if (!result.success || !result.code) {
         throw new Error(result.error || 'Failed to approve');
       }
+      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ignore */ }
       const target = new URL(redirectUri);
       target.searchParams.set('code', result.code);
       if (state) target.searchParams.set('state', state);

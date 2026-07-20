@@ -9,7 +9,22 @@
   "assets": {
     "directory": "build",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Browser navigations otherwise hit SPA index.html before the Worker
+    // (Sec-Fetch-Mode: navigate). Keep consent UI (/oauth/mcp) on the SPA;
+    // run the Worker first for OAuth/MCP/API endpoints.
+    "run_worker_first": [
+      "/api/*",
+      "/mcp",
+      "/mcp/*",
+      "/.well-known/*",
+      "/oauth/register",
+      "/oauth/authorize",
+      "/oauth/token",
+      "/oauth/approve",
+      "/oauth/revoke",
+      "/oauth/db-check"
+    ]
   },
   "compatibility_flags": [
     "nodejs_compat"
