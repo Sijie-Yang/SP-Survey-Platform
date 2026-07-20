@@ -17,18 +17,20 @@ Run in order:
 2. `supabase/agent_mcp_platform.sql`
 3. `supabase/survey_public_rpcs.sql`
 
-### 2. Wrangler secrets
+### 2. Wrangler secrets / vars
+
+`wrangler.jsonc` already sets plaintext `APP_URL`, `MCP_RESOURCE`, and `SUPABASE_URL`.
+**Do not rely on plaintext Variables in the Cloudflare dashboard** — they are wiped on every deploy.
 
 ```bash
-wrangler secret put BYOK_ENCRYPTION_KEY   # 32 random bytes, base64
-wrangler secret put SUPABASE_URL
+wrangler secret put BYOK_ENCRYPTION_KEY        # 32 random bytes, base64
 wrangler secret put SUPABASE_ANON_KEY
 wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 # optional:
 # wrangler secret put BYOK_ENCRYPTION_KEY_ID   # default 1
-# wrangler secret put APP_URL                  # https://sp-survey.org
-# wrangler secret put MCP_RESOURCE             # optional; defaults to APP_URL/mcp
 ```
+
+After deploy, verify: `https://sp-survey.org/oauth/db-check`
 
 Generate a key:
 

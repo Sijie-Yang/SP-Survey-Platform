@@ -14,13 +14,15 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
-  // Plain (non-secret) R2 settings declared here so `wrangler deploy` always
-  // pushes them. Setting these in the dashboard alone gets wiped on every
-  // deploy. SECRETS (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY) stay in the
-  // dashboard / `wrangler secret put`, they survive deploys.
+  // Plaintext dashboard vars are overwritten by this block on every deploy.
+  // Keep non-secret config here. Secrets (SUPABASE_* keys, BYOK, R2 keys)
+  // must stay as Cloudflare Secrets / `wrangler secret put`.
   "vars": {
     "R2_BUCKET_NAME": "survey-images",
     "R2_PUBLIC_URL":  "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev",
-    "R2_ACCOUNT_ID":  "ed9b50b0f51b87ab562fbd1e47e0a6b5"
+    "R2_ACCOUNT_ID":  "ed9b50b0f51b87ab562fbd1e47e0a6b5",
+    "APP_URL": "https://sp-survey.org",
+    "MCP_RESOURCE": "https://sp-survey.org/mcp",
+    "SUPABASE_URL": "https://wskhzjfrhjueiqauhpmb.supabase.co"
   }
 }
