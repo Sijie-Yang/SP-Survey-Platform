@@ -8,6 +8,7 @@ import {
   jsonResponse,
   errorResponse,
 } from '../auth/supabaseJwt.mjs';
+import { supabaseRest } from '../supabaseUserClient.mjs';
 import {
   deleteCredential,
   getCredentialStatus,
@@ -155,6 +156,44 @@ export async function handleAgentAndMcpRoutes(request, env) {
     return jsonResponse(authorizationServerMetadata(request, env));
   }
 
+  // Lightweight DB probe for Codex / ops (no secrets).
+  if (pathname === '/oauth/db-check' && request.method === 'GET') {
+    const supabaseUrl = (env.SUPABASE_URL || env.REACT_APP_SUPABASE_URL || '').replace(/\/$/, '');
+    let host = null;
+    try { host = supabaseUrl ? new URL(supabaseUrl).host : null; } catch { host = null; }
+    const hasServiceRole = Boolean(env.SUPABASE_SERVICE_ROLE_KEY);
+    const hasAnon = Boolean(env.SUPABASE_ANON_KEY || env.REACT_APP_SUPABASE_ANON_KEY);
+    if (!supabaseUrl || !hasServiceRole) {
+      return jsonResponse({
+        ok: false,
+        host,
+        hasServiceRole,
+        hasAnon,
+        error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing on Worker',
+      }, { status: 503 });
+    }
+    try {
+      await supabaseRest(env, {
+        path: '/rest/v1/mcp_oauth_clients',
+        serviceRole: true,
+        query: '?select=client_id&limit=1',
+      });
+      return jsonResponse({ ok: true, host, hasServiceRole, hasAnon, table: 'mcp_oauth_clients' });
+    } catch (error) {
+      return jsonResponse({
+        ok: false,
+        host,
+        hasServiceRole,
+        hasAnon,
+        table: 'mcp_oauth_clients',
+        supabaseMessage: String(error.message || ''),
+        supabaseCode: error.details?.code || null,
+        supabaseHint: error.details?.hint || null,
+        supabaseStatus: error.status || null,
+      }, { status: 503 });
+    }
+  }
+
   // OAuth endpoints
   if (pathname === '/oauth/register' && request.method === 'POST') {
     try {
@@ -164,12 +203,32 @@ export async function handleAgentAndMcpRoutes(request, env) {
       return jsonResponse(result, { status: 201 });
     } catch (error) {
       const msg = String(error.message || '');
-      if (msg.includes('mcp_oauth_clients') || error.details?.code === 'PGRST205') {
+      const code = error.details?.code || null;
+      const missingTable = code === 'PGRST205'
+        || /schema cache/i.test(msg)
+        || /could not find the table/i.test(msg)
+        || /relation .*mcp_oauth_clients.* does not exist/i.test(msg);
+      if (missingTable) {
         return errorResponse(Object.assign(new Error(
-          'OAuth tables are missing. Run supabase/agent_mcp_platform.sql in your Supabase SQL editor, then retry codex mcp login.',
-        ), { status: 503, code: 'MIGRATION_REQUIRED' }), 503);
+          'OAuth tables are missing or not visible to the API. In the Supabase project matching Worker SUPABASE_URL, run supabase/agent_mcp_platform.sql, GRANT to service_role, then: NOTIFY pgrst, \'reload schema\';',
+        ), {
+          status: 503,
+          code: 'MIGRATION_REQUIRED',
+          details: {
+            supabaseMessage: msg,
+            supabaseCode: code,
+            supabaseHint: error.details?.hint || null,
+          },
+        }), 503);
       }
-      return errorResponse(error, error.status || 400);
+      // Surface real errors (wrong service role key, RLS, etc.) instead of fake migration.
+      return errorResponse(Object.assign(error, {
+        details: {
+          ...(error.details || {}),
+          supabaseMessage: msg,
+          supabaseCode: code,
+        },
+      }), error.status || 400);
     }
   }
 

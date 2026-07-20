@@ -217,6 +217,13 @@ ALTER TABLE public.mcp_authorization_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mcp_access_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mcp_refresh_tokens ENABLE ROW LEVEL SECURITY;
 
+-- Ensure PostgREST / service_role can see and write these tables.
+GRANT ALL ON TABLE public.mcp_oauth_clients TO postgres, anon, authenticated, service_role;
+GRANT ALL ON TABLE public.mcp_authorization_codes TO postgres, anon, authenticated, service_role;
+GRANT ALL ON TABLE public.mcp_access_tokens TO postgres, anon, authenticated, service_role;
+GRANT ALL ON TABLE public.mcp_refresh_tokens TO postgres, anon, authenticated, service_role;
+NOTIFY pgrst, 'reload schema';
+
 DROP POLICY IF EXISTS "Users read own mcp tokens" ON public.mcp_access_tokens;
 CREATE POLICY "Users read own mcp tokens" ON public.mcp_access_tokens
   FOR SELECT TO authenticated USING (user_id = auth.uid());
