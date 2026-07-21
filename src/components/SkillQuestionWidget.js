@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
 import { Box, Alert } from '@mui/material';
 import { buildSkillSrcdoc } from '../lib/skillSdk';
 import { toSkillInitPayload } from '../lib/skillPostMessage';
 import { extractAnswerFromIframeMessage } from '../lib/skillAnswerBridge';
 import { getPresetSkill } from '../lib/presetSkills';
 import SkillAnswerReview from './SkillAnswerReview';
+import { RegionContext } from '../contexts/RegionContext';
+import { adminI18n } from '../contexts/adminI18n';
 
 function presetSkillHtml(skillId) {
   if (!skillId?.startsWith('preset_')) return '';
@@ -20,6 +22,8 @@ function stableStringify(v) {
 }
 
 export default function SkillQuestionFrame({ skillHtml, config, images, value, onChange, readOnly, skillId }) {
+  const region = useContext(RegionContext);
+  const t = region?.t || adminI18n.en;
   const resolvedHtml = skillHtml || presetSkillHtml(skillId);
   const iframeRef = useRef(null);
   const [height, setHeight] = useState(200);
@@ -157,7 +161,7 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
   if (readOnly && hasAnswer) {
     return (
       <Box sx={{ width: '100%' }}>
-        <SkillAnswerReview value={value} title="你刚才提交的回答" />
+        <SkillAnswerReview value={value} title={t.skillAnswerYourSubmittedTitle} />
       </Box>
     );
   }
@@ -166,7 +170,7 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
     <Box sx={{ width: '100%', position: 'relative', zIndex: 1 }}>
       {readOnly && !hasAnswer && (
         <Alert severity="info" sx={{ mb: 1 }}>
-          此题尚未记录到答案（完成键未成功写入，或未作答）。
+          {t.skillAnswerNotRecorded}
         </Alert>
       )}
       <iframe

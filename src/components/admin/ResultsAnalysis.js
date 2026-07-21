@@ -1332,28 +1332,27 @@ function inferSkillResultSchema(sampleAnswer) {
 }
 
 function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
+  const { t, language } = useRegion();
   const [showAll, setShowAll] = useState(false);
   const [showJson, setShowJson] = useState(false);
   const visible = showAll ? answers : answers.slice(0, maxVisible);
 
   if (!answers.length) {
-    return <Typography variant="body2" color="text.secondary">No responses yet.</Typography>;
+    return <Typography variant="body2" color="text.secondary">{t.resultsSkillNoResponses}</Typography>;
   }
 
   return (
     <Box sx={{ mt: 1 }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        {readable
-          ? '每人一条可读摘要；需要时可展开原始 JSON。'
-          : 'Answer fields only — shown media is listed separately per response.'}
+        {readable ? t.resultsSkillReadableHint : t.resultsSkillRawHint}
       </Typography>
       {visible.map((entry, idx) => {
         const shown = entry.shown_images?.length ? entry.shown_images : [];
-        const summary = summarizeSkillAnswer(entry.answer);
+        const summary = summarizeSkillAnswer(entry.answer, language);
         return (
           <Paper key={idx} variant="outlined" sx={{ p: 1.5, mb: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-              回答 {idx + 1}
+              {tf(t.resultsSkillResponseN, { n: idx + 1 })}
             </Typography>
             {readable ? (
               <Box component="ul" sx={{ m: 0, pl: 2.25, mb: showJson ? 1 : 0 }}>
@@ -1381,7 +1380,8 @@ function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
             )}
             {shown.length > 0 && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                刺激媒体: {shown.map((u) => shortName(u)).join(' · ')}
+                {t.resultsSkillStimulusMedia}{' '}
+                {shown.map((u) => shortName(u)).join(' · ')}
               </Typography>
             )}
           </Paper>
@@ -1390,12 +1390,12 @@ function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
         {readable && (
           <Button size="small" onClick={() => setShowJson((v) => !v)}>
-            {showJson ? '隐藏原始 JSON' : '显示原始 JSON'}
+            {showJson ? t.resultsSkillHideRawJson : t.resultsSkillShowRawJson}
           </Button>
         )}
         {answers.length > maxVisible && (
           <Button size="small" onClick={() => setShowAll((v) => !v)}>
-            {showAll ? '收起' : `查看全部 ${answers.length} 条`}
+            {showAll ? t.resultsSkillShowLess : tf(t.resultsSkillShowAllN, { n: answers.length })}
           </Button>
         )}
       </Box>
@@ -1404,6 +1404,7 @@ function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
 }
 
 function SkillQuestionAnalysis({ question, answers, allResponses }) {
+  const { t } = useRegion();
   const [showRaw, setShowRaw] = useState(false);
   const [modeTab, setModeTab] = useState(0);
 
@@ -1427,7 +1428,7 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
 
   if (PresetAnalysis) {
     if (!objAnswers.length) {
-      return <Typography variant="body2" color="text.secondary">No responses yet.</Typography>;
+      return <Typography variant="body2" color="text.secondary">{t.resultsSkillNoResponses}</Typography>;
     }
     return (
       <Box>
@@ -1440,7 +1441,7 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
         )}
         <PresetAnalysis answers={objAnswers} question={question} />
         <Button size="small" onClick={() => setShowRaw((s) => !s)} sx={{ mt: 1 }}>
-          {showRaw ? 'Hide raw responses' : 'View raw responses'}
+          {showRaw ? t.resultsSkillHideRaw : t.resultsSkillViewRaw}
         </Button>
         {showRaw && <SkillRawResponses answers={enrichedAnswers} maxVisible={10} />}
       </Box>
@@ -1482,8 +1483,7 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
     <Box>
       <IrrSummary responses={allResponses} question={question} />
       <Alert severity="info" sx={{ mb: 2 }}>
-        自定义 Skill 结果：上方按任务模式分栏（若有多个 mode），中间是字段统计，
-        底部「回答一览」用可读摘要列出每人提交的内容。
+        {t.resultsSkillCustomHelp}
       </Alert>
       {droppedCount > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
@@ -1494,10 +1494,10 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
       {modeKeys.length > 1 && (
         <>
           <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            按任务模式查看
+            {t.resultsSkillByMode}
           </Typography>
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            此 Skill 把多种任务写在同一个题里，用 <code>mode</code> 区分（例如线索排序 / 路线描绘）。
+            {t.resultsSkillByModeHelp}
           </Typography>
           <Tabs
             value={safeModeTab}
@@ -1521,26 +1521,31 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
       )}
       {chartSchema.length > 0 && (
         <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>字段统计</Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+            {t.resultsSkillFieldStats}
+          </Typography>
           {chartSchema.map((field) => (
             <SkillFieldSummary key={`${activeMode || 'all'}:${field.key}`} field={field} answers={scopedAnswers} />
           ))}
         </Box>
       )}
       <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-        回答一览{activeMode ? ` · ${activeMode}` : ''}（{scopedAnswers.length}）
+        {t.resultsSkillResponseList}
+        {activeMode ? ` · ${activeMode}` : ''}
+        {' '}
+        ({scopedAnswers.length})
       </Typography>
       <SkillRawResponses answers={scopedAnswers} maxVisible={8} readable />
       {scopedAnswers[0] && (
         <Box sx={{ mt: 2 }}>
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-            示例（第 1 条）
+            {t.resultsSkillExampleFirst}
           </Typography>
-          <SkillAnswerReview value={scopedAnswers[0].answer} title="可读摘要" dense />
+          <SkillAnswerReview value={scopedAnswers[0].answer} title={t.resultsSkillReadableSummary} dense />
         </Box>
       )}
       <Button size="small" onClick={() => setShowRaw((s) => !s)} sx={{ mt: 1 }}>
-        {showRaw ? '隐藏全部原始回答' : '查看全部原始回答'}
+        {showRaw ? t.resultsSkillHideAllRaw : t.resultsSkillShowAllRaw}
       </Button>
       {showRaw && <SkillRawResponses answers={enrichedAnswers} maxVisible={50} readable />}
     </Box>

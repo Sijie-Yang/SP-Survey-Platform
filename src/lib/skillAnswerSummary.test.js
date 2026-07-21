@@ -1,32 +1,44 @@
 import { summarizeSkillAnswer, summarizeSkillAnswerOneLine } from './skillAnswerSummary';
 
 describe('summarizeSkillAnswer', () => {
-  test('empty', () => {
-    expect(summarizeSkillAnswer(null)[0]).toMatch(/未作答/);
+  test('empty (en default)', () => {
+    expect(summarizeSkillAnswer(null)[0]).toMatch(/no answer/i);
   });
 
-  test('cue_detective', () => {
+  test('empty (zh)', () => {
+    expect(summarizeSkillAnswer(null, 'zh')[0]).toMatch(/未作答/);
+  });
+
+  test('cue_detective en', () => {
     const lines = summarizeSkillAnswer({
       mode: 'cue_detective',
-      rankedCues: ['绿化', '照明', '车辆速度感'],
+      rankedCues: ['green', 'lighting'],
       elapsedMs: 12000,
-    });
-    expect(lines.some((l) => l.includes('线索顺序'))).toBe(true);
-    expect(lines.some((l) => l.includes('任务'))).toBe(true);
+    }, 'en');
+    expect(lines.some((l) => l.includes('Cue order'))).toBe(true);
+    expect(lines.some((l) => l.includes('Task'))).toBe(true);
     expect(summarizeSkillAnswerOneLine({
       mode: 'cue_detective',
       rankedCues: ['a', 'b'],
-    })).toContain('线索顺序');
+    }, 'en')).toContain('Cue order');
   });
 
-  test('budget_lab', () => {
+  test('cue_detective zh', () => {
+    const lines = summarizeSkillAnswer({
+      mode: 'cue_detective',
+      rankedCues: ['绿化', '照明'],
+    }, 'zh');
+    expect(lines.some((l) => l.includes('线索顺序'))).toBe(true);
+  });
+
+  test('budget_lab en', () => {
     const lines = summarizeSkillAnswer({
       mode: 'budget_lab',
-      allocations: { 照明: 40, 树荫: 60 },
+      allocations: { lighting: 40, trees: 60 },
       total: 100,
-      priority: '树荫',
-    });
-    expect(lines.some((l) => l.includes('预算'))).toBe(true);
-    expect(lines.some((l) => l.includes('合计'))).toBe(true);
+      priority: 'trees',
+    }, 'en');
+    expect(lines.some((l) => l.includes('Budget'))).toBe(true);
+    expect(lines.some((l) => l.includes('Total'))).toBe(true);
   });
 });

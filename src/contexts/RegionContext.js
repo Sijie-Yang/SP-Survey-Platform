@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState } from 'react';
 import { adminI18n } from './adminI18n';
 
-const RegionContext = createContext();
+export const RegionContext = createContext(null);
 
 export const REGIONS = {
   GLOBAL: 'global',
