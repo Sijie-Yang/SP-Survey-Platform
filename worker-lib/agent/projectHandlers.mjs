@@ -53,7 +53,7 @@ export async function handleAgentDiscovery(request, env) {
   return {
     success: true,
     name: 'SP-Survey Platform Agent API',
-    workflow: 'Call survey_capabilities (image/media/skillquestion guides), then get draft, edit with apply_operations (saves are live), validate, share preview/live URL. Prefer image*/media*/preset skillquestion for visual studies. Use survey_delete_project / survey_update_project for owned-project CRUD.',
+    workflow: 'Call survey_capabilities (image/media/skillquestion guides), then get draft, edit with apply_operations (saves are live), validate, share preview/live URL. Prefer image*/media*/preset skillquestion for visual studies. Media: import from template or use project/preview library — never AI-generate uploads. Use survey_delete_project / survey_update_project for owned-project CRUD.',
     capabilities: DESIGN_CAPABILITIES,
     endpoints: {
       credentialsStatus: 'GET /api/agent/credentials/status',

@@ -113,7 +113,10 @@ async function listOwnedViaService(env, userId) {
 const TOOLS = [
   {
     name: 'survey_capabilities',
-    description: 'Read SP-Survey design rules, FULL question-type catalog (image*/media*/skillquestion presets + examples), operations, and scopes. Call this before designing surveys that need images, video, audio, or interactive skills.',
+    description:
+      'Read SP-Survey design rules, FULL question-type catalog (image*/media*/skillquestion presets + examples), operations, and scopes. '
+      + 'Call this before designing surveys that need images, video, audio, or interactive skills. '
+      + 'Includes MEDIA SOURCE RULES: never AI-generate media to upload; use template import / project pool / preview media library.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -276,7 +279,9 @@ const TOOLS = [
   },
   {
     name: 'media_import_from_template',
-    description: 'Copy template R2 media into an owned project. Requires confirm:true.',
+    description:
+      'PREFERRED way to seed project media: copy an existing published template\'s R2 media into an owned project. '
+      + 'Use this instead of generating or uploading synthetic images. Requires confirm:true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -302,13 +307,17 @@ const TOOLS = [
   },
   {
     name: 'media_upload',
-    description: 'Upload one media file (base64) into an owned project Media Dataset prefix. Max 8MB decoded. Optional folder + updatePreloaded (default true).',
+    description:
+      'LAST RESORT: upload one REAL media file (base64) the researcher explicitly provided. Max 8MB decoded. '
+      + 'DO NOT use for AI-generated, DALL·E/Midjourney/synthetic, or placeholder images. '
+      + 'Prefer media_import_from_template, existing project Media Dataset, or ask the user to use Admin → 预览媒体库. '
+      + 'Optional folder + updatePreloaded (default true).',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
         filename: { type: 'string' },
-        data: { type: 'string', description: 'Base64 file bytes (data: URL prefix allowed)' },
+        data: { type: 'string', description: 'Base64 file bytes (data: URL prefix allowed) — real researcher file only' },
         folder: { type: 'string' },
         contentType: { type: 'string' },
         updatePreloaded: { type: 'boolean' },

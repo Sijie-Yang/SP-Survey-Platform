@@ -296,6 +296,7 @@ export const DESIGN_CAPABILITIES = {
     'media* may use mediaSlots for multi-modal. Empty mediaSlots = legacy single-pool path.',
     'For set mode, imageCount must equal files-per-set folder size. Folder tags live on Media Dataset.',
     'Never invent media URLs or send storage/API credentials.',
+    'MEDIA SOURCE RULES: Do NOT AI-generate / synthesize / invent images or videos and media_upload them. Prefer media_import_from_template, the project Media Dataset, or the platform Admin preview media library (预览媒体库). media_upload only for real files the researcher explicitly provides.',
   ],
   mediaSamplingDefaults: MEDIA_SAMPLING,
   mediaAssignment: {

@@ -65,10 +65,10 @@ export const adminI18n = {
       'Open the toolbar AI button → AI & Integrations. Set agent permission to Approve for me, paste the setup message, approve in your system browser. Then start a new Codex chat so tools reload.',
     introFlow2Title: 'Ask Codex to build the survey with sp_survey',
     introFlow2Body:
-      'In a new chat, tell Codex to use the sp_survey MCP. Describe your topic and study design in your own words. You can mention a media dataset now, or say you will add media later.',
+      'In a new chat, tell Codex to use the sp_survey MCP. Describe your topic and study design in your own words. For media, say to import from a template or use 预览媒体库 / project pool — do not let it generate images to upload.',
     introFlow3Title: 'Add media if you skipped it',
     introFlow3Body:
-      'If the survey needs images/video/audio and you have not uploaded yet, tell Codex to add a Media Dataset from a local folder (or use Admin Step 1). For set/category modes, also ask it to tag folders as set or category.',
+      'For images/video/audio: tell Codex to import from a template (media_import_from_template) or use the project Media Dataset / Admin → 预览媒体库. Do NOT let Codex generate or invent media and upload it. For set/category modes, tag folders as set or category.',
     introFlow4Title: 'Share the live link and collect responses',
     introFlow4Body:
       'Ask Codex for the preview / live survey URL, or use View Live in the toolbar. Send that link to participants — saves are already live; no extra publish step for the share link.',
@@ -588,7 +588,7 @@ export const adminI18n = {
       '在新对话中告诉 Codex 使用 sp_survey MCP。用自己的话描述主题与研究设计。可以现在说明媒体数据集，也可以稍后再加。',
     introFlow3Title: '若未添加媒体则补上',
     introFlow3Body:
-      '若问卷需要图片/视频/音频且尚未上传，告诉 Codex 从本地文件夹添加媒体数据集（或使用 Admin 步骤 1）。set/category 模式还需给文件夹打标签。',
+      '需要图片/视频/音频时：让 Codex 用 media_import_from_template 从模板导入，或使用项目媒体库 / Admin → 预览媒体库。禁止让 Codex 自己生成或虚构媒体再上传。set/category 模式还需给文件夹打标签。',
     introFlow4Title: '分享链接并收集答卷',
     introFlow4Body:
       '向 Codex 索取预览/线上问卷链接，或使用工具栏 View Live。将链接发给参与者——保存后即已上线，无需额外发布。',

@@ -8,7 +8,7 @@ This repository hosts the multi-user SP-Survey Platform. External agents (Codex,
 2. Codex calls MCP tools on `https://<host>/mcp`
 3. Always `survey_capabilities` then `survey_get_draft` (retain `draftUpdatedAt`)
 4. Prefer `survey_apply_operations` over full `survey_replace_draft`
-5. Media: `media_upload` / `media_list` / `survey_update_media_dataset` (folder tags for set/category)
+5. Media: prefer `media_import_from_template` or existing project / Admin 预览媒体库. `media_upload` only for real researcher files — **never AI-generate images to upload**. Then `media_list` / `survey_update_media_dataset` (folder tags for set/category)
 6. Skills: prefer `preset_*` on `skillquestion`. Custom: `skill_save` then `skillId` — never put `skillHtml` on the question. `skill_save` HTML **must** call `SPSkill.setAnswer` (no `skill-result` postMessage); one task per skill
 7. Results: `survey_list_responses` / `survey_export_responses` / `survey_results_summary` (`results:read`)
 8. Never send API keys, HuggingFace tokens, fal keys, or Supabase credentials

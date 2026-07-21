@@ -83,6 +83,7 @@ Use the FULL type set when appropriate — not only text/rating:
 For image*/media*/skillquestion ALWAYS set:
   imageSelectionMode:"huggingface_random", choices:[], randomImageSelection:true, excludePreviouslyUsedImages:true
 Leave choices empty (runtime fills from the project dataset). Never invent image URLs or API keys.
+Never AI-generate/synthesize images to upload. Prefer template media import, project Media Dataset, or Admin preview media library (预览媒体库).
 
 media* extras: mediaType ("any"|"image"|"video"|"audio"), mediaSlots:[], mediaPresentation:"stack".
 

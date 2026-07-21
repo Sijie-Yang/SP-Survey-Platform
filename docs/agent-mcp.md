@@ -97,7 +97,8 @@ npm run deploy
 
 **Media** (`media:write` for mutate)
 
-- `media_list`, `media_upload` (base64, max 8MB, optional `folder`), `media_import_from_template` / `media_delete` (`confirm: true`)
+- `media_list`, `media_import_from_template` (preferred) / `media_delete` (`confirm: true`), `media_upload` (base64, max 8MB — **real files only; never AI-generated placeholders**)
+- Media sources: published templates, project Media Dataset, or Admin → 预览媒体库. Agents must not synthesize images and upload them.
 - `survey_get_media_dataset` / `survey_update_media_dataset` — folder tags `set` | `category` (Admin Media Dataset)
 - Larger video/audio: Admin Media Dataset (MCP base64 cap)
 

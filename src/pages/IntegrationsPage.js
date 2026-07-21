@@ -183,7 +183,13 @@ Also set: mcp_oauth_credentials_store = "keyring"
 Then run: codex mcp login sp_survey
 Open the authorize URL in my system default browser (Safari / Chrome / Edge). Wait while I click Approve on this site.`;
 
-  const designPrompt = 'Using sp_survey, help me design a survey.';
+  const designPrompt = `Using sp_survey, help me design a survey.
+
+MEDIA RULES (must follow):
+- Do NOT generate, synthesize, or invent images/videos and upload them via media_upload.
+- Prefer existing media: media_import_from_template (copy from a published template), or ask me to use project Media Dataset / Admin → 预览媒体库 (platform preview media library).
+- Leave image*/media*/skillquestion choices empty with imageSelectionMode=huggingface_random so runtime samples from the project pool.
+- media_upload is only for real files I explicitly provide; never AI-generated placeholders.`;
 
   return (
     <Box sx={{ maxWidth: 820, mx: 'auto', p: { xs: 2, md: 4 } }}>
