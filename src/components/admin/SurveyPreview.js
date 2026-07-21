@@ -20,11 +20,13 @@ import {
 import { getTrialCount } from '../../lib/trialNavigation';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
+import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 
 export default function SurveyPreview({ config, currentProject, showMediaAssignment = true }) {
   const [processedConfig, setProcessedConfig] = useState(null);
   const [mediaAssignments, setMediaAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
 
   useEffect(() => {
     const processConfig = async () => {
@@ -46,6 +48,11 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
         
         const configCopy = JSON.parse(JSON.stringify(config));
         await resolveSkillQuestions(configCopy);
+        // Project media first; platform preview library when the project has none.
+        const mediaPool = await resolveMediaPoolForPreview(currentProject?.preloadedImages || []);
+        const fromPreviewLibrary = !(currentProject?.preloadedImages?.length)
+          && mediaPool.length > 0;
+        setUsingPreviewLibrary(fromPreviewLibrary);
         const mediaAssignmentLog = [];
         const globallyUsedImageKeys = new Set();
         const globallyUsedGroupKeys = new Set();
@@ -139,7 +146,7 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                   console.log(`✅ Preview: Skipping image loading for ${element.type} question "${element.name}" - using manually selected images (${element.choices.length} images)`);
                 }
 
-                if (isManualMode && applyCuratedMediaIfNeeded(element, currentProject?.preloadedImages || [])) {
+                if (isManualMode && applyCuratedMediaIfNeeded(element, mediaPool)) {
                   console.log(`✅ Preview: Applied curated media for ${element.type} question "${element.name}"`);
                 }
                 
@@ -148,10 +155,10 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                   try {
                     let result;
                     
-                    // PRIORITY 1: Check if project has preloaded images
-                    if (currentProject?.preloadedImages && currentProject.preloadedImages.length > 0) {
-                      console.log(`📦 Preview: Using preloaded images from project (${currentProject.preloadedImages.length} available)`);
-                      const pool = filterPoolForQuestion(currentProject.preloadedImages, element);
+                    // PRIORITY 1: Project media, else platform preview library
+                    if (mediaPool.length > 0) {
+                      console.log(`📦 Preview: Using media pool (${mediaPool.length} available${fromPreviewLibrary ? ', preview library' : ''})`);
+                      const pool = filterPoolForQuestion(mediaPool, element);
                       const elementTrialCount = getTrialCount(element);
                       const folderTags = resolveMediaFolderTags(currentProject, currentProject?.config);
                       if (elementTrialCount > 1) {
@@ -440,6 +447,9 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
           borderRadius: 1
         }}>
           📋 Preview Mode - This shows exactly how your survey will appear to participants
+          {usingPreviewLibrary
+            ? ' · No project media — sampling from the platform preview media library'
+            : ''}
         </Box>
         {showMediaAssignment && mediaAssignments.length > 0 && (
           <Box sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>

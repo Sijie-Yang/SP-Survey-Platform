@@ -14,7 +14,7 @@ import {
   listMySkills, deleteSkill, submitSkillForReview, getSkillStatus,
   importPresetSkill, listImportedPresetIds, PRESET_SKILLS,
 } from '../lib/skillManager';
-import { listSkillPreviewMedia, pickPreviewMedia } from '../lib/skillPreviewMedia';
+import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
 import SkillQuestionFrame from '../components/SkillQuestionWidget';
 import AdminShell from '../components/layout/AdminShell';
 import ConfirmDialog from '../components/layout/ConfirmDialog';
@@ -57,7 +57,7 @@ export default function SkillLibraryPage() {
 
   // Admin-maintained shared media library used to preview skills with real media
   useEffect(() => {
-    listSkillPreviewMedia().then(setPreviewMediaPool).catch(() => {});
+    listPreviewMedia().then(setPreviewMediaPool).catch(() => {});
   }, []);
 
   const handleDelete = (id, name) => {
@@ -104,7 +104,7 @@ export default function SkillLibraryPage() {
     finally { setImporting(null); }
   };
 
-  // Use admin skill-preview library only (no SVG demos).
+  // Platform preview media library only (no SVG demos).
   const mediaForSkill = (skillLike) => {
     const count = skillLike.defaultConfig?.mediaCount || 1;
     const mediaType = skillLike.defaultConfig?.mediaType || 'image';
@@ -320,7 +320,7 @@ export default function SkillLibraryPage() {
           {preview?.skill?.name}
           {preview && previewMediaPool.length > 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              (using admin preview media library)
+              (using platform preview media library)
             </Typography>
           )}
         </DialogTitle>
@@ -328,7 +328,7 @@ export default function SkillLibraryPage() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{preview?.skill?.description}</Typography>
           {preview && !preview.media?.length && (
             <Alert severity="info" sx={{ mb: 2 }}>
-              No media in the admin skill-preview library. Add files under Admin → Skill Preview Media.
+              No media in the platform preview media library. Add files under Admin → 预览媒体库.
             </Alert>
           )}
           {preview && (

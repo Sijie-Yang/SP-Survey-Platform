@@ -10,13 +10,15 @@ import {
 } from '@mui/material';
 import {
   AttachFile, CloudUpload, Refresh, DeleteForever, Delete, CloudDownload, SelectAll, Deselect,
-  DriveFileMove, OpenInNew,
+  DriveFileMove, OpenInNew, Visibility, Audiotrack,
 } from '@mui/icons-material';
 import MediaFolderBrowser from './MediaFolderBrowser';
+import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import {
   normalizeMediaEntry, sortMediaByName, MEDIA_ACCEPT, buildProjectMediaKey,
   normalizeFolderPath, getDirectChildMedia, downloadMediaFiles, inferMediaType,
-  sanitizeMediaFolderConfig,
+  sanitizeMediaFolderConfig, assertAvMediaUploadAllowed, IMAGE_COMPRESS_TARGET_BYTES,
+  MAX_AV_MEDIA_BYTES, formatMediaMb,
 } from '../../lib/mediaUtils';
 import {
   isR2Configured, listImagesFromR2, uploadImageToR2, deleteImagesFromR2,
@@ -46,7 +48,7 @@ function readSurveyConfig(owner) {
   return (owner?.config && typeof owner.config === 'object') ? owner.config : {};
 }
 
-function compressImage(file, maxBytes = 300 * 1024, quality = 0.85) {
+function compressImage(file, maxBytes = IMAGE_COMPRESS_TARGET_BYTES, quality = 0.85) {
   if (!file.type.startsWith('image/') || file.size <= maxBytes) {
     return Promise.resolve(file);
   }
@@ -126,6 +128,7 @@ export default function AdminScopedMediaLibrary({
   const [info, setInfo] = useState('');
   const [mediaSearch, setMediaSearch] = useState('');
   const [mediaFilter, setMediaFilter] = useState('all');
+  const [previewEntry, setPreviewEntry] = useState(null);
   const fileInputRef = useRef(null);
   const suppInputRef = useRef(null);
   const persistRef = useRef(onPersist);
@@ -315,12 +318,14 @@ export default function AdminScopedMediaLibrary({
 
     const results = await asyncPool(6, files, async (file) => {
       try {
-        const isImage = file.type.startsWith('image/');
+        const type = inferMediaType(file.name);
+        assertAvMediaUploadAllowed(file, type);
+        const isImage = type === 'image' || file.type.startsWith('image/');
         const payload = isImage ? await compressImage(file) : file;
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const key = buildProjectMediaKey(prefix, folder, safeName);
         const result = await uploadImageToR2(payload, key);
-        return { safeName, key, result, type: inferMediaType(safeName) };
+        return { safeName, key, result, type };
       } catch (e) {
         return { safeName: file.name, key: null, result: { success: false, error: e.message } };
       } finally {
@@ -667,6 +672,9 @@ export default function AdminScopedMediaLibrary({
         >
           Upload{currentFolder ? ` → ${currentFolder}` : ' → root'}
         </Button>
+        <Typography variant="caption" color="text.secondary">
+          Images ~300 KB · A/V max {formatMediaMb(MAX_AV_MEDIA_BYTES)} MB
+        </Typography>
         <Button
           startIcon={<Refresh />}
           size="small"
@@ -777,62 +785,91 @@ export default function AdminScopedMediaLibrary({
             No files in {currentFolder || 'root'}. Upload here or create folders on the left and tag them as set / category.
           </Alert>
         ) : (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {filteredMedia.map((img) => {
-              const e = normalizeMediaEntry(img, prefix);
-              const id = entryId(e);
-              const isSelected = selected.has(id);
-              const isVideo = (e.type || '') === 'video';
-              const isAudio = (e.type || '') === 'audio';
-              return (
-                <Box
-                  key={id}
-                  onClick={() => toggleSelect(img)}
-                  sx={{
-                    width: 120,
-                    cursor: 'pointer',
-                    border: '2px solid',
-                    borderColor: isSelected ? 'primary.main' : 'divider',
-                    borderRadius: 1,
-                    overflow: 'hidden',
-                    bgcolor: 'grey.50',
-                  }}
-                >
-                  <Box sx={{ position: 'relative', height: 90, bgcolor: 'grey.200' }}>
-                    <Checkbox
-                      size="small"
-                      checked={isSelected}
-                      onClick={(ev) => ev.stopPropagation()}
-                      onChange={() => toggleSelect(img)}
-                      sx={{ position: 'absolute', top: 0, left: 0, zIndex: 1, p: 0.25 }}
-                    />
-                    {isVideo ? (
-                      <video src={e.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
-                    ) : isAudio ? (
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', px: 1 }}>
-                        <Typography variant="caption">Audio</Typography>
-                      </Box>
-                    ) : (
-                      <img
-                        src={e.url}
-                        alt={e.name}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        onError={(ev) => { ev.target.style.opacity = 0.3; }}
+          <>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              Click a file to preview (image / video / audio). Use checkboxes to select for download, move, or delete.
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {filteredMedia.map((img) => {
+                const e = normalizeMediaEntry(img, prefix);
+                const id = entryId(e);
+                const isSelected = selected.has(id);
+                const mediaType = e.type || inferMediaType(e.name || e.url);
+                const isVideo = mediaType === 'video';
+                const isAudio = mediaType === 'audio';
+                return (
+                  <Box
+                    key={id}
+                    onClick={() => setPreviewEntry(e)}
+                    sx={{
+                      width: 120,
+                      cursor: 'pointer',
+                      border: '2px solid',
+                      borderColor: isSelected ? 'primary.main' : 'divider',
+                      borderRadius: 1,
+                      overflow: 'hidden',
+                      bgcolor: 'grey.50',
+                      '&:hover .media-preview-btn': { opacity: 1 },
+                    }}
+                  >
+                    <Box sx={{ position: 'relative', height: 90, bgcolor: 'grey.200' }}>
+                      <Checkbox
+                        size="small"
+                        checked={isSelected}
+                        onClick={(ev) => ev.stopPropagation()}
+                        onChange={() => toggleSelect(img)}
+                        sx={{ position: 'absolute', top: 0, left: 0, zIndex: 1, p: 0.25, bgcolor: 'rgba(255,255,255,0.85)' }}
                       />
-                    )}
+                      <Tooltip title="Preview">
+                        <IconButton
+                          className="media-preview-btn"
+                          size="small"
+                          onClick={(ev) => { ev.stopPropagation(); setPreviewEntry(e); }}
+                          sx={{
+                            position: 'absolute', top: 2, right: 2, zIndex: 1,
+                            bgcolor: 'rgba(255,255,255,0.9)', opacity: 0, transition: 'opacity .15s',
+                          }}
+                        >
+                          <Visibility fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      {isVideo ? (
+                        <video src={e.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
+                      ) : isAudio ? (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 0.5, px: 1 }}>
+                          <Audiotrack fontSize="small" color="action" />
+                          <Typography variant="caption">Audio</Typography>
+                        </Box>
+                      ) : (
+                        <img
+                          src={e.url}
+                          alt={e.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(ev) => { ev.target.style.opacity = 0.3; }}
+                        />
+                      )}
+                    </Box>
+                    <Typography variant="caption" sx={{
+                      display: 'block', px: 0.5, py: 0.25,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {e.name}
+                    </Typography>
                   </Box>
-                  <Typography variant="caption" sx={{
-                    display: 'block', px: 0.5, py: 0.25,
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  }}>
-                    {e.name}
-                  </Typography>
-                </Box>
-              );
-            })}
-          </Box>
+                );
+              })}
+            </Box>
+          </>
         )}
       </MediaFolderBrowser>
+
+      <MediaFilePreviewDialog
+        open={!!previewEntry}
+        entry={previewEntry}
+        items={filteredMedia.map((img) => normalizeMediaEntry(img, prefix))}
+        onNavigate={setPreviewEntry}
+        onClose={() => setPreviewEntry(null)}
+      />
     </Box>
   );
 }

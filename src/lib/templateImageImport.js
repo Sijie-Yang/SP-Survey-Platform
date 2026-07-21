@@ -6,9 +6,9 @@ import {
   normalizeMediaEntry, folderFromR2Key, sanitizeMediaFolderConfig,
   mergeMediaFolderConfigs,
 } from './mediaUtils';
-import { SKILL_PREVIEW_PREFIX } from './skillPreviewMedia';
+import { PREVIEW_MEDIA_PREFIX } from './previewMediaLibrary';
 
-/** Synthetic import source id for the admin skill-preview media library. */
+/** Synthetic import source id for the platform preview media library. */
 export const PREVIEW_MEDIA_IMPORT_ID = 'skill-preview';
 
 export function isPreviewMediaImportId(id) {
@@ -103,14 +103,14 @@ export async function computeR2SourceImportProgress(sourcePrefix, userId, projec
 export async function computeTemplateImportProgress(templateId, userId, projectId) {
   if (!templateId || !projectId) return emptyImportProgress();
   if (isPreviewMediaImportId(templateId)) {
-    return computeR2SourceImportProgress(SKILL_PREVIEW_PREFIX, userId, projectId);
+    return computeR2SourceImportProgress(PREVIEW_MEDIA_PREFIX, userId, projectId);
   }
   return computeR2SourceImportProgress(`templates/${templateId}/`, userId, projectId);
 }
 
 /** Progress for admin preview media library → project import. */
 export async function computePreviewMediaImportProgress(userId, projectId) {
-  return computeR2SourceImportProgress(SKILL_PREVIEW_PREFIX, userId, projectId);
+  return computeR2SourceImportProgress(PREVIEW_MEDIA_PREFIX, userId, projectId);
 }
 
 export function buildTemplateCopyTodo(templateImages, existingPaths, projectPrefix, templatePrefix = '') {

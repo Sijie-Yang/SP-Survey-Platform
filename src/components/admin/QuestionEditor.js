@@ -53,7 +53,7 @@ import {
   resolveBuilderSkill,
 } from '../../lib/presetSkills';
 import { enrichEmotionColorConfig } from '../../lib/emotionColor';
-import { listSkillPreviewMedia, pickPreviewMedia } from '../../lib/skillPreviewMedia';
+import { listPreviewMedia, pickPreviewMedia } from '../../lib/previewMediaLibrary';
 import {
   getQuestionMediaConstraints,
   clampQuestionImageCount,
@@ -570,7 +570,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const [loadingImages, setLoadingImages] = useState(false);
   const [imageError, setImageError] = useState(null);
   const [builderSkills, setBuilderSkills] = useState([]);
-  const [skillPreviewPool, setSkillPreviewPool] = useState([]);
+  const [previewMediaPool, setPreviewMediaPool] = useState([]);
 
   useEffect(() => {
     listSkillsForBuilder().then(setBuilderSkills);
@@ -583,7 +583,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   }, [editedQuestion.type]);
 
   useEffect(() => {
-    listSkillPreviewMedia().then(setSkillPreviewPool).catch(() => setSkillPreviewPool([]));
+    listPreviewMedia().then(setPreviewMediaPool).catch(() => setPreviewMediaPool([]));
   }, []);
 
   const presetTypeOptions = getPresetBuilderTypeOptions();
@@ -1874,9 +1874,9 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       skillConfig: mergedCfg,
                     }).slice(0, displayMediaCount);
                   }
-                  if (!previewImages.length && skillPreviewPool.length) {
+                  if (!previewImages.length && previewMediaPool.length) {
                     previewImages = pickPreviewMedia(
-                      skillPreviewPool,
+                      previewMediaPool,
                       effectiveMediaType,
                       displayMediaCount,
                     );
@@ -1885,8 +1885,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     <>
                       {!previewImages.length && (
                         <Alert severity="info" sx={{ py: 0.5, mb: 1 }}>
-                          No project media or admin skill-preview library media available.
-                          Upload project media, or ask an admin to add files to the skill-preview library.
+                          No project media or platform preview media library files available.
+                          Upload project media, or ask an admin to add files under Admin → 预览媒体库.
                         </Alert>
                       )}
                       <SkillQuestionFrame

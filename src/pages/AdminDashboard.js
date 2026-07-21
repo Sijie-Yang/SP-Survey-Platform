@@ -10,8 +10,8 @@ import {
 } from '@mui/material';
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
-  EditNote, PhotoLibrary, DeleteForever, Videocam, Audiotrack, PermMedia,
-  ExpandMore, PushPin, AutoFixHigh, Stop, CloudDownload, Publish,
+  EditNote, PhotoLibrary, DeleteForever, ExpandMore, PushPin, AutoFixHigh, Stop,
+  CloudDownload,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -19,7 +19,7 @@ import {
   normalizeTemplateId, templateImagePrefix,
   listAllProjects, updateProjectAdmin, deleteProjectAdmin,
   seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
-  downloadOnlineTemplatesAsBuiltinZip, publishOnlineTemplatesAsBuiltin,
+  downloadOnlineTemplatesAsBuiltinZip,
 } from '../lib/templateManager';
 import { findDuplicateQuestionNames, repairDuplicateQuestionNames } from '../lib/questionNames';
 import {
@@ -32,8 +32,8 @@ import {
   computeLiveStatus,
 } from '../lib/liveSurveyManager';
 import { supabase } from '../lib/supabase';
-import { inferMediaType, normalizeMediaEntry, MEDIA_ACCEPT, sortMediaByName } from '../lib/mediaUtils';
-import { SKILL_PREVIEW_PREFIX, listSkillPreviewMedia } from '../lib/skillPreviewMedia';
+import { normalizeMediaEntry, IMAGE_COMPRESS_TARGET_BYTES, inferMediaType } from '../lib/mediaUtils';
+import PreviewMediaLibraryManagement from '../components/admin/PreviewMediaLibraryManagement';
 import {
   listSubmittedSkills, updateSkill, deleteSkill, getSkillStatus,
 } from '../lib/skillManager';
@@ -325,7 +325,7 @@ function SurveyPreviewDialog({ template, open, onClose }) {
 
 // Mirrors the client-side compressor in ImageDataset.js but kept local so
 // AdminDashboard has no implicit cross-component dependency.
-function compressImage(file, maxBytes = 300 * 1024, quality = 0.85) {
+function compressImage(file, maxBytes = IMAGE_COMPRESS_TARGET_BYTES, quality = 0.85) {
   return new Promise((resolve) => {
     if (file.size <= maxBytes) { resolve(file); return; }
     const img = new Image();
@@ -564,11 +564,6 @@ function TemplateManagement() {
   const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
   /** Selected builtin template ids in the import confirm dialog. */
   const [seedSelectedIds, setSeedSelectedIds] = useState(() => new Set());
-  /** Online → builtin pack: pick online templates to download ZIP or publish to R2. */
-  const [exportBuiltinOpen, setExportBuiltinOpen] = useState(false);
-  const [exportBuiltinIds, setExportBuiltinIds] = useState(() => new Set());
-  const [exportBuiltinBusy, setExportBuiltinBusy] = useState(false);
-  const [exportBuiltinLog, setExportBuiltinLog] = useState('');
   const [sortBy, setSortBy]               = useState('year');
   const [sortOrder, setSortOrder]         = useState('desc');
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -828,7 +823,8 @@ function TemplateManagement() {
     setSeedSelectedIds(new Set());
     setSeedConfirmOpen(true);
     try {
-      const preview = await previewBuiltinTemplateImport(templates.map((t) => t.id));
+      // Pass full online templates so preview can content-diff against builtin JSON.
+      const preview = await previewBuiltinTemplateImport(templates);
       setSeedPreview(preview);
       // Default: select new imports; leave updates unchecked so overwrite is intentional.
       setSeedSelectedIds(new Set((preview.toInsert || []).map((item) => item.id)));
@@ -847,6 +843,11 @@ function TemplateManagement() {
       ...(seedPreview.toUpdate || []).map((item) => ({ ...item, action: 'update' })),
     ];
   }, [seedPreview]);
+
+  const seedUnchangedItems = useMemo(
+    () => (seedPreview?.toUnchanged || []).map((item) => ({ ...item, action: 'unchanged' })),
+    [seedPreview],
+  );
 
   const toggleSeedSelected = (id) => {
     setSeedSelectedIds((prev) => {
@@ -908,73 +909,28 @@ function TemplateManagement() {
     }
   };
 
-  const exportBuiltinCandidates = useMemo(
-    () => templates.filter((t) => t?.id && t?.name && t?.config),
-    [templates],
-  );
-
-  const handleOpenExportBuiltin = () => {
-    setExportBuiltinLog('');
-    // Default: approved / pinned / landing templates — most likely official builtins.
-    const defaults = new Set(
-      exportBuiltinCandidates
-        .filter((t) => t.is_approved || t.is_pinned || t.show_on_landing)
-        .map((t) => t.id),
+  /** Online templates corresponding to current seed selection (for reverse-save ZIP). */
+  const selectedOnlineForBuiltinDownload = useMemo(() => {
+    const ids = [...seedSelectedIds];
+    return templates.filter(
+      (t) => ids.includes(t.id) && t?.name && t?.config,
     );
-    setExportBuiltinIds(defaults.size ? defaults : new Set(exportBuiltinCandidates.map((t) => t.id)));
-    setExportBuiltinOpen(true);
-  };
+  }, [templates, seedSelectedIds]);
 
-  const toggleExportBuiltinId = (id) => {
-    setExportBuiltinIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const selectedExportTemplates = useMemo(
-    () => exportBuiltinCandidates.filter((t) => exportBuiltinIds.has(t.id)),
-    [exportBuiltinCandidates, exportBuiltinIds],
-  );
-
-  const handleDownloadBuiltinZip = () => {
+  const handleDownloadOnlineAsBuiltin = (onlineTemplates) => {
     try {
-      const result = downloadOnlineTemplatesAsBuiltinZip(selectedExportTemplates);
-      showSnack(`已下载 ${result.count} 个内置模板包（可解压到 public/project_templates/）`);
-      setExportBuiltinLog(`已下载 ZIP：${result.filenames.join(', ')}`);
-    } catch (err) {
-      showSnack(err.message, 'error');
-    }
-  };
-
-  const handlePublishBuiltinToR2 = async () => {
-    if (!selectedExportTemplates.length) return;
-    if (!isR2Configured()) {
-      showSnack('云存储未配置，无法写入可热更新的内置覆盖包', 'error');
-      return;
-    }
-    setExportBuiltinBusy(true);
-    setExportBuiltinLog('');
-    try {
-      const result = await publishOnlineTemplatesAsBuiltin(selectedExportTemplates, {
-        onProgress: ({ current, total, name }) => {
-          setExportBuiltinLog(`更新内置覆盖包 ${current}/${total} — ${name}`);
-        },
-      });
-      const msg = `已更新 ${result.published}/${result.total} 个内置覆盖包`
-        + (result.errors?.length ? `（${result.errors.length} 个错误）` : '');
-      showSnack(msg, result.errors?.length ? 'warning' : 'success');
-      setExportBuiltinLog(
-        (result.errors?.length ? `错误: ${result.errors.join('; ')}\n` : '')
-        + `文件: ${(result.filenames || []).join(', ')}`,
+      const result = downloadOnlineTemplatesAsBuiltinZip(onlineTemplates);
+      showSnack(
+        `已下载 ${result.count} 个线上模板为内置 ZIP（解压到 public/project_templates/ 后提交）`,
       );
+      setSeedLog(`已下载线上→仓库 ZIP：${result.filenames.join(', ')}`);
     } catch (err) {
       showSnack(err.message, 'error');
-    } finally {
-      setExportBuiltinBusy(false);
     }
+  };
+
+  const handleDownloadSelectedOnlineAsBuiltin = () => {
+    handleDownloadOnlineAsBuiltin(selectedOnlineForBuiltinDownload);
   };
 
   return (
@@ -989,7 +945,7 @@ function TemplateManagement() {
               color="secondary"
               startIcon={bulkFeat.active ? <CircularProgress size={16} color="inherit" /> : <AutoFixHigh />}
               onClick={() => handleBulkFeatures({ runL0: true, runSeg: true })}
-              disabled={bulkFeat.active || seeding || loading || exportBuiltinBusy}
+              disabled={bulkFeat.active || seeding || loading}
             >
               一键提取全部 Features
             </Button>
@@ -1005,43 +961,31 @@ function TemplateManagement() {
             停止
           </Button>
         )}
-        <Tooltip title="导入或更新本地/R2 内置模板到 Supabase（已存在的会覆盖问卷配置）">
+        <Tooltip title="对比内置包与线上：可将内置导入线上，或把线上版本下载回仓库">
           <Button
             variant="outlined"
-            startIcon={seeding ? <CircularProgress size={16} /> : <CloudUpload />}
+            startIcon={seeding || seedPreviewLoading ? <CircularProgress size={16} /> : <CloudUpload />}
             onClick={handleOpenSeedConfirm}
-            disabled={seeding || seedPreviewLoading || bulkFeat.active || exportBuiltinBusy}
+            disabled={seeding || seedPreviewLoading || bulkFeat.active}
           >
             导入内置模板
           </Button>
         </Tooltip>
-        <Tooltip title="用线上模板更新内置 JSON（不含图片）：可下载进仓库，或写入可热更新的内置覆盖包；导入内置时再带上内置侧已有图片">
-          <Button
-            variant="outlined"
-            color="secondary"
-            startIcon={exportBuiltinBusy ? <CircularProgress size={16} /> : <Publish />}
-            onClick={handleOpenExportBuiltin}
-            disabled={seeding || seedPreviewLoading || bulkFeat.active || exportBuiltinBusy || !templates.length}
-          >
-            用线上更新内置
-          </Button>
-        </Tooltip>
-        <Button startIcon={<Refresh />} onClick={load} disabled={loading || bulkFeat.active || exportBuiltinBusy}>
+        <Button startIcon={<Refresh />} onClick={load} disabled={loading || bulkFeat.active}>
           刷新
         </Button>
       </Stack>
 
-      {(seedLog || bulkFeat.log || exportBuiltinLog) && (
+      {(seedLog || bulkFeat.log) && (
         <Alert
           severity="info"
           sx={{ mb: 2 }}
-          onClose={bulkFeat.active || exportBuiltinBusy ? undefined : () => {
+          onClose={bulkFeat.active ? undefined : () => {
             setSeedLog('');
-            setExportBuiltinLog('');
             setBulkFeat((s) => ({ ...s, log: '' }));
           }}
         >
-          {bulkFeat.log || exportBuiltinLog || seedLog}
+          {bulkFeat.log || seedLog}
           {bulkFeat.active && bulkFeat.imageTotal > 0 && (
             <Box sx={{ mt: 1 }}>
               <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
@@ -1225,10 +1169,10 @@ function TemplateManagement() {
       <Dialog
         open={seedConfirmOpen}
         onClose={() => !seeding && setSeedConfirmOpen(false)}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
       >
-        <DialogTitle>确认导入内置模板</DialogTitle>
+        <DialogTitle>内置模板 ↔ 线上</DialogTitle>
         <DialogContent dividers>
           {seedPreviewLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -1237,23 +1181,29 @@ function TemplateManagement() {
           ) : seedPreview ? (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                勾选要处理的内置模板（优先 R2 覆盖包，否则静态 <code>public/project_templates/</code>）。
-                新模板会导入；已存在的会<strong>覆盖</strong>问卷配置与元数据（有图片包则刷新图库）。
-                默认只勾选「新建」项，更新项需手动勾选。
+                对比仓库 <code>public/project_templates/</code> 与线上模板。
+                「导入内置→线上」用内置覆盖线上；若差异不合理、应以线上为准，勾选后点「下载线上→仓库」导出 ZIP，解压进仓库再提交。
+                默认只勾选「新建」。
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
                 <Chip
                   size="small"
                   color="success"
-                  label={`已选新建 ${(seedPreview.toInsert || []).filter((i) => seedSelectedIds.has(i.id)).length}/${seedPreview.toInsert.length}`}
+                  label={`新建 ${seedPreview.toInsert?.length || 0}（已选 ${(seedPreview.toInsert || []).filter((i) => seedSelectedIds.has(i.id)).length}）`}
                 />
                 <Chip
                   size="small"
                   color="warning"
-                  label={`已选更新 ${(seedPreview.toUpdate || []).filter((i) => seedSelectedIds.has(i.id)).length}/${(seedPreview.toUpdate || []).length}`}
+                  label={`有差异 ${(seedPreview.toUpdate || []).length}（已选 ${(seedPreview.toUpdate || []).filter((i) => seedSelectedIds.has(i.id)).length}）`}
+                />
+                <Chip
+                  size="small"
+                  color="default"
+                  variant="outlined"
+                  label={`已一致 ${seedPreview.toUnchanged?.length || 0}`}
                 />
                 <Button size="small" onClick={() => setSeedSelectionForAction('insert', true)}>全选新建</Button>
-                <Button size="small" onClick={() => setSeedSelectionForAction('update', true)}>全选更新</Button>
+                <Button size="small" onClick={() => setSeedSelectionForAction('update', true)}>全选有差异</Button>
                 <Button size="small" onClick={() => setSeedSelectedIds(new Set())}>清空</Button>
                 {(seedPreview.invalid.length + seedPreview.errors.length) > 0 && (
                   <Chip
@@ -1263,104 +1213,164 @@ function TemplateManagement() {
                   />
                 )}
               </Stack>
-              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 420 }}>
-                <Table size="small" stickyHeader>
-                  <TableHead>
-                    <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
-                      <TableCell padding="checkbox">
-                        <Checkbox
-                          size="small"
-                          indeterminate={
-                            seedSelectedIds.size > 0
-                            && seedSelectedIds.size < seedSelectableItems.length
-                          }
-                          checked={
-                            seedSelectableItems.length > 0
-                            && seedSelectedIds.size === seedSelectableItems.length
-                          }
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSeedSelectedIds(new Set(seedSelectableItems.map((i) => i.id)));
-                            } else {
-                              setSeedSelectedIds(new Set());
-                            }
-                          }}
-                          inputProps={{ 'aria-label': '全选' }}
-                        />
-                      </TableCell>
-                      <TableCell>状态</TableCell>
-                      <TableCell>ID</TableCell>
-                      <TableCell>名称</TableCell>
-                      <TableCell>作者</TableCell>
-                      <TableCell align="center">年份</TableCell>
-                      <TableCell align="center">页数</TableCell>
-                      <TableCell align="center">图片</TableCell>
-                      <TableCell>来源</TableCell>
-                      <TableCell>文件</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {seedSelectableItems.map((item) => {
-                      const checked = seedSelectedIds.has(item.id);
-                      const isUpdate = item.action === 'update';
-                      return (
-                        <TableRow
-                          key={`${item.action}-${item.id}`}
-                          hover
-                          selected={checked}
-                          onClick={() => toggleSeedSelected(item.id)}
-                          sx={{ cursor: 'pointer' }}
-                        >
-                          <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
-                            <Checkbox
-                              size="small"
-                              checked={checked}
-                              onChange={() => toggleSeedSelected(item.id)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              size="small"
-                              color={isUpdate ? 'warning' : 'success'}
-                              label={
-                                isUpdate
-                                  ? (item.willRefreshImages ? '更新+图片' : '更新')
-                                  : '新建'
-                              }
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="caption">{item.id}</Typography>
-                          </TableCell>
-                          <TableCell>{item.name}</TableCell>
-                          <TableCell>{item.author || '—'}</TableCell>
-                          <TableCell align="center">{item.year || '—'}</TableCell>
-                          <TableCell align="center">{item.pageCount}</TableCell>
-                          <TableCell align="center">{item.imageCount}</TableCell>
-                          <TableCell>
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              color={item.source === 'r2' ? 'secondary' : 'default'}
-                              label={item.source === 'r2' ? 'R2 覆盖' : '静态包'}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="caption" color="text.secondary">{item.filename}</Typography>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                    {seedSelectableItems.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={10} align="center" sx={{ py: 3, color: 'text.secondary' }}>
-                          没有可预览的内置模板
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+
+              {seedSelectableItems.length > 0 ? (
+                <Stack spacing={1} sx={{ maxHeight: 480, overflow: 'auto' }}>
+                  {seedSelectableItems.map((item) => {
+                    const checked = seedSelectedIds.has(item.id);
+                    const isUpdate = item.action === 'update';
+                    const diffs = item.diffs || [];
+                    return (
+                      <Paper
+                        key={`${item.action}-${item.id}`}
+                        variant="outlined"
+                        sx={{
+                          p: 1.25,
+                          bgcolor: checked ? 'action.selected' : 'background.paper',
+                        }}
+                      >
+                        <Stack direction="row" spacing={1} alignItems="flex-start">
+                          <Checkbox
+                            size="small"
+                            checked={checked}
+                            onChange={() => toggleSeedSelected(item.id)}
+                            sx={{ mt: -0.5 }}
+                          />
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                              <Chip
+                                size="small"
+                                color={isUpdate ? 'warning' : 'success'}
+                                label={
+                                  isUpdate
+                                    ? (item.willRefreshImages ? '有差异+图片' : '有差异')
+                                    : '新建'
+                                }
+                              />
+                              <Typography variant="body2" fontWeight={600} noWrap>
+                                {item.name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {item.id} · {item.filename}
+                                {item.pageCount != null ? ` · ${item.pageCount} 页` : ''}
+                                {item.imageCount ? ` · 图包 ${item.imageCount}` : ''}
+                              </Typography>
+                              {isUpdate && (
+                                <Tooltip title="反向：下载此模板的线上版本到仓库 ZIP">
+                                  <Button
+                                    size="small"
+                                    variant="text"
+                                    color="secondary"
+                                    startIcon={<CloudDownload fontSize="small" />}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const online = templates.find((t) => t.id === item.id);
+                                      if (online) handleDownloadOnlineAsBuiltin([online]);
+                                      else showSnack('线上找不到该模板', 'error');
+                                    }}
+                                    sx={{ ml: 'auto', minHeight: 24, py: 0 }}
+                                  >
+                                    下载线上
+                                  </Button>
+                                </Tooltip>
+                              )}
+                            </Stack>
+                            {isUpdate && diffs.length > 0 && (
+                              <Accordion
+                                disableGutters
+                                elevation={0}
+                                sx={{
+                                  mt: 0.75,
+                                  bgcolor: 'transparent',
+                                  '&:before': { display: 'none' },
+                                }}
+                              >
+                                <AccordionSummary
+                                  expandIcon={<ExpandMore fontSize="small" />}
+                                  sx={{ minHeight: 32, px: 0, '& .MuiAccordionSummary-content': { my: 0.5 } }}
+                                >
+                                  <Typography variant="caption" color="text.secondary">
+                                    {diffs.length} 处差异（内置 vs 线上）· {item.reason}
+                                  </Typography>
+                                </AccordionSummary>
+                                <AccordionDetails sx={{ px: 0, pt: 0, pb: 0.5 }}>
+                                  <Stack spacing={0.75}>
+                                    {diffs.map((d) => (
+                                      <Box
+                                        key={`${item.id}-${d.field}`}
+                                        sx={{
+                                          p: 1,
+                                          borderRadius: 1,
+                                          bgcolor: 'grey.50',
+                                          border: '1px solid',
+                                          borderColor: 'divider',
+                                        }}
+                                      >
+                                        <Typography variant="caption" fontWeight={700} display="block">
+                                          {d.label}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary" display="block">
+                                          线上：{d.online}
+                                        </Typography>
+                                        <Typography variant="caption" color="primary.dark" display="block">
+                                          内置：{d.builtin}
+                                        </Typography>
+                                        {Array.isArray(d.paths) && d.paths.length > 0 && (
+                                          <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2 }}>
+                                            {d.paths.map((p) => (
+                                              <Typography
+                                                key={p.path}
+                                                component="li"
+                                                variant="caption"
+                                                color="text.secondary"
+                                                sx={{ fontFamily: 'ui-monospace, monospace' }}
+                                              >
+                                                {p.path}: {p.online} → {p.builtin}
+                                              </Typography>
+                                            ))}
+                                          </Box>
+                                        )}
+                                      </Box>
+                                    ))}
+                                  </Stack>
+                                </AccordionDetails>
+                              </Accordion>
+                            )}
+                          </Box>
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              ) : (
+                <Alert severity="success" variant="outlined">
+                  没有需要新建或覆盖的模板
+                  {(seedUnchangedItems.length > 0)
+                    ? `（${seedUnchangedItems.length} 个已与线上一致）`
+                    : ''}
+                  。
+                </Alert>
+              )}
+
+              {seedUnchangedItems.length > 0 && (
+                <Accordion disableGutters elevation={0} sx={{ '&:before': { display: 'none' } }}>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Typography variant="body2" color="text.secondary">
+                      已一致（{seedUnchangedItems.length}）— 展开查看，不会被勾选导入
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails sx={{ pt: 0 }}>
+                    <Stack spacing={0.5}>
+                      {seedUnchangedItems.map((item) => (
+                        <Typography key={item.id} variant="caption" color="text.secondary">
+                          {item.id} · {item.name}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
+              )}
+
               {seedPreview.invalid.length > 0 && (
                 <Alert severity="warning">
                   无效模板: {seedPreview.invalid.map((i) => `${i.filename} (${i.reason})`).join('；')}
@@ -1374,157 +1384,34 @@ function TemplateManagement() {
             </Stack>
           ) : null}
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
           <Button onClick={() => setSeedConfirmOpen(false)} disabled={seeding}>
             取消
           </Button>
+          <Box flex={1} />
+          <Tooltip title="把勾选模板的线上版本导出为内置 JSON ZIP（不含图片），解压到 public/project_templates/">
+            <span>
+              <Button
+                variant="outlined"
+                color="secondary"
+                startIcon={<CloudDownload />}
+                onClick={handleDownloadSelectedOnlineAsBuiltin}
+                disabled={seeding || seedPreviewLoading || selectedOnlineForBuiltinDownload.length === 0}
+              >
+                {selectedOnlineForBuiltinDownload.length
+                  ? `下载线上→仓库（${selectedOnlineForBuiltinDownload.length}）`
+                  : '下载线上→仓库'}
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             variant="contained"
             onClick={handleConfirmSeed}
             disabled={seeding || seedPreviewLoading || seedSelectedIds.size === 0}
           >
             {seedSelectedIds.size
-              ? `确认处理已选 ${seedSelectedIds.size} 个`
+              ? `导入内置→线上（${seedSelectedIds.size}）`
               : '请先勾选模板'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog
-        open={exportBuiltinOpen}
-        onClose={() => !exportBuiltinBusy && setExportBuiltinOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>用线上模板更新内置包</DialogTitle>
-        <DialogContent dividers>
-          <Stack spacing={2}>
-            <Typography variant="body2" color="text.secondary">
-              勾选线上模板，只导出问卷配置与元数据（不含图片）。
-              「下载到仓库」生成 ZIP，解压进 <code>public/project_templates/</code> 后提交代码；
-              「更新内置覆盖包」立刻写入可热更新的内置层，下次「导入内置模板」会优先用它（无需前端发版）。
-              图片仍只来自内置侧 sibling 图包。
-            </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
-              <Chip size="small" label={`已选 ${exportBuiltinIds.size}/${exportBuiltinCandidates.length}`} />
-              <Button
-                size="small"
-                onClick={() => setExportBuiltinIds(new Set(exportBuiltinCandidates.map((t) => t.id)))}
-              >
-                全选
-              </Button>
-              <Button
-                size="small"
-                onClick={() => setExportBuiltinIds(new Set(
-                  exportBuiltinCandidates.filter((t) => t.is_approved).map((t) => t.id),
-                ))}
-              >
-                仅已批准
-              </Button>
-              <Button size="small" onClick={() => setExportBuiltinIds(new Set())}>
-                清空
-              </Button>
-              {!isR2Configured() && (
-                <Chip size="small" color="warning" label="云存储未配置（仅可下载到仓库）" />
-              )}
-            </Stack>
-            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 420 }}>
-              <Table size="small" stickyHeader>
-                <TableHead>
-                  <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
-                    <TableCell padding="checkbox">
-                      <Checkbox
-                        size="small"
-                        indeterminate={
-                          exportBuiltinIds.size > 0
-                          && exportBuiltinIds.size < exportBuiltinCandidates.length
-                        }
-                        checked={
-                          exportBuiltinCandidates.length > 0
-                          && exportBuiltinIds.size === exportBuiltinCandidates.length
-                        }
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setExportBuiltinIds(new Set(exportBuiltinCandidates.map((t) => t.id)));
-                          } else {
-                            setExportBuiltinIds(new Set());
-                          }
-                        }}
-                        inputProps={{ 'aria-label': '全选' }}
-                      />
-                    </TableCell>
-                    <TableCell>ID</TableCell>
-                    <TableCell>名称</TableCell>
-                    <TableCell>分类</TableCell>
-                    <TableCell align="center">批准</TableCell>
-                    <TableCell align="center">置顶</TableCell>
-                    <TableCell align="center">图片</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {exportBuiltinCandidates.map((t) => {
-                    const checked = exportBuiltinIds.has(t.id);
-                    return (
-                      <TableRow
-                        key={t.id}
-                        hover
-                        selected={checked}
-                        onClick={() => toggleExportBuiltinId(t.id)}
-                        sx={{ cursor: 'pointer' }}
-                      >
-                        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            size="small"
-                            checked={checked}
-                            onChange={() => toggleExportBuiltinId(t.id)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption">{t.id}</Typography>
-                        </TableCell>
-                        <TableCell>{t.name}</TableCell>
-                        <TableCell>
-                          <Chip size="small" variant="outlined" label={t.category || '—'} />
-                        </TableCell>
-                        <TableCell align="center">{t.is_approved ? '是' : '—'}</TableCell>
-                        <TableCell align="center">{t.is_pinned ? '是' : '—'}</TableCell>
-                        <TableCell align="center">{t.preloadedImages?.length || 0}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {exportBuiltinCandidates.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={7} align="center" sx={{ py: 3, color: 'text.secondary' }}>
-                        没有可导出的线上模板（需有 name 与 config）
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
-          <Button onClick={() => setExportBuiltinOpen(false)} disabled={exportBuiltinBusy}>
-            关闭
-          </Button>
-          <Box flex={1} />
-          <Button
-            variant="outlined"
-            startIcon={<CloudDownload />}
-            onClick={handleDownloadBuiltinZip}
-            disabled={exportBuiltinBusy || exportBuiltinIds.size === 0}
-          >
-            下载到仓库
-          </Button>
-          <Button
-            variant="contained"
-            color="secondary"
-            startIcon={exportBuiltinBusy ? <CircularProgress size={16} color="inherit" /> : <Publish />}
-            onClick={handlePublishBuiltinToR2}
-            disabled={exportBuiltinBusy || exportBuiltinIds.size === 0 || !isR2Configured()}
-          >
-            更新内置覆盖包
           </Button>
         </DialogActions>
       </Dialog>
@@ -2103,248 +1990,12 @@ function ProjectOverview() {
   );
 }
 
-// ─── Skill Preview Media Library Dialog ──────────────────────────────────────
-
-// Shared R2 folder (skill-preview/) whose media is used by every user's
-// Skill 库 preset previews. Images are compressed on upload; video/audio
-// are uploaded as-is.
-function SkillPreviewMediaDialog({ open, onClose }) {
-  const [media, setMedia]         = useState([]);
-  const [syncing, setSyncing]     = useState(false);
-  const [uploading, setUploading] = useState({ active: false, progress: 0, total: 0 });
-  const [error, setError]         = useState('');
-  const [info, setInfo]           = useState('');
-  const [confirmDialog, setConfirmDialog] = useState(null);
-  const fileInputRef = useRef(null);
-
-  const refresh = useCallback(async () => {
-    setSyncing(true);
-    setError('');
-    const list = await listSkillPreviewMedia();
-    setMedia(list);
-    setSyncing(false);
-  }, []);
-
-  useEffect(() => {
-    if (open) { setError(''); setInfo(''); refresh(); }
-  }, [open, refresh]);
-
-  const handleUpload = async (fileList) => {
-    if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
-
-    setUploading({ active: true, progress: 0, total: files.length });
-    setError(''); setInfo('');
-    let okCount = 0, failCount = 0;
-
-    for (let i = 0; i < files.length; i++) {
-      try {
-        const file = files[i];
-        const isImage = (file.type || '').startsWith('image/');
-        const payload = isImage ? await compressImage(file) : file;
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const result = await uploadImageToR2(payload, `${SKILL_PREVIEW_PREFIX}${safeName}`);
-        if (result.success) okCount++;
-        else { failCount++; if (!error) setError(`Upload failed: ${result.error}`); }
-      } catch (e) {
-        failCount++;
-        if (!error) setError(e.message);
-      }
-      setUploading((s) => ({ ...s, progress: i + 1 }));
-    }
-
-    setUploading({ active: false, progress: files.length, total: files.length });
-    setInfo(failCount > 0 ? `上传 ${okCount} 个，失败 ${failCount} 个` : `已上传 ${okCount} 个媒体文件`);
-    refresh();
-  };
-
-  const handleDeleteOne = (item) => {
-    setConfirmDialog({
-      title: '删除预览媒体',
-      message: `确认删除「${item.name}」吗？`,
-      confirmLabel: '删除',
-      confirmColor: 'error',
-      onConfirm: async () => {
-        setConfirmDialog(null);
-        const result = await deleteImagesFromR2([item.key || `${SKILL_PREVIEW_PREFIX}${item.name}`]);
-        if (!result.success) { setError(result.error || 'Delete failed'); return; }
-        refresh();
-      },
-    });
-  };
-
-  const handleClear = () => {
-    if (!media.length) return;
-    setConfirmDialog({
-      title: '清空预览媒体库',
-      message: `确认清空全部 ${media.length} 个预览媒体吗？此操作不可恢复。`,
-      confirmLabel: '清空',
-      confirmColor: 'error',
-      onConfirm: async () => {
-        setConfirmDialog(null);
-        const result = await deleteImagesFromR2(media.map((m) => m.key || `${SKILL_PREVIEW_PREFIX}${m.name}`));
-        if (!result.success) { setError(result.error || 'Delete failed'); return; }
-        setInfo('已清空预览媒体库。');
-        refresh();
-      },
-    });
-  };
-
-  const counts = media.reduce((acc, m) => {
-    acc[m.type] = (acc[m.type] || 0) + 1;
-    return acc;
-  }, {});
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth
-      PaperProps={{ sx: { minHeight: '70vh' } }}>
-      <DialogTitle>
-        Skill 预览媒体库
-        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-          (R2: {SKILL_PREVIEW_PREFIX} · 所有用户的 Skill 案例预览共用)
-        </Typography>
-      </DialogTitle>
-      <DialogContent dividers>
-        {!isR2Configured() && (
-          <Alert severity="warning" sx={{ mb: 2 }}>Cloudflare R2 未配置，无法上传或浏览媒体。</Alert>
-        )}
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
-        {info  && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo('')}>{info}</Alert>}
-
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
-          <Chip
-            label={syncing ? '同步中…' : `图片 ${counts.image || 0} · 视频 ${counts.video || 0} · 音频 ${counts.audio || 0}`}
-            color={media.length > 0 ? 'success' : 'default'}
-            variant="outlined"
-            icon={syncing ? <CircularProgress size={14} /> : undefined}
-          />
-          <Box flex={1} />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={MEDIA_ACCEPT}
-            multiple
-            style={{ display: 'none' }}
-            onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }}
-          />
-          <Button
-            startIcon={<CloudUpload />}
-            variant="contained"
-            size="small"
-            disabled={!isR2Configured() || uploading.active}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            上传媒体
-          </Button>
-          <Button startIcon={<Refresh />} size="small" disabled={syncing || uploading.active} onClick={refresh}>
-            刷新
-          </Button>
-          <Button
-            startIcon={<DeleteForever />}
-            size="small"
-            color="error"
-            disabled={media.length === 0 || uploading.active}
-            onClick={handleClear}
-          >
-            清空
-          </Button>
-        </Stack>
-
-        {uploading.active && (
-          <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography variant="body2">Uploading…</Typography>
-              <Typography variant="body2" color="text.secondary">
-                {uploading.progress} / {uploading.total}
-              </Typography>
-            </Box>
-            <LinearProgress
-              variant="determinate"
-              value={uploading.total > 0 ? (uploading.progress / uploading.total) * 100 : 0}
-              sx={{ height: 8, borderRadius: 4 }}
-            />
-          </Box>
-        )}
-
-        {media.length === 0 ? (
-          <Box sx={{ py: 6, textAlign: 'center', color: 'text.secondary' }}>
-            <PermMedia sx={{ fontSize: 48, opacity: 0.4 }} />
-            <Typography variant="body2" sx={{ mt: 1 }}>
-              还没有预览媒体。上传图片 / 视频 / 音频后，「我的 Skill 库」中的预设案例预览将随机使用这里的真实媒体，
-              而不再显示内置示例图。
-            </Typography>
-          </Box>
-        ) : (
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {media.map((item) => (
-              <Box key={item.key || item.name} sx={{ width: 110, position: 'relative',
-                '&:hover .del-btn': { opacity: 1 } }}>
-                <Box sx={{ width: 110, height: 110, borderRadius: 1, overflow: 'hidden',
-                  border: '1px solid', borderColor: 'divider', bgcolor: 'grey.100',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {item.type === 'image' ? (
-                    <img
-                      src={item.url}
-                      alt={item.name}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.parentElement.innerHTML =
-                          '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:10px;color:#999;">Failed</div>';
-                      }}
-                    />
-                  ) : item.type === 'video' ? (
-                    <Videocam sx={{ fontSize: 36, color: 'warning.main' }} />
-                  ) : (
-                    <Audiotrack sx={{ fontSize: 36, color: 'secondary.main' }} />
-                  )}
-                </Box>
-                <IconButton
-                  className="del-btn"
-                  size="small"
-                  onClick={() => handleDeleteOne(item)}
-                  sx={{ position: 'absolute', top: 2, right: 2, opacity: 0,
-                    transition: 'opacity .15s', bgcolor: 'rgba(255,255,255,0.85)',
-                    '&:hover': { bgcolor: 'error.light', color: 'white' } }}
-                >
-                  <Delete sx={{ fontSize: 16 }} />
-                </IconButton>
-                <Typography variant="caption" sx={{
-                  display: 'block', mt: 0.5,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {item.name}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>关闭</Button>
-      </DialogActions>
-
-      <ConfirmDialog
-        open={Boolean(confirmDialog)}
-        title={confirmDialog?.title}
-        message={confirmDialog?.message}
-        confirmLabel={confirmDialog?.confirmLabel}
-        confirmColor={confirmDialog?.confirmColor || 'error'}
-        onConfirm={() => confirmDialog?.onConfirm?.()}
-        onCancel={() => setConfirmDialog(null)}
-      />
-    </Dialog>
-  );
-}
-
 // ─── Skill Management Tab ──────────────────────────────────────────────────────
 
 function SkillManagement() {
   const navigate = useNavigate();
   const [skills, setSkills] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [mediaOpen, setMediaOpen] = useState(false);
   const [snack, setSnack] = useState({ open: false, msg: '', sev: 'success' });
   const [confirmDialog, setConfirmDialog] = useState(null);
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
@@ -2387,11 +2038,6 @@ function SkillManagement() {
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center">
         <Typography variant="h6">Skill 审核</Typography>
         <Box flex={1} />
-        <Tooltip title="管理 Skill 案例预览使用的全局图片 / 视频 / 音频库">
-          <Button variant="outlined" startIcon={<PermMedia />} onClick={() => setMediaOpen(true)}>
-            预览媒体库
-          </Button>
-        </Tooltip>
         <Button variant="outlined" onClick={() => navigate('/skills')}>我的 Skill 库</Button>
         <Button startIcon={<Refresh />} onClick={load} disabled={loading}>刷新</Button>
       </Stack>
@@ -2445,7 +2091,6 @@ function SkillManagement() {
           </Table>
         </TableContainer>
       )}
-      <SkillPreviewMediaDialog open={mediaOpen} onClose={() => setMediaOpen(false)} />
       <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((x) => ({ ...x, open: false }))}>
         <Alert severity={snack.sev}>{snack.msg}</Alert>
       </Snackbar>
@@ -2751,6 +2396,7 @@ export default function AdminDashboard() {
         >
           <Tab label="模板管理" />
           <Tab label="项目概览" />
+          <Tab label="预览媒体库" />
           <Tab label="Skill 审核" />
           <Tab label="Live Surveys" />
           <Tab label="论文库" />
@@ -2760,11 +2406,12 @@ export default function AdminDashboard() {
       </Box>
       {tab === 0 && <TemplateManagement />}
       {tab === 1 && <ProjectOverview />}
-      {tab === 2 && <SkillManagement />}
-      {tab === 3 && <LiveSurveyManagement />}
-      {tab === 4 && <ResearchDeepSearch />}
-      {tab === 5 && <SurveyDesignRequestManagement />}
-      {tab === 6 && <SpBenchManagement />}
+      {tab === 2 && <PreviewMediaLibraryManagement />}
+      {tab === 3 && <SkillManagement />}
+      {tab === 4 && <LiveSurveyManagement />}
+      {tab === 5 && <ResearchDeepSearch />}
+      {tab === 6 && <SurveyDesignRequestManagement />}
+      {tab === 7 && <SpBenchManagement />}
     </AdminShell>
   );
 }

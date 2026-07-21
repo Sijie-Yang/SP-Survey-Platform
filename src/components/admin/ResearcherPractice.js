@@ -56,6 +56,7 @@ import {
 } from '../../lib/trialNavigation';
 import { enrichSurveyResponses } from '../../lib/enrichSurveyResponses';
 import { syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
+import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
@@ -611,7 +612,7 @@ export default function ResearcherPractice({
     setToast('Session stopped. Free practice is available again.');
   };
 
-  const loadRound = useCallback(() => {
+  const loadRound = useCallback(async () => {
     if (!selectedQuestion) {
       setModel(null);
       return;
@@ -621,9 +622,10 @@ export default function ResearcherPractice({
     try {
       ensureWidgets();
       clearTrialsAnswerStore();
+      const mediaPool = await resolveMediaPoolForPreview(currentProject?.preloadedImages || []);
       const built = buildSingleQuestionSurvey({
         question: selectedQuestion,
-        projectImages: currentProject?.preloadedImages || [],
+        projectImages: mediaPool,
         usedImageKeys: usedImageKeysRef.current,
         usedGroupKeys: usedGroupKeysRef.current,
         randomMedia: true,
@@ -668,7 +670,12 @@ export default function ResearcherPractice({
   }, [selectedQuestion, currentProject?.preloadedImages, currentProject?.id, currentProject?.imageDatasetConfig, surveyConfig, reloadToken, writeSessionPersist]);
 
   useEffect(() => {
-    loadRound();
+    let cancelled = false;
+    (async () => {
+      await loadRound();
+      if (cancelled) return;
+    })();
+    return () => { cancelled = true; };
   }, [loadRound]);
 
   const enrichAndSave = async (surveyModel) => {

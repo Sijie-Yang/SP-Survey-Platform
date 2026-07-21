@@ -955,7 +955,7 @@ export function syncInjectedMediaOntoSurveyModel(surveyModel, surveyJson) {
 
 /**
  * Ensure skillConfig carries skillId. Media comes from project injection or
- * the admin skill-preview library in builder previews — no SVG demos.
+ * the platform preview media library in builder previews — no SVG demos.
  */
 export function ensureSkillDemoMedia(element) {
   if (element.type !== 'skillquestion') return;

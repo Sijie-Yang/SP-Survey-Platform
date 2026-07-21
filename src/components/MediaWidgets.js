@@ -36,14 +36,27 @@ export function MediaPlayer({ url, type, name }) {
   if (!url) return <Typography color="text.secondary">No media selected</Typography>;
   if (type === 'video') {
     return (
-      <video src={url} controls style={{ width: '100%', maxHeight: 400, borderRadius: 8 }} />
+      <video
+        key={url}
+        src={url}
+        controls
+        playsInline
+        style={{ width: '100%', maxHeight: 480, borderRadius: 8, background: '#111' }}
+      />
     );
   }
   if (type === 'audio') {
-    return <audio src={url} controls style={{ width: '100%' }} />;
+    return (
+      <audio key={url} src={url} controls style={{ width: '100%' }} />
+    );
   }
   return (
-    <img src={url} alt={name || 'media'} style={{ width: '100%', maxHeight: 400, objectFit: 'contain', borderRadius: 8 }} />
+    <img
+      key={url}
+      src={url}
+      alt={name || 'media'}
+      style={{ width: '100%', maxHeight: 480, objectFit: 'contain', borderRadius: 8 }}
+    />
   );
 }
 

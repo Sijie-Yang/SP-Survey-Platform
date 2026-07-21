@@ -9,11 +9,14 @@ import { SEG_MODEL } from './falInference';
 import { SAM_PREANNOT_MODEL } from './imageFeaturesR2';
 import {
   computeQuestionTrueSkill,
+  computeForcedChoiceTrueSkill,
+  computeMaxDiffTrueSkill,
   computeTrueSkillFromMatches,
   matchesFromOrderedRanking,
   filenameKey,
 } from './trueskill';
 import { expandQuestionAnswerUnits } from './responseAnswerUnits';
+import { isForcedChoiceSkill, isMaxDiffSkill } from './skillMediaUtils';
 
 export { L0_MODEL, SEG_MODEL, SAM_PREANNOT_MODEL };
 
@@ -278,7 +281,13 @@ function finalizeMediaScores(byMedia, scoreKind) {
 /** Human-readable score kind for UI. */
 export function scoreKindLabel(type, attributeId) {
   const t = String(type || '');
-  if (t === 'imagepicker' || t === 'imageranking' || t === 'image_ranking' || t === 'mediaranking') {
+  if (
+    t === 'imagepicker'
+    || t === 'imageranking'
+    || t === 'image_ranking'
+    || t === 'mediaranking'
+    || t === 'skillquestion'
+  ) {
     return 'μ std (0–5)';
   }
   if (t === 'imagerating' || t === 'image_rating' || t === 'mediarating') return 'Mean rating';
@@ -342,10 +351,18 @@ export function discoverAnnotationLabels(responses, questionName) {
   return [...set].sort();
 }
 
+function isPerceptionScoreQuestion(q) {
+  if (!q?.name) return false;
+  if (q.type === 'skillquestion') {
+    return isForcedChoiceSkill(q.skillId) || isMaxDiffSkill(q.skillId);
+  }
+  return PERCEPTION_IMAGE_TYPES.has(q.type) && !isMediaQuestionType(q.type);
+}
+
 /** All image questions eligible for Image × Perception. */
 export function listPerceptionScoreQuestions(questions, responses = null) {
   return (questions || [])
-    .filter((q) => q?.name && PERCEPTION_IMAGE_TYPES.has(q.type) && !isMediaQuestionType(q.type))
+    .filter(isPerceptionScoreQuestion)
     .map((q) => {
       let attributes = listPerceptionAttributes(q);
       if (q.type === 'imageannotation' && responses) {
@@ -390,8 +407,15 @@ function aggregateRatingLike(responses, questionName, pool, toScore) {
   return byMedia;
 }
 
-function aggregateTrueSkillPicker(responses, questionName, pool) {
-  const { rankings } = computeQuestionTrueSkill(responses || [], questionName);
+function aggregateTrueSkillPicker(responses, questionName, pool, { mode = 'picker' } = {}) {
+  let rankings;
+  if (mode === 'forcedChoice') {
+    ({ rankings } = computeForcedChoiceTrueSkill(responses || [], questionName));
+  } else if (mode === 'maxdiff') {
+    ({ rankings } = computeMaxDiffTrueSkill(responses || [], questionName));
+  } else {
+    ({ rankings } = computeQuestionTrueSkill(responses || [], questionName));
+  }
   return (rankings || []).map((r) => {
     const mediaId = resolveMediaIdFromKey(r.imageKey, pool);
     const hit = (pool || []).find((m) => getMediaId(m) === mediaId);
@@ -514,6 +538,12 @@ export function aggregatePerceptionByMedia(responses, question, pool = [], attri
 
   if (type === 'imagepicker') {
     return aggregateTrueSkillPicker(responses, name, pool);
+  }
+  if (type === 'skillquestion' && isForcedChoiceSkill(question.skillId)) {
+    return aggregateTrueSkillPicker(responses, name, pool, { mode: 'forcedChoice' });
+  }
+  if (type === 'skillquestion' && isMaxDiffSkill(question.skillId)) {
+    return aggregateTrueSkillPicker(responses, name, pool, { mode: 'maxdiff' });
   }
   if (type === 'imageranking' || type === 'image_ranking' || type === 'mediaranking') {
     return aggregateTrueSkillRanking(responses, name, pool);

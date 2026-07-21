@@ -9,7 +9,7 @@ import {
   saveSkill, submitSkillForReview, getSkillById, getSkillStatus,
 } from '../lib/skillManager';
 import SkillQuestionFrame from '../components/SkillQuestionWidget';
-import { listSkillPreviewMedia, pickPreviewMedia } from '../lib/skillPreviewMedia';
+import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
 import SkillAiPanel from '../components/admin/SkillAiPanel';
 import AdminShell from '../components/layout/AdminShell';
 
@@ -52,7 +52,7 @@ export default function SkillEditorPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const pool = await listSkillPreviewMedia();
+      const pool = await listPreviewMedia();
       if (cancelled) return;
       const count = previewConfig.mediaCount || 1;
       const mediaType = previewConfig.mediaType || 'image';
@@ -252,9 +252,9 @@ export default function SkillEditorPage() {
               readOnly
             />
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              Preview uses the admin skill-preview media library.
+              Preview uses the platform preview media library.
               {previewImages.length === 0
-                ? ' No matching media found — add files under Admin → Skill Preview Media.'
+                ? ' No matching media found — add files under Admin → 预览媒体库.'
                 : ''}
             </Typography>
           </Paper>

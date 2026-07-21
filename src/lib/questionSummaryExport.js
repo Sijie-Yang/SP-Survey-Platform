@@ -19,15 +19,35 @@ import { average, descriptiveStats } from './stats';
 import { computeBordaScores, kendallW } from './rankingStats';
 import {
   computeQuestionTrueSkill,
+  computeForcedChoiceTrueSkill,
+  computeMaxDiffTrueSkill,
   computeTrueSkillFromMatches,
   matchesFromOrderedRanking,
+  matchesFromForcedChoiceAnswer,
+  filenameKey,
 } from './trueskill';
 import {
   evaluateResponseQuality,
   QUALITY_FLAG_LABELS,
 } from './quality';
-import { getPresetSkill } from './presetSkills';
-import { stripSkillAnswerContext } from './skillMediaUtils';
+import {
+  stripSkillAnswerContext,
+  extractSkillShownImages,
+  isForcedChoiceSkill,
+  isMaxDiffSkill,
+  isVideoMomentSkill,
+  isPairwiseSliderSkill,
+  isEmotionColorSkill,
+  isContinuousVideoSkill,
+  isCompositeBlocksSkill,
+  videoStimulusKey,
+  imageStimulusKey,
+  pairwiseShownKeys,
+  mediaFilenameKey,
+} from './skillMediaUtils';
+import { computeMaxDiffScores } from './maxdiff';
+import { expandQuestionAnswerUnits } from './responseAnswerUnits';
+import { summarizeVideoMomentsByVideo } from './videoStats';
 import { objectsToCsv, rowsToCsv, exportDateStamp } from './csvUtil';
 import { downloadZip } from './zipDownload';
 import { downloadTextFile, generateMethodsText } from './methodsExport';
@@ -85,13 +105,26 @@ const LONG_EXTRA_BY_FAMILY = {
   image_boolean: ['value', 'value_norm'],
   // value = media key the participant chose (options are in shown_*)
   imagepicker: ['value'],
+  // Best–Worst MaxDiff: one row per trial with both picks (media keys)
+  maxdiff: ['best', 'worst'],
+  // Video key moments: one row per marked segment (video in shown_*)
+  video_moments: ['segment_index', 'start', 'end'],
+  // Pairwise A/B slider: one row per trial
+  pairwise_slider: ['preference', 'hard_to_decide', 'interpretation'],
+  // Emotion color: one row per trial
+  emotion_color: ['hex', 'hue', 'intensity', 'option_id', 'option_label', 'source'],
+  // Continuous video rating: one row per time sample
+  continuous_video: ['time_s', 'value'],
+  // Composite blocks: one row per slider dimension (choice/words/text repeated)
+  composite_blocks: ['dimension_id', 'dimension_label', 'value', 'choice', 'words', 'text'],
   slider: ['dimension_id', 'dimension_label', 'value'],
   // Same long shape as slider; summary breaks out by shown image × dimension.
   image_slider: ['dimension_id', 'dimension_label', 'value'],
   points: ['choice_key', 'choice_label', 'points'],
   // Same long shape as points; summary breaks out by shown image × allocation choice.
   image_points: ['choice_key', 'choice_label', 'points'],
-  skill: ['schema_key', 'value'],
+  // Generic / custom skills: one row per trial (not one row per schema key)
+  skill: ['answer_json'],
   annotation: ['tool', 'label', 'annotation_json'],
 };
 
@@ -125,9 +158,366 @@ function questionFamily(type) {
   return 'text';
 }
 
-function longHeadersForType(type) {
-  const fam = questionFamily(type);
+/** Effective long/summary family for skill presets / skillquestion. */
+function exportFamilyForQuestion(question) {
+  if (isForcedChoiceSkill(question?.skillId)) return 'imagepicker';
+  if (isMaxDiffSkill(question?.skillId)) return 'maxdiff';
+  if (isVideoMomentSkill(question?.skillId)) return 'video_moments';
+  if (isPairwiseSliderSkill(question?.skillId)) return 'pairwise_slider';
+  if (isEmotionColorSkill(question?.skillId)) return 'emotion_color';
+  if (isContinuousVideoSkill(question?.skillId)) return 'continuous_video';
+  if (isCompositeBlocksSkill(question?.skillId)) return 'composite_blocks';
+  return questionFamily(question?.type);
+}
+
+/** Ensure skill long rows carry stimulus filenames in shown_images. */
+function enrichShownForSkill(answer, shownImages, preferredKeys = null) {
+  if (Array.isArray(preferredKeys) && preferredKeys.length) {
+    return preferredKeys.filter(Boolean).join('|');
+  }
+  const fromAnswer = extractSkillShownImages(answer).map(mediaFilenameKey).filter(Boolean);
+  if (fromAnswer.length) return fromAnswer.join('|');
+  return joinPipe(shownImages);
+}
+
+function longHeadersForType(type, question = null) {
+  const fam = question ? exportFamilyForQuestion(question) : questionFamily(type);
   return [...LONG_PREFIX, ...(LONG_EXTRA_BY_FAMILY[fam] || LONG_EXTRA_BY_FAMILY.text)];
+}
+
+/** Chosen image filename key from a Forced-Choice A/B skill answer. */
+function chosenKeyFromForcedChoice(answer, shownImages) {
+  const matches = matchesFromForcedChoiceAnswer(answer, shownImages);
+  if (matches[0]?.winner) return matches[0].winner;
+  let idx = answer?.chosenIndex;
+  if (idx == null) {
+    if (answer?.choice === 'A') idx = 0;
+    else if (answer?.choice === 'B') idx = 1;
+  }
+  const shown = (Array.isArray(shownImages) && shownImages.length)
+    ? shownImages
+    : [answer?.imageA, answer?.imageB].filter(Boolean);
+  if (idx != null && shown[idx] != null) {
+    return filenameKey(typeof shown[idx] === 'string' ? shown[idx] : shown[idx]?.url || shown[idx]?.name || '');
+  }
+  if (answer?.chosenUrl) return filenameKey(answer.chosenUrl);
+  return '';
+}
+
+/** Best / worst media keys from a MaxDiff skill answer (one trial). */
+function bestWorstKeysFromAnswer(answer, shownImages) {
+  if (!answer || typeof answer !== 'object') return { best: '', worst: '' };
+  const rawShown = (Array.isArray(shownImages) && shownImages.length)
+    ? shownImages
+    : (answer.shownUrls || []);
+  const keys = rawShown
+    .map((s) => filenameKey(typeof s === 'string' ? s : s?.url || s?.name || ''))
+    .filter(Boolean);
+
+  let bestIdx = answer.bestIndex;
+  let worstIdx = answer.worstIndex;
+  if ((bestIdx == null || bestIdx < 0 || bestIdx >= keys.length) && answer.bestUrl) {
+    const fk = filenameKey(answer.bestUrl);
+    const i = keys.findIndex((k) => k === fk);
+    if (i >= 0) bestIdx = i;
+  }
+  if ((worstIdx == null || worstIdx < 0 || worstIdx >= keys.length) && answer.worstUrl) {
+    const fk = filenameKey(answer.worstUrl);
+    const i = keys.findIndex((k) => k === fk);
+    if (i >= 0) worstIdx = i;
+  }
+
+  return {
+    best: (bestIdx != null && keys[bestIdx]) || (answer.bestUrl ? filenameKey(answer.bestUrl) : ''),
+    worst: (worstIdx != null && keys[worstIdx]) || (answer.worstUrl ? filenameKey(answer.worstUrl) : ''),
+  };
+}
+
+function pushTrueSkillSummary(out, question, nResponses, rankings, longObjs, {
+  valueKey = 'value',
+} = {}) {
+  const sortedTs = [...(rankings || [])].sort((a, b) => (b.mu ?? -Infinity) - (a.mu ?? -Infinity));
+  sortedTs.forEach((r, idx) => {
+    out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'rank', idx + 1, r.games));
+    out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'mu', r.mu, r.games));
+    out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'sigma', r.sigma, r.games));
+    out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'mu_std5', r.muStd5, r.games));
+    out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'wins', r.wins, r.games));
+    out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'losses', r.losses, r.games));
+    out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'games', r.games, r.games));
+  });
+  const freq = {};
+  longObjs.forEach((r) => {
+    const k = r[valueKey];
+    if (!k) return;
+    freq[k] = (freq[k] || 0) + 1;
+  });
+  Object.entries(freq).forEach(([k, count]) => {
+    out.push(summaryRow(question, nResponses, k, k, 'count', count, nResponses));
+    out.push(summaryRow(question, nResponses, k, k, 'pct', nResponses ? count / nResponses : 0, nResponses));
+  });
+}
+
+/** Video Key Moments summary: one unit per video stimulus. */
+function pushVideoMomentSummary(out, question, eligible) {
+  const answerUnits = [];
+  for (const row of eligible) {
+    answerUnits.push(...expandQuestionAnswerUnits(row, question.name, { requireAnswer: true }));
+  }
+  const rows = summarizeVideoMomentsByVideo(answerUnits);
+  rows.forEach((r) => {
+    const n = r.nResponses;
+    out.push(summaryRow(question, n, r.videoKey, r.videoKey, 'n_responses', n, n));
+    out.push(summaryRow(question, n, r.videoKey, r.videoKey, 'total_segments', r.totalSegments, n));
+    out.push(summaryRow(question, n, r.videoKey, r.videoKey, 'mean_segments', r.meanSegments, n));
+    if (r.meanSegDuration != null) {
+      out.push(summaryRow(question, n, r.videoKey, r.videoKey, 'mean_seg_duration', r.meanSegDuration, n));
+    }
+    if (r.meanVideoDuration != null) {
+      out.push(summaryRow(question, n, r.videoKey, r.videoKey, 'mean_video_duration', r.meanVideoDuration, n));
+    }
+    if (r.peakTime != null) {
+      out.push(summaryRow(question, n, r.videoKey, r.videoKey, 'peak_time', r.peakTime, n));
+      out.push(summaryRow(question, n, r.videoKey, r.videoKey, 'peak_proportion', r.peakProportion, n));
+    }
+  });
+}
+
+function collectAnswerUnits(eligible, questionName) {
+  const units = [];
+  for (const row of eligible) {
+    units.push(...expandQuestionAnswerUnits(row, questionName, { requireAnswer: true }));
+  }
+  return units;
+}
+
+/** Pairwise slider: unit = image; signed preference (−A … +B). */
+function pushPairwiseSliderSummary(out, question, eligible) {
+  const units = collectAnswerUnits(eligible, question.name);
+  const byImg = {};
+  units.forEach(({ answer, shown_images: shown }) => {
+    const p = Number(answer?.preference);
+    if (Number.isNaN(p)) return;
+    const pairs = [
+      { key: mediaFilenameKey(answer?.imageA || ''), score: -p },
+      { key: mediaFilenameKey(answer?.imageB || ''), score: p },
+    ];
+    const fallback = pairwiseShownKeys(answer, shown);
+    if ((!pairs[0].key || pairs[0].key === 'null') && fallback[0]) pairs[0].key = fallback[0];
+    if ((!pairs[1].key || pairs[1].key === 'null') && fallback[1]) pairs[1].key = fallback[1];
+    pairs.forEach(({ key, score }) => {
+      if (!key || key === 'null' || key === 'undefined') return;
+      if (!byImg[key]) byImg[key] = [];
+      byImg[key].push(score);
+    });
+  });
+  const nResp = units.length;
+  Object.entries(byImg)
+    .sort((a, b) => {
+      const ma = a[1].reduce((s, v) => s + v, 0) / a[1].length;
+      const mb = b[1].reduce((s, v) => s + v, 0) / b[1].length;
+      return mb - ma;
+    })
+    .forEach(([key, nums], idx) => {
+      pushStats(out, question, nResp, key, key, nums);
+      out.push(summaryRow(question, nResp, key, key, 'rank', idx + 1, nums.length));
+      out.push(summaryRow(question, nResp, key, key, 'appearances', nums.length, nums.length));
+    });
+}
+
+/** Emotion color: unit = image. */
+function pushEmotionColorSummary(out, question, eligible) {
+  const units = collectAnswerUnits(eligible, question.name);
+  const byImg = {};
+  units.forEach(({ answer, shown_images: shown }) => {
+    const key = imageStimulusKey(answer, shown);
+    if (!byImg[key]) byImg[key] = { hues: [], intensities: [], options: {} };
+    const c = answer?.color;
+    if (!c || typeof c !== 'object') return;
+    const hue = Number(c.hue);
+    if (!Number.isNaN(hue)) byImg[key].hues.push(hue);
+    const inten = Number(c.intensity);
+    if (!Number.isNaN(inten)) byImg[key].intensities.push(inten);
+    const opt = c.optionId || c.label;
+    if (opt) byImg[key].options[opt] = (byImg[key].options[opt] || 0) + 1;
+  });
+  Object.entries(byImg).forEach(([key, block]) => {
+    const n = Math.max(block.hues.length, block.intensities.length, Object.values(block.options).reduce((s, v) => s + v, 0), 1);
+    out.push(summaryRow(question, n, key, key, 'n_responses', n, n));
+    if (block.hues.length) pushStats(out, question, n, key, key, block.hues, 'hue', 'hue');
+    if (block.intensities.length) pushStats(out, question, n, key, key, block.intensities, 'intensity', 'intensity');
+    Object.entries(block.options).forEach(([opt, count]) => {
+      out.push(summaryRow(question, n, key, key, 'option_count', count, n, opt, opt));
+    });
+  });
+}
+
+/** Continuous video rating: unit = video. */
+function pushContinuousVideoSummary(out, question, eligible) {
+  const units = collectAnswerUnits(eligible, question.name);
+  const byVid = {};
+  units.forEach(({ answer, shown_images: shown }) => {
+    const key = videoStimulusKey(answer, shown);
+    if (!byVid[key]) byVid[key] = { means: [], sampleCounts: [], values: [] };
+    const mean = Number(answer?.mean);
+    if (!Number.isNaN(mean)) byVid[key].means.push(mean);
+    const sc = Number(answer?.sampleCount);
+    if (!Number.isNaN(sc)) byVid[key].sampleCounts.push(sc);
+    (answer?.samples || []).forEach((s) => {
+      const v = Number(s?.v);
+      if (!Number.isNaN(v)) byVid[key].values.push(v);
+    });
+  });
+  Object.entries(byVid).forEach(([key, block]) => {
+    const n = Math.max(block.means.length, 1);
+    out.push(summaryRow(question, n, key, key, 'n_responses', n, n));
+    if (block.means.length) pushStats(out, question, n, key, key, block.means, 'trial_mean', 'trial_mean');
+    if (block.values.length) pushStats(out, question, n, key, key, block.values, 'sample', 'sample');
+    if (block.sampleCounts.length) {
+      const total = block.sampleCounts.reduce((a, b) => a + b, 0);
+      out.push(summaryRow(question, n, key, key, 'total_samples', total, n));
+    }
+  });
+}
+
+/** Composite blocks: unit = image × dimension (ratings); choice/words overall per image. */
+function pushCompositeBlocksSummary(out, question, eligible) {
+  const units = collectAnswerUnits(eligible, question.name);
+  const byUnit = {}; // img||dim → nums
+  const byImgChoice = {};
+  const byImgWord = {};
+  units.forEach(({ answer, shown_images: shown }) => {
+    const img = imageStimulusKey(answer, shown);
+    (answer?.ratings || []).forEach((d) => {
+      const dim = d.id || d.label || `${d.left}/${d.right}` || 'dim';
+      const key = `${img}||${dim}`;
+      if (!byUnit[key]) byUnit[key] = { img, dim, label: d.label || dim, nums: [] };
+      const n = Number(d.value);
+      if (!Number.isNaN(n)) byUnit[key].nums.push(n);
+    });
+    if (answer?.choice != null && answer.choice !== '') {
+      if (!byImgChoice[img]) byImgChoice[img] = {};
+      const c = String(answer.choice);
+      byImgChoice[img][c] = (byImgChoice[img][c] || 0) + 1;
+    }
+    (answer?.words || []).forEach((w) => {
+      if (!byImgWord[img]) byImgWord[img] = {};
+      const ww = String(w);
+      byImgWord[img][ww] = (byImgWord[img][ww] || 0) + 1;
+    });
+  });
+  const nResp = units.length;
+  Object.values(byUnit).forEach((block) => {
+    pushStats(out, question, nResp, block.img, block.img, block.nums, block.dim, block.label);
+  });
+  Object.entries(byImgChoice).forEach(([img, freq]) => {
+    Object.entries(freq).forEach(([c, count]) => {
+      out.push(summaryRow(question, nResp, img, img, 'choice_count', count, nResp, c, c));
+    });
+  });
+  Object.entries(byImgWord).forEach(([img, freq]) => {
+    Object.entries(freq).forEach(([w, count]) => {
+      out.push(summaryRow(question, nResp, img, img, 'word_count', count, nResp, w, w));
+    });
+  });
+}
+
+/** Generic skill: unit = primary stimulus; numeric leaves → mean stats. */
+function pushGenericSkillSummary(out, question, eligible, longObjs) {
+  const byMedia = {};
+  longObjs.forEach((r) => {
+    const media = shownKeysFromLongRow(r)[0] || '(no_media)';
+    if (!byMedia[media]) byMedia[media] = { n: 0, nums: {} };
+    byMedia[media].n += 1;
+    let obj = null;
+    try { obj = r.answer_json ? JSON.parse(r.answer_json) : null; } catch { obj = null; }
+    if (!obj || typeof obj !== 'object') return;
+    const walk = (node, prefix) => {
+      if (node == null) return;
+      if (typeof node === 'number' && !Number.isNaN(node)) {
+        if (!byMedia[media].nums[prefix]) byMedia[media].nums[prefix] = [];
+        byMedia[media].nums[prefix].push(node);
+        return;
+      }
+      if (typeof node !== 'object' || Array.isArray(node)) return;
+      Object.entries(node).forEach(([k, v]) => walk(v, prefix ? `${prefix}.${k}` : k));
+    };
+    walk(obj, '');
+  });
+  // Fallback: rebuild from eligible if long empty
+  if (!Object.keys(byMedia).length) {
+    collectAnswerUnits(eligible, question.name).forEach(({ answer, shown_images: shown }) => {
+      const media = imageStimulusKey(answer, shown);
+      const key = media === '(unknown_image)' ? videoStimulusKey(answer, shown) : media;
+      if (!byMedia[key]) byMedia[key] = { n: 0, nums: {} };
+      byMedia[key].n += 1;
+    });
+  }
+  Object.entries(byMedia).forEach(([media, block]) => {
+    out.push(summaryRow(question, block.n, media, media, 'n_responses', block.n, block.n));
+    Object.entries(block.nums).forEach(([attr, nums]) => {
+      pushStats(out, question, block.n, media, media, nums, attr, attr);
+    });
+  });
+}
+
+/** MaxDiff summary: TrueSkill (μ-sorted) + classical BWS columns per image. */
+function pushMaxDiffSummary(out, question, nResponses, eligible) {
+  const { rankings: tsRankings } = computeMaxDiffTrueSkill(eligible, question.name);
+  const answerUnits = [];
+  for (const row of eligible) {
+    answerUnits.push(...expandQuestionAnswerUnits(row, question.name, { requireAnswer: true }));
+  }
+  const mediaCount = question.skillConfig?.mediaCount
+    || question.imageCount
+    || 4;
+  const bwsRows = computeMaxDiffScores(answerUnits, mediaCount);
+  const bwsByKey = new Map(bwsRows.map((r) => [r.imageKey, r]));
+  const sortedTs = [...(tsRankings || [])].sort((a, b) => (b.mu ?? -Infinity) - (a.mu ?? -Infinity));
+
+  // Prefer TrueSkill order; append BWS-only images with no matches.
+  const seen = new Set();
+  const ordered = [];
+  sortedTs.forEach((r) => {
+    seen.add(r.imageKey);
+    ordered.push({ ts: r, bws: bwsByKey.get(r.imageKey) || null });
+  });
+  bwsRows.forEach((bws) => {
+    if (!seen.has(bws.imageKey)) {
+      ordered.push({ ts: null, bws });
+    }
+  });
+
+  ordered.forEach((row, idx) => {
+    const key = row.ts?.imageKey || row.bws?.imageKey;
+    if (!key) return;
+    const games = row.ts?.games ?? row.bws?.appearances ?? 0;
+    out.push(summaryRow(question, nResponses, key, key, 'rank', idx + 1, games));
+    if (row.ts) {
+      out.push(summaryRow(question, nResponses, key, key, 'mu', row.ts.mu, row.ts.games));
+      out.push(summaryRow(question, nResponses, key, key, 'sigma', row.ts.sigma, row.ts.games));
+      out.push(summaryRow(question, nResponses, key, key, 'mu_std5', row.ts.muStd5, row.ts.games));
+      out.push(summaryRow(question, nResponses, key, key, 'wins', row.ts.wins, row.ts.games));
+      out.push(summaryRow(question, nResponses, key, key, 'losses', row.ts.losses, row.ts.games));
+      out.push(summaryRow(question, nResponses, key, key, 'games', row.ts.games, row.ts.games));
+    }
+    if (row.bws) {
+      out.push(summaryRow(question, nResponses, key, key, 'bws', row.bws.bws, row.bws.appearances));
+      out.push(summaryRow(question, nResponses, key, key, 'score_std5', row.bws.scoreStd5, row.bws.appearances));
+      out.push(summaryRow(question, nResponses, key, key, 'best', row.bws.best, row.bws.appearances));
+      out.push(summaryRow(question, nResponses, key, key, 'worst', row.bws.worst, row.bws.appearances));
+      out.push(summaryRow(question, nResponses, key, key, 'appearances', row.bws.appearances, row.bws.appearances));
+      out.push(summaryRow(
+        question,
+        nResponses,
+        key,
+        key,
+        'pct_best',
+        row.bws.appearances ? row.bws.best / row.bws.appearances : 0,
+        row.bws.appearances,
+      ));
+    }
+  });
 }
 
 function isDisplayOnly(question) {
@@ -194,14 +584,6 @@ function normalizeBool(v) {
   if (v === true || v === 'true' || v === 'yes' || v === 1 || v === '1') return 1;
   if (v === false || v === 'false' || v === 'no' || v === 0 || v === '0') return 0;
   return '';
-}
-
-function getPath(obj, path) {
-  if (!obj || typeof obj !== 'object') return undefined;
-  return String(path).split('.').reduce(
-    (o, k) => (o && typeof o === 'object' ? o[k] : undefined),
-    obj,
-  );
 }
 
 function parsePayload(row, questionName) {
@@ -365,7 +747,8 @@ function pushStats(
 // ─── Long builders ────────────────────────────────────────────────────────────
 
 function buildLongObjects(question, responses, surveyConfig) {
-  const fam = questionFamily(question.type);
+  const fam = exportFamilyForQuestion(question);
+  const forcedChoice = isForcedChoiceSkill(question.skillId);
   const eligible = responsesEligibleForQuestion(question.name, responses);
   const objects = [];
 
@@ -456,14 +839,136 @@ function buildLongObjects(question, responses, surveyConfig) {
         value_norm: normalizeBool(answer),
       });
     } else if (fam === 'imagepicker') {
-      const vals = Array.isArray(answer) ? answer : [answer];
-      vals.forEach((v) => {
+      if (forcedChoice) {
         objects.push({
           ...base,
           ...extra,
-          value: resolveImageChoiceKey(v, shownImages),
+          value: chosenKeyFromForcedChoice(answer, shownImages),
         });
+      } else {
+        const vals = Array.isArray(answer) ? answer : [answer];
+        vals.forEach((v) => {
+          objects.push({
+            ...base,
+            ...extra,
+            value: resolveImageChoiceKey(v, shownImages),
+          });
+        });
+      }
+    } else if (fam === 'maxdiff') {
+      const { best, worst } = bestWorstKeysFromAnswer(answer, shownImages);
+      objects.push({
+        ...base,
+        ...extra,
+        best,
+        worst,
       });
+    } else if (fam === 'video_moments') {
+      const videoKey = videoStimulusKey(answer, shownImages);
+      const shownPipe = enrichShownForSkill(answer, shownImages, [videoKey].filter((k) => k && k !== '(unknown_video)'));
+      const segs = Array.isArray(answer?.segments) ? answer.segments : [];
+      if (!segs.length) {
+        objects.push({
+          ...base,
+          shown_images: shownPipe || base.shown_images,
+          ...extra,
+          segment_index: '',
+          start: '',
+          end: '',
+        });
+      } else {
+        segs.forEach((seg, i) => {
+          objects.push({
+            ...base,
+            shown_images: shownPipe || base.shown_images,
+            ...extra,
+            segment_index: i,
+            start: seg?.start ?? '',
+            end: seg?.end ?? '',
+          });
+        });
+      }
+    } else if (fam === 'pairwise_slider') {
+      const pairKeys = pairwiseShownKeys(answer, shownImages);
+      objects.push({
+        ...base,
+        shown_images: enrichShownForSkill(answer, shownImages, pairKeys),
+        ...extra,
+        preference: answer?.preference ?? '',
+        hard_to_decide: answer?.hardToDecide ? 'true' : 'false',
+        interpretation: answer?.interpretation ?? '',
+      });
+    } else if (fam === 'emotion_color') {
+      const c = answer?.color && typeof answer.color === 'object' ? answer.color : {};
+      const imgKey = imageStimulusKey(answer, shownImages);
+      objects.push({
+        ...base,
+        shown_images: enrichShownForSkill(answer, shownImages, [imgKey].filter((k) => k && k !== '(unknown_image)')),
+        ...extra,
+        hex: c.hex ?? '',
+        hue: c.hue ?? '',
+        intensity: c.intensity ?? '',
+        option_id: c.optionId ?? '',
+        option_label: c.label ?? '',
+        source: c.source ?? '',
+      });
+    } else if (fam === 'continuous_video') {
+      const videoKey = videoStimulusKey(answer, shownImages);
+      const shownPipe = enrichShownForSkill(answer, shownImages, [videoKey].filter((k) => k && k !== '(unknown_video)'));
+      const samples = Array.isArray(answer?.samples) ? answer.samples : [];
+      if (!samples.length) {
+        objects.push({
+          ...base,
+          shown_images: shownPipe || base.shown_images,
+          ...extra,
+          time_s: '',
+          value: answer?.mean ?? '',
+        });
+      } else {
+        samples.forEach((s) => {
+          objects.push({
+            ...base,
+            shown_images: shownPipe || base.shown_images,
+            ...extra,
+            time_s: s?.t ?? '',
+            value: s?.v ?? '',
+          });
+        });
+      }
+    } else if (fam === 'composite_blocks') {
+      const imgKey = imageStimulusKey(answer, shownImages);
+      const shownPipe = enrichShownForSkill(answer, shownImages, [imgKey].filter((k) => k && k !== '(unknown_image)'));
+      const ratings = Array.isArray(answer?.ratings) ? answer.ratings : [];
+      const words = Array.isArray(answer?.words) ? answer.words.join('|') : '';
+      const choice = answer?.choice ?? '';
+      const text = answer?.text ?? '';
+      if (!ratings.length) {
+        objects.push({
+          ...base,
+          shown_images: shownPipe || base.shown_images,
+          ...extra,
+          dimension_id: '',
+          dimension_label: '',
+          value: '',
+          choice,
+          words,
+          text,
+        });
+      } else {
+        ratings.forEach((d) => {
+          objects.push({
+            ...base,
+            shown_images: shownPipe || base.shown_images,
+            ...extra,
+            dimension_id: d.id || '',
+            dimension_label: d.label || `${d.left || ''} ↔ ${d.right || ''}` || d.id || '',
+            value: d.value ?? '',
+            choice,
+            words,
+            text,
+          });
+        });
+      }
     } else if (fam === 'slider' || fam === 'image_slider') {
       const dims = question.dimensions || [];
       const obj = (answer && typeof answer === 'object' && !Array.isArray(answer)) ? answer : {};
@@ -502,33 +1007,17 @@ function buildLongObjects(question, responses, surveyConfig) {
         });
       });
     } else if (fam === 'skill') {
-      let schema = question.skillResultSchema;
-      if (!schema?.length && question.skillId?.startsWith('preset_')) {
-        schema = getPresetSkill(question.skillId.replace(/^preset_/, ''))?.resultSchema;
-      }
+      // One row per trial — full answer JSON (not one row per schema key).
       const raw = (answer && typeof answer === 'object' && !Array.isArray(answer))
         ? stripSkillAnswerContext(answer)
         : answer;
-      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-        const keys = (schema || []).map((f) => f.key).filter(Boolean);
-        const useKeys = keys.length ? keys : Object.keys(raw);
-        useKeys.forEach((k) => {
-          const v = getPath(raw, k);
-          objects.push({
-            ...base,
-            ...extra,
-            schema_key: k,
-            value: v != null && typeof v === 'object' ? JSON.stringify(v) : (v ?? ''),
-          });
-        });
-      } else {
-        objects.push({
-          ...base,
-          ...extra,
-          schema_key: 'answer',
-          value: typeof raw === 'object' ? JSON.stringify(raw) : String(raw ?? ''),
-        });
-      }
+      const stimKeys = extractSkillShownImages(answer).map(mediaFilenameKey).filter(Boolean);
+      objects.push({
+        ...base,
+        shown_images: enrichShownForSkill(answer, shownImages, stimKeys) || base.shown_images,
+        ...extra,
+        answer_json: raw != null ? JSON.stringify(raw) : '',
+      });
     } else if (fam === 'annotation') {
       const ann = (answer && typeof answer === 'object') ? answer : null;
       // Stimulus media is already in shown_*; rows carry annotation answer only.
@@ -568,7 +1057,8 @@ function buildLongObjects(question, responses, surveyConfig) {
 
 function buildSummaryObjects(question, responses) {
   const type = question.type || '';
-  const fam = questionFamily(type);
+  const fam = exportFamilyForQuestion(question);
+  const forcedChoice = isForcedChoiceSkill(question.skillId);
   const eligible = responsesEligibleForQuestion(question.name, responses);
   const longObjs = buildLongObjects(question, responses, null);
   const nResponses = new Set(
@@ -809,27 +1299,22 @@ function buildSummaryObjects(question, responses) {
       out.push(summaryRow(question, nResponses, `${key}__no`, key, 'count', no, total));
     });
   } else if (fam === 'imagepicker') {
-    const { rankings } = computeQuestionTrueSkill(eligible, question.name);
-    const sortedTs = [...(rankings || [])].sort((a, b) => (b.mu ?? -Infinity) - (a.mu ?? -Infinity));
-    sortedTs.forEach((r, idx) => {
-      out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'rank', idx + 1, r.games));
-      out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'mu', r.mu, r.games));
-      out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'sigma', r.sigma, r.games));
-      out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'mu_std5', r.muStd5, r.games));
-      out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'wins', r.wins, r.games));
-      out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'losses', r.losses, r.games));
-      out.push(summaryRow(question, nResponses, r.imageKey, r.imageKey, 'games', r.games, r.games));
-    });
-    const freq = {};
-    longObjs.forEach((r) => {
-      const k = r.value;
-      if (!k) return;
-      freq[k] = (freq[k] || 0) + 1;
-    });
-    Object.entries(freq).forEach(([k, count]) => {
-      out.push(summaryRow(question, nResponses, k, k, 'count', count, nResponses));
-      out.push(summaryRow(question, nResponses, k, k, 'pct', nResponses ? count / nResponses : 0, nResponses));
-    });
+    const { rankings } = forcedChoice
+      ? computeForcedChoiceTrueSkill(eligible, question.name)
+      : computeQuestionTrueSkill(eligible, question.name);
+    pushTrueSkillSummary(out, question, nResponses, rankings, longObjs);
+  } else if (fam === 'maxdiff') {
+    pushMaxDiffSummary(out, question, nResponses, eligible);
+  } else if (fam === 'video_moments') {
+    pushVideoMomentSummary(out, question, eligible);
+  } else if (fam === 'pairwise_slider') {
+    pushPairwiseSliderSummary(out, question, eligible);
+  } else if (fam === 'emotion_color') {
+    pushEmotionColorSummary(out, question, eligible);
+  } else if (fam === 'continuous_video') {
+    pushContinuousVideoSummary(out, question, eligible);
+  } else if (fam === 'composite_blocks') {
+    pushCompositeBlocksSummary(out, question, eligible);
   } else if (fam === 'image_slider') {
     // attribute_* = slider dimension; unit_* = image only (no image__dim join keys).
     const byUnit = {}; // `${img}||${attr}` → { img, attr, attrLabel, nums }
@@ -917,20 +1402,7 @@ function buildSummaryObjects(question, responses) {
       pushStats(out, question, nResponses, id, label, nums);
     });
   } else if (fam === 'skill') {
-    const byKey = {};
-    longObjs.forEach((r) => {
-      const id = r.schema_key;
-      if (!id) return;
-      if (!byKey[id]) byKey[id] = [];
-      const num = Number(r.value);
-      if (!Number.isNaN(num)) byKey[id].push(num);
-      else byKey[id].push(null);
-    });
-    Object.entries(byKey).forEach(([id, vals]) => {
-      const nums = vals.filter((v) => v != null && !Number.isNaN(v));
-      if (nums.length) pushStats(out, question, nResponses, id, id, nums);
-      else out.push(summaryRow(question, nResponses, id, id, 'count', vals.length, vals.length));
-    });
+    pushGenericSkillSummary(out, question, eligible, longObjs);
   } else if (fam === 'annotation') {
     // Two dimensions: label and tool. unit_* = image (no join keys).
     const byImgLabel = {}; // `${img}||${label}` → count
@@ -998,7 +1470,7 @@ function buildSummaryObjects(question, responses) {
 
 export function buildQuestionLongCsv(question, responses, surveyConfig) {
   if (!question?.name || isDisplayOnly(question)) return null;
-  const headers = longHeadersForType(question.type);
+  const headers = longHeadersForType(question.type, question);
   const objects = buildLongObjects(question, responses, surveyConfig);
   return objectsToCsv(headers, objects);
 }
@@ -1025,7 +1497,7 @@ export function buildQuestionExportFiles(question, responses, surveyConfig, { pa
   const files = [
     {
       path: `${pathPrefix}/${name}__long.csv`,
-      content: longCsv || objectsToCsv(longHeadersForType(question.type), []),
+      content: longCsv || objectsToCsv(longHeadersForType(question.type, question), []),
     },
     {
       path: `${pathPrefix}/${name}__summary.csv`,
@@ -1035,7 +1507,7 @@ export function buildQuestionExportFiles(question, responses, surveyConfig, { pa
 
   // Image/media matrix, slider, point allocation: one summary "tab" file per attribute (unit = image only).
   // Annotation: one file per label and per tool (unit = image only).
-  const fam = questionFamily(question.type);
+  const fam = exportFamilyForQuestion(question);
   if (fam === 'image_matrix' || fam === 'image_slider' || fam === 'image_points') {
     const byAttr = new Map();
     summaryObjects.forEach((row) => {
@@ -1226,6 +1698,17 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     'image/media ranking: value only  (pipe-ordered filenames; no separate image labels)',
     'imagerating* / imageboolean*: value (and value_norm for boolean)',
     'imagepicker*: value = chosen media key (options are in shown_*)',
+    'Forced-Choice A/B (skill): same long/summary as imagepicker (value = chosen key; TrueSkill μ/σ/wins/…)',
+    'Best–Worst MaxDiff (skill) long: best, worst (= media keys; one row per trial)',
+    'Best–Worst MaxDiff summary: unit_* = image; metrics = rank/mu/… + bws/best/worst/appearances (μ-sorted)',
+    'Video Key Moments long: segment_index, start, end (one row per segment; shown_images = video)',
+    'Video Key Moments summary: unit_* = video; metrics = n_responses/mean_segments/peak_time/…',
+    'Pairwise A/B slider long: preference, hard_to_decide, interpretation (shown_images = A|B)',
+    'Pairwise A/B slider summary: unit_* = image; signed preference stats',
+    'Emotion color long: hex, hue, intensity, option_*; summary unit_* = image',
+    'Continuous video long: time_s, value (per sample); summary unit_* = video',
+    'Composite blocks long: dimension_* + value + choice/words/text; summary unit_* = image × dim',
+    'Generic skill long: one row with answer_json (not one row per schema key); summary by media',
     'imageannotation long: tool, label, annotation_json (+ shown_images)',
     'imageannotation summary: attribute_* = label or tool; unit_* = image;',
     '  metrics = count (overall) + label_count + tool_count',

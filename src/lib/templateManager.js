@@ -24,13 +24,15 @@
 import { supabase } from './supabase';
 import {
   isR2Configured, listImagesFromR2, copyImagesInR2, deleteImagesFromR2, uploadImageToR2,
-  getR2PublicBase,
 } from './r2';
 import { normalizeMediaEntry, sanitizeMediaFolderConfig } from './mediaUtils';
 import { downloadZip } from './zipDownload';
-
-/** R2 prefix for admin-published builtin pack overrides (read by seed/import). */
-export const BUILTIN_R2_PREFIX = 'project_templates/';
+import {
+  buildBuiltinImportSnapshot,
+  buildOnlineImportSnapshot,
+  compareBuiltinImagesToOnline,
+  diffBuiltinImportSnapshots,
+} from './templateBuiltinDiff';
 
 export function templateImagePrefix(templateId) {
   return `templates/${templateId}/`;
@@ -562,10 +564,10 @@ export async function deleteProjectAdmin(id) {
  * Convert a live Supabase template into the static builtin JSON shape
  * (`public/project_templates/{id}.json`).
  *
- * Intentionally omits preloadedImages: online → builtin only refreshes survey
+ * Intentionally omits preloadedImages: online → ZIP only refreshes survey
  * config / metadata. Builtin media stays in the static sibling pack
  * (`public/project_templates/{id}/`) and is applied on「导入内置模板」via
- * syncBuiltinTemplateImages — never copied back from Supabase/R2 template libs.
+ * syncBuiltinTemplateImages — never copied back from Supabase template libs.
  */
 export function templateToBuiltinJson(template) {
   const id = normalizeTemplateId(template?.id);
@@ -597,65 +599,26 @@ function builtinJsonFilename(id) {
   return `${normalizeTemplateId(id)}.json`;
 }
 
-async function fetchJsonNoStore(url) {
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) return null;
-  return res.json();
-}
-
-/** Load builtin index filenames: static pack ∪ R2 override pack. */
+/** Load builtin index filenames from static `public/project_templates/`. */
 async function loadBuiltinTemplateFilenames() {
   const indexRes = await fetch('/project_templates/index.json', { cache: 'no-store' });
   if (!indexRes.ok) throw new Error('Could not load template index');
   const staticIndex = await indexRes.json();
-  const merged = [];
-  const seen = new Set();
-  const pushAll = (list) => {
-    (list || []).forEach((filename) => {
-      const name = String(filename || '').trim();
-      if (!name || seen.has(name)) return;
-      seen.add(name);
-      merged.push(name);
-    });
-  };
-  pushAll(staticIndex.templates);
-
-  const base = getR2PublicBase();
-  if (base) {
-    try {
-      const r2Index = await fetchJsonNoStore(`${base}/${BUILTIN_R2_PREFIX}index.json`);
-      pushAll(r2Index?.templates);
-    } catch {
-      // R2 override index is optional
-    }
-  }
-  return merged;
+  return (staticIndex.templates || [])
+    .map((filename) => String(filename || '').trim())
+    .filter(Boolean);
 }
 
 /**
- * Load one builtin template JSON. Prefers R2 override, then static `/project_templates/`.
- * @returns {{ tpl: object, source: 'r2'|'static', filename: string }}
+ * Load one builtin template JSON from static `/project_templates/`.
+ * @returns {{ tpl: object, filename: string }}
  */
 export async function fetchBuiltinTemplateJson(idOrFilename) {
   const raw = String(idOrFilename || '');
   const filename = raw.endsWith('.json') ? raw : builtinJsonFilename(raw);
-  const id = normalizeTemplateId(filename.replace(/\.json$/i, ''));
-
-  const base = getR2PublicBase();
-  if (base) {
-    try {
-      const tpl = await fetchJsonNoStore(`${base}/${BUILTIN_R2_PREFIX}${id}.json`);
-      if (tpl && typeof tpl === 'object') {
-        return { tpl, source: 'r2', filename };
-      }
-    } catch {
-      // fall through to static
-    }
-  }
-
   const res = await fetch(`/project_templates/${filename}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`无法加载内置模板 ${filename}`);
-  return { tpl: await res.json(), source: 'static', filename };
+  return { tpl: await res.json(), filename };
 }
 
 /**
@@ -680,78 +643,6 @@ export function downloadOnlineTemplatesAsBuiltinZip(templates) {
   const stamp = new Date().toISOString().slice(0, 10);
   downloadZip(`builtin_templates_${stamp}.zip`, files);
   return { count: list.length, filenames: indexNames };
-}
-
-/**
- * Publish selected online templates to R2 as builtin overrides.
- * Next「导入内置模板」will prefer these over static files.
- */
-export async function publishOnlineTemplatesAsBuiltin(templates, { onProgress } = {}) {
-  if (!isR2Configured()) throw new Error('R2 未配置，无法发布内置覆盖包');
-  const list = (templates || []).filter((t) => t?.id && t?.name && t?.config);
-  if (!list.length) throw new Error('没有可发布的模板');
-
-  let published = 0;
-  const errors = [];
-  const filenames = [];
-
-  for (let i = 0; i < list.length; i += 1) {
-    const t = list[i];
-    const json = templateToBuiltinJson(t);
-    const filename = builtinJsonFilename(json.id);
-    filenames.push(filename);
-    onProgress?.({
-      current: i + 1,
-      total: list.length,
-      name: json.name || json.id,
-      phase: 'upload',
-    });
-    try {
-      const blob = new Blob([`${JSON.stringify(json, null, 2)}\n`], { type: 'application/json' });
-      const key = `${BUILTIN_R2_PREFIX}${json.id}.json`;
-      const up = await uploadImageToR2(blob, key);
-      if (!up.success) throw new Error(up.error || 'upload failed');
-      published += 1;
-    } catch (err) {
-      errors.push(`${filename}: ${err.message || err}`);
-    }
-  }
-
-  // Merge into R2 index (static ∪ previous R2 ∪ newly published)
-  try {
-    const staticNames = await (async () => {
-      const res = await fetch('/project_templates/index.json', { cache: 'no-store' });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.templates || [];
-    })();
-    let prevR2 = [];
-    const base = getR2PublicBase();
-    if (base) {
-      const prev = await fetchJsonNoStore(`${base}/${BUILTIN_R2_PREFIX}index.json`);
-      prevR2 = prev?.templates || [];
-    }
-    const merged = [];
-    const seen = new Set();
-    [...staticNames, ...prevR2, ...filenames].forEach((name) => {
-      const n = String(name || '').trim();
-      if (!n || seen.has(n)) return;
-      seen.add(n);
-      merged.push(n);
-    });
-    const indexBlob = new Blob(
-      [`${JSON.stringify({ templates: merged }, null, 2)}\n`],
-      { type: 'application/json' },
-    );
-    const indexUp = await uploadImageToR2(indexBlob, `${BUILTIN_R2_PREFIX}index.json`);
-    if (!indexUp.success) {
-      errors.push(`index.json: ${indexUp.error || 'upload failed'}`);
-    }
-  } catch (err) {
-    errors.push(`index.json: ${err.message || err}`);
-  }
-
-  return { published, total: list.length, filenames, errors };
 }
 
 /**
@@ -921,25 +812,57 @@ function describeBuiltinTemplateEntry(tpl, filename, bundledImageCount = 0) {
 }
 
 /**
- * Preview which built-in templates would be imported vs updated (existing id).
- * @param {string[]|null} existingIds - optional pre-fetched template ids
+ * Build id → online template map for import preview.
+ * Accepts full template objects, id strings, or fetches from Supabase.
+ * @param {Array<object|string>|null} existingTemplatesOrIds
  */
-export async function previewBuiltinTemplateImport(existingIds = null) {
-  const filenames = await loadBuiltinTemplateFilenames();
-
-  let existingSet;
-  if (existingIds) {
-    existingSet = new Set(existingIds);
-  } else if (supabase) {
-    const { data, error } = await supabase.from('templates').select('id');
-    if (error) throw error;
-    existingSet = new Set((data || []).map((r) => r.id));
-  } else {
-    existingSet = new Set();
+async function resolveOnlineTemplatesForPreview(existingTemplatesOrIds = null) {
+  const byId = new Map();
+  if (Array.isArray(existingTemplatesOrIds) && existingTemplatesOrIds.length) {
+    if (typeof existingTemplatesOrIds[0] === 'string') {
+      // ids only — load full rows so we can diff content
+      if (supabase) {
+        const { data, error } = await supabase.from('templates').select('*').in('id', existingTemplatesOrIds);
+        if (error) throw error;
+        (data || []).forEach((row) => {
+          const t = rowToTemplate(row);
+          byId.set(t.id, t);
+        });
+      } else {
+        existingTemplatesOrIds.forEach((id) => byId.set(id, { id }));
+      }
+    } else {
+      existingTemplatesOrIds.forEach((t) => {
+        if (t?.id) byId.set(t.id, t);
+      });
+    }
+    return byId;
   }
+  if (supabase) {
+    const { data, error } = await supabase.from('templates').select('*');
+    if (error) throw error;
+    (data || []).forEach((row) => {
+      const t = rowToTemplate(row);
+      byId.set(t.id, t);
+    });
+  }
+  return byId;
+}
+
+/**
+ * Preview builtin import with content diff against online templates.
+ * - toInsert: id not in Supabase
+ * - toUpdate: id exists and seed would change something (see `diffs`)
+ * - toUnchanged: id exists and comparable fields already match (no image refresh)
+ * @param {Array<object|string>|null} existingTemplatesOrIds
+ */
+export async function previewBuiltinTemplateImport(existingTemplatesOrIds = null) {
+  const filenames = await loadBuiltinTemplateFilenames();
+  const onlineById = await resolveOnlineTemplatesForPreview(existingTemplatesOrIds);
 
   const toInsert = [];
   const toUpdate = [];
+  const toUnchanged = [];
   const toSkip = [];
   const toBackfillImages = [];
   const invalid = [];
@@ -947,7 +870,7 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
 
   for (const filename of filenames) {
     try {
-      const { tpl, source } = await fetchBuiltinTemplateJson(filename);
+      const { tpl } = await fetchBuiltinTemplateJson(filename);
       if (!tpl.name || !tpl.config) {
         invalid.push({ filename, reason: '缺少 name 或 config' });
         continue;
@@ -955,24 +878,45 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
 
       const id = resolveBuiltinTemplateId(tpl);
       const bundled = await loadBuiltinTemplateImageManifest(id);
-      const meta = {
-        ...describeBuiltinTemplateEntry(tpl, filename, bundled.images.length),
-        source,
-      };
-      if (existingSet.has(meta.id)) {
-        toUpdate.push({
-          ...meta,
-          reason: bundled.images.length
-            ? '覆盖问卷配置并刷新内置图片'
-            : '覆盖问卷配置',
-          willRefreshImages: bundled.images.length > 0,
-        });
-        // Keep legacy key for older UI callers
-        if (bundled.images.length > 0) {
-          toBackfillImages.push({ ...meta, reason: '刷新内置图片到模板图库' });
-        }
-      } else {
+      const meta = describeBuiltinTemplateEntry(tpl, filename, bundled.images.length);
+      const online = onlineById.get(meta.id);
+
+      if (!online) {
         toInsert.push(meta);
+        continue;
+      }
+
+      const builtinSnap = buildBuiltinImportSnapshot(tpl, {
+        bundledImages: bundled.images,
+      });
+      const onlineSnap = buildOnlineImportSnapshot(online);
+      const {
+        diffs,
+        unchanged,
+        willRefreshImages = false,
+      } = diffBuiltinImportSnapshots(builtinSnap, onlineSnap);
+
+      if (unchanged) {
+        toUnchanged.push({
+          ...meta,
+          reason: '与线上一致，无需导入',
+          willRefreshImages: false,
+          diffs: [],
+        });
+        continue;
+      }
+
+      const hasConfigOrMetaDiff = diffs.some((d) => d.field !== 'images');
+      toUpdate.push({
+        ...meta,
+        reason: hasConfigOrMetaDiff
+          ? (willRefreshImages ? '覆盖问卷/元数据并补齐内置图片' : '覆盖问卷配置或元数据')
+          : '补齐内置图片到模板图库',
+        willRefreshImages,
+        diffs,
+      });
+      if (willRefreshImages) {
+        toBackfillImages.push({ ...meta, reason: '补齐内置图片到模板图库' });
       }
     } catch (err) {
       errors.push({ filename, reason: err.message });
@@ -993,6 +937,7 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
   return {
     toInsert: dedupedInsert,
     toUpdate,
+    toUnchanged,
     toSkip,
     toBackfillImages,
     invalid,
@@ -1003,7 +948,7 @@ export async function previewBuiltinTemplateImport(existingIds = null) {
 
 /**
  * Seed built-in templates into Supabase (approved / landing).
- * Loads each file via fetchBuiltinTemplateJson (R2 override → static pack).
+ * Loads each file from static `/project_templates/` via fetchBuiltinTemplateJson.
  * Existing ids are updated (survey config + metadata; bundled images refreshed when present).
  */
 export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
@@ -1035,7 +980,7 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
 
       const { data: existing, error: selectError } = await supabase
         .from('templates')
-        .select('id')
+        .select('id, preloaded_images')
         .eq('id', id)
         .maybeSingle();
       if (selectError) {
@@ -1047,33 +992,48 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
       if (!tags.includes('official')) tags.push('official');
 
       // Prefer R2 upload of sibling /project_templates/{id}/ folder; else static URLs from JSON.
+      // Skip when online already contains every syncable file from the builtin pack.
       let preloadedImages = Array.isArray(tpl.preloadedImages) ? [...tpl.preloadedImages] : [];
       let preloadedSource = tpl.preloadedSource || (preloadedImages.length ? 'builtin' : null);
       let preloadedAt = tpl.preloadedAt || null;
+      let didSyncImages = false;
+      const existingPreloaded = Array.isArray(existing?.preloaded_images)
+        ? existing.preloaded_images
+        : [];
       try {
-        const synced = await syncBuiltinTemplateImages(id, {
-          onProgress: ({ current, index, total }) => {
-            if (onProgress) {
-              onProgress({
-                inserted,
-                updated,
-                skipped,
-                total: filenames.length,
-                current: `${filename} · image ${index}/${total}: ${current}`,
-              });
-            }
-          },
-        });
-        if (synced.preloadedImages.length) {
-          preloadedImages = synced.preloadedImages;
-          preloadedSource = isR2Configured() && synced.uploaded > 0 ? 'r2' : 'builtin';
-          preloadedAt = new Date().toISOString();
-        }
-        if (synced.errors?.length) {
-          errors.push(...synced.errors.map((e) => `${filename} image: ${e}`));
-        }
-        if (synced.warnings?.length) {
-          warnings.push(...synced.warnings.map((e) => `${filename}: ${e}`));
+        const bundled = await loadBuiltinTemplateImageManifest(id);
+        const imageCmp = compareBuiltinImagesToOnline(bundled.images, existingPreloaded);
+        if (imageCmp.bundledPaths.length && imageCmp.missingPaths.length === 0) {
+          // Keep online library as-is — do not re-upload or overwrite.
+          preloadedImages = [];
+          preloadedSource = null;
+          preloadedAt = null;
+        } else {
+          const synced = await syncBuiltinTemplateImages(id, {
+            onProgress: ({ current, index, total }) => {
+              if (onProgress) {
+                onProgress({
+                  inserted,
+                  updated,
+                  skipped,
+                  total: filenames.length,
+                  current: `${filename} · image ${index}/${total}: ${current}`,
+                });
+              }
+            },
+          });
+          if (synced.preloadedImages.length) {
+            preloadedImages = synced.preloadedImages;
+            preloadedSource = isR2Configured() && synced.uploaded > 0 ? 'r2' : 'builtin';
+            preloadedAt = new Date().toISOString();
+            didSyncImages = true;
+          }
+          if (synced.errors?.length) {
+            errors.push(...synced.errors.map((e) => `${filename} image: ${e}`));
+          }
+          if (synced.warnings?.length) {
+            warnings.push(...synced.warnings.map((e) => `${filename}: ${e}`));
+          }
         }
       } catch (imgErr) {
         errors.push(`${filename} images: ${imgErr.message}`);
@@ -1099,8 +1059,8 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
           is_pinned: !!(tpl.isPinned ?? tpl.is_pinned),
           updated_at: new Date().toISOString(),
         };
-        // Only overwrite media library when builtin pack (or JSON) provides images.
-        if (preloadedImages.length) {
+        // Only overwrite media library when we actually synced missing builtin images.
+        if (didSyncImages && preloadedImages.length) {
           patch.preloaded_images = preloadedImages;
           patch.preloaded_at = preloadedAt;
           patch.preloaded_source = preloadedSource;

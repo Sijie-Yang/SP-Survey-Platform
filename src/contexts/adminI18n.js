@@ -93,6 +93,9 @@ export const adminI18n = {
       'Copy media from a published template or the admin preview media library. Existing files are skipped so imports can resume.',
     mediaUploadTitle: 'Upload Media',
     mediaUploadHelpPrefix: 'Upload into the current folder in Media library',
+    mediaUploadLimitsHelp:
+      'Images are compressed to ~300 KB. Video/audio max {mb} MB (no in-browser A/V compression).',
+    mediaAvTooLarge: '"{name}" is too large ({size} MB). Video/audio max is {mb} MB.',
     mediaChooseFiles: 'Choose files',
     mediaSelected: 'selected',
     mediaUploadBtn: 'Upload',
@@ -608,6 +611,9 @@ export const adminI18n = {
     mediaImportTemplateHelp: '从已发布模板或管理端预览媒体库复制文件。已存在文件会跳过，便于断点续传。',
     mediaUploadTitle: '上传媒体',
     mediaUploadHelpPrefix: '上传到媒体库中的当前文件夹',
+    mediaUploadLimitsHelp:
+      '图片会压缩到约 300 KB；视频/音频上限 {mb} MB（浏览器端不做可靠音视频压缩）。',
+    mediaAvTooLarge: '「{name}」过大（{size} MB）。视频/音频上限 {mb} MB。',
     mediaChooseFiles: '选择文件',
     mediaSelected: '已选',
     mediaUploadBtn: '上传',

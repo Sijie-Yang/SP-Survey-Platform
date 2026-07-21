@@ -44,6 +44,8 @@ import {
   SelectAll,
   Deselect,
   DriveFileMove,
+  Visibility,
+  Audiotrack,
 } from '@mui/icons-material';
 import {
   testHuggingFaceConnection,
@@ -52,10 +54,17 @@ import {
 } from '../../lib/huggingface';
 import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix, stripTemplateOwnedMedia, r2KeyFromUrl, isTemplateR2Key } from '../../lib/r2';
 import { asyncPool } from '../../lib/asyncPool';
-import { inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT, analyzeTaggedSets, analyzeTaggedCategories, downloadMediaFiles, sortMediaByName, compareMediaNames, buildProjectMediaKey, joinFolderPath, normalizeFolderPath } from '../../lib/mediaUtils';
+import {
+  inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT,
+  analyzeTaggedSets, analyzeTaggedCategories, downloadMediaFiles,
+  sortMediaByName, compareMediaNames, buildProjectMediaKey, joinFolderPath,
+  normalizeFolderPath, IMAGE_COMPRESS_TARGET_BYTES, MAX_AV_MEDIA_BYTES,
+  checkAvMediaTooLarge, formatMediaMb,
+} from '../../lib/mediaUtils';
 import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import MediaFolderBrowser from './MediaFolderBrowser';
+import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
 import MediaPreannotatePanel from './MediaPreannotatePanel';
 import MediaPreannotateResults from './MediaPreannotateResults';
@@ -85,7 +94,7 @@ import {
   PREVIEW_MEDIA_IMPORT_ID,
   isPreviewMediaImportId,
 } from '../../lib/templateImageImport';
-import { SKILL_PREVIEW_PREFIX } from '../../lib/skillPreviewMedia';
+import { PREVIEW_MEDIA_PREFIX } from '../../lib/previewMediaLibrary';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
 import { useAuth } from '../../contexts/AuthContext';
@@ -197,7 +206,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const [r2Syncing, setR2Syncing] = useState(false);
 
   // Import template images — any project can pull from any template with an R2 folder,
-  // or from the shared admin preview media library (skill-preview/).
+  // or from the shared platform preview media library (skill-preview/ prefix).
   const [availableTemplates, setAvailableTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [previewMediaCount, setPreviewMediaCount] = useState(0);
@@ -221,6 +230,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const [mediaFilter, setMediaFilter] = useState('all');
   const [mediaPage, setMediaPage] = useState(1);
   const [selectedMedia, setSelectedMedia] = useState(() => new Set());
+  const [previewEntry, setPreviewEntry] = useState(null);
   const [mediaActionStatus, setMediaActionStatus] = useState({ loading: false, error: null, success: null });
   const [mediaDownloadProgress, setMediaDownloadProgress] = useState(null);
   const [refreshingMedia, setRefreshingMedia] = useState(false);
@@ -549,14 +559,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     });
   };
 
-  /** Card click: focus for pre-annotate (images) + select; multi-select via checkbox. */
+  /** Card click: preview media; images also focus Pre-annotate. Multi-select via checkbox. */
   const handleMediaCardClick = (img) => {
     const t = img.type || inferMediaType(img.name || img.url);
+    setPreviewEntry(img);
     if (t === 'image') {
       focusMediaInGallery(img.name);
-      return;
     }
-    toggleMediaSelection(img.name);
   };
 
   const selectAllFiltered = () => {
@@ -631,7 +640,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     Promise.all([
       listTemplates(user?.id),
       isR2Configured()
-        ? listImagesFromR2(SKILL_PREVIEW_PREFIX).then((r) => (
+        ? listImagesFromR2(PREVIEW_MEDIA_PREFIX).then((r) => (
           r.success
             ? (r.images || []).filter((img) => {
               const key = String(img.key || img.name || '');
@@ -757,7 +766,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
 
     const sourcePrefix = fromPreview
-      ? SKILL_PREVIEW_PREFIX
+      ? PREVIEW_MEDIA_PREFIX
       : `templates/${template.id}/`;
 
     scrollRef.current = window.scrollY;
@@ -979,7 +988,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   // ── Direct upload to Cloudflare R2 ────────────────────────────────────────
 
   // Compress image to stay under maxBytes using Canvas
-  const compressImage = (file, maxBytes = 300 * 1024, quality = 0.85) => {
+  const compressImage = (file, maxBytes = IMAGE_COMPRESS_TARGET_BYTES, quality = 0.85) => {
     return new Promise((resolve) => {
       if (file.size <= maxBytes) { resolve(file); return; }
       const img = new Image();
@@ -1033,6 +1042,20 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       for (let i = 0; i < selectedFiles.length; i++) {
         const raw = selectedFiles[i];
         const mediaType = inferMediaType(raw.name);
+        const tooLarge = checkAvMediaTooLarge(raw, mediaType);
+        if (tooLarge) {
+          failCount++;
+          setDirectUploadStatus((prev) => ({
+            ...prev,
+            error: tf(t.mediaAvTooLarge, {
+              name: tooLarge.name,
+              size: tooLarge.sizeMb,
+              mb: tooLarge.maxMb,
+            }),
+          }));
+          setDirectUploadStatus((prev) => ({ ...prev, progress: i + 1 }));
+          continue;
+        }
         const file = mediaType === 'image' ? await compressImage(raw) : raw;
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const userId = user?.id || 'anonymous';
@@ -1701,6 +1724,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
             {t.mediaUploadHelpPrefix}
             {' '}({currentFolder ? <code>{currentFolder}</code> : 'root'}).
+            {' '}
+            {tf(t.mediaUploadLimitsHelp, { mb: formatMediaMb(MAX_AV_MEDIA_BYTES) })}
           </Typography>
 
           <input
@@ -2000,7 +2025,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
                   Showing {pagedMedia.length} of {filteredMedia.length} file(s)
                   {mediaSearch || mediaFilter !== 'all' ? ' (filtered)' : ''}.
-                  Click a card to focus Pre-annotate below (images); use checkboxes for multi-select download / move / delete.
+                  Click a card to preview (image / video / audio); images also focus Pre-annotate below.
+                  Use checkboxes for multi-select download / move / delete.
                 </Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 1.5, mb: 2 }}>
                   {pagedMedia.map((img) => {
@@ -2041,6 +2067,18 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                           sx={{ position: 'absolute', top: 2, left: 2, zIndex: 2, bgcolor: 'rgba(255,255,255,0.85)', borderRadius: 1, p: 0.25 }}
                         />
                         <Box sx={{ position: 'absolute', top: 2, right: 2, zIndex: 2, display: 'flex', gap: 0.25 }}>
+                          <Tooltip title="Preview">
+                            <IconButton
+                              className="media-action-btn"
+                              size="small"
+                              onClick={(e) => { e.stopPropagation(); setPreviewEntry(img); }}
+                              sx={{
+                                bgcolor: 'rgba(255,255,255,0.9)', opacity: 0, transition: 'opacity .15s',
+                              }}
+                            >
+                              <Visibility fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Download">
                             <IconButton
                               className="media-action-btn"
@@ -2072,9 +2110,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                         </Box>
                         <Box sx={{ height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           {t === 'video' ? (
-                            <video src={img.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted />
+                            <video src={img.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted preload="metadata" />
                           ) : t === 'audio' ? (
-                            <Typography variant="caption" sx={{ p: 1, textAlign: 'center' }}>🎵 Audio</Typography>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, p: 1 }}>
+                              <Audiotrack fontSize="small" color="action" />
+                              <Typography variant="caption" sx={{ textAlign: 'center' }}>Audio</Typography>
+                            </Box>
                           ) : (
                             <img
                               src={img.url}
@@ -2436,6 +2477,14 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         confirmColor={confirmDialog?.confirmColor || 'error'}
         onConfirm={() => confirmDialog?.onConfirm?.()}
         onCancel={() => setConfirmDialog(null)}
+      />
+
+      <MediaFilePreviewDialog
+        open={!!previewEntry}
+        entry={previewEntry}
+        items={filteredMedia}
+        onNavigate={setPreviewEntry}
+        onClose={() => setPreviewEntry(null)}
       />
     </Box>
   );

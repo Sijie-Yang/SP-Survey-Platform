@@ -12,6 +12,7 @@ import { applyAdminThemeToSurveyModel } from '../../lib/surveyStorage';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import { getTrialCount } from '../../lib/trialNavigation';
 import { syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
+import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 
 let widgetsRegistered = false;
 function ensureWidgets() {
@@ -30,6 +31,7 @@ function ensureWidgets() {
 export default function QuestionParticipantPreview({ question, currentProject, surveyConfig = null }) {
   const [model, setModel] = useState(null);
   const [error, setError] = useState(null);
+  const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
   const themeKey = useMemo(() => {
     try {
       return JSON.stringify(surveyConfig?.theme || currentProject?.config?.theme || null);
@@ -84,16 +86,20 @@ export default function QuestionParticipantPreview({ question, currentProject, s
 
   useEffect(() => {
     let cancelled = false;
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       try {
         ensureWidgets();
         if (!question?.type) {
           setModel(null);
           return;
         }
+        const projectImages = currentProject?.preloadedImages || [];
+        const mediaPool = await resolveMediaPoolForPreview(projectImages);
+        if (cancelled) return;
+        setUsingPreviewLibrary(!projectImages.length && mediaPool.length > 0);
         const { surveyJson } = buildSingleQuestionSurvey({
           question,
-          projectImages: currentProject?.preloadedImages || [],
+          projectImages: mediaPool,
           randomMedia: false,
           showNavigationButtons: false,
         });
@@ -150,7 +156,9 @@ export default function QuestionParticipantPreview({ question, currentProject, s
       }}
     >
       <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-        Live preview — uses curated files when set, otherwise a sample from the project media pool.
+        Live preview — uses curated files when set, otherwise a sample from the
+        {usingPreviewLibrary ? ' platform preview media library' : ' project media pool'}
+        .
         {multiTrial ? ` · ${getTrialCount(question)} trials` : ''}
       </Typography>
       <SurveyTrialNavProvider>
