@@ -29,3 +29,10 @@ export {
   buildProjectUrls,
   isSafeProjectId,
 } from './capabilities';
+
+export {
+  SKILL_TYPE_ANALYSIS_GUIDE,
+  SKILL_ANALYSIS_VISUAL_CONVENTIONS,
+  buildSkillAnalysisGuideText,
+  skillAnalysisGuideBlurb,
+} from './skillAnalysisGuide';

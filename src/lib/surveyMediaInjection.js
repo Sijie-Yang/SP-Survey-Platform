@@ -989,6 +989,8 @@ export async function resolveSkillQuestions(surveyJson) {
       }
       if (skill) {
         el.skillHtml = skill.sourceHtml || el.skillHtml;
+        if (skill.analysisHtml) el.skillAnalysisHtml = skill.analysisHtml;
+        if (skill.resultSchema?.length) el.skillResultSchema = skill.resultSchema;
         const merged = { ...(skill.defaultConfig || {}), ...(el.skillConfig || {}) };
         delete merged.demoImages;
         const skillKey = String(el.skillId || '').replace(/^preset_/, '');

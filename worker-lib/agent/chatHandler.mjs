@@ -98,6 +98,9 @@ skillquestion presets (required skillId + skillConfig; NEVER invent skillHtml on
 
 For custom interactions: use skill_save (MCP) with SPSkill.setAnswer + spskill-init, ONE task per skill,
 then skillquestion + that skillId. Never pack 5 modes into one skill. Never parent.postMessage answer protocols.
+Declare resultSchema types from: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList
+so Results Analysis / CSV reuse native charts (points→annotation overlay, rankedList→Borda, allocation→budget bars).
+Optional analysisHtml + SPAnalysis.getResponses() only when no native type fits. Include imageUrl in answers.
 
 Prefer imagerating / imagepicker / skillquestion for scene preference tasks.
 Do not include API keys or credentials.`;

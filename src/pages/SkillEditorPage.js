@@ -1,18 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box, Typography, TextField, Button,
   Alert, Paper, Stack, Chip,
 } from '@mui/material';
-import { Publish, Save } from '@mui/icons-material';
+import { Publish, Save, CheckCircle, ErrorOutline } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   saveSkill, submitSkillForReview, getSkillById, getSkillStatus,
 } from '../lib/skillManager';
 import SkillQuestionFrame from '../components/SkillQuestionWidget';
+import SkillAnalysisFrame from '../components/SkillAnalysisFrame';
 import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
 import SkillAiPanel from '../components/admin/SkillAiPanel';
 import AdminShell from '../components/layout/AdminShell';
 import { normalizeSkillSchemaArray } from '../lib/skillAnswerBridge';
+import { checkAnswerAgainstResultSchema, KNOWN_SKILL_RESULT_TYPE_IDS } from '../lib/skillResultTypes';
+import { buildSyntheticAnalysisResponses } from '../lib/skillSdk';
 
 const DEFAULT_SKILL_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -37,6 +40,7 @@ export default function SkillEditorPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [sourceHtml, setSourceHtml] = useState(DEFAULT_SKILL_HTML);
+  const [analysisHtml, setAnalysisHtml] = useState('');
   const [configSchema, setConfigSchema] = useState('[]');
   const [resultSchema, setResultSchema] = useState('[]');
   const [defaultConfig, setDefaultConfig] = useState('{}');
@@ -48,6 +52,7 @@ export default function SkillEditorPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [previewImages, setPreviewImages] = useState([]);
+  const [previewAnswer, setPreviewAnswer] = useState(null);
   const [openaiApiKey] = useState(() => localStorage.getItem('openaiApiKey') || sessionStorage.getItem('openai_api_key') || '');
 
   useEffect(() => {
@@ -79,6 +84,7 @@ export default function SkillEditorPage() {
       setName(skill.name);
       setDescription(skill.description);
       setSourceHtml(skill.sourceHtml || DEFAULT_SKILL_HTML);
+      setAnalysisHtml(skill.analysisHtml || '');
       setConfigSchema(JSON.stringify(skill.configSchema || [], null, 2));
       setResultSchema(JSON.stringify(skill.resultSchema || [], null, 2));
       setDefaultConfig(JSON.stringify(skill.defaultConfig || {}, null, 2));
@@ -119,11 +125,35 @@ export default function SkillEditorPage() {
     && /postMessage\s*\(/.test(sourceHtml)
     && /(skill-result|skillResult|SP_SURVEY_SKILL_RESULT)/.test(sourceHtml);
 
+  const parsedResultSchemaForCheck = useMemo(() => {
+    try {
+      return normalizeSkillSchemaArray(JSON.parse(resultSchema || '[]'), { defaultType: 'text' });
+    } catch {
+      return [];
+    }
+  }, [resultSchema]);
+
+  const answerCheck = useMemo(
+    () => checkAnswerAgainstResultSchema(previewAnswer, parsedResultSchemaForCheck),
+    [previewAnswer, parsedResultSchemaForCheck],
+  );
+
+  // Reset recorded answer when HTML / config structure changes substantially
+  useEffect(() => {
+    setPreviewAnswer(null);
+  }, [sourceHtml, defaultConfig]);
+
+  const syntheticAnalysisResponses = useMemo(
+    () => buildSyntheticAnalysisResponses(parsedResultSchemaForCheck, previewImages, 4),
+    [parsedResultSchemaForCheck, previewImages],
+  );
+
   const buildPayload = () => ({
     id: skillId || undefined,
     name: name || 'Untitled Skill',
     description,
     sourceHtml,
+    analysisHtml,
     configSchema: parseSchema(),
     resultSchema: parseResultSchema(),
     defaultConfig: parseDefaultConfig(),
@@ -138,7 +168,10 @@ export default function SkillEditorPage() {
       setSkillId(result.skill.id);
       setStatus(getSkillStatus(result.skill));
       setPreviewConfig(result.skill.defaultConfig || {});
-      setSuccess('Saved to your skill library');
+      const warn = (result.warnings || []).filter(Boolean);
+      setSuccess(warn.length
+        ? `Saved to your skill library. Note: ${warn.join(' ')}`
+        : 'Saved to your skill library');
       if (!routeId) navigate(`/skill-editor/${result.skill.id}`, { replace: true });
     } catch (err) {
       setError(err.message);
@@ -169,6 +202,7 @@ export default function SkillEditorPage() {
     if (skill.name) setName(skill.name);
     if (skill.description) setDescription(skill.description);
     if (skill.sourceHtml) setSourceHtml(skill.sourceHtml);
+    if (skill.analysisHtml != null) setAnalysisHtml(skill.analysisHtml || '');
     if (skill.configSchema) {
       setConfigSchema(JSON.stringify(normalizeSkillSchemaArray(skill.configSchema), null, 2));
     }
@@ -234,6 +268,7 @@ export default function SkillEditorPage() {
             name,
             description,
             sourceHtml,
+            analysisHtml,
             configSchema: (() => { try { return JSON.parse(configSchema); } catch { return []; } })(),
             defaultConfig: (() => { try { return JSON.parse(defaultConfig); } catch { return {}; } })(),
             resultSchema: (() => { try { return JSON.parse(resultSchema); } catch { return []; } })(),
@@ -262,7 +297,7 @@ export default function SkillEditorPage() {
             value={resultSchema}
             onChange={(e) => setResultSchema(e.target.value)}
             fullWidth multiline rows={3}
-            helperText='e.g. [{"key":"score","label":"Score","type":"number"}] — types: number / boolean / choice / text / count / color / scaleGroup; auto-inferred if omitted'
+            helperText={`e.g. [{"key":"marks","label":"Marks","type":"points"}] — types: ${KNOWN_SKILL_RESULT_TYPE_IDS.join(' / ')}. Declared types reuse native analysis/export.`}
           />
           <TextField
             label="HTML source"
@@ -272,12 +307,16 @@ export default function SkillEditorPage() {
             sx={{ fontFamily: 'monospace' }}
           />
           <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>Live preview</Typography>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>Live preview (interactive)</Typography>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+              Try answering below. Confirm SPSkill.setAnswer fires before saving to a survey.
+            </Typography>
             <SkillQuestionFrame
               skillHtml={sourceHtml}
               config={previewConfig}
               images={previewImages}
-              readOnly
+              value={previewAnswer}
+              onChange={setPreviewAnswer}
             />
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
               Preview uses the platform preview media library.
@@ -286,6 +325,63 @@ export default function SkillEditorPage() {
                 : ''}
             </Typography>
           </Paper>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: answerCheck.recorded ? 'success.50' : 'warning.50' }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>Answer test</Typography>
+            {!answerCheck.recorded ? (
+              <Alert severity="warning" sx={{ mb: 1 }}>
+                No answer recorded yet — interact with the preview (click Done / submit) to confirm the skill is answerable.
+              </Alert>
+            ) : (
+              <Alert severity="success" icon={<CheckCircle />} sx={{ mb: 1 }}>
+                Answer recorded via SPSkill.setAnswer (or compatible bridge).
+              </Alert>
+            )}
+            {answerCheck.fields.length > 0 && (
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
+                {answerCheck.fields.map((f) => (
+                  <Chip
+                    key={f.key}
+                    size="small"
+                    icon={f.ok ? <CheckCircle /> : <ErrorOutline />}
+                    color={f.ok ? 'success' : 'default'}
+                    variant={f.ok ? 'filled' : 'outlined'}
+                    label={`${f.label} (${f.type}): ${f.detail}`}
+                  />
+                ))}
+              </Stack>
+            )}
+            {previewAnswer != null && (
+              <Box
+                component="pre"
+                sx={{
+                  m: 0, p: 1.5, borderRadius: 1, bgcolor: 'grey.100',
+                  fontSize: 12, overflow: 'auto', maxHeight: 220,
+                }}
+              >
+                {JSON.stringify(previewAnswer, null, 2)}
+              </Box>
+            )}
+          </Paper>
+          <TextField
+            label="Analysis view HTML (optional) — Results Analysis custom view"
+            value={analysisHtml}
+            onChange={(e) => setAnalysisHtml(e.target.value)}
+            fullWidth multiline rows={8}
+            sx={{ fontFamily: 'monospace' }}
+            helperText='Use spanalysis-init / SPAnalysis.getResponses(). Leave empty when declared resultSchema types are enough.'
+          />
+          {analysisHtml.trim() && (
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                Analysis view preview (synthetic responses)
+              </Typography>
+              <SkillAnalysisFrame
+                analysisHtml={analysisHtml}
+                responses={syntheticAnalysisResponses}
+                config={previewConfig}
+              />
+            </Paper>
+          )}
           <Stack direction="row" spacing={2}>
             <Button variant="contained" startIcon={<Save />} onClick={handleSave} disabled={saving || submitting}>
               {saving ? 'Saving…' : 'Save to my library'}

@@ -16,6 +16,7 @@ Run in order:
 1. `supabase/admin_projects_rls.sql` (if not already applied)
 2. `supabase/agent_mcp_platform.sql`
 3. `supabase/survey_public_rpcs.sql`
+4. `supabase/question_skills_analysis_html.sql` (optional `analysis_html` for skill-authored Results Analysis views)
 
 ### 2. Wrangler secrets / vars
 
@@ -107,6 +108,8 @@ npm run deploy
 - `skill_list`, `skill_get`, `skill_save` (`confirm: true`) — private library; no auto public review
 - Survey questions: `skillquestion` + `skillId` (`preset_*` or library id). Never put `skillHtml` on the draft.
 - `skill_save` is **rejected** unless `sourceHtml` calls `SPSkill.setAnswer(...)`. One task per skill; no `skill-result` postMessage protocols. Prefer `preset_*` when a preset fits.
+- Declare `resultSchema[].type` from: `number`, `boolean`, `choice`, `text`, `count`, `color`, `scaleGroup`, `points`, `path`, `allocation`, `rankedList` so Results Analysis / CSV reuse native charts. Optional `analysisHtml` + `SPAnalysis.getResponses()` for novel shapes. See `survey_capabilities.skillAnalysisGuide`.
+- Include `imageUrl` in answers for per-stimulus grouping.
 
 **Results** (`results:read`)
 

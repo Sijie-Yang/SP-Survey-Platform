@@ -1227,6 +1227,8 @@ export function registerSkillQuestionWidget() {
   Serializer.addClass('skillquestion', [
     { name: 'skillId', category: 'general' },
     { name: 'skillHtml', category: 'general' },
+    { name: 'skillAnalysisHtml', category: 'general' },
+    { name: 'skillResultSchema', default: [], category: 'general' },
     { name: 'skillConfig', default: {}, category: 'general' },
     { name: 'skillImages', default: [], category: 'general' },
     { name: 'randomImageSelection:boolean', default: false, category: 'general' },

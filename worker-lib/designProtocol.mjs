@@ -337,7 +337,18 @@ export const DESIGN_CAPABILITIES = {
       note:
         'Interactive skills. Prefer preset_* first. Custom HTML only via skill_save (never skillHtml on the draft). '
         + 'skill_save HTML MUST use SPSkill.setAnswer + spskill-init; one task per skill; '
-        + 'configSchema/resultSchema as [{key,label,type},...]. Required: skillId, skillConfig, imageCount.',
+        + 'configSchema/resultSchema as [{key,label,type},...]. Required: skillId, skillConfig, imageCount. '
+        + 'Declare resultSchema[].type from: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList '
+        + 'so Results Analysis / CSV export reuse native charts. Optional analysisHtml uses SPAnalysis.getResponses() for novel shapes. '
+        + 'Include imageUrl in answers for per-stimulus grouping.',
+      resultSchemaTypes: [
+        'number', 'boolean', 'choice', 'text', 'count', 'color', 'scaleGroup',
+        'points', 'path', 'allocation', 'rankedList',
+      ],
+      analysisGuide:
+        'See skillAnalysisGuide: points→annotation density overlay; path→polyline overlay; '
+        + 'allocation→point-allocation mean bars; rankedList→ranking Borda; scaleGroup→slider-group bars. '
+        + 'Unknown types fall back to readable summary + raw JSON. Optional analysisHtml for custom views.',
       skillPresets: [
         { skillId: 'preset_image_preference_slider', useWhen: 'Pairwise A/B slider', imageCount: 2 },
         { skillId: 'preset_image_preference_forced', useWhen: 'Forced-choice A/B', imageCount: 2 },

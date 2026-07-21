@@ -774,8 +774,17 @@ app.post('/api/openai/generate-skill', async (req, res) => {
         defaultConfig: currentSkill.defaultConfig,
         resultSchema: currentSkill.resultSchema,
         sourceHtml: currentSkill.sourceHtml,
+        analysisHtml: currentSkill.analysisHtml,
       }, null, 2).slice(0, 12000)}`
       : '';
+
+    let analysisGuideText = '';
+    try {
+      const guideMod = await import('./worker-lib/agent/skillAnalysisGuide.mjs');
+      analysisGuideText = guideMod.buildSkillAnalysisGuideText();
+    } catch (e) {
+      analysisGuideText = 'resultSchema types: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList';
+    }
 
     const systemPrompt = `You are an expert at building custom survey question types ("skills") for the SP Survey Platform.
 
@@ -796,6 +805,10 @@ Skill design rules:
 - configSchema and resultSchema MUST be arrays of OBJECTS like {"key":"prompt","label":"Prompt","type":"string"} — never plain string arrays like ["mode","prompt"].
 - Include mediaCount and mediaType in defaultConfig when the skill shows media.
 - Include imageUrl (from images[0].url) inside the answer object when a stimulus image is shown, so results can group by media.
+- DECLARE each resultSchema field with the closest catalog type below so Results Analysis and CSV export reuse the platform's native charts. Free-form fields are allowed but only get readable summary + raw JSON.
+- Optional analysisHtml: when the data shape has no native match, also return an analysis view that uses SPAnalysis (document.addEventListener('spanalysis-init', ...) / SPAnalysis.getResponses()). Follow visual conventions in the guide. Prefer declared types over inventing analysisHtml.
+
+${analysisGuideText}
 
 Return JSON only:
 {
@@ -806,7 +819,8 @@ Return JSON only:
     "configSchema": [{ "key": "prompt", "label": "Prompt", "type": "string" }, ...],
     "defaultConfig": { "mediaCount": 1, "mediaType": "image", "prompt": "...", ... },
     "resultSchema": [{ "key": "score", "label": "Score", "type": "number" }],
-    "sourceHtml": "<full HTML document with inline script using spskill-init and SPSkill.setAnswer>"
+    "sourceHtml": "<full HTML document with inline script using spskill-init and SPSkill.setAnswer>",
+    "analysisHtml": "<optional full HTML for Results Analysis using spanalysis-init / SPAnalysis.getResponses — omit or empty string when typed fields suffice>"
   }
 }
 

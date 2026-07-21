@@ -694,6 +694,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         updates.type = 'skillquestion';
         updates.skillId = skill?.id || skillId;
         updates.skillHtml = skill?.sourceHtml || '';
+        updates.skillAnalysisHtml = skill?.analysisHtml || '';
         const mediaConstraints = getSkillMediaConstraints(updates.skillId, skill);
         const lockedCount = mediaConstraints.countFixed
           ?? skill?.defaultConfig?.mediaCount
@@ -718,6 +719,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         // Blank advanced custom task — no preset HTML until user picks/imports a skill
         updates.skillId = '';
         updates.skillHtml = '';
+        updates.skillAnalysisHtml = '';
         updates.skillConfig = {};
         updates.skillResultSchema = [];
         updates.randomImageSelection = true;

@@ -3,6 +3,7 @@
  */
 
 import { normalizeSkillSchemaArray } from './skillAnswerBridge';
+import { isKnownSkillResultType, KNOWN_SKILL_RESULT_TYPE_IDS } from './skillResultTypes';
 
 const ALT_ANSWER_TYPES_RE = /skill-result|skillResult|SP_SURVEY_SKILL_RESULT|skill_answer|skill-answer/;
 
@@ -76,9 +77,24 @@ export function prepareSkillForSave(raw = {}) {
     warnings.push('resultSchema had string keys — normalized to {key,label,type} objects.');
   }
 
+  const unknownTypes = [...new Set(
+    resultSchema
+      .map((f) => String(f.type || '').trim())
+      .filter((t) => t && !isKnownSkillResultType(t)),
+  )];
+  if (unknownTypes.length) {
+    warnings.push(
+      `Unknown resultSchema type(s): ${unknownTypes.join(', ')}. `
+      + `Known types: ${KNOWN_SKILL_RESULT_TYPE_IDS.join(', ')}. `
+      + 'Skill will still save; undeclared fields get readable summary + raw JSON only.',
+    );
+  }
+
   const defaultConfig = (raw.defaultConfig && typeof raw.defaultConfig === 'object')
     ? raw.defaultConfig
     : ((raw.default_config && typeof raw.default_config === 'object') ? raw.default_config : {});
+
+  const analysisHtml = String(raw.analysisHtml || raw.analysis_html || '');
 
   return {
     ok: errors.length === 0,
@@ -87,6 +103,7 @@ export function prepareSkillForSave(raw = {}) {
     skill: {
       ...raw,
       sourceHtml: String(raw.sourceHtml || raw.source_html || ''),
+      analysisHtml,
       configSchema,
       resultSchema,
       defaultConfig,

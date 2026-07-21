@@ -207,7 +207,7 @@ export const adminI18n = {
     resultsRecordsHelp: 'Remove individual submissions from this project. Deletion is permanent.',
     resultsEmpty: 'No responses collected yet. Share your survey link and come back here to view results.',
     resultsSkillCustomHelp:
-      'Custom skill results: tabs split by task mode (when present), then field stats, then a readable response list.',
+      'Custom skill results: optional skill-authored analysis view first, then typed field stats (points/path/allocation/ranking reuse native charts), then a readable response list.',
     resultsSkillByMode: 'View by task mode',
     resultsSkillByModeHelp:
       'This skill stores multiple tasks in one question, distinguished by mode (e.g. cue ranking / route trace).',
@@ -747,7 +747,7 @@ export const adminI18n = {
     resultsRecordsHelp: '删除本项目的单条提交。删除后不可恢复。',
     resultsEmpty: '尚无答卷。分享问卷链接后，再回到这里查看结果。',
     resultsSkillCustomHelp:
-      '自定义 Skill 结果：上方按任务模式分栏（若有多个 mode），中间是字段统计，底部「回答一览」用可读摘要列出每人提交的内容。',
+      '自定义 Skill 结果：若有 skill 自带分析视图会先显示；中间是按类型声明的字段统计（标注点/路径/分配/排序会复用原生图表）；底部「回答一览」用可读摘要列出每人提交的内容。',
     resultsSkillByMode: '按任务模式查看',
     resultsSkillByModeHelp:
       '此 Skill 把多种任务写在同一个题里，用 mode 区分（例如线索排序 / 路线描绘）。',

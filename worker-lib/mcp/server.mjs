@@ -48,6 +48,7 @@ import {
   saveSkill,
 } from '../agent/skillHandlers.mjs';
 import { DESIGN_CAPABILITIES } from '../designProtocol.mjs';
+import { buildSkillAnalysisGuideText, skillAnalysisGuideBlurb } from '../agent/skillAnalysisGuide.mjs';
 import { getCredentialStatus } from '../agent/credentials.mjs';
 import { supabaseRest } from '../supabaseUserClient.mjs';
 import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from '../agent/projectMeta.mjs';
@@ -369,6 +370,10 @@ const TOOLS = [
       + 'MUST use spskill-init or SPSkill.getConfig/getImages; NEVER parent.postMessage skill-result aliases; '
       + 'ONE focused task per skill (do not pack attention_map+route_trace+budget_lab+… into one HTML); '
       + 'configSchema/resultSchema must be arrays of {key,label,type} objects. '
+      + 'Declare resultSchema[].type from: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList '
+      + '(platform reuses native Results Analysis + CSV export for these; unknown types warn but still save). '
+      + 'Optional analysisHtml: sandboxed analysis view reading SPAnalysis.getResponses() for novel data shapes. '
+      + 'Include imageUrl in answers for per-stimulus grouping. '
       + 'Prefer preset_* skillquestion when a preset fits. Does not submit for public review.',
     inputSchema: {
       type: 'object',
@@ -377,9 +382,13 @@ const TOOLS = [
         name: { type: 'string' },
         description: { type: 'string' },
         sourceHtml: { type: 'string' },
+        analysisHtml: { type: 'string', description: 'Optional skill-authored analysis view (SPAnalysis SDK).' },
         configSchema: { type: 'array' },
         defaultConfig: { type: 'object' },
-        resultSchema: { type: 'array' },
+        resultSchema: {
+          type: 'array',
+          description: '[{key,label,type}] — type from catalog so analysis/export match native question types.',
+        },
         confirm: { type: 'boolean' },
       },
       required: ['name', 'sourceHtml', 'confirm'],
@@ -580,7 +589,12 @@ async function callTool(env, auth, request, name, args = {}) {
 
   switch (name) {
     case 'survey_capabilities':
-      return toolResult({ ...(await handleAgentDiscovery(request, env)), capabilities: DESIGN_CAPABILITIES });
+      return toolResult({
+        ...(await handleAgentDiscovery(request, env)),
+        capabilities: DESIGN_CAPABILITIES,
+        skillAnalysisGuide: buildSkillAnalysisGuideText(),
+        skillAnalysisGuideBlurb: skillAnalysisGuideBlurb(),
+      });
     case 'survey_list_projects': {
       requireScope(auth, 'surveys:read');
       if (useService) return toolResult(await listOwnedViaService(env, auth.userId));

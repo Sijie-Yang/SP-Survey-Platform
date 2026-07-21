@@ -123,8 +123,14 @@ const LONG_EXTRA_BY_FAMILY = {
   points: ['choice_key', 'choice_label', 'points'],
   // Same long shape as points; summary breaks out by shown image × allocation choice.
   image_points: ['choice_key', 'choice_label', 'points'],
-  // Generic / custom skills: one row per trial (not one row per schema key)
-  skill: ['answer_json'],
+  // Generic / custom skills: answer_json + expanded archetype rows (points/path/allocation/rankedList)
+  skill: [
+    'field_key', 'field_type',
+    'x', 'y', 't', 'label', 'seq',
+    'choice_key', 'choice_label', 'points',
+    'rank', 'option', 'value',
+    'answer_json',
+  ],
   annotation: ['tool', 'label', 'annotation_json'],
 };
 
@@ -422,30 +428,83 @@ function pushCompositeBlocksSummary(out, question, eligible) {
   });
 }
 
-/** Generic skill: unit = primary stimulus; numeric leaves → mean stats. */
+/** Generic skill: unit = primary stimulus; numeric leaves → mean stats; archetypes → native-like metrics. */
 function pushGenericSkillSummary(out, question, eligible, longObjs) {
   const byMedia = {};
+  const labelCounts = {}; // `${media}||${field}||${label}` → count
+  const allocByMedia = {}; // `${media}||${field}||${item}` → nums[]
+  const rankByOption = {}; // `${field}||${option}` → ranks[]
+  const pathLens = {}; // `${media}||${field}` → lengths[]
+
   longObjs.forEach((r) => {
     const media = shownKeysFromLongRow(r)[0] || '(no_media)';
+    if (r.field_type === 'points') {
+      const label = String(r.label || '').trim() || '(unlabeled)';
+      const key = `${media}||${r.field_key || 'points'}||${label}`;
+      labelCounts[key] = (labelCounts[key] || 0) + 1;
+      return;
+    }
+    if (r.field_type === 'path') {
+      // Aggregate path length when we see seq===0 (start of a path) — accumulate in a temp via answer_json pass below.
+      return;
+    }
+    if (r.field_type === 'allocation') {
+      const key = `${media}||${r.field_key || 'allocation'}||${r.choice_key || ''}`;
+      if (!allocByMedia[key]) allocByMedia[key] = [];
+      const n = Number(r.points);
+      if (!Number.isNaN(n)) allocByMedia[key].push(n);
+      return;
+    }
+    if (r.field_type === 'rankedList') {
+      const key = `${r.field_key || 'rankedList'}||${r.option || ''}`;
+      if (!rankByOption[key]) rankByOption[key] = [];
+      const rank = Number(r.rank);
+      if (!Number.isNaN(rank)) rankByOption[key].push(rank);
+      return;
+    }
     if (!byMedia[media]) byMedia[media] = { n: 0, nums: {} };
-    byMedia[media].n += 1;
-    let obj = null;
-    try { obj = r.answer_json ? JSON.parse(r.answer_json) : null; } catch { obj = null; }
-    if (!obj || typeof obj !== 'object') return;
-    const walk = (node, prefix) => {
-      if (node == null) return;
-      if (typeof node === 'number' && !Number.isNaN(node)) {
-        if (!byMedia[media].nums[prefix]) byMedia[media].nums[prefix] = [];
-        byMedia[media].nums[prefix].push(node);
-        return;
-      }
-      if (typeof node !== 'object' || Array.isArray(node)) return;
-      Object.entries(node).forEach(([k, v]) => walk(v, prefix ? `${prefix}.${k}` : k));
-    };
-    walk(obj, '');
+    if (r.field_type === 'answer' || r.answer_json) {
+      byMedia[media].n += 1;
+      let obj = null;
+      try { obj = r.answer_json ? JSON.parse(r.answer_json) : null; } catch { obj = null; }
+      if (!obj || typeof obj !== 'object') return;
+      const schema = Array.isArray(question.skillResultSchema) ? question.skillResultSchema : [];
+      const archetypeKeys = new Set(
+        schema.filter((f) => ['points', 'path', 'allocation', 'rankedList'].includes(f.type)).map((f) => f.key),
+      );
+      // Path length from answer object
+      schema.filter((f) => f.type === 'path').forEach((f) => {
+        const pts = obj[f.key];
+        if (!Array.isArray(pts) || pts.length < 2) return;
+        let len = 0;
+        for (let i = 1; i < pts.length; i += 1) {
+          const dx = Number(pts[i].x) - Number(pts[i - 1].x);
+          const dy = Number(pts[i].y) - Number(pts[i - 1].y);
+          if (Number.isFinite(dx) && Number.isFinite(dy)) len += Math.hypot(dx, dy);
+        }
+        const pk = `${media}||${f.key}`;
+        if (!pathLens[pk]) pathLens[pk] = [];
+        pathLens[pk].push(len);
+      });
+      const walk = (node, prefix) => {
+        if (node == null) return;
+        if (typeof node === 'number' && !Number.isNaN(node)) {
+          if (!byMedia[media].nums[prefix]) byMedia[media].nums[prefix] = [];
+          byMedia[media].nums[prefix].push(node);
+          return;
+        }
+        if (typeof node !== 'object' || Array.isArray(node)) return;
+        Object.entries(node).forEach(([k, v]) => {
+          if (archetypeKeys.has(k)) return; // covered by archetype summaries
+          walk(v, prefix ? `${prefix}.${k}` : k);
+        });
+      };
+      walk(obj, '');
+    }
   });
   // Fallback: rebuild from eligible if long empty
-  if (!Object.keys(byMedia).length) {
+  if (!Object.keys(byMedia).length && !Object.keys(labelCounts).length
+    && !Object.keys(allocByMedia).length && !Object.keys(rankByOption).length) {
     collectAnswerUnits(eligible, question.name).forEach(({ answer, shown_images: shown }) => {
       const media = imageStimulusKey(answer, shown);
       const key = media === '(unknown_image)' ? videoStimulusKey(answer, shown) : media;
@@ -458,6 +517,38 @@ function pushGenericSkillSummary(out, question, eligible, longObjs) {
     Object.entries(block.nums).forEach(([attr, nums]) => {
       pushStats(out, question, block.n, media, media, nums, attr, attr);
     });
+  });
+  Object.entries(labelCounts).forEach(([key, count]) => {
+    const [media, field, label] = key.split('||');
+    out.push(summaryRow(question, count, media, media, 'label_count', count, count, `${field}:${label}`, `${field}:${label}`));
+  });
+  Object.entries(pathLens).forEach(([key, nums]) => {
+    const [media, field] = key.split('||');
+    pushStats(out, question, nums.length, media, media, nums, `${field}:path_length`, `${field}:path_length`);
+  });
+  Object.entries(allocByMedia).forEach(([key, nums]) => {
+    const [media, field, item] = key.split('||');
+    pushStats(out, question, nums.length, media, media, nums, `${field}:${item}`, `${field}:${item}`);
+  });
+  Object.entries(rankByOption).forEach(([key, ranks]) => {
+    const [field, option] = key.split('||');
+    const avg = average(ranks);
+    out.push(summaryRow(question, ranks.length, option, option, 'avg_rank', avg, ranks.length, field, field));
+    const nItems = new Set(
+      Object.keys(rankByOption).filter((k) => k.startsWith(`${field}||`)).map((k) => k.split('||')[1]),
+    ).size;
+    const bordaMap = computeBordaScores({ [option]: ranks }, nItems || ranks.length);
+    out.push(summaryRow(
+      question,
+      ranks.length,
+      option,
+      option,
+      'borda',
+      bordaMap[option]?.borda ?? null,
+      ranks.length,
+      field,
+      field,
+    ));
   });
 }
 
@@ -1007,16 +1098,102 @@ function buildLongObjects(question, responses, surveyConfig) {
         });
       });
     } else if (fam === 'skill') {
-      // One row per trial — full answer JSON (not one row per schema key).
+      // One row per trial with full answer JSON, plus expanded rows for declared archetypes.
       const raw = (answer && typeof answer === 'object' && !Array.isArray(answer))
         ? stripSkillAnswerContext(answer)
         : answer;
       const stimKeys = extractSkillShownImages(answer).map(mediaFilenameKey).filter(Boolean);
+      const shownPipe = enrichShownForSkill(answer, shownImages, stimKeys) || base.shown_images;
       objects.push({
         ...base,
-        shown_images: enrichShownForSkill(answer, shownImages, stimKeys) || base.shown_images,
+        shown_images: shownPipe,
         ...extra,
+        field_key: '',
+        field_type: 'answer',
+        x: '', y: '', t: '', label: '', seq: '',
+        choice_key: '', choice_label: '', points: '',
+        rank: '', option: '', value: '',
         answer_json: raw != null ? JSON.stringify(raw) : '',
+      });
+      const schema = Array.isArray(question.skillResultSchema) ? question.skillResultSchema : [];
+      const ansObj = (answer && typeof answer === 'object' && !Array.isArray(answer)) ? answer : {};
+      schema.forEach((field) => {
+        if (!field?.key || !field?.type) return;
+        const val = ansObj[field.key];
+        if (val == null) return;
+        if (field.type === 'points' && Array.isArray(val)) {
+          val.forEach((p, idx) => {
+            if (!p || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) return;
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'points',
+              x: Number(p.x),
+              y: Number(p.y),
+              t: p.t != null ? Number(p.t) : '',
+              label: p.label != null ? String(p.label) : '',
+              seq: idx,
+              choice_key: '', choice_label: '', points: '',
+              rank: '', option: '', value: '',
+              answer_json: '',
+            });
+          });
+        } else if (field.type === 'path' && Array.isArray(val)) {
+          val.forEach((p, idx) => {
+            if (!p || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) return;
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'path',
+              x: Number(p.x),
+              y: Number(p.y),
+              t: p.t != null ? Number(p.t) : '',
+              label: '',
+              seq: idx,
+              choice_key: '', choice_label: '', points: '',
+              rank: '', option: '', value: '',
+              answer_json: '',
+            });
+          });
+        } else if (field.type === 'allocation' && val && typeof val === 'object' && !Array.isArray(val)) {
+          Object.entries(val).forEach(([k, v]) => {
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'allocation',
+              x: '', y: '', t: '', label: '', seq: '',
+              choice_key: k,
+              choice_label: k,
+              points: Number(v),
+              rank: '', option: '', value: '',
+              answer_json: '',
+            });
+          });
+        } else if (field.type === 'rankedList' && Array.isArray(val)) {
+          const order = val.map((x) => String(x));
+          const pipe = order.join('|');
+          order.forEach((opt, idx) => {
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'rankedList',
+              x: '', y: '', t: '', label: '', seq: '',
+              choice_key: '', choice_label: '', points: '',
+              rank: idx + 1,
+              option: opt,
+              value: pipe,
+              answer_json: '',
+            });
+          });
+        }
       });
     } else if (fam === 'annotation') {
       const ann = (answer && typeof answer === 'object') ? answer : null;
@@ -1708,7 +1885,7 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     'Emotion color long: hex, hue, intensity, option_*; summary unit_* = image',
     'Continuous video long: time_s, value (per sample); summary unit_* = video',
     'Composite blocks long: dimension_* + value + choice/words/text; summary unit_* = image × dim',
-    'Generic skill long: one row with answer_json (not one row per schema key); summary by media',
+    'Generic skill long: answer_json row + expanded rows for points/path/allocation/rankedList; summary by media + archetype metrics',
     'imageannotation long: tool, label, annotation_json (+ shown_images)',
     'imageannotation summary: attribute_* = label or tool; unit_* = image;',
     '  metrics = count (overall) + label_count + tool_count',

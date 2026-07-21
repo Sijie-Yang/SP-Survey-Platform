@@ -101,6 +101,10 @@ import {
 import { enrichSkillAnswers, buildResponseMediaUrlMap, stripSkillAnswerContext, formatSkillAnswerForDisplay, filterAnswersForSkill } from '../../lib/skillMediaUtils';
 import { summarizeSkillAnswer } from '../../lib/skillAnswerSummary';
 import SkillAnswerReview from '../SkillAnswerReview';
+import SkillArchetypeFieldSummary from './SkillArchetypeFieldSummary';
+import SkillAnalysisFrame from '../SkillAnalysisFrame';
+import { ARCHETYPE_SKILL_RESULT_TYPES } from '../../lib/skillResultTypes';
+import { getSkillById } from '../../lib/skillManager';
 import { saveProjectFull } from '../../lib/projectManager';
 import { deleteSurveyResponse, responseRecordKey } from '../../lib/surveyResponses';
 import { AdminPageHeader } from './AdminPageLayout';
@@ -1152,6 +1156,7 @@ function ImageQuestionAnalysis({ answers, type, question }) {
 // Skills declare a resultSchema ([{ key, label, type }]) describing how each
 // answer field should be summarized. Supported types:
 //   number | boolean | choice | text | count | color | scaleGroup
+//   points | path | allocation | rankedList  (reuse native analyses)
 // Without a schema we auto-infer one from the answer shape, so results are
 // never shown as raw JSON dumps.
 
@@ -1182,6 +1187,18 @@ function SkillFieldSummary({ field, answers }) {
       <Box sx={{ mb: 2.5 }}>
         {header}
         <Typography variant="body2" color="text.secondary">No data.</Typography>
+      </Box>
+    );
+  }
+
+  const archetypeBody = (
+    <SkillArchetypeFieldSummary field={field} answers={answers} />
+  );
+  if (archetypeBody && ARCHETYPE_SKILL_RESULT_TYPES.includes(field.type)) {
+    return (
+      <Box sx={{ mb: 2.5 }}>
+        {header}
+        {archetypeBody}
       </Box>
     );
   }
@@ -1252,16 +1269,24 @@ function SkillFieldSummary({ field, answers }) {
       </Box>
     );
   } else if (field.type === 'scaleGroup') {
-    // value = [{ id, left, right, label?, value }] — average each dimension
+    // value = [{ id, left, right, label?, value }] OR { dimensionId: number }
     const dims = {}; // id → { left, right, label, values: [] }
     for (const v of values) {
-      if (!Array.isArray(v)) continue;
-      for (const d of v) {
-        if (!d || d.value === undefined) continue;
-        const id = d.id || d.label || `${d.left}/${d.right}`;
-        if (!dims[id]) dims[id] = { left: d.left, right: d.right, label: d.label, values: [] };
-        const n = Number(d.value);
-        if (!isNaN(n)) dims[id].values.push(n);
+      if (Array.isArray(v)) {
+        for (const d of v) {
+          if (!d || d.value === undefined) continue;
+          const id = d.id || d.label || `${d.left}/${d.right}`;
+          if (!dims[id]) dims[id] = { left: d.left, right: d.right, label: d.label, values: [] };
+          const n = Number(d.value);
+          if (!isNaN(n)) dims[id].values.push(n);
+        }
+      } else if (v && typeof v === 'object') {
+        Object.entries(v).forEach(([id, raw]) => {
+          const n = Number(raw);
+          if (!Number.isFinite(n)) return;
+          if (!dims[id]) dims[id] = { label: id, values: [] };
+          dims[id].values.push(n);
+        });
       }
     }
     const allVals = Object.values(dims).flatMap((d) => d.values);
@@ -1324,8 +1349,36 @@ function inferSkillResultSchema(sampleAnswer) {
     .map(([k, v]) => {
       if (typeof v === 'number') return { key: k, label: k, type: 'number' };
       if (typeof v === 'boolean') return { key: k, label: k, type: 'boolean' };
-      if (Array.isArray(v)) return { key: k, label: k, type: 'count' };
-      if (typeof v === 'string') return { key: k, label: k, type: 'choice' };
+      if (Array.isArray(v)) {
+        if (v.length >= 1 && v.every((p) => p && typeof p === 'object'
+          && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))) {
+          // Heuristic: ≥2 vertices with optional t → path; else points
+          const looksPath = v.length >= 2 && (v.some((p) => p.t != null) || k.toLowerCase().includes('path')
+            || k.toLowerCase().includes('route') || k.toLowerCase().includes('trace'));
+          return { key: k, label: k, type: looksPath ? 'path' : 'points' };
+        }
+        if (v.length >= 1 && v.every((x) => typeof x === 'string' || typeof x === 'number')) {
+          if (/rank|order|priority/i.test(k) || v.length >= 3) {
+            return { key: k, label: k, type: 'rankedList' };
+          }
+        }
+        return { key: k, label: k, type: 'count' };
+      }
+      if (v && typeof v === 'object') {
+        const vals = Object.values(v);
+        if (vals.length && vals.every((x) => Number.isFinite(Number(x)))) {
+          if (/alloc|budget|weight|points/i.test(k)) {
+            return { key: k, label: k, type: 'allocation' };
+          }
+          return { key: k, label: k, type: 'scaleGroup' };
+        }
+      }
+      if (typeof v === 'string') {
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v)) {
+          return { key: k, label: k, type: 'color' };
+        }
+        return { key: k, label: k, type: 'choice' };
+      }
       return null;
     })
     .filter(Boolean);
@@ -1407,6 +1460,32 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
   const { t } = useRegion();
   const [showRaw, setShowRaw] = useState(false);
   const [modeTab, setModeTab] = useState(0);
+  const [resolvedAnalysisHtml, setResolvedAnalysisHtml] = useState(
+    () => question.skillAnalysisHtml || '',
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const existing = question.skillAnalysisHtml || '';
+    if (existing) {
+      setResolvedAnalysisHtml(existing);
+      return undefined;
+    }
+    const skillId = question.skillId;
+    if (!skillId || skillId.startsWith('preset_')) {
+      setResolvedAnalysisHtml('');
+      return undefined;
+    }
+    (async () => {
+      try {
+        const skill = await getSkillById(skillId);
+        if (!cancelled) setResolvedAnalysisHtml(skill?.analysisHtml || '');
+      } catch {
+        if (!cancelled) setResolvedAnalysisHtml('');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [question.skillId, question.skillAnalysisHtml]);
 
   const enrichedAnswers = useMemo(
     () => filterAnswersForSkill(enrichSkillAnswers(answers), question.skillId),
@@ -1472,10 +1551,12 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
     schema = schema.filter((f) => f.key !== 'mode');
   }
 
-  // Huge trajectory / point arrays are not useful as generic "count" charts.
+  // Include archetype types (points/path/allocation/rankedList) so they get native charts.
+  // Still skip undeclared raw trajectory keys that were inferred as generic "count".
   const chartSchema = (schema || []).filter((f) => {
     if (!f?.key) return false;
-    if (['path', 'points', 'weights', 'allocations'].includes(f.key)) return false;
+    if (ARCHETYPE_SKILL_RESULT_TYPES.includes(f.type)) return true;
+    if (['path', 'points', 'weights', 'allocations'].includes(f.key) && f.type === 'count') return false;
     return true;
   });
 
@@ -1490,6 +1571,13 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
           Ignored {droppedCount} response{droppedCount === 1 ? '' : 's'} with the wrong answer shape
           (cross-contamination from an older bug when multiple skills shared one page).
         </Alert>
+      )}
+      {resolvedAnalysisHtml?.trim() && (
+        <SkillAnalysisFrame
+          analysisHtml={resolvedAnalysisHtml}
+          responses={scopedAnswers}
+          config={question.skillConfig || {}}
+        />
       )}
       {modeKeys.length > 1 && (
         <>

@@ -115,7 +115,14 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
         lastEmittedJsonRef.current = json;
         if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = setTimeout(() => {
-          onChangeRef.current?.(extracted.value);
+          if (typeof onChangeRef.current !== 'function') {
+            console.warn(
+              '[SkillQuestionFrame] Answer arrived from iframe but onChange is missing — value not written to question.',
+              extracted.value,
+            );
+            return;
+          }
+          onChangeRef.current(extracted.value);
         }, 0);
       }
     };

@@ -12,6 +12,7 @@ function rowToSkill(row) {
     user_id: row.user_id || null,
     submitter_email: row.submitter_email || null,
     sourceHtml: row.source_html || '',
+    analysisHtml: row.analysis_html || '',
     configSchema: row.config_schema || [],
     defaultConfig: row.default_config || {},
     resultSchema: row.result_schema || [],
@@ -115,6 +116,7 @@ export async function saveSkill(skill) {
     name: prepared.skill.name || skill.name || 'Untitled Skill',
     description: prepared.skill.description || skill.description || '',
     source_html: prepared.skill.sourceHtml || '',
+    analysis_html: prepared.skill.analysisHtml || '',
     config_schema: prepared.skill.configSchema || [],
     default_config: prepared.skill.defaultConfig || {},
     result_schema: prepared.skill.resultSchema || [],
@@ -126,7 +128,17 @@ export async function saveSkill(skill) {
   };
   if (!existing) row.created_at = new Date().toISOString();
 
-  const { error } = await supabase.from('question_skills').upsert(row, { onConflict: 'id' });
+  let { error } = await supabase.from('question_skills').upsert(row, { onConflict: 'id' });
+  // Graceful fallback before supabase/question_skills_analysis_html.sql is applied.
+  if (error && /analysis_html/i.test(error.message || '')) {
+    const { analysis_html: _omit, ...rowWithoutAnalysis } = row;
+    ({ error } = await supabase.from('question_skills').upsert(rowWithoutAnalysis, { onConflict: 'id' }));
+    if (!error) {
+      prepared.warnings.push(
+        'Saved without analysis_html — run supabase/question_skills_analysis_html.sql to enable skill-authored analysis views.',
+      );
+    }
+  }
   if (error) throw error;
   return {
     success: true,
@@ -162,6 +174,7 @@ export async function updateSkill(id, updates) {
   if ('name' in updates) row.name = updates.name;
   if ('description' in updates) row.description = updates.description;
   if ('source_html' in updates) row.source_html = updates.source_html;
+  if ('analysis_html' in updates) row.analysis_html = updates.analysis_html;
   if ('config_schema' in updates) row.config_schema = updates.config_schema;
   if ('default_config' in updates) row.default_config = updates.default_config;
   if ('result_schema' in updates) row.result_schema = updates.result_schema;

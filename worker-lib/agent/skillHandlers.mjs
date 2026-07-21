@@ -20,7 +20,10 @@ function rowToSkill(row, { includeHtml = false } = {}) {
     updatedAt: row.updated_at,
     status: row.is_approved ? 'approved' : (row.submitted_at ? 'pending' : 'draft'),
   };
-  if (includeHtml) skill.sourceHtml = row.source_html || '';
+  if (includeHtml) {
+    skill.sourceHtml = row.source_html || '';
+    skill.analysisHtml = row.analysis_html || '';
+  }
   return skill;
 }
 
@@ -113,6 +116,7 @@ export async function saveSkill(env, ctx, body = {}) {
     ...body,
     name,
     sourceHtml: body.sourceHtml || body.source_html || '',
+    analysisHtml: body.analysisHtml ?? body.analysis_html,
     configSchema: body.configSchema ?? body.config_schema,
     resultSchema: body.resultSchema ?? body.result_schema,
     defaultConfig: body.defaultConfig ?? body.default_config,
@@ -141,11 +145,15 @@ export async function saveSkill(env, ctx, body = {}) {
   }
 
   const now = new Date().toISOString();
+  const analysisHtml = prepared.skill.analysisHtml != null
+    ? prepared.skill.analysisHtml
+    : (existing?.analysis_html || '');
   const row = {
     id,
     name,
     description: String(body.description || prepared.skill.description || '').trim(),
     source_html: prepared.skill.sourceHtml,
+    analysis_html: analysisHtml,
     config_schema: prepared.skill.configSchema.length
       ? prepared.skill.configSchema
       : (existing?.config_schema || []),
@@ -162,14 +170,33 @@ export async function saveSkill(env, ctx, body = {}) {
   };
   if (!existing) row.created_at = now;
 
-  await supabaseRest(env, {
-    path: '/rest/v1/question_skills',
-    method: 'POST',
-    serviceRole: true,
-    query: '?on_conflict=id',
-    body: row,
-    prefer: 'resolution=merge-duplicates,return=representation',
-  });
+  try {
+    await supabaseRest(env, {
+      path: '/rest/v1/question_skills',
+      method: 'POST',
+      serviceRole: true,
+      query: '?on_conflict=id',
+      body: row,
+      prefer: 'resolution=merge-duplicates,return=representation',
+    });
+  } catch (err) {
+    if (/analysis_html/i.test(String(err?.message || err))) {
+      const { analysis_html: _omit, ...rowWithout } = row;
+      await supabaseRest(env, {
+        path: '/rest/v1/question_skills',
+        method: 'POST',
+        serviceRole: true,
+        query: '?on_conflict=id',
+        body: rowWithout,
+        prefer: 'resolution=merge-duplicates,return=representation',
+      });
+      prepared.warnings.push(
+        'Saved without analysis_html — run supabase/question_skills_analysis_html.sql to enable it.',
+      );
+    } else {
+      throw err;
+    }
+  }
 
   return {
     success: true,
