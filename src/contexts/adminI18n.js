@@ -772,6 +772,7 @@ export const adminI18n = {
     skillAnswerYourSubmittedTitle: '你刚才提交的回答',
     skillAnswerRecorded: '已记录',
     skillAnswerEmpty: '（未作答）',
+    skillAnswerNotRecorded: '此题尚未记录到答案（完成键未成功写入，或未作答）。',
 
     practiceTitle: '研究者练习',
     practiceDescription: '练习答题、验证媒体分配，并在邀请参与者前检查结果。',
