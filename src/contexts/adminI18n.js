@@ -585,7 +585,7 @@ export const adminI18n = {
       '点击工具栏 AI 按钮 → AI 与集成。将 agent 权限设为 Approve for me，粘贴设置说明，在系统浏览器中批准。然后开一个新的 Codex 对话以重新加载工具。',
     introFlow2Title: '让 Codex 用 sp_survey 构建问卷',
     introFlow2Body:
-      '在新对话中告诉 Codex 使用 sp_survey MCP。用自己的话描述主题与研究设计。可以现在说明媒体数据集，也可以稍后再加。',
+      '在新对话中告诉 Codex 使用 sp_survey MCP。用自己的话描述主题与研究设计。媒体请说从模板导入或用预览媒体库/项目图库，禁止让它生成图片再上传。',
     introFlow3Title: '若未添加媒体则补上',
     introFlow3Body:
       '需要图片/视频/音频时：让 Codex 用 media_import_from_template 从模板导入，或使用项目媒体库 / Admin → 预览媒体库。禁止让 Codex 自己生成或虚构媒体再上传。set/category 模式还需给文件夹打标签。',
