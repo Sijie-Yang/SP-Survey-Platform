@@ -29,6 +29,7 @@ import { handleAgentAndMcpRoutes } from './worker-lib/agent/router.mjs';
 import { getUserFromBearer } from './worker-lib/auth/supabaseJwt.mjs';
 import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
 import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
+import { supabaseRest } from './worker-lib/supabaseUserClient.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -716,12 +717,54 @@ async function resolveR2User(request, env) {
   return { userId: mcp.userId, kind: 'mcp', scopes: mcp.scopes };
 }
 
+/** Shared platform preview media library (Admin → 预览媒体库). */
+const PREVIEW_MEDIA_PREFIX = 'skill-preview/';
+
+function normalizeR2Key(key) {
+  return String(key || '').replace(/^\/+/, '');
+}
+
+function isPreviewMediaKey(key) {
+  const n = normalizeR2Key(key);
+  return n === 'skill-preview' || n.startsWith(PREVIEW_MEDIA_PREFIX);
+}
+
 function assertR2KeyOwned(userId, key) {
-  const normalized = String(key || '').replace(/^\/+/, '');
+  const normalized = normalizeR2Key(key);
   if (!normalized) return false;
-  // Allow template reads/copies for admins later; mutating user media must be under {userId}/
-  if (normalized.startsWith('templates/')) return true;
+  // Shared readable prefixes (list / import source). User media must stay under {userId}/.
+  if (normalized.startsWith('templates/') || normalized === 'templates') return true;
+  if (isPreviewMediaKey(normalized)) return true;
   return normalized.startsWith(`${userId}/`);
+}
+
+async function isPlatformAdminUser(env, userId) {
+  if (!userId || !supabaseConfigured(env)) return false;
+  try {
+    const rows = await supabaseRest(env, {
+      path: '/rest/v1/admins',
+      serviceRole: true,
+      query: `?user_id=eq.${encodeURIComponent(userId)}&select=user_id`,
+    });
+    return Array.isArray(rows) && !!rows[0];
+  } catch {
+    return false;
+  }
+}
+
+/** Writes to skill-preview/ are platform-admin only; user prefixes stay owner-only. */
+async function assertR2WriteAllowed(env, user, key) {
+  if (!user?.userId) return { ok: true };
+  if (isPreviewMediaKey(key)) {
+    const admin = await isPlatformAdminUser(env, user.userId);
+    return admin
+      ? { ok: true }
+      : { ok: false, error: 'Preview media library is admin-only', code: 'FORBIDDEN' };
+  }
+  if (!assertR2KeyOwned(user.userId, key)) {
+    return { ok: false, error: 'Key must be under your user prefix', code: 'FORBIDDEN' };
+  }
+  return { ok: true };
 }
 
 export default {
@@ -743,8 +786,11 @@ export default {
         if (!user) return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
         if (user.userId) {
           const body = await request.clone().json().catch(() => ({}));
-          if (body?.key && !assertR2KeyOwned(user.userId, body.key)) {
-            return json({ success: false, error: 'Key must be under your user prefix', code: 'FORBIDDEN' }, { status: 403 });
+          if (body?.key) {
+            const gate = await assertR2WriteAllowed(env, user, body.key);
+            if (!gate.ok) {
+              return json({ success: false, error: gate.error, code: gate.code }, { status: 403 });
+            }
           }
         }
         return await handleUpload(request, env);
@@ -754,7 +800,8 @@ export default {
         if (!user) return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
         const prefix = url.searchParams.get('prefix') || '';
         if (user.userId) {
-          if (prefix && !assertR2KeyOwned(user.userId, prefix) && !prefix.startsWith('templates/')) {
+          // Allow listing user prefix, templates/, and shared skill-preview/ (preview media library).
+          if (prefix && !assertR2KeyOwned(user.userId, prefix)) {
             return json({ success: false, error: 'Prefix must be under your user prefix', code: 'FORBIDDEN' }, { status: 403 });
           }
           if (!prefix) {
@@ -771,8 +818,11 @@ export default {
         if (user.userId) {
           const body = await request.clone().json().catch(() => ({}));
           const keys = Array.isArray(body?.keys) ? body.keys : [];
-          if (keys.some((k) => !assertR2KeyOwned(user.userId, k))) {
-            return json({ success: false, error: 'One or more keys are outside your prefix', code: 'FORBIDDEN' }, { status: 403 });
+          for (const k of keys) {
+            const gate = await assertR2WriteAllowed(env, user, k);
+            if (!gate.ok) {
+              return json({ success: false, error: gate.error, code: gate.code }, { status: 403 });
+            }
           }
         }
         return await handleDelete(request, env);
@@ -784,8 +834,16 @@ export default {
           const body = await request.clone().json().catch(() => ({}));
           const copies = Array.isArray(body?.copies) ? body.copies : [];
           for (const c of copies) {
-            if (c?.to && !assertR2KeyOwned(user.userId, c.to) && !String(c.to).startsWith('templates/')) {
-              return json({ success: false, error: 'Copy destination must be under your prefix', code: 'FORBIDDEN' }, { status: 403 });
+            if (!c?.to) continue;
+            const gate = await assertR2WriteAllowed(env, user, c.to);
+            if (!gate.ok) {
+              return json({
+                success: false,
+                error: gate.error === 'Key must be under your user prefix'
+                  ? 'Copy destination must be under your prefix'
+                  : gate.error,
+                code: gate.code,
+              }, { status: 403 });
             }
           }
         }
