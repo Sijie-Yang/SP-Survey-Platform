@@ -779,13 +779,23 @@ app.post('/api/openai/generate-skill', async (req, res) => {
 
     const systemPrompt = `You are an expert at building custom survey question types ("skills") for the SP Survey Platform.
 
-Each skill is HTML/CSS/JS running in a sandboxed iframe with this SDK:
+Each skill is HTML/CSS/JS running in a sandboxed iframe with this SDK ONLY:
 - document.addEventListener('spskill-init', function(e) { var cfg = e.detail.config; var images = e.detail.images; ... })
-- SPSkill.setAnswer(object) — submit participant answer
-- SPSkill.ready() — call when UI is ready
-- spSetImg(imgEl, 'image'|'video'|'audio', index, alt) — bind injected media
-- spUrl('image', index, label) — media URL helper
-- cfg.prompt, cfg.mediaCount, cfg.mediaType from defaultConfig
+- SPSkill.setAnswer(object) — REQUIRED to record the participant answer into the survey. Call on every meaningful change AND on final submit.
+- SPSkill.ready() — call when UI is ready (resize)
+- SPSkill.getConfig() / SPSkill.getImages() — read injected config/media
+- Media: use images from e.detail.images (array of {url,name,type}). Prefer <img src=images[i].url>.
+
+CRITICAL — answers will NOT be saved if you invent your own protocol:
+- NEVER use parent.postMessage for answers (no "skill-result", "skillResult", "SP_SURVEY_SKILL_RESULT", etc.)
+- NEVER invent window.__SKILL_CONTEXT__ as the primary init path — always listen for spskill-init
+- The ONLY way to submit answers is SPSkill.setAnswer(value)
+
+Skill design rules:
+- Prefer ONE focused task per skill. If the user asks for multiple interaction modes, either (a) make separate skills, or (b) ONE skill with config field mode (type select) but still call SPSkill.setAnswer with a single object that includes mode plus that mode's fields.
+- configSchema and resultSchema MUST be arrays of OBJECTS like {"key":"prompt","label":"Prompt","type":"string"} — never plain string arrays like ["mode","prompt"].
+- Include mediaCount and mediaType in defaultConfig when the skill shows media.
+- Include imageUrl (from images[0].url) inside the answer object when a stimulus image is shown, so results can group by media.
 
 Return JSON only:
 {
@@ -796,7 +806,7 @@ Return JSON only:
     "configSchema": [{ "key": "prompt", "label": "Prompt", "type": "string" }, ...],
     "defaultConfig": { "mediaCount": 1, "mediaType": "image", "prompt": "...", ... },
     "resultSchema": [{ "key": "score", "label": "Score", "type": "number" }],
-    "sourceHtml": "<full HTML document with inline script using spskill-init>"
+    "sourceHtml": "<full HTML document with inline script using spskill-init and SPSkill.setAnswer>"
   }
 }
 

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Box, Alert } from '@mui/material';
 import { buildSkillSrcdoc } from '../lib/skillSdk';
 import { toSkillInitPayload } from '../lib/skillPostMessage';
+import { extractAnswerFromIframeMessage } from '../lib/skillAnswerBridge';
 import { getPresetSkill } from '../lib/presetSkills';
 
 function presetSkillHtml(skillId) {
@@ -58,17 +59,24 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
       // Only handle messages from this question's iframe (same page may host multiple skills).
       if (!iframe?.contentWindow || e.source !== iframe.contentWindow) return;
       const d = e.data;
-      if (!d || d.source !== 'sp-survey-skill') return;
-      if (d.type === 'height' && d.px) {
-        setHeight(Math.min(Math.max(d.px, 80), 1200));
+      if (!d || typeof d !== 'object') return;
+
+      // Official SDK control messages (height / ready)
+      if (d.source === 'sp-survey-skill') {
+        if (d.type === 'height' && d.px) {
+          setHeight(Math.min(Math.max(d.px, 80), 1200));
+        }
+        if (d.type === 'ready') {
+          iframeReadyRef.current = true;
+          sendInit();
+        }
       }
-      if (d.type === 'ready') {
-        iframeReadyRef.current = true;
-        sendInit();
-      }
-      if (d.type === 'answer' && !readOnly) {
+
+      // Official answer + AI mistaken postMessage shapes (skill-result, etc.)
+      const extracted = extractAnswerFromIframeMessage(d);
+      if (extracted && !readOnly) {
         skipValueSyncRef.current = true;
-        onChange?.(d.value);
+        onChange?.(extracted.value);
       }
     };
     window.addEventListener('message', handler);

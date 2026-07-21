@@ -1381,6 +1381,7 @@ function SkillRawResponses({ answers, maxVisible = 10 }) {
 
 function SkillQuestionAnalysis({ question, answers, allResponses }) {
   const [showRaw, setShowRaw] = useState(false);
+  const [modeTab, setModeTab] = useState(0);
 
   const enrichedAnswers = useMemo(
     () => filterAnswersForSkill(enrichSkillAnswers(answers), question.skillId),
@@ -1389,6 +1390,16 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
   const droppedCount = answers.length - enrichedAnswers.length;
   const objAnswers = enrichedAnswers.filter((a) => a.answer && typeof a.answer === 'object');
   const PresetAnalysis = getPresetSkillAnalysis(question.skillId);
+
+  const modeKeys = useMemo(() => {
+    const set = new Set();
+    objAnswers.forEach((a) => {
+      if (a.answer?.mode != null && String(a.answer.mode).trim() !== '') {
+        set.add(String(a.answer.mode));
+      }
+    });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [objAnswers]);
 
   if (PresetAnalysis) {
     if (!objAnswers.length) {
@@ -1412,18 +1423,28 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
     );
   }
 
+  if (!objAnswers.length) {
+    return (
+      <SkillRawResponses answers={enrichedAnswers} maxVisible={10} />
+    );
+  }
+
+  const safeModeTab = Math.min(modeTab, Math.max(0, modeKeys.length - 1));
+  const activeMode = modeKeys.length > 1 ? modeKeys[safeModeTab] : null;
+  const scopedAnswers = activeMode
+    ? objAnswers.filter((a) => String(a.answer?.mode) === activeMode)
+    : objAnswers;
+
   let schema = question.skillResultSchema;
   if (!schema?.length && question.skillId?.startsWith('preset_')) {
     schema = getPresetSkill(question.skillId.replace(/^preset_/, ''))?.resultSchema;
   }
-  if (!schema?.length && objAnswers.length) {
-    schema = inferSkillResultSchema(objAnswers[0].answer);
+  if (!schema?.length && scopedAnswers[0]?.answer) {
+    schema = inferSkillResultSchema(scopedAnswers[0].answer);
   }
-
-  if (!schema?.length || !objAnswers.length) {
-    return (
-      <SkillRawResponses answers={enrichedAnswers} maxVisible={10} />
-    );
+  // Multi-mode skills: hide the mode key itself from field charts (shown as tabs).
+  if (activeMode && Array.isArray(schema)) {
+    schema = schema.filter((f) => f.key !== 'mode');
   }
 
   return (
@@ -1435,9 +1456,41 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
           (cross-contamination from an older bug when multiple skills shared one page).
         </Alert>
       )}
-      {schema.map((field) => (
-        <SkillFieldSummary key={field.key} field={field} answers={objAnswers} />
-      ))}
+      {modeKeys.length > 1 && (
+        <>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Results by mode
+          </Typography>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            This skill stores multiple task modes in one answer object — tabs split analysis by <code>mode</code>.
+          </Typography>
+          <Tabs
+            value={safeModeTab}
+            onChange={(_, v) => setModeTab(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{
+              mb: 1.5,
+              borderBottom: 1,
+              borderColor: 'divider',
+              minHeight: 40,
+              '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 13 },
+            }}
+          >
+            {modeKeys.map((m) => {
+              const n = objAnswers.filter((a) => String(a.answer?.mode) === m).length;
+              return <Tab key={m} label={`${m} (${n})`} />;
+            })}
+          </Tabs>
+        </>
+      )}
+      {schema?.length ? (
+        schema.map((field) => (
+          <SkillFieldSummary key={`${activeMode || 'all'}:${field.key}`} field={field} answers={scopedAnswers} />
+        ))
+      ) : (
+        <SkillRawResponses answers={scopedAnswers} maxVisible={10} />
+      )}
       <Button size="small" onClick={() => setShowRaw((s) => !s)}>
         {showRaw ? 'Hide raw responses' : 'View raw responses'}
       </Button>

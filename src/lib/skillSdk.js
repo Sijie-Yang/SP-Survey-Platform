@@ -43,6 +43,13 @@ export const SKILL_SDK_SOURCE = `
     images = data.images || [];
     value = data.value != null ? data.value : null;
     inited = true;
+    // Compatibility for AI skills that read window.__SKILL_CONTEXT__ / skillContext
+    // instead of spskill-init / SPSkill.getConfig().
+    try {
+      var ctx = { config: config, skillConfig: config, images: images, media: images, value: value };
+      window.__SKILL_CONTEXT__ = ctx;
+      window.skillContext = ctx;
+    } catch (e) { /* ignore */ }
     doFireInit();
   }
 

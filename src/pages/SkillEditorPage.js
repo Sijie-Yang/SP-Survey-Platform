@@ -12,6 +12,7 @@ import SkillQuestionFrame from '../components/SkillQuestionWidget';
 import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
 import SkillAiPanel from '../components/admin/SkillAiPanel';
 import AdminShell from '../components/layout/AdminShell';
+import { normalizeSkillSchemaArray } from '../lib/skillAnswerBridge';
 
 const DEFAULT_SKILL_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -97,19 +98,26 @@ export default function SkillEditorPage() {
   }, [defaultConfig]);
 
   const parseSchema = () => {
-    try { return JSON.parse(configSchema || '[]'); }
+    try { return normalizeSkillSchemaArray(JSON.parse(configSchema || '[]')); }
     catch { throw new Error('config_schema must be a valid JSON array'); }
   };
 
   const parseResultSchema = () => {
-    try { return JSON.parse(resultSchema || '[]'); }
-    catch { throw new Error('result_schema must be a valid JSON array'); }
+    try {
+      return normalizeSkillSchemaArray(JSON.parse(resultSchema || '[]'), { defaultType: 'text' });
+    } catch { throw new Error('result_schema must be a valid JSON array'); }
   };
 
   const parseDefaultConfig = () => {
     try { return JSON.parse(defaultConfig || '{}'); }
     catch { throw new Error('default_config must be a valid JSON object'); }
   };
+
+  const missingSetAnswer = sourceHtml
+    && !/SPSkill\s*\.\s*setAnswer\s*\(/.test(sourceHtml);
+  const usesAltPostMessage = sourceHtml
+    && /postMessage\s*\(/.test(sourceHtml)
+    && /(skill-result|skillResult|SP_SURVEY_SKILL_RESULT)/.test(sourceHtml);
 
   const buildPayload = () => ({
     id: skillId || undefined,
@@ -161,8 +169,16 @@ export default function SkillEditorPage() {
     if (skill.name) setName(skill.name);
     if (skill.description) setDescription(skill.description);
     if (skill.sourceHtml) setSourceHtml(skill.sourceHtml);
-    if (skill.configSchema) setConfigSchema(JSON.stringify(skill.configSchema, null, 2));
-    if (skill.resultSchema) setResultSchema(JSON.stringify(skill.resultSchema, null, 2));
+    if (skill.configSchema) {
+      setConfigSchema(JSON.stringify(normalizeSkillSchemaArray(skill.configSchema), null, 2));
+    }
+    if (skill.resultSchema) {
+      setResultSchema(JSON.stringify(
+        normalizeSkillSchemaArray(skill.resultSchema, { defaultType: 'text' }),
+        null,
+        2,
+      ));
+    }
     if (skill.defaultConfig) {
       setDefaultConfig(JSON.stringify(skill.defaultConfig, null, 2));
       setPreviewConfig(skill.defaultConfig);
@@ -200,6 +216,18 @@ export default function SkillEditorPage() {
         </Typography>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
         {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+        {missingSetAnswer && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            This HTML never calls <code>SPSkill.setAnswer(...)</code>. Answers will not be saved in surveys.
+            Replace custom <code>parent.postMessage</code> answer protocols with <code>SPSkill.setAnswer(object)</code>.
+          </Alert>
+        )}
+        {!missingSetAnswer && usesAltPostMessage && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            HTML uses alternate <code>postMessage</code> answer types. The platform accepts some of these for
+            compatibility, but prefer <code>SPSkill.setAnswer</code> only.
+          </Alert>
+        )}
         <SkillAiPanel
           apiKey={openaiApiKey}
           currentSkill={skillId ? {
