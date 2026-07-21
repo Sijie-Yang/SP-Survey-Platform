@@ -28,6 +28,7 @@ import {
 import { handleAgentAndMcpRoutes } from './worker-lib/agent/router.mjs';
 import { getUserFromBearer } from './worker-lib/auth/supabaseJwt.mjs';
 import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
+import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -724,7 +725,7 @@ function assertR2KeyOwned(userId, key) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url);
       const { pathname } = url;
@@ -732,6 +733,10 @@ export default {
       // Agent / OAuth / MCP (returns Response or null if not matched)
       const agentResponse = await handleAgentAndMcpRoutes(request, env);
       if (agentResponse) return agentResponse;
+
+      // SP-Bench admin + public APIs
+      const benchResponse = await handleBenchRoutes(request, env, ctx);
+      if (benchResponse) return benchResponse;
 
       if (pathname === '/api/r2/upload' && request.method === 'POST') {
         const user = await resolveR2User(request, env);
@@ -839,5 +844,10 @@ export default {
     } catch (error) {
       return json({ success: false, error: error.message || String(error) }, { status: 500 });
     }
+  },
+
+  // Optional: bind SP_BENCH_QUEUE producer/consumer in wrangler.jsonc
+  async queue(batch, env) {
+    await handleBenchQueueBatch(batch, env);
   },
 };

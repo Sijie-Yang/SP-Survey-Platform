@@ -75,7 +75,7 @@ function buildBridgeBody(req, headers) {
   return typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? {});
 }
 
-// Platform Agent / OAuth / MCP — shared Worker handlers (ESM) for local parity.
+// Platform Agent / OAuth / MCP / SP-Bench — shared Worker handlers (ESM) for local parity.
 app.use(async (req, res, next) => {
   const pathName = req.path || '';
   const isAgentRoute = pathName === '/api/agent'
@@ -83,10 +83,10 @@ app.use(async (req, res, next) => {
     || pathName.startsWith('/oauth/')
     || pathName === '/mcp'
     || pathName.startsWith('/.well-known/');
-  if (!isAgentRoute) return next();
+  const isBenchRoute = pathName === '/api/bench' || pathName.startsWith('/api/bench/');
+  if (!isAgentRoute && !isBenchRoute) return next();
 
   try {
-    const { handleAgentAndMcpRoutes } = await import('./worker-lib/agent/router.mjs');
     const url = `http://localhost:${PORT}${req.originalUrl}`;
     const headers = new Headers();
     Object.entries(req.headers || {}).forEach(([key, value]) => {
@@ -103,8 +103,17 @@ app.use(async (req, res, next) => {
       APP_URL: process.env.APP_URL || 'http://localhost:3000',
       SUPABASE_URL: process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL,
       SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || process.env.REACT_APP_SUPABASE_ANON_KEY,
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      BYOK_ENCRYPTION_KEY: process.env.BYOK_ENCRYPTION_KEY,
     };
-    const response = await handleAgentAndMcpRoutes(request, env);
+    let response = null;
+    if (isBenchRoute) {
+      const { handleBenchRoutes } = await import('./worker-lib/bench/handlers.mjs');
+      response = await handleBenchRoutes(request, env, null);
+    } else {
+      const { handleAgentAndMcpRoutes } = await import('./worker-lib/agent/router.mjs');
+      response = await handleAgentAndMcpRoutes(request, env);
+    }
     if (!response) return next();
     res.status(response.status);
     response.headers.forEach((value, key) => {
@@ -119,7 +128,7 @@ app.use(async (req, res, next) => {
     const buf = Buffer.from(await response.arrayBuffer());
     return res.send(buf);
   } catch (error) {
-    console.error('Agent/MCP bridge error:', error);
+    console.error('Agent/MCP/Bench bridge error:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -125,7 +125,7 @@ export default function MediaPreannotateDialog({
             imageUrl={entry.url}
             value={value}
             onChange={setValue}
-            allowedTools={['point', 'line', 'region', 'bbox']}
+            allowedTools={['point', 'line', 'polygon', 'bbox']}
             annotationLabels={labels.length ? labels : DEFAULT_SAM_LABELS}
             enableSamAssist={!!String(falKey || '').trim()}
             falKey={falKey}

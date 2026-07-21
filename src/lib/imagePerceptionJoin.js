@@ -66,7 +66,7 @@ function imageKeyFromShown(entry) {
 function resolveImageChoiceKey(value, shownImages) {
   if (value == null || value === '') return '';
   const str = String(value);
-  const match = str.match(/^image_(\d+)$/);
+  const match = str.match(/^(?:image|media)_(\d+)$/);
   if (match && Array.isArray(shownImages) && shownImages.length) {
     const img = shownImages[Number(match[1])];
     if (img != null) return imageKeyFromShown(img) || String(img);

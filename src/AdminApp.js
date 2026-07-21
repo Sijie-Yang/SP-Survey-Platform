@@ -137,11 +137,14 @@ export default function AdminApp() {
   const theme = createCustomTheme(currentTheme);
   
   const [tabValue, setTabValue] = useState(0);
-  // Keep Researcher Practice mounted only while an explicit practice session is running.
+  // Keep Practice mounted after first visit so free-pick selection + list scroll survive tab switches.
   const [practiceKeepAlive, setPracticeKeepAlive] = useState(false);
   const handlePracticeSessionActive = useCallback((active) => {
-    setPracticeKeepAlive(!!active);
+    if (active) setPracticeKeepAlive(true);
   }, []);
+  useEffect(() => {
+    if (tabValue === 5) setPracticeKeepAlive(true);
+  }, [tabValue]);
   const [surveyConfig, setSurveyConfig] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -207,17 +210,15 @@ export default function AdminApp() {
   const [currentProject, setCurrentProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(true);
 
-  // If a practice session was persisted for this project, keep the Practice tab mounted
-  // even before the user navigates back to it (e.g. after refresh on another tab).
+  // Restore keep-alive after refresh when a practice session (or UI selection) was persisted.
   useEffect(() => {
-    if (!currentProject?.id) {
-      setPracticeKeepAlive(false);
-      return;
-    }
+    if (!currentProject?.id) return;
     try {
       const all = JSON.parse(sessionStorage.getItem('researcher_practice_sessions') || '{}') || {};
       const row = all[currentProject.id];
       if (row?.active && row?.sessionId) setPracticeKeepAlive(true);
+      const ui = JSON.parse(sessionStorage.getItem('researcher_practice_ui') || '{}') || {};
+      if (ui[currentProject.id]?.selectedName) setPracticeKeepAlive(true);
     } catch {
       /* ignore */
     }
@@ -1485,6 +1486,7 @@ export default function AdminApp() {
               <ResearcherPractice
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
+                onSurveyConfigChange={handleSurveyConfigChange}
                 onSessionActiveChange={handlePracticeSessionActive}
               />
             </TabPanel>

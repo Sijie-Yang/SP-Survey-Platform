@@ -49,8 +49,8 @@ export function filenameKey(val) {
 }
 
 /**
- * Map imagepicker answer(s) to filename keys from the shown set.
- * Handles enriched filenames/URLs and legacy image_0 indices.
+ * Map imagepicker/mediapicker answer(s) to filename keys from the shown set.
+ * Handles enriched filenames/URLs and legacy image_0 / media_0 indices.
  */
 export function answerToSelectedKeys(answer, shownImages) {
   if (answer === null || answer === undefined || answer === '') return [];
@@ -62,7 +62,7 @@ export function answerToSelectedKeys(answer, shownImages) {
   values.forEach((val) => {
     if (val === null || val === undefined || val === '') return;
     const str = String(val);
-    const indexMatch = str.match(/^image_(\d+)$/);
+    const indexMatch = str.match(/^(?:image|media)_(\d+)$/);
     if (indexMatch) {
       const idx = parseInt(indexMatch[1], 10);
       if (shownKeys[idx]) selected.add(shownKeys[idx]);

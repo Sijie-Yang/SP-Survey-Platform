@@ -124,7 +124,7 @@ export function percentAgreement(responses, questionName) {
 }
 
 export function irrLevelForQuestion(question) {
-  if (['rating', 'imagerating', 'mediarating', 'slidergroup', 'imageslidergroup', 'skillquestion'].includes(question.type)) {
+  if (['rating', 'imagerating', 'mediarating', 'slidergroup', 'imageslidergroup', 'mediaslidergroup', 'skillquestion'].includes(question.type)) {
     return 'interval';
   }
   return 'nominal';

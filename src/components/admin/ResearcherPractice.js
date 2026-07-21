@@ -17,6 +17,7 @@ import {
   FormControl,
   FormControlLabel,
   FormLabel,
+  IconButton,
   List,
   ListItemButton,
   ListItemIcon,
@@ -27,9 +28,10 @@ import {
   Snackbar,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
-import { PlayArrow, Stop, SkipNext, Replay } from '@mui/icons-material';
+import { PlayArrow, Stop, SkipNext, Replay, Settings } from '@mui/icons-material';
 import registerImageRankingWidget, {
   registerImageRatingWidget,
   registerImageBooleanWidget,
@@ -46,6 +48,7 @@ import {
   collectAnswers,
   responsesEligibleForQuestion,
 } from './ResultsAnalysis';
+import QuestionEditor from './QuestionEditor';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import {
   clearTrialsAnswerStore,
@@ -82,11 +85,36 @@ function isPracticeable(q) {
   return true;
 }
 
+/** Drop Practice-only bookkeeping fields before writing back to surveyConfig. */
+function stripPracticeMeta(question) {
+  if (!question || typeof question !== 'object') return question;
+  const {
+    _pageName,
+    _pageTitle,
+    _pageIndex,
+    _allResponses,
+    ...rest
+  } = question;
+  return rest;
+}
+
+function replaceQuestionInConfig(surveyConfig, originalName, updatedQuestion) {
+  const clean = stripPracticeMeta(updatedQuestion);
+  const pages = (surveyConfig?.pages || []).map((page) => ({
+    ...page,
+    elements: (page.elements || []).map((el) => (
+      el?.name === originalName ? { ...clean } : el
+    )),
+  }));
+  return { ...surveyConfig, pages };
+}
+
 function newSessionId() {
   return `prac_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 const PRACTICE_SESSION_KEY = 'researcher_practice_sessions';
+const PRACTICE_UI_KEY = 'researcher_practice_ui';
 
 function readPracticeStore() {
   try {
@@ -117,6 +145,30 @@ function persistSession(projectId, payload) {
   }
 }
 
+function readPracticeUiStore() {
+  try {
+    return JSON.parse(sessionStorage.getItem(PRACTICE_UI_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function loadPracticeUi(projectId) {
+  if (!projectId) return null;
+  return readPracticeUiStore()[projectId] || null;
+}
+
+function persistPracticeUi(projectId, patch) {
+  if (!projectId) return;
+  try {
+    const all = readPracticeUiStore();
+    all[projectId] = { ...(all[projectId] || {}), ...patch, updatedAt: Date.now() };
+    sessionStorage.setItem(PRACTICE_UI_KEY, JSON.stringify(all));
+  } catch (err) {
+    console.warn('Failed to persist practice UI:', err);
+  }
+}
+
 /**
  * Free practice: pick any question and answer anytime.
  * Optional session: multi-question queue with fixed/unlimited repeats; stays alive until Stop.
@@ -124,6 +176,7 @@ function persistSession(projectId, payload) {
 export default function ResearcherPractice({
   currentProject,
   surveyConfig,
+  onSurveyConfigChange,
   onSessionActiveChange,
 }) {
   const { user } = useAuth();
@@ -199,11 +252,17 @@ export default function ResearcherPractice({
   const [setupUnlimited, setSetupUnlimited] = useState(false);
   const [setupRepeats, setSetupRepeats] = useState(10);
 
+  // Inline question settings (same QuestionEditor as Survey Builder)
+  const [editingQuestion, setEditingQuestion] = useState(null); // { originalName, question }
+
   const usedImageKeysRef = useRef(new Set());
   const usedGroupKeysRef = useRef(new Set());
   const roundMetaRef = useRef(null);
   const sessionRef = useRef(null);
   const hydratedRef = useRef(null);
+  const questionListRef = useRef(null);
+  const selectedItemRef = useRef(null);
+  const restoreScrollRef = useRef(null);
 
   const selectedQuestion = useMemo(
     () => questions.find((q) => q.name === selectedName) || null,
@@ -357,13 +416,47 @@ export default function ResearcherPractice({
     } else {
       setSession(null);
       sessionRef.current = null;
-      setSelectedName(null);
       setModel(null);
       setRoundMeta(null);
       usedImageKeysRef.current = new Set();
       usedGroupKeysRef.current = new Set();
+      const ui = loadPracticeUi(projectId);
+      if (ui?.selectedName) {
+        setSelectedName(ui.selectedName);
+        restoreScrollRef.current = typeof ui.listScrollTop === 'number' ? ui.listScrollTop : null;
+        setReloadToken((t) => t + 1);
+      } else {
+        setSelectedName(null);
+      }
     }
   }, [projectId, applySession]);
+
+  // Drop restored selection if that question no longer exists in the survey.
+  useEffect(() => {
+    if (!selectedName || !questions.length) return;
+    if (!questions.some((q) => q.name === selectedName)) setSelectedName(null);
+  }, [questions, selectedName]);
+
+  // Remember free-pick (and session) selection across tab switches / remounts.
+  useEffect(() => {
+    if (!projectId || !selectedName) return;
+    persistPracticeUi(projectId, { selectedName });
+  }, [projectId, selectedName]);
+
+  // Restore question-list scroll, then ensure the selected row is visible.
+  useEffect(() => {
+    const listEl = questionListRef.current;
+    if (!listEl) return undefined;
+    const savedTop = restoreScrollRef.current;
+    if (typeof savedTop === 'number') {
+      listEl.scrollTop = savedTop;
+      restoreScrollRef.current = null;
+    }
+    const t = window.setTimeout(() => {
+      selectedItemRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+    }, 50);
+    return () => window.clearTimeout(t);
+  }, [selectedName, projectId, questionsByPage.length]);
 
   // Drop session questions that no longer exist; keep survey order
   useEffect(() => {
@@ -396,6 +489,53 @@ export default function ResearcherPractice({
     usedGroupKeysRef.current = new Set();
     setReloadToken((t) => t + 1);
   };
+
+  const openQuestionSettings = useCallback((question) => {
+    if (!question?.name) return;
+    if (!surveyConfig || typeof onSurveyConfigChange !== 'function') {
+      setError(t.practiceSettingsUnavailable);
+      return;
+    }
+    setEditingQuestion({
+      originalName: question.name,
+      question: stripPracticeMeta(question),
+    });
+  }, [surveyConfig, onSurveyConfigChange, t.practiceSettingsUnavailable]);
+
+  const saveQuestionSettings = useCallback((updatedQuestion) => {
+    if (!editingQuestion || !surveyConfig || typeof onSurveyConfigChange !== 'function') {
+      setEditingQuestion(null);
+      return;
+    }
+    const originalName = editingQuestion.originalName;
+    const nextName = updatedQuestion?.name || originalName;
+    const nextConfig = replaceQuestionInConfig(surveyConfig, originalName, updatedQuestion);
+    onSurveyConfigChange(nextConfig);
+
+    if (selectedName === originalName && nextName !== originalName) {
+      setSelectedName(nextName);
+      persistPracticeUi(projectId, { selectedName: nextName });
+    }
+
+    if (sessionRef.current?.questionNames?.includes(originalName)) {
+      const cur = sessionRef.current;
+      const questionNames = cur.questionNames.map((n) => (n === originalName ? nextName : n));
+      applySession({ ...cur, questionNames }, { persist: true, reload: false });
+    }
+
+    setEditingQuestion(null);
+    setToast(t.practiceSettingsSaved);
+    // Reload practice widget with the updated question definition.
+    setReloadToken((token) => token + 1);
+  }, [
+    editingQuestion,
+    surveyConfig,
+    onSurveyConfigChange,
+    selectedName,
+    projectId,
+    applySession,
+    t.practiceSettingsSaved,
+  ]);
 
   /** Always order selected names by survey appearance, not click order. */
   const sortBySurveyOrder = useCallback((names) => {
@@ -741,7 +881,15 @@ export default function ResearcherPractice({
         description={t.practiceDescription}
       />
       <Box sx={{ display: 'flex', gap: 2, minHeight: 480, flexDirection: { xs: 'column', md: 'row' } }}>
-      <Paper variant="outlined" sx={{ width: { xs: '100%', md: 320 }, flexShrink: 0, maxHeight: 640, overflow: 'auto' }}>
+      <Paper
+        ref={questionListRef}
+        variant="outlined"
+        onScroll={(e) => {
+          if (!projectId) return;
+          persistPracticeUi(projectId, { listScrollTop: e.currentTarget.scrollTop });
+        }}
+        sx={{ width: { xs: '100%', md: 320 }, flexShrink: 0, maxHeight: 640, overflow: 'auto' }}
+      >
         <Box sx={{ p: 2, pb: 1 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
             <Typography variant="subtitle1" fontWeight={700} sx={{ flex: 1 }}>{t.practiceQuestions}</Typography>
@@ -783,12 +931,23 @@ export default function ResearcherPractice({
               {group.questions.map((q) => {
                 const count = practiceCounts[q.name] || 0;
                 const inSession = session?.questionNames?.includes(q.name);
+                const isSelected = selectedName === q.name;
+                const pickLocked = sessionActive
+                  && session?.questionNames?.[session.queueIndex] !== q.name;
                 return (
                   <ListItemButton
                     key={q.name}
-                    selected={selectedName === q.name}
-                    disabled={sessionActive && session?.questionNames?.[session.queueIndex] !== q.name}
-                    onClick={() => selectFreeQuestion(q.name)}
+                    ref={isSelected ? selectedItemRef : undefined}
+                    selected={isSelected}
+                    onClick={() => {
+                      if (pickLocked) return;
+                      selectFreeQuestion(q.name);
+                    }}
+                    sx={{
+                      pr: 0.5,
+                      opacity: pickLocked ? 0.55 : 1,
+                      cursor: pickLocked ? 'default' : 'pointer',
+                    }}
                   >
                     <ListItemText
                       primary={
@@ -809,6 +968,20 @@ export default function ResearcherPractice({
                       secondary={`${q.type}${inSession ? ' · in session' : ''}`}
                       secondaryTypographyProps={{ noWrap: true, fontSize: 11 }}
                     />
+                    <Tooltip title={t.practiceEditSettings}>
+                      <IconButton
+                        size="small"
+                        edge="end"
+                        aria-label={t.practiceEditSettings}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openQuestionSettings(q);
+                        }}
+                        sx={{ ml: 0.25 }}
+                      >
+                        <Settings fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   </ListItemButton>
                 );
               })}
@@ -848,6 +1021,14 @@ export default function ResearcherPractice({
                 variant="outlined"
                 label={tf(t.practiceTotal, { n: practiceCounts[selectedQuestion.name] || 0 })}
               />
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Settings />}
+                onClick={() => openQuestionSettings(selectedQuestion)}
+              >
+                {t.practiceEditSettings}
+              </Button>
               {!sessionActive && (
                 <Button
                   size="small"
@@ -956,6 +1137,17 @@ export default function ResearcherPractice({
         message={toast || ''}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />
+
+      {editingQuestion && (
+        <QuestionEditor
+          question={editingQuestion.question}
+          onSave={saveQuestionSettings}
+          onCancel={() => setEditingQuestion(null)}
+          images={surveyConfig?.images || []}
+          currentProject={currentProject}
+          surveyConfig={surveyConfig}
+        />
+      )}
 
       <Dialog open={setupOpen} onClose={() => setSetupOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Start practice session</DialogTitle>

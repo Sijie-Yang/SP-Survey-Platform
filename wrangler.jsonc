@@ -40,4 +40,9 @@
     "MCP_RESOURCE": "https://sp-survey.org/mcp",
     "SUPABASE_URL": "https://wskhzjfrhjueiqauhpmb.supabase.co"
   }
+  // Optional SP-Bench Queue (uncomment after: wrangler queues create sp-bench-jobs)
+  // "queues": {
+  //   "producers": [{ "binding": "SP_BENCH_QUEUE", "queue": "sp-bench-jobs" }],
+  //   "consumers": [{ "queue": "sp-bench-jobs", "max_batch_size": 1, "max_retries": 5 }]
+  // }
 }

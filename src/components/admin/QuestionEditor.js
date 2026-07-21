@@ -44,6 +44,7 @@ import {
   resolveMediaFolderTags,
 } from '../../lib/surveyMediaInjection';
 import { sortMediaByName, normalizeMediaAssignmentMode } from '../../lib/mediaUtils';
+import { normalizeAllowedTools } from '../../lib/annotationTools';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
 import SkillQuestionFrame from '../SkillQuestionWidget';
 import {
@@ -307,8 +308,9 @@ function TrialCountField({ question, onChange }) {
 }
 
 function AttentionCheckFields({ question, onChange }) {
-  const supported = ['rating', 'radiogroup', 'dropdown', 'boolean', 'imagepicker'].includes(question.type);
+  const supported = ['rating', 'radiogroup', 'dropdown', 'boolean', 'imagepicker', 'mediapicker'].includes(question.type);
   if (!supported) return null;
+  const isPicker = question.type === 'imagepicker' || question.type === 'mediapicker';
   return (
     <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
       <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
@@ -332,7 +334,7 @@ function AttentionCheckFields({ question, onChange }) {
           value={question.expectedAnswer ?? ''}
           onChange={(e) => onChange('expectedAnswer', e.target.value)}
           helperText={
-            question.type === 'imagepicker'
+            isPicker
               ? 'Filename or choice value the participant must select (checked in analysis, not blocked at submit)'
               : question.type === 'boolean'
                 ? 'Use true or false (or the Yes/No label text as stored — usually true/false)'
@@ -557,6 +559,10 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   
   const [editedQuestion, setEditedQuestion] = useState(initialQuestion);
   const [newChoice, setNewChoice] = useState('');
+  // Draft string so trailing commas stay while typing (array join would strip them).
+  const [annotationLabelsText, setAnnotationLabelsText] = useState(
+    () => (initialQuestion.annotationLabels || []).join(', '),
+  );
   
   // Image selection states
   const [availableImages, setAvailableImages] = useState([]);
@@ -569,6 +575,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   useEffect(() => {
     listSkillsForBuilder().then(setBuilderSkills);
   }, []);
+
+  useEffect(() => {
+    if (editedQuestion.type === 'imageannotation') {
+      setAnnotationLabelsText((editedQuestion.annotationLabels || []).join(', '));
+    }
+  }, [editedQuestion.type]);
 
   useEffect(() => {
     listSkillPreviewMedia().then(setSkillPreviewPool).catch(() => setSkillPreviewPool([]));
@@ -754,7 +766,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           updates.budget = 100;
         }
         if (value === 'imageannotation') {
-          updates.allowedTools = ['point', 'line', 'region', 'bbox'];
+          updates.allowedTools = ['point', 'line', 'polygon', 'bbox'];
           if (editedQuestion.minAnnotations == null) updates.minAnnotations = 0;
           if (editedQuestion.maxAnnotations == null) updates.maxAnnotations = 50;
           if (!Array.isArray(editedQuestion.annotationLabels)) updates.annotationLabels = [];
@@ -769,6 +781,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         updates.choices = updates.choices || [];
         if (!Array.isArray(editedQuestion.mediaSlots)) updates.mediaSlots = [];
         if (!editedQuestion.mediaPresentation) updates.mediaPresentation = 'stack';
+        if (value === 'mediapicker' && editedQuestion.multiSelect == null) {
+          updates.multiSelect = false;
+        }
+        if (value === 'mediapicker' && !editedQuestion.pairingMode) {
+          updates.pairingMode = 'random';
+        }
       }
       else if (value === 'number') {
         updates.inputType = 'number';
@@ -1084,7 +1102,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
               {editedQuestion.type === 'imageannotation' && (
                 <Alert severity="info">
-                  Participants can draw points, lines, regions, and bounding boxes on an image from your sampling settings.
+                  Participants can draw points, lines, polygons, and bounding boxes on an image from your sampling settings.
                   Optionally define class labels, then set tools and min/max counts in the task options below.
                 </Alert>
               )}
@@ -1515,7 +1533,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   );
                 })()}
 
-                {editedQuestion.type === 'imagepicker' && (
+                {(editedQuestion.type === 'imagepicker' || editedQuestion.type === 'mediapicker') && (
                   <>
                     <FormControlLabel
                       control={
@@ -1524,7 +1542,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                           onChange={(e) => handleQuestionChange('multiSelect', e.target.checked)}
                         />
                       }
-                      label="Allow Multiple Selection - participants can choose more than one image"
+                      label={
+                        editedQuestion.type === 'mediapicker'
+                          ? 'Allow Multiple Selection — participants can choose more than one media item'
+                          : 'Allow Multiple Selection — participants can choose more than one image'
+                      }
                     />
                     {(editedQuestion.mediaAssignmentMode || 'individual') === 'individual' && (
                       <FormControl fullWidth variant="outlined">
@@ -1539,8 +1561,10 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                           label="Sampling Mode"
                         >
                           <MenuItem value="random">Random — uniform from the pool</MenuItem>
-                          <MenuItem value="balanced">Balanced — prefer least-exposed images</MenuItem>
-                          <MenuItem value="adaptive">Adaptive — μ bands + cold-start for new images</MenuItem>
+                          <MenuItem value="balanced">
+                            Balanced — prefer least-exposed {editedQuestion.type === 'mediapicker' ? 'media' : 'images'}
+                          </MenuItem>
+                          <MenuItem value="adaptive">Adaptive — μ bands + cold-start for new items</MenuItem>
                         </Select>
                       </FormControl>
                     )}
@@ -1696,14 +1720,22 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Allowed Tools</InputLabel>
                       <Select
                         multiple
-                        value={editedQuestion.allowedTools || ['point', 'line', 'region', 'bbox']}
-                        onChange={(e) => handleQuestionChange('allowedTools',
-                          typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+                        value={normalizeAllowedTools(
+                          editedQuestion.allowedTools || ['point', 'line', 'polygon', 'bbox'],
+                        )}
+                        onChange={(e) => handleQuestionChange(
+                          'allowedTools',
+                          normalizeAllowedTools(
+                            typeof e.target.value === 'string'
+                              ? e.target.value.split(',')
+                              : e.target.value,
+                          ),
+                        )}
                         label="Allowed Tools"
                       >
                         <MenuItem value="point">Point</MenuItem>
                         <MenuItem value="line">Line</MenuItem>
-                        <MenuItem value="region">Region (polygon)</MenuItem>
+                        <MenuItem value="polygon">Polygon</MenuItem>
                         <MenuItem value="bbox">Bounding box</MenuItem>
                       </Select>
                     </FormControl>
@@ -1711,13 +1743,23 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       fullWidth
                       variant="outlined"
                       label="Class labels (optional)"
-                      value={(editedQuestion.annotationLabels || []).join(', ')}
+                      value={annotationLabelsText}
                       onChange={(e) => {
-                        const labels = e.target.value
+                        const raw = e.target.value;
+                        setAnnotationLabelsText(raw);
+                        const labels = raw
                           .split(',')
                           .map((s) => s.trim())
                           .filter(Boolean);
                         handleQuestionChange('annotationLabels', labels);
+                      }}
+                      onBlur={() => {
+                        const labels = annotationLabelsText
+                          .split(',')
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+                        handleQuestionChange('annotationLabels', labels);
+                        setAnnotationLabelsText(labels.join(', '));
                       }}
                       helperText="Comma-separated labels applied to new shapes (e.g. building, tree, sky). Leave empty for unlabeled annotation."
                       placeholder="building, tree, sky"

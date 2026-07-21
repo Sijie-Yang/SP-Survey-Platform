@@ -32,6 +32,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Refresh,
@@ -207,11 +209,11 @@ function imageKeyFromShown(entry) {
   return s.split('?')[0].split('/').pop() || s;
 }
 
-/** Map imagepicker/imageranking choice values (image_N or URL) to a stable filename key. */
+/** Map image/media picker·ranking choice values (image_N / media_N or URL) to a filename key. */
 function resolveImageChoiceKey(value, shownImages) {
   if (value == null || value === '') return '';
   const str = String(value);
-  const match = str.match(/^image_(\d+)$/);
+  const match = str.match(/^(?:image|media)_(\d+)$/);
   if (match && Array.isArray(shownImages) && shownImages.length) {
     const img = shownImages[Number(match[1])];
     if (img != null) return imageKeyFromShown(img) || String(img);
@@ -223,7 +225,7 @@ function resolveImageChoiceKey(value, shownImages) {
 function resolveImageChoiceUrl(value, shownImages) {
   if (value == null || value === '') return null;
   const str = String(value);
-  const match = str.match(/^image_(\d+)$/);
+  const match = str.match(/^(?:image|media)_(\d+)$/);
   if (match && Array.isArray(shownImages) && shownImages.length) {
     const img = shownImages[Number(match[1])];
     if (img == null) return null;
@@ -427,6 +429,122 @@ function compareByColumnProportions(a, b, colKeys) {
     if (Math.abs(pa - pb) > 1e-9) return pb - pa;
   }
   return 0;
+}
+
+/** One bottom tab per matrix attribute (row); ranking inside is by image only. */
+function ImageMatrixAttributeTabs({ question, answers, getImageUrl }) {
+  const perImage = useMemo(() => {
+    const map = {};
+    for (const { answer, shown_images } of answers || []) {
+      if (typeof answer !== 'object' || !answer || !shown_images?.length) continue;
+      const img = shown_images[0];
+      const key = imageKeyFromShown(img) || img;
+      if (!map[key]) map[key] = { url: img, rows: {} };
+      for (const [row, val] of Object.entries(answer)) {
+        if (!map[key].rows[row]) map[key].rows[row] = {};
+        const colKey = String(val);
+        map[key].rows[row][colKey] = (map[key].rows[row][colKey] || 0) + 1;
+      }
+    }
+    return map;
+  }, [answers]);
+
+  const rowDefs = question.rows || [];
+  const colDefs = question.columns || [];
+  const rowKeys = rowDefs.length
+    ? rowDefs.map((r) => (typeof r === 'object' ? r.value : r))
+    : [...new Set(Object.values(perImage).flatMap((d) => Object.keys(d.rows)))];
+  const colKeys = colDefs.length
+    ? colDefs.map((c) => (typeof c === 'object' ? c.value : c))
+    : [...new Set(Object.values(perImage).flatMap((d) => Object.values(d.rows).flatMap((r) => Object.keys(r))))];
+
+  const [tab, setTab] = useState(0);
+  const safeTab = Math.min(tab, Math.max(0, rowKeys.length - 1));
+
+  if (!rowKeys.length || !Object.keys(perImage).length) {
+    return <Typography variant="body2" color="text.secondary">No responses yet.</Typography>;
+  }
+
+  const lastCol = colKeys[colKeys.length - 1];
+  const numericCols = columnKeysAreNumeric(colKeys);
+  const row = rowKeys[safeTab];
+  const rowDef = rowDefs.find((r) => (typeof r === 'object' ? r.value : r) === row);
+  const rowLabel = rowDef ? (typeof rowDef === 'object' ? (rowDef.text || rowDef.value) : rowDef) : row;
+
+  const imageStats = Object.entries(perImage).map(([key, data]) => {
+    const cols = data.rows[row] || {};
+    const total = Object.values(cols).reduce((s, v) => s + v, 0);
+    const mean = numericCols ? meanFromColumnCounts(cols, colKeys) : null;
+    return { key, url: data.url, cols, total, mean };
+  }).filter((s) => s.total > 0);
+
+  const sorted = [...imageStats].sort((a, b) => {
+    if (numericCols) {
+      const diff = (b.mean ?? -Infinity) - (a.mean ?? -Infinity);
+      if (Math.abs(diff) > 1e-9) return diff;
+    }
+    return compareByColumnProportions(a, b, colKeys);
+  });
+
+  const maxMean = numericCols
+    ? Math.max(...sorted.map((s) => s.mean ?? 0), Number(colKeys[colKeys.length - 1]) || 1)
+    : 1;
+
+  const rankedItems = sorted.map(({ key, url, cols, total, mean }) => {
+    const colParts = colKeys.map((c) => {
+      const colDef = colDefs.find((col) => (typeof col === 'object' ? col.value : col) === c);
+      const cLabel = colDef ? (typeof colDef === 'object' ? (colDef.text || colDef.value) : colDef) : c;
+      return `${cLabel}: ${pct(cols[c] || 0, total)}%`;
+    });
+    const meanPart = numericCols && mean != null ? `avg ${mean.toFixed(2)} · ` : '';
+    return {
+      key,
+      url,
+      value: numericCols
+        ? (mean ?? 0)
+        : (total > 0 ? (cols[lastCol] || 0) / total : 0),
+      label: `${meanPart}${colParts.join(' · ')}`,
+    };
+  });
+
+  return (
+    <Box>
+      {numericCols && (
+        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+          Column values are numeric — images ranked by mean on this attribute.
+        </Typography>
+      )}
+      <CompactImageRanking
+        title={null}
+        items={rankedItems}
+        getImageUrl={getImageUrl}
+        maxValue={numericCols ? maxMean : 1}
+        formatLabel={(_, label) => label}
+      />
+      <Tabs
+        value={safeTab}
+        onChange={(_, v) => setTab(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{
+          mt: 1,
+          borderTop: 1,
+          borderColor: 'divider',
+          minHeight: 40,
+          '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 13 },
+        }}
+      >
+        {rowKeys.map((rk) => {
+          const def = rowDefs.find((r) => (typeof r === 'object' ? r.value : r) === rk);
+          const label = def ? (typeof def === 'object' ? (def.text || def.value) : def) : rk;
+          return <Tab key={rk} label={label} />;
+        })}
+      </Tabs>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+        Attribute: {rowLabel}
+      </Typography>
+    </Box>
+  );
 }
 
 function ImagePickerDistribution({ question, allResponses }) {
@@ -1009,94 +1127,12 @@ function ImageQuestionAnalysis({ answers, type, question }) {
 
   // ── image_matrix / mediamatrix ────────────────────────────────────────────
   if (type === 'image_matrix' || type === 'imagematrix' || type === 'mediamatrix') {
-    const perImage = {};
-    for (const { answer, shown_images } of answers) {
-      if (typeof answer !== 'object' || !answer || !shown_images?.length) continue;
-      const img = shown_images[0];
-      const key = imageKeyFromShown(img) || img;
-      if (!perImage[key]) perImage[key] = { url: img, rows: {} };
-      for (const [row, val] of Object.entries(answer)) {
-        if (!perImage[key].rows[row]) perImage[key].rows[row] = {};
-        const colKey = String(val);
-        perImage[key].rows[row][colKey] = (perImage[key].rows[row][colKey] || 0) + 1;
-      }
-    }
-
-    const rowDefs = question.rows || [];
-    const colDefs = question.columns || [];
-    const rowKeys = rowDefs.length
-      ? rowDefs.map((r) => (typeof r === 'object' ? r.value : r))
-      : [...new Set(Object.values(perImage).flatMap((d) => Object.keys(d.rows)))];
-    const colKeys = colDefs.length
-      ? colDefs.map((c) => (typeof c === 'object' ? c.value : c))
-      : [...new Set(Object.values(perImage).flatMap((d) => Object.values(d.rows).flatMap((r) => Object.keys(r))))];
-
-    if (!rowKeys.length || !Object.keys(perImage).length) {
-      return <Typography variant="body2" color="text.secondary">No responses yet.</Typography>;
-    }
-
-    const lastCol = colKeys[colKeys.length - 1];
-    const numericCols = columnKeysAreNumeric(colKeys);
-
     return (
-      <Box>
-        {numericCols && (
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-            Column values are numeric — images are ranked by mean score (higher first); percentages still shown.
-          </Typography>
-        )}
-        {rowKeys.map((row) => {
-          const rowDef = rowDefs.find((r) => (typeof r === 'object' ? r.value : r) === row);
-          const rowLabel = rowDef ? (typeof rowDef === 'object' ? (rowDef.text || rowDef.value) : rowDef) : row;
-
-          const imageStats = Object.entries(perImage).map(([key, data]) => {
-            const cols = data.rows[row] || {};
-            const total = Object.values(cols).reduce((s, v) => s + v, 0);
-            const mean = numericCols ? meanFromColumnCounts(cols, colKeys) : null;
-            return { key, url: data.url, cols, total, mean };
-          }).filter((s) => s.total > 0);
-
-          const sorted = [...imageStats].sort((a, b) => {
-            if (numericCols) {
-              const diff = (b.mean ?? -Infinity) - (a.mean ?? -Infinity);
-              if (Math.abs(diff) > 1e-9) return diff;
-            }
-            return compareByColumnProportions(a, b, colKeys);
-          });
-
-          const maxMean = numericCols
-            ? Math.max(...sorted.map((s) => s.mean ?? 0), Number(colKeys[colKeys.length - 1]) || 1)
-            : 1;
-
-          const rankedItems = sorted.map(({ key, url, cols, total, mean }) => {
-            const colParts = colKeys.map((c) => {
-              const colDef = colDefs.find((col) => (typeof col === 'object' ? col.value : col) === c);
-              const cLabel = colDef ? (typeof colDef === 'object' ? (colDef.text || colDef.value) : colDef) : c;
-              return `${cLabel}: ${pct(cols[c] || 0, total)}%`;
-            });
-            const meanPart = numericCols && mean != null ? `avg ${mean.toFixed(2)} · ` : '';
-            return {
-              key,
-              url,
-              value: numericCols
-                ? (mean ?? 0)
-                : (total > 0 ? (cols[lastCol] || 0) / total : 0),
-              label: `${meanPart}${colParts.join(' · ')}`,
-            };
-          });
-
-          return (
-            <CompactImageRanking
-              key={row}
-              title={rowLabel}
-              items={rankedItems}
-              getImageUrl={getImageUrl}
-              maxValue={numericCols ? maxMean : 1}
-              formatLabel={(_, label) => label}
-            />
-          );
-        })}
-      </Box>
+      <ImageMatrixAttributeTabs
+        question={question}
+        answers={answers}
+        getImageUrl={getImageUrl}
+      />
     );
   }
 
@@ -1492,156 +1528,227 @@ function useImageUrlResolver() {
   };
 }
 
-/** Per-dimension score distribution + per-image ranking (imageslidergroup). */
+/**
+ * Bottom tab per slider dimension (attribute); ranking inside is by image only
+ * (imageslidergroup / mediaslidergroup).
+ */
 function ImageSliderGroupAnalysis({ question, answers }) {
   const getImageUrl = useImageUrlResolver();
   const dims = question.dimensions || [];
   const scaleMin = question.scaleMin ?? 1;
   const scaleMax = question.scaleMax ?? 7;
+  const [tab, setTab] = useState(0);
 
-  if (!dims.length) {
+  const dimKeys = dims.length
+    ? dims.map((d) => d.id)
+    : [...new Set(
+      (answers || []).flatMap(({ answer }) => (
+        answer && typeof answer === 'object' ? Object.keys(answer) : []
+      )),
+    )];
+  const safeTab = Math.min(tab, Math.max(0, dimKeys.length - 1));
+  const dimId = dimKeys[safeTab];
+  const dimDef = dims.find((d) => d.id === dimId);
+  const dimTitle = dimDef
+    ? (dimDef.label || `${dimDef.left} ↔ ${dimDef.right}`)
+    : dimId;
+
+  const { allVals, rankedItems } = useMemo(() => {
+    if (!dimId) return { allVals: [], rankedItems: [] };
+    const vals = [];
+    const perImage = {};
+    for (const { answer, shown_images } of answers || []) {
+      if (!shown_images?.length || typeof answer !== 'object' || !answer) continue;
+      const val = Number(answer[dimId]);
+      if (Number.isNaN(val)) continue;
+      vals.push(val);
+      const img = shown_images[0];
+      const key = imageKeyFromShown(img) || img;
+      if (!perImage[key]) perImage[key] = { url: img, vals: [] };
+      perImage[key].vals.push(val);
+    }
+    const ranked = Object.entries(perImage)
+      .map(([key, { url, vals: imgVals }]) => {
+        const avg = average(imgVals);
+        return {
+          key,
+          url,
+          value: avg ?? scaleMin,
+          label: `${avg?.toFixed(2) ?? '–'} / ${scaleMax} · n=${imgVals.length}`,
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+    return { allVals: vals, rankedItems: ranked };
+  }, [answers, dimId, scaleMin, scaleMax]);
+
+  if (!dimKeys.length) {
     return <Typography variant="body2" color="text.secondary">No dimensions configured.</Typography>;
   }
 
+  const mean = average(allVals);
+  const sd = allVals.length > 1
+    ? Math.sqrt(allVals.reduce((s, v) => s + (v - mean) ** 2, 0) / allVals.length)
+    : 0;
+
   return (
     <Box>
-      {dims.map((d) => {
-        const allVals = [];
-        const perImage = {};
-        for (const { answer, shown_images } of answers) {
-          if (!shown_images?.length || typeof answer !== 'object') continue;
-          const val = Number(answer[d.id]);
-          if (Number.isNaN(val)) continue;
-          allVals.push(val);
-          for (const img of shown_images) {
-            const key = imageKeyFromShown(img) || img;
-            if (!perImage[key]) perImage[key] = { url: img, vals: [] };
-            perImage[key].vals.push(val);
-          }
-        }
-
-        const dimTitle = d.label || `${d.left} ↔ ${d.right}`;
-        const mean = average(allVals);
-        const sd = allVals.length > 1
-          ? Math.sqrt(allVals.reduce((s, v) => s + (v - mean) ** 2, 0) / allVals.length)
-          : 0;
-
-        const rankedItems = Object.entries(perImage)
-          .map(([key, { url, vals }]) => {
-            const avg = average(vals);
-            return {
-              key,
-              url,
-              value: avg ?? scaleMin,
-              label: `${avg?.toFixed(2) ?? '–'} / ${scaleMax} · n=${vals.length}`,
-            };
-          })
-          .sort((a, b) => b.value - a.value);
-
-        return (
-          <Box key={d.id} sx={{ mb: 3.5 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              {dimTitle}
-            </Typography>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-              <Typography variant="caption" color="text.secondary">{d.left}</Typography>
-              <Typography variant="caption" fontWeight={700}>
-                {mean != null
-                  ? `avg ${mean.toFixed(2)} ± ${sd.toFixed(2)} (n=${allVals.length})`
-                  : 'no data'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">{d.right}</Typography>
-            </Box>
-            {allVals.length > 0 && <DescriptiveStatsLine nums={allVals} />}
-            {allVals.length >= 3 && (
-              <DensityHistogramChart
-                scores={allVals}
-                domainMin={scaleMin}
-                domainMax={scaleMax}
-                title={`${dimTitle} — score distribution`}
-                caption="Blue bars: histogram (density). Orange curve: fitted normal PDF."
-                xLabel={`Score (${scaleMin}–${scaleMax})`}
-                padB={40}
-                chartH={200}
-              />
-            )}
-            {rankedItems.length > 0 && (
-              <CompactImageRanking
-                title="By image (mean score)"
-                items={rankedItems}
-                getImageUrl={getImageUrl}
-                maxValue={scaleMax}
-                formatLabel={(_, label) => label}
-              />
-            )}
-            {allVals.length === 0 && (
-              <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
-            )}
-          </Box>
-        );
-      })}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+        <Typography variant="caption" color="text.secondary">{dimDef?.left || ''}</Typography>
+        <Typography variant="caption" fontWeight={700}>
+          {mean != null
+            ? `avg ${mean.toFixed(2)} ± ${sd.toFixed(2)} (n=${allVals.length})`
+            : 'no data'}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">{dimDef?.right || ''}</Typography>
+      </Box>
+      {allVals.length > 0 && <DescriptiveStatsLine nums={allVals} />}
+      {allVals.length >= 3 && (
+        <DensityHistogramChart
+          scores={allVals}
+          domainMin={scaleMin}
+          domainMax={scaleMax}
+          title={`${dimTitle} — score distribution`}
+          caption="Blue bars: histogram (density). Orange curve: fitted normal PDF."
+          xLabel={`Score (${scaleMin}–${scaleMax})`}
+          padB={40}
+          chartH={200}
+        />
+      )}
+      {rankedItems.length > 0 && (
+        <CompactImageRanking
+          title={null}
+          items={rankedItems}
+          getImageUrl={getImageUrl}
+          maxValue={scaleMax}
+          formatLabel={(_, label) => label}
+        />
+      )}
+      {allVals.length === 0 && (
+        <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
+      )}
+      <Tabs
+        value={safeTab}
+        onChange={(_, v) => setTab(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{
+          mt: 1,
+          borderTop: 1,
+          borderColor: 'divider',
+          minHeight: 40,
+          '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 13 },
+        }}
+      >
+        {dimKeys.map((id) => {
+          const def = dims.find((d) => d.id === id);
+          const label = def
+            ? (def.label || `${def.left || ''} ↔ ${def.right || ''}`.trim() || id)
+            : id;
+          return <Tab key={id} label={label} />;
+        })}
+      </Tabs>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+        Attribute: {dimTitle}
+      </Typography>
     </Box>
   );
 }
 
-/** Per-choice compact image ranking (imagepointallocation). */
+/**
+ * Bottom tab per allocation choice (attribute); ranking inside is by image only
+ * (imagepointallocation / mediapointallocation).
+ */
 function ImagePointAllocationAnalysis({ question, answers }) {
   const getImageUrl = useImageUrlResolver();
   const choices = (question.choices || []).map((c) => (typeof c === 'object' ? c : { value: c, text: c }));
   const budget = question.budget || 100;
+  const [tab, setTab] = useState(0);
+
+  const choiceKeys = choices.length
+    ? choices.map((c) => c.value)
+    : [...new Set(
+      (answers || []).flatMap(({ answer }) => (
+        answer && typeof answer === 'object' ? Object.keys(answer) : []
+      )),
+    )];
+  const safeTab = Math.min(tab, Math.max(0, choiceKeys.length - 1));
+  const choiceKey = choiceKeys[safeTab];
+  const choiceDef = choices.find((c) => c.value === choiceKey);
+  const choiceLabel = choiceDef ? (choiceDef.text || choiceDef.value) : choiceKey;
 
   let compliant = 0;
-  answers.forEach(({ answer }) => {
+  (answers || []).forEach(({ answer }) => {
     if (!answer || typeof answer !== 'object') return;
     const sum = Object.values(answer).reduce((s, v) => s + (Number(v) || 0), 0);
     if (Math.abs(sum - budget) < 0.01) compliant += 1;
   });
 
-  if (!choices.length) {
+  const rankedItems = useMemo(() => {
+    if (!choiceKey) return [];
+    const perImage = {};
+    for (const { answer, shown_images } of answers || []) {
+      if (!shown_images?.length || typeof answer !== 'object' || !answer) continue;
+      const pts = Number(answer[choiceKey]);
+      if (Number.isNaN(pts)) continue;
+      const img = shown_images[0];
+      const key = imageKeyFromShown(img) || img;
+      if (!perImage[key]) perImage[key] = { url: img, vals: [] };
+      perImage[key].vals.push(pts);
+    }
+    return Object.entries(perImage)
+      .map(([key, { url, vals }]) => {
+        const avg = average(vals);
+        return {
+          key,
+          url,
+          value: avg ?? 0,
+          label: `${avg?.toFixed(1) ?? '–'} / ${budget} pts · n=${vals.length}`,
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+  }, [answers, choiceKey, budget]);
+
+  if (!choiceKeys.length) {
     return <Typography variant="body2" color="text.secondary">No allocation choices configured.</Typography>;
   }
 
   return (
     <Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
         Budget compliance: {compliant}/{answers.length} ({pct(compliant, answers.length)}%)
       </Typography>
-      {choices.map((c) => {
-        const perImage = {};
-        for (const { answer, shown_images } of answers) {
-          if (!shown_images?.length || typeof answer !== 'object') continue;
-          const pts = Number(answer[c.value]);
-          if (Number.isNaN(pts)) continue;
-          for (const img of shown_images) {
-            const key = imageKeyFromShown(img) || img;
-            if (!perImage[key]) perImage[key] = { url: img, vals: [] };
-            perImage[key].vals.push(pts);
-          }
-        }
-
-        const rankedItems = Object.entries(perImage)
-          .map(([key, { url, vals }]) => {
-            const avg = average(vals);
-            return {
-              key,
-              url,
-              value: avg ?? 0,
-              label: `${avg?.toFixed(1) ?? '–'} / ${budget} pts · n=${vals.length}`,
-            };
-          })
-          .sort((a, b) => b.value - a.value);
-
-        return (
-          <CompactImageRanking
-            key={c.value}
-            title={c.text || c.value}
-            items={rankedItems}
-            getImageUrl={getImageUrl}
-            maxValue={budget}
-            formatLabel={(_, label) => label}
-          />
-        );
-      })}
+      {rankedItems.length > 0 ? (
+        <CompactImageRanking
+          title={null}
+          items={rankedItems}
+          getImageUrl={getImageUrl}
+          maxValue={budget}
+          formatLabel={(_, label) => label}
+        />
+      ) : (
+        <Typography variant="body2" color="text.secondary">No responses yet.</Typography>
+      )}
+      <Tabs
+        value={safeTab}
+        onChange={(_, v) => setTab(v)}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{
+          mt: 1,
+          borderTop: 1,
+          borderColor: 'divider',
+          minHeight: 40,
+          '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 13 },
+        }}
+      >
+        {choiceKeys.map((ck) => {
+          const def = choices.find((c) => c.value === ck);
+          return <Tab key={ck} label={def ? (def.text || def.value) : ck} />;
+        })}
+      </Tabs>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+        Attribute: {choiceLabel}
+      </Typography>
     </Box>
   );
 }

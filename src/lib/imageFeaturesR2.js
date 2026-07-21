@@ -83,8 +83,9 @@ function polygonAreaNorm(pts) {
 function shapeAreaRatio(shape) {
   const pts = shape?.points || [];
   if (!pts.length) return 0;
-  const tool = shape.tool
-    || (pts.length >= 3 ? 'region' : pts.length === 2 ? 'line' : 'point');
+  const raw = shape.tool
+    || (pts.length >= 3 ? 'polygon' : pts.length === 2 ? 'line' : 'point');
+  const tool = raw === 'region' ? 'polygon' : raw;
   if (tool === 'bbox' && pts.length >= 2) {
     const xs = pts.map((p) => p.x);
     const ys = pts.map((p) => p.y);
@@ -92,7 +93,7 @@ function shapeAreaRatio(shape) {
     const h = Math.max(0, Math.max(...ys) - Math.min(...ys));
     return w * h;
   }
-  if (tool === 'region' && pts.length >= 3) return polygonAreaNorm(pts);
+  if (tool === 'polygon' && pts.length >= 3) return polygonAreaNorm(pts);
   return 0;
 }
 
@@ -328,6 +329,31 @@ export async function loadPreannotation(r2Prefix, mediaEntry) {
     console.warn('loadPreannotation', err);
     return null;
   }
+}
+
+/**
+ * Load preannotation JSON for many media entries (concurrency-limited).
+ * @returns {Promise<Array<{ mediaEntry: object, annotation: object|null }>>}
+ */
+export async function loadPreannotationsForMediaList(r2Prefix, mediaEntries, { concurrency = 8 } = {}) {
+  const list = (mediaEntries || []).map((m) => normalizeMediaEntry(m)).filter((m) => m?.url || m?.name);
+  if (!list.length || !r2Prefix || !isR2Configured()) {
+    return list.map((mediaEntry) => ({ mediaEntry, annotation: null }));
+  }
+  const out = new Array(list.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, list.length) }, async () => {
+    while (cursor < list.length) {
+      const i = cursor;
+      cursor += 1;
+      const mediaEntry = list[i];
+      // eslint-disable-next-line no-await-in-loop
+      const annotation = await loadPreannotation(r2Prefix, mediaEntry);
+      out[i] = { mediaEntry, annotation };
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 /**

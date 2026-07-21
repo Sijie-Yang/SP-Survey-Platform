@@ -58,6 +58,7 @@ import MediaCategoryGuide from './MediaCategoryGuide';
 import MediaFolderBrowser from './MediaFolderBrowser';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
 import MediaPreannotatePanel from './MediaPreannotatePanel';
+import MediaPreannotateResults from './MediaPreannotateResults';
 import ConfirmDialog from '../layout/ConfirmDialog';
 import { AdminPageHeader } from './AdminPageLayout';
 import { L0_MODEL } from '../../lib/imageFeaturesL0';
@@ -70,6 +71,7 @@ import {
   FEATURE_MODELS,
   SAM_PREANNOT_MODEL,
 } from '../../lib/imageFeaturesR2';
+import { featureStorageKey } from '../../lib/imageFeaturesStore';
 import { getTemplateById, listTemplates } from '../../lib/templateManager';
 import {
   computeTemplateImportProgress,
@@ -80,7 +82,10 @@ import {
   mergeTemplateMediaFoldersIntoProject,
   formatTemplateImportStatus,
   formatTemplateImportButtonLabel,
+  PREVIEW_MEDIA_IMPORT_ID,
+  isPreviewMediaImportId,
 } from '../../lib/templateImageImport';
+import { SKILL_PREVIEW_PREFIX } from '../../lib/skillPreviewMedia';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
 import { useAuth } from '../../contexts/AuthContext';
@@ -92,12 +97,17 @@ const R2_COPY_REQUEST_BATCH = 100;
 const R2_COPY_CONCURRENCY = 3;
 
 function templateImportProgressLabel(status) {
-  if (status.phase === 'listing') return 'Scanning template & project folders…';
-  if (status.phase === 'saving') return 'Saving project image list…';
-  if (status.total === 0) {
+  if (status.phase === 'listing') {
+    return isPreviewMediaImportId(status.activeTemplateId)
+      ? 'Scanning preview media library & project folders…'
+      : 'Scanning template & project folders…';
+  }
+  if (status.phase === 'features') return 'Copying feature CSVs (optional metadata)…';
+  if (status.phase === 'saving') return 'Saving project image list to database…';
+  if (status.total === 0 && status.phase !== 'idle') {
     return status.activeTemplateName
-      ? `All images from "${status.activeTemplateName}" are already in this project.`
-      : 'All template images are already in this project.';
+      ? `All media from "${status.activeTemplateName}" are already in this project.`
+      : 'All source media are already in this project.';
   }
   const shown = Math.min(status.progress, status.total);
   const pct = status.total > 0 ? Math.round((shown / status.total) * 100) : 0;
@@ -186,9 +196,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   // R2 sync state
   const [r2Syncing, setR2Syncing] = useState(false);
 
-  // Import template images — any project can pull from any template with an R2 folder.
+  // Import template images — any project can pull from any template with an R2 folder,
+  // or from the shared admin preview media library (skill-preview/).
   const [availableTemplates, setAvailableTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [previewMediaCount, setPreviewMediaCount] = useState(0);
   const [templateProgressMap, setTemplateProgressMap] = useState({});
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [templateImportStatus, setTemplateImportStatus] = useState({
@@ -197,7 +209,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     total: 0,
     templateTotal: 0,
     skipped: 0,
-    phase: 'idle', // idle | listing | copying | saving
+    phase: 'idle', // idle | listing | copying | features | saving
     activeTemplateId: null,
     activeTemplateName: null,
     error: null,
@@ -216,6 +228,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const [featureInspect, setFeatureInspect] = useState(null); // { name, mediaId, records }
   const [r2FeatureMap, setR2FeatureMap] = useState({});
   const [preannotateFocusName, setPreannotateFocusName] = useState(null);
+  /** Latest autosave → patch Pre-annotate results without re-fetching the library. */
+  const [preannotateSavedPatch, setPreannotateSavedPatch] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, onConfirm }
   const [currentFolder, setCurrentFolder] = useState('');
   const [openMoveSignal, setOpenMoveSignal] = useState(0);
@@ -610,21 +624,37 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   };
 
   // Load templates that ship with images (any project can import from them).
+  // Also keep the shared preview media library selectable as a source.
   useEffect(() => {
     let cancelled = false;
     setLoadingTemplates(true);
-    listTemplates(user?.id).then((templates) => {
+    Promise.all([
+      listTemplates(user?.id),
+      isR2Configured()
+        ? listImagesFromR2(SKILL_PREVIEW_PREFIX).then((r) => (
+          r.success
+            ? (r.images || []).filter((img) => {
+              const key = String(img.key || img.name || '');
+              return !key.includes('/features/') && !key.includes('/preannotations/');
+            }).length
+            : 0
+        )).catch(() => 0)
+        : Promise.resolve(0),
+    ]).then(([templates, previewCount]) => {
       if (cancelled) return;
       const withImages = templates.filter(
         (t) => Array.isArray(t.preloadedImages) && t.preloadedImages.length > 0,
       );
       setAvailableTemplates(withImages);
+      setPreviewMediaCount(previewCount);
       setSelectedTemplateId((prev) => {
+        if (prev === PREVIEW_MEDIA_IMPORT_ID && previewCount > 0) return prev;
         if (prev && withImages.some((t) => t.id === prev)) return prev;
         if (currentProject?.templateId && withImages.some((t) => t.id === currentProject.templateId)) {
           return currentProject.templateId;
         }
-        return withImages[0]?.id || '';
+        if (withImages[0]?.id) return withImages[0].id;
+        return previewCount > 0 ? PREVIEW_MEDIA_IMPORT_ID : '';
       });
     }).finally(() => {
       if (!cancelled) setLoadingTemplates(false);
@@ -639,11 +669,17 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     const ids = new Set(Object.keys(templateImportHistory));
     if (selectedTemplateId) ids.add(selectedTemplateId);
     if (ids.size && projectId) refreshTemplateProgress([...ids]);
-  }, [selectedTemplateId, projectId, currentProject?.preloadedImages?.length, Object.keys(templateImportHistory).join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Do not depend on preloadedImages.length — import already updates progress locally;
+    // re-listing R2 after every large save made the UI feel stuck/slow.
+  }, [selectedTemplateId, projectId, Object.keys(templateImportHistory).join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectedTemplate = availableTemplates.find((t) => t.id === selectedTemplateId) || null;
+  const selectedIsPreviewMedia = isPreviewMediaImportId(selectedTemplateId);
+  const selectedTemplate = selectedIsPreviewMedia
+    ? null
+    : (availableTemplates.find((t) => t.id === selectedTemplateId) || null);
   const selectedProgress = templateProgressMap[selectedTemplateId];
   const selectedImportHistory = templateImportHistory[selectedTemplateId] || null;
+  const hasImportSources = availableTemplates.length > 0 || previewMediaCount > 0;
 
   // Sync hfConfig from project
   useEffect(() => {
@@ -689,7 +725,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
   };
 
-  // ── Import images from source template ───────────────────────────────────
+  // ── Import images from source template or preview media library ──────────
 
   const handleImportFromTemplate = async (templateIdOverride) => {
     const templateId = templateIdOverride || selectedTemplateId;
@@ -703,12 +739,26 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
     if (templateImportStatus.loading) return;
 
-    const template = availableTemplates.find((t) => t.id === templateId)
-      || (await getTemplateById(templateId));
-    if (!template) {
-      setTemplateImportStatus((prev) => ({ ...prev, error: 'Template not found.' }));
-      return;
+    const fromPreview = isPreviewMediaImportId(templateId);
+    let template = null;
+    if (fromPreview) {
+      template = {
+        id: PREVIEW_MEDIA_IMPORT_ID,
+        name: 'Preview media library',
+        imageDatasetConfig: {},
+      };
+    } else {
+      template = availableTemplates.find((t) => t.id === templateId)
+        || (await getTemplateById(templateId));
+      if (!template) {
+        setTemplateImportStatus((prev) => ({ ...prev, error: 'Template not found.' }));
+        return;
+      }
     }
+
+    const sourcePrefix = fromPreview
+      ? SKILL_PREVIEW_PREFIX
+      : `templates/${template.id}/`;
 
     scrollRef.current = window.scrollY;
     restoreScrollRef.current = true;
@@ -734,8 +784,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       const progress = await computeTemplateImportProgress(template.id, uid, currentProject.id);
       if (progress.error) throw new Error(progress.error);
 
-      // Record that this template import was started (enables Resume after interrupt).
-      // Filename overlap alone is not enough to attribute files to a template.
+      // Record that this import was started (enables Resume after interrupt).
+      // Filename overlap alone is not enough to attribute files to a source.
       const startHistoryEntry = {
         templateName: template.name,
         totalInTemplate: progress.totalInTemplate,
@@ -746,17 +796,15 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         lastBatchCopied: 0,
       };
       const startConfig = mergeTemplateImportHistory(currentProject, template.id, startHistoryEntry);
+      // Keep UI/history in sync without a full Supabase write (avoids double-saving large image lists).
       onProjectUpdate({
         ...currentProject,
         imageDatasetConfig: startConfig,
-      });
+      }, { skipSave: true });
       if (onConfigChange) onConfigChange(true, startConfig);
 
       const listed = { success: true, images: progress.templateImages };
-      const existing = await listImagesFromR2(projectPrefix);
-      if (!existing.success) {
-        throw new Error(existing.error || 'Failed to list project images');
-      }
+      const existingImages = progress.existingImages || [];
 
       if (listed.images.length === 0) {
         setTemplateImportStatus({
@@ -769,7 +817,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           activeTemplateId: template.id,
           activeTemplateName: template.name,
           error: null,
-          success: `"${template.name}" has no images in its template folder.`,
+          success: fromPreview
+            ? 'Preview media library is empty.'
+            : `"${template.name}" has no images in its template folder.`,
         });
         return;
       }
@@ -778,7 +828,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         listed.images,
         progress.existingPaths || progress.existingNames,
         projectPrefix,
-        `templates/${template.id}/`,
+        sourcePrefix,
       );
       const total = todo.length;
       const skipCount = listed.images.length - total;
@@ -789,7 +839,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         skipped: skipCount,
         total,
         progress: 0,
-        phase: total > 0 ? 'copying' : 'saving',
+        phase: total > 0 ? 'copying' : (fromPreview ? 'saving' : 'features'),
       }));
 
       const copiedImages = [];
@@ -800,38 +850,54 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         errors.push(...copyResult.errors);
       }
 
-      setTemplateImportStatus((prev) => ({
-        ...prev,
-        phase: 'saving',
-        progress: copiedImages.length,
-      }));
-
       const finalImages = mergeCopiedIntoProjectImages(
-        existing.images,
+        existingImages,
         copiedImages,
         r2PublicUrl,
         projectPrefix,
       );
 
-      // Copy L0/Seg feature CSVs from template → project (remap media_id by filename)
-      try {
-        const nameToNewMediaId = new Map();
-        finalImages.forEach((img) => {
-          const entry = normalizeMediaEntry(img);
-          if (entry?.name) nameToNewMediaId.set(entry.name, getMediaId(entry));
-        });
-        await copyFeatureCsvsTemplateToProject({
-          templatePrefix: `templates/${template.id}/`,
-          projectPrefix,
-          nameToNewMediaId,
-        });
-        const featMap = await loadFeaturesMapFromR2(projectPrefix, FEATURE_MODELS);
-        setR2FeatureMap(featMap);
-      } catch (featErr) {
-        console.warn('Feature CSV copy skipped/failed:', featErr);
+      // Derive progress locally — avoid another full R2 list of source + project.
+      const importedCount = Math.min(
+        listed.images.length,
+        skipCount + copiedImages.length,
+      );
+      const remaining = Math.max(0, listed.images.length - importedCount);
+      const afterProgress = {
+        totalInTemplate: listed.images.length,
+        importedCount,
+        remaining,
+        isComplete: listed.images.length > 0 && remaining === 0,
+        hasStarted: importedCount > 0,
+        error: null,
+      };
+
+      if (!fromPreview) {
+        setTemplateImportStatus((prev) => ({
+          ...prev,
+          phase: 'features',
+          progress: copiedImages.length,
+        }));
+
+        // Copy L0/Seg feature CSVs from template → project (remap media_id by filename)
+        try {
+          const nameToNewMediaId = new Map();
+          finalImages.forEach((img) => {
+            const entry = normalizeMediaEntry(img);
+            if (entry?.name) nameToNewMediaId.set(entry.name, getMediaId(entry));
+          });
+          await copyFeatureCsvsTemplateToProject({
+            templatePrefix: sourcePrefix,
+            projectPrefix,
+            nameToNewMediaId,
+          });
+          const featMap = await loadFeaturesMapFromR2(projectPrefix, FEATURE_MODELS);
+          setR2FeatureMap(featMap);
+        } catch (featErr) {
+          console.warn('Feature CSV copy skipped/failed:', featErr);
+        }
       }
 
-      const afterProgress = await computeTemplateImportProgress(template.id, uid, currentProject.id);
       const historyEntry = {
         templateName: template.name,
         totalInTemplate: afterProgress.totalInTemplate,
@@ -842,16 +908,34 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         lastBatchCopied: copiedImages.length,
       };
 
-      const updatedImageDatasetConfig = mergeTemplateMediaFoldersIntoProject(
-        mergeTemplateImportHistory(
-          { ...currentProject, imageDatasetConfig: startConfig },
-          template.id,
-          historyEntry,
-        ),
-        template.imageDatasetConfig || {},
+      let updatedImageDatasetConfig = mergeTemplateImportHistory(
+        { ...currentProject, imageDatasetConfig: startConfig },
+        template.id,
+        historyEntry,
       );
+      if (!fromPreview) {
+        updatedImageDatasetConfig = mergeTemplateMediaFoldersIntoProject(
+          updatedImageDatasetConfig,
+          template.imageDatasetConfig || {},
+        );
+      }
 
-      onProjectUpdate({
+      setTemplateProgressMap((prev) => ({
+        ...prev,
+        [template.id]: afterProgress,
+      }));
+      if (fromPreview) {
+        setPreviewMediaCount(afterProgress.totalInTemplate);
+      }
+
+      setTemplateImportStatus((prev) => ({
+        ...prev,
+        phase: 'saving',
+        progress: copiedImages.length,
+      }));
+
+      // One full project write (image list can be large — this is the slow DB step).
+      await onProjectUpdate({
         ...currentProject,
         preloadedImages: finalImages,
         preloadedSource: 'r2',
@@ -860,9 +944,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       });
       if (onConfigChange) onConfigChange(true, updatedImageDatasetConfig);
 
-      await refreshTemplateProgress([template.id]);
-
       const newCount = copiedImages.length;
+      const unit = fromPreview ? 'file' : 'image';
       setTemplateImportStatus({
         loading: false,
         progress: total,
@@ -874,8 +957,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         activeTemplateName: template.name,
         error: errors.length ? `${errors.length} file(s) failed to copy.` : null,
         success: total === 0
-          ? `All ${listed.images.length} image(s) from "${template.name}" are already in this project.`
-          : `Imported ${newCount} image${newCount === 1 ? '' : 's'} from "${template.name}"${skipCount > 0 ? ` (${skipCount} already present — resume supported)` : ''}.`,
+          ? `All ${listed.images.length} ${unit}(s) from "${template.name}" are already in this project.`
+          : `Imported ${newCount} ${unit}${newCount === 1 ? '' : 's'} from "${template.name}"${skipCount > 0 ? ` (${skipCount} already present — resume supported)` : ''}.`,
       });
     } catch (err) {
       setTemplateImportStatus({
@@ -1473,9 +1556,14 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               <Box sx={{ mb: 1.5, maxHeight: 140, overflow: 'auto' }}>
                 {historyIds.map((tid) => {
                   const hist = templateImportHistory[tid];
-                  const tpl = availableTemplates.find((t) => t.id === tid);
+                  const tpl = isPreviewMediaImportId(tid)
+                    ? { name: 'Preview media library' }
+                    : availableTemplates.find((t) => t.id === tid);
                   const live = templateProgressMap[tid];
-                  const total = live?.totalInTemplate ?? hist?.totalInTemplate ?? tpl?.preloadedImages?.length ?? 0;
+                  const total = live?.totalInTemplate
+                    ?? hist?.totalInTemplate
+                    ?? (isPreviewMediaImportId(tid) ? previewMediaCount : tpl?.preloadedImages?.length)
+                    ?? 0;
                   const imported = live?.importedCount ?? hist?.importedCount ?? 0;
                   const remaining = live?.remaining ?? hist?.remaining ?? Math.max(0, total - imported);
                   const isComplete = live?.isComplete ?? hist?.isComplete ?? (total > 0 && remaining === 0);
@@ -1516,20 +1604,29 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               <CircularProgress size={18} />
               <Typography variant="body2" color="text.secondary">Loading…</Typography>
             </Box>
-          ) : availableTemplates.length === 0 ? (
+          ) : !hasImportSources ? (
             <Alert severity="info" sx={{ mb: 1.5 }}>
-              No templates with images yet.
+              No templates or preview media library files yet.
             </Alert>
           ) : (
             <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
-              <InputLabel id="template-import-select">Template</InputLabel>
+              <InputLabel id="template-import-select">Source</InputLabel>
               <Select
                 labelId="template-import-select"
-                label="Template"
+                label="Source"
                 value={selectedTemplateId}
                 onChange={(e) => setSelectedTemplateId(e.target.value)}
                 disabled={templateImportStatus.loading}
               >
+                <MenuItem value={PREVIEW_MEDIA_IMPORT_ID}>
+                  {(() => {
+                    const live = templateProgressMap[PREVIEW_MEDIA_IMPORT_ID];
+                    const hist = templateImportHistory[PREVIEW_MEDIA_IMPORT_ID];
+                    const status = formatTemplateImportStatus(live, hist)
+                      || (previewMediaCount > 0 ? `${previewMediaCount} files` : 'empty');
+                    return `Preview media library (${status})`;
+                  })()}
+                </MenuItem>
                 {availableTemplates.map((t) => {
                   const live = templateProgressMap[t.id];
                   const hist = templateImportHistory[t.id];
@@ -1570,11 +1667,17 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               variant="contained"
               color="secondary"
               onClick={() => handleImportFromTemplate()}
-              disabled={!isR2Configured() || templateImportStatus.loading || !selectedTemplateId || availableTemplates.length === 0}
+              disabled={
+                !isR2Configured()
+                || templateImportStatus.loading
+                || !selectedTemplateId
+                || !hasImportSources
+              }
               startIcon={templateImportStatus.loading ? <CircularProgress size={16} color="inherit" /> : <ContentCopy />}
             >
               {formatTemplateImportButtonLabel(selectedProgress, selectedImportHistory, {
                 loading: templateImportStatus.loading,
+                sourceKind: selectedIsPreviewMedia ? 'preview' : 'template',
               })}
             </Button>
           </Box>
@@ -2221,14 +2324,37 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           r2Prefix={projectPrefix}
           falKey={currentProject?.imageDatasetConfig?.falApiKey || ''}
           projectId={projectId || ''}
-          onSaved={async () => {
-            try {
-              const map = await loadFeaturesMapFromR2(projectPrefix, FEATURE_MODELS);
-              setR2FeatureMap(map);
-            } catch (err) {
-              console.warn(err);
+          onSaved={(result) => {
+            const annotation = result?.annotation || null;
+            const mediaEntry = preannotateEntry
+              || (annotation
+                ? { name: annotation.name, url: annotation.image, media_id: annotation.media_id }
+                : null);
+            setPreannotateSavedPatch({
+              mediaEntry,
+              annotation,
+              at: Date.now(),
+            });
+            // Patch feature map locally — avoid re-downloading all feature CSVs on every autosave.
+            const rec = result?.featureRecord;
+            if (rec) {
+              setR2FeatureMap((prev) => {
+                const next = { ...prev };
+                if (rec.media_id) next[featureStorageKey(rec.media_id, SAM_PREANNOT_MODEL)] = rec;
+                if (rec.name) next[featureStorageKey(rec.name, SAM_PREANNOT_MODEL)] = rec;
+                return next;
+              });
             }
           }}
+        />
+      )}
+
+      {preloadedCount > 0 && (
+        <MediaPreannotateResults
+          r2Prefix={projectPrefix}
+          mediaList={preannotateImages}
+          featureMap={r2FeatureMap}
+          savedPatch={preannotateSavedPatch}
         />
       )}
 

@@ -21,6 +21,7 @@ import SkillEditorPage from './pages/SkillEditorPage';
 import SkillLibraryPage from './pages/SkillLibraryPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import McpOAuthPage from './pages/McpOAuthPage';
+import SpBenchPage from './pages/SpBenchPage';
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -129,6 +130,7 @@ export default function App() {
                 <Route path="/request-survey-design" element={<RequestSurveyDesignPage />} />
                 <Route path="/team" element={<TeamPage />} />
                 <Route path="/live" element={<LiveSurveysPage />} />
+                <Route path="/bench" element={<SpBenchPage />} />
                 <Route path="/survey" element={<SurveyApp />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/oauth/mcp" element={<McpOAuthPage />} />

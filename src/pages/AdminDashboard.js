@@ -11,7 +11,7 @@ import {
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
   EditNote, PhotoLibrary, DeleteForever, Videocam, Audiotrack, PermMedia,
-  ExpandMore, PushPin, AutoFixHigh, Stop,
+  ExpandMore, PushPin, AutoFixHigh, Stop, CloudDownload, Publish,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -19,6 +19,7 @@ import {
   normalizeTemplateId, templateImagePrefix,
   listAllProjects, updateProjectAdmin, deleteProjectAdmin,
   seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
+  downloadOnlineTemplatesAsBuiltinZip, publishOnlineTemplatesAsBuiltin,
 } from '../lib/templateManager';
 import { findDuplicateQuestionNames, repairDuplicateQuestionNames } from '../lib/questionNames';
 import {
@@ -60,6 +61,7 @@ import ConfirmDialog from '../components/layout/ConfirmDialog';
 import AdminScopedMediaLibrary from '../components/admin/AdminScopedMediaLibrary';
 import ResearchDeepSearch from '../components/admin/ResearchDeepSearch';
 import SurveyDesignRequestManagement from '../components/admin/SurveyDesignRequestManagement';
+import SpBenchManagement from '../components/admin/SpBenchManagement';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 
@@ -562,6 +564,11 @@ function TemplateManagement() {
   const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
   /** Selected builtin template ids in the import confirm dialog. */
   const [seedSelectedIds, setSeedSelectedIds] = useState(() => new Set());
+  /** Online → builtin pack: pick online templates to download ZIP or publish to R2. */
+  const [exportBuiltinOpen, setExportBuiltinOpen] = useState(false);
+  const [exportBuiltinIds, setExportBuiltinIds] = useState(() => new Set());
+  const [exportBuiltinBusy, setExportBuiltinBusy] = useState(false);
+  const [exportBuiltinLog, setExportBuiltinLog] = useState('');
   const [sortBy, setSortBy]               = useState('year');
   const [sortOrder, setSortOrder]         = useState('desc');
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -901,6 +908,75 @@ function TemplateManagement() {
     }
   };
 
+  const exportBuiltinCandidates = useMemo(
+    () => templates.filter((t) => t?.id && t?.name && t?.config),
+    [templates],
+  );
+
+  const handleOpenExportBuiltin = () => {
+    setExportBuiltinLog('');
+    // Default: approved / pinned / landing templates — most likely official builtins.
+    const defaults = new Set(
+      exportBuiltinCandidates
+        .filter((t) => t.is_approved || t.is_pinned || t.show_on_landing)
+        .map((t) => t.id),
+    );
+    setExportBuiltinIds(defaults.size ? defaults : new Set(exportBuiltinCandidates.map((t) => t.id)));
+    setExportBuiltinOpen(true);
+  };
+
+  const toggleExportBuiltinId = (id) => {
+    setExportBuiltinIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectedExportTemplates = useMemo(
+    () => exportBuiltinCandidates.filter((t) => exportBuiltinIds.has(t.id)),
+    [exportBuiltinCandidates, exportBuiltinIds],
+  );
+
+  const handleDownloadBuiltinZip = () => {
+    try {
+      const result = downloadOnlineTemplatesAsBuiltinZip(selectedExportTemplates);
+      showSnack(`已下载 ${result.count} 个内置模板包（可解压到 public/project_templates/）`);
+      setExportBuiltinLog(`已下载 ZIP：${result.filenames.join(', ')}`);
+    } catch (err) {
+      showSnack(err.message, 'error');
+    }
+  };
+
+  const handlePublishBuiltinToR2 = async () => {
+    if (!selectedExportTemplates.length) return;
+    if (!isR2Configured()) {
+      showSnack('云存储未配置，无法写入可热更新的内置覆盖包', 'error');
+      return;
+    }
+    setExportBuiltinBusy(true);
+    setExportBuiltinLog('');
+    try {
+      const result = await publishOnlineTemplatesAsBuiltin(selectedExportTemplates, {
+        onProgress: ({ current, total, name }) => {
+          setExportBuiltinLog(`更新内置覆盖包 ${current}/${total} — ${name}`);
+        },
+      });
+      const msg = `已更新 ${result.published}/${result.total} 个内置覆盖包`
+        + (result.errors?.length ? `（${result.errors.length} 个错误）` : '');
+      showSnack(msg, result.errors?.length ? 'warning' : 'success');
+      setExportBuiltinLog(
+        (result.errors?.length ? `错误: ${result.errors.join('; ')}\n` : '')
+        + `文件: ${(result.filenames || []).join(', ')}`,
+      );
+    } catch (err) {
+      showSnack(err.message, 'error');
+    } finally {
+      setExportBuiltinBusy(false);
+    }
+  };
+
   return (
     <Box>
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
@@ -913,7 +989,7 @@ function TemplateManagement() {
               color="secondary"
               startIcon={bulkFeat.active ? <CircularProgress size={16} color="inherit" /> : <AutoFixHigh />}
               onClick={() => handleBulkFeatures({ runL0: true, runSeg: true })}
-              disabled={bulkFeat.active || seeding || loading}
+              disabled={bulkFeat.active || seeding || loading || exportBuiltinBusy}
             >
               一键提取全部 Features
             </Button>
@@ -929,31 +1005,43 @@ function TemplateManagement() {
             停止
           </Button>
         )}
-        <Tooltip title="导入或更新本地内置模板到 Supabase（已存在的会覆盖问卷配置）">
+        <Tooltip title="导入或更新本地/R2 内置模板到 Supabase（已存在的会覆盖问卷配置）">
           <Button
             variant="outlined"
             startIcon={seeding ? <CircularProgress size={16} /> : <CloudUpload />}
             onClick={handleOpenSeedConfirm}
-            disabled={seeding || seedPreviewLoading || bulkFeat.active}
+            disabled={seeding || seedPreviewLoading || bulkFeat.active || exportBuiltinBusy}
           >
             导入内置模板
           </Button>
         </Tooltip>
-        <Button startIcon={<Refresh />} onClick={load} disabled={loading || bulkFeat.active}>
+        <Tooltip title="用线上模板更新内置 JSON（不含图片）：可下载进仓库，或写入可热更新的内置覆盖包；导入内置时再带上内置侧已有图片">
+          <Button
+            variant="outlined"
+            color="secondary"
+            startIcon={exportBuiltinBusy ? <CircularProgress size={16} /> : <Publish />}
+            onClick={handleOpenExportBuiltin}
+            disabled={seeding || seedPreviewLoading || bulkFeat.active || exportBuiltinBusy || !templates.length}
+          >
+            用线上更新内置
+          </Button>
+        </Tooltip>
+        <Button startIcon={<Refresh />} onClick={load} disabled={loading || bulkFeat.active || exportBuiltinBusy}>
           刷新
         </Button>
       </Stack>
 
-      {(seedLog || bulkFeat.log) && (
+      {(seedLog || bulkFeat.log || exportBuiltinLog) && (
         <Alert
-          severity={bulkFeat.active ? 'info' : 'info'}
+          severity="info"
           sx={{ mb: 2 }}
-          onClose={bulkFeat.active ? undefined : () => {
+          onClose={bulkFeat.active || exportBuiltinBusy ? undefined : () => {
             setSeedLog('');
+            setExportBuiltinLog('');
             setBulkFeat((s) => ({ ...s, log: '' }));
           }}
         >
-          {bulkFeat.log || seedLog}
+          {bulkFeat.log || exportBuiltinLog || seedLog}
           {bulkFeat.active && bulkFeat.imageTotal > 0 && (
             <Box sx={{ mt: 1 }}>
               <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
@@ -1149,7 +1237,8 @@ function TemplateManagement() {
           ) : seedPreview ? (
             <Stack spacing={2}>
               <Typography variant="body2" color="text.secondary">
-                勾选要处理的内置模板。新模板会导入；已存在的会<strong>覆盖</strong>问卷配置与元数据（有图片包则刷新图库）。
+                勾选要处理的内置模板（优先 R2 覆盖包，否则静态 <code>public/project_templates/</code>）。
+                新模板会导入；已存在的会<strong>覆盖</strong>问卷配置与元数据（有图片包则刷新图库）。
                 默认只勾选「新建」项，更新项需手动勾选。
               </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
@@ -1206,6 +1295,7 @@ function TemplateManagement() {
                       <TableCell align="center">年份</TableCell>
                       <TableCell align="center">页数</TableCell>
                       <TableCell align="center">图片</TableCell>
+                      <TableCell>来源</TableCell>
                       <TableCell>文件</TableCell>
                     </TableRow>
                   </TableHead>
@@ -1248,6 +1338,14 @@ function TemplateManagement() {
                           <TableCell align="center">{item.pageCount}</TableCell>
                           <TableCell align="center">{item.imageCount}</TableCell>
                           <TableCell>
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              color={item.source === 'r2' ? 'secondary' : 'default'}
+                              label={item.source === 'r2' ? 'R2 覆盖' : '静态包'}
+                            />
+                          </TableCell>
+                          <TableCell>
                             <Typography variant="caption" color="text.secondary">{item.filename}</Typography>
                           </TableCell>
                         </TableRow>
@@ -1255,7 +1353,7 @@ function TemplateManagement() {
                     })}
                     {seedSelectableItems.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={9} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                        <TableCell colSpan={10} align="center" sx={{ py: 3, color: 'text.secondary' }}>
                           没有可预览的内置模板
                         </TableCell>
                       </TableRow>
@@ -1288,6 +1386,145 @@ function TemplateManagement() {
             {seedSelectedIds.size
               ? `确认处理已选 ${seedSelectedIds.size} 个`
               : '请先勾选模板'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={exportBuiltinOpen}
+        onClose={() => !exportBuiltinBusy && setExportBuiltinOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>用线上模板更新内置包</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2}>
+            <Typography variant="body2" color="text.secondary">
+              勾选线上模板，只导出问卷配置与元数据（不含图片）。
+              「下载到仓库」生成 ZIP，解压进 <code>public/project_templates/</code> 后提交代码；
+              「更新内置覆盖包」立刻写入可热更新的内置层，下次「导入内置模板」会优先用它（无需前端发版）。
+              图片仍只来自内置侧 sibling 图包。
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+              <Chip size="small" label={`已选 ${exportBuiltinIds.size}/${exportBuiltinCandidates.length}`} />
+              <Button
+                size="small"
+                onClick={() => setExportBuiltinIds(new Set(exportBuiltinCandidates.map((t) => t.id)))}
+              >
+                全选
+              </Button>
+              <Button
+                size="small"
+                onClick={() => setExportBuiltinIds(new Set(
+                  exportBuiltinCandidates.filter((t) => t.is_approved).map((t) => t.id),
+                ))}
+              >
+                仅已批准
+              </Button>
+              <Button size="small" onClick={() => setExportBuiltinIds(new Set())}>
+                清空
+              </Button>
+              {!isR2Configured() && (
+                <Chip size="small" color="warning" label="云存储未配置（仅可下载到仓库）" />
+              )}
+            </Stack>
+            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 420 }}>
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        size="small"
+                        indeterminate={
+                          exportBuiltinIds.size > 0
+                          && exportBuiltinIds.size < exportBuiltinCandidates.length
+                        }
+                        checked={
+                          exportBuiltinCandidates.length > 0
+                          && exportBuiltinIds.size === exportBuiltinCandidates.length
+                        }
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setExportBuiltinIds(new Set(exportBuiltinCandidates.map((t) => t.id)));
+                          } else {
+                            setExportBuiltinIds(new Set());
+                          }
+                        }}
+                        inputProps={{ 'aria-label': '全选' }}
+                      />
+                    </TableCell>
+                    <TableCell>ID</TableCell>
+                    <TableCell>名称</TableCell>
+                    <TableCell>分类</TableCell>
+                    <TableCell align="center">批准</TableCell>
+                    <TableCell align="center">置顶</TableCell>
+                    <TableCell align="center">图片</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {exportBuiltinCandidates.map((t) => {
+                    const checked = exportBuiltinIds.has(t.id);
+                    return (
+                      <TableRow
+                        key={t.id}
+                        hover
+                        selected={checked}
+                        onClick={() => toggleExportBuiltinId(t.id)}
+                        sx={{ cursor: 'pointer' }}
+                      >
+                        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            size="small"
+                            checked={checked}
+                            onChange={() => toggleExportBuiltinId(t.id)}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="caption">{t.id}</Typography>
+                        </TableCell>
+                        <TableCell>{t.name}</TableCell>
+                        <TableCell>
+                          <Chip size="small" variant="outlined" label={t.category || '—'} />
+                        </TableCell>
+                        <TableCell align="center">{t.is_approved ? '是' : '—'}</TableCell>
+                        <TableCell align="center">{t.is_pinned ? '是' : '—'}</TableCell>
+                        <TableCell align="center">{t.preloadedImages?.length || 0}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {exportBuiltinCandidates.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                        没有可导出的线上模板（需有 name 与 config）
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <Button onClick={() => setExportBuiltinOpen(false)} disabled={exportBuiltinBusy}>
+            关闭
+          </Button>
+          <Box flex={1} />
+          <Button
+            variant="outlined"
+            startIcon={<CloudDownload />}
+            onClick={handleDownloadBuiltinZip}
+            disabled={exportBuiltinBusy || exportBuiltinIds.size === 0}
+          >
+            下载到仓库
+          </Button>
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={exportBuiltinBusy ? <CircularProgress size={16} color="inherit" /> : <Publish />}
+            onClick={handlePublishBuiltinToR2}
+            disabled={exportBuiltinBusy || exportBuiltinIds.size === 0 || !isR2Configured()}
+          >
+            更新内置覆盖包
           </Button>
         </DialogActions>
       </Dialog>
@@ -2518,6 +2755,7 @@ export default function AdminDashboard() {
           <Tab label="Live Surveys" />
           <Tab label="论文库" />
           <Tab label="Survey Design" />
+          <Tab label="SP-Bench" />
         </Tabs>
       </Box>
       {tab === 0 && <TemplateManagement />}
@@ -2526,6 +2764,7 @@ export default function AdminDashboard() {
       {tab === 3 && <LiveSurveyManagement />}
       {tab === 4 && <ResearchDeepSearch />}
       {tab === 5 && <SurveyDesignRequestManagement />}
+      {tab === 6 && <SpBenchManagement />}
     </AdminShell>
   );
 }

@@ -5,10 +5,14 @@
  * Long prefix (all types):
  *   participant_id, created_at, session_id, attempt_index, practice_mode, quality_flags,
  *   question_name, question_type,
- *   shown_images, shown_media_ids, shown_media_set, shown_media_categories
+ *   shown_images, shown_media_set, shown_media_categories
+ *   (shown_media_ids stay in stored responses for internal joins; not exported)
  *
  * Summary (all types, tidy):
- *   question_name, question_type, n_responses, unit_key, unit_label, metric, value, n
+ *   question_name, question_type, n_responses,
+ *   attribute_key, attribute_label,  ← matrix row / slider dim / etc. (empty when N/A)
+ *   unit_key, unit_label,            ← image or choice unit (no image__attr concatenation)
+ *   metric, value, n
  */
 
 import { average, descriptiveStats } from './stats';
@@ -27,6 +31,11 @@ import { stripSkillAnswerContext } from './skillMediaUtils';
 import { objectsToCsv, rowsToCsv, exportDateStamp } from './csvUtil';
 import { downloadZip } from './zipDownload';
 import { downloadTextFile, generateMethodsText } from './methodsExport';
+import {
+  annotationToolLabel,
+  inferShapeTool,
+  normalizeAnnotationTool,
+} from './annotationTools';
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -41,7 +50,6 @@ export const LONG_PREFIX = [
   'question_type',
   'trial_index',
   'shown_images',
-  'shown_media_ids',
   'shown_media_set',
   'shown_media_categories',
 ];
@@ -50,6 +58,8 @@ export const SUMMARY_HEADERS = [
   'question_name',
   'question_type',
   'n_responses',
+  'attribute_key',
+  'attribute_label',
   'unit_key',
   'unit_label',
   'metric',
@@ -59,21 +69,38 @@ export const SUMMARY_HEADERS = [
 
 const DISPLAY_ONLY = new Set(['expression', 'image', 'html', 'mediadisplay']);
 
+// Long-CSV extras = the answer only. What was displayed lives in LONG_PREFIX
+// (shown_images / …), not duplicated here.
 const LONG_EXTRA_BY_FAMILY = {
   scalar: ['value'],
   boolean: ['value', 'value_norm'],
   choice: ['value', 'label'],
   text: ['text'],
   matrix: ['row_key', 'row_label', 'column_key', 'column_label', 'value'],
-  ranking: ['rank_position', 'item_key', 'item_label'],
-  image_rating: ['item_key', 'value'],
-  image_boolean: ['item_key', 'value', 'value_norm'],
-  imagepicker: ['item_key'],
+  image_matrix: ['row_key', 'row_label', 'column_key', 'column_label', 'value'],
+  // Text ranking: value + label (choice text). Image/media ranking: value only (filenames).
+  ranking: ['value', 'label'],
+  image_ranking: ['value'],
+  image_rating: ['value'],
+  image_boolean: ['value', 'value_norm'],
+  // value = media key the participant chose (options are in shown_*)
+  imagepicker: ['value'],
   slider: ['dimension_id', 'dimension_label', 'value'],
+  // Same long shape as slider; summary breaks out by shown image × dimension.
+  image_slider: ['dimension_id', 'dimension_label', 'value'],
   points: ['choice_key', 'choice_label', 'points'],
+  // Same long shape as points; summary breaks out by shown image × allocation choice.
+  image_points: ['choice_key', 'choice_label', 'points'],
   skill: ['schema_key', 'value'],
-  annotation: ['item_key', 'label', 'annotation_json'],
+  annotation: ['tool', 'label', 'annotation_json'],
 };
+
+function shownKeysFromLongRow(row) {
+  return String(row?.shown_images || '')
+    .split('|')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 function questionFamily(type) {
   const t = type || '';
@@ -81,13 +108,18 @@ function questionFamily(type) {
   if (t === 'boolean' || t === 'consent') return 'boolean';
   if (t === 'radiogroup' || t === 'dropdown' || t === 'checkbox') return 'choice';
   if (t === 'text' || t === 'comment') return 'text';
-  if (t === 'matrix' || t === 'imagematrix' || t === 'image_matrix' || t === 'mediamatrix') return 'matrix';
-  if (t === 'ranking' || t === 'imageranking' || t === 'image_ranking' || t === 'mediaranking') return 'ranking';
+  if (t === 'matrix') return 'matrix';
+  // Image/media matrix: same cell answer shape, but summary must break out by shown stimulus.
+  if (t === 'imagematrix' || t === 'image_matrix' || t === 'mediamatrix') return 'image_matrix';
+  if (t === 'ranking') return 'ranking';
+  if (t === 'imageranking' || t === 'image_ranking' || t === 'mediaranking') return 'image_ranking';
   if (t === 'imagerating' || t === 'image_rating' || t === 'mediarating') return 'image_rating';
   if (t === 'imageboolean' || t === 'image_boolean' || t === 'mediaboolean') return 'image_boolean';
   if (t === 'imagepicker' || t === 'mediapicker') return 'imagepicker';
-  if (t === 'slidergroup' || t === 'imageslidergroup' || t === 'mediaslidergroup') return 'slider';
-  if (t === 'pointallocation' || t === 'imagepointallocation' || t === 'mediapointallocation') return 'points';
+  if (t === 'slidergroup') return 'slider';
+  if (t === 'imageslidergroup' || t === 'mediaslidergroup') return 'image_slider';
+  if (t === 'pointallocation') return 'points';
+  if (t === 'imagepointallocation' || t === 'mediapointallocation') return 'image_points';
   if (t === 'skillquestion') return 'skill';
   if (t === 'imageannotation') return 'annotation';
   return 'text';
@@ -120,7 +152,8 @@ function imageKeyFromShown(entry) {
 function resolveImageChoiceKey(value, shownImages) {
   if (value == null || value === '') return '';
   const str = String(value);
-  const match = str.match(/^image_(\d+)$/);
+  // SurveyJS choice values: image_N (image*) or media_N (media*)
+  const match = str.match(/^(?:image|media)_(\d+)$/);
   if (match && Array.isArray(shownImages) && shownImages.length) {
     const img = shownImages[Number(match[1])];
     if (img != null) return imageKeyFromShown(img) || String(img);
@@ -271,7 +304,6 @@ function baseLongFields(row, question, flags, payload = null) {
     question_type: question.type || '',
     trial_index: p?.trialIndex ?? '',
     shown_images: joinPipe(p?.shownImages),
-    shown_media_ids: (p?.shownMediaIds || []).join('|'),
     shown_media_set: p?.shownMediaSet || p?.shownMediaGroup || '',
     shown_media_categories: p?.shownMediaCategories || '',
     _payload: p,
@@ -285,11 +317,23 @@ function emptyExtra(fam) {
   return o;
 }
 
-function summaryRow(question, nResponses, unitKey, unitLabel, metric, value, n) {
+function summaryRow(
+  question,
+  nResponses,
+  unitKey,
+  unitLabel,
+  metric,
+  value,
+  n,
+  attributeKey = '',
+  attributeLabel = '',
+) {
   return {
     question_name: question.name,
     question_type: question.type || '',
     n_responses: nResponses,
+    attribute_key: attributeKey || '',
+    attribute_label: attributeLabel || '',
     unit_key: unitKey,
     unit_label: unitLabel,
     metric,
@@ -298,15 +342,24 @@ function summaryRow(question, nResponses, unitKey, unitLabel, metric, value, n) 
   };
 }
 
-function pushStats(out, question, nResponses, unitKey, unitLabel, nums) {
+function pushStats(
+  out,
+  question,
+  nResponses,
+  unitKey,
+  unitLabel,
+  nums,
+  attributeKey = '',
+  attributeLabel = '',
+) {
   const st = descriptiveStats(nums);
   if (!st.n) return;
-  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'mean', st.mean, st.n));
-  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'sd', st.sd, st.n));
-  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'median', st.median, st.n));
-  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'min', st.min, st.n));
-  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'max', st.max, st.n));
-  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'count', st.n, st.n));
+  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'mean', st.mean, st.n, attributeKey, attributeLabel));
+  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'sd', st.sd, st.n, attributeKey, attributeLabel));
+  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'median', st.median, st.n, attributeKey, attributeLabel));
+  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'min', st.min, st.n, attributeKey, attributeLabel));
+  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'max', st.max, st.n, attributeKey, attributeLabel));
+  out.push(summaryRow(question, nResponses, unitKey, unitLabel, 'count', st.n, st.n, attributeKey, attributeLabel));
 }
 
 // ─── Long builders ────────────────────────────────────────────────────────────
@@ -353,7 +406,7 @@ function buildLongObjects(question, responses, surveyConfig) {
       });
     } else if (fam === 'text') {
       objects.push({ ...base, ...extra, text: typeof answer === 'object' ? JSON.stringify(answer) : String(answer) });
-    } else if (fam === 'matrix') {
+    } else if (fam === 'matrix' || fam === 'image_matrix') {
       const rowLabels = matrixLabelMap(question.rows);
       const colLabels = matrixLabelMap(question.columns);
       const obj = (answer && typeof answer === 'object' && !Array.isArray(answer)) ? answer : {};
@@ -371,35 +424,36 @@ function buildLongObjects(question, responses, surveyConfig) {
     } else if (fam === 'ranking') {
       const labels = choiceLabelMap(question.choices);
       const ranked = Array.isArray(answer) ? answer : [];
-      ranked.forEach((item, idx) => {
-        const key = resolveImageChoiceKey(item, shownImages);
-        objects.push({
-          ...base,
-          ...extra,
-          rank_position: idx + 1,
-          item_key: key,
-          item_label: labels[String(item)] || labels[key] || key,
-        });
+      const keys = ranked.map((item) => String(item ?? ''));
+      const labs = keys.map((key) => labels[key] || key);
+      objects.push({
+        ...base,
+        ...extra,
+        value: keys.join('|'),
+        label: labs.join('|'),
+      });
+    } else if (fam === 'image_ranking') {
+      const ranked = Array.isArray(answer) ? answer : [];
+      const keys = ranked.map((item) => resolveImageChoiceKey(item, shownImages));
+      objects.push({
+        ...base,
+        ...extra,
+        value: keys.join('|'),
       });
     } else if (fam === 'image_rating') {
       const rating = Number(answer);
-      (shownImages || []).forEach((img) => {
-        objects.push({
-          ...base,
-          ...extra,
-          item_key: imageKeyFromShown(img) || String(img),
-          value: Number.isNaN(rating) ? answer : rating,
-        });
+      // One row per trial: stimulus is in shown_*; answer is value only.
+      objects.push({
+        ...base,
+        ...extra,
+        value: Number.isNaN(rating) ? answer : rating,
       });
     } else if (fam === 'image_boolean') {
-      (shownImages || []).forEach((img) => {
-        objects.push({
-          ...base,
-          ...extra,
-          item_key: imageKeyFromShown(img) || String(img),
-          value: answer,
-          value_norm: normalizeBool(answer),
-        });
+      objects.push({
+        ...base,
+        ...extra,
+        value: answer,
+        value_norm: normalizeBool(answer),
       });
     } else if (fam === 'imagepicker') {
       const vals = Array.isArray(answer) ? answer : [answer];
@@ -407,10 +461,10 @@ function buildLongObjects(question, responses, surveyConfig) {
         objects.push({
           ...base,
           ...extra,
-          item_key: resolveImageChoiceKey(v, shownImages),
+          value: resolveImageChoiceKey(v, shownImages),
         });
       });
-    } else if (fam === 'slider') {
+    } else if (fam === 'slider' || fam === 'image_slider') {
       const dims = question.dimensions || [];
       const obj = (answer && typeof answer === 'object' && !Array.isArray(answer)) ? answer : {};
       dims.forEach((d) => {
@@ -433,7 +487,7 @@ function buildLongObjects(question, responses, surveyConfig) {
           });
         });
       }
-    } else if (fam === 'points') {
+    } else if (fam === 'points' || fam === 'image_points') {
       const labels = choiceLabelMap(question.choices);
       const obj = (answer && typeof answer === 'object' && !Array.isArray(answer)) ? answer : {};
       const keys = (question.choices || []).map((c) => (typeof c === 'object' ? c.value : c)).filter((k) => k != null);
@@ -477,15 +531,13 @@ function buildLongObjects(question, responses, surveyConfig) {
       }
     } else if (fam === 'annotation') {
       const ann = (answer && typeof answer === 'object') ? answer : null;
-      const img = ann?.image
-        ? imageKeyFromShown(ann.image)
-        : (shownImages?.[0] ? imageKeyFromShown(shownImages[0]) : '');
+      // Stimulus media is already in shown_*; rows carry annotation answer only.
       if (ann?.shapes?.length) {
         ann.shapes.forEach((shape) => {
           objects.push({
             ...base,
             ...extra,
-            item_key: img,
+            tool: inferShapeTool(shape),
             label: shape.label || '',
             annotation_json: JSON.stringify(shape),
           });
@@ -494,7 +546,7 @@ function buildLongObjects(question, responses, surveyConfig) {
         objects.push({
           ...base,
           ...extra,
-          item_key: img,
+          tool: '',
           label: '',
           annotation_json: JSON.stringify(ann || answer),
         });
@@ -582,7 +634,64 @@ function buildSummaryObjects(question, responses) {
       out.push(summaryRow(question, nResponses, unit, f.label, 'count', f.count, nResponses));
       out.push(summaryRow(question, nResponses, unit, f.label, 'pct', nResponses ? f.count / nResponses : 0, nResponses));
     });
-  } else if (fam === 'ranking') {
+  } else if (fam === 'image_matrix') {
+    // attribute_* = matrix row; unit_* = image only (no image__attr join keys).
+    const byUnit = {}; // `${img}||${attr}` → { img, attr, attrLabel, colCounts, nums }
+    const declaredCols = (question.columns || []).map((c) => (
+      typeof c === 'object' && c !== null ? String(c.value) : String(c)
+    )).filter(Boolean);
+
+    longObjs.forEach((r) => {
+      const img = shownKeysFromLongRow(r)[0] || '(no_media)';
+      const attr = String(r.row_key ?? '');
+      if (!attr) return;
+      const key = `${img}||${attr}`;
+      if (!byUnit[key]) {
+        byUnit[key] = {
+          img,
+          attr,
+          attrLabel: r.row_label || attr,
+          colCounts: {},
+          nums: [],
+        };
+      }
+      const col = String(r.column_key ?? r.value ?? '');
+      if (!col) return;
+      byUnit[key].colCounts[col] = (byUnit[key].colCounts[col] || 0) + 1;
+      const num = Number(col);
+      if (!Number.isNaN(num)) byUnit[key].nums.push(num);
+    });
+
+    Object.values(byUnit).forEach((block) => {
+      const total = Object.values(block.colCounts).reduce((s, v) => s + v, 0);
+      if (!total) return;
+      const { img, attr, attrLabel } = block;
+
+      if (block.nums.length === total) {
+        pushStats(out, question, nResponses, img, img, block.nums, attr, attrLabel);
+      } else {
+        out.push(summaryRow(question, nResponses, img, img, 'count', total, total, attr, attrLabel));
+      }
+
+      const cols = declaredCols.length
+        ? declaredCols
+        : Object.keys(block.colCounts).sort();
+      cols.forEach((col) => {
+        const c = block.colCounts[col] || 0;
+        out.push(summaryRow(
+          question,
+          nResponses,
+          img,
+          img,
+          `pct_${col}`,
+          total ? c / total : 0,
+          total,
+          attr,
+          attrLabel,
+        ));
+      });
+    });
+  } else if (fam === 'ranking' || fam === 'image_ranking') {
     if (type === 'ranking') {
       const rankPositions = {};
       const rankingLists = [];
@@ -671,11 +780,13 @@ function buildSummaryObjects(question, responses) {
   } else if (fam === 'image_rating') {
     const perImage = {};
     longObjs.forEach((r) => {
-      const key = r.item_key;
       const num = Number(r.value);
-      if (!key || Number.isNaN(num)) return;
-      if (!perImage[key]) perImage[key] = [];
-      perImage[key].push(num);
+      if (Number.isNaN(num)) return;
+      const keys = shownKeysFromLongRow(r);
+      (keys.length ? keys : ['(no_media)']).forEach((key) => {
+        if (!perImage[key]) perImage[key] = [];
+        perImage[key].push(num);
+      });
     });
     Object.entries(perImage).forEach(([key, nums]) => {
       pushStats(out, question, nResponses, key, key, nums);
@@ -683,11 +794,12 @@ function buildSummaryObjects(question, responses) {
   } else if (fam === 'image_boolean') {
     const perImage = {};
     longObjs.forEach((r) => {
-      const key = r.item_key;
-      if (!key) return;
-      if (!perImage[key]) perImage[key] = { yes: 0, no: 0 };
-      if (r.value_norm === 1 || r.value_norm === '1') perImage[key].yes += 1;
-      else perImage[key].no += 1;
+      const keys = shownKeysFromLongRow(r);
+      (keys.length ? keys : ['(no_media)']).forEach((key) => {
+        if (!perImage[key]) perImage[key] = { yes: 0, no: 0 };
+        if (r.value_norm === 1 || r.value_norm === '1') perImage[key].yes += 1;
+        else perImage[key].no += 1;
+      });
     });
     Object.entries(perImage).forEach(([key, { yes, no }]) => {
       const total = yes + no;
@@ -710,13 +822,44 @@ function buildSummaryObjects(question, responses) {
     });
     const freq = {};
     longObjs.forEach((r) => {
-      const k = r.item_key;
+      const k = r.value;
       if (!k) return;
       freq[k] = (freq[k] || 0) + 1;
     });
     Object.entries(freq).forEach(([k, count]) => {
       out.push(summaryRow(question, nResponses, k, k, 'count', count, nResponses));
       out.push(summaryRow(question, nResponses, k, k, 'pct', nResponses ? count / nResponses : 0, nResponses));
+    });
+  } else if (fam === 'image_slider') {
+    // attribute_* = slider dimension; unit_* = image only (no image__dim join keys).
+    const byUnit = {}; // `${img}||${attr}` → { img, attr, attrLabel, nums }
+    longObjs.forEach((r) => {
+      const img = shownKeysFromLongRow(r)[0] || '(no_media)';
+      const attr = String(r.dimension_id ?? '');
+      if (!attr) return;
+      const key = `${img}||${attr}`;
+      if (!byUnit[key]) {
+        byUnit[key] = {
+          img,
+          attr,
+          attrLabel: r.dimension_label || attr,
+          nums: [],
+        };
+      }
+      const num = Number(r.value);
+      if (!Number.isNaN(num)) byUnit[key].nums.push(num);
+    });
+    Object.values(byUnit).forEach((block) => {
+      pushStats(
+        out,
+        question,
+        nResponses,
+        block.img,
+        block.img,
+        block.nums,
+        block.attr,
+        block.attrLabel,
+      );
     });
   } else if (fam === 'slider') {
     const byDim = {};
@@ -729,6 +872,37 @@ function buildSummaryObjects(question, responses) {
     });
     Object.entries(byDim).forEach(([id, { label, nums }]) => {
       pushStats(out, question, nResponses, id, label, nums);
+    });
+  } else if (fam === 'image_points') {
+    // attribute_* = allocation choice; unit_* = image only (no image__choice join keys).
+    const byUnit = {}; // `${img}||${attr}` → { img, attr, attrLabel, nums }
+    longObjs.forEach((r) => {
+      const img = shownKeysFromLongRow(r)[0] || '(no_media)';
+      const attr = String(r.choice_key ?? '');
+      if (!attr) return;
+      const key = `${img}||${attr}`;
+      if (!byUnit[key]) {
+        byUnit[key] = {
+          img,
+          attr,
+          attrLabel: r.choice_label || attr,
+          nums: [],
+        };
+      }
+      const num = Number(r.points);
+      if (!Number.isNaN(num)) byUnit[key].nums.push(num);
+    });
+    Object.values(byUnit).forEach((block) => {
+      pushStats(
+        out,
+        question,
+        nResponses,
+        block.img,
+        block.img,
+        block.nums,
+        block.attr,
+        block.attrLabel,
+      );
     });
   } else if (fam === 'points') {
     const byChoice = {};
@@ -758,20 +932,62 @@ function buildSummaryObjects(question, responses) {
       else out.push(summaryRow(question, nResponses, id, id, 'count', vals.length, vals.length));
     });
   } else if (fam === 'annotation') {
-    const byLabel = {};
-    const byImage = {};
+    // Two dimensions: label and tool. unit_* = image (no join keys).
+    const byImgLabel = {}; // `${img}||${label}` → count
+    const byImgTool = {}; // `${img}||${tool}` → count
+    let shapeCount = 0;
+
     longObjs.forEach((r) => {
-      const label = r.label || '(unlabeled)';
-      byLabel[label] = (byLabel[label] || 0) + 1;
-      const img = r.item_key || 'unknown';
-      byImage[img] = (byImage[img] || 0) + 1;
+      let shape = null;
+      try {
+        shape = r.annotation_json ? JSON.parse(r.annotation_json) : null;
+      } catch {
+        shape = null;
+      }
+      const tool = normalizeAnnotationTool(r.tool) || (shape ? inferShapeTool(shape) : '');
+      const hasShape = !!(shape?.points?.length || tool || r.label);
+      if (!hasShape) return;
+      shapeCount += 1;
+      const img = shownKeysFromLongRow(r)[0] || '(no_media)';
+      const label = String(r.label || '').trim() || '(unlabeled)';
+      const labelKey = `${img}||${label}`;
+      byImgLabel[labelKey] = (byImgLabel[labelKey] || 0) + 1;
+      if (tool) {
+        const toolKey = `${img}||${tool}`;
+        byImgTool[toolKey] = (byImgTool[toolKey] || 0) + 1;
+      }
     });
-    out.push(summaryRow(question, nResponses, 'overall', 'overall', 'count', longObjs.length, nResponses));
-    Object.entries(byLabel).forEach(([label, count]) => {
-      out.push(summaryRow(question, nResponses, `label__${label}`, label, 'count', count, nResponses));
+
+    out.push(summaryRow(question, nResponses, 'overall', 'overall', 'count', shapeCount, nResponses));
+
+    Object.entries(byImgLabel).forEach(([key, count]) => {
+      const [img, label] = key.split('||');
+      out.push(summaryRow(
+        question,
+        nResponses,
+        img,
+        img,
+        'label_count',
+        count,
+        count,
+        label,
+        label,
+      ));
     });
-    Object.entries(byImage).forEach(([img, count]) => {
-      out.push(summaryRow(question, nResponses, `image__${img}`, img, 'count', count, nResponses));
+
+    Object.entries(byImgTool).forEach(([key, count]) => {
+      const [img, tool] = key.split('||');
+      out.push(summaryRow(
+        question,
+        nResponses,
+        img,
+        img,
+        'tool_count',
+        count,
+        count,
+        tool,
+        annotationToolLabel(tool),
+      ));
     });
   }
 
@@ -793,19 +1009,80 @@ export function buildQuestionSummaryCsv(question, responses) {
   return objectsToCsv(SUMMARY_HEADERS, objects);
 }
 
+function safeFileToken(raw) {
+  return String(raw || 'attr').replace(/[^\w.-]+/g, '_').replace(/^_|_$/g, '') || 'attr';
+}
+
 /**
  * @returns {{ path: string, content: string }[] | null}
  */
 export function buildQuestionExportFiles(question, responses, surveyConfig, { pathPrefix = 'questions' } = {}) {
   if (!question?.name || isDisplayOnly(question)) return null;
   const longCsv = buildQuestionLongCsv(question, responses, surveyConfig);
-  const summaryCsv = buildQuestionSummaryCsv(question, responses);
-  if (!longCsv && !summaryCsv) return null;
+  const summaryObjects = buildSummaryObjects(question, responses);
+  if (!longCsv && !summaryObjects.length) return null;
   const name = question.name;
-  return [
-    { path: `${pathPrefix}/${name}__long.csv`, content: longCsv || objectsToCsv(longHeadersForType(question.type), []) },
-    { path: `${pathPrefix}/${name}__summary.csv`, content: summaryCsv || objectsToCsv(SUMMARY_HEADERS, []) },
+  const files = [
+    {
+      path: `${pathPrefix}/${name}__long.csv`,
+      content: longCsv || objectsToCsv(longHeadersForType(question.type), []),
+    },
+    {
+      path: `${pathPrefix}/${name}__summary.csv`,
+      content: objectsToCsv(SUMMARY_HEADERS, summaryObjects),
+    },
   ];
+
+  // Image/media matrix, slider, point allocation: one summary "tab" file per attribute (unit = image only).
+  // Annotation: one file per label and per tool (unit = image only).
+  const fam = questionFamily(question.type);
+  if (fam === 'image_matrix' || fam === 'image_slider' || fam === 'image_points') {
+    const byAttr = new Map();
+    summaryObjects.forEach((row) => {
+      const ak = row.attribute_key;
+      if (!ak) return;
+      if (!byAttr.has(ak)) byAttr.set(ak, []);
+      byAttr.get(ak).push(row);
+    });
+    byAttr.forEach((rows, attrKey) => {
+      const label = rows[0]?.attribute_label || attrKey;
+      const token = safeFileToken(attrKey);
+      files.push({
+        path: `${pathPrefix}/${name}__summary__${token}.csv`,
+        content: objectsToCsv(SUMMARY_HEADERS, rows),
+        // hint for manifest consumers
+        attribute_key: attrKey,
+        attribute_label: label,
+      });
+    });
+  } else if (fam === 'annotation') {
+    const byDim = new Map(); // `${kind}||${attrKey}` → rows
+    summaryObjects.forEach((row) => {
+      const ak = row.attribute_key;
+      if (!ak) return;
+      let kind = null;
+      if (row.metric === 'label_count') kind = 'label';
+      else if (row.metric === 'tool_count') kind = 'tool';
+      if (!kind) return;
+      const mapKey = `${kind}||${ak}`;
+      if (!byDim.has(mapKey)) byDim.set(mapKey, []);
+      byDim.get(mapKey).push(row);
+    });
+    byDim.forEach((rows, mapKey) => {
+      const [kind, attrKey] = mapKey.split('||');
+      const label = rows[0]?.attribute_label || attrKey;
+      const token = safeFileToken(attrKey);
+      files.push({
+        path: `${pathPrefix}/${name}__summary__${kind}__${token}.csv`,
+        content: objectsToCsv(SUMMARY_HEADERS, rows),
+        attribute_key: attrKey,
+        attribute_label: label,
+        dimension: kind,
+      });
+    });
+  }
+
+  return files;
 }
 
 export function downloadQuestionExportZip(question, responses, surveyConfig) {
@@ -912,15 +1189,47 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     'references.bib         Bibliography (if available)',
     'manifest.json          Machine-readable export metadata',
     'questions/{name}__long.csv      Tidy long answers for one question',
-    'questions/{name}__summary.csv   Tidy summary metrics (unit × metric)',
+    'questions/{name}__summary.csv   All attributes together',
+    'questions/{name}__summary__{attribute}.csv',
+    '  → imagematrix / imageslidergroup / imagepointallocation (+ media*):',
+    '    one file per attribute tab (unit = image only)',
+    'questions/{name}__summary__label__{label}.csv',
+    'questions/{name}__summary__tool__{tool}.csv',
+    '  → imageannotation: one file per label and per drawing tool (unit = image only)',
     '',
     'Summary schema',
     '--------------',
-    'question_name, question_type, n_responses, unit_key, unit_label, metric, value, n',
+    SUMMARY_HEADERS.join(', '),
+    '',
+    '  attribute_key / attribute_label  → matrix row / slider dim / allocation choice /',
+    '                                    annotation label or tool (empty when N/A)',
+    '  unit_key / unit_label            → image or choice — not image__attr joins',
     '',
     'Long schema prefix (all question types)',
     '---------------------------------------',
     LONG_PREFIX.join(', '),
+    '',
+    'Long columns: shown_* = stimulus; extras = answer only',
+    '-------------------------------------------------------',
+    'shown_images / shown_media_set / shown_media_categories',
+    '  → what was displayed for that row/trial (filenames / set / category tags)',
+    '  Internal media_id keys are not exported (use shown_images for analysis).',
+    'choice: value, label',
+    'matrix (text): row_key, column_key, value',
+    'imagematrix / mediamatrix long: row/column cells + shown_images',
+    'imagematrix / mediamatrix summary: attribute_* = row; unit_* = image; metrics = count/mean/… + pct_<column>',
+    'imageslidergroup / mediaslidergroup long: dimension_id + value + shown_images',
+    'imageslidergroup / mediaslidergroup summary: attribute_* = dimension; unit_* = image; metrics = mean/sd/…',
+    'imagepointallocation / mediapointallocation long: choice_key + points + shown_images',
+    'imagepointallocation / mediapointallocation summary: attribute_* = choice; unit_* = image; metrics = mean/sd/…',
+    'text ranking: value, label  (pipe-ordered; label = choice text when set)',
+    'image/media ranking: value only  (pipe-ordered filenames; no separate image labels)',
+    'imagerating* / imageboolean*: value (and value_norm for boolean)',
+    'imagepicker*: value = chosen media key (options are in shown_*)',
+    'imageannotation long: tool, label, annotation_json (+ shown_images)',
+    'imageannotation summary: attribute_* = label or tool; unit_* = image;',
+    '  metrics = count (overall) + label_count + tool_count',
+    'pointallocation (text): choice_key, choice_label, points',
     '',
     'Encoding: UTF-8 with BOM. CSV fields RFC4180-escaped.',
   ];

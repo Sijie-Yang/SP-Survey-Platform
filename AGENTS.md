@@ -43,3 +43,7 @@ Pure modules live under `src/lib/designProtocol/` (mirrored for Workers in `work
 - Expose or log BYOK ciphertext/plaintext
 
 See `docs/agent-mcp.md` for the full tool catalog.
+
+## SP-Bench
+
+Platform-admin benchmark (not MCP). Schema `supabase/sp_bench.sql`, APIs under `/api/bench/*`, admin tab on `/admin-dashboard`, public page `/bench` behind `public_enabled`. See `docs/sp-bench.md`.

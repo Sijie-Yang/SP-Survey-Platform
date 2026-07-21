@@ -656,7 +656,7 @@ export default function SurveyApp() {
 
                 if (element.type === 'imageannotation') {
                   // SAM assist is intentionally disabled for live respondents —
-                  // annotation stays point / line / region / bbox only.
+                  // annotation stays point / line / polygon / bbox only.
                   element.enableSamAssist = false;
                 }
               }

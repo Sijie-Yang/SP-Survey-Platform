@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppBar, Toolbar, Typography, Button, Box, Container, Tooltip } from '@mui/material';
 import { GitHub, Star } from '@mui/icons-material';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { useGithubStars } from '../../lib/useGithubStars';
 import { useRegion } from '../../contexts/RegionContext';
 import RegionSwitcher from '../admin/RegionSwitcher';
+import { getBenchPublicStatus } from '../../lib/spBenchApi';
 
 export const GITHUB_REPO_URL = 'https://github.com/Sijie-Yang/SP-Survey';
 
@@ -31,6 +32,19 @@ export default function PublicHeader({
   const githubStars = useGithubStars();
   const { t } = useRegion();
   const isActive = (path) => location.pathname === path;
+  const [benchEnabled, setBenchEnabled] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getBenchPublicStatus()
+      .then((res) => {
+        if (!cancelled) setBenchEnabled(!!res.enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setBenchEnabled(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <AppBar
@@ -99,6 +113,16 @@ export default function PublicHeader({
           >
             {t.navLiveSurveys}
           </Button>
+          {benchEnabled && (
+            <Button
+              component={RouterLink}
+              to="/bench"
+              color={isActive('/bench') ? 'primary' : 'inherit'}
+              sx={{ fontWeight: isActive('/bench') ? 700 : 500 }}
+            >
+              {t.navSpBench || 'SP-Bench'}
+            </Button>
+          )}
           <RegionSwitcher variant="public" />
           <Tooltip title="GitHub repository">
             <Box

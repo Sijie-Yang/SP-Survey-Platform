@@ -6,7 +6,7 @@ import {
 } from '@mui/material';
 import {
   Search, Article, Dataset, DesignServices,
-  AutoAwesome, BarChart, CloudUpload, Share, Preview, Public, GitHub,
+  AutoAwesome, BarChart, CloudUpload, Share, Preview, Public, GitHub, EmojiEvents,
 } from '@mui/icons-material';
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
 import { useNavigate } from 'react-router-dom';
@@ -17,6 +17,7 @@ import PublicHeader, { PublicFooter, GITHUB_REPO_URL } from '../components/layou
 import { useGithubStars } from '../lib/useGithubStars';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
+import { getBenchPublic } from '../lib/spBenchApi';
 
 const CLAMP = (lines) => ({
   display: '-webkit-box',
@@ -53,12 +54,25 @@ export default function LandingPage() {
   const [loadingTemplates, setLoadingTemplates] = useState(true);
   const [search, setSearch] = useState('');
   const [onlineLiveCount, setOnlineLiveCount] = useState(0);
+  const [benchSummary, setBenchSummary] = useState(null);
 
   useEffect(() => {
     loadTemplates();
     listPublicLiveSurveys().then((rows) => {
       setOnlineLiveCount(rows.filter((r) => computeLiveStatus(r) === 'online').length);
     }).catch(() => setOnlineLiveCount(0));
+    getBenchPublic()
+      .then((res) => {
+        if (res?.enabled) {
+          const top = [...(res.leaderboard || [])]
+            .sort((a, b) => (b.overall_score ?? -Infinity) - (a.overall_score ?? -Infinity))
+            .slice(0, 3);
+          setBenchSummary({ settings: res.settings, top });
+        } else {
+          setBenchSummary(null);
+        }
+      })
+      .catch(() => setBenchSummary(null));
   }, []);
 
   async function loadTemplates() {
@@ -187,6 +201,60 @@ export default function LandingPage() {
           </Stack>
         </Container>
       </Box>
+
+      {benchSummary && (
+        <Container maxWidth="lg" sx={{ pt: 6, pb: 0 }}>
+          <Card
+            sx={{
+              borderRadius: 3,
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
+            }}
+          >
+            <CardContent sx={{ p: { xs: 2.5, md: 3.5 } }}>
+              <Stack
+                direction={{ xs: 'column', md: 'row' }}
+                spacing={3}
+                alignItems={{ md: 'center' }}
+                justifyContent="space-between"
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                    <EmojiEvents color="warning" />
+                    <Typography variant="h5" fontWeight={800}>
+                      {benchSummary.settings?.title || t.navSpBench || 'SP-Bench'}
+                    </Typography>
+                    <Chip size="small" color="primary" label={benchSummary.settings?.method_version || 'v1'} />
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, maxWidth: 720 }}>
+                    {benchSummary.settings?.landing_blurb
+                      || benchSummary.settings?.subtitle
+                      || t.benchLandingFallback}
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    {benchSummary.top.map((row, idx) => (
+                      <Chip
+                        key={row.run_id || idx}
+                        label={`#${idx + 1} ${row.model_name}${row.overall_score != null ? ` · ${Number(row.overall_score).toFixed(3)}` : ''}`}
+                        variant="outlined"
+                      />
+                    ))}
+                    {!benchSummary.top.length && (
+                      <Typography variant="caption" color="text.secondary">
+                        {t.benchNoResultsYet || 'Leaderboard coming soon'}
+                      </Typography>
+                    )}
+                  </Stack>
+                </Box>
+                <Button variant="contained" size="large" onClick={() => navigate('/bench')}>
+                  {t.benchViewLeaderboard || 'View leaderboard'}
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Container>
+      )}
 
       <Container maxWidth="lg" sx={{ py: 8 }}>
         <Typography variant="h4" fontWeight={700} textAlign="center" sx={{ mb: 5 }}>

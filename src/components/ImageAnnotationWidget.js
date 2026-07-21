@@ -4,11 +4,20 @@ import {
 } from '@mui/material';
 import { Check, Close } from '@mui/icons-material';
 import { runSam3, loadMaskUrlToCanvas, maskCanvasToPolygon } from '../lib/falInference';
+import {
+  inferShapeTool,
+  isPolygonTool,
+  normalizeAllowedTools,
+  normalizeAnnotationTool,
+} from '../lib/annotationTools';
+
+export { inferShapeTool, normalizeAnnotationTool, annotationToolLabel } from '../lib/annotationTools';
 
 const TOOL_COLORS = {
   point: '#e53935',
   line: '#1e88e5',
-  region: '#43a047',
+  polygon: '#43a047',
+  region: '#43a047', // legacy alias color
   bbox: '#fb8c00',
 };
 
@@ -19,14 +28,6 @@ const LABEL_PALETTE = [
 
 export function newShapeId() {
   return `shp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function inferShapeTool(shape) {
-  if (shape?.tool) return shape.tool;
-  const n = shape?.points?.length || 0;
-  if (n >= 3) return 'region';
-  if (n === 2) return 'line';
-  return 'point';
 }
 
 export function colorForLabel(label, fallback) {
@@ -113,7 +114,7 @@ export function drawAnnotationShape(ctx, shape, w, h, {
     ctx.stroke();
     pts.forEach((p) => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
     if (showLabel && shape.label) drawLabelTag(ctx, shape.label, pts[0].x, pts[0].y - 4, baseColor);
-  } else if (tool === 'region' && pts.length >= 2) {
+  } else if (isPolygonTool(tool) && pts.length >= 2) {
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
     pts.slice(1).forEach((p) => ctx.lineTo(p.x, p.y));
@@ -194,7 +195,7 @@ function hitTestShape(shape, pt, w, h, thresholdPx = 8) {
     }
     return false;
   }
-  if (tool === 'region' && pts.length >= 3) {
+  if (isPolygonTool(tool) && pts.length >= 3) {
     return pointInPolygon({ x: nPt.x * w, y: nPt.y * h }, pts);
   }
   return false;
@@ -264,10 +265,11 @@ function boxToPoints(box) {
 
 function draftReady(draft) {
   if (!draft?.points?.length) return false;
-  if (draft.tool === 'point') return draft.points.length >= 1;
-  if (draft.tool === 'line') return draft.points.length >= 2;
-  if (draft.tool === 'region') return draft.points.length >= 3;
-  if (draft.tool === 'bbox') return draft.points.length >= 2;
+  const t = normalizeAnnotationTool(draft.tool);
+  if (t === 'point') return draft.points.length >= 1;
+  if (t === 'line') return draft.points.length >= 2;
+  if (t === 'polygon') return draft.points.length >= 3;
+  if (t === 'bbox') return draft.points.length >= 2;
   return false;
 }
 
@@ -286,7 +288,7 @@ export default function ImageAnnotationCanvas({
   imageUrl,
   value,
   onChange,
-  allowedTools = ['point', 'line', 'region'],
+  allowedTools = ['point', 'line', 'polygon'],
   annotationLabels = [],
   readOnly = false,
   minAnnotations = 0,
@@ -299,7 +301,7 @@ export default function ImageAnnotationCanvas({
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const imgRef = useRef(null);
-  const tools = allowedTools?.length ? allowedTools : ['point', 'line', 'region'];
+  const tools = normalizeAllowedTools(allowedTools);
   const [tool, setTool] = useState(tools[0] || 'point');
   const [draft, setDraft] = useState(null); // { tool, points } | null
   const [drag, setDrag] = useState(null); // { mode, index?, handle?, startPt, origPoints, moved }
@@ -358,7 +360,7 @@ export default function ImageAnnotationCanvas({
     if (maxAnnotations > 0 && shapesRef.current.length >= maxAnnotations) return;
     const shape = {
       id: newShapeId(),
-      tool: d.tool,
+      tool: normalizeAnnotationTool(d.tool) || d.tool,
       points: d.points,
       label: activeLabel || null,
     };
@@ -465,7 +467,7 @@ export default function ImageAnnotationCanvas({
   };
 
   const switchTool = (next) => {
-    setTool(next);
+    setTool(normalizeAnnotationTool(next) || next);
     setDraft(null);
     setDrag(null);
   };
@@ -473,7 +475,7 @@ export default function ImageAnnotationCanvas({
   const putSamPolygonInDraft = (poly) => {
     if (!poly?.length) return;
     setSelectedId(null);
-    setDraft({ tool: 'region', points: poly });
+    setDraft({ tool: 'polygon', points: poly });
     setDrag(null);
   };
 
@@ -586,14 +588,16 @@ export default function ImageAnnotationCanvas({
         return; // must confirm/cancel
       }
 
-      if (d.tool === 'point' || d.tool === 'line' || d.tool === 'region') {
+      const draftTool = normalizeAnnotationTool(d.tool);
+      if (draftTool === 'point' || draftTool === 'line' || draftTool === 'polygon') {
         const vi = hitTestVertex(d, pt, w, h);
         if (vi >= 0) {
           setDrag({ mode: 'vertex', index: vi, startPt: pt, origPoints: d.points.map((p) => ({ ...p })), moved: false });
           canvasRef.current?.setPointerCapture?.(e.pointerId);
           return;
         }
-        if ((d.tool === 'line' || d.tool === 'region') && toolRef.current === d.tool) {
+        if ((draftTool === 'line' || draftTool === 'polygon')
+          && normalizeAnnotationTool(toolRef.current) === draftTool) {
           setDrag({ mode: 'pending-add', startPt: pt, origPoints: d.points.map((p) => ({ ...p })), moved: false });
           canvasRef.current?.setPointerCapture?.(e.pointerId);
           return;
@@ -611,10 +615,10 @@ export default function ImageAnnotationCanvas({
     setSelectedId(null);
     if (maxAnnotations > 0 && shapesRef.current.length >= maxAnnotations) return;
 
-    const t = toolRef.current;
+    const t = normalizeAnnotationTool(toolRef.current);
     if (t === 'point') {
       setDraft({ tool: 'point', points: [pt] });
-    } else if (t === 'line' || t === 'region') {
+    } else if (t === 'line' || t === 'polygon') {
       setDraft({ tool: t, points: [pt] });
     } else if (t === 'bbox') {
       setDraft({ tool: 'bbox', points: [pt, pt] });
@@ -786,16 +790,18 @@ export default function ImageAnnotationCanvas({
   const canConfirm = draftReady(draft);
 
   const toolHint = (() => {
+    const draftTool = normalizeAnnotationTool(draft?.tool);
+    const activeTool = normalizeAnnotationTool(tool);
     if (draft) {
-      if (draft.tool === 'line') return 'Click to add more points · drag vertices to edit · ✓ confirm · ✕ discard';
-      if (draft.tool === 'region') return 'Click to add vertices · drag to edit · ✓ confirm (≥3) · ✕ discard';
-      if (draft.tool === 'bbox') return 'Drag body to move · handles to resize · ✓ confirm · ✕ discard';
-      if (draft.tool === 'point') return 'Drag to adjust · ✓ confirm · ✕ discard';
+      if (draftTool === 'line') return 'Click to add more points · drag vertices to edit · ✓ confirm · ✕ discard';
+      if (draftTool === 'polygon') return 'Click to add vertices · drag to edit · ✓ confirm (≥3) · ✕ discard';
+      if (draftTool === 'bbox') return 'Drag body to move · handles to resize · ✓ confirm · ✕ discard';
+      if (draftTool === 'point') return 'Drag to adjust · ✓ confirm · ✕ discard';
     }
-    if (tool === 'point') return 'Click to place a point, then ✓ to confirm';
-    if (tool === 'line') return 'Click to add polyline points, then ✓ to confirm (Esc cancels)';
-    if (tool === 'region') return 'Click to add polygon vertices, then ✓ to confirm (no double-click)';
-    if (tool === 'bbox') return 'Drag to draw a box, then ✓ to confirm';
+    if (activeTool === 'point') return 'Click to place a point, then ✓ to confirm';
+    if (activeTool === 'line') return 'Click to add polyline points, then ✓ to confirm (Esc cancels)';
+    if (activeTool === 'polygon') return 'Click to add polygon vertices, then ✓ to confirm (no double-click)';
+    if (activeTool === 'bbox') return 'Drag to draw a box, then ✓ to confirm';
     return '';
   })();
 
@@ -827,8 +833,8 @@ export default function ImageAnnotationCanvas({
             {tools.includes('line') && (
               <Button size="small" variant={tool === 'line' ? 'contained' : 'outlined'} onClick={() => switchTool('line')}>Line</Button>
             )}
-            {tools.includes('region') && (
-              <Button size="small" variant={tool === 'region' ? 'contained' : 'outlined'} onClick={() => switchTool('region')}>Region</Button>
+            {tools.includes('polygon') && (
+              <Button size="small" variant={tool === 'polygon' ? 'contained' : 'outlined'} onClick={() => switchTool('polygon')}>Polygon</Button>
             )}
             {tools.includes('bbox') && (
               <Button size="small" variant={tool === 'bbox' ? 'contained' : 'outlined'} onClick={() => switchTool('bbox')}>Box</Button>
@@ -1010,9 +1016,16 @@ export default function ImageAnnotationCanvas({
   );
 }
 /** Overlay multiple participants' annotations on one image (for ResultsAnalysis). */
-export function AnnotationOverlay({ imageUrl, annotations, width = 500, labelFilter = null }) {
+export function AnnotationOverlay({
+  imageUrl,
+  annotations,
+  width = 500,
+  labelFilter = null,
+  toolFilter = null,
+}) {
   const canvasRef = useRef(null);
   const PARTICIPANT_COLORS = ['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa', '#00acc1'];
+  const toolFilterNorm = toolFilter ? normalizeAnnotationTool(toolFilter) : '';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1024,6 +1037,7 @@ export function AnnotationOverlay({ imageUrl, annotations, width = 500, labelFil
         const color = PARTICIPANT_COLORS[pi % PARTICIPANT_COLORS.length];
         (ann.shapes || []).forEach((shape) => {
           if (labelFilter && shape.label !== labelFilter) return;
+          if (toolFilterNorm && inferShapeTool(shape) !== toolFilterNorm) return;
           drawAnnotationShape(ctx, shape, w, h, {
             color: shape.label ? colorForLabel(shape.label, color) : color,
             alpha: 0.75,
@@ -1069,7 +1083,7 @@ export function AnnotationOverlay({ imageUrl, annotations, width = 500, labelFil
     tryLoad(true);
 
     return () => { cancelled = true; };
-  }, [imageUrl, annotations, width, labelFilter]);
+  }, [imageUrl, annotations, width, labelFilter, toolFilterNorm]);
 
   return <canvas ref={canvasRef} style={{ maxWidth: '100%', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)' }} />;
 }

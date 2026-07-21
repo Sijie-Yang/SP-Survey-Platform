@@ -29,6 +29,7 @@ import {
   questionUnitHasAnswer,
 } from '../lib/trialNavigation';
 import { resolveQuestionImageChoices } from '../lib/questionImageChoices';
+import { normalizeAllowedTools } from '../lib/annotationTools';
 
 /** Restore multi-trial drafts without leaving {trials} on question.value (breaks widgets). */
 function ingestTrialsValue(question, newValue, toFlat) {
@@ -1015,7 +1016,7 @@ export function registerImageAnnotationWidget() {
   Serializer.addClass('imageannotation', [
     ...MEDIA_PROPS.filter((p) => p.name !== 'mediaUrl' && p.name !== 'mediaName'),
     { name: 'annotationImageUrl', category: 'general' },
-    { name: 'allowedTools', default: ['point', 'line', 'region', 'bbox'], category: 'general' },
+    { name: 'allowedTools', default: ['point', 'line', 'polygon', 'bbox'], category: 'general' },
     { name: 'annotationLabels', default: [], category: 'general' },
     { name: 'minAnnotations:number', default: 0, category: 'general' },
     { name: 'maxAnnotations:number', default: 50, category: 'general' },
@@ -1029,7 +1030,7 @@ export function registerImageAnnotationWidget() {
     return React.createElement(ImageAnnotationCanvas, {
       imageUrl: url,
       value: q.value,
-      allowedTools: q.allowedTools || ['point', 'line', 'region', 'bbox'],
+      allowedTools: normalizeAllowedTools(q.allowedTools || ['point', 'line', 'polygon', 'bbox']),
       annotationLabels: q.annotationLabels || [],
       minAnnotations: q.minAnnotations || 0,
       maxAnnotations: q.maxAnnotations ?? 50,
