@@ -975,8 +975,18 @@ export async function resolveSkillQuestions(surveyJson) {
     if (!page.elements) continue;
     for (const el of page.elements) {
       if (el.type !== 'skillquestion' || !el.skillId) continue;
-      let skill = await getSkillById(el.skillId);
-      if (!skill) skill = skillFromPreset(el.skillId);
+      // Prefer presets first (sync) so live surveys don't wait on Supabase for stock skills.
+      let skill = skillFromPreset(el.skillId);
+      if (!skill) {
+        try {
+          skill = await Promise.race([
+            getSkillById(el.skillId),
+            new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+          ]);
+        } catch {
+          skill = null;
+        }
+      }
       if (skill) {
         el.skillHtml = skill.sourceHtml || el.skillHtml;
         const merged = { ...(skill.defaultConfig || {}), ...(el.skillConfig || {}) };

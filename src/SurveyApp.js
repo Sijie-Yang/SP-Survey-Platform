@@ -37,6 +37,17 @@ import SurveyProgressBridge, {
   normalizeShowProgressBar,
 } from './components/SurveyProgressBridge';
 
+/** Fail-open if Supabase / network stalls (keeps Live Survey from hanging on one RPC). */
+function withTimeout(promise, ms, fallback) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(fallback), ms);
+    }),
+  ]);
+}
+
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -314,7 +325,11 @@ export default function SurveyApp() {
 
       // Live Surveys approved-window gate (projects without a listing stay open by link)
       setLoadingMessage('Checking survey availability…');
-      const liveAccess = await getProjectLiveAccess(projectId);
+      const liveAccess = await withTimeout(
+        getProjectLiveAccess(projectId),
+        8000,
+        { gated: false, allowed: true, listing: null, phase: 'open' },
+      );
       if (liveAccess.gated && !liveAccess.allowed) {
         const phase = liveAccess.phase;
         const windowText = liveAccess.listing
@@ -334,8 +349,8 @@ export default function SurveyApp() {
       // Response quota gate
       const responseQuota = Number(adminConfig?.responseQuota) || 0;
       if (responseQuota > 0) {
-        setLoadingMessage('Checking survey availability…');
-        const currentCount = await countProjectResponses(projectId);
+        setLoadingMessage('Checking response quota…');
+        const currentCount = await withTimeout(countProjectResponses(projectId), 8000, null);
         if (currentCount != null && currentCount >= responseQuota) {
           setQuotaClosed(true);
           setSurveyPhase('closed');
@@ -346,7 +361,8 @@ export default function SurveyApp() {
       setQuotaClosed(false);
 
       // Pair stats for adaptive/balanced pairing (best-effort)
-      pairStatsRef.current = await fetchPairStats(projectId);
+      setLoadingMessage('Preparing questions and media…');
+      pairStatsRef.current = await withTimeout(fetchPairStats(projectId), 8000, null);
       
       // Build runtime Supabase config from project sources.
       // Priority: project.supabaseConfig (legacy/system status) -> imageDatasetConfig (current UI flow)
@@ -402,7 +418,33 @@ export default function SurveyApp() {
         // Directly use admin configuration (already in standard SurveyJS format)
         // Use deep copy to avoid modifying the original config
         finalSurveyJson = JSON.parse(JSON.stringify(adminConfig));
+        setLoadingMessage('Resolving interactive skills…');
         await resolveSkillQuestions(finalSurveyJson);
+
+        // Same as Admin Preview: project Media Dataset, else platform preview media library.
+        let mediaPool = Array.isArray(projectData?.preloadedImages)
+          ? projectData.preloadedImages.filter(Boolean)
+          : [];
+        let fromPreviewLibrary = false;
+        if (!mediaPool.length) {
+          setLoadingMessage('Loading preview media library…');
+          try {
+            const { listPreviewMedia } = await import('./lib/previewMediaLibrary');
+            const preview = await withTimeout(listPreviewMedia(), 15000, []);
+            if (Array.isArray(preview) && preview.length) {
+              mediaPool = preview;
+              fromPreviewLibrary = true;
+              console.log(`📦 Live survey: using platform preview media library (${mediaPool.length} files)`);
+            }
+          } catch (err) {
+            console.warn('Preview media library unavailable for live survey:', err?.message || err);
+          }
+        }
+        setLoadingMessage(
+          mediaPool.length
+            ? (fromPreviewLibrary ? 'Assigning preview media…' : 'Assigning project media…')
+            : 'Preparing survey…',
+        );
         
         // Process image questions and convert imageranking to ranking for SurveyJS
         if (finalSurveyJson.pages) {
@@ -454,7 +496,7 @@ export default function SurveyApp() {
                   console.log(`✅ Skipping image loading for ${element.type} question "${element.name}" - using manually selected images (${element.choices.length} images)`);
                 }
 
-                if (isManualMode && applyCuratedMediaIfNeeded(element, projectData?.preloadedImages || [])) {
+                if (isManualMode && applyCuratedMediaIfNeeded(element, mediaPool)) {
                   console.log(`✅ Applied curated media for ${element.type} question "${element.name}"`);
                 }
                 
@@ -464,10 +506,13 @@ export default function SurveyApp() {
                     let result;
                     const elementTrialCount = getTrialCount(element);
                     
-                    // PRIORITY 1: Check if project has preloaded images
-                    if (projectData?.preloadedImages && projectData.preloadedImages.length > 0) {
-                      console.log(`📦 Using preloaded media from project (${projectData.preloadedImages.length} available)`);
-                      const pool = filterPoolForQuestion(projectData.preloadedImages, element);
+                    // PRIORITY 1: Project media, else platform preview library (same as Admin Preview)
+                    if (mediaPool.length > 0) {
+                      console.log(
+                        `📦 Using media pool (${mediaPool.length} available`
+                        + `${fromPreviewLibrary ? ', preview library' : ', project'})`,
+                      );
+                      const pool = filterPoolForQuestion(mediaPool, element);
                       const folderTags = resolveMediaFolderTags(projectData, projectData?.config);
 
                       if (elementTrialCount > 1) {
@@ -524,9 +569,8 @@ export default function SurveyApp() {
                       console.log(`✅ Selected ${selectedImages.length} media file(s) from preloaded pool${assignment.groupId ? ` (group: ${assignment.groupId})` : ''}${assignment.categories?.length ? ` (categories: ${assignment.categories.join(', ')})` : ''}`);
                       }
                     }
-                    // PRIORITY 2: Use global imageDatasetConfig if available
+                    // PRIORITY 2: Hugging Face dataset (optional; never block survey forever)
                     else if (projectData?.imageDatasetConfig?.enabled && projectData.imageDatasetConfig.datasetName) {
-                      // Load from Hugging Face using global config
                       const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 Fetching ${imageCount} images from Hugging Face dataset (global config): ${projectData.imageDatasetConfig.datasetName}`);
@@ -534,8 +578,12 @@ export default function SurveyApp() {
                       const { huggingFaceToken, datasetName } = projectData.imageDatasetConfig;
                       
                       if (datasetName) {
-                        result = await getRandomImagesFromHuggingFace(huggingFaceToken, datasetName, imageCount);
-                        console.log(`✅ Successfully loaded ${result?.images?.length || 0} images from Hugging Face`);
+                        result = await withTimeout(
+                          getRandomImagesFromHuggingFace(huggingFaceToken, datasetName, imageCount),
+                          12000,
+                          { success: false, images: [] },
+                        );
+                        console.log(`✅ Hugging Face returned ${result?.images?.length || 0} image(s)`);
                       } else {
                         console.warn(`Hugging Face dataset name missing for question: ${element.name}`);
                         continue;
@@ -543,7 +591,6 @@ export default function SurveyApp() {
                     }
                     // PRIORITY 3: Legacy - element-specific config (kept for backward compatibility)
                     else if (element.imageSource === 'huggingface' && element.huggingFaceConfig) {
-                      // Load from Hugging Face using element config (deprecated)
                       const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 [Legacy] Fetching ${imageCount} images from element config: ${element.huggingFaceConfig.datasetName}`);
@@ -551,8 +598,12 @@ export default function SurveyApp() {
                       const { huggingFaceToken, datasetName } = element.huggingFaceConfig;
                       
                       if (datasetName) {
-                        result = await getRandomImagesFromHuggingFace(huggingFaceToken, datasetName, imageCount);
-                        console.log(`✅ Successfully loaded ${result?.images?.length || 0} images from Hugging Face`);
+                        result = await withTimeout(
+                          getRandomImagesFromHuggingFace(huggingFaceToken, datasetName, imageCount),
+                          12000,
+                          { success: false, images: [] },
+                        );
+                        console.log(`✅ Hugging Face returned ${result?.images?.length || 0} image(s)`);
                       } else {
                         console.warn(`Hugging Face dataset name missing for question: ${element.name}`);
                         continue;
