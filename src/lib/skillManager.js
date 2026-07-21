@@ -98,6 +98,12 @@ export async function saveSkill(skill) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
+  const { prepareSkillForSave } = await import('./skillHtmlValidate');
+  const prepared = prepareSkillForSave(skill);
+  if (!prepared.ok) {
+    throw new Error(prepared.errors.join(' '));
+  }
+
   const existing = skill.id ? await getSkillById(skill.id) : null;
   if (existing && existing.user_id && existing.user_id !== user.id) {
     throw new Error('Cannot edit another user\'s skill');
@@ -106,12 +112,12 @@ export async function saveSkill(skill) {
   const id = skill.id || `skill_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   const row = {
     id,
-    name: skill.name || 'Untitled Skill',
-    description: skill.description || '',
-    source_html: skill.sourceHtml || '',
-    config_schema: skill.configSchema || [],
-    default_config: skill.defaultConfig || {},
-    result_schema: skill.resultSchema || [],
+    name: prepared.skill.name || skill.name || 'Untitled Skill',
+    description: prepared.skill.description || skill.description || '',
+    source_html: prepared.skill.sourceHtml || '',
+    config_schema: prepared.skill.configSchema || [],
+    default_config: prepared.skill.defaultConfig || {},
+    result_schema: prepared.skill.resultSchema || [],
     user_id: user.id,
     submitter_email: user.email || null,
     is_approved: existing?.is_approved ?? false,
@@ -122,7 +128,11 @@ export async function saveSkill(skill) {
 
   const { error } = await supabase.from('question_skills').upsert(row, { onConflict: 'id' });
   if (error) throw error;
-  return { success: true, skill: rowToSkill(row) };
+  return {
+    success: true,
+    skill: rowToSkill(row),
+    warnings: prepared.warnings,
+  };
 }
 
 export async function submitSkillForReview(id) {

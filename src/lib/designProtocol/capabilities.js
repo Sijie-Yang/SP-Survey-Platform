@@ -173,7 +173,10 @@ export const DESIGN_CAPABILITIES = {
       },
     },
     skillquestion: {
-      note: 'Interactive skills. Required: type, name, title, skillId (preset_* OR id from skill_list/skill_save), skillConfig, imageCount matching mediaCount, media sampling defaults. Do NOT set skillHtml on the question — store HTML via skill_save.',
+      note:
+        'Interactive skills. Prefer preset_* first. Custom HTML only via skill_save (never skillHtml on the draft). '
+        + 'skill_save HTML MUST use SPSkill.setAnswer + spskill-init; one task per skill; '
+        + 'configSchema/resultSchema as [{key,label,type},...]. Required on question: skillId, skillConfig, imageCount.',
       skillPresets: [
         {
           skillId: 'preset_image_preference_slider',

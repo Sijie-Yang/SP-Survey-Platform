@@ -3,6 +3,7 @@
  */
 
 import { supabaseRest } from '../supabaseUserClient.mjs';
+import { prepareSkillForSave } from './skillHtmlValidate.mjs';
 
 function rowToSkill(row, { includeHtml = false } = {}) {
   const skill = {
@@ -108,9 +109,16 @@ export async function saveSkill(env, ctx, body = {}) {
   if (!name) {
     throw Object.assign(new Error('name is required'), { status: 400 });
   }
-  const sourceHtml = String(body.sourceHtml || body.source_html || '');
-  if (!sourceHtml.trim()) {
-    throw Object.assign(new Error('sourceHtml is required for a custom skill'), { status: 400 });
+  const prepared = prepareSkillForSave({
+    ...body,
+    name,
+    sourceHtml: body.sourceHtml || body.source_html || '',
+    configSchema: body.configSchema ?? body.config_schema,
+    resultSchema: body.resultSchema ?? body.result_schema,
+    defaultConfig: body.defaultConfig ?? body.default_config,
+  });
+  if (!prepared.ok) {
+    throw Object.assign(new Error(prepared.errors.join(' ')), { status: 400 });
   }
 
   let id = body.id ? String(body.id).trim() : '';
@@ -136,13 +144,17 @@ export async function saveSkill(env, ctx, body = {}) {
   const row = {
     id,
     name,
-    description: String(body.description || '').trim(),
-    source_html: sourceHtml,
-    config_schema: Array.isArray(body.configSchema) ? body.configSchema : (existing?.config_schema || []),
-    default_config: (body.defaultConfig && typeof body.defaultConfig === 'object')
-      ? body.defaultConfig
+    description: String(body.description || prepared.skill.description || '').trim(),
+    source_html: prepared.skill.sourceHtml,
+    config_schema: prepared.skill.configSchema.length
+      ? prepared.skill.configSchema
+      : (existing?.config_schema || []),
+    default_config: Object.keys(prepared.skill.defaultConfig || {}).length
+      ? prepared.skill.defaultConfig
       : (existing?.default_config || {}),
-    result_schema: Array.isArray(body.resultSchema) ? body.resultSchema : (existing?.result_schema || []),
+    result_schema: prepared.skill.resultSchema.length
+      ? prepared.skill.resultSchema
+      : (existing?.result_schema || []),
     user_id: userId,
     is_approved: existing?.is_approved ?? false,
     submitted_at: existing?.submitted_at ?? null,
@@ -162,6 +174,7 @@ export async function saveSkill(env, ctx, body = {}) {
   return {
     success: true,
     skill: { ...rowToSkill(row, { includeHtml: true }), scope: 'mine' },
+    warnings: prepared.warnings,
     message: 'Saved to your private skill library (not submitted for public review).',
   };
 }

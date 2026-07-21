@@ -354,7 +354,13 @@ const TOOLS = [
   },
   {
     name: 'skill_save',
-    description: 'Create or update a private skill (sourceHtml allowed). Requires confirm:true. Does not submit for public review.',
+    description:
+      'Create or update a private skill. Requires confirm:true. '
+      + 'HARD RULES (save is rejected if violated): sourceHtml MUST call SPSkill.setAnswer(...); '
+      + 'MUST use spskill-init or SPSkill.getConfig/getImages; NEVER parent.postMessage skill-result aliases; '
+      + 'ONE focused task per skill (do not pack attention_map+route_trace+budget_lab+… into one HTML); '
+      + 'configSchema/resultSchema must be arrays of {key,label,type} objects. '
+      + 'Prefer preset_* skillquestion when a preset fits. Does not submit for public review.',
     inputSchema: {
       type: 'object',
       properties: {

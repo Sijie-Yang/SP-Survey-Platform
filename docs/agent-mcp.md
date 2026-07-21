@@ -105,6 +105,7 @@ npm run deploy
 
 - `skill_list`, `skill_get`, `skill_save` (`confirm: true`) — private library; no auto public review
 - Survey questions: `skillquestion` + `skillId` (`preset_*` or library id). Never put `skillHtml` on the draft.
+- `skill_save` is **rejected** unless `sourceHtml` calls `SPSkill.setAnswer(...)`. One task per skill; no `skill-result` postMessage protocols. Prefer `preset_*` when a preset fits.
 
 **Results** (`results:read`)
 

@@ -18,7 +18,11 @@ const SKILL_CONTEXT_KEYS = new Set([
 export function isSkillContextKey(key) {
   if (!key || typeof key !== 'string') return false;
   if (SKILL_CONTEXT_KEYS.has(key)) return true;
-  return /url|urls|name|mode|size|shown|poster|media/i.test(key);
+  // Do NOT treat research fields like `mode` (task mode) as context — only media carriers.
+  if (/(Url|URL|Urls|URLs|posterUrl|Poster)$/.test(key)) return true;
+  if (/^(image|video|audio)[A-Z]/.test(key) && /url|Url|URL/.test(key)) return true;
+  if (/^shown/i.test(key) && /url|image|media/i.test(key)) return true;
+  return false;
 }
 
 /** Remove media-context fields from a skill answer — measurements only. */

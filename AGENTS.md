@@ -9,7 +9,7 @@ This repository hosts the multi-user SP-Survey Platform. External agents (Codex,
 3. Always `survey_capabilities` then `survey_get_draft` (retain `draftUpdatedAt`)
 4. Prefer `survey_apply_operations` over full `survey_replace_draft`
 5. Media: `media_upload` / `media_list` / `survey_update_media_dataset` (folder tags for set/category)
-6. Skills: `skill_list` / `skill_save` then `skillquestion` with that `skillId` (or `preset_*`) — never put `skillHtml` on the question
+6. Skills: prefer `preset_*` on `skillquestion`. Custom: `skill_save` then `skillId` — never put `skillHtml` on the question. `skill_save` HTML **must** call `SPSkill.setAnswer` (no `skill-result` postMessage); one task per skill
 7. Results: `survey_list_responses` / `survey_export_responses` / `survey_results_summary` (`results:read`)
 8. Never send API keys, HuggingFace tokens, fal keys, or Supabase credentials
 9. Saves update the live share URL immediately

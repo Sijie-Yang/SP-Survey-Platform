@@ -838,6 +838,23 @@ Keep HTML self-contained (inline styles OK).`;
       return res.status(500).json({ success: false, error: 'AI did not return valid skill HTML' });
     }
 
+    const html = String(parsed.skill.sourceHtml || '');
+    if (!/SPSkill\s*\.\s*setAnswer\s*\(/.test(html)) {
+      return res.status(422).json({
+        success: false,
+        error: 'Generated skill must call SPSkill.setAnswer(...). Do not use parent.postMessage skill-result protocols.',
+        hint: 'Regenerate with spskill-init + SPSkill.setAnswer; one focused task per skill.',
+      });
+    }
+    const normSchema = (arr, defaultType = 'string') => (Array.isArray(arr) ? arr : []).map((item) => {
+      if (typeof item === 'string' && item.trim()) {
+        return { key: item.trim(), label: item.trim(), type: defaultType };
+      }
+      return item;
+    }).filter((item) => item && item.key);
+    parsed.skill.configSchema = normSchema(parsed.skill.configSchema);
+    parsed.skill.resultSchema = normSchema(parsed.skill.resultSchema, 'text');
+
     res.json({
       success: true,
       message: parsed.message || 'Skill generated',

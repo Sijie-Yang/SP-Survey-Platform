@@ -14,6 +14,7 @@ import {
 import { SliderGroupContent, PointAllocationContent, ImageSliderGroupContent, ImagePointAllocationContent } from './ResponseWidgets';
 import ImageAnnotationCanvas from './ImageAnnotationWidget';
 import SkillQuestionFrame from './SkillQuestionWidget';
+import { summarizeSkillAnswerOneLine } from '../lib/skillAnswerSummary';
 import { readSkillQuestionFields } from '../lib/skillPostMessage';
 import { inferMediaType } from '../lib/mediaUtils';
 import { resolveQuestionMediaItems } from '../lib/surveyMediaInjection';
@@ -1234,18 +1235,26 @@ export function registerSkillQuestionWidget() {
     { name: 'excludePreviouslyUsedImages:boolean', default: true, category: 'general' },
   ], () => new (class extends Question {
     getType() { return 'skillquestion'; }
+    getDisplayValue(_keysAsText, val) {
+      const v = val !== undefined ? val : this.value;
+      return summarizeSkillAnswerOneLine(v);
+    }
   })(), 'question');
 
   ReactQuestionFactory.Instance.registerQuestion('skillquestion', (props) => {
     const q = props.question;
     const { config, images, value } = readSkillQuestionFields(q);
+    const readOnly = !!q.isReadOnly;
     return React.createElement(SkillQuestionFrame, {
       skillHtml: q.skillHtml || '',
       skillId: q.skillId || '',
       config,
       images,
       value,
-      onChange: (v) => { q.value = v; },
+      readOnly,
+      onChange: (v) => {
+        if (!q.isReadOnly) q.value = v;
+      },
     });
   });
 }

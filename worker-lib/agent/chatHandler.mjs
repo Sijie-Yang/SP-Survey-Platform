@@ -86,7 +86,7 @@ Leave choices empty (runtime fills from the project dataset). Never invent image
 
 media* extras: mediaType ("any"|"image"|"video"|"audio"), mediaSlots:[], mediaPresentation:"stack".
 
-skillquestion presets (required skillId + skillConfig; NEVER invent skillHtml):
+skillquestion presets (required skillId + skillConfig; NEVER invent skillHtml on the survey):
 - preset_image_preference_slider (imageCount/mediaCount 2) — pairwise A/B slider
 - preset_image_preference_forced (2) — forced A/B click
 - preset_best_worst_choice (4) — MaxDiff best/worst
@@ -94,6 +94,9 @@ skillquestion presets (required skillId + skillConfig; NEVER invent skillHtml):
 - preset_video_moment_tag (1, mediaType video)
 - preset_video_continuous_rating (1, mediaType video)
 - preset_composite_blocks (1)
+
+For custom interactions: use skill_save (MCP) with SPSkill.setAnswer + spskill-init, ONE task per skill,
+then skillquestion + that skillId. Never pack 5 modes into one skill. Never parent.postMessage answer protocols.
 
 Prefer imagerating / imagepicker / skillquestion for scene preference tasks.
 Do not include API keys or credentials.`;

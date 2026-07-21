@@ -333,7 +333,10 @@ export const DESIGN_CAPABILITIES = {
       ],
     },
     skillquestion: {
-      note: 'Interactive skills. Required: skillId (preset_* OR id from skill_list/skill_save), skillConfig, imageCount. Do NOT set skillHtml on the question.',
+      note:
+        'Interactive skills. Prefer preset_* first. Custom HTML only via skill_save (never skillHtml on the draft). '
+        + 'skill_save HTML MUST use SPSkill.setAnswer + spskill-init; one task per skill; '
+        + 'configSchema/resultSchema as [{key,label,type},...]. Required: skillId, skillConfig, imageCount.',
       skillPresets: [
         { skillId: 'preset_image_preference_slider', useWhen: 'Pairwise A/B slider', imageCount: 2 },
         { skillId: 'preset_image_preference_forced', useWhen: 'Forced-choice A/B', imageCount: 2 },

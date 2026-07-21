@@ -13,9 +13,11 @@ export const SKILL_SDK_SOURCE = `
   }
 
   function reportHeight() {
+    var app = document.getElementById('app');
     var h = Math.max(
-      document.documentElement.scrollHeight,
+      document.documentElement ? document.documentElement.scrollHeight : 0,
       document.body ? document.body.scrollHeight : 0,
+      app ? app.scrollHeight : 0,
       120
     );
     post({ type: 'height', px: h });
@@ -82,6 +84,20 @@ export const SKILL_SDK_SOURCE = `
   if (window.ResizeObserver) {
     new ResizeObserver(reportHeight).observe(document.documentElement);
   }
+  // AI skills often replace #app via innerHTML — remeasure so Done buttons aren't clipped.
+  if (window.MutationObserver) {
+    var moTimer = null;
+    new MutationObserver(function() {
+      if (moTimer) return;
+      moTimer = setTimeout(function() {
+        moTimer = null;
+        reportHeight();
+      }, 50);
+    }).observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  }
+  document.addEventListener('load', function(e) {
+    if (e.target && (e.target.tagName === 'IMG' || e.target.tagName === 'VIDEO')) reportHeight();
+  }, true);
   post({ type: 'ready' });
 })();
 `;
