@@ -3,16 +3,18 @@
  * Pure module — no I/O.
  */
 
+import { ANNOTATION_TOOLS, normalizeAllowedTools } from '../annotationTools';
+
 const MEDIA_STIMULUS_TYPES = [
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image',
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image',
   'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
-  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
   'skillquestion',
 ];
 
 const MEDIA_STAR_TYPES = [
-  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
 ];
 
@@ -61,6 +63,17 @@ export function postProcessAiConfig(surveyConfig) {
       }
       if (!element.choices) element.choices = [];
       if (element.type === 'imagematrix' && !element.imageLinks) element.imageLinks = [];
+      if ((element.type === 'imagecheckbox' || element.type === 'mediacheckbox')
+        && (!Array.isArray(element.choices) || !element.choices.length)) {
+        element.choices = [
+          { value: 'tag_a', text: 'Tag A' },
+          { value: 'tag_b', text: 'Tag B' },
+          { value: 'tag_c', text: 'Tag C' },
+        ];
+      }
+      if (element.type === 'imageannotation') {
+        element.allowedTools = normalizeAllowedTools(element.allowedTools, ANNOTATION_TOOLS);
+      }
       if (MEDIA_STAR_TYPES.includes(element.type)) {
         if (!element.mediaType) element.mediaType = 'any';
         if (!Array.isArray(element.mediaSlots)) element.mediaSlots = [];
@@ -96,6 +109,8 @@ export function createDefaultSurveyConfig(name, description = '') {
     progressBarType: 'questions',
     autoGrowComment: true,
     showPreviewBeforeComplete: 'showAllQuestions',
+    includeResearcherPractice: true,
+    excludeFlaggedFromAnalysis: false,
     pages: [
       {
         name: 'page1',

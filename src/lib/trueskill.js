@@ -1,6 +1,6 @@
 /** TrueSkill-style 1v1 rating for imagepicker (any count, single or multi-select). */
 
-import { expandQuestionAnswerUnits } from './responseAnswerUnits';
+import { expandQuestionAnswerUnits } from './responseAnswerUnits.js';
 
 const DEFAULT_MU = 25;
 const DEFAULT_SIGMA = DEFAULT_MU / 3;

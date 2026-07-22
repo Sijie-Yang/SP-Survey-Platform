@@ -22,11 +22,12 @@ export const DESIGN_CAPABILITIES = {
   name: 'SP-Survey Design Protocol',
   version: '1.1.0',
   questionTypes: [
-    'text', 'comment', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
+    'text', 'comment', 'number', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
     'matrix', 'ranking', 'slidergroup', 'pointallocation', 'consent',
-    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean',
+    'expression',
+    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
     'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
-    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
     'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
     'skillquestion',
   ],
@@ -128,6 +129,17 @@ export const DESIGN_CAPABILITIES = {
           defaults: { imageCount: 1, rateMin: 1, rateMax: 5, minRateDescription: 'Poor', maxRateDescription: 'Excellent' },
         },
         imageboolean: { role: 'Yes/No about image', defaults: { imageCount: 1, labelTrue: 'Yes', labelFalse: 'No' } },
+        imagecheckbox: {
+          role: 'Multi-select text tags about an image (which apply to this scene)',
+          defaults: {
+            imageCount: 1,
+            choices: [
+              { value: 'tag_a', text: 'Tag A' },
+              { value: 'tag_b', text: 'Tag B' },
+              { value: 'tag_c', text: 'Tag C' },
+            ],
+          },
+        },
         imagematrix: { role: 'Matrix under image(s)', defaults: { imageCount: 1, rows: [], columns: [], imageLinks: [] } },
         imageslidergroup: {
           role: 'Sliders with image',
@@ -141,8 +153,14 @@ export const DESIGN_CAPABILITIES = {
         imagepointallocation: { role: 'Allocate points with image', defaults: { imageCount: 1, choices: [], budget: 100 } },
         imageannotation: {
           role: 'Draw/annotate on image',
-          defaults: { imageCount: 1, allowedTools: ['rect', 'polygon'], annotationLabels: [], minAnnotations: 0 },
+          defaults: {
+            imageCount: 1,
+            allowedTools: ['point', 'line', 'polygon', 'bbox'],
+            annotationLabels: [],
+            minAnnotations: 0,
+          },
           avoid: ['falApiKey', 'enableSamAssist secrets'],
+          note: 'Tools: point|line|polygon|bbox (aliases: path→line, points→point, rect/box→bbox).',
         },
       },
     },
@@ -161,6 +179,20 @@ export const DESIGN_CAPABILITIES = {
           },
         },
         mediaboolean: { role: 'Yes/No about media', defaults: { mediaType: 'any', imageCount: 1, mediaSlots: [], mediaPresentation: 'stack' } },
+        mediacheckbox: {
+          role: 'Multi-select text tags about media (which apply to this scene)',
+          defaults: {
+            mediaType: 'any',
+            imageCount: 1,
+            mediaSlots: [],
+            mediaPresentation: 'stack',
+            choices: [
+              { value: 'tag_a', text: 'Tag A' },
+              { value: 'tag_b', text: 'Tag B' },
+              { value: 'tag_c', text: 'Tag C' },
+            ],
+          },
+        },
         mediamatrix: { role: 'Matrix + media', defaults: { mediaType: 'image', imageCount: 1, rows: [], columns: [], mediaSlots: [] } },
         mediaslidergroup: {
           role: 'Sliders + media',
@@ -177,18 +209,26 @@ export const DESIGN_CAPABILITIES = {
       note:
         'Interactive skills. Prefer preset_* first. Custom HTML only via skill_save (never skillHtml on the draft). '
         + 'skill_save HTML MUST use SPSkill.setAnswer + spskill-init; one task per skill; '
-        + 'configSchema/resultSchema as [{key,label,type},...]. Required on question: skillId, skillConfig, imageCount. '
-        + 'Declare resultSchema[].type from: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList '
-        + 'so Results Analysis / CSV export reuse native charts. Optional analysisHtml uses SPAnalysis.getResponses() for novel shapes. '
-        + 'Include imageUrl in answers for per-stimulus grouping.',
+        + 'configSchema as [{key,label,type},...]; resultSchema must contain exactly one native field. Required on question: skillId, skillConfig, imageCount. '
+        + 'YOU choose resultSchema[].type: ANNOTATION→points|path|polygon|bbox; '
+        + 'MEDIA→rating/number/boolean/scaleGroup/mediaChoice/mediaRankedList/mediaMatrix+imageUrl; '
+        + 'STRUCTURED→multiChoice(text tags; +imageUrl⇒imagecheckbox)|matrix|rankedList|allocation|compositeBlocks; '
+        + 'Prefer native imagecheckbox/mediacheckbox for stimulus+text multi-select. '
+        + 'COLOR→color; COMPARISON→pairwiseChoice|pairwisePreference|bestWorst; '
+        + 'VIDEO→timeRanges|timeSeries; TEXT→choice/text. '
+        + 'Every field must match an existing native family; json, legacy pairwise, and analysisHtml are forbidden for new revisions. Include imageUrl when media is shown.',
       resultSchemaTypes: [
-        'number', 'boolean', 'choice', 'text', 'count', 'color', 'scaleGroup',
-        'points', 'path', 'allocation', 'rankedList',
+        'number', 'rating', 'boolean', 'choice', 'text', 'count', 'color', 'scaleGroup',
+        'points', 'path', 'polygon', 'bbox', 'allocation', 'rankedList',
+        'multiChoice', 'matrix', 'mediaMatrix', 'mediaChoice', 'mediaRankedList',
+        'timeRanges', 'timeSeries', 'pairwiseChoice', 'pairwisePreference', 'bestWorst', 'compositeBlocks',
       ],
       analysisGuide:
-        'See skillAnalysisGuide: points→annotation density overlay; path→polyline overlay; '
-        + 'allocation→point-allocation mean bars; rankedList→ranking Borda; scaleGroup→slider-group bars. '
-        + 'Unknown types fall back to readable summary + raw JSON. Optional analysisHtml for custom views.',
+        'Annotation: points/path/polygon/bbox → imageannotation overlays. '
+        + 'Media: rating/number/boolean/scaleGroup/mediaChoice/mediaRankedList/mediaMatrix+imageUrl → native media charts. '
+        + 'Structured: multiChoice/matrix/rankedList/allocation; comparison: pairwiseChoice/pairwisePreference/bestWorst. '
+        + 'Video: timeRanges/timeSeries → moment timeline / continuous rating. '
+        + 'No custom result layer: redesign unmatched shapes to one of these native families.',
       skillPresets: [
         {
           skillId: 'preset_image_preference_slider',

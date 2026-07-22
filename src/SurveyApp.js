@@ -4,14 +4,17 @@ import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
 import { Box, Alert, CircularProgress, Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography } from '@mui/material';
 import { saveSurveyResponse, isSupabaseConfigured } from './lib/supabase';
-import { findDraftForProject, saveDraft, clearDraft, clearDraftByKey, clearAllDraftsForProject } from './lib/surveyDraft';
+import {
+  findDraftForProject, saveDraft, clearDraft, clearDraftByKey, clearAllDraftsForProject,
+  savePendingSubmission, findPendingSubmission, clearPendingSubmission, clearPendingByKey,
+} from './lib/surveyDraft';
 import { surveyJson, displayedImages } from './config/questions';
 import { surveyConfig } from './config/surveyConfig';
 import { themeJson } from "./theme";
 import { loadSurveyConfig, convertToSurveyJS, generateCustomTheme, normalizeBuilderSurveyJson } from './lib/surveyStorage';
 import registerImageRankingWidget, {
   registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget,
-  registerAllExtendedWidgets,
+  registerAllExtendedWidgets, captureSkillPreviewAnswers,
 } from './components/SurveyCustomComponents';
 import { getBrowserId, generateCompletionCode } from './lib/browserId';
 import { countProjectResponses, fetchPairStats } from './lib/surveyPublicApi';
@@ -86,6 +89,13 @@ export default function SurveyApp() {
   const submissionGuardRef = useRef(false);
   const progressChromeEnabledRef = useRef(true);
   const surveyThemeRef = useRef(null);
+  const surveyPhaseRef = useRef('loading');
+  const finalSurveyJsonRef = useRef(null);
+  const imageTrackerRef = useRef({});
+
+  useEffect(() => {
+    surveyPhaseRef.current = surveyPhase;
+  }, [surveyPhase]);
 
   // Monitor URL changes and reinitialize when project ID changes
   useEffect(() => {
@@ -122,22 +132,55 @@ export default function SurveyApp() {
     initializeSurvey();
   }, [useAdminConfig]);
 
-  // Force reload when page becomes visible (to refresh expired image URLs)
+  // Flush draft on hide; never blind-reinitialize an active / submit-error session.
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && surveyModel) {
-        console.log('👁️ Page became visible, checking if survey needs refresh...');
-        // Optionally reload survey if it's been hidden for too long
-        const timeSinceLastLoad = Date.now() - (window.lastSurveyLoadTime || 0);
-        if (timeSinceLastLoad > 30 * 60 * 1000) { // 30 minutes
-          console.log('⏰ Survey data is stale (>30min), reloading...');
-          initializeSurvey();
-        }
+    const flushDraftNow = () => {
+      if (!draftSavingEnabledRef.current) return;
+      if (!projectIdRef.current || !participantIdRef.current || !surveyModel) return;
+      if (!finalSurveyJsonRef.current) return;
+      cancelPendingDraftSave();
+      try {
+        saveDraft(projectIdRef.current, participantIdRef.current, {
+          surveyData: collectSurveyDataWithTrials(surveyModel),
+          currentPageNo: surveyModel.currentPageNo,
+          displayedImages: { ...(displayedImagesRef.current || {}) },
+          displayedMediaGroups: { ...(displayedMediaGroupsRef.current || {}) },
+          displayedMediaCategories: { ...(displayedMediaCategoriesRef.current || {}) },
+          finalSurveyJson: JSON.parse(JSON.stringify(finalSurveyJsonRef.current)),
+        });
+      } catch (err) {
+        console.warn('flushDraftNow failed:', err?.message || err);
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushDraftNow();
+        return;
+      }
+      if (document.visibilityState !== 'visible' || !surveyModel) return;
+      const phase = surveyPhaseRef.current;
+      // Active answering / retry must keep the same stimulus set.
+      if (phase === 'active' || phase === 'submit-error' || phase === 'submitting') {
+        flushDraftNow();
+        return;
+      }
+      const timeSinceLastLoad = Date.now() - (window.lastSurveyLoadTime || 0);
+      if (timeSinceLastLoad > 30 * 60 * 1000) {
+        console.log('⏰ Survey data is stale (>30min) and not in an active session, reloading...');
+        flushDraftNow();
+        initializeSurvey();
+      }
+    };
+
+    const handlePageHide = () => { flushDraftNow(); };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
   }, [surveyModel]);
 
   // ✅ No longer monitoring localStorage (using sessionStorage now)
@@ -167,7 +210,9 @@ export default function SurveyApp() {
   const submitSurveyResponse = async (completeData, { isRepeatMode, repeatTotal, attemptIndex }) => {
     const result = await saveSurveyResponse(completeData);
     if (result.success) {
+      // Only clear drafts AFTER a successful save (including idempotent dedupe).
       discardDraftForProject(projectIdRef.current, completeData.participant_id);
+      clearPendingSubmission(projectIdRef.current, completeData.participant_id);
       if (isRepeatMode && attemptIndex < repeatTotal) {
         submissionGuardRef.current = false;
         draftSavingEnabledRef.current = true;
@@ -195,6 +240,11 @@ export default function SurveyApp() {
     }
     submissionGuardRef.current = false;
     setPendingSubmission(completeData);
+    savePendingSubmission(projectIdRef.current, completeData.participant_id, completeData, {
+      isRepeatMode: !!isRepeatMode,
+      repeatTotal: repeatTotal || 1,
+      attemptIndex: attemptIndex || 1,
+    });
     setSurveyPhase('submit-error');
   };
 
@@ -414,7 +464,16 @@ export default function SurveyApp() {
         }
       }
       
-      if (useAdminConfig && adminConfig) {
+      // Resume path: rebuild from the exact survey JSON that was answered (same stimuli).
+      const resumeDraft = options.resumeDraft || null;
+      if (resumeDraft?.finalSurveyJson) {
+        finalSurveyJson = JSON.parse(JSON.stringify(resumeDraft.finalSurveyJson));
+        setAdminConfigExists(true);
+        setLoadingMessage('Restoring previous session…');
+        if (resumeDraft.participantId) {
+          participantIdRef.current = resumeDraft.participantId;
+        }
+      } else if (useAdminConfig && adminConfig) {
         // Directly use admin configuration (already in standard SurveyJS format)
         // Use deep copy to avoid modifying the original config
         finalSurveyJson = JSON.parse(JSON.stringify(adminConfig));
@@ -571,7 +630,7 @@ export default function SurveyApp() {
                     }
                     // PRIORITY 2: Hugging Face dataset (optional; never block survey forever)
                     else if (projectData?.imageDatasetConfig?.enabled && projectData.imageDatasetConfig.datasetName) {
-                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
+                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'imagecheckbox' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 Fetching ${imageCount} images from Hugging Face dataset (global config): ${projectData.imageDatasetConfig.datasetName}`);
                       const { getRandomImagesFromHuggingFace } = await import('./lib/huggingface');
@@ -591,7 +650,7 @@ export default function SurveyApp() {
                     }
                     // PRIORITY 3: Legacy - element-specific config (kept for backward compatibility)
                     else if (element.imageSource === 'huggingface' && element.huggingFaceConfig) {
-                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
+                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'imagecheckbox' || element.type === 'image' || element.type === 'imageslidergroup' || element.type === 'imagepointallocation') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 [Legacy] Fetching ${imageCount} images from element config: ${element.huggingFaceConfig.datasetName}`);
                       const { getRandomImagesFromHuggingFace } = await import('./lib/huggingface');
@@ -887,12 +946,30 @@ export default function SurveyApp() {
       // Handle survey completion
       model.showCompletedPage = false;
 
+      // Freeze Skill answers before SurveyJS rearranges/clones pages for Preview.
+      // Preview components read this snapshot and never re-run the interactive iframe.
+      model.onShowingPreview.add((survey) => {
+        captureSkillPreviewAnswers(survey);
+      });
+
+      // Unified synchronous final flush. Normally question.value and data are
+      // already identical; this also covers restored historical Skill answers.
+      model.onCompleting.add((survey) => {
+        survey.getAllQuestions().forEach((question) => {
+          if (question.getType() !== 'skillquestion' || !question.name) return;
+          const value = question.skillAnswerSnapshot
+            ?? survey.__skillPreviewAnswers?.[question.name]
+            ?? question.value;
+          if (value !== undefined) survey.setValue(question.name, value);
+        });
+      });
+
       model.onComplete.add(async (survey) => {
         if (submissionGuardRef.current) return;
         submissionGuardRef.current = true;
         draftSavingEnabledRef.current = false;
         cancelPendingDraftSave();
-        discardDraftForProject(projectId, participantIdRef.current);
+        // Keep draft until save succeeds — see submitSurveyResponse.
         setSurveyPhase('submitting');
 
         console.log("=== SURVEY COMPLETION STARTED ===");
@@ -1002,8 +1079,24 @@ export default function SurveyApp() {
         scheduleDraftSave(model, imageTracker, finalSurveyJson);
       });
 
+      finalSurveyJsonRef.current = finalSurveyJson;
+      imageTrackerRef.current = imageTracker;
+
+      // Failed submission recovery (refresh after submit-error)
+      const pendingFound = !options.skipDraftCheck ? findPendingSubmission(projectId) : null;
+      if (pendingFound?.pending?.completeData && !options.resumeDraft) {
+        participantIdRef.current = pendingFound.pending.participantId
+          || pendingFound.pending.completeData.participant_id
+          || participantIdRef.current;
+        setPendingSubmission(pendingFound.pending.completeData);
+        setSurveyPhase('submit-error');
+        setLoading(false);
+        resumeChoiceRef.current = null;
+        return;
+      }
+
       const existingDraft = !options.skipDraftCheck ? findDraftForProject(projectId) : null;
-      if (existingDraft && !resumeChoiceRef.current) {
+      if (existingDraft && !resumeChoiceRef.current && !options.resumeDraft) {
         setResumeDialog({
           draft: existingDraft.draft,
           draftKey: existingDraft.key,
@@ -1016,27 +1109,30 @@ export default function SurveyApp() {
         return;
       }
 
-      if (resumeChoiceRef.current === 'resume' && existingDraft?.draft) {
-        model.data = existingDraft.draft.surveyData || {};
+      // Apply restored answers onto the (draft-stimulus) model.
+      const draftToApply = options.resumeDraft
+        || (resumeChoiceRef.current === 'resume' ? existingDraft?.draft : null);
+      if (draftToApply) {
+        model.data = draftToApply.surveyData || {};
         rehydrateTrialsAnswerStoreFromSurvey(model);
-        if (typeof existingDraft.draft.currentPageNo === 'number') {
-          model.currentPageNo = existingDraft.draft.currentPageNo;
+        if (typeof draftToApply.currentPageNo === 'number') {
+          model.currentPageNo = draftToApply.currentPageNo;
         }
-        if (existingDraft.draft.displayedImages) {
+        if (draftToApply.displayedImages) {
           Object.keys(imageTracker).forEach((k) => delete imageTracker[k]);
-          Object.assign(imageTracker, existingDraft.draft.displayedImages);
-          displayedImagesRef.current = existingDraft.draft.displayedImages;
+          Object.assign(imageTracker, draftToApply.displayedImages);
+          displayedImagesRef.current = draftToApply.displayedImages;
         }
-        if (existingDraft.draft.displayedMediaGroups) {
+        if (draftToApply.displayedMediaGroups) {
           Object.keys(mediaGroupTracker).forEach((k) => delete mediaGroupTracker[k]);
-          Object.assign(mediaGroupTracker, existingDraft.draft.displayedMediaGroups);
+          Object.assign(mediaGroupTracker, draftToApply.displayedMediaGroups);
         }
-        if (existingDraft.draft.displayedMediaCategories) {
+        if (draftToApply.displayedMediaCategories) {
           Object.keys(mediaCategoryTracker).forEach((k) => delete mediaCategoryTracker[k]);
-          Object.assign(mediaCategoryTracker, existingDraft.draft.displayedMediaCategories);
+          Object.assign(mediaCategoryTracker, draftToApply.displayedMediaCategories);
         }
-        if (existingDraft.draft.participantId) {
-          participantIdRef.current = existingDraft.draft.participantId;
+        if (draftToApply.participantId) {
+          participantIdRef.current = draftToApply.participantId;
         }
       }
       resumeChoiceRef.current = null;
@@ -1276,6 +1372,9 @@ export default function SurveyApp() {
             onClick={() => {
               clearDraftByKey(resumeDialog.draftKey);
               clearAllDraftsForProject(projectIdRef.current);
+              if (resumeDialog.draft?.participantId) {
+                clearPendingSubmission(projectIdRef.current, resumeDialog.draft.participantId);
+              }
               participantIdRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
               const { model, imageTracker } = resumeDialog;
               setResumeDialog(null);
@@ -1298,31 +1397,17 @@ export default function SurveyApp() {
           <Button
             variant="contained"
             onClick={() => {
-              const { draft, model, imageTracker } = resumeDialog;
-              model.data = draft.surveyData || {};
-              rehydrateTrialsAnswerStoreFromSurvey(model);
-              if (typeof draft.currentPageNo === 'number') {
-                model.currentPageNo = draft.currentPageNo;
-              }
-              if (draft.displayedImages) {
-                Object.keys(imageTracker).forEach((k) => delete imageTracker[k]);
-                Object.assign(imageTracker, draft.displayedImages);
-                displayedImagesRef.current = draft.displayedImages;
-              }
-              displayedMediaGroupsRef.current = {
-                ...(draft.displayedMediaGroups || {}),
-              };
-              displayedMediaCategoriesRef.current = {
-                ...(draft.displayedMediaCategories || {}),
-              };
-              if (draft.participantId) {
-                participantIdRef.current = draft.participantId;
-              }
+              const { draft } = resumeDialog;
               setResumeDialog(null);
-              setDisplayedImagesMap(imageTracker);
-              setSurveyModel(model);
-              setSurveyPhase('active');
-              setLoading(false);
+              setSurveyModel(null);
+              setLoading(true);
+              setSurveyPhase('loading');
+              resumeChoiceRef.current = 'resume';
+              // Rebuild Model from the saved stimulus JSON so shown media matches answers.
+              initializeSurvey({
+                resumeDraft: draft,
+                skipDraftCheck: true,
+              });
             }}
           >
             Continue

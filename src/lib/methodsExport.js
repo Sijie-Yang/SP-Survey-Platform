@@ -1,10 +1,10 @@
-import { flattenQuestions, getAttentionCheckQuestions, summarizeQuality } from './quality';
-import { computeQuestionIrr, irrLevelForQuestion } from './reliability';
+import { flattenQuestions, getAttentionCheckQuestions, summarizeQuality } from './quality.js';
+import { computeQuestionIrr, irrLevelForQuestion } from './reliability.js';
 import {
   computeQuestionTrueSkill,
   computeForcedChoiceTrueSkill,
   computeMaxDiffTrueSkill,
-} from './trueskill';
+} from './trueskill.js';
 
 function questionTypeLabel(type) {
   const labels = {

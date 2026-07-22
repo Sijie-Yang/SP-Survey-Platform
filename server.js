@@ -697,16 +697,38 @@ app.post('/api/responses', async (req, res) => {
     
     // Ensure responses directory exists
     await fs.ensureDir(RESPONSES_PATH);
-    
-    // Create filename with timestamp
+
+    // Idempotent filename when client sends participant + completion code
+    const idempotencyKey = responseData.idempotency_key
+      || (
+        responseData.participant_id && responseData.survey_metadata?.completion_code
+          ? `${responseData.participant_id}__${responseData.survey_metadata.completion_code}`
+          : null
+      );
+    let filename;
+    let deduped = false;
+    if (idempotencyKey) {
+      const safe = String(idempotencyKey).replace(/[^\w.-]+/g, '_');
+      filename = `response_${safe}.json`;
+      const filePath = path.join(RESPONSES_PATH, filename);
+      if (await fs.pathExists(filePath)) {
+        deduped = true;
+        console.log(`♻️ Survey response already saved (idempotent): ${filePath}`);
+        return res.json({ success: true, filename, filePath, deduped: true });
+      }
+      await fs.writeFile(filePath, JSON.stringify(responseData, null, 2), 'utf8');
+      console.log(`✅ Survey response saved to ${filePath}`);
+      return res.json({ success: true, filename, filePath, deduped: false });
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `response_${responseData.participant_id}_${timestamp}.json`;
+    filename = `response_${responseData.participant_id}_${timestamp}.json`;
     const filePath = path.join(RESPONSES_PATH, filename);
     
     await fs.writeFile(filePath, JSON.stringify(responseData, null, 2), 'utf8');
     
     console.log(`✅ Survey response saved to ${filePath}`);
-    res.json({ success: true, filename, filePath });
+    res.json({ success: true, filename, filePath, deduped });
   } catch (error) {
     console.error('Error saving survey response:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -774,7 +796,6 @@ app.post('/api/openai/generate-skill', async (req, res) => {
         defaultConfig: currentSkill.defaultConfig,
         resultSchema: currentSkill.resultSchema,
         sourceHtml: currentSkill.sourceHtml,
-        analysisHtml: currentSkill.analysisHtml,
       }, null, 2).slice(0, 12000)}`
       : '';
 
@@ -783,7 +804,7 @@ app.post('/api/openai/generate-skill', async (req, res) => {
       const guideMod = await import('./worker-lib/agent/skillAnalysisGuide.mjs');
       analysisGuideText = guideMod.buildSkillAnalysisGuideText();
     } catch (e) {
-      analysisGuideText = 'resultSchema types: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList';
+      analysisGuideText = 'Pick types: annotation→points|path|polygon|bbox; media→number/boolean/mediaChoice/mediaRankedList+imageUrl; structured→multiChoice|matrix|rankedList|allocation|pairwise|bestWorst; video→timeRanges|timeSeries; text→choice/text. Never default all to text.';
     }
 
     const systemPrompt = `You are an expert at building custom survey question types ("skills") for the SP Survey Platform.
@@ -801,12 +822,14 @@ CRITICAL — answers will NOT be saved if you invent your own protocol:
 - The ONLY way to submit answers is SPSkill.setAnswer(value)
 
 Skill design rules:
-- Prefer ONE focused task per skill. If the user asks for multiple interaction modes, either (a) make separate skills, or (b) ONE skill with config field mode (type select) but still call SPSkill.setAnswer with a single object that includes mode plus that mode's fields.
+- Exactly ONE focused task and ONE native result family per skill. Split multiple interaction modes or output families into separate skills.
 - configSchema and resultSchema MUST be arrays of OBJECTS like {"key":"prompt","label":"Prompt","type":"string"} — never plain string arrays like ["mode","prompt"].
 - Include mediaCount and mediaType in defaultConfig when the skill shows media.
 - Include imageUrl (from images[0].url) inside the answer object when a stimulus image is shown, so results can group by media.
-- DECLARE each resultSchema field with the closest catalog type below so Results Analysis and CSV export reuse the platform's native charts. Free-form fields are allowed but only get readable summary + raw JSON.
-- Optional analysisHtml: when the data shape has no native match, also return an analysis view that uses SPAnalysis (document.addEventListener('spanalysis-init', ...) / SPAnalysis.getResponses()). Follow visual conventions in the guide. Prefer declared types over inventing analysisHtml.
+- resultSchema MUST contain exactly one field. Its type and settings must exactly match an existing native question/results/export family below.
+- Include native settings in that field: options for choice/multiChoice/rankedList/allocation; rows+columns for matrix; dimensions for scaleGroup; min/max/budget where relevant.
+- If no native family matches, redesign the answer shape. json, legacy pairwise, analysisHtml, and custom result/export logic are forbidden.
+- exampleAnswer MUST be a non-empty object that validates against every resultSchema field.
 
 ${analysisGuideText}
 
@@ -819,8 +842,8 @@ Return JSON only:
     "configSchema": [{ "key": "prompt", "label": "Prompt", "type": "string" }, ...],
     "defaultConfig": { "mediaCount": 1, "mediaType": "image", "prompt": "...", ... },
     "resultSchema": [{ "key": "score", "label": "Score", "type": "number" }],
-    "sourceHtml": "<full HTML document with inline script using spskill-init and SPSkill.setAnswer>",
-    "analysisHtml": "<optional full HTML for Results Analysis using spanalysis-init / SPAnalysis.getResponses — omit or empty string when typed fields suffice>"
+    "exampleAnswer": { "score": 72 },
+    "sourceHtml": "<full HTML document with inline script using spskill-init and SPSkill.setAnswer>"
   }
 }
 
@@ -868,6 +891,23 @@ Keep HTML self-contained (inline styles OK).`;
     }).filter((item) => item && item.key);
     parsed.skill.configSchema = normSchema(parsed.skill.configSchema);
     parsed.skill.resultSchema = normSchema(parsed.skill.resultSchema, 'text');
+    parsed.skill.exampleAnswer = parsed.skill.exampleAnswer && typeof parsed.skill.exampleAnswer === 'object'
+      && !Array.isArray(parsed.skill.exampleAnswer)
+      ? parsed.skill.exampleAnswer
+      : {};
+    parsed.skill.contractVersion = 1;
+    parsed.skill.analysisHtml = '';
+
+    const { prepareSkillForSave } = await import('./worker-lib/agent/skillHtmlValidate.mjs');
+    const prepared = prepareSkillForSave(parsed.skill);
+    if (!prepared.ok) {
+      return res.status(422).json({
+        success: false,
+        error: `Generated Skill does not match a native result/export family: ${prepared.errors.join(' ')}`,
+        hint: 'Regenerate with exactly one native resultSchema field and matching exampleAnswer/settings.',
+      });
+    }
+    parsed.skill = prepared.skill;
 
     res.json({
       success: true,

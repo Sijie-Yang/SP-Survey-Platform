@@ -15,6 +15,7 @@ import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-d
 import { useAuth } from '../contexts/AuthContext';
 import { useRegion } from '../contexts/RegionContext';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
+import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -70,28 +71,38 @@ export default function LoginPage() {
       <Box
         sx={{
           flex: 1,
+          position: 'relative',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          p: 2,
+          p: { xs: 2, sm: 3 },
+          minHeight: { xs: 520, md: 560 },
         }}
       >
+        <StreetscapeAtmosphere
+          overlay="linear-gradient(120deg, rgba(8,14,12,0.42) 0%, rgba(8,14,12,0.28) 45%, rgba(8,14,12,0.5) 100%)"
+        />
         <Paper
-          variant="outlined"
           elevation={0}
           sx={{
+            position: 'relative',
+            zIndex: 1,
             width: '100%',
             maxWidth: 420,
-            p: 4,
-            borderRadius: 2,
-            borderColor: 'divider',
+            p: { xs: 3, sm: 4 },
+            borderRadius: 2.5,
+            border: '1px solid',
+            borderColor: 'rgba(255,255,255,0.35)',
+            bgcolor: 'rgba(255,255,255,0.92)',
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 18px 50px rgba(0,0,0,0.28)',
           }}
         >
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
             <Typography variant="h6" fontWeight={700}>
               {t.loginBrand}
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="text.secondary" textAlign="center">
               {t.loginSubtitle}
             </Typography>
           </Box>

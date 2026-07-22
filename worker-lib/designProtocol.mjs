@@ -4,6 +4,8 @@
  * Keep in sync with src/lib/designProtocol/*.
  */
 
+import { ANNOTATION_TOOLS, normalizeAllowedTools } from './annotationTools.mjs';
+
 const SECRET_FIELDS = new Set([
   'supabaseconfig', 'supabasekey', 'supabaseanonkey', 'servicerolekey', 'anonkey',
   'huggingfacetoken', 'falapikey', 'falkey', 'openaiapikey', 'openrouterapikey',
@@ -51,6 +53,26 @@ export const restoreStoredSecrets = (incoming, stored) => {
   return restored;
 };
 
+const IMAGE_TYPES = new Set([
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'imagematrix', 'image',
+  'imageannotation', 'skillquestion', 'imageslidergroup', 'imagepointallocation',
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
+  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+]);
+
+const MEDIA_STIMULUS_TYPES = [
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image',
+  'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
+  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+  'skillquestion',
+];
+
+const MEDIA_STAR_TYPES = [
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
+  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
+];
+
 export function validateSurveyConfig(surveyConfig) {
   const errors = [];
   const warnings = [];
@@ -77,14 +99,18 @@ export function validateSurveyConfig(surveyConfig) {
         errors.push({ path: pagePath, message: 'Each page must be an object.' });
         return;
       }
+      if (!page.name) warnings.push({ path: `${pagePath}.name`, message: 'Page name is recommended.' });
       if (!Array.isArray(page.elements)) {
         errors.push({ path: `${pagePath}.elements`, message: 'elements must be an array.' });
         return;
       }
+      if (page.elements.length === 0) {
+        warnings.push({ path: `${pagePath}.elements`, message: 'Page has no questions.' });
+      }
       page.elements.forEach((element, elementIndex) => {
         questionCount += 1;
         const elementPath = `${pagePath}.elements[${elementIndex}]`;
-        if (!element || typeof element !== 'object') {
+        if (!element || typeof element !== 'object' || Array.isArray(element)) {
           errors.push({ path: elementPath, message: 'Each element must be an object.' });
           return;
         }
@@ -99,6 +125,41 @@ export function validateSurveyConfig(surveyConfig) {
         } else {
           names.set(element.name, `${elementPath}.name`);
         }
+
+        if (IMAGE_TYPES.has(element.type) && element.type !== 'skillquestion') {
+          const hasManual = element.selectedImageUrls?.length
+            || element.choices?.length
+            || element.imageLinks?.length
+            || element.annotationImageUrl;
+          const hasRandom = element.randomImageSelection !== false
+            || element.imageSelectionMode === 'huggingface_random';
+          if (!hasManual && !hasRandom) {
+            warnings.push({
+              path: elementPath,
+              message: `Question "${element.title || element.name}" may have no images configured.`,
+            });
+          }
+        }
+        if (
+          (element.type === 'slidergroup' || element.type === 'imageslidergroup' || element.type === 'mediaslidergroup')
+          && !element.dimensions?.length
+        ) {
+          warnings.push({
+            path: elementPath,
+            message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
+          });
+        }
+        if (
+          (element.type === 'pointallocation'
+            || element.type === 'imagepointallocation'
+            || element.type === 'mediapointallocation')
+          && !element.choices?.length
+        ) {
+          warnings.push({
+            path: elementPath,
+            message: `Point allocation "${element.title || element.name}" has no choices configured.`,
+          });
+        }
       });
     });
   }
@@ -109,6 +170,65 @@ export function validateSurveyConfig(surveyConfig) {
     pageCount: Array.isArray(surveyConfig.pages) ? surveyConfig.pages.length : 0,
     questionCount,
   };
+}
+
+export function getSurveyValidationWarningStrings(surveyConfig) {
+  const report = validateSurveyConfig(surveyConfig);
+  return [
+    ...report.errors.map((e) => e.message),
+    ...report.warnings.map((w) => w.message),
+  ];
+}
+
+/** Post-process LLM/MCP-generated configs (image/media/skill defaults, strip secrets). */
+export function postProcessAiConfig(surveyConfig) {
+  const processedConfig = JSON.parse(JSON.stringify(surveyConfig || {}));
+  if (!Array.isArray(processedConfig.pages)) return processedConfig;
+
+  processedConfig.pages.forEach((page) => {
+    (page.elements || []).forEach((element) => {
+      if (!MEDIA_STIMULUS_TYPES.includes(element.type)) return;
+      if (!element.imageSelectionMode || element.imageSelectionMode === 'random') {
+        element.imageSelectionMode = 'huggingface_random';
+      }
+      element.randomImageSelection = true;
+      if (element.excludePreviouslyUsedImages === undefined) {
+        element.excludePreviouslyUsedImages = true;
+      }
+      if (!element.choices) element.choices = [];
+      if (element.type === 'imagematrix' && !element.imageLinks) element.imageLinks = [];
+      if ((element.type === 'imagecheckbox' || element.type === 'mediacheckbox')
+        && (!Array.isArray(element.choices) || !element.choices.length)) {
+        element.choices = [
+          { value: 'tag_a', text: 'Tag A' },
+          { value: 'tag_b', text: 'Tag B' },
+          { value: 'tag_c', text: 'Tag C' },
+        ];
+      }
+      if (element.type === 'imageannotation') {
+        element.allowedTools = normalizeAllowedTools(element.allowedTools, ANNOTATION_TOOLS);
+      }
+      if (MEDIA_STAR_TYPES.includes(element.type)) {
+        if (!element.mediaType) element.mediaType = 'any';
+        if (!Array.isArray(element.mediaSlots)) element.mediaSlots = [];
+        if (!element.mediaPresentation) element.mediaPresentation = 'stack';
+      }
+      if (element.type === 'skillquestion') {
+        delete element.skillHtml;
+        if (element.skillId && !String(element.skillId).startsWith('preset_')) {
+          element.skillId = `preset_${element.skillId}`;
+        }
+        if (element.skillConfig?.mediaCount != null && element.imageCount == null) {
+          element.imageCount = Number(element.skillConfig.mediaCount) || 1;
+        }
+      }
+      delete element.imageSource;
+      delete element.huggingFaceConfig;
+      delete element.falApiKey;
+    });
+  });
+
+  return processedConfig;
 }
 
 function clone(value) {
@@ -275,11 +395,12 @@ export const DESIGN_CAPABILITIES = {
   name: 'SP-Survey Design Protocol',
   version: '1.1.0',
   questionTypes: [
-    'text', 'comment', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
+    'text', 'comment', 'number', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
     'matrix', 'ranking', 'slidergroup', 'pointallocation', 'consent',
-    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean',
+    'expression',
+    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
     'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
-    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
     'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
     'skillquestion',
   ],
@@ -319,36 +440,88 @@ export const DESIGN_CAPABILITIES = {
     },
   },
   questionTypeGuide: {
+    standard: {
+      text: { fields: ['name', 'title', 'placeholder', 'inputType?'] },
+      comment: { fields: ['name', 'title', 'rows?'] },
+      radiogroup: { fields: ['name', 'title', 'choices[]'] },
+      checkbox: { fields: ['name', 'title', 'choices[]'] },
+      dropdown: { fields: ['name', 'title', 'choices[]'] },
+      boolean: { fields: ['name', 'title', 'labelTrue', 'labelFalse'] },
+      consent: { note: 'Stored as boolean with isRequired:true; labels for agree/disagree.' },
+      rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
+      matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
+      ranking: { fields: ['name', 'title', 'choices[]'] },
+      slidergroup: { fields: ['name', 'title', 'dimensions[{id,left,right}]', 'scaleMin', 'scaleMax'] },
+      pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
+    },
     image: {
       note: 'Image-only stimuli. Always include mediaSamplingDefaults.',
       types: [
-        'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean',
+        'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
         'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
       ],
+      imagecheckbox: {
+        role: 'Multi-select text tags about an image (which apply to this scene)',
+        defaults: {
+          imageCount: 1,
+          choices: [
+            { value: 'tag_a', text: 'Tag A' },
+            { value: 'tag_b', text: 'Tag B' },
+            { value: 'tag_c', text: 'Tag C' },
+          ],
+        },
+      },
+      imageannotation: {
+        role: 'Draw/annotate on image',
+        defaults: { imageCount: 1, allowedTools: ['point', 'line', 'polygon', 'bbox'], annotationLabels: [], minAnnotations: 0 },
+        note: 'Tools: point|line|polygon|bbox (aliases: path→line, points→point, rect/box→bbox).',
+      },
     },
     media: {
       note: 'Image/video/audio. Add mediaType + mediaSlots:[] + mediaPresentation:"stack".',
       types: [
-        'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+        'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
         'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
       ],
+      mediacheckbox: {
+        role: 'Multi-select text tags about media (which apply to this scene)',
+        defaults: {
+          mediaType: 'any',
+          imageCount: 1,
+          mediaSlots: [],
+          mediaPresentation: 'stack',
+          choices: [
+            { value: 'tag_a', text: 'Tag A' },
+            { value: 'tag_b', text: 'Tag B' },
+            { value: 'tag_c', text: 'Tag C' },
+          ],
+        },
+      },
     },
     skillquestion: {
       note:
         'Interactive skills. Prefer preset_* first. Custom HTML only via skill_save (never skillHtml on the draft). '
         + 'skill_save HTML MUST use SPSkill.setAnswer + spskill-init; one task per skill; '
-        + 'configSchema/resultSchema as [{key,label,type},...]. Required: skillId, skillConfig, imageCount. '
-        + 'Declare resultSchema[].type from: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList '
-        + 'so Results Analysis / CSV export reuse native charts. Optional analysisHtml uses SPAnalysis.getResponses() for novel shapes. '
-        + 'Include imageUrl in answers for per-stimulus grouping.',
+        + 'configSchema as [{key,label,type},...]; resultSchema must contain exactly one native field. Required: skillId, skillConfig, imageCount. '
+        + 'YOU choose resultSchema[].type: ANNOTATION→points|path|polygon|bbox; '
+        + 'MEDIA→rating/number/boolean/scaleGroup/mediaChoice/mediaRankedList/mediaMatrix+imageUrl; '
+        + 'STRUCTURED→multiChoice(text tags; +imageUrl⇒imagecheckbox)|matrix|rankedList|allocation|compositeBlocks; '
+        + 'Prefer native imagecheckbox/mediacheckbox for stimulus+text multi-select. '
+        + 'COLOR→color; COMPARISON→pairwiseChoice|pairwisePreference|bestWorst; '
+        + 'VIDEO→timeRanges|timeSeries; TEXT→choice/text. '
+        + 'Every field must match an existing native family; json, legacy pairwise, and analysisHtml are forbidden for new revisions. Include imageUrl when media is shown.',
       resultSchemaTypes: [
-        'number', 'boolean', 'choice', 'text', 'count', 'color', 'scaleGroup',
-        'points', 'path', 'allocation', 'rankedList',
+        'number', 'rating', 'boolean', 'choice', 'text', 'count', 'color', 'scaleGroup',
+        'points', 'path', 'polygon', 'bbox', 'allocation', 'rankedList',
+        'multiChoice', 'matrix', 'mediaMatrix', 'mediaChoice', 'mediaRankedList',
+        'timeRanges', 'timeSeries', 'pairwiseChoice', 'pairwisePreference', 'bestWorst', 'compositeBlocks',
       ],
       analysisGuide:
-        'See skillAnalysisGuide: points→annotation density overlay; path→polyline overlay; '
-        + 'allocation→point-allocation mean bars; rankedList→ranking Borda; scaleGroup→slider-group bars. '
-        + 'Unknown types fall back to readable summary + raw JSON. Optional analysisHtml for custom views.',
+        'Annotation: points/path/polygon/bbox → imageannotation overlays. '
+        + 'Media: rating/number/boolean/scaleGroup/mediaChoice/mediaRankedList/mediaMatrix+imageUrl → native media charts. '
+        + 'Structured: multiChoice(+media⇒imagecheckbox)/matrix/rankedList/allocation; comparison: pairwiseChoice/pairwisePreference/bestWorst. '
+        + 'Video: timeRanges/timeSeries → moment timeline / continuous rating. '
+        + 'No custom result layer: redesign unmatched shapes to one of these native families.',
       skillPresets: [
         { skillId: 'preset_image_preference_slider', useWhen: 'Pairwise A/B slider', imageCount: 2 },
         { skillId: 'preset_image_preference_forced', useWhen: 'Forced-choice A/B', imageCount: 2 },

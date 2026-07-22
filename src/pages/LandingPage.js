@@ -18,6 +18,9 @@ import { useGithubStars } from '../lib/useGithubStars';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
 import { getBenchPublic } from '../lib/spBenchApi';
+import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
+import { filterMediaByType, inferMediaType } from '../lib/mediaUtils';
+import { listPreviewMedia } from '../lib/previewMediaLibrary';
 
 const CLAMP = (lines) => ({
   display: '-webkit-box',
@@ -31,6 +34,41 @@ function normalizeCategory(raw) {
   if (c.includes('ai')) return 'ai';
   if (c.includes('urban')) return 'urban';
   return 'academic';
+}
+
+/** Stable hash so the same template keeps the same fallback cover across reloads. */
+function hashString(str) {
+  let h = 0;
+  const s = String(str || '');
+  for (let i = 0; i < s.length; i += 1) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function collectImageUrls(preloadedImages) {
+  if (!Array.isArray(preloadedImages)) return [];
+  const urls = [];
+  for (const entry of preloadedImages) {
+    const url = entry?.url;
+    if (!url) continue;
+    const type = entry.type || inferMediaType(entry.name || url);
+    if (type === 'image') urls.push(url);
+  }
+  return urls;
+}
+
+const DEFAULT_COVER = '/hero/streetscape-poster.jpg';
+
+/**
+ * Prefer explicit thumbnail_url → own template library → platform preview media library.
+ * Same fallback chain as survey/question preview when a study has no media.
+ * Picks are stable per template id so cards don’t reshuffle on every refresh.
+ */
+function resolveTemplateThumb(template, previewUrls = []) {
+  if (template?.thumbnail_url) return template.thumbnail_url;
+  const own = collectImageUrls(template?.preloaded_images || template?.preloadedImages);
+  const pool = own.length ? own : previewUrls;
+  if (!pool.length) return DEFAULT_COVER;
+  return pool[hashString(template.id || template.name) % pool.length] || DEFAULT_COVER;
 }
 
 function getStaticTemplates() {
@@ -55,6 +93,7 @@ export default function LandingPage() {
   const [search, setSearch] = useState('');
   const [onlineLiveCount, setOnlineLiveCount] = useState(0);
   const [benchSummary, setBenchSummary] = useState(null);
+  const [heroScroll, setHeroScroll] = useState(0);
 
   useEffect(() => {
     loadTemplates();
@@ -75,28 +114,83 @@ export default function LandingPage() {
       .catch(() => setBenchSummary(null));
   }, []);
 
+  useEffect(() => {
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) return undefined;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        setHeroScroll(Math.min(220, Math.max(0, window.scrollY)));
+      });
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+
   async function loadTemplates() {
     setLoadingTemplates(true);
     try {
+      const previewPoolPromise = listPreviewMedia().catch(() => []);
       if (supabase) {
+        // Lightweight first pass — avoid downloading every template's full media catalog.
         const { data, error } = await supabase
           .from('templates')
           .select('id, name, description, author, year, category, paper_url, dataset, thumbnail_url, show_on_landing')
           .eq('is_approved', true)
           .order('year', { ascending: false });
         if (!error && data?.length > 0) {
-          const normalized = data.map((tpl) => ({
-            ...tpl,
-            category: normalizeCategory(tpl.category),
-          }));
+          const missingIds = data.filter((tpl) => !tpl.thumbnail_url).map((tpl) => tpl.id);
+          const libraryById = {};
+          const mediaPromise = missingIds.length
+            ? supabase.from('templates').select('id, preloaded_images').in('id', missingIds)
+            : Promise.resolve({ data: [] });
+          const [mediaResult, previewPool] = await Promise.all([mediaPromise, previewPoolPromise]);
+          for (const row of mediaResult.data || []) {
+            libraryById[row.id] = row.preloaded_images || [];
+          }
+          const previewUrls = filterMediaByType(previewPool, 'image')
+            .map((img) => img.url)
+            .filter(Boolean);
+          const normalized = data.map((tpl) => {
+            const withLibrary = {
+              ...tpl,
+              preloaded_images: libraryById[tpl.id] || [],
+            };
+            return {
+              id: tpl.id,
+              name: tpl.name,
+              description: tpl.description,
+              author: tpl.author,
+              year: tpl.year,
+              category: normalizeCategory(tpl.category),
+              paper_url: tpl.paper_url,
+              dataset: tpl.dataset,
+              thumbnail_url: resolveTemplateThumb(withLibrary, previewUrls),
+              show_on_landing: tpl.show_on_landing,
+            };
+          });
           setTemplates(normalized);
           setLoadingTemplates(false);
           return;
         }
       }
-      setTemplates(getStaticTemplates());
+      const previewUrls = filterMediaByType(await previewPoolPromise, 'image')
+        .map((img) => img.url)
+        .filter(Boolean);
+      setTemplates(getStaticTemplates().map((tpl) => ({
+        ...tpl,
+        thumbnail_url: resolveTemplateThumb(tpl, previewUrls),
+      })));
     } catch {
-      setTemplates(getStaticTemplates());
+      setTemplates(getStaticTemplates().map((tpl) => ({
+        ...tpl,
+        thumbnail_url: resolveTemplateThumb(tpl),
+      })));
     } finally {
       setLoadingTemplates(false);
     }
@@ -148,31 +242,104 @@ export default function LandingPage() {
         </Box>
       )}
 
-      <Box sx={{ bgcolor: 'primary.main', color: 'white', py: { xs: 6, md: 10 }, textAlign: 'center' }}>
-        <Container maxWidth="md">
+      <Box
+        className="sp-landing-hero"
+        sx={{
+          position: 'relative',
+          color: 'white',
+          textAlign: 'center',
+          minHeight: { xs: 360, md: 440 },
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+        }}
+      >
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            transform: `translateY(${heroScroll * 0.22}px) scale(${1 + heroScroll * 0.00025})`,
+            opacity: Math.max(0.55, 1 - heroScroll / 420),
+            willChange: 'transform, opacity',
+          }}
+        >
+          <StreetscapeAtmosphere />
+        </Box>
+        <Container
+          maxWidth="md"
+          sx={{
+            position: 'relative',
+            zIndex: 1,
+            py: { xs: 6, md: 10 },
+            px: { xs: 2.5, sm: 3 },
+            opacity: Math.max(0.75, 1 - heroScroll / 520),
+            transform: `translateY(${heroScroll * 0.08}px)`,
+          }}
+        >
           <Box
             component="img"
+            className="sp-landing-hero-brand"
             src="/logo-centre.png"
             alt="SP-Survey"
-            sx={{ height: { xs: 120, md: 180 }, objectFit: 'contain', mb: 3 }}
+            sx={{
+              height: { xs: 100, md: 150 },
+              objectFit: 'contain',
+              mb: { xs: 2, md: 3 },
+              filter: 'drop-shadow(0 8px 28px rgba(0,0,0,0.35))',
+            }}
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
-          <Typography variant="h3" fontWeight={800} sx={{ mb: 2, fontSize: { xs: '2rem', md: '2.8rem' }, letterSpacing: '-0.02em' }}>
+          <Typography
+            className="sp-landing-hero-title"
+            component="h1"
+            sx={{
+              mb: 1.5,
+              fontWeight: 800,
+              fontSize: { xs: '1.9rem', sm: '2.4rem', md: '2.8rem' },
+              letterSpacing: '-0.03em',
+              lineHeight: 1.12,
+              textShadow: '0 2px 28px rgba(0,0,0,0.45)',
+            }}
+          >
             {t.landHeroTitle}
           </Typography>
-          <Typography variant="h6" sx={{ opacity: 0.88, mb: 0.5, fontWeight: 400, maxWidth: 860, mx: 'auto' }}>
-            {t.landHeroLine1}
-          </Typography>
-          <Typography variant="h6" sx={{ opacity: 0.88, mb: 4, fontWeight: 400, maxWidth: 860, mx: 'auto' }}>
+          <Typography
+            className="sp-landing-hero-sub"
+            sx={{
+              opacity: 0.92,
+              mb: 3.5,
+              fontWeight: 400,
+              fontSize: { xs: '1rem', md: '1.15rem' },
+              maxWidth: 560,
+              mx: 'auto',
+              lineHeight: 1.55,
+              textShadow: '0 1px 16px rgba(0,0,0,0.4)',
+            }}
+          >
             {t.landHeroLine2}
           </Typography>
 
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center">
+          <Stack
+            className="sp-landing-hero-cta"
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1.75}
+            justifyContent="center"
+            alignItems="center"
+          >
             <Button
               variant="contained"
               size="large"
               onClick={() => navigate('/login')}
-              sx={{ bgcolor: 'white', color: 'primary.main', fontWeight: 700, px: 4, py: 1.5, '&:hover': { bgcolor: 'grey.100' } }}
+              sx={{
+                bgcolor: 'rgba(255,255,255,0.96)',
+                color: '#0f2a22',
+                fontWeight: 700,
+                px: 4,
+                py: 1.5,
+                boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+                '&:hover': { bgcolor: '#fff' },
+              }}
             >
               {t.landStartFree}
             </Button>
@@ -183,7 +350,13 @@ export default function LandingPage() {
               target="_blank"
               rel="noopener noreferrer"
               startIcon={<Article />}
-              sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' } }}
+              sx={{
+                color: 'white',
+                borderColor: 'rgba(255,255,255,0.55)',
+                bgcolor: 'rgba(255,255,255,0.06)',
+                backdropFilter: 'blur(8px)',
+                '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.14)' },
+              }}
             >
               {t.landReadPaper}
             </Button>
@@ -194,7 +367,13 @@ export default function LandingPage() {
               target="_blank"
               rel="noopener noreferrer"
               startIcon={<GitHub />}
-              sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.6)', '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.1)' } }}
+              sx={{
+                color: 'white',
+                borderColor: 'rgba(255,255,255,0.55)',
+                bgcolor: 'rgba(255,255,255,0.06)',
+                backdropFilter: 'blur(8px)',
+                '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.14)' },
+              }}
             >
               {githubStars !== null ? `GitHub · ★ ${githubStars}` : 'GitHub'}
             </Button>
@@ -203,57 +382,47 @@ export default function LandingPage() {
       </Box>
 
       {benchSummary && (
-        <Container maxWidth="lg" sx={{ pt: 6, pb: 0 }}>
-          <Card
+        <Box
+          sx={{
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'grey.50',
+            py: 1.25,
+            px: 2,
+          }}
+        >
+          <Container
+            maxWidth="lg"
             sx={{
-              borderRadius: 3,
-              border: '1px solid',
-              borderColor: 'divider',
-              boxShadow: '0 2px 16px rgba(0,0,0,0.06)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 2,
+              flexWrap: 'wrap',
             }}
           >
-            <CardContent sx={{ p: { xs: 2.5, md: 3.5 } }}>
-              <Stack
-                direction={{ xs: 'column', md: 'row' }}
-                spacing={3}
-                alignItems={{ md: 'center' }}
-                justifyContent="space-between"
-              >
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-                    <EmojiEvents color="warning" />
-                    <Typography variant="h5" fontWeight={800}>
-                      {benchSummary.settings?.title || t.navSpBench || 'SP-Bench'}
-                    </Typography>
-                    <Chip size="small" color="primary" label={benchSummary.settings?.method_version || 'v1'} />
-                  </Stack>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, maxWidth: 720 }}>
-                    {benchSummary.settings?.landing_blurb
-                      || benchSummary.settings?.subtitle
-                      || t.benchLandingFallback}
-                  </Typography>
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {benchSummary.top.map((row, idx) => (
-                      <Chip
-                        key={row.run_id || idx}
-                        label={`#${idx + 1} ${row.model_name}${row.overall_score != null ? ` · ${Number(row.overall_score).toFixed(3)}` : ''}`}
-                        variant="outlined"
-                      />
-                    ))}
-                    {!benchSummary.top.length && (
-                      <Typography variant="caption" color="text.secondary">
-                        {t.benchNoResultsYet || 'Leaderboard coming soon'}
-                      </Typography>
-                    )}
-                  </Stack>
-                </Box>
-                <Button variant="contained" size="large" onClick={() => navigate('/bench')}>
-                  {t.benchViewLeaderboard || 'View leaderboard'}
-                </Button>
+            <Stack direction="row" spacing={1.25} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+              <EmojiEvents fontSize="small" color="warning" />
+              <Typography variant="subtitle2" fontWeight={800} noWrap>
+                {benchSummary.settings?.title || t.navSpBench || 'SP-Bench'}
+              </Typography>
+              <Chip size="small" variant="outlined" label={benchSummary.settings?.method_version || 'v1'} />
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ display: { xs: 'none', md: 'flex' } }}>
+                {benchSummary.top.slice(0, 3).map((row, idx) => (
+                  <Chip
+                    key={row.run_id || idx}
+                    size="small"
+                    variant="outlined"
+                    label={`#${idx + 1} ${row.model_name}${row.overall_score != null ? ` · ${Number(row.overall_score).toFixed(2)}` : ''}`}
+                  />
+                ))}
               </Stack>
-            </CardContent>
-          </Card>
-        </Container>
+            </Stack>
+            <Button size="small" variant="text" onClick={() => navigate('/bench')} sx={{ fontWeight: 700 }}>
+              {t.benchViewLeaderboard || 'View leaderboard'} →
+            </Button>
+          </Container>
+        </Box>
       )}
 
       <Container maxWidth="lg" sx={{ py: 8 }}>
@@ -472,35 +641,78 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
 function TemplateCard({ template, onUse }) {
   const { t } = useRegion();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
   const isAI = template.category === 'ai';
   const isUrban = template.category === 'urban';
   const chipColor = isAI ? 'primary' : isUrban ? 'warning' : 'success';
   const chipLabel = isAI ? t.landChipAi : isUrban ? t.landChipUrban : t.landChipAcademic;
+  const resolvedThumb = template.thumbnail_url || resolveTemplateThumb(template) || DEFAULT_COVER;
+  const thumb = thumbFailed ? DEFAULT_COVER : resolvedThumb;
+  const coverPos = `${hashString(template.id) % 80}% ${hashString(`${template.id}-y`) % 80}%`;
+
+  useEffect(() => {
+    setThumbFailed(false);
+  }, [resolvedThumb]);
 
   return (
     <>
       <Card sx={{
-        height: 220,
+        height: 258,
         borderRadius: 2,
+        overflow: 'hidden',
         boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
         '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.12)' },
         transition: 'box-shadow 0.2s',
+        display: 'flex',
+        flexDirection: 'column',
       }}>
-        <CardContent sx={{ p: 2.5, height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
-            <Chip label={chipLabel} size="small" color={chipColor} variant="outlined" />
-            <Typography variant="caption" color="text.secondary">{template.year || ''}</Typography>
-          </Box>
-
-          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5, flexShrink: 0, lineHeight: 1.35, ...CLAMP(2) }}>
+        <Box
+          sx={{
+            height: 110,
+            flexShrink: 0,
+            bgcolor: 'grey.100',
+            backgroundImage: `url(${thumb})`,
+            backgroundSize: 'cover',
+            backgroundPosition: coverPos,
+            position: 'relative',
+          }}
+        >
+          <Box
+            component="img"
+            src={thumb}
+            alt=""
+            onError={() => {
+              if (thumb !== DEFAULT_COVER) setThumbFailed(true);
+            }}
+            sx={{ display: 'none' }}
+          />
+          <Chip
+            label={chipLabel}
+            size="small"
+            color={chipColor}
+            variant="outlined"
+            sx={{
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              bgcolor: 'rgba(255,255,255,0.94)',
+              fontWeight: 600,
+              // Filled chips use contrast (white) text; white bg made that invisible.
+              borderColor: `${chipColor}.main`,
+              color: `${chipColor}.dark`,
+            }}
+          />
+        </Box>
+        <CardContent sx={{ p: 2, flex: 1, minHeight: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.35, flexShrink: 0, lineHeight: 1.35, ...CLAMP(2) }}>
             {template.name}
           </Typography>
 
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 1, flexShrink: 0, ...CLAMP(1) }}>
-            {template.author || '\u00A0'}
+          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, flexShrink: 0, ...CLAMP(1) }}>
+            {[template.author, template.year].filter(Boolean).join(' · ') || '\u00A0'}
           </Typography>
 
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, flex: 1, fontSize: '0.8rem', ...CLAMP(2) }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25, flex: 1, fontSize: '0.8rem', lineHeight: 1.4, ...CLAMP(1) }}>
             {template.description || ''}
           </Typography>
 

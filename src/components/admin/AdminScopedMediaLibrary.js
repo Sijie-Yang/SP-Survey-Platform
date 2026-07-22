@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import {
   AttachFile, CloudUpload, Refresh, DeleteForever, Delete, CloudDownload, SelectAll, Deselect,
-  DriveFileMove, OpenInNew, Visibility, Audiotrack,
+  DriveFileMove, OpenInNew, Visibility, Audiotrack, PhotoLibrary,
 } from '@mui/icons-material';
 import MediaFolderBrowser from './MediaFolderBrowser';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
@@ -95,6 +95,8 @@ function entryId(entry) {
  * @param {boolean} [props.enableSupplementary] - show PDF/doc panel (defaults on for templates)
  * @param {string} [props.rootLabel]
  * @param {string} [props.userId] - optional; used only when r2Prefix not enough for MediaFolderBrowser
+ * @param {string|null} [props.thumbnailUrl] - current landing cover URL (templates)
+ * @param {(url: string|null) => Promise<void>|void} [props.onSetThumbnail]
  */
 export default function AdminScopedMediaLibrary({
   r2Prefix,
@@ -105,6 +107,8 @@ export default function AdminScopedMediaLibrary({
   rootLabel = '(root)',
   userId = 'admin',
   onImagesChange = null,
+  thumbnailUrl = null,
+  onSetThumbnail = null,
 }) {
   const prefix = String(r2Prefix || '').replace(/\/?$/, '/');
   const showSupplementary = enableSupplementary ?? !!allowTemplateKeys;
@@ -284,6 +288,12 @@ export default function AdminScopedMediaLibrary({
     () => pool.filter((m) => selected.has(entryId(normalizeMediaEntry(m, prefix)))),
     [pool, selected, prefix],
   );
+  const singleSelectedImage = useMemo(() => {
+    if (!onSetThumbnail || selectedEntries.length !== 1) return null;
+    const e = normalizeMediaEntry(selectedEntries[0], prefix);
+    const mediaType = e?.type || inferMediaType(e?.name || e?.url);
+    return mediaType === 'image' && e?.url ? e : null;
+  }, [onSetThumbnail, selectedEntries, prefix]);
 
   const toggleSelect = (img) => {
     const id = entryId(normalizeMediaEntry(img, prefix));
@@ -778,6 +788,29 @@ export default function AdminScopedMediaLibrary({
           >
             Delete ({selected.size})
           </Button>
+          {onSetThumbnail && (
+            <>
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<PhotoLibrary />}
+                disabled={!singleSelectedImage || busy}
+                onClick={() => onSetThumbnail(singleSelectedImage.url)}
+              >
+                设为首页封面
+              </Button>
+              {thumbnailUrl && (
+                <Button
+                  size="small"
+                  variant="text"
+                  disabled={busy}
+                  onClick={() => onSetThumbnail(null)}
+                >
+                  清除封面
+                </Button>
+              )}
+            </>
+          )}
         </Stack>
 
         {filteredMedia.length === 0 ? (
@@ -787,13 +820,15 @@ export default function AdminScopedMediaLibrary({
         ) : (
           <>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Click a file to preview (image / video / audio). Use checkboxes to select for download, move, or delete.
+              Click a file to preview (image / video / audio). Use checkboxes to select for download, move, or delete
+              {onSetThumbnail ? ' — or set one image as the landing cover.' : '.'}
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
               {filteredMedia.map((img) => {
                 const e = normalizeMediaEntry(img, prefix);
                 const id = entryId(e);
                 const isSelected = selected.has(id);
+                const isCover = !!(thumbnailUrl && e.url === thumbnailUrl);
                 const mediaType = e.type || inferMediaType(e.name || e.url);
                 const isVideo = mediaType === 'video';
                 const isAudio = mediaType === 'audio';
@@ -805,7 +840,7 @@ export default function AdminScopedMediaLibrary({
                       width: 120,
                       cursor: 'pointer',
                       border: '2px solid',
-                      borderColor: isSelected ? 'primary.main' : 'divider',
+                      borderColor: isCover ? 'warning.main' : isSelected ? 'primary.main' : 'divider',
                       borderRadius: 1,
                       overflow: 'hidden',
                       bgcolor: 'grey.50',
@@ -820,6 +855,21 @@ export default function AdminScopedMediaLibrary({
                         onChange={() => toggleSelect(img)}
                         sx={{ position: 'absolute', top: 0, left: 0, zIndex: 1, p: 0.25, bgcolor: 'rgba(255,255,255,0.85)' }}
                       />
+                      {isCover && (
+                        <Chip
+                          size="small"
+                          label="封面"
+                          color="warning"
+                          sx={{
+                            position: 'absolute',
+                            bottom: 4,
+                            left: 4,
+                            zIndex: 1,
+                            height: 20,
+                            fontSize: '0.65rem',
+                          }}
+                        />
+                      )}
                       <Tooltip title="Preview">
                         <IconButton
                           className="media-preview-btn"

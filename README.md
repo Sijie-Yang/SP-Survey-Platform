@@ -38,14 +38,14 @@ Design image-based questionnaires in a drag-and-drop admin panel, share a link w
 
 ## ChatGPT (Codex) + MCP
 
-Design and run a study almost entirely from **ChatGPT (Codex)** through the platform’s remote MCP:
+Design and run a study from **ChatGPT (Codex)**, **Claude Code**, or **Cursor** through the platform’s remote MCP:
 
 1. Sign in at **[sp-survey.org/admin](https://sp-survey.org/admin)**
 2. Open toolbar **AI** → **AI & Integrations**
-3. Set ChatGPT (Codex) permission to **Approve for me**, paste the setup message, and approve OAuth in your browser
-4. Start a **new** Codex chat and ask it to use `sp_survey` (topic, question types, media now or later)
+3. Follow the setup for your client (Codex / Claude Code / Cursor), then approve OAuth in your browser
+4. Start a **new** agent chat and ask it to use `sp_survey` (topic, question types, media now or later)
 5. Share the live survey link with participants — **saves update the link immediately**
-6. Ask Codex to summarize / export results for a project when data comes in
+6. Ask the agent to summarize / export results for a project when data comes in
 
 Example prompt:
 
@@ -55,7 +55,7 @@ Add question types <question type description>.
 I have media datasets <description> at <folder location>. (can be done later)
 ```
 
-Local Codex config (`~/.codex/config.toml`):
+**Codex** (`~/.codex/config.toml`):
 
 ```toml
 mcp_oauth_credentials_store = "keyring"
@@ -70,6 +70,27 @@ scopes = ["surveys:read", "surveys:write", "surveys:publish", "media:write", "re
 codex mcp login sp_survey
 ```
 
+**Claude Code:**
+
+```bash
+claude mcp add --transport http sp_survey "https://sp-survey.org/mcp" --scope user
+# then /mcp → Authenticate
+```
+
+**Cursor** (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "sp_survey": {
+      "url": "https://sp-survey.org/mcp"
+    }
+  }
+}
+```
+
+Then **Settings → Tools & MCP → Connect / Authenticate**.
+
 MCP covers project lifecycle, draft editing (`survey_apply_operations`), media upload / set–category tags, and results list/export/summary. Full tool catalog and deploy notes: [`docs/agent-mcp.md`](./docs/agent-mcp.md) · agent workflow: [`AGENTS.md`](./AGENTS.md).
 
 ---
@@ -78,7 +99,7 @@ MCP covers project lifecycle, draft editing (`survey_apply_operations`), media u
 
 ### Hosted (recommended)
 
-Go to **[sp-survey.org](https://sp-survey.org)**, create an account, and start building. Cloud storage, auth, and live links are handled for you. Connect ChatGPT (Codex) under **Admin → AI** as above.
+Go to **[sp-survey.org](https://sp-survey.org)**, create an account, and start building. Cloud storage, auth, and live links are handled for you. Connect Codex / Claude Code / Cursor under **Admin → AI** as above.
 
 ### Self-host (open source)
 

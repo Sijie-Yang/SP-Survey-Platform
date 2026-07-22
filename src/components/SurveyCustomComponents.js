@@ -6,14 +6,15 @@ import { Serializer, Question, QuestionMatrixModel, QuestionBooleanModel, Custom
 import ImageRankingWidget from './ImageRankingWidget';
 import ImageRatingWidget from './ImageRatingWidget';
 import ImageBooleanWidget from './ImageBooleanWidget';
+import ImageCheckboxWidget from './ImageCheckboxWidget';
 import SurveyJsMatrixControl, { normalizeMatrixAxis } from './SurveyJsMatrixControl';
 import {
-  MediaDisplayContent, MediaRatingContent, MediaBooleanContent, MediaPickerContent,
-  MediaSlotLayout,
+  MediaDisplayContent, MediaRatingContent, MediaBooleanContent, MediaCheckboxContent,
+  MediaPickerContent, MediaSlotLayout,
 } from './MediaWidgets';
 import { SliderGroupContent, PointAllocationContent, ImageSliderGroupContent, ImagePointAllocationContent } from './ResponseWidgets';
 import ImageAnnotationCanvas from './ImageAnnotationWidget';
-import SkillQuestionFrame from './SkillQuestionWidget';
+import SkillQuestionFrame, { skillAnswerPresent } from './SkillQuestionWidget';
 import { summarizeSkillAnswerOneLine } from '../lib/skillAnswerSummary';
 import { readSkillQuestionFields } from '../lib/skillPostMessage';
 import { inferMediaType } from '../lib/mediaUtils';
@@ -436,6 +437,102 @@ export function registerImageBooleanWidget() {
   registerTrialAwareQuestion(BOOLEAN_WIDGET_NAME, ImageBooleanQuestionComponent);
 }
 
+// ===== IMAGE CHECKBOX (stimulus + text multi-select) =====
+const CHECKBOX_WIDGET_NAME = 'imagecheckbox';
+
+/** Write array answers so SurveyJS emits onValueChanged (needed for TrialShell capture). */
+function setQuestionArrayValue(question, newValue) {
+  const copy = Array.isArray(newValue) ? [...newValue] : [];
+  const survey = question?.survey;
+  if (survey && typeof survey.setValue === 'function' && question?.name) {
+    survey.setValue(question.name, copy);
+    return copy;
+  }
+  question.value = copy;
+  return copy;
+}
+
+export function registerImageCheckboxWidget() {
+  class ImageCheckboxQuestion extends Question {
+    getType() { return CHECKBOX_WIDGET_NAME; }
+
+    setValueCore(newValue) {
+      if (ingestTrialsValue(this, newValue, (flat) => {
+        super.setValueCore(Array.isArray(flat) ? [...flat] : []);
+      })) return;
+      if (Array.isArray(newValue)) super.setValueCore([...newValue]);
+      else if (newValue == null) super.setValueCore([]);
+    }
+
+    isEmpty() {
+      const n = getTrialCount(this);
+      if (n > 1) return !allTrialsAnswered(getTrialsAnswer(this) || this.value, n);
+      return !Array.isArray(this.value) || this.value.length === 0;
+    }
+  }
+
+  const creator = () => new ImageCheckboxQuestion();
+  if (!Serializer.findClass(CHECKBOX_WIDGET_NAME)) {
+    Serializer.addClass(
+      CHECKBOX_WIDGET_NAME,
+      [
+        { name: 'choices:itemvalue[]', category: 'choices' },
+        { name: 'imageCount:number', default: 1, category: 'general' },
+        { name: 'imageSelectionMode', default: 'random', choices: ['random', 'manual'], category: 'general' },
+        { name: 'selectedImageUrls:string[]', category: 'general' },
+        { name: 'randomImageSelection:boolean', default: false, category: 'general' },
+        { name: 'bucketPath', category: 'general' },
+        { name: 'supabaseConfig', category: 'general' },
+        { name: 'imageFit', default: 'cover', category: 'general' },
+        { name: 'imageSource', default: 'huggingface', category: 'general' },
+        { name: 'huggingFaceConfig:object', category: 'general' },
+        { name: 'imageHtml:string', category: 'general' },
+        { name: 'imageLinks:string[]', category: 'general', default: [] },
+        { name: 'imageNames:string[]', category: 'general', default: [] },
+        { name: 'excludePreviouslyUsedImages:boolean', default: true, category: 'general' },
+      ],
+      creator,
+      'question',
+    );
+  } else {
+    try { Serializer.overrideClassCreator(CHECKBOX_WIDGET_NAME, creator); } catch { /* ignore */ }
+  }
+
+  function ImageCheckboxQuestionComponent({ question, trialStimulusMedia = null }) {
+    const [value, setValue] = React.useState(() => (
+      Array.isArray(question.value) ? [...question.value] : []
+    ));
+    React.useEffect(() => {
+      const sync = () => {
+        const v = question.value;
+        setValue(Array.isArray(v) ? [...v] : []);
+      };
+      sync();
+      try {
+        question.registerPropertyChangedHandlers?.(['value'], sync);
+        return () => {
+          try { question.unregisterPropertyChangedHandlers?.(['value'], sync); } catch { /* ignore */ }
+        };
+      } catch {
+        return undefined;
+      }
+    }, [question, trialStimulusMedia]);
+
+    return (
+      <ImageCheckboxWidget
+        question={question}
+        value={value}
+        onValueChanged={(newValue) => {
+          const copy = setQuestionArrayValue(question, newValue);
+          setValue(copy);
+        }}
+        trialStimulusMedia={trialStimulusMedia}
+      />
+    );
+  }
+  registerTrialAwareQuestion(CHECKBOX_WIDGET_NAME, ImageCheckboxQuestionComponent);
+}
+
 // Custom Question Class for Image Boolean
 class ImageBooleanQuestion extends QuestionBooleanModel {
   getType() {
@@ -608,8 +705,8 @@ export default registerImageRankingWidget;
 // ── Media question types ──────────────────────────────────────────────────────
 
 const MEDIA_PAIRING_TYPES = [
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix',
-  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'mediapicker',
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image', 'imagematrix',
+  'mediadisplay', 'mediarating', 'mediaboolean', 'mediacheckbox', 'mediaranking', 'mediapicker',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
   'imageannotation', 'skillquestion',
   'imageslidergroup', 'imagepointallocation',
@@ -853,6 +950,81 @@ export function registerMediaBooleanWidget() {
   registerTrialAwareQuestion('mediaboolean', MediaBooleanQuestionComponent);
 }
 
+export function registerMediaCheckboxWidget() {
+  makeMediaQuestion('mediacheckbox');
+  [
+    { name: 'choices:itemvalue[]', category: 'choices' },
+    { name: 'mediaItems', default: [], category: 'general' },
+    { name: 'mediaUrls:string[]', category: 'general' },
+    { name: 'mediaNames:string[]', category: 'general' },
+    { name: 'mediaTypes:string[]', category: 'general' },
+  ].forEach((prop) => {
+    try {
+      const base = prop.name.split(':')[0];
+      if (!Serializer.findProperty('mediacheckbox', base)) {
+        Serializer.addProperty('mediacheckbox', prop);
+      }
+    } catch { /* already present */ }
+  });
+
+  class MediaCheckboxQuestion extends Question {
+    getType() { return 'mediacheckbox'; }
+    setValueCore(newValue) {
+      if (ingestTrialsValue(this, newValue, (flat) => {
+        super.setValueCore(Array.isArray(flat) ? [...flat] : []);
+      })) return;
+      if (Array.isArray(newValue)) super.setValueCore([...newValue]);
+      else if (newValue == null) super.setValueCore([]);
+    }
+    isEmpty() {
+      const n = getTrialCount(this);
+      if (n > 1) return !allTrialsAnswered(getTrialsAnswer(this) || this.value, n);
+      return !Array.isArray(this.value) || this.value.length === 0;
+    }
+  }
+  try {
+    Serializer.overrideClassCreator('mediacheckbox', () => new MediaCheckboxQuestion());
+  } catch { /* ignore */ }
+
+  function MediaCheckboxQuestionComponent({ question: q, trialStimulusMedia = null }) {
+    const rawChoices = q.choices;
+    const choices = Array.isArray(rawChoices)
+      ? rawChoices
+      : (rawChoices && typeof rawChoices.length === 'number' ? Array.from(rawChoices) : []);
+    const [value, setValue] = React.useState(() => (
+      Array.isArray(q.value) ? [...q.value] : []
+    ));
+    React.useEffect(() => {
+      const sync = () => {
+        const v = q.value;
+        setValue(Array.isArray(v) ? [...v] : []);
+      };
+      sync();
+      try {
+        q.registerPropertyChangedHandlers?.(['value'], sync);
+        return () => {
+          try { q.unregisterPropertyChangedHandlers?.(['value'], sync); } catch { /* ignore */ }
+        };
+      } catch {
+        return undefined;
+      }
+    }, [q, trialStimulusMedia]);
+
+    return React.createElement(MediaCheckboxContent, {
+      ...mediaStimulusProps(q, trialStimulusMedia),
+      name: q.name || 'mediacheckbox',
+      choices,
+      value,
+      disabled: !!q.isReadOnly,
+      onChange: (v) => {
+        const copy = setQuestionArrayValue(q, v);
+        setValue(copy);
+      },
+    });
+  }
+  registerTrialAwareQuestion('mediacheckbox', MediaCheckboxQuestionComponent);
+}
+
 export function registerMediaPickerWidget() {
   makeMediaQuestion('mediapicker');
   Serializer.addProperty('mediapicker', { name: 'mediaItems', default: [], category: 'general' });
@@ -937,6 +1109,16 @@ export function registerMediaMatrixWidget() {
 export function registerMediaSliderGroupWidget() {
   class Q extends Question {
     getType() { return 'mediaslidergroup'; }
+    onCheckForErrors(errors, isOnValueChanged) {
+      super.onCheckForErrors(errors, isOnValueChanged);
+      if (!this.isRequired || isOnValueChanged) return;
+      const dims = this.dimensions || [];
+      const val = this.value || {};
+      const missing = dims.filter((d) => val[d.id] === undefined || val[d.id] === null);
+      if (missing.length) {
+        errors.push(new CustomError('Please rate every dimension.', this));
+      }
+    }
   }
   Serializer.addClass('mediaslidergroup', [
     ...MEDIA_PROPS, ...SLOT_PROPS,
@@ -951,7 +1133,6 @@ export function registerMediaSliderGroupWidget() {
   ensureMediaStimulusSerializerProps('mediaslidergroup');
 
   function MediaSliderGroupQuestionComponent({ question: q, trialStimulusMedia = null }) {
-    ensureSliderGroupMidDefaults(q);
     return React.createElement('div', null,
       React.createElement(MediaQuestionStimulus, { question: q, trialStimulusMedia }),
       React.createElement(SliderGroupContent, {
@@ -961,7 +1142,7 @@ export function registerMediaSliderGroupWidget() {
         value: q.value,
         onChange: (v) => { q.value = v; },
         readOnly: q.isReadOnly,
-        autoPersistDefaults: true,
+        autoPersistDefaults: false,
       }),
     );
   }
@@ -971,6 +1152,16 @@ export function registerMediaSliderGroupWidget() {
 export function registerMediaPointAllocationWidget() {
   class Q extends Question {
     getType() { return 'mediapointallocation'; }
+    onCheckForErrors(errors, isOnValueChanged) {
+      super.onCheckForErrors(errors, isOnValueChanged);
+      if (isOnValueChanged) return;
+      const budget = this.budget || 100;
+      const val = this.value || {};
+      const total = Object.values(val).reduce((s, n) => s + (Number(n) || 0), 0);
+      if (total > budget) {
+        errors.push(new CustomError(`Please allocate at most ${budget} points (currently ${total}).`, this));
+      }
+    }
   }
   Serializer.addClass('mediapointallocation', [
     ...MEDIA_PROPS, ...SLOT_PROPS,
@@ -1003,6 +1194,11 @@ export function registerMediaPointAllocationWidget() {
 export function registerImageAnnotationWidget() {
   const QuestionModel = class extends Question {
     getType() { return 'imageannotation'; }
+    /** Match trialHasAnswer: image+empty shapes is not answered. */
+    isEmpty() {
+      const shapes = this.value?.shapes;
+      return !Array.isArray(shapes) || shapes.length === 0;
+    }
     validate() {
       const base = super.validate();
       if (base) return base;
@@ -1046,28 +1242,6 @@ export function registerImageAnnotationWidget() {
 
 // ── Native response types (slider group / point allocation) ──────────────────
 
-function ensureSliderGroupMidDefaults(q) {
-  // Midpoint is a valid answer even if the participant never touches the slider
-  // (single- and multi-trial). Persist so TrialShell / required checks see scores.
-  const dims = q.dimensions || [];
-  if (!dims.length) return;
-  const min = q.scaleMin ?? 1;
-  const max = q.scaleMax ?? 7;
-  const mid = Math.round((Number(min) + Number(max)) / 2);
-  const val = (q.value && typeof q.value === 'object' && !Array.isArray(q.value))
-    ? { ...q.value }
-    : {};
-  let changed = false;
-  dims.forEach((d) => {
-    if (!d?.id) return;
-    if (val[d.id] === undefined || val[d.id] === null || val[d.id] === '') {
-      val[d.id] = mid;
-      changed = true;
-    }
-  });
-  if (changed) q.value = val;
-}
-
 export function registerSliderGroupWidget() {
   class Q extends Question {
     getType() { return 'slidergroup'; }
@@ -1090,7 +1264,6 @@ export function registerSliderGroupWidget() {
 
   ReactQuestionFactory.Instance.registerQuestion('slidergroup', (props) => {
     const q = props.question;
-    ensureSliderGroupMidDefaults(q);
     return React.createElement(SliderGroupContent, {
       dimensions: q.dimensions || [],
       scaleMin: q.scaleMin ?? 1,
@@ -1098,7 +1271,8 @@ export function registerSliderGroupWidget() {
       value: q.value,
       onChange: (v) => { q.value = v; },
       readOnly: q.isReadOnly,
-      autoPersistDefaults: true,
+      // Show midpoint in UI, but only persist after the participant touches a slider.
+      autoPersistDefaults: false,
     });
   });
 }
@@ -1160,7 +1334,6 @@ export function registerImageSliderGroupWidget() {
   ], () => new Q(), 'question');
 
   function ImageSliderGroupQuestionComponent({ question: q, trialStimulusMedia = null }) {
-    ensureSliderGroupMidDefaults(q);
     const fromTrial = resolveQuestionImageChoices(q, trialStimulusMedia)
       .map((c) => c.imageLink)
       .filter(Boolean);
@@ -1173,7 +1346,7 @@ export function registerImageSliderGroupWidget() {
       value: q.value,
       onChange: (v) => { q.value = v; },
       readOnly: q.isReadOnly,
-      autoPersistDefaults: true,
+      autoPersistDefaults: false,
     });
   }
   registerTrialAwareQuestion('imageslidergroup', ImageSliderGroupQuestionComponent);
@@ -1223,30 +1396,83 @@ export function registerImagePointAllocationWidget() {
 
 // ── Skill question type ───────────────────────────────────────────────────────
 
+export class SkillQuestionModel extends Question {
+  getType() { return 'skillquestion'; }
+  isEmpty() { return !skillAnswerPresent(this.value); }
+  setValueCore(newValue) {
+    super.setValueCore(newValue);
+    if (skillAnswerPresent(newValue)) this.skillAnswerSnapshot = newValue;
+  }
+  getDisplayValue(_keysAsText, val) {
+    const value = val !== undefined ? val : (this.value ?? this.skillAnswerSnapshot);
+    return summarizeSkillAnswerOneLine(value);
+  }
+}
+
+function cloneSkillAnswer(value) {
+  if (value === undefined) return undefined;
+  try { return JSON.parse(JSON.stringify(value)); } catch { return value; }
+}
+
+/** Capture answers before SurveyJS creates/rearranges its preview pages. */
+export function captureSkillPreviewAnswers(survey) {
+  const snapshot = {};
+  const questions = typeof survey?.getAllQuestions === 'function' ? survey.getAllQuestions() : [];
+  questions.forEach((question) => {
+    if (question.getType?.() !== 'skillquestion' || !question.name) return;
+    const value = skillAnswerPresent(question.value)
+      ? question.value
+      : (skillAnswerPresent(survey.data?.[question.name])
+        ? survey.data[question.name]
+        : question.skillAnswerSnapshot);
+    if (!skillAnswerPresent(value)) return;
+    const frozen = cloneSkillAnswer(value);
+    snapshot[question.name] = frozen;
+    question.skillAnswerSnapshot = frozen;
+  });
+  survey.__skillPreviewAnswers = snapshot;
+  return snapshot;
+}
+
+export function resolveSkillQuestionValue(question, fieldValue, readOnly = false) {
+  const snapshot = question?.skillAnswerSnapshot
+    ?? question?.survey?.__skillPreviewAnswers?.[question?.name];
+  const dataValue = question?.survey?.data?.[question?.name];
+  const candidates = readOnly
+    ? [snapshot, fieldValue, question?.value, dataValue]
+    : [fieldValue, question?.value, dataValue, snapshot];
+  return candidates.find((candidate) => skillAnswerPresent(candidate)) ?? null;
+}
+
+/** Admin display mode is read-only too, but it must render the question itself. */
+export function isSkillAnswerReviewMode(question) {
+  return !!question?.isReadOnly && question?.survey?.state === 'preview';
+}
+
 export function registerSkillQuestionWidget() {
   Serializer.addClass('skillquestion', [
     { name: 'skillId', category: 'general' },
     { name: 'skillHtml', category: 'general' },
     { name: 'skillAnalysisHtml', category: 'general' },
     { name: 'skillResultSchema', default: [], category: 'general' },
+    { name: 'skillAnswerSnapshot', default: null, category: 'general', visible: false },
+    { name: 'skillRevision:number', default: 0, category: 'general' },
+    { name: 'skillContractVersion:number', default: 1, category: 'general' },
     { name: 'skillConfig', default: {}, category: 'general' },
     { name: 'skillImages', default: [], category: 'general' },
     { name: 'randomImageSelection:boolean', default: false, category: 'general' },
     { name: 'imageCount', default: 1, category: 'general' },
     { name: 'imageSelectionMode', default: 'huggingface_random', category: 'general' },
     { name: 'excludePreviouslyUsedImages:boolean', default: true, category: 'general' },
-  ], () => new (class extends Question {
-    getType() { return 'skillquestion'; }
-    getDisplayValue(_keysAsText, val) {
-      const v = val !== undefined ? val : this.value;
-      return summarizeSkillAnswerOneLine(v);
-    }
-  })(), 'question');
+  ], () => new SkillQuestionModel(''), 'question');
 
   ReactQuestionFactory.Instance.registerQuestion('skillquestion', (props) => {
     const q = props.question;
-    const { config, images, value } = readSkillQuestionFields(q);
-    const readOnly = !!q.isReadOnly;
+    const { config, images, value: fieldValue } = readSkillQuestionFields(q);
+    // Admin's whole-survey preview uses mode="display", which also makes the
+    // question read-only. Only SurveyJS state="preview" is answer review.
+    const readOnly = isSkillAnswerReviewMode(q);
+    const value = resolveSkillQuestionValue(q, fieldValue, readOnly);
     return React.createElement(SkillQuestionFrame, {
       skillHtml: q.skillHtml || '',
       skillId: q.skillId || '',
@@ -1254,8 +1480,23 @@ export function registerSkillQuestionWidget() {
       images,
       value,
       readOnly,
+      resultSchema: q.skillResultSchema || [],
       onChange: (v) => {
-        if (!q.isReadOnly) q.value = v;
+        // Always persist iframe answers — do not gate on isReadOnly.
+        // Entering showPreviewBeforeComplete can flip read-only before the
+        // debounced write runs; skipping here drops the answer entirely.
+        try {
+          q.value = v;
+          q.skillAnswerSnapshot = cloneSkillAnswer(v);
+          if (q.survey && q.name) q.survey.setValue(q.name, v);
+        } catch (err) {
+          console.warn('[skillquestion] failed to set question.value', err);
+          try {
+            if (q.survey && q.name) q.survey.setValue(q.name, v);
+          } catch (err2) {
+            console.warn('[skillquestion] failed to survey.setValue', err2);
+          }
+        }
       },
     });
   });
@@ -1327,9 +1568,11 @@ export function registerImagePickerTrialSupport() {
 
 export function registerAllExtendedWidgets() {
   registerImageMatrixWidget();
+  registerImageCheckboxWidget();
   registerMediaDisplayWidget();
   registerMediaRatingWidget();
   registerMediaBooleanWidget();
+  registerMediaCheckboxWidget();
   registerMediaRankingWidget();
   registerMediaPickerWidget();
   registerMediaMatrixWidget();

@@ -5,9 +5,18 @@
 import { supabaseRest } from '../supabaseUserClient.mjs';
 import { loadOwned } from './projectLifecycle.mjs';
 import { buildResponsesWideCsv, flattenQuestions, qualityFlags } from '../results/wideExport.mjs';
+import {
+  buildExportReadme,
+  buildManifest,
+  buildQuestionExportFiles,
+  buildQuestionLongCsv,
+  buildQuestionSummaryCsv,
+  buildQuestionSummaryRows,
+} from '../../src/lib/questionSummaryExport.js';
 
 const LIST_DEFAULT_LIMIT = 100;
 const EXPORT_MAX = 5000;
+const DISPLAY_ONLY_TYPES = new Set(['expression', 'image', 'html', 'mediadisplay']);
 
 function draftConfig(row) {
   return row.survey_config_draft ?? row.survey_config ?? {};
@@ -168,8 +177,8 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
     limit: filters.limit != null ? filters.limit : EXPORT_MAX,
   });
   const format = String(filters.format || 'json').toLowerCase();
-  if (!['json', 'wide_csv', 'both'].includes(format)) {
-    throw Object.assign(new Error('format must be json, wide_csv, or both'), { status: 400 });
+  if (!['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle'].includes(format)) {
+    throw Object.assign(new Error('format must be json, wide_csv, both, long_csv, summary_csv, or analysis_bundle'), { status: 400 });
   }
 
   const surveyConfig = draftConfig(project);
@@ -182,13 +191,20 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
     );
   }
 
-  const questions = flattenQuestions(surveyConfig);
+  const allQuestions = flattenQuestions(surveyConfig)
+    .filter((q) => q?.name && !DISPLAY_ONLY_TYPES.has(q.type));
+  const questions = filters.questionName
+    ? allQuestions.filter((q) => q.name === filters.questionName)
+    : allQuestions;
+  if (filters.questionName && !questions.length) {
+    throw Object.assign(new Error(`Question not found: ${filters.questionName}`), { status: 404 });
+  }
   const result = {
     success: true,
     projectId,
     format,
     n: filtered.length,
-    note: 'Custom skill answers are exported as stored JSON. Platform does not provide dedicated skill analysis via MCP.',
+    note: 'Typed Skill exports use the frozen question contract; every Skill trial also retains answer_json.',
   };
 
   if (format === 'json' || format === 'both') {
@@ -197,6 +213,66 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
   if (format === 'wide_csv' || format === 'both') {
     result.wideCsv = buildResponsesWideCsv(filtered, questions, surveyConfig);
     result.wideCsvFilename = `responses_wide_${projectId}_${new Date().toISOString().slice(0, 10)}.csv`;
+  }
+  if (['long_csv', 'summary_csv', 'analysis_bundle'].includes(format)) {
+    const analyses = questions.map((question) => ({
+      question,
+      longCsv: buildQuestionLongCsv(question, filtered, surveyConfig),
+      summaryCsv: buildQuestionSummaryCsv(question, filtered),
+    }));
+    if (format === 'long_csv') {
+      if (analyses.length === 1) {
+        result.longCsv = analyses[0].longCsv;
+        result.longCsvFilename = `${analyses[0].question.name}__long.csv`;
+      } else {
+        result.longCsvFiles = analyses.map(({ question, longCsv }) => ({
+          questionName: question.name,
+          filename: `${question.name}__long.csv`,
+          content: longCsv,
+        }));
+        result.note = 'Question types have different native long schemas, so multi-question long_csv returns one file per question. Pass questionName for a single CSV.';
+      }
+    } else if (format === 'summary_csv') {
+      if (analyses.length === 1) {
+        result.summaryCsv = analyses[0].summaryCsv;
+        result.summaryCsvFilename = `${analyses[0].question.name}__summary.csv`;
+      } else {
+        result.summaryCsvFiles = analyses.map(({ question, summaryCsv }) => ({
+          questionName: question.name,
+          filename: `${question.name}__summary.csv`,
+          content: summaryCsv,
+        }));
+        result.note = 'Multi-question summary_csv returns one native-format file per question. Pass questionName for a single CSV.';
+      }
+    } else {
+      const questionFiles = questions.flatMap((question) => (
+        buildQuestionExportFiles(question, filtered, surveyConfig) || []
+      ));
+      const manifestFilters = {
+        date_from: opts.dateFrom,
+        date_to: opts.dateTo,
+        session_id: opts.sessionId,
+        include_practice: opts.includePractice,
+        exclude_flagged: opts.excludeFlagged,
+      };
+      const manifest = buildManifest({
+        project, questions, responses: filtered, filters: manifestFilters, questionFiles,
+      });
+      const files = [
+        { path: 'manifest.json', content: JSON.stringify(manifest, null, 2) },
+        {
+          path: 'README.md',
+          content: buildExportReadme({
+            project,
+            filters: manifestFilters,
+            nResponses: filtered.length,
+            questionCount: questions.length,
+          }),
+        },
+        ...questionFiles,
+      ];
+      result.analysisBundle = { manifest, files };
+    }
   }
   return result;
 }
@@ -211,6 +287,12 @@ export async function summarizeResponses(env, ctx, projectId, filters = {}) {
   const all = await fetchAllResponses(env, projectId);
   const nPractice = all.filter((r) => r.survey_metadata?.practice_mode).length;
   const filtered = filterRows(all, { ...opts, excludeFlagged: false }, surveyConfig);
+  if (filtered.length > EXPORT_MAX) {
+    throw Object.assign(
+      new Error(`Too many responses (${filtered.length}). Narrow by date or questionName (max ${EXPORT_MAX}); statistics were not truncated.`),
+      { status: 400, code: 'RESULTS_TOO_LARGE' },
+    );
+  }
 
   let flagged = 0;
   const flagCounts = {};
@@ -229,14 +311,32 @@ export async function summarizeResponses(env, ctx, projectId, filters = {}) {
     : filtered;
 
   const timestamps = forAnalysis.map(rowTimestamp).filter(Boolean).map((t) => new Date(t).getTime());
-  const questions = flattenQuestions(surveyConfig).filter((q) => q?.name && q.type !== 'html' && q.type !== 'expression');
+  let questions = flattenQuestions(surveyConfig)
+    .filter((q) => q?.name && !DISPLAY_ONLY_TYPES.has(q.type));
+  if (filters.questionName) questions = questions.filter((q) => q.name === filters.questionName);
 
   const perQuestion = questions.map((q) => {
-    let nAnswered = 0;
-    forAnalysis.forEach((row) => {
-      if (hasAnswer(row.responses?.[q.name])) nAnswered += 1;
-    });
-    return { name: q.name, type: q.type || 'unknown', n_answered: nAnswered };
+    const summaryRows = buildQuestionSummaryRows(q, forAnalysis) || [];
+    const manifestQuestion = buildManifest({
+      project,
+      questions: [q],
+      responses: forAnalysis,
+      filters: {},
+      questionFiles: [],
+    }).questions[0];
+    return {
+      name: q.name,
+      type: q.type || 'unknown',
+      n_answered: forAnalysis.filter((row) => hasAnswer(row.responses?.[q.name])).length,
+      contract: q.type === 'skillquestion' ? {
+        skill_id: q.skillId || null,
+        revision: q.skillRevision || null,
+        contract_version: q.skillContractVersion || null,
+        result_schema: q.skillResultSchema || [],
+      } : null,
+      summary_rows: summaryRows,
+      warnings: manifestQuestion?.warnings || [],
+    };
   });
 
   return {
@@ -258,7 +358,7 @@ export async function summarizeResponses(env, ctx, projectId, filters = {}) {
       sessionId: opts.sessionId,
       excludeFlagged: opts.excludeFlagged,
     },
-    note: 'Light summary only. Use survey_export_responses for full data; Admin Results Analysis has charts/TrueSkill/etc.',
+    note: 'Typed summary rows use the same frozen Skill contract as long/analysis exports.',
   };
 }
 

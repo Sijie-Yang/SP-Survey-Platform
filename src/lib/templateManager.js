@@ -70,6 +70,7 @@ function applyTemplateFieldUpdates(row, updates) {
   if ('image_dataset_config' in updates) {
     row.image_dataset_config = sanitizeMediaFolderConfig(updates.image_dataset_config);
   }
+  if ('thumbnail_url' in updates) row.thumbnail_url = updates.thumbnail_url || null;
   return row;
 }
 
@@ -94,6 +95,8 @@ function rowToTemplate(row) {
     preloadedSource:   row.preloaded_source   || null,
     // Folder / set / category tags (safe subset — no tokens)
     imageDatasetConfig: sanitizeMediaFolderConfig(row.image_dataset_config || {}),
+    // Landing card cover (public media URL from template library)
+    thumbnail_url:     row.thumbnail_url      || null,
     // submitter info
     user_id:           row.user_id            || null,
     submitter_email:   row.submitter_email    || null,
@@ -176,7 +179,7 @@ export async function listTemplates(userId) {
         'id, name, description, author, year, category, tags, paper_url, ' +
         'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
         'is_approved, show_on_landing, is_pinned, preloaded_images, preloaded_at, ' +
-        'preloaded_source, image_dataset_config, created_at, updated_at'
+        'preloaded_source, image_dataset_config, thumbnail_url, created_at, updated_at'
       )
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false });
@@ -214,7 +217,7 @@ export async function getTemplateById(id) {
         'id, name, description, author, year, category, tags, paper_url, ' +
         'huggingface_dataset, dataset, survey_config, user_id, submitter_email, ' +
         'is_approved, show_on_landing, is_pinned, preloaded_images, preloaded_at, ' +
-        'preloaded_source, image_dataset_config, created_at, updated_at'
+        'preloaded_source, image_dataset_config, thumbnail_url, created_at, updated_at'
       )
       .eq('id', id)
       .maybeSingle();
@@ -281,6 +284,7 @@ export async function saveTemplateToSupabase(template) {
     image_dataset_config: sanitizeMediaFolderConfig(
       template.imageDatasetConfig || template.image_dataset_config || {},
     ),
+    thumbnail_url:       template.thumbnail_url || template.thumbnailUrl || null,
     user_id:             user.id,
     submitter_email:     user.email           || null,
     is_approved:         false,
@@ -447,12 +451,17 @@ export async function renameTemplateId(oldId, newId, updates = {}, onProgress) {
   }
 
   report('正在更新数据库…');
+  let thumbnail_url = row.thumbnail_url || null;
+  if (thumbnail_url && String(thumbnail_url).includes(oldPrefix)) {
+    thumbnail_url = String(thumbnail_url).replace(oldPrefix, newPrefix);
+  }
   const newRow = applyTemplateFieldUpdates({
     ...row,
     id: normalized,
     preloaded_images,
     preloaded_source: preloaded_images.length ? (row.preloaded_source || 'r2') : row.preloaded_source,
     image_dataset_config: sanitizeMediaFolderConfig(row.image_dataset_config || {}),
+    thumbnail_url,
     updated_at: new Date().toISOString(),
   }, updates);
 

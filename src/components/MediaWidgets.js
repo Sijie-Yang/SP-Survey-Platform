@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Box, Typography, Button, Chip } from '@mui/material';
 import { Visibility, TimerOutlined } from '@mui/icons-material';
 import { SurveyJsBooleanControl } from './ImageBooleanWidget';
+import { SurveyJsCheckboxControl } from './ImageCheckboxWidget';
 import { SurveyJsRatingControl } from './ImageRatingWidget';
 
 function isImageMedia(type) {
@@ -443,6 +444,25 @@ export function MediaBooleanContent({
         labelFalse={labelFalse}
         value={value}
         onChange={onChange}
+      />
+    </Box>
+  );
+}
+
+/** Stimulus media + text multi-select (which labels apply to this scene). */
+export function MediaCheckboxContent({
+  mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation,
+  choices = [], value, onChange, name = 'mediacheckbox', disabled = false,
+}) {
+  return (
+    <Box sx={{ width: '100%' }}>
+      {renderStimulus({ mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation })}
+      <SurveyJsCheckboxControl
+        name={name}
+        choices={choices}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
       />
     </Box>
   );

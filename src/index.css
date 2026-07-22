@@ -431,3 +431,54 @@ iframe[title="skill-question"] {
     padding-inline: 8px;
   }
 }
+
+/* Landing hero — video atmosphere + staged entrance */
+@keyframes sp-hero-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sp-hero-video-drift {
+  from { transform: scale(1.06) translate3d(0, 0, 0); }
+  to { transform: scale(1.16) translate3d(-1.5%, -1%, 0); }
+}
+
+.sp-landing-hero-brand,
+.sp-landing-hero-title,
+.sp-landing-hero-sub,
+.sp-landing-hero-cta {
+  opacity: 0;
+  animation: sp-hero-fade-up 0.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.sp-landing-hero-brand { animation-delay: 0.08s; }
+.sp-landing-hero-title { animation-delay: 0.22s; }
+.sp-landing-hero-sub { animation-delay: 0.36s; }
+.sp-landing-hero-cta { animation-delay: 0.5s; }
+
+.sp-landing-hero-title {
+  font-family: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+}
+
+.sp-landing-hero-video {
+  animation: sp-hero-video-drift 18s ease-in-out alternate infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-landing-hero-brand,
+  .sp-landing-hero-title,
+  .sp-landing-hero-sub,
+  .sp-landing-hero-cta {
+    opacity: 1;
+    animation: none;
+  }
+  .sp-landing-hero-video {
+    animation: none;
+  }
+}

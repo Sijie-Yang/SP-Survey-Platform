@@ -14,6 +14,9 @@ function rowToSkill(row, { includeHtml = false } = {}) {
     configSchema: row.config_schema || [],
     defaultConfig: row.default_config || {},
     resultSchema: row.result_schema || [],
+    exampleAnswer: row.example_answer || null,
+    contractVersion: Number(row.contract_version) || 0,
+    currentRevision: Number(row.current_revision) || 1,
     isApproved: Boolean(row.is_approved),
     submittedAt: row.submitted_at || null,
     createdAt: row.created_at,
@@ -45,12 +48,12 @@ export async function listSkills(env, ctx) {
     supabaseRest(env, {
       path: '/rest/v1/question_skills',
       serviceRole: true,
-      query: '?is_approved=eq.true&select=id,name,description,user_id,config_schema,default_config,result_schema,is_approved,submitted_at,created_at,updated_at&order=name.asc',
+      query: '?is_approved=eq.true&select=id,name,description,user_id,config_schema,default_config,result_schema,example_answer,contract_version,current_revision,is_approved,submitted_at,created_at,updated_at&order=name.asc',
     }),
     supabaseRest(env, {
       path: '/rest/v1/question_skills',
       serviceRole: true,
-      query: `?user_id=eq.${encodeURIComponent(userId)}&select=id,name,description,user_id,config_schema,default_config,result_schema,is_approved,submitted_at,created_at,updated_at&order=updated_at.desc`,
+      query: `?user_id=eq.${encodeURIComponent(userId)}&select=id,name,description,user_id,config_schema,default_config,result_schema,example_answer,contract_version,current_revision,is_approved,submitted_at,created_at,updated_at&order=updated_at.desc`,
     }),
   ]);
   const byId = new Map();
@@ -71,7 +74,7 @@ export async function listSkills(env, ctx) {
   };
 }
 
-export async function getSkill(env, ctx, skillId) {
+export async function getSkill(env, ctx, skillId, revision = null) {
   const userId = ctx.userId;
   const id = String(skillId || '').trim();
   if (!id) {
@@ -91,10 +94,29 @@ export async function getSkill(env, ctx, skillId) {
   if (!isOwner && !isPublic) {
     throw Object.assign(new Error('Skill not found'), { status: 404 });
   }
+  let resolvedRow = row;
+  const requestedRevision = revision == null ? null : Number(revision);
+  if (requestedRevision && Number.isInteger(requestedRevision) && requestedRevision > 0) {
+    const versionRows = await supabaseRest(env, {
+      path: '/rest/v1/question_skill_versions',
+      serviceRole: true,
+      query: `?skill_id=eq.${encodeURIComponent(id)}&revision=eq.${requestedRevision}&select=*`,
+    });
+    const version = Array.isArray(versionRows) ? versionRows[0] : null;
+    if (!version) throw Object.assign(new Error('Skill revision not found'), { status: 404 });
+    resolvedRow = {
+      ...row,
+      ...version,
+      id,
+      current_revision: row.current_revision || 1,
+      updated_at: version.created_at,
+    };
+  }
   return {
     success: true,
     skill: {
-      ...rowToSkill(row, { includeHtml: isOwner || isPublic }),
+      ...rowToSkill(resolvedRow, { includeHtml: isOwner || isPublic }),
+      revision: requestedRevision || Number(row.current_revision) || 1,
       scope: isOwner ? 'mine' : 'public',
     },
   };
@@ -120,6 +142,8 @@ export async function saveSkill(env, ctx, body = {}) {
     configSchema: body.configSchema ?? body.config_schema,
     resultSchema: body.resultSchema ?? body.result_schema,
     defaultConfig: body.defaultConfig ?? body.default_config,
+    exampleAnswer: body.exampleAnswer ?? body.example_answer,
+    contractVersion: 1,
   });
   if (!prepared.ok) {
     throw Object.assign(new Error(prepared.errors.join(' ')), { status: 400 });
@@ -145,6 +169,25 @@ export async function saveSkill(env, ctx, body = {}) {
   }
 
   const now = new Date().toISOString();
+  const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const unchanged = existing
+    && existing.name === name
+    && String(existing.description || '') === String(body.description || prepared.skill.description || '').trim()
+    && existing.source_html === prepared.skill.sourceHtml
+    && String(existing.analysis_html || '') === String(prepared.skill.analysisHtml || '')
+    && sameJson(existing.config_schema || [], prepared.skill.configSchema || [])
+    && sameJson(existing.default_config || {}, prepared.skill.defaultConfig || {})
+    && sameJson(existing.result_schema || [], prepared.skill.resultSchema || [])
+    && sameJson(existing.example_answer, prepared.skill.exampleAnswer);
+  if (unchanged) {
+    return {
+      success: true,
+      revision: Number(existing.current_revision) || 1,
+      skill: { ...rowToSkill(existing, { includeHtml: true }), revision: Number(existing.current_revision) || 1 },
+      warnings: prepared.warnings,
+    };
+  }
+  const revision = existing ? (Number(existing.current_revision) || 1) + 1 : 1;
   const analysisHtml = prepared.skill.analysisHtml != null
     ? prepared.skill.analysisHtml
     : (existing?.analysis_html || '');
@@ -163,6 +206,9 @@ export async function saveSkill(env, ctx, body = {}) {
     result_schema: prepared.skill.resultSchema.length
       ? prepared.skill.resultSchema
       : (existing?.result_schema || []),
+    example_answer: prepared.skill.exampleAnswer,
+    contract_version: 1,
+    current_revision: revision,
     user_id: userId,
     is_approved: existing?.is_approved ?? false,
     submitted_at: existing?.submitted_at ?? null,
@@ -198,9 +244,32 @@ export async function saveSkill(env, ctx, body = {}) {
     }
   }
 
+  await supabaseRest(env, {
+    path: '/rest/v1/question_skill_versions',
+    method: 'POST',
+    serviceRole: true,
+    query: '?on_conflict=skill_id,revision',
+    body: {
+      skill_id: id,
+      revision,
+      user_id: userId,
+      name: row.name,
+      description: row.description,
+      source_html: row.source_html,
+      analysis_html: row.analysis_html || '',
+      config_schema: row.config_schema,
+      default_config: row.default_config,
+      result_schema: row.result_schema,
+      example_answer: row.example_answer,
+      contract_version: 1,
+      created_at: now,
+    },
+    prefer: 'resolution=ignore-duplicates,return=minimal',
+  });
+
   return {
     success: true,
-    skill: { ...rowToSkill(row, { includeHtml: true }), scope: 'mine' },
+    skill: { ...rowToSkill(row, { includeHtml: true }), revision, scope: 'mine' },
     warnings: prepared.warnings,
     message: 'Saved to your private skill library (not submitted for public review).',
   };

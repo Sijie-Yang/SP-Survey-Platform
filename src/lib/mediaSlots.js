@@ -16,6 +16,7 @@ export const MEDIA_STAR_TYPES = [
   'mediaranking',
   'mediarating',
   'mediaboolean',
+  'mediacheckbox',
   'mediamatrix',
   'mediaslidergroup',
   'mediapointallocation',

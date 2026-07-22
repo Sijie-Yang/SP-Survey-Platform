@@ -4,6 +4,7 @@ import { buildSkillSrcdoc } from '../lib/skillSdk';
 import { toSkillInitPayload } from '../lib/skillPostMessage';
 import { extractAnswerFromIframeMessage } from '../lib/skillAnswerBridge';
 import { getPresetSkill } from '../lib/presetSkills';
+import { stripSkillAnswerContext } from '../lib/skillMediaUtils';
 import SkillAnswerReview from './SkillAnswerReview';
 import { RegionContext } from '../contexts/RegionContext';
 import { adminI18n } from '../contexts/adminI18n';
@@ -21,7 +22,19 @@ function stableStringify(v) {
   }
 }
 
-export default function SkillQuestionFrame({ skillHtml, config, images, value, onChange, readOnly, skillId }) {
+/** True when SurveyJS holds a real skill answer (not just stimulus context). */
+export function skillAnswerPresent(value) {
+  if (value == null || value === '') return false;
+  if (typeof value !== 'object') return true;
+  if (Array.isArray(value)) return value.length > 0;
+  const clean = stripSkillAnswerContext(value);
+  if (clean == null) return false;
+  if (typeof clean !== 'object') return true;
+  if (Array.isArray(clean)) return clean.length > 0;
+  return Object.keys(clean).length > 0;
+}
+
+export default function SkillQuestionFrame({ skillHtml, config, images, value, onChange, readOnly, skillId, resultSchema }) {
   const region = useContext(RegionContext);
   const t = region?.t || adminI18n.en;
   const resolvedHtml = skillHtml || presetSkillHtml(skillId);
@@ -32,7 +45,6 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
   const skipValueSyncUntilRef = useRef(0);
   const lastEmittedJsonRef = useRef('');
   const lastInitKeyRef = useRef('');
-  const debounceTimerRef = useRef(null);
   const configRef = useRef(config);
   const imagesRef = useRef(images);
   const valueRef = useRef(value);
@@ -81,10 +93,6 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
     lastInitKeyRef.current = '';
   }, [srcDoc]);
 
-  useEffect(() => () => {
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-  }, []);
-
   useEffect(() => {
     const handler = (e) => {
       const iframe = iframeRef.current;
@@ -105,30 +113,23 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
         }
       }
 
-      // Official answer + AI mistaken postMessage shapes (skill-result, etc.)
+      // Official answer + AI mistaken postMessage shapes (skill-result, etc.).
+      // Persist even if SurveyJS already flipped isReadOnly for preview — the
+      // answer was produced while the participant was interacting.
       const extracted = extractAnswerFromIframeMessage(d);
-      if (extracted && !readOnly) {
-        const json = stableStringify(extracted.value);
-        // ChatGPT skills often post 3 alias messages at once — debounce + skip re-init window.
-        skipValueSyncUntilRef.current = Date.now() + 600;
-        if (json === lastEmittedJsonRef.current) return;
-        lastEmittedJsonRef.current = json;
-        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = setTimeout(() => {
-          if (typeof onChangeRef.current !== 'function') {
-            console.warn(
-              '[SkillQuestionFrame] Answer arrived from iframe but onChange is missing — value not written to question.',
-              extracted.value,
-            );
-            return;
-          }
-          onChangeRef.current(extracted.value);
-        }, 0);
-      }
+      if (!extracted) return;
+      const json = stableStringify(extracted.value);
+      // ChatGPT skills often post 3 alias messages at once — debounce + skip re-init window.
+      skipValueSyncUntilRef.current = Date.now() + 600;
+      if (json === lastEmittedJsonRef.current) return;
+      lastEmittedJsonRef.current = json;
+      // The answer is survey state, so persist synchronously. UI echo suppression
+      // may be timed, but correctness must never depend on a timer surviving Preview.
+      if (typeof onChangeRef.current === 'function') onChangeRef.current(extracted.value);
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [readOnly, sendInit]);
+  }, [sendInit]);
 
   useEffect(() => {
     if (!iframeReadyRef.current) return;
@@ -159,27 +160,26 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
     return () => iframe.removeEventListener('load', onLoad);
   }, [srcDoc, sendInit]);
 
-  if (!resolvedHtml) {
-    return <Alert severity="warning">Skill HTML not configured.</Alert>;
-  }
-
-  // Preview-before-complete / review: show the recorded answer, not a blank re-run of the skill.
-  const hasAnswer = value != null && value !== '';
-  if (readOnly && hasAnswer) {
+  // Survey end preview / review: always show recorded answer summary (never a blank re-run).
+  if (readOnly) {
+    const hasAnswer = skillAnswerPresent(value);
     return (
       <Box sx={{ width: '100%' }}>
-        <SkillAnswerReview value={value} title={t.skillAnswerYourSubmittedTitle} />
+        {hasAnswer ? (
+          <SkillAnswerReview value={value} resultSchema={resultSchema} title={t.skillAnswerYourSubmittedTitle} />
+        ) : (
+          <Alert severity="info">{t.skillAnswerNotRecorded}</Alert>
+        )}
       </Box>
     );
   }
 
+  if (!resolvedHtml) {
+    return <Alert severity="warning">Skill HTML not configured.</Alert>;
+  }
+
   return (
     <Box sx={{ width: '100%', position: 'relative', zIndex: 1 }}>
-      {readOnly && !hasAnswer && (
-        <Alert severity="info" sx={{ mb: 1 }}>
-          {t.skillAnswerNotRecorded}
-        </Alert>
-      )}
       <iframe
         ref={iframeRef}
         title="skill-question"
@@ -192,11 +192,10 @@ export default function SkillQuestionFrame({ skillHtml, config, images, value, o
           border: '1px solid rgba(0,0,0,0.12)',
           borderRadius: 8,
           display: 'block',
-          pointerEvents: readOnly ? 'none' : 'auto',
+          pointerEvents: 'auto',
           touchAction: 'manipulation',
           background: '#fff',
           overflow: 'auto',
-          opacity: readOnly ? 0.85 : 1,
         }}
       />
     </Box>

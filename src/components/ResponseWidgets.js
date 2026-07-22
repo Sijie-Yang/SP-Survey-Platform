@@ -5,7 +5,8 @@ import { ImageGalleryGrid } from './MediaWidgets';
 /**
  * Slider group (semantic differential): multiple bipolar dimensions rated
  * on a shared numeric scale. value = { [dimensionId]: number }
- * Defaults every dimension to the scale midpoint until the participant moves it.
+ * UI shows the scale midpoint until touched; values persist only after interaction
+ * (unless autoPersistDefaults is explicitly enabled for legacy callers).
  */
 export function SliderGroupContent({
   dimensions = [],
@@ -14,14 +15,12 @@ export function SliderGroupContent({
   value,
   onChange,
   readOnly,
-  /** Persist midpoint as the answer when the participant never moves a slider. */
-  autoPersistDefaults = true,
+  /** When true, silently persist midpoints (legacy). Default false restores required semantics. */
+  autoPersistDefaults = false,
 }) {
   const mid = Math.round((Number(scaleMin) + Number(scaleMax)) / 2);
   const current = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
 
-  // Persist midpoint defaults so submit / required / multi-trial checks see real scores
-  // without requiring the participant to touch every slider.
   useEffect(() => {
     if (!autoPersistDefaults || readOnly || !onChange || !dimensions.length) return;
     let changed = false;
@@ -217,7 +216,7 @@ export function ImageSliderGroupContent({
   value,
   onChange,
   readOnly,
-  autoPersistDefaults = true,
+  autoPersistDefaults = false,
 }) {
   const items = (imageUrls || []).filter(Boolean).map((url, i) => ({
     url,

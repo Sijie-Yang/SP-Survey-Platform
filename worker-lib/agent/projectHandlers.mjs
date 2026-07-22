@@ -9,6 +9,7 @@ import {
   createDefaultSurveyConfig,
   findSecretFields,
   isSafeProjectId,
+  postProcessAiConfig,
   restoreStoredSecrets,
   sanitizeForAgent,
   validateSurveyConfig,
@@ -16,6 +17,7 @@ import {
 } from '../designProtocol.mjs';
 import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from './projectMeta.mjs';
 import { deleteOwnedProject } from './projectLifecycle.mjs';
+import { hydrateSkillContracts } from './skillContracts.mjs';
 
 function originFromRequest(request, env) {
   return env.APP_URL
@@ -124,7 +126,11 @@ export async function createProject(env, accessToken, userId, body, request) {
   if (!name) throw Object.assign(new Error('Project name is required.'), { status: 400 });
 
   const description = String(body?.description || '').trim();
-  const surveyConfig = body?.surveyConfig || createDefaultSurveyConfig(name, description);
+  const surveyConfig = await hydrateSkillContracts(
+    env,
+    postProcessAiConfig(body?.surveyConfig || createDefaultSurveyConfig(name, description)),
+    userId,
+  );
   const validation = validateSurveyConfig(surveyConfig);
   if (!validation.valid) {
     throw Object.assign(new Error('Survey validation failed.'), { status: 400, validation });
@@ -235,20 +241,30 @@ export async function saveDraft(env, accessToken, projectId, body, writerSource 
       details: { secretFields },
     });
   }
-  const surveyConfig = body?.surveyConfig;
+  if (!body?.expectedDraftUpdatedAt) {
+    throw Object.assign(new Error('expectedDraftUpdatedAt is required. Call survey_get_draft first.'), {
+      status: 400,
+      code: 'MISSING_EXPECTED_DRAFT_UPDATED_AT',
+    });
+  }
+  const row = await loadOwnedProject(env, accessToken, projectId);
+  const surveyConfig = await hydrateSkillContracts(
+    env,
+    postProcessAiConfig(body?.surveyConfig),
+    row.user_id,
+  );
   const validation = validateSurveyConfig(surveyConfig);
   if (!validation.valid) {
     throw Object.assign(new Error('Survey validation failed.'), { status: 400, validation });
   }
 
-  const row = await loadOwnedProject(env, accessToken, projectId);
   const merged = restoreStoredSecrets(surveyConfig, draftConfig(row));
 
   try {
     const result = await rpc(env, 'save_project_draft', {
       p_project_id: projectId,
       p_survey_config: merged,
-      p_expected_draft_updated_at: body?.expectedDraftUpdatedAt || null,
+      p_expected_draft_updated_at: body.expectedDraftUpdatedAt,
       p_writer: { source: writerSource, ...(body?.writer || {}) },
       p_client_mutation_id: body?.clientMutationId || null,
     }, accessToken);
@@ -258,6 +274,7 @@ export async function saveDraft(env, accessToken, projectId, body, writerSource 
       draftUpdatedAt: result?.draftUpdatedAt || result?.draft_updated_at,
       revisionId: result?.revisionId || result?.revision_id,
       validation,
+      surveyConfig: sanitizeForAgent(merged),
     };
   } catch (error) {
     if (String(error.message || '').includes('conflict')) {
@@ -272,11 +289,19 @@ export async function saveDraft(env, accessToken, projectId, body, writerSource 
 }
 
 export async function applyProjectOperations(env, accessToken, projectId, body, writerSource = 'codex') {
+  if (!body?.expectedDraftUpdatedAt) {
+    throw Object.assign(new Error('expectedDraftUpdatedAt is required. Call survey_get_draft first.'), {
+      status: 400,
+      code: 'MISSING_EXPECTED_DRAFT_UPDATED_AT',
+    });
+  }
   const row = await loadOwnedProject(env, accessToken, projectId);
   const current = draftConfig(row);
   let next;
   try {
     next = applyOperations(current, body?.operations || []);
+    next.surveyConfig = postProcessAiConfig(next.surveyConfig);
+    next.validation = validateSurveyConfig(next.surveyConfig);
   } catch (error) {
     throw Object.assign(new Error(error.message), { status: 400 });
   }
@@ -288,7 +313,7 @@ export async function applyProjectOperations(env, accessToken, projectId, body, 
   }
   const saved = await saveDraft(env, accessToken, projectId, {
     surveyConfig: next.surveyConfig,
-    expectedDraftUpdatedAt: body?.expectedDraftUpdatedAt || row.draft_updated_at,
+    expectedDraftUpdatedAt: body.expectedDraftUpdatedAt,
     clientMutationId: body?.clientMutationId,
     writer: body?.writer,
   }, writerSource);
@@ -296,7 +321,7 @@ export async function applyProjectOperations(env, accessToken, projectId, body, 
     ...saved,
     applied: next.applied,
     inverse: next.inverse,
-    surveyConfig: sanitizeForAgent(next.surveyConfig),
+    surveyConfig: saved.surveyConfig,
   };
 }
 

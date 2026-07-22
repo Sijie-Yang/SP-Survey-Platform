@@ -10,6 +10,7 @@ export const TRIAL_DOT_GROUP_SIZE = 30;
 export const TRIAL_LOOP_TYPES = new Set([
   'imagepicker', 'mediapicker',
   'imagerating', 'mediarating', 'imageboolean', 'mediaboolean',
+  'imagecheckbox', 'mediacheckbox',
   'imageranking', 'mediaranking',
   'imagematrix', 'mediamatrix',
   'imageslidergroup', 'mediaslidergroup',

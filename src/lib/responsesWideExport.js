@@ -14,6 +14,7 @@ const IMAGE_TYPES = new Set([
   'imageranking', 'image_ranking',
   'mediaranking', 'mediapicker',
   'imageboolean', 'image_boolean',
+  'imagecheckbox', 'image_checkbox', 'mediacheckbox',
   'imagematrix', 'image_matrix', 'mediamatrix',
   'imagepicker',
   'image',

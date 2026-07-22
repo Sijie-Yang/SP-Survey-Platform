@@ -366,6 +366,9 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
   const [falKey, setFalKey] = useState('');
   const [r2FeatureMap, setR2FeatureMap] = useState({});
   const [images, setImages] = useState([]);
+  const [thumbnailUrl, setThumbnailUrl] = useState(null);
+  const [thumbBusy, setThumbBusy] = useState(false);
+  const [thumbError, setThumbError] = useState('');
   const [preannotateTarget, setPreannotateTarget] = useState(null);
   const onSavedRef = useRef(onSaved);
   useEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
@@ -398,15 +401,40 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
   useEffect(() => {
     if (open && template) {
       setImages(template.preloadedImages || []);
+      setThumbnailUrl(template.thumbnail_url || null);
+      setThumbError('');
       reloadFeatures();
     }
   }, [open, template, reloadFeatures]);
 
   const handlePersist = useCallback(async (payload) => {
     if (!template) return;
-    await updateTemplate(template.id, payload);
+    const next = { ...payload };
+    if (Array.isArray(payload.preloaded_images) && thumbnailUrl) {
+      const stillThere = payload.preloaded_images.some((img) => img?.url === thumbnailUrl);
+      if (!stillThere) {
+        next.thumbnail_url = null;
+        setThumbnailUrl(null);
+      }
+    }
+    await updateTemplate(template.id, next);
     if (payload.preloaded_images) setImages(payload.preloaded_images);
     if (onSavedRef.current) onSavedRef.current({ silent: true });
+  }, [template, thumbnailUrl]);
+
+  const handleSetThumbnail = useCallback(async (url) => {
+    if (!template) return;
+    setThumbBusy(true);
+    setThumbError('');
+    try {
+      await updateTemplate(template.id, { thumbnail_url: url || null });
+      setThumbnailUrl(url || null);
+      if (onSavedRef.current) onSavedRef.current({ silent: true });
+    } catch (err) {
+      setThumbError(err.message || '保存封面失败');
+    } finally {
+      setThumbBusy(false);
+    }
   }, [template]);
 
   if (!template) return null;
@@ -421,6 +449,45 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
         </Typography>
       </DialogTitle>
       <DialogContent dividers>
+        <Paper variant="outlined" sx={{ p: 1.5, mb: 2, display: 'flex', gap: 1.5, alignItems: 'center' }}>
+          <Box
+            sx={{
+              width: 96,
+              height: 64,
+              flexShrink: 0,
+              borderRadius: 1,
+              overflow: 'hidden',
+              bgcolor: 'grey.100',
+              backgroundImage: thumbnailUrl ? `url(${thumbnailUrl})` : 'none',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              border: '1px solid',
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {!thumbnailUrl && (
+              <Typography variant="caption" color="text.secondary">无封面</Typography>
+            )}
+          </Box>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="subtitle2" fontWeight={700}>首页模板封面</Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              在下方勾选一张图片，点「设为首页封面」。会显示在落地页模板卡片上。
+            </Typography>
+            {thumbError && (
+              <Alert severity="error" sx={{ mt: 1, py: 0 }}>{thumbError}</Alert>
+            )}
+          </Box>
+          {thumbnailUrl && (
+            <Button size="small" disabled={thumbBusy} onClick={() => handleSetThumbnail(null)}>
+              清除
+            </Button>
+          )}
+        </Paper>
+
         <Accordion defaultExpanded={false} sx={{ mb: 2 }}>
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Box>
@@ -472,12 +539,14 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
 
         <AdminScopedMediaLibrary
           r2Prefix={templateImagePrefix(template.id)}
-          owner={template}
+          owner={{ ...template, preloadedImages: images }}
           allowTemplateKeys
           rootLabel="(template root)"
           userId={user?.id || 'admin'}
           onPersist={handlePersist}
           onImagesChange={setImages}
+          thumbnailUrl={thumbnailUrl}
+          onSetThumbnail={handleSetThumbnail}
         />
       </DialogContent>
       <DialogActions>
@@ -1162,7 +1231,7 @@ function TemplateManagement() {
       <TemplateImagesDialog
         template={imagesTarget}
         open={imagesOpen}
-        onClose={() => setImagesOpen(false)}
+        onClose={() => { setImagesOpen(false); setImagesTarget(null); }}
         onSaved={(opts) => { load(); if (!opts?.silent) showSnack('模板图片已更新'); }}
       />
 

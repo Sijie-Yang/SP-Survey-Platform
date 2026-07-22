@@ -16,6 +16,9 @@ function rowToSkill(row) {
     configSchema: row.config_schema || [],
     defaultConfig: row.default_config || {},
     resultSchema: row.result_schema || [],
+    exampleAnswer: row.example_answer || null,
+    contractVersion: Number(row.contract_version) || 0,
+    currentRevision: Number(row.current_revision) || 1,
     is_approved: row.is_approved ?? false,
     submittedAt: row.submitted_at || null,
     createdAt: row.created_at,
@@ -100,7 +103,7 @@ export async function saveSkill(skill) {
   if (!user) throw new Error('Not authenticated');
 
   const { prepareSkillForSave } = await import('./skillHtmlValidate');
-  const prepared = prepareSkillForSave(skill);
+  const prepared = prepareSkillForSave({ ...skill, contractVersion: 1 });
   if (!prepared.ok) {
     throw new Error(prepared.errors.join(' '));
   }
@@ -111,6 +114,20 @@ export async function saveSkill(skill) {
   }
 
   const id = skill.id || `skill_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const unchanged = existing
+    && existing.name === (prepared.skill.name || skill.name || 'Untitled Skill')
+    && existing.description === (prepared.skill.description || skill.description || '')
+    && existing.sourceHtml === prepared.skill.sourceHtml
+    && existing.analysisHtml === prepared.skill.analysisHtml
+    && sameJson(existing.configSchema, prepared.skill.configSchema)
+    && sameJson(existing.defaultConfig, prepared.skill.defaultConfig)
+    && sameJson(existing.resultSchema, prepared.skill.resultSchema)
+    && sameJson(existing.exampleAnswer, prepared.skill.exampleAnswer);
+  if (unchanged) {
+    return { success: true, skill: { ...existing, revision: existing.currentRevision }, warnings: prepared.warnings };
+  }
+  const revision = existing ? (Number(existing.currentRevision) || 1) + 1 : 1;
   const row = {
     id,
     name: prepared.skill.name || skill.name || 'Untitled Skill',
@@ -120,6 +137,9 @@ export async function saveSkill(skill) {
     config_schema: prepared.skill.configSchema || [],
     default_config: prepared.skill.defaultConfig || {},
     result_schema: prepared.skill.resultSchema || [],
+    example_answer: prepared.skill.exampleAnswer,
+    contract_version: 1,
+    current_revision: revision,
     user_id: user.id,
     submitter_email: user.email || null,
     is_approved: existing?.is_approved ?? false,
@@ -140,9 +160,28 @@ export async function saveSkill(skill) {
     }
   }
   if (error) throw error;
+  const versionRow = {
+    skill_id: id,
+    revision,
+    user_id: user.id,
+    name: row.name,
+    description: row.description,
+    source_html: row.source_html,
+    analysis_html: row.analysis_html,
+    config_schema: row.config_schema,
+    default_config: row.default_config,
+    result_schema: row.result_schema,
+    example_answer: row.example_answer,
+    contract_version: 1,
+    created_at: row.updated_at,
+  };
+  const { error: versionError } = await supabase
+    .from('question_skill_versions')
+    .upsert(versionRow, { onConflict: 'skill_id,revision', ignoreDuplicates: true });
+  if (versionError) throw versionError;
   return {
     success: true,
-    skill: rowToSkill(row),
+    skill: { ...rowToSkill(row), revision },
     warnings: prepared.warnings,
   };
 }
@@ -191,12 +230,25 @@ export async function deleteSkill(id) {
   return { success: true };
 }
 
-export async function getSkillById(id) {
+export async function getSkillById(id, revision = null) {
   if (!supabase || !id) return null;
   try {
     const { data, error } = await supabase.from('question_skills').select('*').eq('id', id).maybeSingle();
     if (error || !data) return null;
-    return rowToSkill(data);
+    if (revision == null || Number(revision) === Number(data.current_revision || 1)) {
+      return { ...rowToSkill(data), revision: Number(revision) || Number(data.current_revision) || 1 };
+    }
+    const { data: version, error: versionError } = await supabase
+      .from('question_skill_versions')
+      .select('*')
+      .eq('skill_id', id)
+      .eq('revision', Number(revision))
+      .maybeSingle();
+    if (versionError || !version) return null;
+    return {
+      ...rowToSkill({ ...data, ...version, id, current_revision: data.current_revision }),
+      revision: Number(revision),
+    };
   } catch {
     return null;
   }
@@ -209,6 +261,12 @@ export async function importPresetSkill(presetId) {
 
   const stableId = `preset_${presetId}`;
   const existing = await getSkillById(stableId);
+  const { buildSyntheticAnalysisResponses } = await import('./skillSdk');
+  const exampleAnswer = buildSyntheticAnalysisResponses(
+    preset.resultSchema || [],
+    [{ url: 'https://example.invalid/stimulus.jpg', name: 'stimulus.jpg', type: preset.defaultConfig?.mediaType || 'image' }],
+    1,
+  )[0]?.answer || { value: true };
   const payload = {
     id: stableId,
     name: preset.name,
@@ -217,6 +275,7 @@ export async function importPresetSkill(presetId) {
     configSchema: preset.configSchema,
     defaultConfig: preset.defaultConfig,
     resultSchema: preset.resultSchema || [],
+    exampleAnswer,
   };
   const result = await saveSkill(payload);
   return { ...result, alreadyExists: !!existing, updated: !!existing };

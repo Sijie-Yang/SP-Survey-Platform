@@ -3,6 +3,7 @@ import { Box, Paper, Typography, Stack, Chip } from '@mui/material';
 import { summarizeSkillAnswer } from '../lib/skillAnswerSummary';
 import { RegionContext } from '../contexts/RegionContext';
 import { adminI18n } from '../contexts/adminI18n';
+import { checkAnswerAgainstResultSchema } from '../lib/skillResultTypes';
 
 /** Read-only review of a skill answer (preview-before-complete / results). */
 export default function SkillAnswerReview({
@@ -11,6 +12,7 @@ export default function SkillAnswerReview({
   dense = false,
   showEmpty = true,
   locale: localeProp,
+  resultSchema = [],
 }) {
   const region = useContext(RegionContext);
   const language = localeProp || region?.language || 'en';
@@ -19,6 +21,16 @@ export default function SkillAnswerReview({
   if (empty && !showEmpty) return null;
   const lines = summarizeSkillAnswer(value, language);
   const heading = title || t.skillAnswerSubmittedTitle;
+  const normalized = value && typeof value === 'object' && !Array.isArray(value) ? value : { value };
+  const contractCheck = checkAnswerAgainstResultSchema(normalized, resultSchema);
+  const mismatches = contractCheck.fields.filter((field) => !field.ok);
+  const mediaUrls = (resultSchema || []).flatMap((field) => {
+    if (!['mediaChoice', 'mediaRankedList'].includes(field?.type)) return [];
+    const fieldValue = normalized[field.key];
+    return (Array.isArray(fieldValue) ? fieldValue : [fieldValue])
+      .map((item) => (typeof item === 'string' ? item : item?.imageUrl || item?.videoUrl || item?.url))
+      .filter(Boolean);
+  });
 
   return (
     <Paper
@@ -58,6 +70,24 @@ export default function SkillAnswerReview({
             </Typography>
           ))}
         </Box>
+      )}
+      {mismatches.length > 0 && (
+        <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1 }}>
+          contract_mismatch: {mismatches.map((field) => field.label || field.key).join(', ')}
+        </Typography>
+      )}
+      {mediaUrls.length > 0 && (
+        <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
+          {mediaUrls.map((url, index) => (
+            <Box
+              key={`${url}-${index}`}
+              component="img"
+              src={url}
+              alt={String(url).split('?')[0].split('/').pop() || `media ${index + 1}`}
+              sx={{ width: 72, height: 54, objectFit: 'contain', borderRadius: 1, bgcolor: 'common.white' }}
+            />
+          ))}
+        </Stack>
       )}
     </Paper>
   );

@@ -15,8 +15,8 @@
  *   metric, value, n
  */
 
-import { average, descriptiveStats } from './stats';
-import { computeBordaScores, kendallW } from './rankingStats';
+import { average, descriptiveStats } from './stats.js';
+import { computeBordaScores, kendallW } from './rankingStats.js';
 import {
   computeQuestionTrueSkill,
   computeForcedChoiceTrueSkill,
@@ -25,11 +25,11 @@ import {
   matchesFromOrderedRanking,
   matchesFromForcedChoiceAnswer,
   filenameKey,
-} from './trueskill';
+} from './trueskill.js';
 import {
   evaluateResponseQuality,
   QUALITY_FLAG_LABELS,
-} from './quality';
+} from './quality.js';
 import {
   stripSkillAnswerContext,
   extractSkillShownImages,
@@ -44,18 +44,23 @@ import {
   imageStimulusKey,
   pairwiseShownKeys,
   mediaFilenameKey,
-} from './skillMediaUtils';
-import { computeMaxDiffScores } from './maxdiff';
-import { expandQuestionAnswerUnits } from './responseAnswerUnits';
-import { summarizeVideoMomentsByVideo } from './videoStats';
-import { objectsToCsv, rowsToCsv, exportDateStamp } from './csvUtil';
-import { downloadZip } from './zipDownload';
-import { downloadTextFile, generateMethodsText } from './methodsExport';
+} from './skillMediaUtils.js';
+import { computeMaxDiffScores } from './maxdiff.js';
+import { expandQuestionAnswerUnits } from './responseAnswerUnits.js';
+import { summarizeVideoMomentsByVideo } from './videoStats.js';
+import { objectsToCsv, rowsToCsv, exportDateStamp } from './csvUtil.js';
+import { downloadZip } from './zipDownload.js';
+import { downloadTextFile, generateMethodsText } from './methodsExport.js';
 import {
   annotationToolLabel,
   inferShapeTool,
   normalizeAnnotationTool,
-} from './annotationTools';
+} from './annotationTools.js';
+import { checkAnswerAgainstResultSchema } from './skillResultTypes.js';
+import {
+  adaptResponsesForSkillField,
+  skillFieldNativeQuestion,
+} from './skillNativeAdapter.mjs';
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
@@ -103,6 +108,8 @@ const LONG_EXTRA_BY_FAMILY = {
   image_ranking: ['value'],
   image_rating: ['value'],
   image_boolean: ['value', 'value_norm'],
+  // Stimulus + text multi-select: one row per selected tag
+  image_checkbox: ['value', 'label'],
   // value = media key the participant chose (options are in shown_*)
   imagepicker: ['value'],
   // Best–Worst MaxDiff: one row per trial with both picks (media keys)
@@ -123,7 +130,7 @@ const LONG_EXTRA_BY_FAMILY = {
   points: ['choice_key', 'choice_label', 'points'],
   // Same long shape as points; summary breaks out by shown image × allocation choice.
   image_points: ['choice_key', 'choice_label', 'points'],
-  // Generic / custom skills: answer_json + expanded archetype rows (points/path/allocation/rankedList)
+  // Generic / custom skills: answer_json + expanded archetype rows (points/path/…/pairwise/bestWorst)
   skill: [
     'field_key', 'field_type',
     'x', 'y', 't', 'label', 'seq',
@@ -154,6 +161,7 @@ function questionFamily(type) {
   if (t === 'imageranking' || t === 'image_ranking' || t === 'mediaranking') return 'image_ranking';
   if (t === 'imagerating' || t === 'image_rating' || t === 'mediarating') return 'image_rating';
   if (t === 'imageboolean' || t === 'image_boolean' || t === 'mediaboolean') return 'image_boolean';
+  if (t === 'imagecheckbox' || t === 'image_checkbox' || t === 'mediacheckbox') return 'image_checkbox';
   if (t === 'imagepicker' || t === 'mediapicker') return 'imagepicker';
   if (t === 'slidergroup') return 'slider';
   if (t === 'imageslidergroup' || t === 'mediaslidergroup') return 'image_slider';
@@ -173,6 +181,12 @@ function exportFamilyForQuestion(question) {
   if (isEmotionColorSkill(question?.skillId)) return 'emotion_color';
   if (isContinuousVideoSkill(question?.skillId)) return 'continuous_video';
   if (isCompositeBlocksSkill(question?.skillId)) return 'composite_blocks';
+  const nativeSkillField = singleNativeSkillField(question);
+  if (nativeSkillField) {
+    const nativeQuestion = skillFieldNativeQuestion(question, nativeSkillField);
+    if (nativeQuestion) return exportFamilyForQuestion(nativeQuestion);
+  }
+  if (question?.type === 'text' && question?.inputType === 'number') return 'scalar';
   return questionFamily(question?.type);
 }
 
@@ -430,22 +444,38 @@ function pushCompositeBlocksSummary(out, question, eligible) {
 
 /** Generic skill: unit = primary stimulus; numeric leaves → mean stats; archetypes → native-like metrics. */
 function pushGenericSkillSummary(out, question, eligible, longObjs) {
+  const nResponses = new Set(longObjs.map((r) => [
+    r.participant_id, r.session_id, r.attempt_index, r.created_at, r.trial_index,
+  ].join('|'))).size || collectAnswerUnits(eligible, question.name).length;
   const byMedia = {};
   const labelCounts = {}; // `${media}||${field}||${label}` → count
   const allocByMedia = {}; // `${media}||${field}||${item}` → nums[]
   const rankByOption = {}; // `${field}||${option}` → ranks[]
   const pathLens = {}; // `${media}||${field}` → lengths[]
+  const choiceCounts = {}; // `${field}||${option}` → count (multiChoice/mediaChoice)
+  const matrixCounts = {}; // `${field}||${row}||${col}` → count
+  const segmentCounts = {}; // `${media}||${field}` → segment counts per response
+  const seriesMeans = {}; // `${media}||${field}` → mean sample values
+  const pairwisePrefs = {}; // `${field}` → preference nums
+  const bestWorstCounts = {}; // `${field}||best|worst||option` → count
+
+  const ARCHETYPE_EXPORT_TYPES = new Set([
+    'points', 'path', 'polygon', 'bbox', 'box',
+    'allocation', 'rankedList', 'mediaRankedList',
+    'multiChoice', 'matrix', 'mediaChoice',
+    'timeRanges', 'timeSeries', 'pairwise', 'bestWorst',
+  ]);
 
   longObjs.forEach((r) => {
     const media = shownKeysFromLongRow(r)[0] || '(no_media)';
-    if (r.field_type === 'points') {
+    if (r.field_type === 'points' || r.field_type === 'polygon' || r.field_type === 'bbox') {
       const label = String(r.label || '').trim() || '(unlabeled)';
-      const key = `${media}||${r.field_key || 'points'}||${label}`;
+      const key = `${media}||${r.field_key || r.field_type}||${label}`;
       labelCounts[key] = (labelCounts[key] || 0) + 1;
       return;
     }
     if (r.field_type === 'path') {
-      // Aggregate path length when we see seq===0 (start of a path) — accumulate in a temp via answer_json pass below.
+      // Path length aggregated from answer_json pass below.
       return;
     }
     if (r.field_type === 'allocation') {
@@ -455,11 +485,74 @@ function pushGenericSkillSummary(out, question, eligible, longObjs) {
       if (!Number.isNaN(n)) allocByMedia[key].push(n);
       return;
     }
-    if (r.field_type === 'rankedList') {
-      const key = `${r.field_key || 'rankedList'}||${r.option || ''}`;
+    if (r.field_type === 'rankedList' || r.field_type === 'mediaRankedList') {
+      const key = `${r.field_key || r.field_type}||${r.option || ''}`;
       if (!rankByOption[key]) rankByOption[key] = [];
       const rank = Number(r.rank);
       if (!Number.isNaN(rank)) rankByOption[key].push(rank);
+      return;
+    }
+    if (r.field_type === 'multiChoice' || r.field_type === 'mediaChoice') {
+      const key = `${r.field_key || r.field_type}||${r.option || ''}`;
+      choiceCounts[key] = (choiceCounts[key] || 0) + 1;
+      return;
+    }
+    if (r.field_type === 'matrix') {
+      const key = `${r.field_key || 'matrix'}||${r.choice_key || ''}||${r.option || ''}`;
+      matrixCounts[key] = (matrixCounts[key] || 0) + 1;
+      return;
+    }
+    if (r.field_type === 'timeRanges') {
+      const key = `${media}||${r.field_key || 'timeRanges'}`;
+      if (!segmentCounts[key]) segmentCounts[key] = { nSeg: 0, durations: [] };
+      segmentCounts[key].nSeg += 1;
+      const dur = Number(r.y) - Number(r.x);
+      if (Number.isFinite(dur) && dur >= 0) segmentCounts[key].durations.push(dur);
+      return;
+    }
+    if (r.field_type === 'timeSeries') {
+      const key = `${media}||${r.field_key || 'timeSeries'}`;
+      if (!seriesMeans[key]) seriesMeans[key] = [];
+      const v = Number(r.y ?? r.value ?? r.points);
+      if (!Number.isNaN(v)) seriesMeans[key].push(v);
+      return;
+    }
+    if (r.field_type === 'pairwise' || r.field_type === 'pairwisePreference') {
+      const key = r.field_key || 'pairwise';
+      if (!pairwisePrefs[key]) pairwisePrefs[key] = [];
+      const n = Number(r.value);
+      if (!Number.isNaN(n)) pairwisePrefs[key].push(n);
+      return;
+    }
+    if (r.field_type === 'pairwiseChoice') {
+      const key = `${r.field_key || 'pairwiseChoice'}||${r.option || ''}`;
+      choiceCounts[key] = (choiceCounts[key] || 0) + 1;
+      return;
+    }
+    if (r.field_type === 'bestWorst') {
+      const field = r.field_key || 'bestWorst';
+      if (r.option) {
+        const bk = `${field}||best||${r.option}`;
+        bestWorstCounts[bk] = (bestWorstCounts[bk] || 0) + 1;
+      }
+      if (r.choice_key) {
+        const wk = `${field}||worst||${r.choice_key}`;
+        bestWorstCounts[wk] = (bestWorstCounts[wk] || 0) + 1;
+      }
+      return;
+    }
+    if (['number', 'scaleGroup'].includes(r.field_type)) {
+      if (!byMedia[media]) byMedia[media] = { n: 0, nums: {} };
+      const n = Number(r.value);
+      if (Number.isFinite(n)) {
+        if (!byMedia[media].nums[r.field_key]) byMedia[media].nums[r.field_key] = [];
+        byMedia[media].nums[r.field_key].push(n);
+      }
+      return;
+    }
+    if (['boolean', 'choice', 'text', 'json'].includes(r.field_type)) {
+      const key = `${r.field_key || r.field_type}||${String(r.option || r.value || '')}`;
+      choiceCounts[key] = (choiceCounts[key] || 0) + 1;
       return;
     }
     if (!byMedia[media]) byMedia[media] = { n: 0, nums: {} };
@@ -470,7 +563,7 @@ function pushGenericSkillSummary(out, question, eligible, longObjs) {
       if (!obj || typeof obj !== 'object') return;
       const schema = Array.isArray(question.skillResultSchema) ? question.skillResultSchema : [];
       const archetypeKeys = new Set(
-        schema.filter((f) => ['points', 'path', 'allocation', 'rankedList'].includes(f.type)).map((f) => f.key),
+        schema.filter((f) => ARCHETYPE_EXPORT_TYPES.has(f.type) || f.type === 'box').map((f) => f.key),
       );
       // Path length from answer object
       schema.filter((f) => f.type === 'path').forEach((f) => {
@@ -520,7 +613,7 @@ function pushGenericSkillSummary(out, question, eligible, longObjs) {
   });
   Object.entries(labelCounts).forEach(([key, count]) => {
     const [media, field, label] = key.split('||');
-    out.push(summaryRow(question, count, media, media, 'label_count', count, count, `${field}:${label}`, `${field}:${label}`));
+    out.push(summaryRow(question, nResponses, media, media, 'label_count', count, count, `${field}:${label}`, `${field}:${label}`));
   });
   Object.entries(pathLens).forEach(([key, nums]) => {
     const [media, field] = key.split('||');
@@ -533,14 +626,14 @@ function pushGenericSkillSummary(out, question, eligible, longObjs) {
   Object.entries(rankByOption).forEach(([key, ranks]) => {
     const [field, option] = key.split('||');
     const avg = average(ranks);
-    out.push(summaryRow(question, ranks.length, option, option, 'avg_rank', avg, ranks.length, field, field));
+    out.push(summaryRow(question, nResponses, option, option, 'avg_rank', avg, ranks.length, field, field));
     const nItems = new Set(
       Object.keys(rankByOption).filter((k) => k.startsWith(`${field}||`)).map((k) => k.split('||')[1]),
     ).size;
     const bordaMap = computeBordaScores({ [option]: ranks }, nItems || ranks.length);
     out.push(summaryRow(
       question,
-      ranks.length,
+      nResponses,
       option,
       option,
       'borda',
@@ -549,6 +642,32 @@ function pushGenericSkillSummary(out, question, eligible, longObjs) {
       field,
       field,
     ));
+  });
+  Object.entries(choiceCounts).forEach(([key, count]) => {
+    const [field, option] = key.split('||');
+    out.push(summaryRow(question, nResponses, option, option, 'choice_count', count, count, field, field));
+  });
+  Object.entries(matrixCounts).forEach(([key, count]) => {
+    const [field, row, col] = key.split('||');
+    out.push(summaryRow(question, nResponses, `${row}:${col}`, `${row}:${col}`, 'cell_count', count, count, field, field));
+  });
+  Object.entries(segmentCounts).forEach(([key, block]) => {
+    const [media, field] = key.split('||');
+    out.push(summaryRow(question, nResponses, media, media, 'segment_count', block.nSeg, block.nSeg, field, field));
+    if (block.durations.length) {
+      pushStats(out, question, block.durations.length, media, media, block.durations, `${field}:seg_duration`, `${field}:seg_duration`);
+    }
+  });
+  Object.entries(seriesMeans).forEach(([key, nums]) => {
+    const [media, field] = key.split('||');
+    pushStats(out, question, nums.length, media, media, nums, `${field}:sample`, `${field}:sample`);
+  });
+  Object.entries(pairwisePrefs).forEach(([field, nums]) => {
+    pushStats(out, question, nums.length, field, field, nums, 'preference', 'preference');
+  });
+  Object.entries(bestWorstCounts).forEach(([key, count]) => {
+    const [field, role, option] = key.split('||');
+    out.push(summaryRow(question, count, option, option, `${role}_count`, count, count, field, field));
   });
 }
 
@@ -929,6 +1048,19 @@ function buildLongObjects(question, responses, surveyConfig) {
         value: answer,
         value_norm: normalizeBool(answer),
       });
+    } else if (fam === 'image_checkbox') {
+      const selected = Array.isArray(answer) ? answer
+        : (answer == null || answer === '' ? [] : [answer]);
+      const labels = choiceLabelMap(question.choices || []);
+      selected.forEach((v) => {
+        const key = String(v);
+        objects.push({
+          ...base,
+          ...extra,
+          value: key,
+          label: labels[key] || key,
+        });
+      });
     } else if (fam === 'imagepicker') {
       if (forcedChoice) {
         objects.push({
@@ -1159,6 +1291,27 @@ function buildLongObjects(question, responses, surveyConfig) {
               answer_json: '',
             });
           });
+        } else if ((field.type === 'polygon' || field.type === 'bbox' || field.type === 'box') && Array.isArray(val)) {
+          const fType = field.type === 'box' ? 'bbox' : field.type;
+          const pts = val.filter((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)));
+          const usePts = fType === 'bbox' ? pts.slice(0, 2) : pts;
+          usePts.forEach((p, idx) => {
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: fType,
+              x: Number(p.x),
+              y: Number(p.y),
+              t: '',
+              label: p.label != null ? String(p.label) : '',
+              seq: idx,
+              choice_key: '', choice_label: '', points: '',
+              rank: '', option: '', value: '',
+              answer_json: '',
+            });
+          });
         } else if (field.type === 'allocation' && val && typeof val === 'object' && !Array.isArray(val)) {
           Object.entries(val).forEach(([k, v]) => {
             objects.push({
@@ -1175,7 +1328,7 @@ function buildLongObjects(question, responses, surveyConfig) {
               answer_json: '',
             });
           });
-        } else if (field.type === 'rankedList' && Array.isArray(val)) {
+        } else if ((field.type === 'rankedList' || field.type === 'mediaRankedList') && Array.isArray(val)) {
           const order = val.map((x) => String(x));
           const pipe = order.join('|');
           order.forEach((opt, idx) => {
@@ -1184,7 +1337,7 @@ function buildLongObjects(question, responses, surveyConfig) {
               shown_images: shownPipe,
               ...extra,
               field_key: field.key,
-              field_type: 'rankedList',
+              field_type: field.type,
               x: '', y: '', t: '', label: '', seq: '',
               choice_key: '', choice_label: '', points: '',
               rank: idx + 1,
@@ -1192,6 +1345,193 @@ function buildLongObjects(question, responses, surveyConfig) {
               value: pipe,
               answer_json: '',
             });
+          });
+        } else if (field.type === 'multiChoice' && Array.isArray(val)) {
+          val.forEach((opt) => {
+            if (opt == null || String(opt).trim() === '') return;
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'multiChoice',
+              x: '', y: '', t: '', label: '', seq: '',
+              choice_key: '', choice_label: '', points: '',
+              rank: '',
+              option: String(opt),
+              value: '',
+              answer_json: '',
+            });
+          });
+        } else if (field.type === 'mediaChoice' && (typeof val === 'string' || typeof val === 'number')) {
+          objects.push({
+            ...base,
+            shown_images: shownPipe,
+            ...extra,
+            field_key: field.key,
+            field_type: 'mediaChoice',
+            x: '', y: '', t: '', label: '', seq: '',
+            choice_key: '', choice_label: '', points: '',
+            rank: '',
+            option: String(val),
+            value: String(val),
+            answer_json: '',
+          });
+        } else if (field.type === 'matrix') {
+          if (Array.isArray(val)) {
+            val.forEach((c, idx) => {
+              if (!c || typeof c !== 'object') return;
+              const row = String(c.row ?? c.row_key ?? c.rowKey ?? '');
+              const col = String(c.column ?? c.col ?? c.value ?? '');
+              objects.push({
+                ...base,
+                shown_images: shownPipe,
+                ...extra,
+                field_key: field.key,
+                field_type: 'matrix',
+                x: '', y: '', t: '', label: '', seq: idx,
+                choice_key: row,
+                choice_label: row,
+                points: Number.isFinite(Number(c.value)) ? Number(c.value) : '',
+                rank: '',
+                option: col,
+                value: col,
+                answer_json: '',
+              });
+            });
+          } else if (val && typeof val === 'object') {
+            Object.entries(val).forEach(([row, col], idx) => {
+              objects.push({
+                ...base,
+                shown_images: shownPipe,
+                ...extra,
+                field_key: field.key,
+                field_type: 'matrix',
+                x: '', y: '', t: '', label: '', seq: idx,
+                choice_key: row,
+                choice_label: row,
+                points: Number.isFinite(Number(col)) ? Number(col) : '',
+                rank: '',
+                option: String(col),
+                value: String(col),
+                answer_json: '',
+              });
+            });
+          }
+        } else if (field.type === 'timeRanges') {
+          const segs = Array.isArray(val)
+            ? val
+            : (val && typeof val === 'object' ? (val.segments || val.ranges || []) : []);
+          (segs || []).forEach((s, idx) => {
+            if (!s || !Number.isFinite(Number(s.start ?? s.begin))) return;
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'timeRanges',
+              x: Number(s.start ?? s.begin),
+              y: Number(s.end ?? s.stop ?? s.start ?? s.begin),
+              t: '',
+              label: s.label != null ? String(s.label) : '',
+              seq: idx,
+              choice_key: '', choice_label: '', points: '',
+              rank: '', option: '', value: '',
+              answer_json: '',
+            });
+          });
+        } else if (field.type === 'timeSeries') {
+          const samples = Array.isArray(val)
+            ? val
+            : (val && typeof val === 'object' ? (val.samples || val.series || []) : []);
+          (samples || []).forEach((s, idx) => {
+            if (!s) return;
+            const t = Number(s.t ?? s.time);
+            const v = Number(s.v ?? s.value);
+            if (!Number.isFinite(t) || !Number.isFinite(v)) return;
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'timeSeries',
+              x: t,
+              y: v,
+              t,
+              label: '',
+              seq: idx,
+              choice_key: '', choice_label: '', points: v,
+              rank: '', option: '', value: v,
+              answer_json: '',
+            });
+          });
+        } else if (field.type === 'pairwise' || field.type === 'pairwisePreference') {
+          const pref = typeof val === 'number'
+            ? val
+            : Number(val?.preference ?? val?.score ?? val?.value);
+          if (Number.isFinite(pref)) {
+            objects.push({
+              ...base,
+              shown_images: shownPipe,
+              ...extra,
+              field_key: field.key,
+              field_type: 'pairwisePreference',
+              x: '', y: '', t: '', label: '', seq: '',
+              choice_key: val?.hardToDecide ? 'hard' : '',
+              choice_label: '',
+              points: '',
+              rank: '',
+              option: [val?.imageA, val?.imageB].filter(Boolean).map(String).join('|'),
+              value: pref,
+              answer_json: '',
+            });
+          }
+        } else if (field.type === 'pairwiseChoice' && val && typeof val === 'object') {
+          objects.push({
+            ...base,
+            shown_images: shownPipe,
+            ...extra,
+            field_key: field.key,
+            field_type: 'pairwiseChoice',
+            x: '', y: '', t: '', label: '', seq: '',
+            choice_key: String(val.loser ?? ''),
+            choice_label: 'loser',
+            points: '', rank: '',
+            option: String(val.winner ?? val.choice ?? val.chosenIndex ?? ''),
+            value: String(val.winner ?? val.choice ?? val.chosenIndex ?? ''),
+            answer_json: '',
+          });
+        } else if (field.type === 'bestWorst' && val && typeof val === 'object') {
+          objects.push({
+            ...base,
+            shown_images: shownPipe,
+            ...extra,
+            field_key: field.key,
+            field_type: 'bestWorst',
+            x: '', y: '', t: '', label: '', seq: '',
+            choice_key: String(val.worst ?? val.worstUrl ?? val.worstIndex ?? ''),
+            choice_label: 'worst',
+            points: '',
+            rank: '',
+            option: String(val.best ?? val.bestUrl ?? val.bestIndex ?? ''),
+            value: 'best',
+            answer_json: '',
+          });
+        } else {
+          // Scalar and novel fields are first-class long rows too. The raw
+          // answer_json row above is always retained for lossless recovery.
+          const scalar = val && typeof val === 'object' ? JSON.stringify(val) : val;
+          objects.push({
+            ...base,
+            shown_images: shownPipe,
+            ...extra,
+            field_key: field.key,
+            field_type: field.type,
+            x: '', y: '', t: '', label: '', seq: '',
+            choice_key: '', choice_label: '', points: '', rank: '',
+            option: ['choice', 'mediaChoice', 'boolean'].includes(field.type) ? String(val) : '',
+            value: scalar,
+            answer_json: '',
           });
         }
       });
@@ -1475,6 +1815,31 @@ function buildSummaryObjects(question, responses) {
       out.push(summaryRow(question, nResponses, `${key}__yes`, key, 'count', yes, total));
       out.push(summaryRow(question, nResponses, `${key}__no`, key, 'count', no, total));
     });
+  } else if (fam === 'image_checkbox') {
+    // unit = stimulus; attribute = tag; denom = answer units for that stimulus
+    const nByUnit = {};
+    collectAnswerUnits(eligible, question.name).forEach(({ shown_images: shown }) => {
+      const keys = (shown || []).map((s) => mediaFilenameKey(typeof s === 'string' ? s : (s?.url || s))).filter(Boolean);
+      (keys.length ? keys : ['(no_media)']).forEach((unit) => {
+        nByUnit[unit] = (nByUnit[unit] || 0) + 1;
+      });
+    });
+    const counts = {};
+    longObjs.forEach((r) => {
+      const tag = String(r.value || '');
+      if (!tag) return;
+      const stims = shownKeysFromLongRow(r);
+      (stims.length ? stims : ['(no_media)']).forEach((unit) => {
+        const key = `${unit}||${tag}`;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+    });
+    Object.entries(counts).forEach(([key, count]) => {
+      const [unit, tag] = key.split('||');
+      const n = nByUnit[unit] || nResponses;
+      out.push(summaryRow(question, nResponses, unit, unit, 'select_count', count, n, tag, tag));
+      out.push(summaryRow(question, nResponses, unit, unit, 'select_rate', n ? count / n : 0, n, tag, tag));
+    });
   } else if (fam === 'imagepicker') {
     const { rankings } = forcedChoice
       ? computeForcedChoiceTrueSkill(eligible, question.name)
@@ -1645,17 +2010,47 @@ function buildSummaryObjects(question, responses) {
 
 // ─── Public file builders ─────────────────────────────────────────────────────
 
-export function buildQuestionLongCsv(question, responses, surveyConfig) {
+function singleNativeSkillField(question) {
+  if (question?.type !== 'skillquestion' || !Array.isArray(question.skillResultSchema)) return null;
+  if (isForcedChoiceSkill(question.skillId) || isMaxDiffSkill(question.skillId)
+    || isVideoMomentSkill(question.skillId) || isPairwiseSliderSkill(question.skillId)
+    || isEmotionColorSkill(question.skillId) || isContinuousVideoSkill(question.skillId)
+    || isCompositeBlocksSkill(question.skillId)) return null;
+  const fields = question.skillResultSchema.filter((field) => skillFieldNativeQuestion(question, field));
+  return fields.length === 1 ? fields[0] : null;
+}
+
+/** Pure long-table builder shared by Admin export and the Worker/MCP. */
+export function buildQuestionLongTable(question, responses, surveyConfig) {
   if (!question?.name || isDisplayOnly(question)) return null;
+  const field = singleNativeSkillField(question);
+  if (field) {
+    const adapted = adaptResponsesForSkillField(question, field, responses);
+    return buildQuestionLongTable(adapted.question, adapted.responses, surveyConfig);
+  }
   const headers = longHeadersForType(question.type, question);
-  const objects = buildLongObjects(question, responses, surveyConfig);
-  return objectsToCsv(headers, objects);
+  return { headers, rows: buildLongObjects(question, responses, surveyConfig) };
+}
+
+/** Pure typed summary rows shared by Admin export and the Worker/MCP. */
+export function buildQuestionSummaryRows(question, responses) {
+  if (!question?.name || isDisplayOnly(question)) return null;
+  const field = singleNativeSkillField(question);
+  if (field) {
+    const adapted = adaptResponsesForSkillField(question, field, responses);
+    return buildQuestionSummaryRows(adapted.question, adapted.responses);
+  }
+  return buildSummaryObjects(question, responses);
+}
+
+export function buildQuestionLongCsv(question, responses, surveyConfig) {
+  const table = buildQuestionLongTable(question, responses, surveyConfig);
+  return table ? objectsToCsv(table.headers, table.rows) : null;
 }
 
 export function buildQuestionSummaryCsv(question, responses) {
-  if (!question?.name || isDisplayOnly(question)) return null;
-  const objects = buildSummaryObjects(question, responses);
-  return objectsToCsv(SUMMARY_HEADERS, objects);
+  const rows = buildQuestionSummaryRows(question, responses);
+  return rows ? objectsToCsv(SUMMARY_HEADERS, rows) : null;
 }
 
 function safeFileToken(raw) {
@@ -1668,7 +2063,7 @@ function safeFileToken(raw) {
 export function buildQuestionExportFiles(question, responses, surveyConfig, { pathPrefix = 'questions' } = {}) {
   if (!question?.name || isDisplayOnly(question)) return null;
   const longCsv = buildQuestionLongCsv(question, responses, surveyConfig);
-  const summaryObjects = buildSummaryObjects(question, responses);
+  const summaryObjects = buildQuestionSummaryRows(question, responses) || [];
   if (!longCsv && !summaryObjects.length) return null;
   const name = question.name;
   const files = [
@@ -1678,9 +2073,35 @@ export function buildQuestionExportFiles(question, responses, surveyConfig, { pa
     },
     {
       path: `${pathPrefix}/${name}__summary.csv`,
-      content: objectsToCsv(SUMMARY_HEADERS, summaryObjects),
+      content: buildQuestionSummaryCsv(question, responses) || objectsToCsv(SUMMARY_HEADERS, []),
     },
   ];
+
+  // Strict native-parity Skills have exactly one mapped field: their primary
+  // long/summary files above are already byte-for-byte native-family output.
+  // Extra per-field/raw files are retained only for historical multi-field Skills.
+  if (question.type === 'skillquestion' && Array.isArray(question.skillResultSchema)
+    && !singleNativeSkillField(question)) {
+    const nativeFields = question.skillResultSchema
+      .map((field) => ({ field, ...adaptResponsesForSkillField(question, field, responses) }))
+      .filter((entry) => entry.question);
+    nativeFields.forEach(({ field, question: nativeQuestion, responses: nativeResponses }) => {
+      const token = safeFileToken(field.key);
+      files.push({
+        path: `${pathPrefix}/${question.name}__field__${token}__long.csv`,
+        content: buildQuestionLongCsv(nativeQuestion, nativeResponses, surveyConfig),
+      });
+      files.push({
+        path: `${pathPrefix}/${question.name}__field__${token}__summary.csv`,
+        content: buildQuestionSummaryCsv(nativeQuestion, nativeResponses),
+      });
+    });
+    // Lossless recovery is separate from the native-format field tables.
+    files.push({
+      path: `${pathPrefix}/${question.name}__raw_json.csv`,
+      content: objectsToCsv(longHeadersForType(question.type, question), buildLongObjects(question, responses, surveyConfig)),
+    });
+  }
 
   // Image/media matrix, slider, point allocation: one summary "tab" file per attribute (unit = image only).
   // Annotation: one file per label and per tool (unit = image only).
@@ -1799,15 +2220,36 @@ export function buildManifest({
     n_responses_in_export: (responses || []).length,
     questions: (questions || [])
       .filter((q) => q?.name && !isDisplayOnly(q))
-      .map((q) => ({
-        name: q.name,
-        type: q.type || '',
-        title: q.title || q.name,
-        files: [
-          `questions/${q.name}__long.csv`,
-          `questions/${q.name}__summary.csv`,
-        ],
-      })),
+      .map((q) => {
+        const contractWarnings = [];
+        if (q.type === 'skillquestion') {
+          let mismatch = 0;
+          collectAnswerUnits(responses || [], q.name).forEach(({ answer }) => {
+            const normalized = answer && typeof answer === 'object' && !Array.isArray(answer)
+              ? answer : { value: answer };
+            const check = checkAnswerAgainstResultSchema(normalized, q.skillResultSchema || []);
+            if (!check.recorded || check.fields.some((field) => !field.ok)) mismatch += 1;
+          });
+          if (mismatch) contractWarnings.push(`contract_mismatch: ${mismatch} trial(s)`);
+          if (!q.skillResultSchema?.length) contractWarnings.push('missing_contract: schema inference/raw fallback used');
+        }
+        return {
+          name: q.name,
+          type: q.type || '',
+          title: q.title || q.name,
+          ...(q.type === 'skillquestion' ? {
+            skill_id: q.skillId || null,
+            skill_revision: q.skillRevision || null,
+            skill_contract_version: q.skillContractVersion || null,
+            skill_result_schema: q.skillResultSchema || [],
+            warnings: contractWarnings,
+          } : {}),
+          files: [
+            `questions/${q.name}__long.csv`,
+            `questions/${q.name}__summary.csv`,
+          ],
+        };
+      }),
     files: (questionFiles || []).map((f) => f.path),
   };
 }
@@ -1885,7 +2327,7 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     'Emotion color long: hex, hue, intensity, option_*; summary unit_* = image',
     'Continuous video long: time_s, value (per sample); summary unit_* = video',
     'Composite blocks long: dimension_* + value + choice/words/text; summary unit_* = image × dim',
-    'Generic skill long: answer_json row + expanded rows for points/path/allocation/rankedList; summary by media + archetype metrics',
+    'Generic skill long: answer_json + expanded rows for points/path/polygon/bbox/allocation/rankedList/multiChoice/matrix/mediaChoice/mediaRankedList/timeRanges/timeSeries/pairwise/bestWorst; summary by media + archetype metrics',
     'imageannotation long: tool, label, annotation_json (+ shown_images)',
     'imageannotation summary: attribute_* = label or tool; unit_* = image;',
     '  metrics = count (overall) + label_count + tool_count',

@@ -11,7 +11,7 @@ import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 import { applyAdminThemeToSurveyModel } from '../../lib/surveyStorage';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import { getTrialCount } from '../../lib/trialNavigation';
-import { syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
+import { resolveSkillQuestions, syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
 import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 
 let widgetsRegistered = false;
@@ -77,6 +77,10 @@ export default function QuestionParticipantPreview({ question, currentProject, s
         maxLength: question?.maxLength,
         minRateDescription: question?.minRateDescription,
         maxRateDescription: question?.maxRateDescription,
+        skillId: question?.skillId,
+        skillRevision: question?.skillRevision,
+        skillResultSchema: question?.skillResultSchema,
+        skillConfig: question?.skillConfig,
         themeKey,
       });
     } catch {
@@ -97,8 +101,13 @@ export default function QuestionParticipantPreview({ question, currentProject, s
         const mediaPool = await resolveMediaPoolForPreview(projectImages);
         if (cancelled) return;
         setUsingPreviewLibrary(!projectImages.length && mediaPool.length > 0);
+        const questionConfig = {
+          pages: [{ elements: [JSON.parse(JSON.stringify(question))] }],
+        };
+        await resolveSkillQuestions(questionConfig);
+        if (cancelled) return;
         const { surveyJson } = buildSingleQuestionSurvey({
-          question,
+          question: questionConfig.pages[0].elements[0],
           projectImages: mediaPool,
           randomMedia: false,
           showNavigationButtons: false,

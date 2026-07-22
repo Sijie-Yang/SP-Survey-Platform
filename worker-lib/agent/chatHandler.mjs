@@ -76,13 +76,13 @@ surveyConfig must include title, description, pages[].elements[] with unique nam
 
 Use the FULL type set when appropriate — not only text/rating:
 - Standard: text, comment, radiogroup, checkbox, dropdown, boolean, rating, matrix, ranking, slidergroup, pointallocation, consent
-- Image*: image, imagepicker, imageranking, imagerating, imageboolean, imagematrix, imageslidergroup, imagepointallocation, imageannotation
-- Media*: mediadisplay, mediapicker, mediaranking, mediarating, mediaboolean, mediamatrix, mediaslidergroup, mediapointallocation
+- Image*: image, imagepicker, imageranking, imagerating, imageboolean, imagecheckbox, imagematrix, imageslidergroup, imagepointallocation, imageannotation
+- Media*: mediadisplay, mediapicker, mediaranking, mediarating, mediaboolean, mediacheckbox, mediamatrix, mediaslidergroup, mediapointallocation
 - Interactive: skillquestion with skillId from presets only
 
 For image*/media*/skillquestion ALWAYS set:
-  imageSelectionMode:"huggingface_random", choices:[], randomImageSelection:true, excludePreviouslyUsedImages:true
-Leave choices empty (runtime fills from the project dataset). Never invent image URLs or API keys.
+  imageSelectionMode:"huggingface_random", randomImageSelection:true, excludePreviouslyUsedImages:true
+Leave stimulus choices empty (runtime fills from the project dataset), EXCEPT imagecheckbox/mediacheckbox which need text tag choices (default Tag A/B/C). Never invent image URLs or API keys.
 Never AI-generate/synthesize images to upload. Prefer template media import, project Media Dataset, or Admin preview media library (预览媒体库).
 
 media* extras: mediaType ("any"|"image"|"video"|"audio"), mediaSlots:[], mediaPresentation:"stack".
@@ -98,9 +98,14 @@ skillquestion presets (required skillId + skillConfig; NEVER invent skillHtml on
 
 For custom interactions: use skill_save (MCP) with SPSkill.setAnswer + spskill-init, ONE task per skill,
 then skillquestion + that skillId. Never pack 5 modes into one skill. Never parent.postMessage answer protocols.
-Declare resultSchema types from: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList
-so Results Analysis / CSV reuse native charts (points→annotation overlay, rankedList→Borda, allocation→budget bars).
-Optional analysisHtml + SPAnalysis.getResponses() only when no native type fits. Include imageUrl in answers.
+YOU choose resultSchema types (never default all to text):
+- Annotation → points | path | polygon | bbox (+ imageUrl)
+- Rating scale → rating; free numeric/count → number | count
+- Media → rating/number/boolean/scaleGroup/mediaChoice/mediaRankedList/mediaMatrix + imageUrl
+- Structured → multiChoice | matrix | rankedList | allocation; combined ratings/words/choice/text → compositeBlocks; color response → color
+- Comparison → pairwiseChoice (forced winner/loser) | pairwisePreference (continuous slider) | bestWorst
+- Video → timeRanges | timeSeries
+- Text → choice/text. If no native family matches, redesign the answer shape; json and analysisHtml are forbidden for new Skills.
 
 Prefer imagerating / imagepicker / skillquestion for scene preference tasks.
 Do not include API keys or credentials.`;

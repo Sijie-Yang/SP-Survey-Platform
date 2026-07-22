@@ -214,7 +214,7 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                     else if (currentProject?.imageDatasetConfig?.enabled && currentProject.imageDatasetConfig.datasetName) {
                       // Load from Hugging Face using global config
                       // Use type-specific defaults if imageCount is not set
-                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
+                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'imagecheckbox' || element.type === 'image') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 Preview: Fetching ${imageCount} images from Hugging Face dataset (global config): ${currentProject.imageDatasetConfig.datasetName}`);
                       const { getRandomImagesFromHuggingFace } = await import('../../lib/huggingface');
@@ -231,7 +231,7 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                     // PRIORITY 3: Legacy - element-specific config (kept for backward compatibility)
                     else if (element.imageSource === 'huggingface' && element.huggingFaceConfig) {
                       // Load from Hugging Face using element config (deprecated)
-                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'image') ? 1 : 4;
+                      const defaultCount = (element.type === 'imagerating' || element.type === 'imagematrix' || element.type === 'imageboolean' || element.type === 'imagecheckbox' || element.type === 'image') ? 1 : 4;
                       const imageCount = element.imageCount || defaultCount;
                       console.log(`📥 Preview: [Legacy] Fetching ${imageCount} images from element config: ${element.huggingFaceConfig.datasetName}`);
                       const { getRandomImagesFromHuggingFace } = await import('../../lib/huggingface');

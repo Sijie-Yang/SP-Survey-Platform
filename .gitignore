@@ -51,3 +51,6 @@ yarn-error.log*
 .dev.vars*
 !.dev.vars.example
 !.env.example
+
+# Local hero source footage (not deployed)
+hero-source/

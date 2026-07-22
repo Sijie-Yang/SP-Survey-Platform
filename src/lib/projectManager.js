@@ -33,6 +33,7 @@
 import { supabase } from './supabase';
 import { saveSurveyConfig, loadSurveyConfig, deleteSurveyConfig } from './surveyStorage';
 import { getTemplateById } from './projectTemplates';
+import { hydrateSkillContractSnapshots } from './skillContracts';
 
 const ACTIVE_PROJECT_KEY = 'active_project_id';
 const isPlatformMode = () => !!supabase;
@@ -52,6 +53,8 @@ const createDefaultSurveyConfig = (title) => ({
   progressBarType: 'questions',
   autoGrowComment: true,
   showPreviewBeforeComplete: 'showAllQuestions',
+  includeResearcherPractice: true,
+  excludeFlaggedFromAnalysis: false,
   pages: [
     {
       name: 'page1',
@@ -265,6 +268,7 @@ export const createProject = async (projectData) => {
     }
 
     if (isPlatformMode()) {
+      surveyConfig = await hydrateSkillContractSnapshots(surveyConfig);
       await sbSaveProject(project, surveyConfig);
     } else {
       await saveSurveyConfig(projectId, surveyConfig);
@@ -391,13 +395,16 @@ export const getProjectById = async (projectId) => {
 
 export const saveProjectFull = async (project, surveyConfig, options = {}) => {
   try {
+    const frozenConfig = isPlatformMode()
+      ? await hydrateSkillContractSnapshots(surveyConfig)
+      : surveyConfig;
     if (isPlatformMode()) {
-      const meta = await sbSaveProject(project, surveyConfig, {
+      const meta = await sbSaveProject(project, frozenConfig, {
         writer: options.writer || { source: 'human' },
       });
       return { success: true, ...meta };
     }
-    await localSaveProject(project, surveyConfig);
+    await localSaveProject(project, frozenConfig);
     return { success: true, draftUpdatedAt: new Date().toISOString() };
   } catch (error) {
     console.error('saveProjectFull:', error);
@@ -468,9 +475,10 @@ export const saveProjectDraftOptimistic = async (
     if (!isPlatformMode()) {
       return saveProjectFull({ id: projectId }, surveyConfig, { writer });
     }
+    const frozenConfig = await hydrateSkillContractSnapshots(surveyConfig);
     const { data, error } = await supabase.rpc('save_project_draft', {
       p_project_id: projectId,
-      p_survey_config: surveyConfig,
+      p_survey_config: frozenConfig,
       p_expected_draft_updated_at: expectedDraftUpdatedAt,
       p_writer: writer,
       p_client_mutation_id: clientMutationId,

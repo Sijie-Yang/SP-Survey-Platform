@@ -4,9 +4,9 @@
  */
 
 const IMAGE_TYPES = new Set([
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image',
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'imagematrix', 'image',
   'imageannotation', 'skillquestion', 'imageslidergroup', 'imagepointallocation',
-  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
 ]);
 
@@ -89,7 +89,9 @@ export function validateSurveyConfig(surveyConfig) {
           });
         }
         if (
-          (element.type === 'pointallocation' || element.type === 'imagepointallocation')
+          (element.type === 'pointallocation'
+            || element.type === 'imagepointallocation'
+            || element.type === 'mediapointallocation')
           && !element.choices?.length
         ) {
           warnings.push({

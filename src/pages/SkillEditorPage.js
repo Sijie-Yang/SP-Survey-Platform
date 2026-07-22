@@ -9,13 +9,11 @@ import {
   saveSkill, submitSkillForReview, getSkillById, getSkillStatus,
 } from '../lib/skillManager';
 import SkillQuestionFrame from '../components/SkillQuestionWidget';
-import SkillAnalysisFrame from '../components/SkillAnalysisFrame';
 import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
 import SkillAiPanel from '../components/admin/SkillAiPanel';
 import AdminShell from '../components/layout/AdminShell';
 import { normalizeSkillSchemaArray } from '../lib/skillAnswerBridge';
-import { checkAnswerAgainstResultSchema, KNOWN_SKILL_RESULT_TYPE_IDS } from '../lib/skillResultTypes';
-import { buildSyntheticAnalysisResponses } from '../lib/skillSdk';
+import { checkAnswerAgainstResultSchema, NATIVE_SKILL_RESULT_TYPE_IDS } from '../lib/skillResultTypes';
 
 const DEFAULT_SKILL_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -24,7 +22,7 @@ button{padding:8px 16px;margin:4px;}
 </style></head><body>
 <h3>My Custom Question</h3>
 <p>Click to record your answer:</p>
-<button onclick="SPSkill.setAnswer('clicked')">Record Answer</button>
+<button onclick="SPSkill.setAnswer({value:'clicked'})">Record Answer</button>
 <script>
 document.addEventListener('spskill-init', function(e) {
   console.log('Skill initialized', e.detail);
@@ -40,9 +38,9 @@ export default function SkillEditorPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [sourceHtml, setSourceHtml] = useState(DEFAULT_SKILL_HTML);
-  const [analysisHtml, setAnalysisHtml] = useState('');
   const [configSchema, setConfigSchema] = useState('[]');
   const [resultSchema, setResultSchema] = useState('[]');
+  const [exampleAnswer, setExampleAnswer] = useState('{}');
   const [defaultConfig, setDefaultConfig] = useState('{}');
   const [previewConfig, setPreviewConfig] = useState({});
   const [status, setStatus] = useState('draft');
@@ -84,9 +82,9 @@ export default function SkillEditorPage() {
       setName(skill.name);
       setDescription(skill.description);
       setSourceHtml(skill.sourceHtml || DEFAULT_SKILL_HTML);
-      setAnalysisHtml(skill.analysisHtml || '');
       setConfigSchema(JSON.stringify(skill.configSchema || [], null, 2));
       setResultSchema(JSON.stringify(skill.resultSchema || [], null, 2));
+      setExampleAnswer(JSON.stringify(skill.exampleAnswer || {}, null, 2));
       setDefaultConfig(JSON.stringify(skill.defaultConfig || {}, null, 2));
       setPreviewConfig(skill.defaultConfig || {});
       setStatus(getSkillStatus(skill));
@@ -119,6 +117,20 @@ export default function SkillEditorPage() {
     catch { throw new Error('default_config must be a valid JSON object'); }
   };
 
+  const parseExampleAnswer = () => {
+    try {
+      const parsed = JSON.parse(exampleAnswer || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('example_answer must be a JSON object');
+      }
+      return parsed;
+    } catch (err) {
+      throw new Error(err.message === 'example_answer must be a JSON object'
+        ? err.message
+        : 'example_answer must be a valid JSON object');
+    }
+  };
+
   const missingSetAnswer = sourceHtml
     && !/SPSkill\s*\.\s*setAnswer\s*\(/.test(sourceHtml);
   const usesAltPostMessage = sourceHtml
@@ -143,19 +155,18 @@ export default function SkillEditorPage() {
     setPreviewAnswer(null);
   }, [sourceHtml, defaultConfig]);
 
-  const syntheticAnalysisResponses = useMemo(
-    () => buildSyntheticAnalysisResponses(parsedResultSchemaForCheck, previewImages, 4),
-    [parsedResultSchemaForCheck, previewImages],
-  );
-
   const buildPayload = () => ({
     id: skillId || undefined,
     name: name || 'Untitled Skill',
     description,
     sourceHtml,
-    analysisHtml,
+    analysisHtml: '',
     configSchema: parseSchema(),
     resultSchema: parseResultSchema(),
+    exampleAnswer: (previewAnswer && typeof previewAnswer === 'object' && !Array.isArray(previewAnswer))
+      ? previewAnswer
+      : parseExampleAnswer(),
+    contractVersion: 1,
     defaultConfig: parseDefaultConfig(),
   });
 
@@ -202,7 +213,6 @@ export default function SkillEditorPage() {
     if (skill.name) setName(skill.name);
     if (skill.description) setDescription(skill.description);
     if (skill.sourceHtml) setSourceHtml(skill.sourceHtml);
-    if (skill.analysisHtml != null) setAnalysisHtml(skill.analysisHtml || '');
     if (skill.configSchema) {
       setConfigSchema(JSON.stringify(normalizeSkillSchemaArray(skill.configSchema), null, 2));
     }
@@ -212,6 +222,9 @@ export default function SkillEditorPage() {
         null,
         2,
       ));
+    }
+    if (skill.exampleAnswer && typeof skill.exampleAnswer === 'object') {
+      setExampleAnswer(JSON.stringify(skill.exampleAnswer, null, 2));
     }
     if (skill.defaultConfig) {
       setDefaultConfig(JSON.stringify(skill.defaultConfig, null, 2));
@@ -268,10 +281,10 @@ export default function SkillEditorPage() {
             name,
             description,
             sourceHtml,
-            analysisHtml,
             configSchema: (() => { try { return JSON.parse(configSchema); } catch { return []; } })(),
             defaultConfig: (() => { try { return JSON.parse(defaultConfig); } catch { return {}; } })(),
             resultSchema: (() => { try { return JSON.parse(resultSchema); } catch { return []; } })(),
+            exampleAnswer: (() => { try { return JSON.parse(exampleAnswer); } catch { return {}; } })(),
           } : null}
           onApply={applyAiSkill}
         />
@@ -297,7 +310,14 @@ export default function SkillEditorPage() {
             value={resultSchema}
             onChange={(e) => setResultSchema(e.target.value)}
             fullWidth multiline rows={3}
-            helperText={`e.g. [{"key":"marks","label":"Marks","type":"points"}] — types: ${KNOWN_SKILL_RESULT_TYPE_IDS.join(' / ')}. Declared types reuse native analysis/export.`}
+            helperText={`e.g. [{"key":"marks","label":"Marks","type":"points"}] — native types only: ${NATIVE_SKILL_RESULT_TYPE_IDS.join(' / ')}. Include settings such as options/rows/columns/dimensions/min/max/budget.`}
+          />
+          <TextField
+            label="Example Answer (JSON object) — validates the frozen result contract"
+            value={exampleAnswer}
+            onChange={(e) => setExampleAnswer(e.target.value)}
+            fullWidth multiline rows={4}
+            helperText="Required for new revisions. A valid object recorded in Live preview is used automatically when saving."
           />
           <TextField
             label="HTML source"
@@ -362,26 +382,6 @@ export default function SkillEditorPage() {
               </Box>
             )}
           </Paper>
-          <TextField
-            label="Analysis view HTML (optional) — Results Analysis custom view"
-            value={analysisHtml}
-            onChange={(e) => setAnalysisHtml(e.target.value)}
-            fullWidth multiline rows={8}
-            sx={{ fontFamily: 'monospace' }}
-            helperText='Use spanalysis-init / SPAnalysis.getResponses(). Leave empty when declared resultSchema types are enough.'
-          />
-          {analysisHtml.trim() && (
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Analysis view preview (synthetic responses)
-              </Typography>
-              <SkillAnalysisFrame
-                analysisHtml={analysisHtml}
-                responses={syntheticAnalysisResponses}
-                config={previewConfig}
-              />
-            </Paper>
-          )}
           <Stack direction="row" spacing={2}>
             <Button variant="contained" startIcon={<Save />} onClick={handleSave} disabled={saving || submitting}>
               {saving ? 'Saving…' : 'Save to my library'}

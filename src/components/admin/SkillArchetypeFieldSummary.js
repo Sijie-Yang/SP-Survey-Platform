@@ -3,6 +3,17 @@ import { Alert, Box, Typography, Tabs, Tab, Chip } from '@mui/material';
 import AggregateDensityOverlay from './AggregateDensityOverlay';
 import { average, pct } from '../../lib/stats';
 import { computeBordaScores, kendallW, interpretKendallW } from '../../lib/rankingStats';
+import { canonicalizeSkillResultType } from '../../lib/skillResultTypes';
+import {
+  MultiChoiceFieldSummary,
+  MatrixFieldSummary,
+  MediaChoiceFieldSummary,
+  TimeRangesFieldSummary,
+  TimeSeriesFieldSummary,
+  PairwiseFieldSummary,
+  PairwiseChoiceFieldSummary,
+  BestWorstFieldSummary,
+} from './skillFieldAnalyses';
 
 function getPath(obj, path) {
   if (!obj || typeof obj !== 'object') return undefined;
@@ -54,7 +65,80 @@ function pathDirectness(pts) {
   return chord / len;
 }
 
-/** points / path field → annotation-style overlays grouped by stimulus. */
+function normalizeXy(p) {
+  if (!p || typeof p !== 'object') return null;
+  const x = Number(p.x);
+  const y = Number(p.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x,
+    y,
+    ...(p.t != null ? { t: Number(p.t) } : {}),
+    ...(p.label != null ? { label: String(p.label) } : {}),
+  };
+}
+
+/** Expand a skill spatial field into annotation shapes (point/line/polygon/bbox). */
+function shapesFromSpatialValue(raw, mode, fieldLabel) {
+  if (!Array.isArray(raw) || !raw.length) return [];
+  const tool = mode === 'path' ? 'line'
+    : mode === 'polygon' ? 'polygon'
+      : mode === 'bbox' ? 'bbox'
+        : 'point';
+
+  // Multi-shape: [[{x,y}…], …] or [{ points:[{x,y}…], label? }, …]
+  if (raw.some((item) => Array.isArray(item) || (item && Array.isArray(item.points)))) {
+    return raw.map((item) => {
+      const pts = (Array.isArray(item) ? item : item.points || [])
+        .map(normalizeXy)
+        .filter(Boolean);
+      if (mode === 'polygon' && pts.length < 3) return null;
+      if ((mode === 'path' || mode === 'bbox') && pts.length < 2) return null;
+      if (mode === 'points' && !pts.length) return null;
+      if (mode === 'points') {
+        return pts.map((p) => ({
+          tool: 'point',
+          points: [{ x: p.x, y: p.y }],
+          label: p.label || item.label || fieldLabel,
+        }));
+      }
+      const usePts = mode === 'bbox' ? [pts[0], pts[1]] : pts;
+      return [{
+        tool,
+        points: usePts,
+        label: (!Array.isArray(item) && item.label) || fieldLabel,
+      }];
+    }).flat().filter(Boolean);
+  }
+
+  const pts = raw.map(normalizeXy).filter(Boolean);
+  if (mode === 'points') {
+    return pts.map((p) => ({
+      tool: 'point',
+      points: [{ x: p.x, y: p.y }],
+      label: p.label || fieldLabel,
+    }));
+  }
+  if (mode === 'path' && pts.length >= 2) {
+    return [{ tool: 'line', points: pts, label: fieldLabel }];
+  }
+  if (mode === 'polygon' && pts.length >= 3) {
+    return [{ tool: 'polygon', points: pts, label: fieldLabel }];
+  }
+  if (mode === 'bbox' && pts.length >= 2) {
+    return [{ tool: 'bbox', points: [pts[0], pts[1]], label: fieldLabel }];
+  }
+  return [];
+}
+
+const SPATIAL_CAPTIONS = {
+  points: 'Point density overlay — darker cells = more clicks (annotation point)',
+  path: 'Path overlay — darker cells = more vertices nearby (annotation line)',
+  polygon: 'Polygon overlay — regions drawn on the stimulus (annotation polygon)',
+  bbox: 'Bounding-box overlay — boxes on the stimulus (annotation bbox)',
+};
+
+/** Annotation-family fields → AggregateDensityOverlay, tabs per stimulus image. */
 function SpatialFieldSummary({ field, answers, mode }) {
   const [tab, setTab] = useState(0);
   const byImage = useMemo(() => {
@@ -63,35 +147,21 @@ function SpatialFieldSummary({ field, answers, mode }) {
     const directness = [];
     answers.forEach((entry) => {
       const raw = getPath(entry.answer, field.key);
-      if (!Array.isArray(raw) || !raw.length) return;
-      const pts = raw
-        .filter((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
-        .map((p) => ({
-          x: Number(p.x),
-          y: Number(p.y),
-          ...(p.t != null ? { t: Number(p.t) } : {}),
-          ...(p.label != null ? { label: String(p.label) } : {}),
-        }));
-      if (!pts.length) return;
+      const shapes = shapesFromSpatialValue(raw, mode, field.label || field.key);
+      if (!shapes.length) return;
       if (mode === 'path') {
-        lengths.push(pathLength(pts));
-        const d = pathDirectness(pts);
-        if (d != null) directness.push(d);
+        shapes.forEach((s) => {
+          const pts = s.points || [];
+          if (pts.length >= 2) {
+            lengths.push(pathLength(pts));
+            const d = pathDirectness(pts);
+            if (d != null) directness.push(d);
+          }
+        });
       }
       const url = stimulusUrlFromAnswer(entry.answer, entry) || '__none__';
       if (!map[url]) map[url] = [];
-      if (mode === 'path') {
-        map[url].push({ shapes: [{ tool: 'line', points: pts, label: field.label || field.key }] });
-      } else {
-        // points: one shape per point so labels split cleanly
-        map[url].push({
-          shapes: pts.map((p) => ({
-            tool: 'point',
-            points: [{ x: p.x, y: p.y }],
-            label: p.label || field.label || field.key,
-          })),
-        });
-      }
+      map[url].push({ shapes });
     });
     return { map, lengths, directness };
   }, [answers, field, mode]);
@@ -133,9 +203,7 @@ function SpatialFieldSummary({ field, answers, mode }) {
         <AggregateDensityOverlay
           imageUrl={activeUrl}
           annotations={annotations}
-          caption={mode === 'path'
-            ? 'Path overlay — darker cells = more vertices nearby'
-            : 'Point density overlay — darker cells = more clicks'}
+          caption={SPATIAL_CAPTIONS[mode] || SPATIAL_CAPTIONS.points}
         />
       ) : (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -279,18 +347,24 @@ function RankedListFieldSummary({ field, answers }) {
  * Returns null when field.type is not an archetype (caller handles legacy types).
  */
 export default function SkillArchetypeFieldSummary({ field, answers }) {
-  if (field.type === 'points') {
-    return <SpatialFieldSummary field={field} answers={answers} mode="points" />;
+  const t = canonicalizeSkillResultType(field.type);
+  if (t === 'points' || t === 'path' || t === 'polygon' || t === 'bbox') {
+    return <SpatialFieldSummary field={field} answers={answers} mode={t} />;
   }
-  if (field.type === 'path') {
-    return <SpatialFieldSummary field={field} answers={answers} mode="path" />;
-  }
-  if (field.type === 'allocation') {
+  if (t === 'allocation') {
     return <AllocationFieldSummary field={field} answers={answers} />;
   }
-  if (field.type === 'rankedList') {
+  if (t === 'rankedList' || t === 'mediaRankedList') {
     return <RankedListFieldSummary field={field} answers={answers} />;
   }
+  if (t === 'multiChoice') return <MultiChoiceFieldSummary field={field} answers={answers} />;
+  if (t === 'matrix') return <MatrixFieldSummary field={field} answers={answers} />;
+  if (t === 'mediaChoice') return <MediaChoiceFieldSummary field={field} answers={answers} />;
+  if (t === 'timeRanges') return <TimeRangesFieldSummary field={field} answers={answers} />;
+  if (t === 'timeSeries') return <TimeSeriesFieldSummary field={field} answers={answers} />;
+  if (t === 'pairwise' || t === 'pairwisePreference') return <PairwiseFieldSummary field={field} answers={answers} />;
+  if (t === 'pairwiseChoice') return <PairwiseChoiceFieldSummary field={field} answers={answers} />;
+  if (t === 'bestWorst') return <BestWorstFieldSummary field={field} answers={answers} />;
   return null;
 }
 

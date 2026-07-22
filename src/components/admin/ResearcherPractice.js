@@ -44,9 +44,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { buildResponseMediaUrlMap } from '../../lib/skillMediaUtils';
 import { ImageResolverContext } from './imageResolverContext';
 import {
+  buildQuestionCardProps,
   QuestionCard,
-  collectAnswers,
-  responsesEligibleForQuestion,
 } from './ResultsAnalysis';
 import QuestionEditor from './QuestionEditor';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
@@ -55,7 +54,7 @@ import {
   collectSurveyDataWithTrials,
 } from '../../lib/trialNavigation';
 import { enrichSurveyResponses } from '../../lib/enrichSurveyResponses';
-import { syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
+import { resolveSkillQuestions, syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
 import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
@@ -335,15 +334,19 @@ export default function ResearcherPractice({
 
   const analysisPropsForQuestion = useCallback((question) => {
     if (!question?.name) return null;
-    const pool = responsesEligibleForQuestion(question.name, analysisResponses);
-    return {
-      question: { ...question, _allResponses: pool },
-      answers: collectAnswers(question.name, analysisResponses),
-      totalResponses: pool.length,
+    // This panel reports researcher practice attempts only. Formal participant
+    // submissions remain available in Results Analysis and must not distort the
+    // immediate practice feedback.
+    const practiceResponses = analysisResponses.filter((row) => (
+      row.survey_metadata?.practice_mode
+      && row.survey_metadata?.practice_question === question.name
+    ));
+    return buildQuestionCardProps(question, practiceResponses, {
       questionNumber: questionNumberByName.get(question.name) ?? null,
-      allResponses: pool,
-    };
-  }, [analysisResponses, questionNumberByName]);
+      surveyConfig,
+      exportResponses: practiceResponses,
+    });
+  }, [analysisResponses, questionNumberByName, surveyConfig]);
 
   const writeSessionPersist = useCallback((nextSession) => {
     if (!projectId) return;
@@ -623,8 +626,13 @@ export default function ResearcherPractice({
       ensureWidgets();
       clearTrialsAnswerStore();
       const mediaPool = await resolveMediaPoolForPreview(currentProject?.preloadedImages || []);
+      const questionConfig = {
+        pages: [{ elements: [JSON.parse(JSON.stringify(selectedQuestion))] }],
+      };
+      await resolveSkillQuestions(questionConfig);
+      const resolvedQuestion = questionConfig.pages[0].elements[0];
       const built = buildSingleQuestionSurvey({
-        question: selectedQuestion,
+        question: resolvedQuestion,
         projectImages: mediaPool,
         usedImageKeys: usedImageKeysRef.current,
         usedGroupKeys: usedGroupKeysRef.current,

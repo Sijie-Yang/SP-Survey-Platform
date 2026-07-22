@@ -68,12 +68,12 @@ import QuestionParticipantPreview from './QuestionParticipantPreview';
 import MediaSlotsEditor from './MediaSlotsEditor';
 
 const MEDIA_STAR_EDITOR_TYPES = [
-  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean',
+  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
 ];
 
 const CURATED_STIMULUS_TYPES = [
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix',
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'imagematrix',
   'image', 'imageslidergroup', 'imagepointallocation',
   ...MEDIA_STAR_EDITOR_TYPES, 'imageannotation',
 ];
@@ -619,6 +619,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     { value: 'imageranking', label: 'Image Ranking', group: 'image' },
     { value: 'imagerating', label: 'Image Rating Scale', group: 'image' },
     { value: 'imageboolean', label: 'Image Yes/No', group: 'image' },
+    { value: 'imagecheckbox', label: 'Image Multi-select (text tags)', group: 'image' },
     { value: 'imagematrix', label: 'Image Matrix', group: 'image' },
     { value: 'image', label: 'Image Display (single image)', group: 'image' },
     { value: 'imageannotation', label: 'Image Annotation', group: 'image' },
@@ -628,6 +629,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     { value: 'mediaranking', label: 'Media Ranking', group: 'media' },
     { value: 'mediarating', label: 'Media Rating Scale', group: 'media' },
     { value: 'mediaboolean', label: 'Media Yes/No', group: 'media' },
+    { value: 'mediacheckbox', label: 'Media Multi-select (text tags)', group: 'media' },
     { value: 'mediamatrix', label: 'Media Matrix', group: 'media' },
     { value: 'mediadisplay', label: 'Media Display (image / video / audio)', group: 'media' },
     { value: 'mediaslidergroup', label: 'Media Slider Group', group: 'media' },
@@ -706,6 +708,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           mediaType: lockedType,
         };
         updates.skillResultSchema = skill?.resultSchema || [];
+        updates.skillRevision = Number(skill?.revision || skill?.currentRevision || 1);
+        updates.skillContractVersion = Number(skill?.contractVersion || 1);
         updates.randomImageSelection = true;
         updates.imageSelectionMode = 'huggingface_random';
         updates.excludePreviouslyUsedImages = true;
@@ -722,6 +726,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         updates.skillAnalysisHtml = '';
         updates.skillConfig = {};
         updates.skillResultSchema = [];
+        updates.skillRevision = 0;
+        updates.skillContractVersion = 1;
         updates.randomImageSelection = true;
         updates.imageSelectionMode = 'huggingface_random';
         updates.excludePreviouslyUsedImages = true;
@@ -729,9 +735,9 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         return setEditedQuestion({ ...editedQuestion, ...updates });
       }
       // Types that should have 1 image/media by default
-      if (value === 'imagerating' || value === 'imagematrix' || value === 'imageboolean' || value === 'image'
+      if (value === 'imagerating' || value === 'imagematrix' || value === 'imageboolean' || value === 'imagecheckbox' || value === 'image'
         || value === 'imageslidergroup' || value === 'imagepointallocation'
-        || value === 'mediadisplay' || value === 'mediarating' || value === 'mediaboolean'
+        || value === 'mediadisplay' || value === 'mediarating' || value === 'mediaboolean' || value === 'mediacheckbox'
         || value === 'mediamatrix' || value === 'mediaslidergroup' || value === 'mediapointallocation'
         || value === 'imageannotation') {
         if (!editedQuestion.imageCount) updates.imageCount = 1;
@@ -740,6 +746,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         updates.randomImageSelection = true;
         updates.excludePreviouslyUsedImages = true;
         updates.choices = updates.choices || [];
+        if (value === 'imagecheckbox' || value === 'mediacheckbox') {
+          if (!editedQuestion.choices?.length) {
+            updates.choices = [
+              { value: 'tag_a', text: 'Tag A' },
+              { value: 'tag_b', text: 'Tag B' },
+              { value: 'tag_c', text: 'Tag C' },
+            ];
+          }
+        }
         if (MEDIA_STAR_EDITOR_TYPES.includes(value)) {
           updates.mediaType = 'any';
           if (!Array.isArray(editedQuestion.mediaSlots)) updates.mediaSlots = [];
@@ -754,8 +769,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         }
         if (value === 'mediaslidergroup' && !editedQuestion.dimensions?.length) {
           updates.dimensions = [
-            { id: 'd1', label: 'Dimension 1' },
-            { id: 'd2', label: 'Dimension 2' },
+            { id: 'd1', left: 'Low', right: 'High' },
+            { id: 'd2', left: 'Disagree', right: 'Agree' },
           ];
           updates.scaleMin = 1;
           updates.scaleMax = 7;
@@ -907,7 +922,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     });
   };
 
-  const needsChoices = ['radiogroup', 'checkbox', 'dropdown', 'ranking', 'pointallocation', 'imagepointallocation'].includes(editedQuestion.type);
+  const needsChoices = [
+    'radiogroup', 'checkbox', 'dropdown', 'ranking',
+    'pointallocation', 'imagepointallocation', 'mediapointallocation',
+    'imagecheckbox', 'mediacheckbox',
+  ].includes(editedQuestion.type);
   const isStimulusQuestion = isMediaStimulusQuestion(editedQuestion.type)
     || (editedQuestion.type === 'skillquestion' && !!editedQuestion.skillId);
   const mediaConstraints = getQuestionMediaConstraints(editedQuestion.type, editedQuestion);
@@ -1618,6 +1637,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   </>
                 )}
 
+                {(editedQuestion.type === 'imagecheckbox' || editedQuestion.type === 'mediacheckbox') && (
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    Participants see the stimulus, then check <strong>any number of text tags</strong>
+                    {' '}(always multi-select). Edit the tag list in <strong>Text tags</strong> below —
+                    tags are independent of the sampled media.
+                  </Alert>
+                )}
+
                 {editedQuestion.type === 'image' && (
                   <Alert severity="info" sx={{ py: 0.5 }}>
                     <strong>Image Display shows exactly one image</strong> per participant.
@@ -1651,6 +1678,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         }}
                       >
                         <MenuItem value="single">Gallery — Image Choice layout (2+ images)</MenuItem>
+                        <MenuItem value="sideBySide">Side by side (2+ images)</MenuItem>
                         <MenuItem value="reveal">Before/After drag reveal (2 images)</MenuItem>
                         <MenuItem value="timed">Timed exposure (hide after N seconds)</MenuItem>
                       </Select>
@@ -1832,8 +1860,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   />
                 )}
 
-                {!['skillquestion', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image',
-                  'imagematrix', 'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediaranking',
+                {!['skillquestion', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image',
+                  'imagematrix', 'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediacheckbox', 'mediaranking',
                   'mediamatrix', 'mediaslidergroup', 'mediapointallocation', 'imageannotation',
                   'imageslidergroup', 'imagepointallocation'].includes(editedQuestion.type) && (
                   <Alert severity="info" sx={{ py: 0.5 }}>No extra task options for this type.</Alert>
@@ -1896,7 +1924,6 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                         config={mergedCfg}
                         images={previewImages}
                         skillId={editedQuestion.skillId}
-                        readOnly
                       />
                     </>
                   );
@@ -1979,11 +2006,13 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           {needsChoices && (
             <Box>
               <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-                {['pointallocation', 'imagepointallocation'].includes(editedQuestion.type)
+                {['pointallocation', 'imagepointallocation', 'mediapointallocation'].includes(editedQuestion.type)
                   ? 'Allocation categories'
                   : editedQuestion.type === 'ranking'
                     ? 'Items to rank'
-                    : 'Answer choices'}
+                    : (editedQuestion.type === 'imagecheckbox' || editedQuestion.type === 'mediacheckbox')
+                      ? 'Text tags (multi-select)'
+                      : 'Answer choices'}
               </Typography>
               {['pointallocation', 'imagepointallocation'].includes(editedQuestion.type) && (
                 <Alert severity="info" sx={{ mb: 2, py: 0.5 }}>
@@ -1991,6 +2020,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   {editedQuestion.type === 'imagepointallocation'
                     ? ' (independent of the sampled images above)'
                     : ''}.
+                </Alert>
+              )}
+              {(editedQuestion.type === 'imagecheckbox' || editedQuestion.type === 'mediacheckbox') && (
+                <Alert severity="info" sx={{ mb: 2, py: 0.5 }}>
+                  Add the labels participants can check (e.g. greenery, safety, busy).
+                  They may select multiple tags per trial.
                 </Alert>
               )}
               {(editedQuestion.type === 'radiogroup' || editedQuestion.type === 'dropdown') && (
@@ -2406,7 +2441,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           }
           
           // Handle image types: keep type, generate imageHtml for runtime display
-          if (['imageboolean', 'imagerating', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(questionToSave.type)) {
+          if (['imageboolean', 'imagecheckbox', 'imagerating', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(questionToSave.type)) {
             console.log(`🔄 Processing ${questionToSave.type} - keeping type, generating imageHtml`);
             
             // Set default imageSelectionMode if not set
@@ -2457,9 +2492,9 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           }
 
           if ([
-            'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagematrix', 'image',
+            'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'imagematrix', 'image',
             'imageslidergroup', 'imagepointallocation',
-            'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediaranking',
+            'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediacheckbox', 'mediaranking',
             'mediamatrix', 'mediaslidergroup', 'mediapointallocation', 'imageannotation',
           ].includes(questionToSave.type)) {
             questionToSave.imageCount = clampQuestionImageCount(
@@ -2502,7 +2537,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
           // Media* / annotation — honor curated vs random (skipped when slots drive selection)
           if ([
-            'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediaranking',
+            'mediadisplay', 'mediapicker', 'mediarating', 'mediaboolean', 'mediacheckbox', 'mediaranking',
             'mediamatrix', 'mediaslidergroup', 'mediapointallocation', 'imageannotation',
           ].includes(questionToSave.type)) {
             if (!questionToSave.imageSelectionMode) {

@@ -358,7 +358,10 @@ const TOOLS = [
     description: 'Get one skill (sourceHtml when approved or owned by you).',
     inputSchema: {
       type: 'object',
-      properties: { skillId: { type: 'string' } },
+      properties: {
+        skillId: { type: 'string' },
+        revision: { type: 'number', description: 'Optional immutable revision; defaults to current.' },
+      },
       required: ['skillId'],
     },
   },
@@ -370,9 +373,12 @@ const TOOLS = [
       + 'MUST use spskill-init or SPSkill.getConfig/getImages; NEVER parent.postMessage skill-result aliases; '
       + 'ONE focused task per skill (do not pack attention_map+route_trace+budget_lab+… into one HTML); '
       + 'configSchema/resultSchema must be arrays of {key,label,type} objects. '
-      + 'Declare resultSchema[].type from: number, boolean, choice, text, count, color, scaleGroup, points, path, allocation, rankedList '
-      + '(platform reuses native Results Analysis + CSV export for these; unknown types warn but still save). '
-      + 'Optional analysisHtml: sandboxed analysis view reading SPAnalysis.getResponses() for novel data shapes. '
+      + 'YOU pick resultSchema[].type: rating scale→rating; numeric/count→number|count; annotation→points|path|polygon|bbox; '
+      + 'media→rating/number/boolean/scaleGroup/mediaChoice/mediaRankedList/mediaMatrix+imageUrl; '
+      + 'text→choice/text/rankedList/allocation; composite ratings/words/choice/text→compositeBlocks; color→color; forced comparison→pairwiseChoice; slider comparison→pairwisePreference. '
+      + 'Every field MUST map exactly to an existing native question/results/export family. json, legacy pairwise, and analysisHtml are rejected for new revisions. '
+      + 'Declare exactly one resultSchema field per Skill; use compositeBlocks or separate Skills when appropriate. '
+      + 'Include native settings (options/rows/columns/dimensions/min/max/budget) in resultSchema. '
       + 'Include imageUrl in answers for per-stimulus grouping. '
       + 'Prefer preset_* skillquestion when a preset fits. Does not submit for public review.',
     inputSchema: {
@@ -382,16 +388,19 @@ const TOOLS = [
         name: { type: 'string' },
         description: { type: 'string' },
         sourceHtml: { type: 'string' },
-        analysisHtml: { type: 'string', description: 'Optional skill-authored analysis view (SPAnalysis SDK).' },
         configSchema: { type: 'array' },
         defaultConfig: { type: 'object' },
         resultSchema: {
           type: 'array',
           description: '[{key,label,type}] — type from catalog so analysis/export match native question types.',
         },
+        exampleAnswer: {
+          type: 'object',
+          description: 'Required non-empty object matching resultSchema; used to validate the result contract.',
+        },
         confirm: { type: 'boolean' },
       },
-      required: ['name', 'sourceHtml', 'confirm'],
+      required: ['name', 'sourceHtml', 'resultSchema', 'exampleAnswer', 'confirm'],
     },
   },
   {
@@ -414,12 +423,13 @@ const TOOLS = [
   },
   {
     name: 'survey_export_responses',
-    description: 'Export owned project responses as JSON and/or wide CSV (results:read). Not a full Admin analysis suite — use for offline analysis.',
+    description: 'Export owned project responses as JSON, wide/long/summary CSV, or a typed per-question analysis bundle (results:read).',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
-        format: { type: 'string', enum: ['json', 'wide_csv', 'both'] },
+        format: { type: 'string', enum: ['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle'] },
+        questionName: { type: 'string', description: 'Optional single-question filter.' },
         includePractice: { type: 'boolean' },
         excludeFlagged: { type: 'boolean' },
         dateFrom: { type: 'string' },
@@ -431,7 +441,7 @@ const TOOLS = [
   },
   {
     name: 'survey_results_summary',
-    description: 'Light summary of owned project responses: counts, date range, per-question n_answered, quality flags (results:read).',
+    description: 'Typed results summary with per-question contract/revision, n_answered, summary rows, and fallback warnings (results:read).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -441,13 +451,14 @@ const TOOLS = [
         dateFrom: { type: 'string' },
         dateTo: { type: 'string' },
         sessionId: { type: 'string' },
+        questionName: { type: 'string' },
       },
       required: ['projectId'],
     },
   },
   {
     name: 'survey_delete_response',
-    description: 'Delete one survey response for an owned project. Requires confirm:true (results:read).',
+    description: 'Delete one survey response for an owned project. Requires confirm:true and surveys:write.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -486,10 +497,10 @@ const TOOLS = [
       properties: {
         projectId: { type: 'string' },
         operations: { type: 'array' },
-        expectedDraftUpdatedAt: { type: 'string' },
+        expectedDraftUpdatedAt: { type: 'string', description: 'Required optimistic concurrency token from survey_get_draft.draftUpdatedAt' },
         clientMutationId: { type: 'string' },
       },
-      required: ['projectId', 'operations'],
+      required: ['projectId', 'operations', 'expectedDraftUpdatedAt'],
     },
   },
   {
@@ -500,10 +511,10 @@ const TOOLS = [
       properties: {
         projectId: { type: 'string' },
         surveyConfig: { type: 'object' },
-        expectedDraftUpdatedAt: { type: 'string' },
+        expectedDraftUpdatedAt: { type: 'string', description: 'Required optimistic concurrency token from survey_get_draft.draftUpdatedAt' },
         clientMutationId: { type: 'string' },
       },
-      required: ['projectId', 'surveyConfig'],
+      required: ['projectId', 'surveyConfig', 'expectedDraftUpdatedAt'],
     },
   },
   {
@@ -689,7 +700,7 @@ async function callTool(env, auth, request, name, args = {}) {
     }
     case 'skill_get': {
       requireScope(auth, 'surveys:read');
-      return toolResult(await getSkill(env, mcpCtx(auth), args.skillId));
+      return toolResult(await getSkill(env, mcpCtx(auth), args.skillId, args.revision));
     }
     case 'skill_save': {
       requireScope(auth, 'surveys:write');
@@ -709,7 +720,8 @@ async function callTool(env, auth, request, name, args = {}) {
       return toolResult(await summarizeResponses(env, mcpCtx(auth), args.projectId, args));
     }
     case 'survey_delete_response': {
-      requireScope(auth, 'results:read');
+      // Destructive — require write scope (not results:read).
+      requireScope(auth, 'surveys:write');
       if (!args.confirm) return toolResult({ error: 'Set confirm:true to delete a response.' }, true);
       return toolResult(await deleteResponse(env, mcpCtx(auth), args.projectId, args));
     }
@@ -897,7 +909,13 @@ async function createViaService(env, userId, body, request) {
   }
   const name = String(body?.name || '').trim();
   if (!name) throw Object.assign(new Error('Project name is required.'), { status: 400 });
-  const surveyConfig = body?.surveyConfig || createDefaultSurveyConfig(name, body?.description || '');
+  const { hydrateSkillContracts } = await import('../agent/skillContracts.mjs');
+  const { postProcessAiConfig } = await import('../designProtocol.mjs');
+  const surveyConfig = await hydrateSkillContracts(
+    env,
+    postProcessAiConfig(body?.surveyConfig || createDefaultSurveyConfig(name, body?.description || '')),
+    userId,
+  );
   const validation = validateSurveyConfig(surveyConfig);
   if (!validation.valid) throw Object.assign(new Error('Survey validation failed.'), { status: 400, validation });
   const id = `proj_${Date.now()}_${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
@@ -934,11 +952,15 @@ async function createViaService(env, userId, body, request) {
 
 async function saveDraftViaService(env, userId, projectId, body) {
   await assertOwned(env, userId, projectId);
-  const { validateSurveyConfig, restoreStoredSecrets, findSecretFields } = await import('../designProtocol.mjs');
+  const {
+    validateSurveyConfig, restoreStoredSecrets, findSecretFields, sanitizeForAgent, postProcessAiConfig,
+  } = await import('../designProtocol.mjs');
   if (findSecretFields(body?.surveyConfig).length) {
     throw Object.assign(new Error('Do not send credentials through the agent API.'), { status: 400 });
   }
-  const validation = validateSurveyConfig(body.surveyConfig);
+  const { hydrateSkillContracts } = await import('../agent/skillContracts.mjs');
+  const hydratedConfig = await hydrateSkillContracts(env, postProcessAiConfig(body.surveyConfig), userId);
+  const validation = validateSurveyConfig(hydratedConfig);
   if (!validation.valid) throw Object.assign(new Error('Survey validation failed.'), { status: 400, validation });
 
   const rows = await supabaseRest(env, {
@@ -947,14 +969,21 @@ async function saveDraftViaService(env, userId, projectId, body) {
     query: `?id=eq.${encodeURIComponent(projectId)}&select=survey_config_draft,survey_config,draft_updated_at`,
   });
   const row = rows?.[0];
-  if (body.expectedDraftUpdatedAt && row.draft_updated_at && body.expectedDraftUpdatedAt !== row.draft_updated_at) {
+  if (!body.expectedDraftUpdatedAt) {
+    throw Object.assign(new Error('expectedDraftUpdatedAt is required. Call survey_get_draft first.'), {
+      status: 400,
+      code: 'MISSING_EXPECTED_DRAFT_UPDATED_AT',
+      draftUpdatedAt: row?.draft_updated_at || null,
+    });
+  }
+  if (row?.draft_updated_at && body.expectedDraftUpdatedAt !== row.draft_updated_at) {
     throw Object.assign(new Error('Project draft changed. Re-read before updating.'), {
       status: 409,
       code: 'CONFLICT',
       draftUpdatedAt: row.draft_updated_at,
     });
   }
-  const merged = restoreStoredSecrets(body.surveyConfig, row.survey_config_draft ?? row.survey_config);
+  const merged = restoreStoredSecrets(hydratedConfig, row.survey_config_draft ?? row.survey_config);
   const now = new Date().toISOString();
   await supabaseRest(env, {
     path: '/rest/v1/projects',
@@ -969,13 +998,21 @@ async function saveDraftViaService(env, userId, projectId, body) {
       last_writer: { source: 'codex', at: now },
     },
   });
-  return { success: true, projectId, draftUpdatedAt: now, validation };
+  return { success: true, projectId, draftUpdatedAt: now, validation, surveyConfig: sanitizeForAgent(merged) };
 }
 
 async function applyOpsViaService(env, userId, projectId, body) {
+  if (!body.expectedDraftUpdatedAt) {
+    throw Object.assign(new Error('expectedDraftUpdatedAt is required. Call survey_get_draft first.'), {
+      status: 400,
+      code: 'MISSING_EXPECTED_DRAFT_UPDATED_AT',
+    });
+  }
   const draft = await getDraftViaService(env, userId, projectId, { url: 'https://local' });
-  const { applyOperations } = await import('../designProtocol.mjs');
+  const { applyOperations, postProcessAiConfig, validateSurveyConfig } = await import('../designProtocol.mjs');
   const next = applyOperations(draft.surveyConfig, body.operations || []);
+  next.surveyConfig = postProcessAiConfig(next.surveyConfig);
+  next.validation = validateSurveyConfig(next.surveyConfig);
   if (!next.validation.valid) {
     throw Object.assign(new Error('Survey validation failed after operations.'), {
       status: 400,
@@ -984,10 +1021,10 @@ async function applyOpsViaService(env, userId, projectId, body) {
   }
   const saved = await saveDraftViaService(env, userId, projectId, {
     surveyConfig: next.surveyConfig,
-    expectedDraftUpdatedAt: body.expectedDraftUpdatedAt || draft.draftUpdatedAt,
+    expectedDraftUpdatedAt: body.expectedDraftUpdatedAt,
     clientMutationId: body.clientMutationId,
   });
-  return { ...saved, applied: next.applied, inverse: next.inverse };
+  return { ...saved, applied: next.applied, inverse: next.inverse, surveyConfig: saved.surveyConfig };
 }
 
 async function leaseViaService(env, userId, projectId, body) {
@@ -1053,6 +1090,10 @@ async function publishViaService(env, userId, projectId, body) {
 }
 
 async function rollbackViaService(env, userId, projectId, version) {
+  // Mirror SQL RPC rollback_project_config:
+  // 1) load target version config
+  // 2) write it as draft/live/published
+  // 3) insert a NEW version snapshot of that restored config (not the pre-rollback draft)
   await assertOwned(env, userId, projectId);
   const versions = await supabaseRest(env, {
     path: '/rest/v1/project_config_versions',
@@ -1061,24 +1102,43 @@ async function rollbackViaService(env, userId, projectId, version) {
   });
   const config = versions?.[0]?.config;
   if (!config) throw Object.assign(new Error('version not found'), { status: 404 });
-  return publishViaService(env, userId, projectId, { summary: `Rollback to version ${version}` })
-    .then(async () => {
-      // Also set draft
-      const now = new Date().toISOString();
-      await supabaseRest(env, {
-        path: '/rest/v1/projects',
-        method: 'PATCH',
-        serviceRole: true,
-        query: `?id=eq.${encodeURIComponent(projectId)}`,
-        body: {
-          survey_config_draft: config,
-          survey_config_published: config,
-          survey_config: config,
-          draft_updated_at: now,
-        },
-      });
-      return { success: true, restoredFrom: version };
-    });
+
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/projects',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(projectId)}&select=published_version`,
+  });
+  const nextVer = (rows?.[0]?.published_version || 0) + 1;
+  const now = new Date().toISOString();
+  await supabaseRest(env, {
+    path: '/rest/v1/projects',
+    method: 'PATCH',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(projectId)}`,
+    body: {
+      survey_config_draft: config,
+      survey_config_published: config,
+      survey_config: config,
+      draft_updated_at: now,
+      published_at: now,
+      published_version: nextVer,
+      updated_at: now,
+      last_writer: { source: 'rollback', fromVersion: Number(version), at: now },
+    },
+  });
+  await supabaseRest(env, {
+    path: '/rest/v1/project_config_versions',
+    method: 'POST',
+    serviceRole: true,
+    body: {
+      project_id: projectId,
+      version: nextVer,
+      config,
+      published_by: userId,
+      change_summary: `Rollback to version ${version}`,
+    },
+  });
+  return { success: true, restoredFrom: Number(version), publishedVersion: nextVer };
 }
 
 export async function handleMcpRequest(request, env, auth) {

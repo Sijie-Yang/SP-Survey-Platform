@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -116,6 +116,7 @@ function SortableItem({ id, image, index }) {
 
 export default function ImageRankingWidget({ question, value, onValueChanged, trialStimulusMedia = null }) {
   const [items, setItems] = useState([]);
+  const seededOrderKeyRef = useRef('');
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -155,10 +156,20 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
       const usedValues = new Set(value);
       const missingItems = initialItems.filter((item) => !usedValues.has(item.value));
       setItems([...orderedItems, ...missingItems]);
+      seededOrderKeyRef.current = trialMediaKey;
     } else {
       setItems(initialItems);
+      // First paint: persist the displayed order so "no drag" still counts as answered.
+      if (
+        initialItems.length > 0
+        && typeof onValueChanged === 'function'
+        && seededOrderKeyRef.current !== trialMediaKey
+      ) {
+        seededOrderKeyRef.current = trialMediaKey;
+        onValueChanged(initialItems.map((item) => item.value));
+      }
     }
-  }, [question, question.choices, question.imageLinks, value, trialMediaKey, trialStimulusMedia]);
+  }, [question, question.choices, question.imageLinks, value, trialMediaKey, trialStimulusMedia, onValueChanged]);
 
   function handleDragEnd(event) {
     const { active, over } = event;

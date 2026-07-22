@@ -17,7 +17,9 @@ export function normalizeAnnotationTool(tool) {
   const t = String(tool).toLowerCase().trim();
   if (t === 'region' || t === 'poly' || t === 'polygon') return 'polygon';
   if (t === 'rect' || t === 'box' || t === 'bbox') return 'bbox';
-  if (t === 'point' || t === 'line') return t;
+  // Skill/MCP vocabulary often uses points/path for native point/line tools.
+  if (t === 'points' || t === 'point') return 'point';
+  if (t === 'path' || t === 'polyline' || t === 'line') return 'line';
   return t;
 }
 

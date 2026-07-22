@@ -94,6 +94,23 @@ export function authorizationServerMetadata(request, env) {
   };
 }
 
+/** https, loopback http, or native MCP client schemes (RFC 8252 / Cursor). */
+function isAllowedRedirectUri(uri) {
+  let parsed;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === 'https:') return true;
+  if (parsed.protocol === 'http:') {
+    return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  }
+  // Cursor uses cursor://anysphere.cursor-mcp/oauth/callback
+  if (parsed.protocol === 'cursor:') return true;
+  return false;
+}
+
 export async function registerClient(env, body, userId = null) {
   const clientName = String(body?.client_name || 'MCP Client').slice(0, 120);
   const redirectUris = Array.isArray(body?.redirect_uris) ? body.redirect_uris : [];
@@ -101,15 +118,11 @@ export async function registerClient(env, body, userId = null) {
     throw Object.assign(new Error('redirect_uris required'), { status: 400 });
   }
   for (const uri of redirectUris) {
-    let parsed;
-    try {
-      parsed = new URL(uri);
-    } catch {
-      throw Object.assign(new Error(`Invalid redirect_uri: ${uri}`), { status: 400 });
-    }
-    const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-    if (parsed.protocol !== 'https:' && !isLocal) {
-      throw Object.assign(new Error('redirect_uri must be https or localhost'), { status: 400 });
+    if (!isAllowedRedirectUri(uri)) {
+      throw Object.assign(
+        new Error('redirect_uri must be https, localhost, or a native MCP client scheme (e.g. cursor://)'),
+        { status: 400 },
+      );
     }
   }
 

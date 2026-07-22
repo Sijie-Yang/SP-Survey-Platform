@@ -12,6 +12,7 @@ import {
   buildProjectUrls,
 } from '../designProtocol.mjs';
 import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from './projectMeta.mjs';
+import { hydrateSkillContracts } from './skillContracts.mjs';
 import {
   copyPrefixMedia,
   deletePrefixMedia,
@@ -129,7 +130,7 @@ function stripSecrets(config) {
 export async function duplicateProject(env, ctx, projectId, body = {}, request) {
   const row = await loadOwned(env, { ...ctx, projectId });
   const name = String(body?.name || `${row.name} (Copy)`).trim().slice(0, 160);
-  const surveyConfig = stripSecrets(draftConfig(row));
+  const surveyConfig = await hydrateSkillContracts(env, stripSecrets(draftConfig(row)), ctx.userId || row.user_id);
   const validation = validateSurveyConfig(surveyConfig);
   if (!validation.valid) {
     throw Object.assign(new Error('Source survey validation failed.'), { status: 400, validation });
@@ -220,10 +221,12 @@ export async function importProject(env, ctx, body, request) {
     });
   }
   const pkg = body?.package || body;
-  const surveyConfig = pkg?.surveyConfig || pkg?.survey_config;
+  const inputSurveyConfig = pkg?.surveyConfig || pkg?.survey_config;
   const name = String(pkg?.project?.name || pkg?.name || 'Imported project').trim().slice(0, 160);
   if (!name) throw Object.assign(new Error('Project name is required.'), { status: 400 });
-  if (!surveyConfig) throw Object.assign(new Error('surveyConfig is required.'), { status: 400 });
+  if (!inputSurveyConfig) throw Object.assign(new Error('surveyConfig is required.'), { status: 400 });
+
+  const surveyConfig = await hydrateSkillContracts(env, inputSurveyConfig, ctx.userId);
 
   const validation = validateSurveyConfig(surveyConfig);
   if (!validation.valid) {
@@ -333,9 +336,10 @@ export async function createFromTemplate(env, ctx, body, request) {
   if (!templateId) throw Object.assign(new Error('templateId is required'), { status: 400 });
   const tpl = await getTemplate(env, ctx, templateId);
   const name = String(body?.name || tpl.template.name).trim().slice(0, 160);
-  const surveyConfig = body?.surveyConfig
+  const inputSurveyConfig = body?.surveyConfig
     ? stripSecrets(body.surveyConfig)
     : { ...tpl.surveyConfig, title: name };
+  const surveyConfig = await hydrateSkillContracts(env, inputSurveyConfig, ctx.userId);
   const validation = validateSurveyConfig(surveyConfig);
   if (!validation.valid) {
     throw Object.assign(new Error('Survey validation failed.'), { status: 400, validation });

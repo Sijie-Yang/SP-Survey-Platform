@@ -39,34 +39,63 @@ function generateParticipantId() {
 export async function saveSurveyResponse(completeData) {
   try {
     const participantId = completeData.participant_id || generateParticipantId();
+    const projectId = completeData.project_id || null;
+    const completionCode = completeData.survey_metadata?.completion_code || null;
+    const idempotencyKey = (participantId && completionCode)
+      ? `${participantId}__${completionCode}`
+      : null;
+
     if (!supabase) {
       const responseData = {
         participant_id: participantId,
-        project_id: completeData.project_id || null,
+        project_id: projectId,
         responses: completeData.responses,
         raw_responses: completeData.raw_responses || null,
         displayed_images: completeData.displayed_images,
         survey_metadata: completeData.survey_metadata,
         saved_at: new Date().toISOString(),
+        idempotency_key: idempotencyKey,
       };
       const res = await fetch('http://localhost:3001/api/responses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(responseData),
       });
-      if (res.ok) return { success: true, data: responseData, storage: 'file' };
+      if (res.ok) {
+        const body = await res.json().catch(() => ({}));
+        return {
+          success: true,
+          data: responseData,
+          storage: 'file',
+          deduped: !!body.deduped,
+        };
+      }
       throw new Error('File save failed');
+    }
+
+    // Idempotent retry: same participant + completion_code ⇒ treat as already saved.
+    if (idempotencyKey && projectId) {
+      const { data: existing, error: lookupError } = await supabase
+        .from('survey_responses')
+        .select('id, participant_id, project_id')
+        .eq('participant_id', participantId)
+        .eq('project_id', projectId)
+        .filter('survey_metadata->>completion_code', 'eq', completionCode)
+        .limit(1);
+      if (!lookupError && Array.isArray(existing) && existing.length) {
+        return { success: true, data: existing[0], storage: 'supabase', deduped: true };
+      }
     }
 
     const { data, error } = await supabase.from('survey_responses').insert([
       {
         participant_id: participantId,
-        project_id: completeData.project_id || null,
+        project_id: projectId,
         responses: completeData.responses,
         displayed_images: completeData.displayed_images,
         survey_metadata: completeData.survey_metadata,
       },
-    ]);
+    ]).select('id, participant_id, project_id');
 
     if (error) throw error;
     return { success: true, data, storage: 'supabase' };

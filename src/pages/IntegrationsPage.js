@@ -164,7 +164,7 @@ export default function IntegrationsPage() {
     setBusy(true);
     try {
       await revokeMcpConnection(tokenHash);
-      setMessage({ severity: 'success', text: 'ChatGPT (Codex) access revoked.' });
+      setMessage({ severity: 'success', text: 'MCP access revoked.' });
       await refresh();
     } finally {
       setBusy(false);
@@ -182,6 +182,34 @@ Also set: mcp_oauth_credentials_store = "keyring"
 
 Then run: codex mcp login sp_survey
 Open the authorize URL in my system default browser (Safari / Chrome / Edge). Wait while I click Approve on this site.`;
+
+  const claudeCli = `claude mcp add --transport http sp_survey "${mcpEndpoint}" --scope user`;
+
+  const claudeSetupPrompt = `Set up SP-Survey MCP for Claude Code (merge; don't remove other MCP servers).
+
+Run this in the terminal:
+${claudeCli}
+
+Then in Claude Code run /mcp → select sp_survey → Authenticate.
+Open the authorize URL in my system default browser. Wait while I click Approve on this site.
+After that, use the sp_survey tools (start with survey_capabilities).`;
+
+  const cursorMcpJson = `{
+  "mcpServers": {
+    "sp_survey": {
+      "url": "${mcpEndpoint}"
+    }
+  }
+}`;
+
+  const cursorSetupPrompt = `Set up SP-Survey MCP for Cursor (merge into existing mcpServers; don't wipe other servers).
+
+Add to ~/.cursor/mcp.json (global) or .cursor/mcp.json (this project):
+${cursorMcpJson}
+
+Then open Cursor Settings → Tools & MCP → Connect / Authenticate on sp_survey.
+Open the authorize URL in my system default browser. Wait while I click Approve on this site.
+After that, use the sp_survey tools (start with survey_capabilities).`;
 
   const designPrompt = `Using sp_survey, help me design a survey.
 
@@ -306,6 +334,72 @@ MEDIA RULES (must follow):
                 ))}
               </Stack>
             )}
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 1 }}>{t.integClaudeTitle}</Typography>
+            <Typography color="text.secondary" sx={{ mb: 2 }}>
+              {t.integClaudeBody}
+            </Typography>
+
+            <SetupStep number={1} title={t.integClaudeStep1Title}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {t.integClaudeStep1Body}
+              </Typography>
+              <CopyBox value={claudeCli} onCopy={copy} />
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, mb: 1 }}>
+                {t.integOrPastePrompt}
+              </Typography>
+              <CopyBox value={claudeSetupPrompt} onCopy={copy} />
+            </SetupStep>
+
+            <SetupStep number={2} title={t.integClaudeStep2Title}>
+              <Typography variant="body2" color="text.secondary">
+                {t.integClaudeStep2Body}
+              </Typography>
+            </SetupStep>
+
+            <SetupStep number={3} title={t.integClaudeStep3Title}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {t.integClaudeStep3Body}
+              </Typography>
+              <CopyBox value={designPrompt} onCopy={copy} />
+            </SetupStep>
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 1 }}>{t.integCursorTitle}</Typography>
+            <Typography color="text.secondary" sx={{ mb: 2 }}>
+              {t.integCursorBody}
+            </Typography>
+
+            <SetupStep number={1} title={t.integCursorStep1Title}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {t.integCursorStep1Body}
+              </Typography>
+              <CopyBox value={cursorMcpJson} onCopy={copy} />
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, mb: 1 }}>
+                {t.integOrPastePrompt}
+              </Typography>
+              <CopyBox value={cursorSetupPrompt} onCopy={copy} />
+            </SetupStep>
+
+            <SetupStep number={2} title={t.integCursorStep2Title}>
+              <Typography variant="body2" color="text.secondary">
+                {t.integCursorStep2Body}
+              </Typography>
+            </SetupStep>
+
+            <SetupStep number={3} title={t.integCursorStep3Title}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                {t.integCursorStep3Body}
+              </Typography>
+              <CopyBox value={designPrompt} onCopy={copy} />
+            </SetupStep>
           </CardContent>
         </Card>
 

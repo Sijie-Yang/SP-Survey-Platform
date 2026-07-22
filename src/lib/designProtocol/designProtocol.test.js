@@ -7,6 +7,7 @@ import {
   applyOperations,
   createDefaultSurveyConfig,
   isSafeProjectId,
+  DESIGN_CAPABILITIES,
 } from './index';
 
 describe('designProtocol secrets', () => {
@@ -61,6 +62,31 @@ describe('designProtocol validate', () => {
 });
 
 describe('designProtocol normalize + operations', () => {
+  test('capabilities expose the same 34 base types as the Builder', () => {
+    expect(DESIGN_CAPABILITIES.questionTypes).toHaveLength(34);
+    expect(DESIGN_CAPABILITIES.questionTypes).toEqual(expect.arrayContaining([
+      'number', 'expression', 'skillquestion', 'imageannotation', 'mediamatrix',
+      'imagecheckbox', 'mediacheckbox',
+    ]));
+  });
+
+  test('postProcessAiConfig defaults imagecheckbox choices and annotation tools', () => {
+    const out = postProcessAiConfig({
+      pages: [{
+        name: 'p1',
+        elements: [
+          { type: 'imagecheckbox', name: 'ic1' },
+          { type: 'imageannotation', name: 'ann1', allowedTools: ['path', 'points', 'region'] },
+        ],
+      }],
+    });
+    const ic = out.pages[0].elements[0];
+    expect(ic.choices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'tag_a' }),
+    ]));
+    expect(out.pages[0].elements[1].allowedTools).toEqual(['line', 'point', 'polygon']);
+  });
+
   test('postProcessAiConfig sets image defaults', () => {
     const out = postProcessAiConfig({
       pages: [{

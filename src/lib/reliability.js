@@ -1,6 +1,6 @@
 /** Inter-rater reliability: Krippendorff's alpha and agreement rate. */
 
-import { expandQuestionAnswerUnits } from './responseAnswerUnits';
+import { expandQuestionAnswerUnits } from './responseAnswerUnits.js';
 
 function filenameKey(val) {
   if (!val || typeof val !== 'string') return String(val ?? '');

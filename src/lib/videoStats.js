@@ -1,6 +1,6 @@
 /** Video skill timeline aggregation. */
 
-import { videoStimulusKey } from './skillMediaUtils';
+import { videoStimulusKey } from './skillMediaUtils.js';
 
 export function aggregateSegmentTimeline(answers, bucketSize = 1) {
   const duration = Math.max(

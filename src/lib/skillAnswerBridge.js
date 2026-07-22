@@ -50,11 +50,12 @@ export function normalizeSkillSchemaArray(raw, { defaultType = 'string' } = {}) 
         return { key: item.trim(), label: item.trim(), type: defaultType };
       }
       if (item && typeof item === 'object' && item.key) {
+        const { key, label, type, ...nativeSettings } = item;
         return {
-          key: String(item.key),
-          label: item.label != null ? String(item.label) : String(item.key),
-          type: item.type != null ? String(item.type) : defaultType,
-          ...(item.options ? { options: item.options } : {}),
+          ...nativeSettings,
+          key: String(key),
+          label: label != null ? String(label) : String(key),
+          type: type != null ? String(type) : defaultType,
         };
       }
       return null;

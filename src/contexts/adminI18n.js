@@ -17,7 +17,7 @@ export const adminI18n = {
     toggleSidebar: 'Toggle Project Sidebar',
     saveTooltipDirty: 'Save (updates share link immediately)',
     saveTooltip: 'Save',
-    aiTooltip: 'AI & Integrations — ChatGPT (Codex) / API key',
+    aiTooltip: 'AI & Integrations — Codex / Claude Code / Cursor / API key',
     aiLabel: 'AI',
     previewSurvey: 'Preview Survey',
     viewLive: 'Survey Link',
@@ -207,7 +207,7 @@ export const adminI18n = {
     resultsRecordsHelp: 'Remove individual submissions from this project. Deletion is permanent.',
     resultsEmpty: 'No responses collected yet. Share your survey link and come back here to view results.',
     resultsSkillCustomHelp:
-      'Custom skill results: optional skill-authored analysis view first, then typed field stats (points/path/allocation/ranking reuse native charts), then a readable response list.',
+      'Custom skill results reuse native charts by declared type: annotation overlays (points/path/polygon/bbox), media ranking (number/boolean with imageUrl), or text/ranking/allocation charts.',
     resultsSkillByMode: 'View by task mode',
     resultsSkillByModeHelp:
       'This skill stores multiple tasks in one question, distinguished by mode (e.g. cue ranking / route trace).',
@@ -276,13 +276,13 @@ export const adminI18n = {
     integBackAdmin: 'Back to Admin',
     integTitle: 'AI & Integrations',
     integBody:
-      'Connect ChatGPT (Codex) to design surveys, or use the built-in assistant with your own API key.',
+      'Connect ChatGPT (Codex), Claude Code, or Cursor via MCP to design surveys — or use the built-in assistant with your own API key.',
     integConnectTitle: '1. Connect ChatGPT (Codex)',
     integRecommended: 'Recommended',
     integConnected: 'Connected',
     integConnectBody:
       'Use ChatGPT (Codex) to create and edit surveys. Saves update the share link immediately. No OpenAI API key is needed on this website.',
-    integMcpEndpoint: 'MCP endpoint (use this in Codex):',
+    integMcpEndpoint: 'MCP endpoint (same URL for Codex / Claude Code / Cursor):',
     integLocalMcpHint: 'Local server MCP (dev only)',
     integStep1Title: 'Set ChatGPT (Codex) permission to "Approve for me"',
     integStep1Body:
@@ -291,12 +291,35 @@ export const adminI18n = {
     integStep2Body: 'Copy into a new ChatGPT (Codex) chat:',
     integStep3Title: 'Start a new chat, then design a survey',
     integStep3Body: 'Open a new ChatGPT (Codex) chat, then paste:',
-    integAccounts: 'Connected ChatGPT (Codex) accounts',
-    integNoneYet: 'None yet. Complete steps 1–2 above.',
+    integClaudeTitle: '2. Connect Claude Code',
+    integClaudeBody:
+      'Use Claude Code in the terminal with the same sp_survey MCP. Saves update the share link immediately. Approve OAuth once in your browser.',
+    integClaudeStep1Title: 'Add the MCP server',
+    integClaudeStep1Body:
+      'In a terminal (or paste the prompt below into Claude Code), add the remote HTTP MCP. Prefer user scope so it works across projects:',
+    integOrPastePrompt: 'Or paste this setup prompt into the agent:',
+    integClaudeStep2Title: 'Authenticate in Claude Code',
+    integClaudeStep2Body:
+      'Run /mcp, select sp_survey, then Authenticate. Open the authorize URL in your system browser and Approve on this site. Restart Claude Code if tools do not appear.',
+    integClaudeStep3Title: 'Design a survey',
+    integClaudeStep3Body: 'In a new Claude Code session, paste:',
+    integCursorTitle: '3. Connect Cursor',
+    integCursorBody:
+      'Use Cursor Agent with the same sp_survey MCP. Add the server JSON, then Connect / Authenticate under Settings → Tools & MCP.',
+    integCursorStep1Title: 'Add ~/.cursor/mcp.json (or project .cursor/mcp.json)',
+    integCursorStep1Body:
+      'Merge into existing mcpServers — do not delete other servers. Cursor uses url only (no type field):',
+    integCursorStep2Title: 'Authenticate in Cursor',
+    integCursorStep2Body:
+      'Open Cursor Settings → Tools & MCP. Find sp_survey and click Connect / Authenticate. Approve in the browser on this site. Reload the window if tools stay grey.',
+    integCursorStep3Title: 'Design a survey',
+    integCursorStep3Body: 'In a new Cursor Agent chat, paste:',
+    integAccounts: 'Connected MCP accounts',
+    integNoneYet: 'None yet. Complete a Codex, Claude Code, or Cursor connection above.',
     integLastUsed: 'Last used:',
     integNever: 'Never',
     integDisconnect: 'Disconnect',
-    integAssistantTitle: '2. Use the built-in Assistant',
+    integAssistantTitle: '4. Use the built-in Assistant',
     integReady: 'Ready',
     integAssistantBody:
       'Prefer to stay in the browser? Add your OpenAI or OpenRouter API key, then use the assistant inside Survey Builder.',
@@ -338,7 +361,7 @@ export const adminI18n = {
     landBrowseLive: 'Browse Live Surveys',
     landHeroTitle: 'Streetscape Perception Survey',
     landHeroLine1: 'A research-grade platform for conducting visual perception surveys on urban streetscapes.',
-    landHeroLine2: 'No coding required — build, share, and analyze in minutes.',
+    landHeroLine2: 'Build, share, and analyze streetscape perception studies — no coding required.',
     landStartFree: 'Start for Free →',
     landReadPaper: 'Read Paper',
     landFeaturesTitle: 'Everything you need for perception research',
@@ -566,7 +589,7 @@ export const adminI18n = {
     toggleSidebar: '打开/关闭项目侧栏',
     saveTooltipDirty: '保存（立即更新分享链接）',
     saveTooltip: '保存',
-    aiTooltip: 'AI 与集成 — ChatGPT（Codex）/ API 密钥',
+    aiTooltip: 'AI 与集成 — Codex / Claude Code / Cursor / API 密钥',
     aiLabel: 'AI',
     previewSurvey: '预览问卷',
     viewLive: '问卷链接',
@@ -747,7 +770,7 @@ export const adminI18n = {
     resultsRecordsHelp: '删除本项目的单条提交。删除后不可恢复。',
     resultsEmpty: '尚无答卷。分享问卷链接后，再回到这里查看结果。',
     resultsSkillCustomHelp:
-      '自定义 Skill 结果：若有 skill 自带分析视图会先显示；中间是按类型声明的字段统计（标注点/路径/分配/排序会复用原生图表）；底部「回答一览」用可读摘要列出每人提交的内容。',
+      '自定义 Skill 结果按声明类型复用原生分析：标注类（points/path/polygon/bbox）叠加热力/图形；媒体评分类按图片排序；文字/排序/分配类用对应原生图表。',
     resultsSkillByMode: '按任务模式查看',
     resultsSkillByModeHelp:
       '此 Skill 把多种任务写在同一个题里，用 mode 区分（例如线索排序 / 路线描绘）。',
@@ -810,13 +833,14 @@ export const adminI18n = {
 
     integBackAdmin: '返回 Admin',
     integTitle: 'AI 与集成',
-    integBody: '连接 ChatGPT（Codex）设计问卷，或使用自带助手并填写你的 API 密钥。',
+    integBody:
+      '通过 MCP 连接 ChatGPT（Codex）、Claude Code 或 Cursor 设计问卷，也可使用内置助手并填写你的 API 密钥。',
     integConnectTitle: '1. 连接 ChatGPT（Codex）',
     integRecommended: '推荐',
     integConnected: '已连接',
     integConnectBody:
       '用 ChatGPT（Codex）创建与编辑问卷。保存后分享链接立即更新。本站无需填写 OpenAI API 密钥。',
-    integMcpEndpoint: 'MCP 地址（请在 Codex 中使用）：',
+    integMcpEndpoint: 'MCP 地址（Codex / Claude Code / Cursor 共用）：',
     integLocalMcpHint: '本地开发 MCP（仅调试用）',
     integStep1Title: '将 ChatGPT（Codex）权限设为 “Approve for me”',
     integStep1Body:
@@ -825,12 +849,35 @@ export const adminI18n = {
     integStep2Body: '复制到一个新的 ChatGPT（Codex）对话：',
     integStep3Title: '开新对话，然后设计问卷',
     integStep3Body: '打开一个新的 ChatGPT（Codex）对话，然后粘贴：',
-    integAccounts: '已连接的 ChatGPT（Codex）账号',
-    integNoneYet: '尚无连接。请先完成上面步骤 1–2。',
+    integClaudeTitle: '2. 连接 Claude Code',
+    integClaudeBody:
+      '在终端用 Claude Code 连接同一 sp_survey MCP。保存后分享链接立即更新。首次需在浏览器完成 OAuth 授权。',
+    integClaudeStep1Title: '添加 MCP 服务器',
+    integClaudeStep1Body:
+      '在终端执行下面命令（或把提示词粘贴给 Claude Code）。建议用 user scope，这样所有项目都能用：',
+    integOrPastePrompt: '或把下面设置提示词粘贴给 agent：',
+    integClaudeStep2Title: '在 Claude Code 中授权',
+    integClaudeStep2Body:
+      '运行 /mcp，选择 sp_survey，再选 Authenticate。在系统浏览器打开授权页并在本站 Approve。若工具未出现，重启 Claude Code。',
+    integClaudeStep3Title: '设计问卷',
+    integClaudeStep3Body: '在新的 Claude Code 会话中粘贴：',
+    integCursorTitle: '3. 连接 Cursor',
+    integCursorBody:
+      '在 Cursor Agent 中使用同一 sp_survey MCP。写入 JSON 配置后，到 Settings → Tools & MCP 完成 Connect / Authenticate。',
+    integCursorStep1Title: '写入 ~/.cursor/mcp.json（或项目 .cursor/mcp.json）',
+    integCursorStep1Body:
+      '合并进已有 mcpServers，不要清空其他服务器。Cursor 只需 url（不要加 type）：',
+    integCursorStep2Title: '在 Cursor 中授权',
+    integCursorStep2Body:
+      '打开 Cursor Settings → Tools & MCP，找到 sp_survey，点击 Connect / Authenticate。在浏览器打开本站并 Approve。若工具仍为灰色，Reload Window。',
+    integCursorStep3Title: '设计问卷',
+    integCursorStep3Body: '在新的 Cursor Agent 对话中粘贴：',
+    integAccounts: '已连接的 MCP 账号',
+    integNoneYet: '尚无连接。请先完成上面 Codex、Claude Code 或 Cursor 的连接步骤。',
     integLastUsed: '最近使用：',
     integNever: '从未',
     integDisconnect: '断开连接',
-    integAssistantTitle: '2. 使用内置助手',
+    integAssistantTitle: '4. 使用内置助手',
     integReady: '已就绪',
     integAssistantBody: '想留在浏览器里？添加 OpenAI 或 OpenRouter API 密钥后，可在问卷构建中使用助手。',
     integGetKey: '从 OpenAI 或 OpenRouter 获取密钥。',
@@ -869,7 +916,7 @@ export const adminI18n = {
     landBrowseLive: '浏览在线调查',
     landHeroTitle: '街景感知调查',
     landHeroLine1: '面向城市街景视觉感知研究的专业级调查平台。',
-    landHeroLine2: '无需编程 — 几分钟内即可构建、分享与分析。',
+    landHeroLine2: '构建、分享并分析街景感知研究 — 无需编程。',
     landStartFree: '免费开始 →',
     landReadPaper: '阅读论文',
     landFeaturesTitle: '感知研究所需的一切',

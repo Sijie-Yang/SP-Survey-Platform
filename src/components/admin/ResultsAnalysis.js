@@ -98,18 +98,32 @@ import {
   TRUESKILL_SORT_COLUMNS,
   RANKING_EXTRA_COLUMNS,
 } from './trueSkillAnalysisUi';
-import { enrichSkillAnswers, buildResponseMediaUrlMap, stripSkillAnswerContext, formatSkillAnswerForDisplay, filterAnswersForSkill } from '../../lib/skillMediaUtils';
-import { summarizeSkillAnswer } from '../../lib/skillAnswerSummary';
-import SkillAnswerReview from '../SkillAnswerReview';
+import {
+  enrichSkillAnswers,
+  buildResponseMediaUrlMap,
+  stripSkillAnswerContext,
+  formatSkillAnswerForDisplay,
+  filterAnswersForSkill,
+  imageStimulusKey,
+  mediaFilenameKey,
+} from '../../lib/skillMediaUtils';
 import SkillArchetypeFieldSummary from './SkillArchetypeFieldSummary';
-import SkillAnalysisFrame from '../SkillAnalysisFrame';
-import { ARCHETYPE_SKILL_RESULT_TYPES } from '../../lib/skillResultTypes';
+import {
+  ARCHETYPE_SKILL_RESULT_TYPES,
+  canonicalizeSkillResultType,
+  checkAnswerAgainstResultSchema,
+} from '../../lib/skillResultTypes';
 import { getSkillById } from '../../lib/skillManager';
 import { saveProjectFull } from '../../lib/projectManager';
 import { deleteSurveyResponse, responseRecordKey } from '../../lib/surveyResponses';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
+import {
+  adaptResponsesForSkillField,
+  adaptSkillAnswerEntries,
+  skillFieldNativeQuestion,
+} from '../../lib/skillNativeAdapter.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -194,6 +208,32 @@ export function collectShownMedia(questionName, responses) {
     result.push(...expandQuestionAnswerUnits(row, questionName, { requireAnswer: false }));
   }
   return result;
+}
+
+/**
+ * One canonical input contract for QuestionCard. Results Analysis and
+ * Researcher Practice both use this so answer units, denominators, Skill
+ * adapters, media context, and per-question exports cannot drift.
+ */
+export function buildQuestionCardProps(
+  question,
+  responses,
+  { questionNumber = null, surveyConfig = null, exportResponses = responses } = {},
+) {
+  if (!question?.name) return null;
+  const pool = responsesEligibleForQuestion(question.name, responses);
+  const answers = question.type === 'mediadisplay'
+    ? collectShownMedia(question.name, responses)
+    : collectAnswers(question.name, responses);
+  return {
+    question: { ...question, _allResponses: pool },
+    answers,
+    totalResponses: pool.length,
+    questionNumber,
+    allResponses: pool,
+    exportResponses,
+    surveyConfig,
+  };
 }
 
 // Frequency map: { choice: count }
@@ -1131,6 +1171,76 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     );
   }
 
+  // ── imagecheckbox / mediacheckbox: stimulus × text-tag select rates ────────
+  if (type === 'image_checkbox' || type === 'imagecheckbox' || type === 'mediacheckbox') {
+    const choiceMeta = {};
+    (question?.choices || []).forEach((c) => {
+      const v = typeof c === 'object' ? String(c.value ?? c.text ?? '') : String(c);
+      if (!v) return;
+      choiceMeta[v] = typeof c === 'object' ? String(c.text ?? c.label ?? c.value ?? v) : v;
+    });
+    const perImage = {};
+    for (const { answer, shown_images } of answers) {
+      const selected = Array.isArray(answer) ? answer.map(String)
+        : (answer == null || answer === '' ? [] : [String(answer)]);
+      const stims = shown_images?.length ? shown_images : ['(no_media)'];
+      for (const img of stims) {
+        const key = imageKeyFromShown(img) || String(img);
+        if (!perImage[key]) perImage[key] = { url: img, n: 0, counts: {} };
+        perImage[key].n += 1;
+        selected.forEach((opt) => {
+          perImage[key].counts[opt] = (perImage[key].counts[opt] || 0) + 1;
+          if (!choiceMeta[opt]) choiceMeta[opt] = opt;
+        });
+      }
+    }
+    const mediaNoun = type === 'mediacheckbox' ? 'media' : 'image';
+    const blocks = Object.entries(perImage).map(([key, block]) => {
+      const items = Object.keys(choiceMeta).map((opt) => {
+        const count = block.counts[opt] || 0;
+        const rate = block.n > 0 ? count / block.n : 0;
+        return {
+          key: opt,
+          url: null,
+          value: rate,
+          label: `${choiceMeta[opt]} · ${pct(count, block.n)}% (${count}/${block.n})`,
+        };
+      }).sort((a, b) => b.value - a.value);
+      return { key, url: block.url, n: block.n, items };
+    }).sort((a, b) => String(a.key).localeCompare(String(b.key)));
+
+    if (!blocks.length) {
+      return <Typography variant="body2" color="text.secondary">No responses yet.</Typography>;
+    }
+    return (
+      <Box>
+        {blocks.map((block) => (
+          <Box key={block.key} sx={{ mb: 2.5 }}>
+            {(typeof block.url === 'string' && (block.url.startsWith('http') || block.url.startsWith('/'))) ? (
+              <Box
+                component="img"
+                src={getImageUrl(block.url) || block.url}
+                alt=""
+                sx={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 1, mb: 1, display: 'block' }}
+              />
+            ) : (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                {block.key}
+              </Typography>
+            )}
+            <CompactImageRanking
+              title={`Select rate by tag · ${mediaNoun} n=${block.n}`}
+              items={block.items}
+              getImageUrl={() => null}
+              maxValue={1}
+              formatLabel={(_, label) => label}
+            />
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+
   // ── image_matrix / mediamatrix ────────────────────────────────────────────
   if (type === 'image_matrix' || type === 'imagematrix' || type === 'mediamatrix') {
     return (
@@ -1168,7 +1278,26 @@ function getPath(obj, path) {
   );
 }
 
+function skillFieldStimulusMeta(entry) {
+  const key = skillAnswerStimulusKey(entry);
+  if (!key || key === '(no_media)') return null;
+  const answer = entry?.answer;
+  const shown = entry?.shown_images || [];
+  const url = answer?.imageUrl || answer?.videoUrl
+    || (typeof shown[0] === 'string' ? shown[0] : shown[0]?.url)
+    || key;
+  return { key, url };
+}
+
 function SkillFieldSummary({ field, answers }) {
+  const resolvedUrl = useContext(ImageResolverContext);
+  const getImageUrl = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('/'))) return value;
+    const key = imageKeyFromShown(value);
+    return resolvedUrl?.get(key) || resolvedUrl?.get(value) || null;
+  };
+
   const values = answers
     .map((a) => getPath(a.answer, field.key))
     .filter((v) => v !== undefined && v !== null);
@@ -1194,7 +1323,7 @@ function SkillFieldSummary({ field, answers }) {
   const archetypeBody = (
     <SkillArchetypeFieldSummary field={field} answers={answers} />
   );
-  if (archetypeBody && ARCHETYPE_SKILL_RESULT_TYPES.includes(field.type)) {
+  if (archetypeBody && ARCHETYPE_SKILL_RESULT_TYPES.includes(canonicalizeSkillResultType(field.type))) {
     return (
       <Box sx={{ mb: 2.5 }}>
         {header}
@@ -1203,11 +1332,68 @@ function SkillFieldSummary({ field, answers }) {
     );
   }
 
+  // Media-native ranking (same pattern as imagerating / mediaboolean), not text histograms.
+  const perMedia = {};
+  answers.forEach((entry) => {
+    const stim = skillFieldStimulusMeta(entry);
+    if (!stim) return;
+    const raw = getPath(entry.answer, field.key);
+    if (raw === undefined || raw === null) return;
+    if (!perMedia[stim.key]) perMedia[stim.key] = { url: stim.url, vals: [] };
+    perMedia[stim.key].vals.push(raw);
+  });
+  const mediaKeys = Object.keys(perMedia);
+
   let body = null;
 
-  if (field.type === 'number') {
+  if (mediaKeys.length > 1 && (field.type === 'number' || field.type === 'count')) {
+    const rankedItems = mediaKeys.map((key) => {
+      const { url, vals } = perMedia[key];
+      const nums = field.type === 'count'
+        ? vals.map((v) => (Array.isArray(v) ? v.length : Number(v))).filter((n) => !Number.isNaN(n))
+        : vals.map(Number).filter((n) => !Number.isNaN(n));
+      const avg = average(nums);
+      return {
+        key,
+        url,
+        value: avg ?? 0,
+        label: `${avg?.toFixed(2) ?? '–'} · n=${nums.length}`,
+      };
+    }).sort((a, b) => b.value - a.value);
+    const maxValue = Math.max(...rankedItems.map((i) => i.value), 1);
+    body = (
+      <CompactImageRanking
+        title={`${field.label || field.key} by media`}
+        items={rankedItems}
+        getImageUrl={getImageUrl}
+        maxValue={maxValue}
+        formatLabel={(_, label) => label}
+      />
+    );
+  } else if (mediaKeys.length > 1 && field.type === 'boolean') {
+    const rankedItems = mediaKeys.map((key) => {
+      const { url, vals } = perMedia[key];
+      const yes = vals.filter((v) => v === true || v === 'true').length;
+      const total = vals.length;
+      const rate = total > 0 ? yes / total : 0;
+      return {
+        key,
+        url,
+        value: rate,
+        label: `${pct(yes, total)}% yes (${yes}/${total})`,
+      };
+    }).sort((a, b) => b.value - a.value);
+    body = (
+      <CompactImageRanking
+        title={`${field.label || field.key} — yes rate by media`}
+        items={rankedItems}
+        getImageUrl={getImageUrl}
+        maxValue={1}
+        formatLabel={(_, label) => label}
+      />
+    );
+  } else if (field.type === 'number') {
     const nums = values.map(Number).filter((n) => !isNaN(n));
-    const avg = average(nums);
     const distinct = [...new Set(nums)].sort((a, b) => a - b);
     const min = Math.min(...nums);
     const max = Math.max(...nums);
@@ -1237,7 +1423,7 @@ function SkillFieldSummary({ field, answers }) {
       </Box>
     );
   } else if (field.type === 'count') {
-    const lengths = values.map((v) => (Array.isArray(v) ? v.length : 0));
+    const lengths = values.map((v) => (Array.isArray(v) ? v.length : Number(v))).filter((n) => !Number.isNaN(n));
     const avg = average(lengths);
     body = (
       <Typography variant="body2" color="text.secondary">
@@ -1352,10 +1538,19 @@ function inferSkillResultSchema(sampleAnswer) {
       if (Array.isArray(v)) {
         if (v.length >= 1 && v.every((p) => p && typeof p === 'object'
           && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))) {
-          // Heuristic: ≥2 vertices with optional t → path; else points
-          const looksPath = v.length >= 2 && (v.some((p) => p.t != null) || k.toLowerCase().includes('path')
-            || k.toLowerCase().includes('route') || k.toLowerCase().includes('trace'));
-          return { key: k, label: k, type: looksPath ? 'path' : 'points' };
+          const kl = k.toLowerCase();
+          if (/bbox|bounding|\brect\b|\bbox\b/.test(kl) || /(^|_)box(_|$)/.test(kl)) {
+            return { key: k, label: k, type: 'bbox' };
+          }
+          if (/polygon|poly|region|area|mask/.test(kl)) {
+            return { key: k, label: k, type: 'polygon' };
+          }
+          if (v.some((p) => p.t != null) || /path|route|trace|line/.test(kl)) {
+            return { key: k, label: k, type: 'path' };
+          }
+          if (v.length >= 3) return { key: k, label: k, type: 'polygon' };
+          if (v.length === 2) return { key: k, label: k, type: 'bbox' };
+          return { key: k, label: k, type: 'points' };
         }
         if (v.length >= 1 && v.every((x) => typeof x === 'string' || typeof x === 'number')) {
           if (/rank|order|priority/i.test(k) || v.length >= 3) {
@@ -1384,8 +1579,28 @@ function inferSkillResultSchema(sampleAnswer) {
     .filter(Boolean);
 }
 
-function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
-  const { t, language } = useRegion();
+function inferSkillResultSchemaFromAnswers(answers) {
+  const votes = new Map();
+  (answers || []).forEach((entry) => {
+    inferSkillResultSchema(entry?.answer).forEach((field) => {
+      if (!votes.has(field.key)) votes.set(field.key, new Map());
+      const byType = votes.get(field.key);
+      byType.set(field.type, (byType.get(field.type) || 0) + 1);
+    });
+  });
+  let winningVotes = 0;
+  let totalVotes = 0;
+  const schema = [...votes.entries()].map(([key, byType]) => {
+    const sorted = [...byType.entries()].sort((a, b) => b[1] - a[1]);
+    winningVotes += sorted[0][1];
+    totalVotes += sorted.reduce((sum, [, count]) => sum + count, 0);
+    return { key, label: key, type: sorted[0][0] };
+  });
+  return { schema, confidence: totalVotes ? winningVotes / totalVotes : 0 };
+}
+
+function SkillRawResponses({ answers, maxVisible = 10 }) {
+  const { t } = useRegion();
   const [showAll, setShowAll] = useState(false);
   const [showJson, setShowJson] = useState(false);
   const visible = showAll ? answers : answers.slice(0, maxVisible);
@@ -1397,26 +1612,16 @@ function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
   return (
     <Box sx={{ mt: 1 }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        {readable ? t.resultsSkillReadableHint : t.resultsSkillRawHint}
+        {t.resultsSkillRawHint}
       </Typography>
-      {visible.map((entry, idx) => {
+      {showJson && visible.map((entry, idx) => {
         const shown = entry.shown_images?.length ? entry.shown_images : [];
-        const summary = summarizeSkillAnswer(entry.answer, language);
         return (
           <Paper key={idx} variant="outlined" sx={{ p: 1.5, mb: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
               {tf(t.resultsSkillResponseN, { n: idx + 1 })}
             </Typography>
-            {readable ? (
-              <Box component="ul" sx={{ m: 0, pl: 2.25, mb: showJson ? 1 : 0 }}>
-                {summary.map((line, i) => (
-                  <Typography key={i} component="li" variant="body2" sx={{ mb: 0.25 }}>
-                    {line}
-                  </Typography>
-                ))}
-              </Box>
-            ) : null}
-            {(!readable || showJson) && (
+            {showJson && (
               <Typography
                 component="pre"
                 variant="body2"
@@ -1441,12 +1646,10 @@ function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
         );
       })}
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 0.5 }}>
-        {readable && (
-          <Button size="small" onClick={() => setShowJson((v) => !v)}>
-            {showJson ? t.resultsSkillHideRawJson : t.resultsSkillShowRawJson}
-          </Button>
-        )}
-        {answers.length > maxVisible && (
+        <Button size="small" onClick={() => setShowJson((v) => !v)}>
+          {showJson ? t.resultsSkillHideRawJson : t.resultsSkillShowRawJson}
+        </Button>
+        {showJson && answers.length > maxVisible && (
           <Button size="small" onClick={() => setShowAll((v) => !v)}>
             {showAll ? t.resultsSkillShowLess : tf(t.resultsSkillShowAllN, { n: answers.length })}
           </Button>
@@ -1456,54 +1659,120 @@ function SkillRawResponses({ answers, maxVisible = 10, readable = true }) {
   );
 }
 
+function skillAnswerStimulusKey(entry) {
+  const answer = entry?.answer;
+  const shown = entry?.shown_images || [];
+  const key = imageStimulusKey(answer, shown);
+  if (key && key !== '(unknown_image)') return key;
+  const video = answer?.videoUrl || answer?.video_url;
+  if (video) return mediaFilenameKey(typeof video === 'string' ? video : video?.url || '');
+  return '(no_media)';
+}
+
+/** The single native analysis renderer used by native questions and Skill fields. */
+function renderNativeQuestionAnalysisBody(question, answers, allResponses) {
+  const type = question?.type || 'text';
+  if (type === 'rating') return (
+    <><IrrSummary responses={allResponses} question={question} /><RatingDistribution answers={answers} rateMin={question.rateMin ?? 1} rateMax={question.rateMax ?? 5} /></>
+  );
+  if (type === 'number') return <NumberDistribution answers={answers} question={question} />;
+  if (type === 'radiogroup' || type === 'dropdown') return <ChoiceDistribution answers={answers} choices={question.choices} />;
+  if (type === 'checkbox') return <ChoiceDistribution answers={answers} choices={question.choices} isCheckbox />;
+  if (type === 'boolean' || type === 'consent') return <BooleanDistribution answers={answers} />;
+  if (type === 'comment' || type === 'text') return question.inputType === 'number'
+    ? <NumberDistribution answers={answers} question={question} />
+    : <TextAnswers answers={answers} />;
+  if (type === 'matrix') return <MatrixDistribution answers={answers} rows={question.rows} columns={question.columns} />;
+  if (type === 'ranking') return <RankingDistribution answers={answers} choices={question.choices} />;
+  if (type === 'slidergroup') return <><IrrSummary responses={allResponses} question={question} /><SliderGroupAnalysis question={question} answers={answers} /></>;
+  if (type === 'imageslidergroup' || type === 'mediaslidergroup') return <><IrrSummary responses={allResponses} question={question} /><ImageSliderGroupAnalysis question={question} answers={answers} /></>;
+  if (type === 'pointallocation') return <PointAllocationAnalysis question={question} answers={answers} />;
+  if (type === 'imagepointallocation' || type === 'mediapointallocation') return <ImagePointAllocationAnalysis question={question} answers={answers} />;
+  if (type === 'imageannotation') return <AnnotationAnalysis answers={answers} questionName={question.name} responses={allResponses} />;
+  if (type === 'imagepicker' || type === 'mediapicker') return (
+    <><IrrSummary responses={allResponses} question={question} /><ImagePickerDistribution question={question} allResponses={allResponses} /></>
+  );
+  if (['image_rating', 'imagerating', 'image_ranking', 'imageranking', 'mediaranking', 'image_boolean', 'imageboolean', 'image_checkbox', 'imagecheckbox', 'mediacheckbox', 'image_matrix', 'imagematrix', 'mediamatrix', 'mediarating', 'mediaboolean'].includes(type)) return (
+    <>
+      {['imagerating', 'image_rating', 'mediarating'].includes(type) && <IrrSummary responses={allResponses} question={question} />}
+      <ImageQuestionAnalysis answers={answers} type={type} question={question} />
+    </>
+  );
+  return null;
+}
+
+/** Render an adapted Skill field through the same chart components as its native question type. */
+function NativeSkillFieldAnalysis({ sourceQuestion, field, answers, allResponses, showHeader = true }) {
+  const question = skillFieldNativeQuestion(sourceQuestion, field);
+  const adaptedAnswers = adaptSkillAnswerEntries(sourceQuestion, field, answers);
+  const adaptedStored = adaptResponsesForSkillField(sourceQuestion, field, allResponses || []);
+  const type = question?.type;
+  let body = null;
+  if (question && adaptedAnswers.length) {
+    body = renderNativeQuestionAnalysisBody(question, adaptedAnswers, adaptedStored.responses);
+    if (!body && type === 'skillquestion') {
+      const PresetAnalysis = getPresetSkillAnalysis(question.skillId);
+      body = PresetAnalysis ? <PresetAnalysis answers={adaptedAnswers} question={question} /> : null;
+    }
+  }
+  // Adapter miss / unsupported native mapping → archetype summary (never silent blank).
+  if (!body) {
+    body = <SkillArchetypeFieldSummary field={field} answers={answers} />;
+  }
+  if (!showHeader) return body;
+  return (
+    <Box sx={{ mb: 2.5 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+        {field.label || field.key}
+        <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+          {(type || field.type || 'field')} · n={adaptedAnswers.length || answers.length}
+        </Typography>
+      </Typography>
+      {body}
+    </Box>
+  );
+}
+
 function SkillQuestionAnalysis({ question, answers, allResponses }) {
   const { t } = useRegion();
-  const [showRaw, setShowRaw] = useState(false);
-  const [modeTab, setModeTab] = useState(0);
-  const [resolvedAnalysisHtml, setResolvedAnalysisHtml] = useState(
-    () => question.skillAnalysisHtml || '',
+  const [resolvedSchema, setResolvedSchema] = useState(
+    () => (Array.isArray(question.skillResultSchema) ? question.skillResultSchema : []),
   );
 
   useEffect(() => {
     let cancelled = false;
-    const existing = question.skillAnalysisHtml || '';
-    if (existing) {
-      setResolvedAnalysisHtml(existing);
-      return undefined;
-    }
     const skillId = question.skillId;
     if (!skillId || skillId.startsWith('preset_')) {
-      setResolvedAnalysisHtml('');
       return undefined;
     }
     (async () => {
       try {
-        const skill = await getSkillById(skillId);
-        if (!cancelled) setResolvedAnalysisHtml(skill?.analysisHtml || '');
+        const skill = await getSkillById(skillId, question.skillRevision || null);
+        if (!cancelled) {
+          if (!question.skillResultSchema?.length) setResolvedSchema(skill?.resultSchema || []);
+        }
       } catch {
-        if (!cancelled) setResolvedAnalysisHtml('');
+        // The frozen schema/raw answer remains usable if the library entry is unavailable.
       }
     })();
     return () => { cancelled = true; };
-  }, [question.skillId, question.skillAnalysisHtml]);
+  }, [question.skillId, question.skillRevision, question.skillResultSchema]);
 
   const enrichedAnswers = useMemo(
     () => filterAnswersForSkill(enrichSkillAnswers(answers), question.skillId),
     [answers, question.skillId],
   );
   const droppedCount = answers.length - enrichedAnswers.length;
-  const objAnswers = enrichedAnswers.filter((a) => a.answer && typeof a.answer === 'object');
+  // Historical contracts allowed scalar/array answers. Preserve the raw value,
+  // but wrap it in memory so typed analysis can use the normal object pipeline.
+  const objAnswers = enrichedAnswers.map((entry) => ({
+    ...entry,
+    originalAnswer: entry.answer,
+    answer: (entry.answer && typeof entry.answer === 'object' && !Array.isArray(entry.answer))
+      ? entry.answer
+      : { value: entry.answer },
+  }));
   const PresetAnalysis = getPresetSkillAnalysis(question.skillId);
-
-  const modeKeys = useMemo(() => {
-    const set = new Set();
-    objAnswers.forEach((a) => {
-      if (a.answer?.mode != null && String(a.answer.mode).trim() !== '') {
-        set.add(String(a.answer.mode));
-      }
-    });
-    return [...set].sort((a, b) => a.localeCompare(b));
-  }, [objAnswers]);
 
   if (PresetAnalysis) {
     if (!objAnswers.length) {
@@ -1519,123 +1788,81 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
           </Alert>
         )}
         <PresetAnalysis answers={objAnswers} question={question} />
-        <Button size="small" onClick={() => setShowRaw((s) => !s)} sx={{ mt: 1 }}>
-          {showRaw ? t.resultsSkillHideRaw : t.resultsSkillViewRaw}
-        </Button>
-        {showRaw && <SkillRawResponses answers={enrichedAnswers} maxVisible={10} />}
       </Box>
     );
   }
 
   if (!objAnswers.length) {
-    return (
-      <SkillRawResponses answers={enrichedAnswers} maxVisible={10} />
-    );
+    return <Typography variant="body2" color="text.secondary">{t.resultsSkillNoResponses}</Typography>;
   }
 
-  const safeModeTab = Math.min(modeTab, Math.max(0, modeKeys.length - 1));
-  const activeMode = modeKeys.length > 1 ? modeKeys[safeModeTab] : null;
-  const scopedAnswers = activeMode
-    ? objAnswers.filter((a) => String(a.answer?.mode) === activeMode)
-    : objAnswers;
-
-  let schema = question.skillResultSchema;
+  let schema = resolvedSchema;
   if (!schema?.length && question.skillId?.startsWith('preset_')) {
     schema = getPresetSkill(question.skillId.replace(/^preset_/, ''))?.resultSchema;
   }
-  if (!schema?.length && scopedAnswers[0]?.answer) {
-    schema = inferSkillResultSchema(scopedAnswers[0].answer);
+  let inferredContract = null;
+  if (!schema?.length && objAnswers.length) {
+    inferredContract = inferSkillResultSchemaFromAnswers(objAnswers);
+    schema = inferredContract.schema;
   }
-  // Multi-mode skills: hide the mode key itself from field charts (shown as tabs).
-  if (activeMode && Array.isArray(schema)) {
+  if (Array.isArray(schema)) {
     schema = schema.filter((f) => f.key !== 'mode');
   }
+  const contractMismatchCount = objAnswers.filter(({ answer }) => {
+    const check = checkAnswerAgainstResultSchema(answer, schema || []);
+    return !check.recorded || check.fields.some((field) => !field.ok);
+  }).length;
 
-  // Include archetype types (points/path/allocation/rankedList) so they get native charts.
-  // Still skip undeclared raw trajectory keys that were inferred as generic "count".
+  // Like imagerating / preset skills: charts rank or overlay by media inside each field.
+  // No text-style "response list / readable summary" subsections.
   const chartSchema = (schema || []).filter((f) => {
     if (!f?.key) return false;
-    if (ARCHETYPE_SKILL_RESULT_TYPES.includes(f.type)) return true;
-    if (['path', 'points', 'weights', 'allocations'].includes(f.key) && f.type === 'count') return false;
+    if (skillFieldNativeQuestion(question, f)) return true;
+    if (['path', 'points', 'polygon', 'bbox', 'box', 'weights', 'allocations'].includes(f.key)
+      && f.type === 'count') return false;
     return true;
   });
+  const nativeParityContract = !inferredContract
+    && chartSchema.length === 1
+    && !!skillFieldNativeQuestion(question, chartSchema[0]);
 
   return (
     <Box>
-      <IrrSummary responses={allResponses} question={question} />
-      <Alert severity="info" sx={{ mb: 2 }}>
-        {t.resultsSkillCustomHelp}
-      </Alert>
       {droppedCount > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Ignored {droppedCount} response{droppedCount === 1 ? '' : 's'} with the wrong answer shape
           (cross-contamination from an older bug when multiple skills shared one page).
         </Alert>
       )}
-      {resolvedAnalysisHtml?.trim() && (
-        <SkillAnalysisFrame
-          analysisHtml={resolvedAnalysisHtml}
-          responses={scopedAnswers}
-          config={question.skillConfig || {}}
-        />
+      {contractMismatchCount > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          contract_mismatch: {contractMismatchCount} response{contractMismatchCount === 1 ? '' : 's'} did not match the frozen Skill result schema. Raw JSON is preserved below.
+        </Alert>
       )}
-      {modeKeys.length > 1 && (
-        <>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            {t.resultsSkillByMode}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            {t.resultsSkillByModeHelp}
-          </Typography>
-          <Tabs
-            value={safeModeTab}
-            onChange={(_, v) => setModeTab(v)}
-            variant="scrollable"
-            scrollButtons="auto"
-            sx={{
-              mb: 1.5,
-              borderBottom: 1,
-              borderColor: 'divider',
-              minHeight: 40,
-              '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 13 },
-            }}
-          >
-            {modeKeys.map((m) => {
-              const n = objAnswers.filter((a) => String(a.answer?.mode) === m).length;
-              return <Tab key={m} label={`${m} (${n})`} />;
-            })}
-          </Tabs>
-        </>
+      {inferredContract && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Missing historical contract: inferred from {objAnswers.length} responses with {Math.round(inferredContract.confidence * 100)}% field-type agreement. This inference is read-only and was not written back.
+        </Alert>
       )}
-      {chartSchema.length > 0 && (
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-            {t.resultsSkillFieldStats}
-          </Typography>
+      {chartSchema.length > 0 ? (
+        <Box sx={{ mb: 1 }}>
           {chartSchema.map((field) => (
-            <SkillFieldSummary key={`${activeMode || 'all'}:${field.key}`} field={field} answers={scopedAnswers} />
+            <NativeSkillFieldAnalysis
+              key={field.key}
+              sourceQuestion={question}
+              field={field}
+              answers={objAnswers}
+              allResponses={allResponses}
+              showHeader={chartSchema.length > 1}
+            />
           ))}
         </Box>
+      ) : (
+        <Typography variant="body2" color="text.secondary">
+          {t.resultsSkillNoResponses}
+        </Typography>
       )}
-      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
-        {t.resultsSkillResponseList}
-        {activeMode ? ` · ${activeMode}` : ''}
-        {' '}
-        ({scopedAnswers.length})
-      </Typography>
-      <SkillRawResponses answers={scopedAnswers} maxVisible={8} readable />
-      {scopedAnswers[0] && (
-        <Box sx={{ mt: 2 }}>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>
-            {t.resultsSkillExampleFirst}
-          </Typography>
-          <SkillAnswerReview value={scopedAnswers[0].answer} title={t.resultsSkillReadableSummary} dense />
-        </Box>
-      )}
-      <Button size="small" onClick={() => setShowRaw((s) => !s)} sx={{ mt: 1 }}>
-        {showRaw ? t.resultsSkillHideAllRaw : t.resultsSkillShowAllRaw}
-      </Button>
-      {showRaw && <SkillRawResponses answers={enrichedAnswers} maxVisible={50} readable />}
+      {!nativeParityContract && <SkillRawResponses answers={enrichedAnswers} maxVisible={10} />}
     </Box>
   );
 }
@@ -2050,137 +2277,24 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
   const responseCount = participantCount;
 
   const renderAnalysis = () => {
-    switch (type) {
-      case 'rating':
-        return (
-          <>
-            <IrrSummary responses={allResponses} question={question} />
-            <RatingDistribution
-              answers={answers}
-              rateMin={question.rateMin ?? 1}
-              rateMax={question.rateMax ?? 5}
-            />
-          </>
-        );
-
-      case 'radiogroup':
-      case 'dropdown':
-        return <ChoiceDistribution answers={answers} choices={question.choices} />;
-
-      case 'checkbox':
-        return <ChoiceDistribution answers={answers} choices={question.choices} isCheckbox />;
-
-      case 'boolean':
-      case 'consent':
-        return <BooleanDistribution answers={answers} />;
-
-      case 'text':
-      case 'comment':
-        return <TextAnswers answers={answers} />;
-
-      case 'matrix':
-        return (
-          <MatrixDistribution
-            answers={answers}
-            rows={question.rows}
-            columns={question.columns}
-          />
-        );
-
-      case 'ranking':
-        return <RankingDistribution answers={answers} choices={question.choices} />;
-
-      case 'expression':
-      case 'image':
-      case 'html':
-        return (
-          <Typography variant="body2" color="text.secondary">
-            Display-only question — no participant answers are collected.
-            {type === 'image' ? ' The shown image is exported in the __shown_images CSV column.' : ''}
-          </Typography>
-        );
-
-      case 'imagepicker':
-      case 'mediapicker':
-        return (
-          <>
-            <IrrSummary responses={allResponses} question={question} />
-            <ImagePickerDistribution
-              question={question}
-              allResponses={allResponses}
-            />
-          </>
-        );
-
-      case 'image_rating':
-      case 'imagerating':
-      case 'image_ranking':
-      case 'imageranking':
-      case 'mediaranking':
-      case 'image_boolean':
-      case 'imageboolean':
-      case 'image_matrix':
-      case 'imagematrix':
-      case 'mediamatrix':
-      case 'mediarating':
-      case 'mediaboolean':
-        return (
-          <>
-            {['imagerating', 'image_rating', 'mediarating'].includes(type) && (
-              <IrrSummary responses={allResponses} question={question} />
-            )}
-            <ImageQuestionAnalysis answers={answers} type={type} question={question} />
-          </>
-        );
-
-      case 'number':
-        return <NumberDistribution answers={answers} question={question} />;
-
-      case 'mediadisplay':
-        return (
-          <Typography variant="body2" color="text.secondary">
-            Display-only question — no participant answers are collected.
-          </Typography>
-        );
-
-      case 'slidergroup':
-        return (
-          <>
-            <IrrSummary responses={allResponses} question={question} />
-            <SliderGroupAnalysis question={question} answers={answers} />
-          </>
-        );
-
-      case 'imageslidergroup':
-      case 'mediaslidergroup':
-        return (
-          <>
-            <IrrSummary responses={allResponses} question={question} />
-            <ImageSliderGroupAnalysis question={question} answers={answers} />
-          </>
-        );
-
-      case 'pointallocation':
-        return <PointAllocationAnalysis question={question} answers={answers} />;
-
-      case 'imagepointallocation':
-      case 'mediapointallocation':
-        return <ImagePointAllocationAnalysis question={question} answers={answers} />;
-
-      case 'imageannotation':
-        return <AnnotationAnalysis answers={answers} questionName={question.name} responses={question._allResponses} />;
-
-      case 'skillquestion':
-        return <SkillQuestionAnalysis question={question} answers={answers} allResponses={allResponses} />;
-
-      default:
-        return (
-          <Typography variant="body2" color="text.secondary">
-            Unrecognized or unsupported question type &quot;{type}&quot; — no dedicated analysis view.
-            Check CSV export for raw answer data.
-          </Typography>
-        );
+    if (type === 'skillquestion') {
+      return <SkillQuestionAnalysis question={question} answers={answers} allResponses={allResponses} />;
     }
+    const nativeBody = renderNativeQuestionAnalysisBody(question, answers, allResponses);
+    if (nativeBody) return nativeBody;
+    if (isDisplayOnlyQuestion(question) || ['expression', 'image', 'html', 'mediadisplay'].includes(type)) {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          Display-only question — no participant answers are collected.
+        </Typography>
+      );
+    }
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Unrecognized or unsupported question type &quot;{type}&quot; — no dedicated analysis view.
+        Check CSV export for raw answer data.
+      </Typography>
+    );
   };
 
   const responseRate = pct(responseCount, totalResponses);
@@ -2294,19 +2408,20 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
 function readExcludeFlaggedFromConfig(surveyConfig) {
   return typeof surveyConfig?.excludeFlaggedFromAnalysis === 'boolean'
     ? surveyConfig.excludeFlaggedFromAnalysis
-    : true;
+    : false; // default OFF for new projects
 }
 
 function readIncludePracticeFromConfig(surveyConfig) {
   return typeof surveyConfig?.includeResearcherPractice === 'boolean'
     ? surveyConfig.includeResearcherPractice
-    : false;
+    : true; // default ON for new projects
 }
 
 export default function ResultsAnalysis({ currentProject, surveyConfig, onSurveyConfigChange }) {
   const { t } = useRegion();
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(null);
   const [error, setError] = useState(null);
   const [dataSource, setDataSource] = useState(null);
   const [searchText, setSearchText] = useState('');
@@ -2372,17 +2487,32 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
 
   const fetchResponses = useCallback(async () => {
     setLoading(true);
+    setLoadProgress(null);
     setError(null);
     try {
       if (platformSupabase && currentProject?.id) {
-        // Platform mode: query responses for this specific project
-        const { data, error: sbError } = await platformSupabase
-          .from('survey_responses')
-          .select('*')
-          .eq('project_id', currentProject.id)
-          .order('created_at', { ascending: false });
-        if (sbError) throw sbError;
-        setResponses(data || []);
+        // Page through all rows — PostgREST default max is 1000.
+        const pageSize = 1000;
+        const all = [];
+        let offset = 0;
+        for (;;) {
+          const from = offset;
+          const to = offset + pageSize - 1;
+          setLoadProgress({ loaded: all.length, page: Math.floor(offset / pageSize) + 1 });
+          const { data, error: sbError } = await platformSupabase
+            .from('survey_responses')
+            .select('*')
+            .eq('project_id', currentProject.id)
+            .order('created_at', { ascending: false })
+            .range(from, to);
+          if (sbError) throw sbError;
+          const batch = data || [];
+          all.push(...batch);
+          if (batch.length < pageSize) break;
+          offset += pageSize;
+          if (offset > 500000) break;
+        }
+        setResponses(all);
         setDataSource('supabase');
       } else {
         // Self-hosted fallback: local file server
@@ -2400,6 +2530,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       setError(`Failed to load responses: ${err.message}`);
     } finally {
       setLoading(false);
+      setLoadProgress(null);
     }
   }, [currentProject?.id]);
 
@@ -2517,22 +2648,6 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       map[q.name] = q.type === 'mediadisplay'
         ? collectShownMedia(q.name, filteredResponses)
         : collectAnswers(q.name, filteredResponses);
-    }
-    return map;
-  }, [allQuestions, filteredResponses]);
-
-  const questionDenominators = useMemo(() => {
-    const map = {};
-    for (const q of allQuestions) {
-      map[q.name] = responsesEligibleForQuestion(q.name, filteredResponses).length;
-    }
-    return map;
-  }, [allQuestions, filteredResponses]);
-
-  const questionResponsePools = useMemo(() => {
-    const map = {};
-    for (const q of allQuestions) {
-      map[q.name] = responsesEligibleForQuestion(q.name, filteredResponses);
     }
     return map;
   }, [allQuestions, filteredResponses]);
@@ -2972,8 +3087,14 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
 
       {/* Loading */}
       {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5, py: 6 }}>
           <CircularProgress />
+          {loadProgress && (
+            <Typography variant="body2" color="text.secondary">
+              Loading responses… {loadProgress.loaded.toLocaleString()} so far
+              {loadProgress.page > 1 ? ` (page ${loadProgress.page})` : ''}
+            </Typography>
+          )}
         </Box>
       )}
 
@@ -3031,13 +3152,11 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                 {pageQuestions.map((question) => (
                   <QuestionCard
                     key={question.name}
-                    question={{ ...question, _allResponses: questionResponsePools[question.name] || [] }}
-                    answers={questionAnswers[question.name] || []}
-                    totalResponses={questionDenominators[question.name] || 0}
-                    questionNumber={answerableNumberByName.get(question.name) ?? null}
-                    allResponses={questionResponsePools[question.name] || []}
-                    exportResponses={filteredResponses}
-                    surveyConfig={surveyConfig}
+                    {...buildQuestionCardProps(question, filteredResponses, {
+                      questionNumber: answerableNumberByName.get(question.name) ?? null,
+                      surveyConfig,
+                      exportResponses: filteredResponses,
+                    })}
                   />
                 ))}
               </Box>

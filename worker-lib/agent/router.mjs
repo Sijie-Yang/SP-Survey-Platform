@@ -140,6 +140,18 @@ function unauthorized(request, env) {
   });
 }
 
+/** MCP opaque tokens must carry the matching OAuth scope; browser Supabase JWTs are full-access. */
+function requireAgentScope(auth, scope) {
+  if (!auth || auth.kind === 'supabase') return;
+  const scopes = auth.scopes || [];
+  if (!scopes.includes(scope)) {
+    throw Object.assign(new Error(`Missing scope: ${scope}`), {
+      status: 403,
+      code: 'insufficient_scope',
+    });
+  }
+}
+
 export async function handleAgentAndMcpRoutes(request, env) {
   const url = new URL(request.url);
   const { pathname } = url;
@@ -420,6 +432,7 @@ export async function handleAgentAndMcpRoutes(request, env) {
     }
 
     if (pathname === '/api/agent/skills' && request.method === 'GET') {
+      requireAgentScope(auth, 'surveys:read');
       return jsonResponse(await listSkills(env, {
         accessToken: auth.accessToken,
         userId: auth.userId,
@@ -427,6 +440,7 @@ export async function handleAgentAndMcpRoutes(request, env) {
       }));
     }
     if (pathname === '/api/agent/skills' && request.method === 'POST') {
+      requireAgentScope(auth, 'surveys:write');
       const body = await request.json().catch(() => ({}));
       if (!body.confirm) {
         return errorResponse(Object.assign(new Error('Set confirm:true to save a skill.'), { status: 400 }));
@@ -439,6 +453,7 @@ export async function handleAgentAndMcpRoutes(request, env) {
     }
     const skillMatch = pathname.match(/^\/api\/agent\/skills\/([^/]+)$/);
     if (skillMatch && request.method === 'GET') {
+      requireAgentScope(auth, 'surveys:read');
       return jsonResponse(await getSkill(env, {
         accessToken: auth.accessToken,
         userId: auth.userId,
@@ -535,6 +550,7 @@ export async function handleAgentAndMcpRoutes(request, env) {
         return jsonResponse(await updateMediaDataset(env, jwtCtx, projectId, body));
       }
       if (action === 'responses' && request.method === 'GET') {
+        requireAgentScope(auth, 'results:read');
         const url = new URL(request.url);
         const filters = {
           includePractice: url.searchParams.get('includePractice') === 'true',
@@ -548,6 +564,7 @@ export async function handleAgentAndMcpRoutes(request, env) {
         return jsonResponse(await listResponses(env, jwtCtx, projectId, filters));
       }
       if (action === 'responses/export' && request.method === 'GET') {
+        requireAgentScope(auth, 'results:read');
         const url = new URL(request.url);
         const filters = {
           format: url.searchParams.get('format') || 'json',
@@ -560,6 +577,7 @@ export async function handleAgentAndMcpRoutes(request, env) {
         return jsonResponse(await exportResponses(env, jwtCtx, projectId, filters));
       }
       if (action === 'results/summary' && request.method === 'GET') {
+        requireAgentScope(auth, 'results:read');
         const url = new URL(request.url);
         const filters = {
           includePractice: url.searchParams.get('includePractice') === 'true',
@@ -571,6 +589,7 @@ export async function handleAgentAndMcpRoutes(request, env) {
         return jsonResponse(await summarizeResponses(env, jwtCtx, projectId, filters));
       }
       if (action === 'responses' && request.method === 'DELETE') {
+        requireAgentScope(auth, 'surveys:write');
         const body = await request.json().catch(() => ({}));
         if (!body.confirm) {
           return errorResponse(Object.assign(new Error('Set confirm:true to delete a response.'), { status: 400 }));
@@ -578,18 +597,22 @@ export async function handleAgentAndMcpRoutes(request, env) {
         return jsonResponse(await deleteResponse(env, jwtCtx, projectId, body));
       }
       if (action === 'draft' && request.method === 'GET') {
+        requireAgentScope(auth, 'surveys:read');
         return jsonResponse(await getDraft(env, auth.accessToken, projectId, request));
       }
       if (action === 'draft' && request.method === 'PUT') {
+        requireAgentScope(auth, 'surveys:write');
         const body = await request.json();
         const writer = auth.kind === 'mcp' ? 'codex' : 'browser-ai';
         return jsonResponse(await saveDraft(env, auth.accessToken, projectId, body, writer));
       }
       if (action === 'operations' && request.method === 'POST') {
+        requireAgentScope(auth, 'surveys:write');
         const body = await request.json();
         return jsonResponse(await applyProjectOperations(env, auth.accessToken, projectId, body, 'codex'));
       }
       if (action === 'publish' && request.method === 'POST') {
+        requireAgentScope(auth, 'surveys:publish');
         const body = await request.json().catch(() => ({}));
         return jsonResponse(await publishProject(env, auth.accessToken, projectId, body));
       }

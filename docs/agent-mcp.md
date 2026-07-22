@@ -56,6 +56,36 @@ npm run deploy
 5. Approve scopes on `/oauth/mcp`
 6. Ask Codex to create/edit, validate, and share the preview / live URL (saves are live immediately)
 
+### Claude Code
+
+1. Sign in at `/admin` → **AI & Integrations**
+2. Add the remote HTTP MCP (user scope recommended):
+
+```bash
+claude mcp add --transport http sp_survey "https://<host>/mcp" --scope user
+```
+
+3. In Claude Code: `/mcp` → `sp_survey` → **Authenticate** → Approve on `/oauth/mcp`
+4. Ask Claude Code to use `sp_survey` (start with `survey_capabilities`)
+
+### Cursor
+
+1. Sign in at `/admin` → **AI & Integrations**
+2. Merge into `~/.cursor/mcp.json` (or project `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "sp_survey": {
+      "url": "https://<host>/mcp"
+    }
+  }
+}
+```
+
+3. Cursor **Settings → Tools & MCP** → **Connect / Authenticate** on `sp_survey` → Approve on `/oauth/mcp`
+4. In a new Agent chat, ask Cursor to use `sp_survey` (start with `survey_capabilities`)
+
 ### Platform Assistant
 
 1. Open **AI & Integrations**
@@ -105,17 +135,20 @@ npm run deploy
 
 **Skills**
 
-- `skill_list`, `skill_get`, `skill_save` (`confirm: true`) — private library; no auto public review
+- `skill_list`, `skill_get` (optional immutable `revision`), `skill_save` (`confirm: true`) — private library; no auto public review
 - Survey questions: `skillquestion` + `skillId` (`preset_*` or library id). Never put `skillHtml` on the draft.
-- `skill_save` is **rejected** unless `sourceHtml` calls `SPSkill.setAnswer(...)`. One task per skill; no `skill-result` postMessage protocols. Prefer `preset_*` when a preset fits.
-- Declare `resultSchema[].type` from: `number`, `boolean`, `choice`, `text`, `count`, `color`, `scaleGroup`, `points`, `path`, `allocation`, `rankedList` so Results Analysis / CSV reuse native charts. Optional `analysisHtml` + `SPAnalysis.getResponses()` for novel shapes. See `survey_capabilities.skillAnalysisGuide`.
+- `skill_save` requires a non-empty typed `resultSchema` and matching non-empty object `exampleAnswer`, and is **rejected** unless `sourceHtml` calls `SPSkill.setAnswer(object)`. Each substantive save creates an immutable revision. One task per skill; no `skill-result` postMessage protocols.
+- Declare exactly one `resultSchema` field, with its type from: `number`, `rating`, `boolean`, `choice`, `text`, `count`, `color`, `scaleGroup`, `points`, `path`, `polygon`, `bbox`, `allocation`, `rankedList`, `multiChoice`, `matrix`, `mediaMatrix`, `mediaChoice`, `mediaRankedList`, `timeRanges`, `timeSeries`, `pairwiseChoice`, `pairwisePreference`, `bestWorst`, or `compositeBlocks`. It must match an existing native question/results/export family; `json`, legacy `pairwise`, and `analysisHtml` are rejected. Use `compositeBlocks` or separate Skills when appropriate. See `survey_capabilities.skillAnalysisGuide`.
 - Include `imageUrl` in answers for per-stimulus grouping.
 
 **Results** (`results:read`)
 
-- `survey_list_responses`, `survey_export_responses` (`json` | `wide_csv` | `both`), `survey_results_summary`
-- `survey_delete_response` — `confirm: true`
+- `survey_list_responses`, `survey_export_responses` (`json` | `wide_csv` | `both` | `long_csv` | `summary_csv` | `analysis_bundle`, optional `questionName`), `survey_results_summary`
 - Not full Admin analysis (no charts / TrueSkill). Export for offline analysis.
+
+**Destructive results** (`surveys:write`)
+
+- `survey_delete_response` — `confirm: true` (requires write scope, not `results:read`)
 
 **Other**
 

@@ -65,6 +65,12 @@ function writeQuestionProp(question, key, value) {
   } catch { /* ignore */ }
 }
 
+/** Types that keep text/response choices independent of the stimulus media. */
+const TEXT_CHOICE_STIMULUS_TYPES = new Set([
+  'imagecheckbox', 'mediacheckbox',
+  'imagepointallocation', 'mediapointallocation',
+]);
+
 function applyTrialMedia(question, mediaSet) {
   if (!question || !mediaSet?.length) return;
   const type = question.getType?.() || question.type;
@@ -76,6 +82,10 @@ function applyTrialMedia(question, mediaSet) {
     'annotationImageUrl', 'imageLink', 'imageName',
     'assignedMediaSetId', 'assignedMediaGroupId', 'assignedMediaCategories',
   ].forEach((key) => {
+    // Never copy undefined — scratch element omits keys that applyMediaToElement
+    // intentionally leaves alone (e.g. text tags on imagecheckbox).
+    if (element[key] === undefined) return;
+    if (key === 'choices' && TEXT_CHOICE_STIMULUS_TYPES.has(type)) return;
     writeQuestionProp(question, key, element[key]);
   });
   const prev = getRememberedInjectedMedia(question.name);
@@ -104,7 +114,12 @@ function applyTrialMedia(question, mediaSet) {
 
 function emptyTrialDisplayValue(question) {
   const type = question?.getType?.() || question?.type;
-  if (type === 'imageranking' || type === 'mediaranking') {
+  if (
+    type === 'imageranking'
+    || type === 'mediaranking'
+    || type === 'imagecheckbox'
+    || type === 'mediacheckbox'
+  ) {
     return [];
   }
   if (
@@ -207,9 +222,18 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
 
   const writeFlatValue = useCallback((trialIndex, answersObj) => {
     const flat = answersObj?.trials?.[trialIndex]?.value;
-    const nextVal = (flat === undefined) ? emptyTrialDisplayValue(question) : flat;
+    let nextVal = (flat === undefined) ? emptyTrialDisplayValue(question) : flat;
+    // Copy arrays so SurveyJS always treats trial switches as a new value
+    // (same reference / []→[] no-ops break checkbox UI on trial 2+).
+    if (Array.isArray(nextVal)) nextVal = [...nextVal];
+    else if (nextVal && typeof nextVal === 'object') nextVal = { ...nextVal };
     try {
-      question.value = nextVal;
+      const survey = question.survey;
+      if (survey && typeof survey.setValue === 'function' && question.name) {
+        survey.setValue(question.name, nextVal);
+      } else {
+        question.value = nextVal;
+      }
     } catch (e) {
       console.warn('TrialShell: failed to set flat question.value', e);
     }
@@ -275,8 +299,11 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
       if (isTrialsAnswer(raw)) return;
       const set = trialMediaSets[indexRef.current] || [];
       const next = normalizeTrialsAnswer(answersRef.current, trialCount);
+      const storedValue = Array.isArray(raw)
+        ? [...raw]
+        : (raw && typeof raw === 'object' ? { ...raw } : raw);
       next.trials[indexRef.current] = {
-        value: raw,
+        value: storedValue,
         shown_images: mediaSetToShownImages(set),
         shown_media_ids: mediaSetToShownIds(set),
       };

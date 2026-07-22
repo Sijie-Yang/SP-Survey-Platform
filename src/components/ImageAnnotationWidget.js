@@ -288,7 +288,7 @@ export default function ImageAnnotationCanvas({
   imageUrl,
   value,
   onChange,
-  allowedTools = ['point', 'line', 'polygon'],
+  allowedTools = ['point', 'line', 'polygon', 'bbox'],
   annotationLabels = [],
   readOnly = false,
   minAnnotations = 0,
@@ -450,11 +450,15 @@ export default function ImageAnnotationCanvas({
   }, [imageUrl]);
 
   const canvasPoint = (e) => {
-    const { w, h } = dimsRef.current;
-    const rect = canvasRef.current.getBoundingClientRect();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      const { w, h } = dimsRef.current;
+      return normalizePoint(0, 0, w || 1, h || 1);
+    }
+    // Normalize against the same rect used for pointer offsets (avoids img/canvas size drift).
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    return normalizePoint(x, y, w, h);
+    return normalizePoint(x, y, rect.width, rect.height);
   };
 
   const findHitShape = (pt) => {
@@ -598,6 +602,16 @@ export default function ImageAnnotationCanvas({
         }
         if ((draftTool === 'line' || draftTool === 'polygon')
           && normalizeAnnotationTool(toolRef.current) === draftTool) {
+          // Polygon: click near first vertex (≥3 pts) closes + confirms.
+          if (draftTool === 'polygon' && d.points.length >= 3) {
+            const { w, h } = dimsRef.current;
+            const first = d.points[0];
+            const closePx = Math.hypot((pt.x - first.x) * w, (pt.y - first.y) * h);
+            if (closePx <= 14) {
+              if (draftReady(d)) confirmDraft();
+              return;
+            }
+          }
           setDrag({ mode: 'pending-add', startPt: pt, origPoints: d.points.map((p) => ({ ...p })), moved: false });
           canvasRef.current?.setPointerCapture?.(e.pointerId);
           return;
@@ -717,6 +731,16 @@ export default function ImageAnnotationCanvas({
     runSamAtPoint(pt);
   };
 
+  const handleDoubleClick = (e) => {
+    if (readOnly || samBusy) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const d = draftRef.current;
+    if (!d || normalizeAnnotationTool(d.tool) !== 'polygon') return;
+    if (!draftReady(d)) return;
+    confirmDraft();
+  };
+
   const undo = () => {
     if (draftRef.current) {
       cancelDraft();
@@ -794,13 +818,13 @@ export default function ImageAnnotationCanvas({
     const activeTool = normalizeAnnotationTool(tool);
     if (draft) {
       if (draftTool === 'line') return 'Click to add more points · drag vertices to edit · ✓ confirm · ✕ discard';
-      if (draftTool === 'polygon') return 'Click to add vertices · drag to edit · ✓ confirm (≥3) · ✕ discard';
+      if (draftTool === 'polygon') return 'Click to add vertices · click first point or double-click to close · ✓ confirm (≥3) · ✕ discard';
       if (draftTool === 'bbox') return 'Drag body to move · handles to resize · ✓ confirm · ✕ discard';
       if (draftTool === 'point') return 'Drag to adjust · ✓ confirm · ✕ discard';
     }
     if (activeTool === 'point') return 'Click to place a point, then ✓ to confirm';
     if (activeTool === 'line') return 'Click to add polyline points, then ✓ to confirm (Esc cancels)';
-    if (activeTool === 'polygon') return 'Click to add polygon vertices, then ✓ to confirm (no double-click)';
+    if (activeTool === 'polygon') return 'Click to add vertices; click near first point or double-click to close (≥3)';
     if (activeTool === 'bbox') return 'Drag to draw a box, then ✓ to confirm';
     return '';
   })();
@@ -961,6 +985,7 @@ export default function ImageAnnotationCanvas({
           <canvas
             ref={canvasRef}
             onClick={handleClick}
+            onDoubleClick={handleDoubleClick}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

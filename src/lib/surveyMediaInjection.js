@@ -124,8 +124,8 @@ function skillFromPreset(skillId) {
 }
 
 export const RANDOM_MEDIA_TYPES = new Set([
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix',
-  'mediadisplay', 'mediarating', 'mediaboolean', 'mediaranking', 'mediapicker',
+  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image', 'imagematrix',
+  'mediadisplay', 'mediarating', 'mediaboolean', 'mediacheckbox', 'mediaranking', 'mediapicker',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
   'imageannotation',
   'imageslidergroup', 'imagepointallocation',
@@ -153,7 +153,7 @@ export function shouldInjectMedia(element) {
   // media* / annotation / slots: Serializer defaults randomImageSelection=false, which
   // previously skipped injection even when imageSelectionMode is huggingface_random.
   if ([
-    'mediadisplay', 'mediarating', 'mediaboolean', 'imageannotation',
+    'mediadisplay', 'mediarating', 'mediaboolean', 'mediacheckbox', 'imageannotation',
     'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
   ].includes(element.type) || hasMediaSlots(element)) {
     return true;
@@ -282,8 +282,8 @@ export function defaultMediaCount(element) {
     return element.imageCount || element.skillConfig?.mediaCount || 1;
   }
   if ([
-    'imagerating', 'imagematrix', 'imageboolean', 'image',
-    'mediadisplay', 'mediarating', 'mediaboolean', 'mediamatrix',
+    'imagerating', 'imagematrix', 'imageboolean', 'imagecheckbox', 'image',
+    'mediadisplay', 'mediarating', 'mediaboolean', 'mediacheckbox', 'mediamatrix',
     'mediaslidergroup', 'mediapointallocation', 'imageannotation',
     'imageslidergroup', 'imagepointallocation',
   ].includes(element.type)) {
@@ -302,7 +302,7 @@ export function getMediaTypeFilter(element) {
   if (isMediaStarType(element.type)) {
     return element.mediaType || 'any';
   }
-  if (['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
+  if (['imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
     return 'image';
   }
   return 'any';
@@ -827,7 +827,7 @@ export function applyMediaToElement(element, selectedImages) {
   }
 
   if ([
-    'mediadisplay', 'mediarating', 'mediaboolean',
+    'mediadisplay', 'mediarating', 'mediaboolean', 'mediacheckbox',
     'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
   ].includes(element.type)) {
     setMediaItems(element, selectedImages);
@@ -853,14 +853,14 @@ export function applyMediaToElement(element, selectedImages) {
     return;
   }
 
-  if (['imageboolean', 'imagerating', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
+  if (['imageboolean', 'imagecheckbox', 'imagerating', 'imagematrix', 'imageslidergroup', 'imagepointallocation'].includes(element.type)) {
     element.imageLinks = selectedImages.map((img) => img.url);
     element.imageNames = selectedImages.map((img) => img.name);
     element.imageHtml = buildImageGalleryHtml(selectedImages);
     element.imageUrls = selectedImages.map((img) => img.url);
     // imagerating / imageboolean / imagematrix widgets read stimulus from choices[].imageLink.
-    // imageslidergroup / imagepointallocation use imageLinks for stimulus; their choices are
-    // response options (dimensions are separate) — never overwrite allocation choices with images.
+    // imagecheckbox / imageslidergroup / imagepointallocation keep text/response choices —
+    // never overwrite those with stimulus images.
     if (['imageboolean', 'imagerating', 'imagematrix'].includes(element.type)) {
       element.choices = selectedImages.map((image, index) => ({
         value: `image_${index}`,
@@ -917,6 +917,8 @@ const INJECTED_MEDIA_SYNC_KEYS = [
   'mediaSlots', 'mediaSlotsResolved', 'slotIds', 'slotUrls', 'slotTypes', 'slotRoles', 'slotNames',
   'imageLinks', 'imageNames', 'imageHtml', 'imageUrls', 'imageLink', 'imageName',
   'annotationImageUrl', 'trialMediaSets', 'skillImages',
+  'skillId', 'skillHtml', 'skillAnalysisHtml', 'skillResultSchema',
+  'skillRevision', 'skillContractVersion', 'skillConfig',
   'assignedMediaSetId', 'assignedMediaGroupId', 'assignedMediaCategories',
 ];
 
@@ -980,7 +982,7 @@ export async function resolveSkillQuestions(surveyJson) {
       if (!skill) {
         try {
           skill = await Promise.race([
-            getSkillById(el.skillId),
+            getSkillById(el.skillId, el.skillRevision || null),
             new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
           ]);
         } catch {
@@ -990,7 +992,11 @@ export async function resolveSkillQuestions(surveyJson) {
       if (skill) {
         el.skillHtml = skill.sourceHtml || el.skillHtml;
         if (skill.analysisHtml) el.skillAnalysisHtml = skill.analysisHtml;
-        if (skill.resultSchema?.length) el.skillResultSchema = skill.resultSchema;
+        if (!Array.isArray(el.skillResultSchema) || !el.skillResultSchema.length) {
+          if (skill.resultSchema?.length) el.skillResultSchema = skill.resultSchema;
+        }
+        el.skillRevision = Number(el.skillRevision || skill.revision || skill.currentRevision || 1);
+        el.skillContractVersion = Number(el.skillContractVersion || skill.contractVersion || 1);
         const merged = { ...(skill.defaultConfig || {}), ...(el.skillConfig || {}) };
         delete merged.demoImages;
         const skillKey = String(el.skillId || '').replace(/^preset_/, '');

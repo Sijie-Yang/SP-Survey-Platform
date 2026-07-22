@@ -7,6 +7,7 @@ import {
   getMediaPerCategory,
   usesSetMediaAssignment,
   usesCategoryMediaAssignment,
+  syncInjectedMediaOntoSurveyModel,
 } from './surveyMediaInjection';
 import {
   FIXTURE_POOL,
@@ -159,5 +160,37 @@ describe('surveyMediaInjection set/category picking', () => {
     );
     expect(assignment.images).toHaveLength(2);
     expect(assignment.images.every((img) => img.folder === 'sets/s1')).toBe(true);
+  });
+
+  test('copies hydrated Skill contract and HTML onto the live SurveyJS question', () => {
+    const assigned = {};
+    const liveQuestion = {
+      name: 'custom_skill',
+      setPropertyValue: (key, value) => { assigned[key] = value; },
+    };
+    syncInjectedMediaOntoSurveyModel(
+      { getAllQuestions: () => [liveQuestion] },
+      {
+        pages: [{
+          elements: [{
+            type: 'skillquestion',
+            name: 'custom_skill',
+            skillId: 'skill-1',
+            skillHtml: '<!doctype html><html></html>',
+            skillRevision: 3,
+            skillContractVersion: 1,
+            skillResultSchema: [{ key: 'score', type: 'number' }],
+          }],
+        }],
+      },
+    );
+
+    expect(assigned).toMatchObject({
+      skillId: 'skill-1',
+      skillHtml: '<!doctype html><html></html>',
+      skillRevision: 3,
+      skillContractVersion: 1,
+      skillResultSchema: [{ key: 'score', type: 'number' }],
+    });
   });
 });
