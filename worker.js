@@ -796,9 +796,16 @@ export default {
         return await handleUpload(request, env);
       }
       if (pathname === '/api/r2/list' && request.method === 'GET') {
-        const user = await resolveR2User(request, env);
-        if (!user) return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
         const prefix = url.searchParams.get('prefix') || '';
+        const user = await resolveR2User(request, env);
+        if (!user) {
+          // Public homepage / previews: allow anonymous list of skill-preview/ only.
+          // (Without this, landing template covers all fall back to the same default poster.)
+          if (prefix && isPreviewMediaKey(prefix)) {
+            return await handleList(request, env);
+          }
+          return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });
+        }
         if (user.userId) {
           // Allow listing user prefix, templates/, and shared skill-preview/ (preview media library).
           if (prefix && !assertR2KeyOwned(user.userId, prefix)) {
