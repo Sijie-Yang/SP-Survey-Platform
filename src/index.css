@@ -470,6 +470,21 @@ iframe[title="skill-question"] {
   animation: sp-hero-video-drift 18s ease-in-out alternate infinite;
 }
 
+/* Safari draws a native center ▶ on paused decorative videos — hide all media chrome. */
+.sp-hero-atmosphere-video::-webkit-media-controls {
+  display: none !important;
+}
+.sp-hero-atmosphere-video::-webkit-media-controls-enclosure {
+  display: none !important;
+}
+.sp-hero-atmosphere-video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none;
+}
+.sp-hero-atmosphere-video::-webkit-media-controls-overlay-play-button {
+  display: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sp-landing-hero-brand,
   .sp-landing-hero-title,

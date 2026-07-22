@@ -259,9 +259,15 @@ export default function LandingPage() {
           sx={{
             position: 'absolute',
             inset: 0,
-            transform: `translateY(${heroScroll * 0.22}px) scale(${1 + heroScroll * 0.00025})`,
-            opacity: Math.max(0.55, 1 - heroScroll / 420),
-            willChange: 'transform, opacity',
+            // Avoid transform on first paint — Safari often refuses muted autoplay
+            // inside a transformed ancestor until a later navigation/gesture.
+            ...(heroScroll > 0
+              ? {
+                  transform: `translateY(${heroScroll * 0.22}px) scale(${1 + heroScroll * 0.00025})`,
+                  opacity: Math.max(0.55, 1 - heroScroll / 420),
+                  willChange: 'transform, opacity',
+                }
+              : null),
           }}
         >
           <StreetscapeAtmosphere />
