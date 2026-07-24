@@ -29,6 +29,9 @@ const TOOL_COLORS = {
   bbox: '#fb8c00',
 };
 
+/** Unlabeled (None) — one fixed color for every tool (not per-tool TOOL_COLORS). */
+export const NONE_SHAPE_COLOR = '#78909c';
+
 export function newShapeId() {
   return `shp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -82,7 +85,10 @@ export function drawAnnotationShape(ctx, shape, w, h, {
   const tool = inferShapeTool(shape);
   const pts = (shape.points || []).map((p) => ({ x: p.x * w, y: p.y * h }));
   if (!pts.length) return;
-  const baseColor = color || colorForLabel(shape.label, TOOL_COLORS[tool] || '#333', labelColors);
+  const hasLabel = !!(shape.label && String(shape.label).trim());
+  const baseColor = color || (hasLabel
+    ? colorForLabel(shape.label, TOOL_COLORS[tool] || '#333', labelColors)
+    : NONE_SHAPE_COLOR);
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = baseColor;
   ctx.fillStyle = baseColor;
@@ -308,7 +314,8 @@ export default function ImageAnnotationCanvas({
   const tools = normalizeAllowedTools(allowedTools);
   const [tool, setTool] = useState(tools[0] || 'point');
   const [draft, setDraft] = useState(null); // { tool, points } | null
-  const [drag, setDrag] = useState(null); // { mode, index?, handle?, startPt, origPoints, moved }
+  /** Draft edit, or Select-mode edit of a committed shape via `shapeId`. */
+  const [drag, setDrag] = useState(null); // { mode, shapeId?, index?, handle?, startPt, origPoints, moved }
   const [shapes, setShapes] = useState(value?.shapes || []);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [imgError, setImgError] = useState(false);
@@ -372,6 +379,13 @@ export default function ImageAnnotationCanvas({
     onChange?.({ image: imageUrl, shapes: nextShapes });
   }, [imageUrl, onChange]);
 
+  const patchShapePoints = useCallback((shapeId, nextPoints) => {
+    if (!shapeId || !Array.isArray(nextPoints)) return;
+    emitChange(shapesRef.current.map((s) => (
+      s.id === shapeId ? { ...s, points: nextPoints } : s
+    )));
+  }, [emitChange]);
+
   const cancelDraft = useCallback(() => {
     setDraft(null);
     setDrag(null);
@@ -410,15 +424,43 @@ export default function ImageAnnotationCanvas({
     setDims({ w, h });
     ctx.clearRect(0, 0, w, h);
     const sel = new Set(selectedIds);
+    const soleId = selectedIds.length === 1 ? selectedIds[0] : null;
 
     shapes.forEach((s) => {
+      const isSole = !!(soleId && s.id === soleId);
+      const sTool = inferShapeTool(s);
       drawAnnotationShape(ctx, s, w, h, {
         alpha: 1,
         fillAlpha: 0.35,
         selected: !!(s.id && sel.has(s.id)),
+        // Single selection in Select mode: show editable vertices (bbox uses handles below).
+        showVertices: isSole && sTool !== 'bbox',
         labelColors,
       });
     });
+
+    if (soleId) {
+      const sole = shapes.find((s) => s.id === soleId);
+      if (sole && inferShapeTool(sole) === 'bbox' && (sole.points || []).length >= 2) {
+        const box = bboxCorners(sole.points);
+        if (box) {
+          const positions = bboxHandlePositions(box, w, h);
+          const stroke = sole.label
+            ? colorForLabel(sole.label, TOOL_COLORS.bbox, labelColors)
+            : NONE_SHAPE_COLOR;
+          BOX_HANDLES.forEach((name) => {
+            const p = positions[name];
+            ctx.beginPath();
+            ctx.fillStyle = '#fff';
+            ctx.strokeStyle = stroke;
+            ctx.lineWidth = 2;
+            ctx.rect(p.x - 4, p.y - 4, 8, 8);
+            ctx.fill();
+            ctx.stroke();
+          });
+        }
+      }
+    }
 
     if (draft?.points?.length) {
       drawAnnotationShape(ctx, {
@@ -441,7 +483,9 @@ export default function ImageAnnotationCanvas({
             const p = positions[name];
             ctx.beginPath();
             ctx.fillStyle = '#fff';
-            ctx.strokeStyle = TOOL_COLORS.bbox;
+            ctx.strokeStyle = activeLabel
+              ? colorForLabel(activeLabel, TOOL_COLORS.bbox, labelColors)
+              : NONE_SHAPE_COLOR;
             ctx.lineWidth = 2;
             ctx.rect(p.x - 4, p.y - 4, 8, 8);
             ctx.fill();
@@ -730,8 +774,50 @@ export default function ImageAnnotationCanvas({
       return;
     }
 
-    // Explicit Select mode: multi-select (click toggles; empty clears).
+    // Select mode: edit geometry when exactly one shape is selected; else multi-select.
     if (!method && toolRef.current === 'select') {
+      const soleId = selectedIdsRef.current.length === 1 ? selectedIdsRef.current[0] : null;
+      if (soleId) {
+        const shape = shapesRef.current.find((s) => s.id === soleId);
+        if (shape) {
+          const sTool = inferShapeTool(shape);
+          const origPoints = (shape.points || []).map((p) => ({ ...p }));
+          if (sTool === 'bbox' && origPoints.length >= 2) {
+            const box = bboxCorners(origPoints);
+            const handle = hitTestBboxHandle(box, pt, w, h);
+            if (handle) {
+              setDrag({
+                mode: 'resize', shapeId: soleId, handle, startPt: pt, origPoints, moved: false,
+              });
+              canvasRef.current?.setPointerCapture?.(e.pointerId);
+              return;
+            }
+            if (hitTestShape(shape, pt, w, h)) {
+              setDrag({
+                mode: 'move', shapeId: soleId, startPt: pt, origPoints, moved: false,
+              });
+              canvasRef.current?.setPointerCapture?.(e.pointerId);
+              return;
+            }
+          } else if (sTool === 'point' || sTool === 'line' || sTool === 'polygon') {
+            const vi = hitTestVertex(shape, pt, w, h);
+            if (vi >= 0) {
+              setDrag({
+                mode: 'vertex', shapeId: soleId, index: vi, startPt: pt, origPoints, moved: false,
+              });
+              canvasRef.current?.setPointerCapture?.(e.pointerId);
+              return;
+            }
+            if (hitTestShape(shape, pt, w, h)) {
+              setDrag({
+                mode: 'move', shapeId: soleId, startPt: pt, origPoints, moved: false,
+              });
+              canvasRef.current?.setPointerCapture?.(e.pointerId);
+              return;
+            }
+          }
+        }
+      }
       const hit = findHitShape(pt);
       if (hit?.id) toggleSelectedId(hit.id);
       else clearSelection();
@@ -770,6 +856,35 @@ export default function ImageAnnotationCanvas({
     if (!cur) return;
     const pt = canvasPoint(e);
     const { w, h } = dimsRef.current;
+
+    // Select-mode edit of a committed shape
+    if (cur.shapeId) {
+      if (cur.mode === 'vertex') {
+        const shape = shapesRef.current.find((s) => s.id === cur.shapeId);
+        if (!shape) return;
+        const pts = (shape.points || []).map((p) => ({ ...p }));
+        pts[cur.index] = {
+          x: Math.min(1, Math.max(0, pt.x)),
+          y: Math.min(1, Math.max(0, pt.y)),
+        };
+        patchShapePoints(cur.shapeId, pts);
+        setDrag({ ...cur, moved: true });
+      } else if (cur.mode === 'move') {
+        const dx = pt.x - cur.startPt.x;
+        const dy = pt.y - cur.startPt.y;
+        patchShapePoints(cur.shapeId, cur.origPoints.map((p) => ({
+          x: Math.min(1, Math.max(0, p.x + dx)),
+          y: Math.min(1, Math.max(0, p.y + dy)),
+        })));
+        setDrag({ ...cur, moved: true });
+      } else if (cur.mode === 'resize') {
+        const box = bboxCorners(cur.origPoints);
+        const next = applyBboxResize(box, cur.handle, pt);
+        patchShapePoints(cur.shapeId, boxToPoints(next));
+        setDrag({ ...cur, moved: true });
+      }
+      return;
+    }
 
     if (cur.mode === 'vertex') {
       setDraft((d) => {
@@ -973,7 +1088,12 @@ export default function ImageAnnotationCanvas({
     if (samMethod === 'click') return 'SAM Click: click object → polygon draft → ✓ · switch to Select to pick existing';
     if (samMethod === 'box') return 'SAM Box: drag guide box → polygon draft → ✓ · switch to Select to pick existing';
     if (samMethod === 'text') return 'SAM Text: one noun + Run → all matches as polygons (all selected for batch label)';
-    if (tool === 'select') return 'Select: click toggles multi-select · Selected row labels all · Delete removes all selected';
+    if (tool === 'select') {
+      if (selectedIds.length === 1) {
+        return 'Edit: drag vertices / move shape · box handles resize · click elsewhere to multi-select or clear';
+      }
+      return 'Select: click toggles multi-select · select one to edit points · Selected row labels all · Delete removes selected';
+    }
     if (activeTool === 'point') return 'Point: click to place (can overlap existing) · ✓ to confirm';
     if (activeTool === 'line') return 'Line: click to add points · ✓ to confirm (Esc cancels)';
     if (activeTool === 'polygon') return 'Polygon: click vertices; click first point or double-click to close (≥3)';
@@ -1153,11 +1273,11 @@ export default function ImageAnnotationCanvas({
               label="None"
               onClick={() => setActiveLabel('')}
               variant={!activeLabel ? 'filled' : 'outlined'}
-              color={!activeLabel ? 'default' : 'default'}
               sx={{
                 fontWeight: !activeLabel ? 700 : 500,
-                bgcolor: !activeLabel ? 'grey.700' : undefined,
-                color: !activeLabel ? '#fff' : undefined,
+                bgcolor: !activeLabel ? NONE_SHAPE_COLOR : undefined,
+                color: !activeLabel ? '#fff' : 'text.secondary',
+                borderColor: NONE_SHAPE_COLOR,
               }}
             />
             {annotationLabels.map((lb) => {
@@ -1218,8 +1338,9 @@ export default function ImageAnnotationCanvas({
               variant={selectedLabelCommon === '' ? 'filled' : 'outlined'}
               sx={{
                 fontWeight: selectedLabelCommon === '' ? 700 : 500,
-                bgcolor: selectedLabelCommon === '' ? 'grey.700' : undefined,
-                color: selectedLabelCommon === '' ? '#fff' : undefined,
+                bgcolor: selectedLabelCommon === '' ? NONE_SHAPE_COLOR : undefined,
+                color: selectedLabelCommon === '' ? '#fff' : 'text.secondary',
+                borderColor: NONE_SHAPE_COLOR,
               }}
             />
             {annotationLabels.map((lb) => {
