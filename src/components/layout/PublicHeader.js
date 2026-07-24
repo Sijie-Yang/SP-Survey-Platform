@@ -83,6 +83,14 @@ export default function PublicHeader({
           </Button>
           <Button
             component={RouterLink}
+            to="/news"
+            color={isActive('/news') || location.pathname.startsWith('/news/') ? 'primary' : 'inherit'}
+            sx={{ fontWeight: (isActive('/news') || location.pathname.startsWith('/news/')) ? 700 : 500 }}
+          >
+            {t.navNews}
+          </Button>
+          <Button
+            component={RouterLink}
             to="/request-template"
             color={isActive('/request-template') ? 'primary' : 'inherit'}
             sx={{ fontWeight: isActive('/request-template') ? 700 : 500 }}

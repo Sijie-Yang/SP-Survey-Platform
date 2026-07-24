@@ -20,6 +20,7 @@ import {
   runL0Extraction,
   runSegExtraction,
 } from '../../lib/runFeatureExtraction';
+import { downloadFeatureCsvsZip } from '../../lib/mediaLibraryDownload';
 
 /**
  * @param {{
@@ -43,6 +44,7 @@ export default function FeatureExtractionJobs({
   const [error, setError] = useState(null);
   const [featureMap, setFeatureMap] = useState({});
   const [loadingMap, setLoadingMap] = useState(false);
+  const [downloadingCsv, setDownloadingCsv] = useState(false);
   const abortRef = useRef(false);
 
   const images = useMemo(() => normalizeImageList(rawImages), [rawImages]);
@@ -75,6 +77,24 @@ export default function FeatureExtractionJobs({
   const segReady = images.filter((m) => isFeatureReady(getFeatureRec(featureMap, m, SEG_MODEL))).length;
 
   const requestStop = () => { abortRef.current = true; };
+
+  const downloadCsvs = async () => {
+    if (!r2Prefix || !isR2Configured()) return;
+    setDownloadingCsv(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const { filename, included, missing } = await downloadFeatureCsvsZip(r2Prefix, {
+        models: [L0_MODEL, SEG_MODEL],
+      });
+      const missHint = missing.length ? ` Missing: ${missing.join(', ')}.` : '';
+      setMessage(`Downloaded ${filename} (${included.join(', ')}).${missHint}`);
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setDownloadingCsv(false);
+    }
+  };
 
   const runL0 = async () => {
     abortRef.current = false;
@@ -162,6 +182,14 @@ export default function FeatureExtractionJobs({
           {compact ? 'Run L0' : 'Extract L0 features'}
         </Button>
         {busy === 'l0' && <Button size="small" color="warning" variant="outlined" onClick={requestStop}>Stop</Button>}
+        <Button
+          size="small"
+          variant="outlined"
+          disabled={!!busy || downloadingCsv || !r2Prefix || !isR2Configured()}
+          onClick={downloadCsvs}
+        >
+          {downloadingCsv ? 'Downloading…' : (compact ? 'Download CSVs' : 'Download L0 + Seg CSV')}
+        </Button>
       </Stack>
 
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>

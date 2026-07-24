@@ -62,6 +62,7 @@ import AdminScopedMediaLibrary from '../components/admin/AdminScopedMediaLibrary
 import ResearchDeepSearch from '../components/admin/ResearchDeepSearch';
 import SurveyDesignRequestManagement from '../components/admin/SurveyDesignRequestManagement';
 import SpBenchManagement from '../components/admin/SpBenchManagement';
+import NewsManagement from '../components/admin/NewsManagement';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 
@@ -2471,6 +2472,7 @@ export default function AdminDashboard() {
           <Tab label="论文库" />
           <Tab label="Survey Design" />
           <Tab label="SP-Bench" />
+          <Tab label="News" />
         </Tabs>
       </Box>
       {tab === 0 && <TemplateManagement />}
@@ -2481,6 +2483,7 @@ export default function AdminDashboard() {
       {tab === 5 && <ResearchDeepSearch />}
       {tab === 6 && <SurveyDesignRequestManagement />}
       {tab === 7 && <SpBenchManagement />}
+      {tab === 8 && <NewsManagement />}
     </AdminShell>
   );
 }

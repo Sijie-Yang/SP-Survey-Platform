@@ -16,10 +16,17 @@ import MediaFolderBrowser from './MediaFolderBrowser';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import {
   normalizeMediaEntry, sortMediaByName, MEDIA_ACCEPT, buildProjectMediaKey,
-  normalizeFolderPath, getDirectChildMedia, downloadMediaFiles, inferMediaType,
+  normalizeFolderPath, getDirectChildMedia, inferMediaType,
   sanitizeMediaFolderConfig, assertAvMediaUploadAllowed, IMAGE_COMPRESS_TARGET_BYTES,
   MAX_AV_MEDIA_BYTES, formatMediaMb,
 } from '../../lib/mediaUtils';
+import {
+  downloadMediaEntriesZip,
+  downloadFolderMediaZip,
+  downloadFeatureCsvsZip,
+} from '../../lib/mediaLibraryDownload';
+import { L0_MODEL } from '../../lib/imageFeaturesL0';
+import { SEG_MODEL } from '../../lib/falInference';
 import {
   isR2Configured, listImagesFromR2, uploadImageToR2, deleteImagesFromR2,
 } from '../../lib/r2';
@@ -451,9 +458,52 @@ export default function AdminScopedMediaLibrary({
   const handleDownloadSelected = async () => {
     if (!selectedEntries.length) return;
     setBusy(true);
+    setError('');
     try {
-      await downloadMediaFiles(selectedEntries);
-      setInfo(`Downloaded ${selectedEntries.length} file(s).`);
+      const { succeeded, failed, failures, filename } = await downloadMediaEntriesZip(selectedEntries, {
+        projectPrefix: prefix,
+        filename: `media_selected_${new Date().toISOString().slice(0, 10)}.zip`,
+      });
+      const failHint = failed > 0
+        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        : '';
+      setInfo(`ZIP ${filename}: ${succeeded} file(s), folders preserved.${failHint}`);
+    } catch (err) {
+      setError(err.message || 'Download failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDownloadFolderRecursive = async () => {
+    if (!pool.length) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { succeeded, failed, failures, filename } = await downloadFolderMediaZip(pool, currentFolder || '', {
+        projectPrefix: prefix,
+      });
+      const failHint = failed > 0
+        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        : '';
+      setInfo(`ZIP ${filename}: ${succeeded} file(s) under ${currentFolder || 'root'} (recursive).${failHint}`);
+    } catch (err) {
+      setError(err.message || 'Download failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDownloadFeatureCsvs = async () => {
+    if (!prefix || !isR2Configured()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { filename, included, missing } = await downloadFeatureCsvsZip(prefix, {
+        models: [L0_MODEL, SEG_MODEL],
+      });
+      const missHint = missing.length ? ` Missing: ${missing.join(', ')}.` : '';
+      setInfo(`Downloaded ${filename} (${included.join(', ')}).${missHint}`);
     } catch (err) {
       setError(err.message || 'Download failed');
     } finally {
@@ -767,7 +817,25 @@ export default function AdminScopedMediaLibrary({
             disabled={!selected.size || busy}
             onClick={handleDownloadSelected}
           >
-            Download ({selected.size})
+            ZIP selected ({selected.size})
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<CloudDownload />}
+            disabled={!pool.length || busy}
+            onClick={handleDownloadFolderRecursive}
+          >
+            ZIP folder+subfolders
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<CloudDownload />}
+            disabled={!prefix || !isR2Configured() || busy}
+            onClick={handleDownloadFeatureCsvs}
+          >
+            Download L0 + Seg CSV
           </Button>
           <Button
             size="small"

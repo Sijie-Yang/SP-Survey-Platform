@@ -56,11 +56,17 @@ import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, 
 import { asyncPool } from '../../lib/asyncPool';
 import {
   inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT,
-  analyzeTaggedSets, analyzeTaggedCategories, downloadMediaFiles,
+  analyzeTaggedSets, analyzeTaggedCategories,
   sortMediaByName, compareMediaNames, buildProjectMediaKey, joinFolderPath,
   normalizeFolderPath, IMAGE_COMPRESS_TARGET_BYTES, MAX_AV_MEDIA_BYTES,
-  checkAvMediaTooLarge, formatMediaMb,
+  checkAvMediaTooLarge, formatMediaMb, getRecursiveMedia, downloadMediaFile,
 } from '../../lib/mediaUtils';
+import {
+  downloadMediaEntriesZip,
+  downloadFolderMediaZip,
+  downloadFeatureCsvsZip,
+} from '../../lib/mediaLibraryDownload';
+import { migrateLegacyDefaultLabelColors } from '../../lib/preannotateLabels';
 import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import MediaFolderBrowser from './MediaFolderBrowser';
@@ -240,6 +246,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const [preannotateFocusName, setPreannotateFocusName] = useState(null);
   /** Latest autosave → patch Pre-annotate results without re-fetching the library. */
   const [preannotateSavedPatch, setPreannotateSavedPatch] = useState(null);
+  /** Accumulated batch saves for results panel (multi-image). */
+  const [preannotateBatchPatches, setPreannotateBatchPatches] = useState([]);
+  const [preannotateLastBatch, setPreannotateLastBatch] = useState(null);
+  const [preannotateReviewFilter, setPreannotateReviewFilter] = useState(null);
+  /** name → 'accepted' | 'needs_review' from saves / Accept·Needs fix clicks */
+  const [preannotateReviewByName, setPreannotateReviewByName] = useState(() => ({}));
   const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, onConfirm }
   const [currentFolder, setCurrentFolder] = useState('');
   const [openMoveSignal, setOpenMoveSignal] = useState(0);
@@ -423,24 +435,23 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     deleteMediaEntries(selected);
   };
 
-  const downloadMediaEntries = async (entries) => {
+  const downloadMediaEntriesAsZip = async (entries, filenameHint) => {
     if (!entries.length) return;
     setMediaActionStatus({ loading: true, error: null, success: null });
     setMediaDownloadProgress({ done: 0, total: entries.length });
     try {
-      const { succeeded, failed, failures } = await downloadMediaFiles(entries, {
+      const { succeeded, failed, failures, filename } = await downloadMediaEntriesZip(entries, {
+        projectPrefix,
+        filename: filenameHint,
         onProgress: (done, total) => setMediaDownloadProgress({ done, total }),
       });
-      if (failed > 0 && succeeded === 0) {
-        throw new Error(failures[0]?.error || 'Download failed');
-      }
       const failHint = failed > 0
         ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
         : '';
       setMediaActionStatus({
         loading: false,
         error: null,
-        success: `Downloaded ${succeeded} of ${entries.length} file(s).${failHint}`,
+        success: `ZIP ${filename}: ${succeeded} file(s), folders preserved.${failHint}`,
       });
     } catch (err) {
       setMediaActionStatus({ loading: false, error: err.message, success: null });
@@ -449,20 +460,75 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
   };
 
-  const handleDownloadSingleMedia = (entry, e) => {
+  const handleDownloadSingleMedia = async (entry, e) => {
     e?.stopPropagation();
-    downloadMediaEntries([entry]);
+    if (!entry) return;
+    setMediaActionStatus({ loading: true, error: null, success: null });
+    try {
+      await downloadMediaFile(entry);
+      setMediaActionStatus({ loading: false, error: null, success: `Downloaded ${entry.name || 'file'}.` });
+    } catch (err) {
+      setMediaActionStatus({ loading: false, error: err.message, success: null });
+    }
   };
 
   const handleDownloadSelectedMedia = () => {
     const selected = filteredMedia.filter((m) => selectedMedia.has(m.name));
     if (!selected.length) return;
-    downloadMediaEntries(selected);
+    downloadMediaEntriesAsZip(selected, `media_selected_${new Date().toISOString().slice(0, 10)}.zip`);
   };
 
   const handleDownloadFilteredMedia = () => {
     if (!filteredMedia.length) return;
-    downloadMediaEntries(filteredMedia);
+    const label = currentFolder ? currentFolder.split('/').pop() : 'root';
+    downloadMediaEntriesAsZip(
+      filteredMedia,
+      `media_${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.zip`,
+    );
+  };
+
+  const handleDownloadFolderRecursive = async () => {
+    const pool = currentProject?.preloadedImages || [];
+    const entries = getRecursiveMedia(pool, currentFolder || '', projectPrefix);
+    if (!entries.length) return;
+    setMediaActionStatus({ loading: true, error: null, success: null });
+    setMediaDownloadProgress({ done: 0, total: entries.length });
+    try {
+      const { succeeded, failed, failures, filename } = await downloadFolderMediaZip(pool, currentFolder || '', {
+        projectPrefix,
+        onProgress: (done, total) => setMediaDownloadProgress({ done, total }),
+      });
+      const failHint = failed > 0
+        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        : '';
+      setMediaActionStatus({
+        loading: false,
+        error: null,
+        success: `ZIP ${filename}: ${succeeded} file(s) under ${currentFolder || 'root'} (recursive).${failHint}`,
+      });
+    } catch (err) {
+      setMediaActionStatus({ loading: false, error: err.message, success: null });
+    } finally {
+      setMediaDownloadProgress(null);
+    }
+  };
+
+  const handleDownloadFeatureCsvs = async () => {
+    if (!projectPrefix) return;
+    setMediaActionStatus({ loading: true, error: null, success: null });
+    try {
+      const { filename, included, missing } = await downloadFeatureCsvsZip(projectPrefix, {
+        models: [L0_MODEL, SEG_MODEL],
+      });
+      const missHint = missing.length ? ` Missing: ${missing.join(', ')}.` : '';
+      setMediaActionStatus({
+        loading: false,
+        error: null,
+        success: `Downloaded ${filename} (${included.join(', ')}).${missHint}`,
+      });
+    } catch (err) {
+      setMediaActionStatus({ loading: false, error: err.message, success: null });
+    }
   };
 
   const filteredMedia = useMemo(() => {
@@ -512,6 +578,48 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     }
   }, [filteredMedia]);
 
+  const reviewQueueNames = useMemo(() => {
+    const batch = preannotateLastBatch;
+    const imgs = Array.isArray(batch?.images) ? batch.images : [];
+    const failNames = new Set((batch?.failures || []).map((f) => f.name).filter(Boolean));
+    const inGallery = (n) => preannotateImages.some((m) => m.name === n);
+    if (preannotateReviewFilter === 'last_batch') {
+      return imgs
+        .filter((i) => (i.status === 'done' || i.status === 'partial') && (i.polygonsAdded > 0 || (i.addedShapeIds || []).length))
+        .map((i) => i.name)
+        .filter(inGallery);
+    }
+    if (preannotateReviewFilter === 'zero') {
+      return imgs.filter((i) => i.status === 'zero').map((i) => i.name).filter(inGallery);
+    }
+    if (preannotateReviewFilter === 'failed') {
+      return [...failNames].filter(inGallery);
+    }
+    if (preannotateReviewFilter === 'needs_review') {
+      // Real Accept / Needs fix marks — not "everything from last batch".
+      return preannotateImages
+        .filter((m) => preannotateReviewByName[m.name] === 'needs_review')
+        .map((m) => m.name);
+    }
+    return [];
+  }, [preannotateLastBatch, preannotateReviewFilter, preannotateImages, preannotateReviewByName]);
+
+  const focusReviewRelative = useCallback((delta) => {
+    if (!reviewQueueNames.length) return;
+    const cur = preannotateFocusName;
+    let idx = reviewQueueNames.indexOf(cur);
+    if (idx < 0) idx = 0;
+    else idx = (idx + delta + reviewQueueNames.length) % reviewQueueNames.length;
+    focusMediaInGallery(reviewQueueNames[idx]);
+  }, [reviewQueueNames, preannotateFocusName, focusMediaInGallery]);
+
+  useEffect(() => {
+    if (!preannotateReviewFilter || !reviewQueueNames.length) return;
+    if (!preannotateFocusName || !reviewQueueNames.includes(preannotateFocusName)) {
+      focusMediaInGallery(reviewQueueNames[0]);
+    }
+  }, [preannotateReviewFilter, reviewQueueNames, preannotateFocusName, focusMediaInGallery]);
+
   useLayoutEffect(() => {
     const lock = preannotScrollLockRef.current;
     if (!lock) return;
@@ -535,6 +643,23 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setPreannotateFocusName(preannotateImages[0].name);
     }
   }, [preannotateImages, preannotateFocusName]);
+
+  // One-time: stock labels still on old index colors → semantic defaults
+  useEffect(() => {
+    if (!currentProject || !onProjectUpdate) return;
+    const migrated = migrateLegacyDefaultLabelColors(
+      currentProject?.imageDatasetConfig?.preannotateLabels,
+    );
+    if (!migrated) return;
+    onProjectUpdate({
+      ...currentProject,
+      imageDatasetConfig: {
+        ...(currentProject.imageDatasetConfig || {}),
+        preannotateLabels: migrated,
+      },
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject?.id, currentProject?.imageDatasetConfig?.preannotateLabels]);
 
   const totalMediaPages = Math.max(1, Math.ceil(filteredMedia.length / MEDIA_PAGE_SIZE));
   const pagedMedia = useMemo(() => {
@@ -1933,7 +2058,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   onClick={handleDownloadSelectedMedia}
                   disabled={!selectedMedia.size || mediaActionStatus.loading}
                 >
-                  Download selected ({selectedMedia.size})
+                  ZIP selected ({selectedMedia.size})
                 </Button>
                 <Button
                   size="small"
@@ -1942,7 +2067,25 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   onClick={handleDownloadFilteredMedia}
                   disabled={!filteredMedia.length || mediaActionStatus.loading}
                 >
-                  Download filtered ({filteredMedia.length})
+                  ZIP this folder view ({filteredMedia.length})
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<CloudDownload />}
+                  onClick={handleDownloadFolderRecursive}
+                  disabled={mediaActionStatus.loading || !(currentProject?.preloadedImages || []).length}
+                >
+                  ZIP folder+subfolders
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<CloudDownload />}
+                  onClick={handleDownloadFeatureCsvs}
+                  disabled={!projectPrefix || !isR2Configured() || mediaActionStatus.loading}
+                >
+                  Download L0 + Seg CSV
                 </Button>
                 <Button
                   size="small"
@@ -2352,12 +2495,90 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           mediaEntry={preannotateEntry}
           imageIndex={preannotateIndex}
           imageTotal={preannotateImages.length}
+          mediaList={preannotateImages}
+          selectedNames={selectedMedia}
+          labelDefs={currentProject?.imageDatasetConfig?.preannotateLabels || null}
+          onLabelDefsChange={(next) => {
+            onProjectUpdate({
+              ...currentProject,
+              imageDatasetConfig: {
+                ...(currentProject?.imageDatasetConfig || {}),
+                preannotateLabels: next,
+              },
+            });
+          }}
+          reviewFilter={preannotateReviewFilter}
+          reviewQueueCount={reviewQueueNames.length}
+          reviewQueueIndex={
+            preannotateFocusName && reviewQueueNames.includes(preannotateFocusName)
+              ? reviewQueueNames.indexOf(preannotateFocusName) + 1
+              : 0
+          }
+          hasLastBatch={!!preannotateLastBatch}
+          onReviewFilterChange={(f) => setPreannotateReviewFilter(f)}
+          onFocusReviewNext={() => focusReviewRelative(1)}
+          onFocusReviewPrev={() => focusReviewRelative(-1)}
+          onReviewStatusKnown={(name, status) => {
+            if (!name) return;
+            setPreannotateReviewByName((prev) => {
+              if (status === 'accepted' || status === 'needs_review') {
+                if (prev[name] === status) return prev;
+                return { ...prev, [name]: status };
+              }
+              if (prev[name] == null) return prev;
+              const next = { ...prev };
+              delete next[name];
+              return next;
+            });
+          }}
+          onBatchComplete={(batch) => {
+            setPreannotateLastBatch(batch || null);
+            if (!batch) return;
+            // Batch save stamps needs_review on new work — mirror into local filter map.
+            const imgs = Array.isArray(batch?.images) ? batch.images : [];
+            setPreannotateReviewByName((prev) => {
+              const next = { ...prev };
+              imgs.forEach((i) => {
+                if (!i?.name) return;
+                if ((i.status === 'done' || i.status === 'partial')
+                  && (i.polygonsAdded > 0 || (i.addedShapeIds || []).length)) {
+                  next[i.name] = 'needs_review';
+                }
+              });
+              return next;
+            });
+          }}
+          onBatchClosed={(batch) => {
+            setPreannotateLastBatch(null);
+            setPreannotateReviewFilter(null);
+            const imgs = Array.isArray(batch?.images) ? batch.images : [];
+            const status = batch?.status;
+            setPreannotateReviewByName((prev) => {
+              const next = { ...prev };
+              imgs.forEach((i) => {
+                if (!i?.name) return;
+                const touched = (i.polygonsAdded > 0 || (i.addedShapeIds || []).length)
+                  && (i.status === 'done' || i.status === 'partial');
+                if (status === 'accepted' && touched) next[i.name] = 'accepted';
+                else if (status === 'cancelled' || status === 'undone') delete next[i.name];
+              });
+              return next;
+            });
+          }}
           onPrev={() => {
+            if (preannotateReviewFilter && reviewQueueNames.length) {
+              focusReviewRelative(-1);
+              return;
+            }
             if (preannotateIndex <= 0) return;
             const prev = preannotateImages[preannotateIndex - 1];
             if (prev) focusMediaInGallery(prev.name);
           }}
           onNext={() => {
+            if (preannotateReviewFilter && reviewQueueNames.length) {
+              focusReviewRelative(1);
+              return;
+            }
             if (preannotateIndex >= preannotateImages.length - 1) return;
             const next = preannotateImages[preannotateIndex + 1];
             if (next) focusMediaInGallery(next.name);
@@ -2371,11 +2592,24 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               || (annotation
                 ? { name: annotation.name, url: annotation.image, media_id: annotation.media_id }
                 : null);
-            setPreannotateSavedPatch({
+            const patch = {
               mediaEntry,
               annotation,
               at: Date.now(),
+            };
+            setPreannotateSavedPatch(patch);
+            setPreannotateBatchPatches((prev) => {
+              const key = mediaEntry?.name || annotation?.name;
+              if (!key) return prev;
+              const next = prev.filter((p) => (p.mediaEntry?.name || p.annotation?.name) !== key);
+              next.push(patch);
+              return next.slice(-200);
             });
+            const reviewName = mediaEntry?.name || annotation?.name;
+            const rs = annotation?.review_status;
+            if (reviewName && (rs === 'accepted' || rs === 'needs_review')) {
+              setPreannotateReviewByName((prev) => ({ ...prev, [reviewName]: rs }));
+            }
             // Patch feature map locally — avoid re-downloading all feature CSVs on every autosave.
             const rec = result?.featureRecord;
             if (rec) {
@@ -2396,6 +2630,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           mediaList={preannotateImages}
           featureMap={r2FeatureMap}
           savedPatch={preannotateSavedPatch}
+          batchPatches={preannotateBatchPatches}
         />
       )}
 

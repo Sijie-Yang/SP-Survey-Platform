@@ -19,6 +19,7 @@ import {
   preannotationsToAnalysisInputs,
 } from '../../lib/preannotateAnalysis';
 import { downloadQuestionExportZip } from '../../lib/questionSummaryExport';
+import { downloadPreannotatePackageZip } from '../../lib/mediaLibraryDownload';
 import { ImageResolverContext } from './imageResolverContext';
 import AnnotationAnalysis from './AnnotationAnalysis';
 
@@ -59,10 +60,14 @@ export default function MediaPreannotateResults({
   featureMap = {},
   /** { mediaEntry, annotation, at } from autosave — single-file local patch */
   savedPatch = null,
+  /** Accumulated patches from batch SAM (multi-image) */
+  batchPatches = [],
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState(null);
+  const [exportInfo, setExportInfo] = useState(null);
   const [items, setItems] = useState([]);
   const cacheRef = useRef(new Map());
   const loadedPrefixRef = useRef('');
@@ -112,6 +117,18 @@ export default function MediaPreannotateResults({
     lastPatchAtRef.current = savedPatch.at;
     applyPatch(savedPatch.mediaEntry, savedPatch.annotation);
   }, [savedPatch, applyPatch]);
+
+  // Batch SAM saves many images — apply each patch without full refresh.
+  const lastBatchLenRef = useRef(0);
+  useEffect(() => {
+    const list = Array.isArray(batchPatches) ? batchPatches : [];
+    if (list.length <= lastBatchLenRef.current) return;
+    const fresh = list.slice(lastBatchLenRef.current);
+    lastBatchLenRef.current = list.length;
+    fresh.forEach((p) => {
+      if (p?.mediaEntry || p?.annotation) applyPatch(p.mediaEntry, p.annotation);
+    });
+  }, [batchPatches, applyPatch]);
 
   const loadInitial = useCallback(async () => {
     if (!r2Prefix || !isR2Configured()) {
@@ -217,6 +234,29 @@ export default function MediaPreannotateResults({
     downloadQuestionExportZip(analysis.question, analysis.responses, null);
   };
 
+  const handleExportPackage = async () => {
+    if (!r2Prefix || !isR2Configured()) {
+      setError('R2 is not configured.');
+      return;
+    }
+    setExporting(true);
+    setError(null);
+    setExportInfo(null);
+    try {
+      const result = await downloadPreannotatePackageZip({
+        r2Prefix,
+        mediaList,
+        items: items.length ? items : null,
+        includeImages: true,
+      });
+      setExportInfo(`Downloaded ${result.filename} — ${result.annotatedCount} set(s) (JSON + CSV + images + overlay previews).`);
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const headerCount = analysis.annotatedCount || indexedCount;
 
   return (
@@ -254,6 +294,18 @@ export default function MediaPreannotateResults({
         </Typography>
         <Button
           size="small"
+          variant="outlined"
+          startIcon={exporting ? <CircularProgress size={14} /> : <FolderZip />}
+          disabled={exporting || loading || !headerCount}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleExportPackage();
+          }}
+        >
+          Download package
+        </Button>
+        <Button
+          size="small"
           startIcon={loading ? <CircularProgress size={14} /> : <Refresh />}
           disabled={loading}
           onClick={(e) => {
@@ -271,10 +323,14 @@ export default function MediaPreannotateResults({
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
             Autosave updates only the image you just annotated — nothing else is re-downloaded.
             Use Refresh all if you need to reload every file from R2.
+            Download package = JSON + SAM CSV (if any) + analysis CSVs + source images + overlays (*_annotated.jpg with shapes burned in).
           </Typography>
 
           {error && (
             <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>
+          )}
+          {exportInfo && (
+            <Alert severity="success" sx={{ mb: 2 }} onClose={() => setExportInfo(null)}>{exportInfo}</Alert>
           )}
 
           {loading && !analysis.answers.length && (

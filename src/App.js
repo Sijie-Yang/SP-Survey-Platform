@@ -22,6 +22,7 @@ import SkillLibraryPage from './pages/SkillLibraryPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import McpOAuthPage from './pages/McpOAuthPage';
 import SpBenchPage from './pages/SpBenchPage';
+import NewsPage from './pages/NewsPage';
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -126,6 +127,8 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/papers" element={<PapersLibraryPage />} />
+                <Route path="/news" element={<NewsPage />} />
+                <Route path="/news/:slug" element={<NewsPage />} />
                 <Route path="/request-template" element={<RequestTemplatePage />} />
                 <Route path="/request-survey-design" element={<RequestSurveyDesignPage />} />
                 <Route path="/team" element={<TeamPage />} />

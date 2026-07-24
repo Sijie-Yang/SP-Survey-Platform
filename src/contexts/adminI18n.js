@@ -332,6 +332,7 @@ export const adminI18n = {
 
     // Public header / footer
     navPaperLibrary: 'Paper library',
+    navNews: 'News',
     navRequestTemplate: 'Request template',
     navRequestDesign: 'Request design',
     navTeam: 'Team',
@@ -339,6 +340,14 @@ export const adminI18n = {
     navSpBench: 'SP-Bench',
     navResearcherLogin: 'Researcher login',
     footerDevelopedBy: 'Developed by',
+
+    newsTitle: 'News',
+    newsSubtitle: 'Product updates, releases, and research notes from SP-Survey.',
+    newsEmpty: 'No posts yet. Check back soon.',
+    newsBackToList: 'All news',
+    newsNotFound: 'This post was not found or is no longer published.',
+    newsNoBody: 'No content.',
+    newsUnavailable: 'News is not available yet.',
 
     benchNotOpenTitle: 'SP-Bench',
     benchNotOpenBody: 'This benchmark is not open to the public yet.',
@@ -888,6 +897,7 @@ export const adminI18n = {
     integCopy: '复制',
 
     navPaperLibrary: '论文库',
+    navNews: '新闻',
     navRequestTemplate: '申请模板',
     navRequestDesign: '申请设计',
     navTeam: '团队',
@@ -895,6 +905,14 @@ export const adminI18n = {
     navSpBench: 'SP-Bench',
     navResearcherLogin: '研究者登录',
     footerDevelopedBy: '开发团队',
+
+    newsTitle: '新闻',
+    newsSubtitle: 'SP-Survey 的产品更新、发布说明与研究动态。',
+    newsEmpty: '暂无内容，稍后再来看看。',
+    newsBackToList: '全部新闻',
+    newsNotFound: '未找到该文章，或尚未发布。',
+    newsNoBody: '暂无正文。',
+    newsUnavailable: '新闻功能尚未就绪。',
 
     benchNotOpenTitle: 'SP-Bench',
     benchNotOpenBody: '公开评测榜暂未开放。',
