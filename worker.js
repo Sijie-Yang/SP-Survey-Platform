@@ -30,6 +30,11 @@ import { getUserFromBearer } from './worker-lib/auth/supabaseJwt.mjs';
 import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
 import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
 import { supabaseRest } from './worker-lib/supabaseUserClient.mjs';
+import {
+  handleInferenceTest,
+  handleInferenceSam3,
+  handleInferenceStreetscapeSeg,
+} from './worker-lib/falInferenceHandlers.mjs';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -862,6 +867,18 @@ export default {
       if (pathname === '/api/r2/image-proxy' && request.method === 'GET') {
         return await handleImageProxy(request, env);
       }
+      // fal / HF inference — must live on the Worker (run_worker_first /api/*).
+      // Without these, POST falls through to SPA assets and Cloudflare returns 405.
+      if (pathname === '/api/inference/test' && request.method === 'POST') {
+        return await handleInferenceTest(request);
+      }
+      if (pathname === '/api/inference/sam3' && request.method === 'POST') {
+        return await handleInferenceSam3(request, env);
+      }
+      if (pathname === '/api/inference/streetscape-seg' && request.method === 'POST') {
+        return await handleInferenceStreetscapeSeg(request, env);
+      }
+
       if (pathname === '/api/research/presets' && request.method === 'GET') {
         return await handleResearchPresets();
       }
