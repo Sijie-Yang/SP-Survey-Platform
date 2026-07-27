@@ -1345,7 +1345,11 @@ export function getPresetBuilderTypeOptions() {
 /** Resolve a skill definition for the builder (preset or library row). */
 export function resolveBuilderSkill(skillId, librarySkills = []) {
   if (!skillId) return null;
-  const fromLibrary = librarySkills.find((s) => s.id === skillId);
+  // Heal mistaken preset_skill_* (old normalizer rewrote library ids).
+  const libraryId = String(skillId).startsWith('preset_skill_')
+    ? String(skillId).slice('preset_'.length)
+    : skillId;
+  const fromLibrary = librarySkills.find((s) => s.id === skillId || s.id === libraryId);
   if (skillId.startsWith('preset_') || (!fromLibrary && getPresetSkill(skillId))) {
     const preset = getPresetSkill(skillId);
     if (!preset) return fromLibrary || null;

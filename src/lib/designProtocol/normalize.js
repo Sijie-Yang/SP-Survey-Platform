@@ -82,9 +82,16 @@ export function postProcessAiConfig(surveyConfig) {
       if (element.type === 'skillquestion') {
         // Prefer preset_* ids; do not keep agent-invented HTML.
         delete element.skillHtml;
-        if (element.skillId && !String(element.skillId).startsWith('preset_')) {
-          element.skillId = `preset_${element.skillId}`;
+        // Bare preset keys (e.g. best_worst_choice) → preset_*.
+        // Library ids (skill_*) must stay unchanged — never rewrite as preset_skill_*.
+        // Also heal drafts already broken by that mistaken rewrite.
+        let sid = element.skillId ? String(element.skillId) : '';
+        if (sid.startsWith('preset_skill_')) {
+          sid = sid.slice('preset_'.length);
+        } else if (sid && !sid.startsWith('preset_') && !sid.startsWith('skill_')) {
+          sid = `preset_${sid}`;
         }
+        if (sid) element.skillId = sid;
         if (element.skillConfig?.mediaCount != null && element.imageCount == null) {
           element.imageCount = Number(element.skillConfig.mediaCount) || 1;
         }

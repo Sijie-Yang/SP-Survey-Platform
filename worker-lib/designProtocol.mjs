@@ -215,9 +215,15 @@ export function postProcessAiConfig(surveyConfig) {
       }
       if (element.type === 'skillquestion') {
         delete element.skillHtml;
-        if (element.skillId && !String(element.skillId).startsWith('preset_')) {
-          element.skillId = `preset_${element.skillId}`;
+        // Bare preset keys → preset_*. Library skill_* ids stay unchanged.
+        // Heal mistaken preset_skill_* rewrites from older normalizers.
+        let sid = element.skillId ? String(element.skillId) : '';
+        if (sid.startsWith('preset_skill_')) {
+          sid = sid.slice('preset_'.length);
+        } else if (sid && !sid.startsWith('preset_') && !sid.startsWith('skill_')) {
+          sid = `preset_${sid}`;
         }
+        if (sid) element.skillId = sid;
         if (element.skillConfig?.mediaCount != null && element.imageCount == null) {
           element.imageCount = Number(element.skillConfig.mediaCount) || 1;
         }

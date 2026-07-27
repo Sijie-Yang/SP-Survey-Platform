@@ -30,6 +30,20 @@ test('postProcessAiConfig fills imagecheckbox tags and strips skillHtml/falApiKe
   assert.deepEqual(ann.allowedTools, ['line', 'point', 'polygon']);
 });
 
+test('postProcessAiConfig keeps library skill ids and heals preset_skill_*', () => {
+  const out = postProcessAiConfig({
+    pages: [{
+      name: 'p1',
+      elements: [
+        { type: 'skillquestion', name: 'a', skillId: 'skill_123_abc' },
+        { type: 'skillquestion', name: 'b', skillId: 'preset_skill_123_abc' },
+      ],
+    }],
+  });
+  assert.equal(out.pages[0].elements[0].skillId, 'skill_123_abc');
+  assert.equal(out.pages[0].elements[1].skillId, 'skill_123_abc');
+});
+
 test('validateSurveyConfig warns on empty mediaslidergroup / mediapointallocation', () => {
   const report = validateSurveyConfig({
     pages: [{

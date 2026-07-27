@@ -111,6 +111,16 @@ describe('designProtocol normalize + operations', () => {
             skillConfig: { mediaCount: 2 },
             skillHtml: '<html>nope</html>',
           },
+          {
+            type: 'skillquestion',
+            name: 's2',
+            skillId: 'skill_123_abc',
+          },
+          {
+            type: 'skillquestion',
+            name: 's3',
+            skillId: 'preset_skill_123_abc',
+          },
         ],
       }],
     });
@@ -122,6 +132,8 @@ describe('designProtocol normalize + operations', () => {
     expect(skill.skillId).toBe('preset_image_preference_slider');
     expect(skill.imageCount).toBe(2);
     expect(skill.skillHtml).toBeUndefined();
+    expect(out.pages[0].elements[2].skillId).toBe('skill_123_abc');
+    expect(out.pages[0].elements[3].skillId).toBe('skill_123_abc');
   });
 
   test('applyOperations add/remove question with inverse', () => {

@@ -980,11 +980,16 @@ export async function resolveSkillQuestions(surveyJson) {
       // Prefer presets first (sync) so live surveys don't wait on Supabase for stock skills.
       let skill = skillFromPreset(el.skillId);
       if (!skill) {
+        // Heal mistaken preset_skill_* (old normalizer rewrote library ids).
+        const libraryId = String(el.skillId || '').startsWith('preset_skill_')
+          ? String(el.skillId).slice('preset_'.length)
+          : el.skillId;
         try {
           skill = await Promise.race([
-            getSkillById(el.skillId, el.skillRevision || null),
+            getSkillById(libraryId, el.skillRevision || null),
             new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
           ]);
+          if (skill && libraryId !== el.skillId) el.skillId = libraryId;
         } catch {
           skill = null;
         }
