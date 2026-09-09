@@ -17,7 +17,8 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
   };
 
   const add = () => {
-    const n = dims.length + 1;
+    let n = dims.length + 1;
+    while (dims.some((d) => d.id === `dim${n}`)) n += 1;
     update([...dims, { id: `dim${n}`, left: 'Left label', right: 'Right label' }]);
   };
 
@@ -41,10 +42,10 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
       </Typography>
       {dims.map((d, i) => (
         <Box
-          key={`${d.id}-${i}`}
+          key={i}
           sx={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr auto',
+            gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'repeat(3, minmax(0, 1fr))' },
             gap: 1,
             alignItems: 'center',
             p: 1.5,
@@ -72,7 +73,10 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
             value={d.right || ''}
             onChange={(e) => patch(i, { right: e.target.value })}
           />
-          <Stack direction="row">
+          {['min', 'max', 'step'].map((key) => <TextField key={key} size="small" type="number"
+            name={`dimensions[${i}].${key}`} label={key === 'min' ? 'Minimum (optional)' : key === 'max' ? 'Maximum (optional)' : 'Step (optional)'}
+            value={d[key] ?? ''} onChange={(e) => patch(i, { [key]: e.target.value === '' ? undefined : Number(e.target.value) })} />)}
+          <Stack direction="row" sx={{ gridColumn: '1 / -1', '& .MuiIconButton-root': { width: 44, height: 44 } }}>
             <IconButton size="small" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">
               <ArrowUpward fontSize="small" />
             </IconButton>
@@ -95,7 +99,7 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
 export function SkillStringListEditor({ value = [], onChange, label = 'Items', placeholder = 'New item' }) {
   const items = Array.isArray(value) ? value : [];
 
-  const update = (next) => onChange(next.filter(Boolean));
+  const update = (next) => onChange(next);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>

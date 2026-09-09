@@ -84,7 +84,8 @@ app.use(async (req, res, next) => {
     || pathName === '/mcp'
     || pathName.startsWith('/.well-known/');
   const isBenchRoute = pathName === '/api/bench' || pathName.startsWith('/api/bench/');
-  if (!isAgentRoute && !isBenchRoute) return next();
+  const isAdminResultsRoute = pathName === '/api/admin/project-responses';
+  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute) return next();
 
   try {
     const url = `http://localhost:${PORT}${req.originalUrl}`;
@@ -107,7 +108,10 @@ app.use(async (req, res, next) => {
       BYOK_ENCRYPTION_KEY: process.env.BYOK_ENCRYPTION_KEY,
     };
     let response = null;
-    if (isBenchRoute) {
+    if (isAdminResultsRoute) {
+      const { handleAdminResultsRoutes } = await import('./worker-lib/adminResults.mjs');
+      response = await handleAdminResultsRoutes(request, env);
+    } else if (isBenchRoute) {
       const { handleBenchRoutes } = await import('./worker-lib/bench/handlers.mjs');
       response = await handleBenchRoutes(request, env, null);
     } else {

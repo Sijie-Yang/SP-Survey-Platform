@@ -40,7 +40,7 @@ export function skillFieldNativeQuestion(question, field) {
   // Apply them before constructing the equivalent native question so Builder,
   // Results Analysis, and export all see the same effective contract.
   const configSettings = {};
-  ['options', 'rows', 'columns', 'dimensions', 'budget', 'labels', 'min', 'max'].forEach((key) => {
+  ['options', 'rows', 'columns', 'dimensions', 'budget', 'labels', 'min', 'max', 'step'].forEach((key) => {
     if (config[key] !== undefined && config[key] !== null) configSettings[key] = config[key];
   });
   if (config.choices != null && configSettings.options == null) configSettings.options = config.choices;
@@ -48,6 +48,7 @@ export function skillFieldNativeQuestion(question, field) {
   if (config.rateMax != null && configSettings.max == null) configSettings.max = config.rateMax;
   if (config.scaleMin != null && configSettings.min == null) configSettings.min = config.scaleMin;
   if (config.scaleMax != null && configSettings.max == null) configSettings.max = config.scaleMax;
+  if (config.scaleStep != null && configSettings.step == null) configSettings.step = config.scaleStep;
   field = { ...field, ...configSettings };
   const media = hasMediaContract(question, field);
   const name = `${question.name}__${field.key}`;
@@ -82,7 +83,7 @@ export function skillFieldNativeQuestion(question, field) {
     case 'mediaMatrix': return { ...base, type: 'mediamatrix', rows: field.rows || [], columns: field.columns || field.options || [] };
     case 'rankedList': return { ...base, type: 'ranking', choices: optionObjects(field.options) };
     case 'allocation': return { ...base, type: media ? 'mediapointallocation' : 'pointallocation', choices: optionObjects(field.options), budget: field.budget || 100 };
-    case 'scaleGroup': return { ...base, type: media ? 'mediaslidergroup' : 'slidergroup', dimensions: field.dimensions || field.options || [] };
+    case 'scaleGroup': return { ...base, type: media ? 'mediaslidergroup' : 'slidergroup', dimensions: field.dimensions || field.options || [], scaleMin: field.min ?? 1, scaleMax: field.max ?? 7, scaleStep: field.step ?? 1 };
     case 'mediaChoice': return { ...base, type: 'mediapicker' };
     case 'mediaRankedList': return { ...base, type: 'mediaranking' };
     case 'points':

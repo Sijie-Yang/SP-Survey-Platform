@@ -1,3 +1,4 @@
+import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { flattenQuestions, getAttentionCheckQuestions, summarizeQuality } from './quality.js';
 import { computeQuestionIrr, irrLevelForQuestion } from './reliability.js';
 import {
@@ -78,6 +79,8 @@ export function generateMethodsText({
 
   const lines = [];
   lines.push('METHODS (auto-generated — review and edit before submission)');
+  lines.push(`Analysis algorithm version: ${ANALYSIS_ALGORITHM_VERSION}`);
+  lines.push(...ANALYSIS_NOTES);
   lines.push('');
   lines.push(
     `We collected perceptual survey data using the SP Survey Platform `

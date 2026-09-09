@@ -21,7 +21,7 @@ import { downloadTextFile } from '../../lib/methodsExport';
 
 export const TRUESKILL_SORT_COLUMNS = [
   { id: 'mu', label: 'μ', align: 'right' },
-  { id: 'muStd5', label: 'Std. μ (0–5)', align: 'right' },
+  { id: 'muStd5', label: 'Relative μ (0–5)', align: 'right' },
   { id: 'sigma', label: 'σ', align: 'right' },
   { id: 'conservative', label: 'μ−3σ', align: 'right' },
   { id: 'games', label: 'Games', align: 'right' },
@@ -70,9 +70,9 @@ export function TrueSkillMuChart({ rankings }) {
       scores={scores}
       domainMin={0}
       domainMax={5}
-      title="Standardized μ distribution (0–5)"
-      caption="Blue bars: histogram of standardized μ (density = count / n / bin width). Orange curve: fitted normal PDF."
-      xLabel="Standardized μ (0–5)"
+      title="Within-question relative μ distribution (0–5)"
+      caption="Within-question min-max scaling, not a comparable 5-point rating scale. Blue: density histogram. Orange: fitted normal PDF."
+      xLabel="Within-question relative μ (0–5)"
       padB={36}
     />
   );
@@ -126,6 +126,7 @@ export function TrueSkillTable({
           <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{title}</Typography>
           <Typography variant="caption" color="text.secondary" display="block">
             {caption || 'Click a column header to sort (default: μ descending).'}
+            {' '}Sequential pairwise approximation; comparisons from one trial are dependent. Use as an exploratory ranking, not a significance test.
           </Typography>
         </Box>
         {onExport && (

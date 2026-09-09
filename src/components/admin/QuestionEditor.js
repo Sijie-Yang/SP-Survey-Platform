@@ -1,6 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import ConfirmDialog from '../layout/ConfirmDialog';
+import useUnsavedChanges from '../../hooks/useUnsavedChanges';
+import { useRegion } from '../../contexts/RegionContext';
+import { validateQuestionSettings } from '../../lib/designProtocol/validate';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
+  Tabs, Tab, useMediaQuery,
   DialogTitle,
   DialogContent,
   DialogActions,
@@ -46,14 +51,11 @@ import {
 import { sortMediaByName, normalizeMediaAssignmentMode } from '../../lib/mediaUtils';
 import { normalizeAllowedTools } from '../../lib/annotationTools';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
-import SkillQuestionFrame from '../SkillQuestionWidget';
 import {
   getSkillMediaConstraints,
   getPresetBuilderTypeOptions,
   resolveBuilderSkill,
 } from '../../lib/presetSkills';
-import { enrichEmotionColorConfig } from '../../lib/emotionColor';
-import { listPreviewMedia, pickPreviewMedia } from '../../lib/previewMediaLibrary';
 import {
   getQuestionMediaConstraints,
   clampQuestionImageCount,
@@ -300,7 +302,7 @@ function TrialCountField({ question, onChange }) {
       value={question.trialCount ?? 1}
       onChange={(e) => onChange('trialCount', clampTrialCount(e.target.value))}
       onFocus={(e) => e.target.select()}
-      helperText="Each trial draws a new media set with the same sampling rules. Participants see how many rounds remain. Image / media choice auto-advances after a pick; rating and yes-no stay so they can change the answer."
+      helperText={`${clampTrialCount(question.trialCount ?? 1)} response rounds × ${question.imageCount ?? 1} media per round. Each round records one answer for its shown set. Choice auto-advances; rating and yes/no allow review. Repeats may occur if the media pool is too small.`}
       inputProps={{ min: 1, max: TRIAL_COUNT_MAX, step: 1 }}
       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
     />
@@ -558,6 +560,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   }
   
   const [editedQuestion, setEditedQuestion] = useState(initialQuestion);
+  const [taskFilter, setTaskFilter] = useState('all');
   const [newChoice, setNewChoice] = useState('');
   // Draft string so trailing commas stay while typing (array join would strip them).
   const [annotationLabelsText, setAnnotationLabelsText] = useState(
@@ -570,7 +573,27 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const [loadingImages, setLoadingImages] = useState(false);
   const [imageError, setImageError] = useState(null);
   const [builderSkills, setBuilderSkills] = useState([]);
-  const [previewMediaPool, setPreviewMediaPool] = useState([]);
+  const initialSnapshot = useRef(JSON.stringify(initialQuestion));
+  const dirty = JSON.stringify(editedQuestion) !== initialSnapshot.current || !!newChoice.trim()
+    || annotationLabelsText !== (initialQuestion.annotationLabels || []).join(', ');
+  const guard = useUnsavedChanges(dirty);
+  const { language } = useRegion();
+  const zh = language === 'zh';
+  const mobile = useMediaQuery('(max-width:600px)');
+  const wide = useMediaQuery('(min-width:1000px)');
+  const [editorTab, setEditorTab] = useState(0);
+  const settingsRef = useRef(null);
+  const settingsErrors = validateQuestionSettings(editedQuestion);
+  const closeEditor = () => guard.request(onCancel);
+  const focusSetting = (path) => {
+    setEditorTab(0);
+    requestAnimationFrame(() => {
+      const field = [...(settingsRef.current?.querySelectorAll('[name]') || [])]
+        .find((node) => node.getAttribute('name') === path);
+      field?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      field?.focus();
+    });
+  };
 
   useEffect(() => {
     listSkillsForBuilder().then(setBuilderSkills);
@@ -582,9 +605,6 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     }
   }, [editedQuestion.type]);
 
-  useEffect(() => {
-    listPreviewMedia().then(setPreviewMediaPool).catch(() => setPreviewMediaPool([]));
-  }, []);
 
   const presetTypeOptions = getPresetBuilderTypeOptions();
   const presetSkillIds = new Set(presetTypeOptions.map((o) => o.value.slice(6)));
@@ -596,7 +616,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
       value: `skill:${s.id}`,
       label: s.scope === 'mine' && !s.is_approved
         ? `Advanced · My task: ${s.name}`
-        : `Advanced · Library: ${s.name}`,
+        : `Advanced · Custom interactions: ${s.name}`,
       group: 'advanced',
     }));
 
@@ -644,6 +664,19 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     },
     ...libraryTypeOptions,
   ];
+
+  const taskFamily = (type) => {
+    if (/ranking/.test(type) || type === 'ranking') return 'ranking';
+    if (/allocation/.test(type)) return 'allocation';
+    if (/matrix/.test(type)) return 'matrix';
+    if (/annotation/.test(type)) return 'annotation';
+    if (/rating|slider/.test(type) || type === 'number') return 'rating';
+    if (/picker|checkbox|boolean|choice|forced/.test(type) || ['radiogroup', 'dropdown', 'consent'].includes(type)) return 'choice';
+    if (type.startsWith('skill:') || type === 'skillquestion') return 'advanced';
+    return 'text';
+  };
+  const selectedType = editedQuestion.type === 'skillquestion' && editedQuestion.skillId
+    ? `skill:${editedQuestion.skillId}` : editedQuestion.type || 'text';
 
   const typeMenuGroups = [
     { id: 'text', label: 'Text & choice' },
@@ -874,12 +907,21 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     });
   };
 
+  const uniqueChoiceValue = (text) => {
+    const base = text.trim().toLowerCase().replace(/\s+/g, '_');
+    const used = new Set((editedQuestion.choices || []).map((c) => String(typeof c === 'object' ? c.value : c)));
+    let value = base;
+    let suffix = 2;
+    while (used.has(value)) value = `${base}_${suffix++}`;
+    return value;
+  };
+
   const addChoice = () => {
     if (!newChoice.trim()) return;
     
     const choices = editedQuestion.choices || [];
     // Use SurveyJS standard format: {value, text}
-    const choiceValue = newChoice.trim().toLowerCase().replace(/\s+/g, '_');
+    const choiceValue = uniqueChoiceValue(newChoice);
     const newChoiceObj = {
       value: choiceValue,
       text: newChoice.trim()
@@ -905,7 +947,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     if (!newChoice.trim()) return;
     
     const choices = editedQuestion.choices || [];
-    const newChoices = [...choices, { value: newChoice.toLowerCase().replace(/\s+/g, '_'), text: newChoice.trim() }];
+    const newChoices = [...choices, { value: uniqueChoiceValue(newChoice), text: newChoice.trim() }];
     
     setEditedQuestion({
       ...editedQuestion,
@@ -1041,19 +1083,25 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   };
 
   return (
-    <Dialog open={true} onClose={onCancel} maxWidth="md" fullWidth>
+    <>
+    <Dialog open={true} onClose={closeEditor} maxWidth="xl" fullWidth fullScreen={mobile}
+      PaperProps={{ sx: { height: mobile ? '100dvh' : '90dvh' } }}>
+
       <DialogTitle>
-        Edit Question
+        {zh ? '编辑题目' : 'Edit Question'}
       </DialogTitle>
-      <DialogContent>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {!wide && <Tabs value={editorTab} onChange={(_, v) => setEditorTab(v)} variant="fullWidth" aria-label={zh ? '题目编辑视图' : 'Question editor views'}>
+        <Tab label={zh ? '题目设置' : 'Settings'} /><Tab label={zh ? '参与者预览' : 'Participant preview'} />
+      </Tabs>}
+      <DialogContent sx={{ p: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: wide ? 'minmax(0, 1fr) minmax(0, 0.9fr)' : 'minmax(0, 1fr)' }}>
+        <Box ref={settingsRef} sx={{ display: wide || editorTab === 0 ? 'flex' : 'none', flexDirection: 'column', gap: 4, overflowY: 'auto', minWidth: 0, p: { xs: 2, sm: 3 } }}>
           {/* Basic Question Settings */}
           <Box>
             <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
               Basic Settings
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <TextField
+              <TextField name="name"
                 fullWidth
                 variant="outlined"
                 label="Question Name (Internal ID)"
@@ -1063,6 +1111,11 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               />
               
+              <TextField name="type" select fullWidth label="Find by task" value={taskFilter} onChange={(e) => setTaskFilter(e.target.value)}
+                helperText="Filter available types by the answer you want to collect. Your current type stays selected until you choose another.">
+                {[['all', 'All tasks'], ['choice', 'Choose / Yes–No'], ['rating', 'Rate / Measure'], ['ranking', 'Rank'], ['allocation', 'Allocate points'], ['matrix', 'Matrix'], ['annotation', 'Annotate'], ['text', 'Text / Display'], ['advanced', 'Custom interactions']]
+                  .map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
+              </TextField>
               <FormControl fullWidth variant="outlined">
                 <InputLabel sx={{ backgroundColor: 'white', px: 1 }}>Question Type</InputLabel>
                 <Select
@@ -1072,7 +1125,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   label="Question Type"
                 >
                   {typeMenuGroups.flatMap((group) => {
-                    const items = questionTypes.filter((t) => t.group === group.id);
+                    const items = questionTypes.filter((t) => t.group === group.id && (taskFilter === 'all' || taskFamily(t.value) === taskFilter || t.value === selectedType));
                     if (!items.length) return [];
                     return [
                       <MenuItem
@@ -1099,7 +1152,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 </Select>
               </FormControl>
 
-              <TextField
+              <TextField name="title"
                 fullWidth
                 variant="outlined"
                 label="Question Title"
@@ -1109,7 +1162,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               />
 
-              <TextField
+              <TextField name="description"
                 fullWidth
                 variant="outlined"
                 multiline
@@ -1132,8 +1185,8 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 <Alert severity="warning">
                   <strong>Advanced custom task.</strong> Most studies only need a ready-made perception task
                   (Pairwise Preference, Best–Worst, etc.) from the type list above.
-                  To continue here, import or create a task in <strong>My Skill Library</strong>, then re-select it
-                  under <em>Advanced · Library</em>.
+                  To continue here, import or create a task in <strong>My custom interactions</strong>, then re-select it
+                  under <em>Advanced · Custom interactions</em>.
                 </Alert>
               )}
 
@@ -1202,7 +1255,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               {editedQuestion.type === 'boolean' && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                    <TextField
+                    <TextField name="labelTrue"
                       fullWidth
                       variant="outlined"
                       label="Yes label"
@@ -1211,7 +1264,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       placeholder="Yes"
                       sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
-                    <TextField
+                    <TextField name="labelFalse"
                       fullWidth
                       variant="outlined"
                       label="No label"
@@ -1601,20 +1654,20 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'imagerating' && (
                   <>
-                    <TextField fullWidth variant="outlined" type="number" label="Minimum Rating Value"
-                      value={editedQuestion.rateMin || 1}
+                    <TextField name="rateMin" fullWidth variant="outlined" type="number" label="Minimum Rating Value"
+                      value={editedQuestion.rateMin ?? 1}
                       onChange={(e) => handleQuestionChange('rateMin', parseInt(e.target.value))}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" type="number" label="Maximum Rating Value"
-                      value={editedQuestion.rateMax || 5}
+                    <TextField name="rateMax" fullWidth variant="outlined" type="number" label="Maximum Rating Value"
+                      value={editedQuestion.rateMax ?? 5}
                       onChange={(e) => handleQuestionChange('rateMax', parseInt(e.target.value))}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" label="Minimum Rating Label"
+                    <TextField name="minRateDescription" fullWidth variant="outlined" label="Minimum Rating Label"
                       value={editedQuestion.minRateDescription || ''}
                       onChange={(e) => handleQuestionChange('minRateDescription', e.target.value)}
                       placeholder="e.g., Very Poor"
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" label="Maximum Rating Label"
+                    <TextField name="maxRateDescription" fullWidth variant="outlined" label="Maximum Rating Label"
                       value={editedQuestion.maxRateDescription || ''}
                       onChange={(e) => handleQuestionChange('maxRateDescription', e.target.value)}
                       placeholder="e.g., Excellent"
@@ -1624,12 +1677,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'imageboolean' && (
                   <>
-                    <TextField fullWidth variant="outlined" label="Yes Label"
+                    <TextField name="labelTrue" fullWidth variant="outlined" label="Yes Label"
                       value={editedQuestion.labelTrue || ''}
                       onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
                       placeholder="e.g., Yes, Agree, Like"
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" label="No Label"
+                    <TextField name="labelFalse" fullWidth variant="outlined" label="No Label"
                       value={editedQuestion.labelFalse || ''}
                       onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
                       placeholder="e.g., No, Disagree, Dislike"
@@ -1685,18 +1738,18 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     </FormControl>
                     {editedQuestion.displayMode === 'reveal' && (
                       <Box sx={{ display: 'flex', gap: 2 }}>
-                        <TextField fullWidth variant="outlined" label="Before label"
+                        <TextField name="beforeLabel" fullWidth variant="outlined" label="Before label"
                           value={editedQuestion.beforeLabel || 'Before'}
                           onChange={(e) => handleQuestionChange('beforeLabel', e.target.value)}
                           sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                        <TextField fullWidth variant="outlined" label="After label"
+                        <TextField name="afterLabel" fullWidth variant="outlined" label="After label"
                           value={editedQuestion.afterLabel || 'After'}
                           onChange={(e) => handleQuestionChange('afterLabel', e.target.value)}
                           sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
                       </Box>
                     )}
                     {editedQuestion.displayMode === 'timed' && (
-                      <TextField fullWidth variant="outlined" type="number" label="Exposure time (seconds)"
+                      <TextField name="exposureSeconds" fullWidth variant="outlined" type="number" label="Exposure time (seconds)"
                         value={editedQuestion.exposureSeconds ?? 5}
                         onChange={(e) => handleQuestionChange('exposureSeconds', Math.min(Math.max(parseInt(e.target.value, 10) || 5, 1), 120))}
                         helperText="Participant clicks to start; media hides permanently after this many seconds."
@@ -1708,20 +1761,20 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'mediarating' && (
                   <>
-                    <TextField fullWidth variant="outlined" type="number" label="Minimum rating"
+                    <TextField name="rateMin" fullWidth variant="outlined" type="number" label="Minimum rating"
                       value={editedQuestion.rateMin ?? 1}
-                      onChange={(e) => handleQuestionChange('rateMin', parseInt(e.target.value) || 1)}
+                      onChange={(e) => handleQuestionChange('rateMin', e.target.value === '' ? undefined : Number(e.target.value))}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" type="number" label="Maximum rating"
+                    <TextField name="rateMax" fullWidth variant="outlined" type="number" label="Maximum rating"
                       value={editedQuestion.rateMax ?? 5}
-                      onChange={(e) => handleQuestionChange('rateMax', parseInt(e.target.value) || 5)}
+                      onChange={(e) => handleQuestionChange('rateMax', e.target.value === '' ? undefined : Number(e.target.value))}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" label="Low-end label"
+                    <TextField name="minRateDescription" fullWidth variant="outlined" label="Low-end label"
                       value={editedQuestion.minRateDescription || ''}
                       onChange={(e) => handleQuestionChange('minRateDescription', e.target.value)}
                       placeholder="e.g., Very poor"
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" label="High-end label"
+                    <TextField name="maxRateDescription" fullWidth variant="outlined" label="High-end label"
                       value={editedQuestion.maxRateDescription || ''}
                       onChange={(e) => handleQuestionChange('maxRateDescription', e.target.value)}
                       placeholder="e.g., Excellent"
@@ -1731,12 +1784,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'mediaboolean' && (
                   <>
-                    <TextField fullWidth variant="outlined" label="Yes Label"
+                    <TextField name="labelTrue" fullWidth variant="outlined" label="Yes Label"
                       value={editedQuestion.labelTrue || ''}
                       onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
                       placeholder="e.g., Yes, Agree, Like"
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                    <TextField fullWidth variant="outlined" label="No Label"
+                    <TextField name="labelFalse" fullWidth variant="outlined" label="No Label"
                       value={editedQuestion.labelFalse || ''}
                       onChange={(e) => handleQuestionChange('labelFalse', e.target.value)}
                       placeholder="e.g., No, Disagree, Dislike"
@@ -1796,13 +1849,13 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
                     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                      <TextField fullWidth variant="outlined" type="number" label="Minimum annotations"
+                      <TextField name="minAnnotations" fullWidth variant="outlined" type="number" label="Minimum annotations"
                         value={editedQuestion.minAnnotations ?? 0}
                         onChange={(e) => handleQuestionChange('minAnnotations', Math.max(0, parseInt(e.target.value, 10) || 0))}
                         helperText="Required before continuing (0 = no minimum)"
                         inputProps={{ min: 0, max: 100, step: 1 }}
                         sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }} />
-                      <TextField fullWidth variant="outlined" type="number" label="Maximum annotations"
+                      <TextField name="maxAnnotations" fullWidth variant="outlined" type="number" label="Maximum annotations"
                         value={editedQuestion.maxAnnotations ?? 50}
                         onChange={(e) => {
                           const raw = parseInt(e.target.value, 10);
@@ -1824,22 +1877,22 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       scaleMax={editedQuestion.scaleMax ?? 7}
                     />
                     <Box sx={{ display: 'flex', gap: 2 }}>
-                      <TextField
+                      <TextField name="scaleMin"
                         fullWidth
                         variant="outlined"
                         type="number"
                         label="Scale minimum"
                         value={editedQuestion.scaleMin ?? 1}
-                        onChange={(e) => handleQuestionChange('scaleMin', parseInt(e.target.value, 10) || 0)}
+                        onChange={(e) => handleQuestionChange('scaleMin', e.target.value === '' ? undefined : Number(e.target.value))}
                         sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                       />
-                      <TextField
+                      <TextField name="scaleMax"
                         fullWidth
                         variant="outlined"
                         type="number"
                         label="Scale maximum"
                         value={editedQuestion.scaleMax ?? 7}
-                        onChange={(e) => handleQuestionChange('scaleMax', parseInt(e.target.value, 10) || 7)}
+                        onChange={(e) => handleQuestionChange('scaleMax', e.target.value === '' ? undefined : Number(e.target.value))}
                         sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                       />
                     </Box>
@@ -1847,7 +1900,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 )}
 
                 {(editedQuestion.type === 'imagepointallocation' || editedQuestion.type === 'mediapointallocation') && (
-                  <TextField
+                  <TextField name="budget"
                     fullWidth
                     variant="outlined"
                     type="number"
@@ -1868,75 +1921,15 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 )}
               </SettingsSection>
 
-              <SettingsSection
-                step={3}
-                title="Participant preview"
-                hint="What participants will interact with. Uses project media when available."
-              >
-                {editedQuestion.type === 'skillquestion' ? (() => {
-                  const skillDef = resolveBuilderSkill(editedQuestion.skillId, builderSkills);
-                  const cfg = editedQuestion.skillConfig || {};
-                  const mediaConstraintsSkill = getSkillMediaConstraints(editedQuestion.skillId, skillDef);
-                  const effectiveMediaType = mediaConstraintsSkill.typeFixed || cfg.mediaType || 'image';
-                  const displayMediaCount = mediaConstraintsSkill.countFixed
-                    ?? cfg.mediaCount
-                    ?? editedQuestion.imageCount
-                    ?? 1;
-                  const previewHtml = editedQuestion.skillHtml || skillDef?.sourceHtml;
-                  if (!previewHtml) {
-                    return <Alert severity="info" sx={{ py: 0.5 }}>No skill HTML available to preview.</Alert>;
-                  }
-                  const mergedCfgRaw = {
-                    ...(skillDef?.defaultConfig || {}),
-                    ...cfg,
-                    mediaCount: displayMediaCount,
-                    mediaType: effectiveMediaType,
-                  };
-                  const skillKey = String(editedQuestion.skillId || '').replace(/^preset_/, '');
-                  const mergedCfg = skillKey === 'emotion_color_picker'
-                    ? enrichEmotionColorConfig(mergedCfgRaw)
-                    : mergedCfgRaw;
-                  let previewImages = [];
-                  if (currentProject?.preloadedImages?.length) {
-                    previewImages = filterPoolForQuestion(currentProject.preloadedImages, {
-                      ...editedQuestion,
-                      imageCount: displayMediaCount,
-                      skillConfig: mergedCfg,
-                    }).slice(0, displayMediaCount);
-                  }
-                  if (!previewImages.length && previewMediaPool.length) {
-                    previewImages = pickPreviewMedia(
-                      previewMediaPool,
-                      effectiveMediaType,
-                      displayMediaCount,
-                    );
-                  }
-                  return (
-                    <>
-                      {!previewImages.length && (
-                        <Alert severity="info" sx={{ py: 0.5, mb: 1 }}>
-                          No project media or platform preview media library files available.
-                          Upload project media, or ask an admin to add files under Admin → 预览媒体库.
-                        </Alert>
-                      )}
-                      <SkillQuestionFrame
-                        skillHtml={previewHtml}
-                        config={mergedCfg}
-                        images={previewImages}
-                        skillId={editedQuestion.skillId}
-                      />
-                    </>
-                  );
-                })() : (
-                  <QuestionParticipantPreview
-                    question={editedQuestion}
-                    currentProject={currentProject}
-                    surveyConfig={surveyConfig}
-                  />
-                )}
-              </SettingsSection>
+
             </Box>
           )}
+
+          {['slidergroup', 'imageslidergroup', 'mediaslidergroup'].includes(editedQuestion.type) && <TextField
+            name="scaleStep" type="number" label="Scale step" value={editedQuestion.scaleStep ?? 1}
+            onChange={(e) => handleQuestionChange('scaleStep', e.target.value === '' ? undefined : Number(e.target.value))}
+            helperText="Default spacing between scale values; each dimension can override this."
+          />}
 
           {/* Slider group (non-image) — image variant uses Card 2 above */}
           {editedQuestion.type === 'slidergroup' && (
@@ -1952,22 +1945,22 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                   scaleMax={editedQuestion.scaleMax ?? 7}
                 />
                 <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
+                  <TextField name="scaleMin"
                     fullWidth
                     variant="outlined"
                     type="number"
                     label="Scale minimum"
                     value={editedQuestion.scaleMin ?? 1}
-                    onChange={(e) => handleQuestionChange('scaleMin', parseInt(e.target.value, 10) || 0)}
+                    onChange={(e) => handleQuestionChange('scaleMin', e.target.value === '' ? undefined : Number(e.target.value))}
                     sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                   />
-                  <TextField
+                  <TextField name="scaleMax"
                     fullWidth
                     variant="outlined"
                     type="number"
                     label="Scale maximum"
                     value={editedQuestion.scaleMax ?? 7}
-                    onChange={(e) => handleQuestionChange('scaleMax', parseInt(e.target.value, 10) || 7)}
+                    onChange={(e) => handleQuestionChange('scaleMax', e.target.value === '' ? undefined : Number(e.target.value))}
                     sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                   />
                 </Box>
@@ -1987,7 +1980,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 Task options — budget allocation
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <TextField
+                <TextField name="budget"
                   fullWidth
                   variant="outlined"
                   type="number"
@@ -2299,7 +2292,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {editedQuestion.type === 'comment' && (
-                  <TextField
+                  <TextField name="rows"
                     fullWidth
                     variant="outlined"
                     type="number"
@@ -2313,7 +2306,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 )}
 
                 {editedQuestion.type === 'text' && (
-                  <TextField
+                  <TextField name="maxLength"
                     fullWidth
                     variant="outlined"
                     type="number"
@@ -2328,7 +2321,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'number' && (
                   <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                    <TextField
+                    <TextField name="min"
                       fullWidth
                       variant="outlined"
                       type="number"
@@ -2337,7 +2330,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       onChange={(e) => handleQuestionChange('min', e.target.value === '' ? undefined : Number(e.target.value))}
                       sx={{ flex: '1 1 160px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
-                    <TextField
+                    <TextField name="max"
                       fullWidth
                       variant="outlined"
                       type="number"
@@ -2351,7 +2344,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                 {editedQuestion.type === 'consent' && (
                   <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                    <TextField
+                    <TextField name="labelTrue"
                       fullWidth
                       variant="outlined"
                       label="Accept label"
@@ -2359,7 +2352,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       onChange={(e) => handleQuestionChange('labelTrue', e.target.value)}
                       sx={{ flex: '1 1 200px', '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
-                    <TextField
+                    <TextField name="labelFalse"
                       fullWidth
                       variant="outlined"
                       label="Decline label"
@@ -2376,23 +2369,23 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                 {editedQuestion.type === 'rating' && (
                   <>
                     <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />
-                    <TextField
+                    <TextField name="rateMin"
                       fullWidth
                       variant="outlined"
                       type="number"
                       label="Minimum Value"
-                      value={editedQuestion.rateMin || 1}
+                      value={editedQuestion.rateMin ?? 1}
                       onChange={(e) => handleQuestionChange('rateMin', parseInt(e.target.value))}
                       helperText="The lowest rating value"
                       inputProps={{ min: 0 }}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
-                    <TextField
+                    <TextField name="rateMax"
                       fullWidth
                       variant="outlined"
                       type="number"
                       label="Maximum Value"
-                      value={editedQuestion.rateMax || 5}
+                      value={editedQuestion.rateMax ?? 5}
                       onChange={(e) => handleQuestionChange('rateMax', parseInt(e.target.value))}
                       helperText="The highest rating value"
                       inputProps={{ min: 1 }}
@@ -2404,29 +2397,17 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             </Box>
           )}
 
-          {/* Non-stimulus: task options live above; Card 3 preview only */}
-          {!isStimulusQuestion && editedQuestion.type && editedQuestion.type !== 'expression' && (
-            <Box>
-              <Typography variant="h6" sx={{ mb: 1, color: 'primary.main' }}>
-                Participant preview
-              </Typography>
-              <SettingsSection
-                step={3}
-                title="Participant preview"
-                hint="Compact SurveyJS preview of this question alone."
-              >
-                <QuestionParticipantPreview
-                  question={editedQuestion}
-                  currentProject={currentProject}
-                  surveyConfig={surveyConfig}
-                />
-              </SettingsSection>
-            </Box>
-          )}
+        </Box>
+        <Box sx={{ display: wide || editorTab === 1 ? 'block' : 'none', overflowY: 'auto', minWidth: 0, p: { xs: 1, sm: 2 }, borderLeft: wide ? '1px solid' : 0, borderColor: 'divider' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>{zh ? '参与者预览（修改设置后自动更新）' : 'Participant preview (updates as you edit)'}</Typography>
+          <QuestionParticipantPreview question={editedQuestion} currentProject={currentProject} surveyConfig={surveyConfig} />
         </Box>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel}>Cancel</Button>
+      <DialogActions sx={{ flexWrap: 'wrap', px: 2, pb: 'max(12px, env(safe-area-inset-bottom))', '& .MuiButton-root': { minHeight: 44 } }}>
+        {settingsErrors.length > 0 && <Alert severity="error" sx={{ width: '100%', maxHeight: 120, overflowY: 'auto' }}>
+          {settingsErrors.map((e, i) => <Button key={`${e.path}-${i}`} color="error" sx={{ display: 'block', textAlign: 'left', textTransform: 'none' }} onClick={() => focusSetting(e.path)}>{e.message}</Button>)}
+        </Alert>}
+        <Button onClick={closeEditor}>{zh ? '取消' : 'Cancel'}</Button>
         <Button onClick={() => {
           const questionToSave = { ...editedQuestion };
           
@@ -2605,11 +2586,17 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
             }
           }
           
+          if (validateQuestionSettings(questionToSave).length) return;
           onSave(questionToSave);
-        }} variant="contained">
-          Save Question
+        }} variant="contained" disabled={settingsErrors.length > 0}>
+          {zh ? '保存题目' : 'Save Question'}
         </Button>
       </DialogActions>
     </Dialog>
+    <ConfirmDialog open={guard.open} onCancel={guard.cancel} onConfirm={guard.discard}
+      title={zh ? '放弃未保存的修改？' : 'Discard unsaved changes?'}
+      message={zh ? '题目设置尚未保存。继续编辑可保留当前内容。' : 'Your question settings have not been saved. Keep editing to retain them.'}
+      confirmLabel={zh ? '放弃修改' : 'Discard changes'} cancelLabel={zh ? '继续编辑' : 'Keep editing'} />
+    </>
   );
 }

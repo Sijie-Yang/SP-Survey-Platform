@@ -1,3 +1,4 @@
+import { validateSurveyConfig } from './designProtocol/validate';
 /**
  * Project management — Supabase-first, falls back to local Express server.
  *
@@ -396,6 +397,8 @@ export const getProjectById = async (projectId) => {
 
 export const saveProjectFull = async (project, surveyConfig, options = {}) => {
   try {
+    const validation = validateSurveyConfig(surveyConfig);
+    if (!validation.valid) throw new Error(validation.errors.map((e) => `${e.path}: ${e.message}`).join(' '));
     const frozenConfig = isPlatformMode()
       ? await hydrateSkillContractSnapshots(surveyConfig)
       : surveyConfig;
@@ -476,6 +479,8 @@ export const saveProjectDraftOptimistic = async (
     if (!isPlatformMode()) {
       return saveProjectFull({ id: projectId }, surveyConfig, { writer });
     }
+    const validation = validateSurveyConfig(surveyConfig);
+    if (!validation.valid) throw new Error(validation.errors.map((e) => `${e.path}: ${e.message}`).join(' '));
     const frozenConfig = await hydrateSkillContractSnapshots(surveyConfig);
     const { data, error } = await supabase.rpc('save_project_draft', {
       p_project_id: projectId,

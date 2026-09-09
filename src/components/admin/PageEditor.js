@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import useUnsavedChanges from '../../hooks/useUnsavedChanges';
+import React, { useState, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -191,6 +192,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
           <IconButton
             size="small"
             color="primary"
+            aria-label="Edit question"
             onClick={() => onEdit({ question, index: questionIndex })}
             sx={{ 
               border: 1, 
@@ -203,6 +205,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
           <IconButton
             size="small"
             color="primary"
+            aria-label="Duplicate question"
             onClick={() => onDuplicate(questionIndex)}
             sx={{ 
               border: 1, 
@@ -215,6 +218,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
           <IconButton
             size="small"
             color="error"
+            aria-label="Delete question"
             onClick={() => onDelete(questionIndex)}
             sx={{ 
               border: 1, 
@@ -233,6 +237,9 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
 export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig }) {
   const [editedPage, setEditedPage] = useState({ ...page });
   const [selectedQuestion, setSelectedQuestion] = useState(null);
+  const initialPage = useRef(JSON.stringify(page));
+  const guard = useUnsavedChanges(JSON.stringify(editedPage) !== initialPage.current);
+  const closeEditor = () => guard.request(onCancel);
   const [confirmDialog, setConfirmDialog] = useState(null);
 
   const sensors = useSensors(
@@ -399,7 +406,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
 
   return (
     <>
-      <Dialog open={true} onClose={onCancel} maxWidth="lg" fullWidth>
+      <Dialog open={true} onClose={closeEditor} maxWidth="lg" fullWidth>
         <DialogTitle>
           Edit Page: {page.title}
         </DialogTitle>
@@ -485,7 +492,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={onCancel}>Cancel</Button>
+          <Button onClick={closeEditor}>Cancel</Button>
           <Button onClick={() => onSave(editedPage)} variant="contained">
             Save Page
           </Button>
@@ -506,6 +513,9 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
           surveyConfig={surveyConfig}
         />
       )}
+      <ConfirmDialog open={guard.open} onCancel={guard.cancel} onConfirm={guard.discard}
+        title="Discard unsaved page changes?" message="Your page and question changes have not been saved."
+        confirmLabel="Discard changes" cancelLabel="Keep editing" />
       <ConfirmDialog
         open={Boolean(confirmDialog)}
         title={confirmDialog?.title}

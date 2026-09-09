@@ -1,3 +1,4 @@
+import QuestionMediaBoundary, { questionMediaFailed } from './QuestionMediaBoundary';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, LinearProgress, Typography, Tooltip, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
@@ -384,6 +385,7 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
         window.clearTimeout(autoAdvanceTimerRef.current);
         autoAdvanceTimerRef.current = window.setTimeout(() => {
           if (indexRef.current === trialIndex
+            && !questionMediaFailed(question)
             && trialHasAnswer(answersRef.current?.trials?.[trialIndex], question)) {
             goToRef.current(trialIndex + 1);
           }
@@ -513,6 +515,7 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
 
   const goTo = (nextIndex) => {
     if (nextIndex < 0 || nextIndex >= trialCount) return;
+    if (nextIndex > index && questionMediaFailed(question)) return;
     if (nextIndex > furthest + 1) return;
     if (nextIndex > furthest && !trialHasAnswer(answers.trials?.[index], question)) return;
     window.clearTimeout(autoAdvanceTimerRef.current);
@@ -713,7 +716,7 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
 /** Factory helper: wrap a SurveyJS React question component with TrialShell. */
 export function withTrialShell(Inner) {
   function Wrapped(props) {
-    return <TrialShell {...props} Inner={Inner} />;
+    return <QuestionMediaBoundary question={props.question}><TrialShell {...props} Inner={Inner} /></QuestionMediaBoundary>;
   }
   Wrapped.displayName = `WithTrialShell(${Inner.displayName || Inner.name || 'Question'})`;
   return Wrapped;

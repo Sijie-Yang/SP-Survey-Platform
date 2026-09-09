@@ -174,3 +174,16 @@ npm run dev   # CRA :3000 + Express :3001 (agent bridge included)
 ```
 
 Express proxies `/api/agent/*`, `/oauth/*`, `/mcp`, and `/.well-known/*` to the same Worker handlers.
+
+
+## Custom interaction authoring (2026-09-10)
+
+The admin navigation now calls Skills **Custom interactions / 自定义交互**. MCP IDs and tools remain `skill_*`; existing Skill IDs, frozen revisions and stored answers are preserved.
+
+- Use native questions and built-in perception tasks directly in Survey Builder. Import a built-in only to create an editable custom copy.
+- Choose one supported result family first. Declare its bounds/options/dimensions/budget, provide a matching `exampleAnswer`, then implement the HTML interaction with `SPSkill.setAnswer(object)`.
+- Save-time validation checks native settings and example values. The participant iframe validates single-field custom answers against the effective schema plus researcher config. Invalid answers clear the question's current answer instead of satisfying Required.
+- The editor provides valid rating, numeric and choice starters, an interactive preview, and native analysis/export for the test answer. Preview does not create a survey response. Admin review uses the same preview panel.
+- Custom interactions currently store one answer per question. For separately recorded rounds, use separate questions or a native type with platform trials; do not overwrite earlier rounds inside one HTML answer.
+- Iframes run with `allow-scripts` only, without same-origin access. The SDK accepts init messages only from the parent. CSP blocks fetch/XHR, external scripts, forms and nested frames; HTTP(S)/data/blob media remain allowed for existing stimuli. Use self-contained scripts, platform-provided media and the SDK. This is isolation hardening, not a complete network-exfiltration or submission-authenticity guarantee.
+- No schema migration is required for this update. Historical answers are not rewritten. New exported summaries identify `analysis_algorithm_version=2026-09-10.1`; corrected calculations may differ from older exports.

@@ -3,11 +3,11 @@ import {
   Box, Typography, Button, Paper, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton,
   Chip, Stack, CircularProgress, Alert, Snackbar,
-  Dialog, DialogTitle, DialogContent, DialogActions, Divider, Tooltip,
+  Dialog, DialogTitle, DialogContent, DialogActions, Divider, Tooltip, Accordion, AccordionSummary, AccordionDetails, useMediaQuery,
 } from '@mui/material';
 import {
   Add, Edit, Delete, Publish, Refresh, Download, Visibility,
-  Image, Videocam, Palette, Code, ContentCopy, GraphicEq, AutoAwesome,
+  Image, Videocam, Palette, Code, ContentCopy, GraphicEq, ExpandMore,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -15,7 +15,8 @@ import {
   importPresetSkill, listImportedPresetIds, PRESET_SKILLS,
 } from '../lib/skillManager';
 import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
-import SkillQuestionFrame from '../components/SkillQuestionWidget';
+import SkillPreviewPanel from '../components/admin/SkillPreviewPanel';
+import { useRegion } from '../contexts/RegionContext';
 import AdminShell from '../components/layout/AdminShell';
 import ConfirmDialog from '../components/layout/ConfirmDialog';
 
@@ -34,6 +35,9 @@ const CATEGORY_META = {
 
 export default function SkillLibraryPage() {
   const navigate = useNavigate();
+  const { language } = useRegion();
+  const zh = language === 'zh';
+  const mobile = useMediaQuery('(max-width:600px)');
   const [skills, setSkills] = useState([]);
   const [importedPresets, setImportedPresets] = useState([]);
   const [previewMediaPool, setPreviewMediaPool] = useState([]);
@@ -106,9 +110,9 @@ export default function SkillLibraryPage() {
 
   // Platform preview media library only (no SVG demos).
   const mediaForSkill = (skillLike) => {
-    const count = skillLike.defaultConfig?.mediaCount || 1;
+    const count = skillLike.defaultConfig?.mediaCount ?? 1;
     const mediaType = skillLike.defaultConfig?.mediaType || 'image';
-    return pickPreviewMedia(previewMediaPool, mediaType, count);
+    return count === 0 ? [] : pickPreviewMedia(previewMediaPool, mediaType, count);
   };
 
   // Pick media once when the dialog opens so re-renders don't reshuffle
@@ -126,27 +130,22 @@ export default function SkillLibraryPage() {
 
   return (
     <AdminShell
-      title="Skill Library"
+      title={zh ? '我的自定义交互' : 'My custom interactions'}
       backTo="/admin"
       maxWidth="lg"
       actions={(
         <>
-          <Button variant="outlined" startIcon={<AutoAwesome />} onClick={() => navigate('/skill-editor')} size="small">
-            New with AI
-          </Button>
           <Button variant="contained" startIcon={<Add />} onClick={() => navigate('/skill-editor')} size="small">
-            New Skill
+            {zh ? '新建自定义交互' : 'New custom interaction'}
           </Button>
         </>
       )}
     >
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Create and manage custom question types here. Use <strong>New with AI</strong> on the editor page
-        to generate HTML skills, or import presets from the gallery. After importing a preset, click
-        <strong> Update preset</strong> again later to sync new configurable fields.
-        Test skills in Survey Builder, then submit for public review.
+        {zh ? '常用题型和内置交互可在问卷编辑器直接选择，无需导入。本页保存你定制的交互，可私有复用，也可选择申请公开。' : 'Use built-in tasks directly in Survey Builder; no import is needed. This page stores your custom interactions for private reuse or optional public review.'}
       </Typography>
 
+      <Accordion sx={{ mb: 2 }}><AccordionSummary expandIcon={<ExpandMore />}>{zh ? '从内置交互创建可编辑副本（可选）' : 'Create an editable copy of a built-in task (optional)'}</AccordionSummary><AccordionDetails>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
         <Typography variant="subtitle1" fontWeight={700} color="primary.dark">Preset Gallery</Typography>
         {previewMediaPool.length > 0 && (
@@ -231,9 +230,10 @@ export default function SkillLibraryPage() {
         </Table>
       </TableContainer>
 
+      </AccordionDetails></Accordion>
       <Divider sx={{ mb: 2 }} />
       <Stack direction="row" spacing={1} sx={{ mb: 2 }} alignItems="center">
-        <Typography variant="subtitle1" fontWeight={700} color="primary.dark">My Skills</Typography>
+        <Typography variant="subtitle1" fontWeight={700} color="primary.dark">{zh ? '已保存的自定义交互' : 'Saved custom interactions'}</Typography>
         <Box flex={1} />
         <Button startIcon={<Refresh />} onClick={load} disabled={loading}>Refresh</Button>
       </Stack>
@@ -256,7 +256,7 @@ export default function SkillLibraryPage() {
               {skills.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} align="center" sx={{ py: 6, color: 'text.secondary' }}>
-                    No skills yet — import one from the gallery above, or click "New Skill"
+                    {zh ? '还没有自定义交互。常规问卷直接使用内置题型即可。' : 'No custom interactions yet. Built-in question types are ready to use in Survey Builder.'}
                   </TableCell>
                 </TableRow>
               )}
@@ -315,7 +315,7 @@ export default function SkillLibraryPage() {
       )}
 
       {/* Preview dialog — works for both presets and personal skills */}
-      <Dialog open={!!preview} onClose={() => setPreview(null)} maxWidth="md" fullWidth>
+      <Dialog open={!!preview} onClose={() => setPreview(null)} maxWidth="md" fullWidth fullScreen={mobile}>
         <DialogTitle>
           {preview?.skill?.name}
           {preview && previewMediaPool.length > 0 && (
@@ -332,12 +332,7 @@ export default function SkillLibraryPage() {
             </Alert>
           )}
           {preview && (
-            <SkillQuestionFrame
-              skillHtml={preview.skill.sourceHtml}
-              config={preview.skill.defaultConfig || {}}
-              images={preview.media}
-              readOnly
-            />
+            <SkillPreviewPanel key={preview.skill.id || preview.presetId} skill={preview.skill} images={preview.media} />
           )}
         </DialogContent>
         <DialogActions>

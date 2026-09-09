@@ -1,3 +1,6 @@
+import { sliderGroupAnswerValid } from '../lib/sliderScale';
+import { resolveSurveyUiLanguage } from '../lib/surveyLocale';
+import { allocationStatus } from '../lib/allocationStats';
 import React from 'react';
 import {
   ReactQuestionFactory, SurveyQuestionImagePicker,
@@ -1112,12 +1115,11 @@ export function registerMediaSliderGroupWidget() {
     getType() { return 'mediaslidergroup'; }
     onCheckForErrors(errors, isOnValueChanged) {
       super.onCheckForErrors(errors, isOnValueChanged);
-      if (!this.isRequired || isOnValueChanged) return;
-      const dims = this.dimensions || [];
-      const val = this.value || {};
-      const missing = dims.filter((d) => val[d.id] === undefined || val[d.id] === null);
-      if (missing.length) {
-        errors.push(new CustomError('Please rate every dimension.', this));
+      if (isOnValueChanged) return;
+      if (!sliderGroupAnswerValid(this.value, this, this.isRequired)) {
+        errors.push(new CustomError(resolveSurveyUiLanguage(this.survey) === 'zh'
+          ? '请按量表范围和步长评分；必答题需要完成每个维度。'
+          : 'Use the configured scale and step; required questions need every dimension rated.', this));
       }
     }
   }
@@ -1130,6 +1132,7 @@ export function registerMediaSliderGroupWidget() {
     { name: 'dimensions', default: [], category: 'general' },
     { name: 'scaleMin:number', default: 1, category: 'general' },
     { name: 'scaleMax:number', default: 7, category: 'general' },
+    { name: 'scaleStep:number', default: 1, category: 'general' },
   ], () => new Q(), 'question');
   ensureMediaStimulusSerializerProps('mediaslidergroup');
 
@@ -1140,6 +1143,8 @@ export function registerMediaSliderGroupWidget() {
         dimensions: q.dimensions || [],
         scaleMin: q.scaleMin ?? 1,
         scaleMax: q.scaleMax ?? 7,
+        scaleStep: q.scaleStep ?? 1,
+        language: resolveSurveyUiLanguage(q.survey),
         value: q.value,
         onChange: (v) => { q.value = v; },
         readOnly: q.isReadOnly,
@@ -1159,8 +1164,8 @@ export function registerMediaPointAllocationWidget() {
       const budget = this.budget || 100;
       const val = this.value || {};
       const total = Object.values(val).reduce((s, n) => s + (Number(n) || 0), 0);
-      if (total > budget) {
-        errors.push(new CustomError(`Please allocate at most ${budget} points (currently ${total}).`, this));
+      if (this.value && Object.keys(this.value).length && !allocationStatus(this.value, this).valid) {
+        errors.push(new CustomError(`Use non-negative points for the listed choices, at most ${budget} in total (currently ${total}).`, this));
       }
     }
   }
@@ -1248,12 +1253,11 @@ export function registerSliderGroupWidget() {
     getType() { return 'slidergroup'; }
     onCheckForErrors(errors, isOnValueChanged) {
       super.onCheckForErrors(errors, isOnValueChanged);
-      if (!this.isRequired || isOnValueChanged) return;
-      const dims = this.dimensions || [];
-      const val = this.value || {};
-      const missing = dims.filter((d) => val[d.id] === undefined || val[d.id] === null);
-      if (missing.length) {
-        errors.push(new CustomError('Please rate every dimension.', this));
+      if (isOnValueChanged) return;
+      if (!sliderGroupAnswerValid(this.value, this, this.isRequired)) {
+        errors.push(new CustomError(resolveSurveyUiLanguage(this.survey) === 'zh'
+          ? '请按量表范围和步长评分；必答题需要完成每个维度。'
+          : 'Use the configured scale and step; required questions need every dimension rated.', this));
       }
     }
   }
@@ -1261,6 +1265,7 @@ export function registerSliderGroupWidget() {
     { name: 'dimensions', default: [], category: 'general' },
     { name: 'scaleMin:number', default: 1, category: 'general' },
     { name: 'scaleMax:number', default: 7, category: 'general' },
+    { name: 'scaleStep:number', default: 1, category: 'general' },
   ], () => new Q(), 'question');
 
   ReactQuestionFactory.Instance.registerQuestion('slidergroup', (props) => {
@@ -1269,6 +1274,8 @@ export function registerSliderGroupWidget() {
       dimensions: q.dimensions || [],
       scaleMin: q.scaleMin ?? 1,
       scaleMax: q.scaleMax ?? 7,
+        scaleStep: q.scaleStep ?? 1,
+        language: resolveSurveyUiLanguage(q.survey),
       value: q.value,
       onChange: (v) => { q.value = v; },
       readOnly: q.isReadOnly,
@@ -1288,8 +1295,8 @@ export function registerPointAllocationWidget() {
       const budget = this.budget || 100;
       const val = this.value || {};
       const total = Object.values(val).reduce((s, n) => s + (Number(n) || 0), 0);
-      if (total > budget) {
-        errors.push(new CustomError(`Please allocate at most ${budget} points (currently ${total}).`, this));
+      if (this.value && Object.keys(this.value).length && !allocationStatus(this.value, this).valid) {
+        errors.push(new CustomError(`Use non-negative points for the listed choices, at most ${budget} in total (currently ${total}).`, this));
       }
     }
   }
@@ -1315,12 +1322,11 @@ export function registerImageSliderGroupWidget() {
     getType() { return 'imageslidergroup'; }
     onCheckForErrors(errors, isOnValueChanged) {
       super.onCheckForErrors(errors, isOnValueChanged);
-      if (!this.isRequired || isOnValueChanged) return;
-      const dims = this.dimensions || [];
-      const val = this.value || {};
-      const missing = dims.filter((d) => val[d.id] === undefined || val[d.id] === null);
-      if (missing.length) {
-        errors.push(new CustomError('Please rate every dimension.', this));
+      if (isOnValueChanged) return;
+      if (!sliderGroupAnswerValid(this.value, this, this.isRequired)) {
+        errors.push(new CustomError(resolveSurveyUiLanguage(this.survey) === 'zh'
+          ? '请按量表范围和步长评分；必答题需要完成每个维度。'
+          : 'Use the configured scale and step; required questions need every dimension rated.', this));
       }
     }
   }
@@ -1332,6 +1338,7 @@ export function registerImageSliderGroupWidget() {
     { name: 'dimensions', default: [], category: 'general' },
     { name: 'scaleMin:number', default: 1, category: 'general' },
     { name: 'scaleMax:number', default: 7, category: 'general' },
+    { name: 'scaleStep:number', default: 1, category: 'general' },
   ], () => new Q(), 'question');
 
   function ImageSliderGroupQuestionComponent({ question: q, trialStimulusMedia = null }) {
@@ -1344,6 +1351,8 @@ export function registerImageSliderGroupWidget() {
       dimensions: q.dimensions || [],
       scaleMin: q.scaleMin ?? 1,
       scaleMax: q.scaleMax ?? 7,
+        scaleStep: q.scaleStep ?? 1,
+        language: resolveSurveyUiLanguage(q.survey),
       value: q.value,
       onChange: (v) => { q.value = v; },
       readOnly: q.isReadOnly,
@@ -1364,8 +1373,8 @@ export function registerImagePointAllocationWidget() {
       const budget = this.budget || 100;
       const val = this.value || {};
       const total = Object.values(val).reduce((s, n) => s + (Number(n) || 0), 0);
-      if (total > budget) {
-        errors.push(new CustomError(`Please allocate at most ${budget} points (currently ${total}).`, this));
+      if (this.value && Object.keys(this.value).length && !allocationStatus(this.value, this).valid) {
+        errors.push(new CustomError(`Use non-negative points for the listed choices, at most ${budget} in total (currently ${total}).`, this));
       }
     }
   }
@@ -1402,7 +1411,8 @@ export class SkillQuestionModel extends Question {
   isEmpty() { return !skillAnswerPresent(this.value); }
   setValueCore(newValue) {
     super.setValueCore(newValue);
-    if (skillAnswerPresent(newValue)) this.skillAnswerSnapshot = newValue;
+    this.skillAnswerSnapshot = skillAnswerPresent(newValue) ? newValue : null;
+    if (!skillAnswerPresent(newValue) && this.survey?.__skillPreviewAnswers) delete this.survey.__skillPreviewAnswers[this.name];
   }
   getDisplayValue(_keysAsText, val) {
     const value = val !== undefined ? val : (this.value ?? this.skillAnswerSnapshot);
@@ -1482,6 +1492,7 @@ export function registerSkillQuestionWidget() {
       value,
       readOnly,
       resultSchema: q.skillResultSchema || [],
+      language: resolveSurveyUiLanguage(q.survey),
       onChange: (v) => {
         // Always persist iframe answers — do not gate on isReadOnly.
         // Entering showPreviewBeforeComplete can flip read-only before the

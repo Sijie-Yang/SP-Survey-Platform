@@ -30,6 +30,7 @@ import { getUserFromBearer } from './worker-lib/auth/supabaseJwt.mjs';
 import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
 import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
 import { supabaseRest } from './worker-lib/supabaseUserClient.mjs';
+import { handleAdminResultsRoutes } from './worker-lib/adminResults.mjs';
 import {
   handleInferenceTest,
   handleInferenceSam3,
@@ -777,6 +778,9 @@ export default {
     try {
       const url = new URL(request.url);
       const { pathname } = url;
+
+      const adminResultsResponse = await handleAdminResultsRoutes(request, env);
+      if (adminResultsResponse) return adminResultsResponse;
 
       // Agent / OAuth / MCP (returns Response or null if not matched)
       const agentResponse = await handleAgentAndMcpRoutes(request, env);

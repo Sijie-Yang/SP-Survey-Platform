@@ -241,6 +241,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
           <IconButton
             size="small"
             color="primary"
+            aria-label="Edit page"
             onClick={() => onEdit({ page, index: pageIndex })}
             sx={{ 
               border: 1, 
@@ -253,6 +254,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
           <IconButton
             size="small"
             color="primary"
+            aria-label="Duplicate page"
             onClick={() => onDuplicate(pageIndex)}
             sx={{ 
               border: 1, 
@@ -265,6 +267,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
           <IconButton
             size="small"
             color="error"
+            aria-label="Delete page"
             onClick={() => onDelete(pageIndex)}
             sx={{ 
               border: 1, 

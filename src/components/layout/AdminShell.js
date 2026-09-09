@@ -12,6 +12,7 @@ export default function AdminShell({
   subtitle,
   actions = null,
   backTo = null,
+  onBack = null,
   maxWidth = 'xl',
   children,
 }) {
@@ -23,7 +24,7 @@ export default function AdminShell({
         <Toolbar sx={{ gap: 1, minHeight: 64 }}>
           {backTo && (
             <Tooltip title="Back">
-              <IconButton edge="start" onClick={() => navigate(backTo)} size="small">
+              <IconButton edge="start" onClick={onBack || (() => navigate(backTo))} size="small">
                 <ArrowBack />
               </IconButton>
             </Tooltip>

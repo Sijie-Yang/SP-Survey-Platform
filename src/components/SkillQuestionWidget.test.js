@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import SkillQuestionFrame, { skillAnswerPresent } from './SkillQuestionWidget';
 import {
   captureSkillPreviewAnswers,
@@ -91,5 +91,35 @@ describe('skill preview answer snapshot', () => {
     expect(screen.queryByText('Skill HTML not configured.')).toBeNull();
     expect(screen.getByText(/score: 5/i)).toBeTruthy();
     expect(screen.queryByTitle('skill-question')).toBeNull();
+  });
+});
+
+
+describe('custom result contract at the iframe boundary', () => {
+  it('rejects out-of-range answers, clears previous validity and permits correction', () => {
+    const onChange = jest.fn();
+    render(<SkillQuestionFrame skillId="custom" skillHtml="<button>Test</button>"
+      resultSchema={[{ key: 'score', type: 'rating', min: 0, max: 5 }]}
+      value={null} onChange={onChange} />);
+    const iframe = screen.getByTitle('skill-question');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+    const send = (score, source = iframe.contentWindow) => act(() => {
+      window.dispatchEvent(new MessageEvent('message', { source,
+        data: { source: 'sp-survey-skill', type: 'answer', value: { score } } }));
+    });
+    send(3, window);
+    expect(onChange).not.toHaveBeenCalled();
+    send(0);
+    expect(onChange).toHaveBeenLastCalledWith({ score: 0 });
+    send(99);
+    expect(onChange).toHaveBeenLastCalledWith(null);
+    expect(screen.getByRole('alert').textContent).toContain('invalid answer');
+    send(5);
+    expect(onChange).toHaveBeenLastCalledWith({ score: 5 });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('does not regard incomplete Best–Worst output as an answer', () => {
+    expect(skillAnswerPresent({ bestIndex: 0, worstIndex: null, complete: false })).toBe(false);
   });
 });

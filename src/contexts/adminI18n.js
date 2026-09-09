@@ -24,7 +24,7 @@ export const adminI18n = {
     moreTools: 'More workspace tools',
     signedInAs: 'Signed in as',
     changeTheme: 'Change theme',
-    skillsLibrary: 'Skills Library',
+    skillsLibrary: 'Custom interactions',
     adminDashboard: 'Admin Dashboard',
     templatesAndProjects: 'Templates and projects',
     clearEditingState: 'Clear editing state',
@@ -228,6 +228,7 @@ export const adminI18n = {
     resultsResponseRecords: 'Response records',
     resultsSubmissions: '{n} submissions',
     resultsRecordsHelp: 'Remove individual submissions from this project. Deletion is permanent.',
+    resultsRecordsViewHelp: 'View answers, trial details and quality flags for each submission.',
     resultsEmpty: 'No responses collected yet. Share your survey link and come back here to view results.',
     resultsSkillCustomHelp:
       'Custom skill results reuse native charts by declared type: annotation overlays (points/path/polygon/bbox), media ranking (number/boolean with imageUrl), or text/ranking/allocation charts.',
@@ -666,7 +667,7 @@ export const adminI18n = {
     moreTools: '更多工作区工具',
     signedInAs: '当前登录',
     changeTheme: '切换主题',
-    skillsLibrary: '技能库',
+    skillsLibrary: '自定义交互',
     adminDashboard: '管理后台',
     templatesAndProjects: '模板与项目',
     clearEditingState: '清除编辑状态',
@@ -861,6 +862,7 @@ export const adminI18n = {
     resultsResponseRecords: '答卷记录',
     resultsSubmissions: '{n} 份提交',
     resultsRecordsHelp: '删除本项目的单条提交。删除后不可恢复。',
+    resultsRecordsViewHelp: '查看每份提交的答案、逐轮详情及质量标记。',
     resultsEmpty: '尚无答卷。分享问卷链接后，再回到这里查看结果。',
     resultsSkillCustomHelp:
       '自定义 Skill 结果按声明类型复用原生分析：标注类（points/path/polygon/bbox）叠加热力/图形；媒体评分类按图片排序；文字/排序/分配类用对应原生图表。',

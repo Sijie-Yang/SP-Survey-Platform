@@ -1,3 +1,5 @@
+import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
+import { allocationStatus } from './allocationStats.js';
 import { computeQuestionIrr } from './reliability.js';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from './mediaIdentity.js';
 /**
@@ -49,7 +51,7 @@ import {
 } from './skillMediaUtils.js';
 import { computeMaxDiffScores } from './maxdiff.js';
 import { expandQuestionAnswerUnits, normalizeBooleanAnswer } from './responseAnswerUnits.js';
-import { summarizeVideoMomentsByVideo } from './videoStats.js';
+import { summarizeVideoMomentsByVideo, aggregateContinuousRatingByVideo } from './videoStats.js';
 import { objectsToCsv, rowsToCsv, exportDateStamp } from './csvUtil.js';
 import { downloadZip } from './zipDownload.js';
 import { downloadTextFile, generateMethodsText } from './methodsExport.js';
@@ -395,28 +397,12 @@ function pushEmotionColorSummary(out, question, eligible) {
 /** Continuous video rating: unit = video. */
 function pushContinuousVideoSummary(out, question, eligible) {
   const units = collectAnswerUnits(eligible, question.name);
-  const byVid = {};
-  units.forEach(({ answer, shown_images: shown }) => {
-    const key = videoStimulusKey(answer, shown);
-    if (!byVid[key]) byVid[key] = { means: [], sampleCounts: [], values: [] };
-    const mean = Number(answer?.mean);
-    if (!Number.isNaN(mean)) byVid[key].means.push(mean);
-    const sc = Number(answer?.sampleCount);
-    if (!Number.isNaN(sc)) byVid[key].sampleCounts.push(sc);
-    (answer?.samples || []).forEach((s) => {
-      const v = Number(s?.v);
-      if (!Number.isNaN(v)) byVid[key].values.push(v);
-    });
-  });
-  Object.entries(byVid).forEach(([key, block]) => {
-    const n = Math.max(block.means.length, 1);
+  aggregateContinuousRatingByVideo(units).forEach(({ videoKey: key, answers, agg, means }) => {
+    const n = answers.length;
     out.push(summaryRow(question, n, key, key, 'n_responses', n, n));
-    if (block.means.length) pushStats(out, question, n, key, key, block.means, 'trial_mean', 'trial_mean');
-    if (block.values.length) pushStats(out, question, n, key, key, block.values, 'sample', 'sample');
-    if (block.sampleCounts.length) {
-      const total = block.sampleCounts.reduce((a, b) => a + b, 0);
-      out.push(summaryRow(question, n, key, key, 'total_samples', total, n));
-    }
+    if (means.length) pushStats(out, question, n, key, key, means, 'trial_mean', 'trial_mean');
+    out.push(summaryRow(question, n, key, key, 'equal_response_mean', agg.globalMean, agg.responseCount));
+    out.push(summaryRow(question, n, key, key, 'total_samples', agg.sampleCount, n));
   });
 }
 
@@ -2021,9 +2007,10 @@ function buildSummaryObjects(question, responses) {
 
   if (['points', 'image_points'].includes(fam)) {
     const units = collectAnswerUnits(eligible, question.name);
-    const budget = question.budget || 100;
-    const compliant = units.filter(({ answer }) => answer && typeof answer === 'object'
-      && Math.abs(Object.values(answer).reduce((sum, v) => sum + (Number(v) || 0), 0) - budget) < 0.01).length;
+    const compliant = units.filter(({ answer }) => allocationStatus(answer, question).valid).length;
+    const full = units.filter(({ answer }) => allocationStatus(answer, question).full).length;
+    out.push(summaryRow(question, nResponses, 'overall', 'overall', 'budget_full_use_rate',
+      units.length ? full / units.length : null, units.length));
     out.push(summaryRow(question, nResponses, 'overall', 'overall', 'budget_compliance_rate',
       units.length ? compliant / units.length : null, units.length));
   }
@@ -2241,6 +2228,8 @@ export function buildManifest({
   questionFiles,
 }) {
   return {
+    analysis_algorithm_version: ANALYSIS_ALGORITHM_VERSION,
+    analysis_notes: ANALYSIS_NOTES,
     project_id: project?.id || null,
     project_name: project?.name || null,
     exported_at: new Date().toISOString(),
@@ -2257,7 +2246,7 @@ export function buildManifest({
           collectAnswerUnits(responses || [], q.name).forEach(({ answer }) => {
             const normalized = answer && typeof answer === 'object' && !Array.isArray(answer)
               ? answer : { value: answer };
-            const check = checkAnswerAgainstResultSchema(normalized, q.skillResultSchema || []);
+            const check = checkAnswerAgainstResultSchema(normalized, q.skillResultSchema || [], q.skillConfig);
             if (!check.recorded || check.fields.some((field) => !field.ok)) mismatch += 1;
           });
           if (mismatch) contractWarnings.push(`contract_mismatch: ${mismatch} trial(s)`);
@@ -2287,6 +2276,8 @@ export function buildManifest({
 export function buildExportReadme({ project, filters, nResponses, questionCount }) {
   const lines = [
     'SP Survey Platform — Results export',
+    `Analysis algorithm version: ${ANALYSIS_ALGORITHM_VERSION}`,
+    ...ANALYSIS_NOTES,
     '====================================',
     '',
     `Project: ${project?.name || project?.id || '(unknown)'}`,

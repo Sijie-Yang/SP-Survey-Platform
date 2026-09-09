@@ -10,6 +10,53 @@ const IMAGE_TYPES = new Set([
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
 ]);
 
+/** Native settings shared by the Builder and Agent API. Undefined means use the native default. */
+export function validateQuestionSettings(q) {
+  const errors = [];
+  const add = (path, message) => errors.push({ path, message });
+  const bounds = (obj, minKey, maxKey, prefix = '') => {
+    for (const key of [minKey, maxKey]) {
+      if (obj[key] != null && !Number.isFinite(obj[key])) add(prefix + key, `${prefix + key} must be a finite number.`);
+    }
+    if (obj[minKey] != null && obj[maxKey] != null && obj[minKey] > obj[maxKey]) {
+      add(prefix + minKey, `${prefix + minKey} must not exceed ${prefix + maxKey}.`);
+    }
+  };
+  bounds(q, 'min', 'max');
+  bounds(q, 'rateMin', 'rateMax');
+  bounds(q, 'minValue', 'maxValue');
+  bounds(q, 'scaleMin', 'scaleMax');
+  bounds({ ...q, maxAnnotations: q.maxAnnotations === 0 ? undefined : (q.maxAnnotations ?? 50) }, 'minAnnotations', 'maxAnnotations');
+  for (const key of ['minAnnotations', 'maxAnnotations', 'minSelectedChoices', 'maxSelectedChoices']) {
+    if (q[key] != null && (!Number.isInteger(q[key]) || q[key] < 0)) add(key, `${key} must be a non-negative integer.`);
+  }
+  if (['slidergroup', 'imageslidergroup', 'mediaslidergroup'].includes(q.type)
+    && (q.scaleMin ?? 1) >= (q.scaleMax ?? 7)) add('scaleMin', 'Scale minimum must be less than its maximum.');
+  bounds({ ...q, maxSelectedChoices: q.maxSelectedChoices === 0 ? undefined : q.maxSelectedChoices }, 'minSelectedChoices', 'maxSelectedChoices');
+  for (const key of ['step', 'rateStep', 'scaleStep', 'budget']) {
+    if (q[key] != null && (!Number.isFinite(q[key]) || q[key] <= 0)) add(key, `${key} must be a positive number.`);
+  }
+  for (const key of ['choices', 'rows', 'columns', 'dimensions']) {
+    if (!Array.isArray(q[key])) continue;
+    const seen = new Set();
+    q[key].forEach((item, i) => {
+      const id = item && typeof item === 'object' ? (item.value ?? item.id ?? item.key) : item;
+      if (id == null || String(id).trim() === '') add(`${key}[${i}]`, `${key}[${i}] needs a stable, non-empty ID.`);
+      else if (seen.has(String(id))) add(`${key}[${i}]`, `${key}: duplicate ID "${id}".`);
+      seen.add(String(id));
+      if (key === 'dimensions' && item && typeof item === 'object') {
+        bounds(item, 'min', 'max', `dimensions[${i}].`);
+        if (!(item.min != null && item.max != null && item.min > item.max)
+          && (item.min ?? q.scaleMin ?? 1) >= (item.max ?? q.scaleMax ?? 7)) {
+          add(`dimensions[${i}].min`, 'Dimension minimum must be less than its effective maximum.');
+        }
+        if (item.step != null && (!Number.isFinite(item.step) || item.step <= 0)) add(`dimensions[${i}].step`, 'Dimension step must be positive.');
+      }
+    });
+  }
+  return errors;
+}
+
 export function validateSurveyConfig(surveyConfig) {
   const errors = [];
   const warnings = [];
@@ -64,6 +111,10 @@ export function validateSurveyConfig(surveyConfig) {
         } else {
           names.set(element.name, `${elementPath}.name`);
         }
+
+        validateQuestionSettings(element).forEach((error) => errors.push({
+          path: `${elementPath}.${error.path}`, message: `${element.name || 'Question'}: ${error.message}`,
+        }));
 
         if (IMAGE_TYPES.has(element.type) && element.type !== 'skillquestion') {
           const hasManual = element.selectedImageUrls?.length

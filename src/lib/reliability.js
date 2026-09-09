@@ -1,4 +1,4 @@
-import { mediaIdentityKey, stimulusUnitKey, resolveMediaAnswerKey } from './mediaIdentity.js';
+import { stimulusUnitKey, resolveMediaAnswerKey } from './mediaIdentity.js';
 /** Inter-rater reliability: Krippendorff's alpha and agreement rate. */
 
 import { expandQuestionAnswerUnits } from './responseAnswerUnits.js';
@@ -23,7 +23,8 @@ export function buildIrrMatrix(responses, questionName, { interval = false, dime
         add(shown.length ? stimulusUnitKey(shown) : questionName, value);
       } else if (!interval && typeof value === 'string' && shown.length) {
         const chosen = resolveMediaAnswerKey(value, shown);
-        if (chosen) shown.forEach((img) => add(mediaIdentityKey(img), mediaIdentityKey(img) === chosen ? 1 : 0));
+        // The alternatives define the task: do not pool choices from different sets.
+        if (chosen) add(stimulusUnitKey(shown), chosen);
       }
     });
   });
@@ -60,33 +61,32 @@ export function krippendorffAlpha(responses, questionName, { level = 'interval',
 
   const distFn = level === 'interval' ? intervalDistance : nominalDistance;
   let obsDisagreement = 0;
-  let obsPairs = 0;
+  let overlappingUnits = 0;
   const allValues = [];
 
   units.forEach((unit) => {
     const coders = Object.entries(unitMap.get(unit) || {});
     if (coders.length < 2) return;
+    overlappingUnits += 1;
     coders.forEach(([, v]) => allValues.push(v));
     for (let i = 0; i < coders.length; i += 1) {
       for (let j = i + 1; j < coders.length; j += 1) {
-        obsDisagreement += distFn(coders[i][1], coders[j][1]);
-        obsPairs += 1;
+        obsDisagreement += 2 * distFn(coders[i][1], coders[j][1]) / (coders.length - 1);
       }
     }
   });
 
-  if (obsPairs === 0) return null;
+  if (overlappingUnits < 2) return null;
 
-  const valueFreq = {};
-  allValues.forEach((v) => { valueFreq[v] = (valueFreq[v] || 0) + 1; });
-  const totalVals = allValues.length;
+  const valueFreq = new Map();
+  allValues.forEach((v) => valueFreq.set(v, (valueFreq.get(v) || 0) + 1));
   let expDisagreement = 0;
   let expPairs = 0;
-  const vals = Object.keys(valueFreq);
+  const vals = [...valueFreq.keys()];
   for (let i = 0; i < vals.length; i += 1) {
     for (let j = i; j < vals.length; j += 1) {
-      const ni = valueFreq[vals[i]];
-      const nj = valueFreq[vals[j]];
+      const ni = valueFreq.get(vals[i]);
+      const nj = valueFreq.get(vals[j]);
       const pairs = i === j ? ni * (ni - 1) / 2 : ni * nj;
       expDisagreement += pairs * distFn(vals[i], vals[j]);
       expPairs += pairs;
@@ -94,9 +94,9 @@ export function krippendorffAlpha(responses, questionName, { level = 'interval',
   }
   if (expPairs === 0) return null;
 
-  const Do = obsDisagreement / obsPairs;
+  const Do = obsDisagreement / allValues.length;
   const De = expDisagreement / expPairs;
-  if (De === 0) return Do === 0 ? 1 : null;
+  if (De === 0) return null;
   return 1 - Do / De;
 }
 
@@ -122,11 +122,11 @@ export function irrLevelForQuestion(question) {
 }
 
 export function interpretAlpha(alpha) {
-  if (alpha == null) return 'Insufficient overlapping ratings';
+  if (alpha == null) return 'Insufficient overlap or no rating variation';
   if (alpha >= 0.8) return 'Excellent reliability (α ≥ 0.80)';
   if (alpha >= 0.667) return 'Acceptable for exploratory research (α ≥ 0.667)';
   if (alpha >= 0.4) return 'Moderate — interpret with caution';
-  return 'Poor reliability — review data quality';
+  return 'Low agreement — may reflect differing perceptions; inspect the study design';
 }
 
 export function computeQuestionIrr(responses, question) {

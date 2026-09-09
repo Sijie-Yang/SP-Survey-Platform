@@ -26,6 +26,9 @@ jobs:
         run: |
           node --test worker-lib/crypto/byokAesGcm.test.mjs
 
+      - name: Admin results authorization tests
+        run: node --test worker-lib/adminResults.test.mjs worker-lib/agent/skillContracts.test.mjs worker-lib/agent/skillHtmlValidate.test.mjs
+
       - name: Media pipeline smoke
         run: npm run test:media-pipeline
 

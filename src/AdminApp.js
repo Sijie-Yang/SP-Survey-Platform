@@ -208,7 +208,12 @@ export default function AdminApp() {
   };
   
   // Project management states
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(!compactToolbar);
+  useEffect(() => {
+    // A persistent desktop sidebar becomes a modal drawer on phones. Close it
+    // at the breakpoint so it cannot cover an already open question editor.
+    if (compactToolbar) setSidebarOpen(false);
+  }, [compactToolbar]);
   const [currentProject, setCurrentProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(true);
 

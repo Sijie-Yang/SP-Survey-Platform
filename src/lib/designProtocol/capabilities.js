@@ -115,7 +115,7 @@ export const DESIGN_CAPABILITIES = {
       rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
       matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
       ranking: { fields: ['name', 'title', 'choices[]'] },
-      slidergroup: { fields: ['name', 'title', 'dimensions[{id,left,right}]', 'scaleMin', 'scaleMax'] },
+      slidergroup: { fields: ['name', 'title', 'dimensions[{id,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
       pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
     },
     image: {

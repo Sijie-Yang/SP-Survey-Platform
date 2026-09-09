@@ -18,11 +18,12 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Box, Typography, Card, Button } from '@mui/material';
+import { Box, Typography, Card, Button, IconButton } from '@mui/material';
+import { ArrowUpward, ArrowDownward } from '@mui/icons-material';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { resolveQuestionImageChoices } from '../lib/questionImageChoices';
 
-function SortableItem({ id, image, index }) {
+function SortableItem({ id, image, index, readOnly, onMove, total, zh }) {
   const {
     attributes,
     listeners,
@@ -30,7 +31,7 @@ function SortableItem({ id, image, index }) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled: readOnly });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -93,18 +94,22 @@ function SortableItem({ id, image, index }) {
         </Box>
       </Box>
       {/* Drag only via handle — rest of row scrolls the page on touch */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <IconButton disabled={readOnly || index === 0} onClick={() => onMove(index, index - 1)}
+        aria-label={zh ? `上移第 ${index + 1} 项` : `Move item ${index + 1} up`} sx={{ width: 44, height: 44 }}><ArrowUpward /></IconButton>
       <Box
-        {...attributes}
-        {...listeners}
-        aria-label={`Drag to reorder image ${index + 1}`}
+        {...(readOnly ? {} : attributes)}
+        {...(readOnly ? {} : listeners)}
+        aria-label={zh ? `拖动第 ${index + 1} 项` : `Drag to reorder image ${index + 1}`}
         sx={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flex: '0 0 auto',
-          width: { xs: 44, sm: 40 },
+          width: 44,
+          minHeight: 44,
           touchAction: 'none',
-          cursor: 'grab',
+          cursor: readOnly ? 'default' : 'grab',
           bgcolor: 'action.hover',
           borderLeft: '1px solid',
           borderColor: 'divider',
@@ -113,6 +118,9 @@ function SortableItem({ id, image, index }) {
       >
         <DragIndicatorIcon fontSize="small" color="action" />
       </Box>
+      <IconButton disabled={readOnly || index === total - 1} onClick={() => onMove(index, index + 1)}
+        aria-label={zh ? `下移第 ${index + 1} 项` : `Move item ${index + 1} down`} sx={{ width: 44, height: 44 }}><ArrowDownward /></IconButton>
+      </Box>
     </Card>
   );
 }
@@ -120,6 +128,7 @@ function SortableItem({ id, image, index }) {
 export default function ImageRankingWidget({ question, value, onValueChanged, trialStimulusMedia = null }) {
   const [items, setItems] = useState([]);
   const zh = resolveSurveyUiLanguage(question?.survey) === 'zh';
+  const readOnly = !!question?.isReadOnly || question?.survey?.mode === 'display';
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -169,18 +178,16 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
     }
   }, [question, question.choices, question.imageLinks, value, trialMediaKey, trialStimulusMedia, onValueChanged]);
 
-  function handleDragEnd(event) {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
+  function moveItem(oldIndex, newIndex) {
+    if (readOnly || oldIndex < 0 || newIndex < 0 || newIndex >= items.length) return;
+    const next = arrayMove(items, oldIndex, newIndex);
+    setItems(next);
+    onValueChanged?.(next.map((item) => item.value));
+  }
 
-    setItems((prev) => {
-      const oldIndex = prev.findIndex((item) => item.id === active.id);
-      const newIndex = prev.findIndex((item) => item.id === over.id);
-      if (oldIndex < 0 || newIndex < 0) return prev;
-      const newItems = arrayMove(prev, oldIndex, newIndex);
-      onValueChanged(newItems.map((item) => item.value));
-      return newItems;
-    });
+  function handleDragEnd({ active, over }) {
+    if (readOnly || !over || active.id === over.id) return;
+    moveItem(items.findIndex((item) => item.id === active.id), items.findIndex((item) => item.id === over.id));
   }
 
   if (!items || items.length === 0) {
@@ -194,10 +201,10 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
   return (
     <Box sx={{ width: '100%', maxWidth: 600, mx: 'auto' }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        {zh ? '拖动右侧手柄调整顺序（手机上长按拖动），或确认当前顺序。' : 'Drag the handle to reorder (touch: press and hold), or confirm the current order.'}
+        {zh ? '点击上下箭头或拖动手柄调整顺序（手机上长按拖动），也可以确认当前顺序。' : 'Use the up/down buttons or drag the handle (touch: press and hold), or confirm the current order.'}
       </Typography>
-      <Button variant="outlined" sx={{ mb: 1 }} disabled={!items.length || question?.survey?.mode === 'display'}
-        onClick={() => onValueChanged?.(items.map((item) => item.value))}>
+      <Button variant="outlined" sx={{ mb: 1 }} disabled={!items.length || readOnly}
+        onClick={() => { if (!readOnly) onValueChanged?.(items.map((item) => item.value)); }}>
         {Array.isArray(value) && value.length ? (zh ? '已确认顺序' : 'Order confirmed') : (zh ? '确认当前顺序' : 'Confirm current order')}
       </Button>
       <Box
@@ -216,6 +223,7 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
                 id={item.id}
                 image={item}
                 index={index}
+                readOnly={readOnly} onMove={moveItem} total={items.length} zh={zh}
               />
             ))}
           </SortableContext>

@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { Box, Typography, Slider, TextField, Chip } from '@mui/material';
+import { Box, Typography, Slider, TextField, Chip, Button } from '@mui/material';
+import { sliderScale } from '../lib/sliderScale';
 import { ImageGalleryGrid } from './MediaWidgets';
 
 /**
@@ -12,13 +13,15 @@ export function SliderGroupContent({
   dimensions = [],
   scaleMin = 1,
   scaleMax = 7,
+  scaleStep = 1,
+  language = 'en',
   value,
   onChange,
   readOnly,
   /** When true, silently persist midpoints (legacy). Default false restores required semantics. */
   autoPersistDefaults = false,
 }) {
-  const mid = Math.round((Number(scaleMin) + Number(scaleMax)) / 2);
+  const zh = language === 'zh';
   const current = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
 
   useEffect(() => {
@@ -28,14 +31,14 @@ export function SliderGroupContent({
     dimensions.forEach((d) => {
       if (!d?.id) return;
       if (next[d.id] === undefined || next[d.id] === null || next[d.id] === '') {
-        next[d.id] = mid;
+        next[d.id] = sliderScale(d, { scaleMin, scaleMax, scaleStep }).midpoint;
         changed = true;
       }
     });
     if (changed) onChange(next);
     // Only re-run when scale / dimension set changes — not on every value tweak.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimensions, scaleMin, scaleMax, mid, readOnly, autoPersistDefaults]);
+  }, [dimensions, scaleMin, scaleMax, scaleStep, readOnly, autoPersistDefaults]);
 
   if (!dimensions.length) {
     return (
@@ -48,7 +51,10 @@ export function SliderGroupContent({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       {dimensions.map((d) => {
-        const v = current[d.id] ?? mid;
+        const scale = sliderScale(d, { scaleMin, scaleMax, scaleStep });
+        const answered = typeof current[d.id] === 'number' && Number.isFinite(current[d.id]);
+        const v = answered ? current[d.id] : scale.midpoint;
+        const label = answered ? v : (zh ? '尚未评分' : 'Not rated');
         return (
           <Box key={d.id} sx={{ px: { xs: 0, sm: 1 } }}>
             {/* Phones: labels above slider so long bipolar text does not crush mid-row */}
@@ -66,8 +72,8 @@ export function SliderGroupContent({
               </Typography>
               <Chip
                 size="small"
-                label={v}
-                color="primary"
+                label={label}
+                color={answered ? "primary" : "default"}
                 sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0 }}
               />
               <Typography
@@ -92,8 +98,8 @@ export function SliderGroupContent({
               </Typography>
               <Chip
                 size="small"
-                label={v}
-                color="primary"
+                label={label}
+                color={answered ? "primary" : "default"}
                 sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700, justifySelf: 'center' }}
               />
               <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'right' }}>
@@ -102,18 +108,23 @@ export function SliderGroupContent({
             </Box>
             <Slider
               value={Number(v)}
-              min={scaleMin}
-              max={scaleMax}
-              step={1}
-              marks
-              disabled={readOnly}
+              min={scale.min}
+              max={scale.max}
+              step={scale.step}
+              marks={scale.valid && (scale.max - scale.min) / scale.step <= 20}
+              disabled={readOnly || !scale.valid}
+              aria-label={`${d.left || d.id} – ${d.right || d.id}`}
               onChange={(_, val) => onChange?.({ ...current, [d.id]: val })}
               valueLabelDisplay="auto"
             />
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: -1 }}>
-              <Typography variant="caption" color="text.disabled">{scaleMin}</Typography>
-              <Typography variant="caption" color="text.disabled">{scaleMax}</Typography>
+              <Typography variant="caption" color="text.disabled">{scale.min}</Typography>
+              <Typography variant="caption" color="text.disabled">{scale.max}</Typography>
             </Box>
+            {!answered && !readOnly && <Button size="small" sx={{ minHeight: 44 }} disabled={!scale.valid}
+              onClick={() => onChange?.({ ...current, [d.id]: scale.midpoint })}>
+              {zh ? `选择 ${scale.midpoint}` : `Select ${scale.midpoint}`}
+            </Button>}
           </Box>
         );
       })}
@@ -213,6 +224,8 @@ export function ImageSliderGroupContent({
   dimensions = [],
   scaleMin = 1,
   scaleMax = 7,
+  scaleStep = 1,
+  language = 'en',
   value,
   onChange,
   readOnly,
@@ -235,6 +248,8 @@ export function ImageSliderGroupContent({
         dimensions={dimensions}
         scaleMin={scaleMin}
         scaleMax={scaleMax}
+        scaleStep={scaleStep}
+        language={language}
         value={value}
         onChange={onChange}
         readOnly={readOnly}

@@ -1,3 +1,6 @@
+import SkillPreviewPanel from '../components/admin/SkillPreviewPanel';
+import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
+import { checkAnswerAgainstResultSchema } from '../lib/skillResultTypes';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Box, Container, Typography, AppBar, Toolbar, Tabs, Tab, Paper,
@@ -6,12 +9,12 @@ import {
   Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Switch, Alert, Snackbar, Checkbox,
   CircularProgress, Tooltip, Stack, Select, MenuItem, FormControl, InputLabel,
-  LinearProgress, Accordion, AccordionSummary, AccordionDetails, Link,
+  LinearProgress, Accordion, AccordionSummary, AccordionDetails, Link, useMediaQuery,
 } from '@mui/material';
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
   EditNote, PhotoLibrary, DeleteForever, ExpandMore, PushPin, AutoFixHigh, Stop,
-  CloudDownload, OpenInNew, ContentCopy,
+  CloudDownload, OpenInNew, ContentCopy, Assessment,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -63,6 +66,7 @@ import ResearchDeepSearch from '../components/admin/ResearchDeepSearch';
 import SurveyDesignRequestManagement from '../components/admin/SurveyDesignRequestManagement';
 import SpBenchManagement from '../components/admin/SpBenchManagement';
 import NewsManagement from '../components/admin/NewsManagement';
+import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDialog';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 const projectSurveyPath = (projectId) => `/survey?project=${encodeURIComponent(projectId)}`;
@@ -1750,6 +1754,7 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
 // ─── Project Overview Tab ────────────────────────────────────────────────────
 
 function ProjectOverview() {
+  const [resultsTarget, setResultsTarget] = useState(null);
   const [projects, setProjects]           = useState([]);
   const [loading, setLoading]             = useState(false);
   const [editTarget, setEditTarget]       = useState(null);
@@ -2020,6 +2025,16 @@ function ProjectOverview() {
                           <ContentCopy fontSize="small" />
                         </IconButton>
                       </Tooltip>
+                      <Tooltip title="结果分析">
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          aria-label={`查看结果分析：${p.name || p.id}`}
+                          onClick={() => setResultsTarget(p)}
+                        >
+                          <Assessment fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       <Tooltip title="管理图片">
                         <IconButton size="small" color="info"
                           onClick={() => { setImagesTarget(p); setImagesOpen(true); }}>
@@ -2058,6 +2073,8 @@ function ProjectOverview() {
         onClose={() => setEditOpen(false)}
         onSaved={() => { load(); showSnack('保存成功'); }}
       />
+
+      <AdminProjectResultsDialog project={resultsTarget} onClose={() => setResultsTarget(null)} />
 
       <ProjectSurveyBuilderDialog
         project={configTarget}
@@ -2107,6 +2124,19 @@ function ProjectOverview() {
 
 function SkillManagement() {
   const navigate = useNavigate();
+  const [review, setReview] = useState(null);
+  const mobile = useMediaQuery('(max-width:600px)');
+  const openReview = async (skill) => {
+    setReview({ skill, media: [], loading: true });
+    try {
+      const pool = await listPreviewMedia();
+      const count = skill.defaultConfig?.mediaCount ?? 1;
+      const media = count === 0 ? [] : pickPreviewMedia(pool, skill.defaultConfig?.mediaType || 'image', count);
+      setReview((current) => current?.skill.id === skill.id ? { skill, media, loading: false } : current);
+    } catch {
+      setReview((current) => current?.skill.id === skill.id ? { skill, media: [], loading: false } : current);
+    }
+  };
   const [skills, setSkills] = useState([]);
   const [loading, setLoading] = useState(false);
   const [snack, setSnack] = useState({ open: false, msg: '', sev: 'success' });
@@ -2149,9 +2179,9 @@ function SkillManagement() {
   return (
     <Box>
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center">
-        <Typography variant="h6">Skill 审核</Typography>
+        <Typography variant="h6">自定义交互审核</Typography>
         <Box flex={1} />
-        <Button variant="outlined" onClick={() => navigate('/skills')}>我的 Skill 库</Button>
+        <Button variant="outlined" onClick={() => navigate('/skills')}>我的自定义交互</Button>
         <Button startIcon={<Refresh />} onClick={load} disabled={loading}>刷新</Button>
       </Stack>
       {loading ? <CircularProgress /> : (
@@ -2169,7 +2199,7 @@ function SkillManagement() {
             </TableHead>
             <TableBody>
               {skills.length === 0 && (
-                <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>暂无待审核 Skill</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>暂无待审核自定义交互</TableCell></TableRow>
               )}
               {skills.map((s) => {
                 const status = getSkillStatus(s);
@@ -2196,6 +2226,7 @@ function SkillManagement() {
                     </Typography>
                   </TableCell>
                   <TableCell align="center">
+                    <Tooltip title="试答、分析与输出检查"><IconButton aria-label={`审核预览：${s.name}`} onClick={() => openReview(s)} sx={{ minWidth: 44, minHeight: 44 }}><Preview fontSize="small" /></IconButton></Tooltip>
                     <IconButton size="small" color="error" onClick={() => handleDelete(s.id, s.name)}><Delete fontSize="small" /></IconButton>
                   </TableCell>
                 </TableRow>
@@ -2204,6 +2235,20 @@ function SkillManagement() {
           </Table>
         </TableContainer>
       )}
+      <Dialog open={!!review} onClose={() => setReview(null)} maxWidth="md" fullWidth fullScreen={mobile}>
+        <DialogTitle>审核预览：{review?.skill.name}</DialogTitle>
+        <DialogContent dividers>
+          {review && <>
+            <Typography variant="body2" sx={{ mb: 1 }}>版本 {review.skill.currentRevision || 1} · {review.skill.description}</Typography>
+            <Alert severity="info" sx={{ mb: 2 }}>检查交互能否完成、手机是否可操作，以及试答是否进入正确的分析与导出。试答不会保存为正式答卷。</Alert>
+            {(!review.skill.contractVersion || review.skill.resultSchema?.length !== 1) && <Alert severity="warning" sx={{ mb: 2 }}>旧版输出协议：保留读取兼容。发布新修订时应使用一个标准结果字段。</Alert>}
+            {!!review.skill.exampleAnswer && !checkAnswerAgainstResultSchema(review.skill.exampleAnswer, review.skill.resultSchema, review.skill.defaultConfig).fields.every((f) => f.ok)
+              && <Alert severity="warning" sx={{ mb: 2 }}>保存的示例答案未通过当前输出检查，请核对字段设置和实际试答。</Alert>}
+            {review.loading ? <CircularProgress /> : <SkillPreviewPanel key={review.skill.id} skill={review.skill} images={review.media} />}
+          </>}
+        </DialogContent>
+        <DialogActions><Button onClick={() => setReview(null)}>关闭</Button></DialogActions>
+      </Dialog>
       <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((x) => ({ ...x, open: false }))}>
         <Alert severity={snack.sev}>{snack.msg}</Alert>
       </Snackbar>
@@ -2510,7 +2555,7 @@ export default function AdminDashboard() {
           <Tab label="模板管理" />
           <Tab label="项目概览" />
           <Tab label="预览媒体库" />
-          <Tab label="Skill 审核" />
+          <Tab label="自定义交互审核" />
           <Tab label="Live Surveys" />
           <Tab label="论文库" />
           <Tab label="Survey Design" />

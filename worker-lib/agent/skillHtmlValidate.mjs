@@ -1,3 +1,4 @@
+import { validateQuestionSettings } from '../designProtocol.mjs';
 /**
  * Hard rules for custom skill HTML (MCP skill_save).
  * Keep in sync with src/lib/skillHtmlValidate.js
@@ -114,6 +115,9 @@ export function prepareSkillForSave(raw = {}) {
   resultSchema.forEach((field) => {
     if (!strictContract) return;
     const type = String(field.type || '');
+    validateQuestionSettings({ ...field, choices: field.options }).forEach((issue) => {
+      errors.push(`resultSchema ${field.key}: ${issue.message}`);
+    });
     const options = Array.isArray(field.options) ? field.options : [];
     if (['choice', 'multiChoice', 'rankedList', 'allocation'].includes(type) && !options.length) {
       errors.push(`resultSchema field "${field.key}" (${type}) requires non-empty options to match its native question settings.`);
@@ -141,7 +145,7 @@ export function prepareSkillForSave(raw = {}) {
   if (strictContract && (!exampleAnswer || typeof exampleAnswer !== 'object' || Array.isArray(exampleAnswer) || !Object.keys(exampleAnswer).length)) {
     errors.push('exampleAnswer must be a non-empty object for contract version 1.');
   } else if (strictContract) {
-    const check = checkAnswerAgainstResultSchema(exampleAnswer, resultSchema);
+    const check = checkAnswerAgainstResultSchema(exampleAnswer, resultSchema, raw.defaultConfig ?? raw.default_config ?? {});
     const invalid = check.fields.filter((field) => !field.ok);
     if (invalid.length) {
       errors.push(`exampleAnswer does not match resultSchema: ${invalid.map((f) => `${f.key} (${f.detail})`).join(', ')}.`);

@@ -1,4 +1,7 @@
+import { sliderScale } from '../../lib/sliderScale';
+import { allocationStatus } from '../../lib/allocationStats';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from '../../lib/mediaIdentity';
+import { fetchAdminResponsePage } from '../../lib/adminResults';
 import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import {
   Box,
@@ -418,7 +421,7 @@ function IrrSummary({ responses, question }) {
       )}
       {agreement != null && (
         <Typography variant="caption" color="text.secondary" display="block">
-          Percent agreement (same-image units): {(agreement * 100).toFixed(1)}%
+          Units with complete agreement among raters: {(agreement * 100).toFixed(1)}%
         </Typography>
       )}
     </Alert>
@@ -1037,6 +1040,7 @@ function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
         From each full ranking, every higher-ranked image beats every lower-ranked image
         ({matches.length} pairwise outcomes).
       </Typography>
+      {kendallWVal == null && <Alert severity="info" sx={{ mb: 2 }}>{interpretKendallW(null)}. Ranks and Borda scores are descriptive within the shown sets.</Alert>}
       {kendallWVal != null && (
         <Alert severity={kendallWVal >= 0.5 ? 'success' : 'info'} sx={{ mb: 2 }}>
           Kendall&apos;s W = {kendallWVal.toFixed(3)} — {interpretKendallW(kendallWVal)}
@@ -1743,7 +1747,7 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
   useEffect(() => {
     let cancelled = false;
     const skillId = question.skillId;
-    if (!skillId || skillId.startsWith('preset_')) {
+    if (!skillId || skillId.startsWith('preset_') || question.skillResultSchema?.length) {
       return undefined;
     }
     (async () => {
@@ -1810,7 +1814,7 @@ function SkillQuestionAnalysis({ question, answers, allResponses }) {
     schema = schema.filter((f) => f.key !== 'mode');
   }
   const contractMismatchCount = objAnswers.filter(({ answer }) => {
-    const check = checkAnswerAgainstResultSchema(answer, schema || []);
+    const check = checkAnswerAgainstResultSchema(answer, schema || [], question.skillConfig);
     return !check.recorded || check.fields.some((field) => !field.ok);
   }).length;
 
@@ -1958,8 +1962,6 @@ function useImageUrlResolver() {
 function ImageSliderGroupAnalysis({ question, answers }) {
   const getImageUrl = useImageUrlResolver();
   const dims = question.dimensions || [];
-  const scaleMin = question.scaleMin ?? 1;
-  const scaleMax = question.scaleMax ?? 7;
   const [tab, setTab] = useState(0);
 
   const dimKeys = dims.length
@@ -1972,6 +1974,7 @@ function ImageSliderGroupAnalysis({ question, answers }) {
   const safeTab = Math.min(tab, Math.max(0, dimKeys.length - 1));
   const dimId = dimKeys[safeTab];
   const dimDef = dims.find((d) => d.id === dimId);
+  const { min: scaleMin, max: scaleMax } = sliderScale(dimDef, question);
   const dimTitle = dimDef
     ? (dimDef.label || `${dimDef.left} ↔ ${dimDef.right}`)
     : dimId;
@@ -1982,8 +1985,9 @@ function ImageSliderGroupAnalysis({ question, answers }) {
     const perImage = {};
     for (const { answer, shown_images } of answers || []) {
       if (!shown_images?.length || typeof answer !== 'object' || !answer) continue;
+      if (answer[dimId] == null || answer[dimId] === '') continue;
       const val = Number(answer[dimId]);
-      if (Number.isNaN(val)) continue;
+      if (!Number.isFinite(val)) continue;
       vals.push(val);
       const img = shown_images[0];
       const key = stimulusUnitKey(shown_images);
@@ -2102,8 +2106,7 @@ function ImagePointAllocationAnalysis({ question, answers }) {
   let compliant = 0;
   (answers || []).forEach(({ answer }) => {
     if (!answer || typeof answer !== 'object') return;
-    const sum = Object.values(answer).reduce((s, v) => s + (Number(v) || 0), 0);
-    if (Math.abs(sum - budget) < 0.01) compliant += 1;
+    if (allocationStatus(answer, question).valid) compliant += 1;
   });
 
   const rankedItems = useMemo(() => {
@@ -2138,7 +2141,8 @@ function ImagePointAllocationAnalysis({ question, answers }) {
   return (
     <Box>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        Budget compliance: {compliant}/{answers.length} ({pct(compliant, answers.length)}%)
+        Within budget (partial use allowed): {compliant}/{answers.length} ({pct(compliant, answers.length)}%) ·
+        Full budget used: {answers.filter(({ answer }) => allocationStatus(answer, question).full).length}/{answers.length}
       </Typography>
       {rankedItems.length > 0 ? (
         <CompactImageRanking
@@ -2178,20 +2182,21 @@ function ImagePointAllocationAnalysis({ question, answers }) {
 
 function SliderGroupAnalysis({ question, answers }) {
   const dims = question.dimensions || [];
-  const scaleMin = question.scaleMin ?? 1;
-  const scaleMax = question.scaleMax ?? 7;
+  const firstScale = sliderScale(dims[0], question);
+  const comparable = dims.every((d) => { const scale = sliderScale(d, question); return scale.min === firstScale.min && scale.max === firstScale.max; });
   const stats = dims.map((d) => {
     const vals = answers
-      .map((a) => (a.answer && typeof a.answer === 'object' ? Number(a.answer[d.id]) : NaN))
-      .filter((v) => !Number.isNaN(v));
+      .map((a) => (a.answer && a.answer[d.id] != null && a.answer[d.id] !== '' ? Number(a.answer[d.id]) : NaN))
+      .filter(Number.isFinite);
     const mean = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
     const sd = vals.length > 1 ? Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length) : 0;
-    return { ...d, mean, sd, n: vals.length, vals };
+    return { ...d, mean, sd, n: vals.length, vals, scale: sliderScale(d, question) };
   });
 
   return (
     <Box>
-      <SemanticProfileChart dimensions={stats} scaleMin={scaleMin} scaleMax={scaleMax} />
+      {comparable ? <SemanticProfileChart dimensions={stats} scaleMin={firstScale.min} scaleMax={firstScale.max} />
+        : <Alert severity="info" sx={{ mb: 2 }}>Dimensions use different ranges. Read each distribution on its own scale.</Alert>}
       {stats.map((s) => (
         <Box key={s.id} sx={{ mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.25 }}>
@@ -2204,8 +2209,8 @@ function SliderGroupAnalysis({ question, answers }) {
           {s.vals?.length >= 3 && (
             <DensityHistogramChart
               scores={s.vals}
-              domainMin={scaleMin}
-              domainMax={scaleMax}
+              domainMin={s.scale.min}
+              domainMax={s.scale.max}
               title={`${s.label || s.id} distribution`}
               padB={40}
               chartH={180}
@@ -2230,8 +2235,7 @@ function PointAllocationAnalysis({ question, answers }) {
   });
   answers.forEach(({ answer }) => {
     if (!answer || typeof answer !== 'object') return;
-    const sum = Object.values(answer).reduce((s, v) => s + (Number(v) || 0), 0);
-    if (Math.abs(sum - budget) < 0.01) compliant += 1;
+    if (allocationStatus(answer, question).valid) compliant += 1;
   });
   const maxMean = Math.max(...stats.map((s) => s.mean), 1);
   const allInOne = answers.filter(({ answer }) => {
@@ -2244,7 +2248,8 @@ function PointAllocationAnalysis({ question, answers }) {
   return (
     <Box>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        Budget compliance: {compliant}/{answers.length} ({pct(compliant, answers.length)}%) ·
+        Within budget (partial use allowed): {compliant}/{answers.length} ({pct(compliant, answers.length)}%) ·
+        Full budget used: {answers.filter(({ answer }) => allocationStatus(answer, question).full).length}/{answers.length} ·
         All-in-one allocation: {allInOne} ({pct(allInOne, answers.length)}%)
       </Typography>
       {stats.map((s) => (
@@ -2386,7 +2391,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
           </Button>
         )}
 
-        <IconButton size="small">
+        <IconButton size="small" aria-label={`${expanded ? 'Collapse' : 'Expand'} analysis: ${question.name}`} aria-expanded={expanded} sx={{ minWidth: 44, minHeight: 44 }}>
           {expanded ? <ExpandLess /> : <ExpandMore />}
         </IconButton>
       </Box>
@@ -2427,7 +2432,7 @@ function readIncludePracticeFromConfig(surveyConfig) {
     : true; // default ON for new projects
 }
 
-export default function ResultsAnalysis({ currentProject, surveyConfig: currentSurveyConfig }) {
+export default function ResultsAnalysis({ currentProject, surveyConfig: currentSurveyConfig, adminMode = false }) {
   const { t } = useRegion();
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -2506,7 +2511,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
     setLoadProgress(null);
     setError(null);
     try {
-      if (platformSupabase && currentProject?.id) {
+      if ((adminMode || platformSupabase) && currentProject?.id) {
         // Page through all rows — PostgREST default max is 1000.
         const pageSize = 1000;
         const all = [];
@@ -2515,7 +2520,9 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
           const from = offset;
           const to = offset + pageSize - 1;
           setLoadProgress({ loaded: all.length, page: Math.floor(offset / pageSize) + 1 });
-          const { data, error: sbError } = await platformSupabase
+          const { data, error: sbError } = adminMode
+            ? { data: await fetchAdminResponsePage(currentProject.id, from) }
+            : await platformSupabase
             .from('survey_responses')
             .select('*')
             .eq('project_id', currentProject.id)
@@ -2550,7 +2557,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
     } finally {
       if (sequence === fetchSequence.current) { setLoading(false); setLoadProgress(null); }
     }
-  }, [currentProject?.id]);
+  }, [currentProject?.id, adminMode]);
 
   useEffect(() => {
     if (currentProject?.id) fetchResponses();
@@ -2596,7 +2603,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
   }, [responses, currentProject?.id, dateFrom, dateTo, sessionFilter, revisionFilter, includePractice]);
 
   const handleDeleteResponse = async () => {
-    if (!deleteTarget) return;
+    if (adminMode || !deleteTarget) return;
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -3036,7 +3043,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
           </AccordionSummary>
           <AccordionDetails>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              {t.resultsRecordsHelp}
+              {adminMode ? t.resultsRecordsViewHelp : t.resultsRecordsHelp}
             </Typography>
             {deleteError && (
               <Alert severity="error" sx={{ mb: 1.5 }} onClose={() => setDeleteError(null)}>
@@ -3098,7 +3105,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
                         </TableCell>
                         <TableCell align="right">
                           <Button size="small" onClick={() => setDetailTarget(row)}>{t.resultsViewResponse}</Button>
-                          <Tooltip title="Delete this response">
+                          {!adminMode && <Tooltip title="Delete this response">
                             <IconButton
                               size="small"
                               color="error"
@@ -3109,7 +3116,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
                             >
                               <DeleteOutline fontSize="small" />
                             </IconButton>
-                          </Tooltip>
+                          </Tooltip>}
                         </TableCell>
                       </TableRow>
                     );

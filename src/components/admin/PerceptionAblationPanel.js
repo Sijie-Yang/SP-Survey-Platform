@@ -265,14 +265,14 @@ export default function PerceptionAblationPanel({
             </Alert>
           )}
           <Typography variant="body2" sx={{ mb: 1 }}>
-            Kept <strong>{result.nFeaturesOut}</strong> / {result.nFeaturesIn} features after VIF
-            (dropped {result.vifDropped?.length || 0}).
+            Used <strong>{result.nFeaturesOut}</strong> / {result.nFeaturesIn} features across training folds.
+            Imputation, VIF and scaling are fitted separately on each training fold.
             {' '}n={result.n}
             {result.foldsUsed > 1
               ? ` · ${result.foldsUsed}-fold CV (≈${result.nTrain} train / ${result.nTest} test per fold)`
               : ` · Train n=${result.nTrain}, test n=${result.nTest}`}
             {result.imputeMissing
-              ? ` · imputed ${result.imputedCells || 0} missing cell(s)`
+              ? ` · imputed ${result.imputedCells || 0} missing cell(s) across folds`
               : null}
             {result.droppedIncomplete
               ? ` · dropped ${result.droppedIncomplete} incomplete row(s)`
@@ -292,9 +292,9 @@ export default function PerceptionAblationPanel({
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
                     {result.vifDropped.map((d) => (
                       <Chip
-                        key={d.feature}
+                        key={`${d.fold}-${d.feature}`}
                         size="small"
-                        label={`${d.feature}${d.vif != null ? ` (${d.vif.toFixed(1)})` : ''}`}
+                        label={`Fold ${d.fold}: ${d.feature}${d.vif != null ? ` (${d.vif.toFixed(1)})` : ''}`}
                         variant="outlined"
                       />
                     ))}
@@ -306,9 +306,9 @@ export default function PerceptionAblationPanel({
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
                   {(result.vifKept || []).slice(0, 24).map((d) => (
                     <Chip
-                      key={d.feature}
+                      key={`${d.fold}-${d.feature}`}
                       size="small"
-                      label={`${d.feature}${d.vif != null ? ` (${d.vif.toFixed(1)})` : ''}`}
+                      label={`Fold ${d.fold}: ${d.feature}${d.vif != null ? ` (${d.vif.toFixed(1)})` : ''}`}
                       color="success"
                       variant="outlined"
                     />

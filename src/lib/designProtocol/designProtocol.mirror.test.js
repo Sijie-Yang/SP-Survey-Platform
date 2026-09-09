@@ -70,3 +70,13 @@ describe('designProtocol browser ↔ worker mirror', () => {
     expect([...workerGuide].sort()).toEqual([...browserGuide].sort());
   });
 });
+
+
+test('browser and Worker share the exact setting validation implementation', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const browser = fs.readFileSync(path.join(process.cwd(), 'src/lib/designProtocol/validate.js'), 'utf8');
+  const worker = fs.readFileSync(path.join(process.cwd(), 'worker-lib/designProtocol.mjs'), 'utf8');
+  const part = (source) => source.slice(source.indexOf('export function validateQuestionSettings'), source.indexOf('export function validateSurveyConfig')).trim();
+  expect(part(worker)).toBe(part(browser));
+});

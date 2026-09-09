@@ -16,8 +16,8 @@ export function SurveyJsRatingControl({
   onChange,
 }) {
   const groupId = useId();
-  const min = Number(rateMin) || 1;
-  const max = Number(rateMax) || 5;
+  const min = Number.isFinite(Number(rateMin)) ? Number(rateMin) : 1;
+  const max = Number.isFinite(Number(rateMax)) ? Number(rateMax) : 5;
   const lo = Math.min(min, max);
   const hi = Math.max(min, max);
   const values = [];

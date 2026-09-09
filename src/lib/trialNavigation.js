@@ -1,3 +1,4 @@
+import { sliderGroupAnswerValid } from './sliderScale';
 /**
  * Multi-trial navigation helpers for image/media questions.
  */
@@ -142,6 +143,9 @@ export function trialHasAnswer(trial, question = null) {
     return false;
   }
   const type = question?.getType?.() || question?.type;
+  if (['slidergroup', 'imageslidergroup', 'mediaslidergroup'].includes(type)) {
+    return sliderGroupAnswerValid(v, question, true);
+  }
   if (question && isMatrixQuestionType(type)) {
     return matrixValueIsComplete(v, question);
   }
