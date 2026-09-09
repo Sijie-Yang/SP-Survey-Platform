@@ -1123,6 +1123,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                     ? `skill:${editedQuestion.skillId}` : (editedQuestion.type || 'text')}
                   onChange={(e) => handleQuestionChange('type', e.target.value)}
                   label="Question Type"
+                  inputProps={{ 'aria-label': 'Question Type' }}
                 >
                   {typeMenuGroups.flatMap((group) => {
                     const items = questionTypes.filter((t) => t.group === group.id && (taskFilter === 'all' || taskFamily(t.value) === taskFilter || t.value === selectedType));

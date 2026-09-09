@@ -791,7 +791,8 @@ export default function AdminApp() {
     
     // Save current tab and state before updating (important!)
     const currentTabValue = tabValue;
-    if (currentProject && currentProject.id === updatedProject.id) {
+    const targetIsActive = currentProjectIdRef.current === updatedProject.id;
+    if (targetIsActive && currentProject && currentProject.id === updatedProject.id) {
       // Immediately save to localStorage synchronously
       const newStates = {
         ...projectStates,
@@ -808,16 +809,24 @@ export default function AdminApp() {
       setProjectStates(newStates);
     }
     
-    setCurrentProject(updatedProject);
+    if (targetIsActive) setCurrentProject(updatedProject);
 
     // Batch feature jobs (L0/Seg) may pass skipSave to avoid full project write every image
     if (opts?.skipSave) return;
 
     try {
-      await saveProjectFull(updatedProject, surveyConfig);
+      const result = await saveProjectFull(updatedProject, surveyConfig);
+      if (!result.success) throw new Error(result.error || 'Project save failed');
+      if (currentProjectIdRef.current === updatedProject.id && result.draftUpdatedAt) {
+        draftUpdatedAtRef.current = result.draftUpdatedAt;
+        setCurrentProject((prev) => prev?.id === updatedProject.id
+          ? { ...prev, draftUpdatedAt: result.draftUpdatedAt } : prev);
+      }
       console.log('✅ Project configuration saved');
     } catch (error) {
       console.error('Error saving project:', error);
+      if (opts?.throwOnError) throw error;
+      setSnackbar({ open: true, severity: 'error', message: error.message || 'Project save failed' });
     }
   };
 
@@ -1455,7 +1464,7 @@ export default function AdminApp() {
             </TabPanel>
 
             <TabPanel value={tabValue} index={1}>
-              <ImageDataset 
+              <ImageDataset key={currentProject?.id}
                 currentProject={currentProject}
                 onProjectUpdate={handleProjectUpdate}
                 onConfigChange={(hasChanges, latestConfig) => {
@@ -1488,6 +1497,7 @@ export default function AdminApp() {
 
             <TabPanel value={tabValue} index={3}>
               <WebsiteSetup
+                hasUnsavedChanges={hasUnsavedChanges}
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
               />

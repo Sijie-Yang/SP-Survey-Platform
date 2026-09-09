@@ -1,3 +1,4 @@
+import { responseWithinDateRange } from '../../lib/responseIdentity';
 import { sliderScale } from '../../lib/sliderScale';
 import { allocationStatus } from '../../lib/allocationStats';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from '../../lib/mediaIdentity';
@@ -2507,6 +2508,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
   const fetchResponses = useCallback(async () => {
     const sequence = ++fetchSequence.current;
     setResponses([]);
+    setDetailTarget(null);
+    setDeleteTarget(null);
     setLoading(true);
     setLoadProgress(null);
     setError(null);
@@ -2592,9 +2595,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
   const dateFilteredResponses = useMemo(() => {
     return responses.filter((row) => {
       if (currentProject?.id && row.project_id && row.project_id !== currentProject.id) return false;
-      const ts = row.created_at || row.survey_metadata?.completion_time || row.saved_at;
-      if (dateFrom && ts && new Date(ts) < new Date(`${dateFrom}T00:00:00`)) return false;
-      if (dateTo && ts && new Date(ts) > new Date(`${dateTo}T23:59:59`)) return false;
+      if (!responseWithinDateRange(row, dateFrom, dateTo)) return false;
       if (revisionFilter && (row.survey_metadata?.survey_revision || 'historical_unknown') !== revisionFilter) return false;
       if (sessionFilter && row.survey_metadata?.session_id !== sessionFilter) return false;
       if (!includePractice && row.survey_metadata?.practice_mode) return false;
@@ -2639,7 +2640,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
   const filteredResponses = useMemo(() => {
     if (!excludeFlagged || !surveyConfig) return dateFilteredResponses;
     return dateFilteredResponses.filter((row) => {
-      const key = row.id ?? row.participant_id;
+      const key = responseRecordKey(row);
       return !(qualitySummary.perResponse[key]?.length);
     });
   }, [dateFilteredResponses, excludeFlagged, surveyConfig, qualitySummary]);
@@ -2812,6 +2813,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
         {tf(t.resultsScopeHint, { shown: filteredResponses.length, total: responses.length })}
       </Typography>
       {revisionOptions.length > 1 && <Alert severity="info" sx={{ mb: 2 }}>{t.resultsMixedRevisions}</Alert>}
+      {dateFrom && dateTo && dateFrom > dateTo && <Alert severity="warning" sx={{ mb: 2 }}>Start date must be on or before end date.</Alert>}
       {/* Data source badge */}
       {dataSource && (
         <Box sx={{ mb: 2 }}>
@@ -2882,6 +2884,9 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
         />
       </Box>
 
+      <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1 }}>
+        Dates use your local timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Records without a valid timestamp are excluded when a date filter is active.
+      </Typography>
       {revisionOptions.some((id) => id !== 'historical_unknown') && <TextField select size="small" label={t.resultsRevision} value={revisionFilter} onChange={(e) => setRevisionFilter(e.target.value)} SelectProps={{ native: true }} InputLabelProps={{ shrink: true }} sx={{ mr: 1, mb: 1 }}>
         <option value="">{t.resultsAllRevisions}</option>
         {revisionOptions.map((id) => <option key={id} value={id}>{id === 'historical_unknown' ? t.resultsHistoricalRevision : id.slice(-12)}</option>)}
@@ -2916,7 +2921,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
                 startIcon={<Download />}
                 onClick={() => {
                   const includedKeys = new Set(
-                    (filteredResponses || []).map((r) => String(r.id ?? `${r.participant_id}|${r.created_at}|${r.survey_metadata?.session_id}`)),
+                    (filteredResponses || []).map((r) => responseRecordKey(r)),
                   );
                   downloadDataQualityCsv(dateFilteredResponses, surveyConfig, {
                     excludeFlagged,
@@ -2954,10 +2959,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
                   </TableHead>
                   <TableBody>
                     {dateFilteredResponses
-                      .filter((r) => (qualitySummary.perResponse[r.id ?? r.participant_id] || []).length)
+                      .filter((r) => (qualitySummary.perResponse[responseRecordKey(r)] || []).length)
                       .slice(0, 20)
                       .map((r) => {
-                        const key = r.id ?? r.participant_id;
+                        const key = responseRecordKey(r);
                         const flags = qualitySummary.perResponse[key] || [];
                         return (
                           <TableRow key={key}>
@@ -3064,7 +3069,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
                 <TableBody>
                   {dateFilteredResponses.slice(recordPage * recordsPerPage, (recordPage + 1) * recordsPerPage).map((row) => {
                     const key = responseRecordKey(row);
-                    const qKey = row.id ?? row.participant_id;
+                    const qKey = responseRecordKey(row);
                     const flags = surveyConfig
                       ? (qualitySummary.perResponse[qKey] || [])
                       : [];
@@ -3219,7 +3224,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
             {' · '}{t.resultsRevision}: {detailTarget?.survey_metadata?.survey_revision || t.resultsHistoricalRevision}
           </Typography>
           <Alert severity="info" sx={{ mb: 2 }}>
-            {t.resultsQuality}: {(qualitySummary.perResponse[detailTarget?.id ?? detailTarget?.participant_id] || []).join(', ') || 'clean'}
+            {t.resultsQuality}: {(qualitySummary.perResponse[responseRecordKey(detailTarget)] || []).join(', ') || 'clean'}
           </Alert>
           {allQuestions.map((q) => {
             const units = expandQuestionAnswerUnits(detailTarget, q.name, { requireAnswer: false });

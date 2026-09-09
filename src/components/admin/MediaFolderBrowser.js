@@ -16,7 +16,7 @@ import {
   MEDIA_FOLDER_TAG_SET, MEDIA_FOLDER_TAG_CATEGORY, compareMediaNames,
   analyzeTaggedSets, analyzeTaggedCategories, normalizeMediaEntry,
   buildProjectMediaKey, removeMediaFolders, isFolderOrDescendant,
-  remapMediaFolderTags, remapMediaFolderList,
+  remapMediaFolderTags, remapMediaFolderList, mediaBasename,
 } from '../../lib/mediaUtils';
 import { moveImagesInR2, deleteImagesFromR2, projectR2Prefix } from '../../lib/r2';
 
@@ -115,6 +115,7 @@ export default function MediaFolderBrowser({
   openMoveSignal = 0,
   children = null,
   mediaCount = 0,
+  disabled = false,
   /** Override R2 prefix (e.g. templates/{id}/). Default: projectR2Prefix(userId, projectId). */
   r2Prefix = null,
   /** Extra options for deleteImagesFromR2 (e.g. { allowTemplateKeys: true }). */
@@ -356,7 +357,7 @@ export default function MediaFolderBrowser({
         if (!covered) return entry;
         const newFolder = remapFolderPath(oldFolder);
         const fromKey = entry.key || buildProjectMediaKey(prefix, entry.folder, entry.name);
-        const toKey = buildProjectMediaKey(prefix, newFolder, entry.name);
+        const toKey = buildProjectMediaKey(prefix, newFolder, mediaBasename(fromKey));
         if (fromKey !== toKey) moves.push({ from: fromKey, to: toKey });
         movedByFolder.add(entry.media_id || entry.key || entry.name);
         return {
@@ -375,7 +376,7 @@ export default function MediaFolderBrowser({
         const selected = selectedMediaEntries.some((s) => (s.media_id || s.key || s.name) === id);
         if (!selected) return entry;
         const fromKey = entry.key || buildProjectMediaKey(prefix, entry.folder, entry.name);
-        const toKey = buildProjectMediaKey(prefix, target, entry.name);
+        const toKey = buildProjectMediaKey(prefix, target, mediaBasename(fromKey));
         if (fromKey !== toKey) moves.push({ from: fromKey, to: toKey });
         return {
           ...entry,
@@ -386,10 +387,18 @@ export default function MediaFolderBrowser({
         };
       });
 
+      const destinations = new Set();
+      const occupied = new Set(pool.map((entry) => entry.key).filter(Boolean));
+      for (const move of moves) {
+        if (destinations.has(move.to) || occupied.has(move.to)) {
+          throw new Error('The target already contains a file with the same storage name. Choose a different folder.');
+        }
+        destinations.add(move.to);
+      }
       if (moves.length) {
-        const result = await moveImagesInR2(moves, deleteOpts);
-        if (!result.success && result.errors?.length) {
-          throw new Error(result.errors[0]?.error || result.error || 'Move failed');
+        const result = await moveImagesInR2(moves, { ...deleteOpts, deferDelete: true });
+        if (!result.success) {
+          throw new Error(result.errors?.[0]?.error || result.error || 'Move failed');
         }
       }
 
@@ -406,7 +415,7 @@ export default function MediaFolderBrowser({
           .sort(compareMediaNames);
       }
 
-      onProjectUpdate({
+      await onProjectUpdate({
         ...currentProject,
         preloadedImages: updated,
         preloadedAt: new Date().toISOString(),
@@ -416,7 +425,16 @@ export default function MediaFolderBrowser({
           mediaFolders: nextFolderList,
           mediaFolderTags: nextTags,
         },
-      });
+      }, { throwOnError: true });
+      // Keep sources until the project points to the successfully copied files.
+      if (moves.length) {
+        const cleanup = await deleteImagesFromR2(moves.map((m) => m.from), deleteOpts);
+        if (!cleanup.success) {
+          setStatus({ severity: 'warning', message: 'Move saved, but original copies could not be removed. Refresh and check the media library before retrying.' });
+          setMoveOpen(false);
+          return;
+        }
+      }
       setMoveOpen(false);
       setSelectedFolders(new Set());
       if (target) onCurrentFolderChange(target);
@@ -523,7 +541,7 @@ export default function MediaFolderBrowser({
                 size="small"
                 variant="outlined"
                 color="error"
-                disabled={!foldersPendingDelete.length || busy}
+                disabled={disabled || !foldersPendingDelete.length || busy}
                 onClick={() => setDeleteOpen(true)}
                 sx={{ minWidth: 0, px: 1, bgcolor: 'background.paper' }}
                 title="Delete folder"
@@ -532,13 +550,13 @@ export default function MediaFolderBrowser({
               </Button>
             </Stack>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-              <Button size="small" variant="outlined" disabled={!foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_SET)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>
+              <Button size="small" variant="outlined" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_SET)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>
                 Set
               </Button>
-              <Button size="small" variant="outlined" color="secondary" disabled={!foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_CATEGORY)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>
+              <Button size="small" variant="outlined" color="secondary" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_CATEGORY)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>
                 Category
               </Button>
-              <Button size="small" variant="text" disabled={!foldersToTag.length} onClick={() => tagSelected(null)} sx={{ py: 0.25 }}>
+              <Button size="small" variant="text" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(null)} sx={{ py: 0.25 }}>
                 Clear
               </Button>
             </Stack>
@@ -596,7 +614,7 @@ export default function MediaFolderBrowser({
               size="small"
               variant="outlined"
               startIcon={<DriveFileMove />}
-              disabled={!selectedMediaEntries.length && !selectedFolders.size}
+              disabled={disabled || busy || (!selectedMediaEntries.length && !selectedFolders.size)}
               onClick={() => { setMoveTarget(currentFolder || ''); setMoveOpen(true); }}
             >
               Move selected
@@ -622,6 +640,10 @@ export default function MediaFolderBrowser({
           {selectedMediaEntries.length ? ` ${selectedMediaEntries.length} file(s)` : ''}
         </DialogTitle>
         <DialogContent>
+          <Alert severity="warning" sx={{ mt: 1, mb: 1 }}>
+            Moving files changes their URLs. Finish organizing media before collecting responses;
+            existing questions and collected answers may still reference the old locations.
+          </Alert>
           {!selectedMediaEntries.length && !selectedFolders.size ? (
             <Alert severity="warning" sx={{ mt: 1 }}>
               Check folders in the tree and/or select files, then try again.
@@ -647,7 +669,7 @@ export default function MediaFolderBrowser({
           <Button
             variant="contained"
             onClick={moveSelectedMedia}
-            disabled={busy || (!selectedMediaEntries.length && !selectedFolders.size)}
+            disabled={disabled || busy || (!selectedMediaEntries.length && !selectedFolders.size)}
           >
             Move
           </Button>

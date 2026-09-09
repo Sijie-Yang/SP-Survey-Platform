@@ -1,12 +1,19 @@
 /* global globalThis */
 // Store only the response contract, never integration credentials or dataset secrets.
-const CONTRACT_KEYS = ['name', 'type', 'title', 'description', 'choices', 'rows', 'columns', 'dimensions', 'budget', 'rateMin', 'rateMax', 'scaleMin', 'scaleMax', 'inputType', 'min', 'max', 'step', 'annotationLabels', 'multiSelect', 'trialCount', 'imageCount', 'skillId', 'skillRevision', 'skillResultSchema', 'isRequired'];
+const CONTRACT_KEYS = ['name', 'type', 'title', 'description', 'choices', 'rows', 'columns', 'dimensions', 'budget', 'rateMin', 'rateMax', 'scaleMin', 'scaleMax', 'scaleStep', 'rateStep', 'inputType', 'min', 'max', 'step', 'annotationLabels', 'allowedTools', 'minAnnotations', 'maxAnnotations', 'minSelectedChoices', 'maxSelectedChoices', 'isAttentionCheck', 'expectedAnswer', 'labelTrue', 'labelFalse', 'minRateDescription', 'maxRateDescription', 'multiSelect', 'trialCount', 'imageCount', 'skillId', 'skillRevision', 'skillResultSchema', 'isRequired'];
+
+const SKILL_CONFIG_KEYS = ['min', 'max', 'step', 'rateMin', 'rateMax', 'scaleMin', 'scaleMax', 'scaleStep', 'choices', 'options', 'rows', 'columns', 'dimensions', 'budget', 'labels', 'mediaType', 'mediaCount'];
 
 export function surveyResponseContract(config) {
   return {
     locale: config?.locale || 'en',
-    questions: (config?.pages || []).flatMap((p) => p.elements || []).map((q) =>
-      Object.fromEntries(CONTRACT_KEYS.filter((k) => q[k] !== undefined).map((k) => [k, q[k]]))),
+    questions: (config?.pages || []).flatMap((p) => p.elements || []).map((q) => {
+      const result = Object.fromEntries(CONTRACT_KEYS.filter((k) => q[k] !== undefined).map((k) => [k, q[k]]));
+      if (q.type === 'skillquestion' && q.skillConfig) {
+        result.skillConfig = Object.fromEntries(SKILL_CONFIG_KEYS.filter((k) => q.skillConfig[k] !== undefined).map((k) => [k, q.skillConfig[k]]));
+      }
+      return result;
+    }),
   };
 }
 

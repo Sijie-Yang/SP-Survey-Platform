@@ -1,3 +1,4 @@
+import { responseRecordKey } from './responseIdentity';
 /** Data-quality evaluation for survey responses. */
 
 export function flattenQuestions(surveyConfig) {
@@ -183,7 +184,7 @@ export function summarizeQuality(allResponses, surveyConfig) {
   let flagged = 0;
   allResponses.forEach((row) => {
     const flags = evaluateResponseQuality(row, surveyConfig, allResponses);
-    perResponse[row.id ?? row.participant_id] = flags;
+    perResponse[responseRecordKey(row)] = flags;
     if (flags.length) flagged += 1;
   });
   return {

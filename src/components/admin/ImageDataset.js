@@ -1,3 +1,5 @@
+import { uploadMediaBatch } from '../../lib/mediaUploadBatch';
+import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Box,
@@ -52,14 +54,14 @@ import {
   getImagesFromHuggingFace,
   getImageCountFromDataset,
 } from '../../lib/huggingface';
-import { isR2Configured, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix, stripTemplateOwnedMedia, r2KeyFromUrl, isTemplateR2Key } from '../../lib/r2';
+import { isR2Configured, resetR2ProxyUnreachable, uploadImageToR2, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix, stripTemplateOwnedMedia, r2KeyFromUrl, isTemplateR2Key } from '../../lib/r2';
 import { asyncPool } from '../../lib/asyncPool';
 import {
   inferMediaType, normalizeMediaEntry, getMediaId, MEDIA_ACCEPT,
   analyzeTaggedSets, analyzeTaggedCategories,
   sortMediaByName, compareMediaNames, buildProjectMediaKey, joinFolderPath,
   normalizeFolderPath, IMAGE_COMPRESS_TARGET_BYTES, MAX_AV_MEDIA_BYTES,
-  checkAvMediaTooLarge, formatMediaMb, getRecursiveMedia, downloadMediaFile,
+  formatMediaMb, getRecursiveMedia, downloadMediaFile,
 } from '../../lib/mediaUtils';
 import {
   downloadMediaEntriesZip,
@@ -193,7 +195,8 @@ function mediaEntryIdentity(entry, userId, projectId) {
 }
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
-  const { t } = useRegion();
+  const { t, language } = useRegion();
+  const zh = language === 'zh';
   const { user } = useAuth();
 
   // Direct upload state
@@ -202,6 +205,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     loading: false, progress: 0, total: 0, error: null, success: null,
   });
   const fileInputRef = useRef(null);
+  const uploadLock = useRef(false);
+  const stopUpload = useRef(false);
+  const [uploadFailures, setUploadFailures] = useState([]);
+  const [pendingMediaSave, setPendingMediaSave] = useState(null);
+  const [compressUploads, setCompressUploads] = useState(true);
+  useUnsavedChanges(directUploadStatus.loading || !!pendingMediaSave);
+  useEffect(() => { stopUpload.current = false; return () => { stopUpload.current = true; }; }, []);
 
   // HuggingFace optional section
   const [hfConfig, setHfConfig] = useState({ enabled: false, token: '', datasetName: '' });
@@ -281,14 +291,15 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     return () => { cancelled = true; };
   }, [projectPrefix, currentProject?.preloadedImages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const normalizeR2Listing = (images = []) => sortMediaByName(images.map((img) => normalizeMediaEntry({
-    url: img.url,
-    name: img.name,
-    key: img.key,
-    folder: img.folder,
-    type: img.type || inferMediaType(img.name),
-    media_id: img.media_id || img.key,
-  }, projectPrefix)));
+  const normalizeR2Listing = (images = []) => {
+    const existing = new Map((currentProject?.preloadedImages || []).map((m) => [getMediaId(m), m]));
+    return sortMediaByName(images.map((img) => {
+      const saved = existing.get(img.media_id || img.key);
+      // Refresh storage presence without losing original names or research metadata.
+      const merged = { ...img, ...saved, url: img.url, key: img.key, media_id: img.media_id || img.key };
+      return { ...merged, ...normalizeMediaEntry(merged, projectPrefix) };
+    }));
+  };
 
   // Strip accidental template-owned URLs/keys from project media list.
   // (Legacy bug: create-from-template copied template refs into preloadedImages.)
@@ -412,7 +423,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           setSelectedMedia((prev) => {
             const next = new Set(prev);
             entries.forEach((entry) => {
-              if (entry?.name) next.delete(entry.name);
+              next.delete(getMediaId(entry));
             });
             return next;
           });
@@ -430,7 +441,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   const handleDeleteSingleMedia = (entry) => deleteMediaEntries([entry]);
   const handleDeleteSelectedMedia = () => {
-    const selected = filteredMedia.filter((m) => selectedMedia.has(m.name));
+    const selected = filteredMedia.filter((m) => selectedMedia.has(getMediaId(m)));
     if (!selected.length) return;
     deleteMediaEntries(selected);
   };
@@ -473,7 +484,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   };
 
   const handleDownloadSelectedMedia = () => {
-    const selected = filteredMedia.filter((m) => selectedMedia.has(m.name));
+    const selected = filteredMedia.filter((m) => selectedMedia.has(getMediaId(m)));
     if (!selected.length) return;
     downloadMediaEntriesAsZip(selected, `media_selected_${new Date().toISOString().slice(0, 10)}.zip`);
   };
@@ -554,7 +565,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   const preannotateIndex = useMemo(() => {
     if (!preannotateFocusName) return 0;
-    const idx = preannotateImages.findIndex((m) => m.name === preannotateFocusName);
+    const idx = preannotateImages.findIndex((m) => getMediaId(m) === preannotateFocusName || m.name === preannotateFocusName);
     return idx >= 0 ? idx : 0;
   }, [preannotateImages, preannotateFocusName]);
 
@@ -571,8 +582,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       preannotScrollLockRef.current = { top: null, y: window.scrollY };
     }
     setPreannotateFocusName(name);
-    setSelectedMedia(new Set([name]));
-    const idxInFiltered = filteredMedia.findIndex((m) => m.name === name);
+    const focusedEntry = filteredMedia.find((m) => getMediaId(m) === name || m.name === name);
+    setSelectedMedia(new Set(focusedEntry ? [getMediaId(focusedEntry)] : []));
+    const idxInFiltered = filteredMedia.findIndex((m) => getMediaId(m) === name || m.name === name);
     if (idxInFiltered >= 0) {
       setMediaPage(Math.floor(idxInFiltered / MEDIA_PAGE_SIZE) + 1);
     }
@@ -639,8 +651,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setPreannotateFocusName(null);
       return;
     }
-    if (!preannotateFocusName || !preannotateImages.some((m) => m.name === preannotateFocusName)) {
-      setPreannotateFocusName(preannotateImages[0].name);
+    if (!preannotateFocusName || !preannotateImages.some((m) => getMediaId(m) === preannotateFocusName || m.name === preannotateFocusName)) {
+      setPreannotateFocusName(getMediaId(preannotateImages[0]));
     }
   }, [preannotateImages, preannotateFocusName]);
 
@@ -689,12 +701,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     const t = img.type || inferMediaType(img.name || img.url);
     setPreviewEntry(img);
     if (t === 'image') {
-      focusMediaInGallery(img.name);
+      focusMediaInGallery(getMediaId(img));
     }
   };
 
   const selectAllFiltered = () => {
-    setSelectedMedia(new Set(filteredMedia.map((m) => m.name)));
+    setSelectedMedia(new Set(filteredMedia.map(getMediaId)));
   };
 
   const clearMediaSelection = () => setSelectedMedia(new Set());
@@ -1114,11 +1126,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   // Compress image to stay under maxBytes using Canvas
   const compressImage = (file, maxBytes = IMAGE_COMPRESS_TARGET_BYTES, quality = 0.85) => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       if (file.size <= maxBytes) { resolve(file); return; }
       const img = new Image();
       const url = URL.createObjectURL(file);
       img.onload = () => {
+        try {
         URL.revokeObjectURL(url);
         const canvas = document.createElement('canvas');
         let { width, height } = img;
@@ -1131,7 +1144,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         }
         canvas.width = width;
         canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('Image conversion unavailable; disable compression and retry.');
+        context.drawImage(img, 0, 0, width, height);
         // Try progressively lower quality until under maxBytes
         const tryQuality = (q) => {
           canvas.toBlob((blob) => {
@@ -1144,103 +1159,65 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           }, 'image/jpeg', q);
         };
         tryQuality(quality);
+        } catch (err) { reject(err); }
       };
-      img.onerror = () => resolve(file);
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image could not be decoded; check the source file.')); };
       img.src = url;
     });
   };
 
   const handleDirectUpload = async () => {
-    if (!selectedFiles.length) return;
-    if (!isR2Configured()) {
-      setDirectUploadStatus(prev => ({ ...prev, error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.' }));
-      return;
-    }
-
-    setDirectUploadStatus({ loading: true, progress: 0, total: selectedFiles.length, error: null, success: null });
-
+    if (!selectedFiles.length || uploadLock.current || pendingMediaSave || !currentProject?.id || !user?.id) return;
+    if (!isR2Configured()) return;
+    uploadLock.current = true;
+    resetR2ProxyUnreachable();
+    stopUpload.current = false;
+    const files = [...selectedFiles];
+    const project = currentProject;
+    const folder = currentFolder;
+    let latestProject = project;
+    setUploadFailures([]);
+    setDirectUploadStatus({ loading: true, progress: 0, total: files.length, error: null, success: null });
     try {
-      const uploadedImages = [...(currentProject?.preloadedImages || [])];
-      let successCount = 0;
-      let failCount = 0;
-
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const raw = selectedFiles[i];
-        const mediaType = inferMediaType(raw.name);
-        const tooLarge = checkAvMediaTooLarge(raw, mediaType);
-        if (tooLarge) {
-          failCount++;
-          setDirectUploadStatus((prev) => ({
-            ...prev,
-            error: tf(t.mediaAvTooLarge, {
-              name: tooLarge.name,
-              size: tooLarge.sizeMb,
-              mb: tooLarge.maxMb,
-            }),
-          }));
-          setDirectUploadStatus((prev) => ({ ...prev, progress: i + 1 }));
-          continue;
-        }
-        const file = mediaType === 'image' ? await compressImage(raw) : raw;
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const userId = user?.id || 'anonymous';
-        const key = buildProjectMediaKey(
-          `${userId}/${currentProject?.id || 'default'}/`,
-          currentFolder,
-          safeName,
-        );
-
-        const result = await uploadImageToR2(file, key);
-
-        if (result.success) {
-          uploadedImages.push({
-            url: result.url,
-            name: raw.name,
-            type: mediaType,
-            key,
-            media_id: key,
-            folder: currentFolder || '',
-          });
-          successCount++;
-        } else {
-          console.error('Upload error:', result.error);
-          failCount++;
-          if (i === 0) {
-            setDirectUploadStatus(prev => ({ ...prev, error: `Upload failed: ${result.error}` }));
-          }
-        }
-
-        setDirectUploadStatus(prev => ({ ...prev, progress: i + 1 }));
-
-        // Save progress every 10 files so interruption doesn't lose all work
-        if ((i + 1) % 10 === 0) {
-          onProjectUpdate({
-            ...currentProject,
-            preloadedImages: [...uploadedImages],
-            preloadedAt: new Date().toISOString(),
-            preloadedSource: 'r2',
-          });
-        }
-      }
-
-      const updatedProject = {
-        ...currentProject,
-        preloadedImages: uploadedImages,
-        preloadedAt: new Date().toISOString(),
-        preloadedSource: 'r2',
-      };
-      onProjectUpdate(updatedProject);
-      if (onConfigChange) onConfigChange(true, updatedProject.imageDatasetConfig);
-
-      setDirectUploadStatus({
-        loading: false, progress: selectedFiles.length, total: selectedFiles.length,
-        error: failCount > 0 ? `${failCount} file(s) failed to upload.` : null,
-        success: `Successfully uploaded ${successCount} file(s) to Cloudflare R2!`,
+      const result = await uploadMediaBatch({
+        files, prefix: `${user.id}/${project.id}/`, folder,
+        // Animated GIFs must retain their frames; compression remains explicit.
+        prepare: (raw, type) => type === 'image' && compressUploads && !/\.gif$/i.test(raw.name) ? compressImage(raw) : raw,
+        upload: uploadImageToR2,
+        makeId: () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+        shouldStop: () => stopUpload.current,
+        persist: async (uploaded) => {
+          latestProject = { ...project, preloadedImages: [...(project.preloadedImages || []), ...uploaded],
+            preloadedAt: new Date().toISOString(), preloadedSource: 'r2' };
+          await onProjectUpdate(latestProject, { throwOnError: true });
+        },
+        onProgress: ({ processed }) => setDirectUploadStatus((prev) => ({ ...prev, progress: processed })),
       });
-      setSelectedFiles([]);
-    } catch (error) {
-      setDirectUploadStatus({ loading: false, progress: 0, total: 0, error: error.message, success: null });
-    }
+      setSelectedFiles([...result.failures.map((f) => f.file), ...result.pending]);
+      setUploadFailures(result.failures);
+      if (result.saveError) setPendingMediaSave(latestProject);
+      setDirectUploadStatus({ loading: false, progress: result.processed, total: files.length,
+        error: result.saveError ? (zh ? '媒体已上传，但媒体清单保存失败，请重试保存。' : 'Media uploaded, but saving the media list failed. Retry saving.')
+          : result.failures.length ? (zh ? `${result.failures.length} 个文件失败，已保留供重试。` : `${result.failures.length} files failed and remain selected for retry.`) : null,
+        success: result.uploaded.length && !result.saveError ? (zh ? `已上传并保存 ${result.uploaded.length} 个文件。` : `${result.uploaded.length} files uploaded and saved.`) : null,
+      });
+    } catch (err) {
+      setDirectUploadStatus((prev) => ({ ...prev, loading: false, error: err.message }));
+    } finally { uploadLock.current = false; }
+  };
+
+  const retryMediaSave = async () => {
+    if (!pendingMediaSave || uploadLock.current) return;
+    uploadLock.current = true;
+    setDirectUploadStatus((prev) => ({ ...prev, loading: true }));
+    try {
+      await onProjectUpdate(pendingMediaSave, { throwOnError: true });
+      setPendingMediaSave(null);
+      setDirectUploadStatus((prev) => ({ ...prev, loading: false, error: null,
+        success: zh ? '媒体清单已保存。' : 'Media list saved.' }));
+    } catch (err) {
+      setDirectUploadStatus((prev) => ({ ...prev, loading: false, error: err.message }));
+    } finally { uploadLock.current = false; }
   };
 
   // ── HuggingFace batch preload ─────────────────────────────────────────────
@@ -1642,7 +1619,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           mb: 2.5,
           display: 'grid',
           gap: 1.5,
-          gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+          gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(2, minmax(0, 1fr))' },
           alignItems: 'stretch',
         }}
       >
@@ -1672,7 +1649,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           display: 'grid',
           gap: 2,
           alignItems: 'stretch',
-          gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' },
+          gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(3, minmax(0, 1fr))' },
         }}
       >
         {/* Import Template Images */}
@@ -1685,6 +1662,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
+          minWidth: 0,
         }}>
           <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
             <ContentCopy fontSize="small" color="secondary" />
@@ -1818,6 +1796,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               disabled={
                 !isR2Configured()
                 || templateImportStatus.loading
+                || directUploadStatus.loading || !!pendingMediaSave
                 || !selectedTemplateId
                 || !hasImportSources
               }
@@ -1841,6 +1820,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
+          minWidth: 0,
         }}>
           <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
             <CloudUpload fontSize="small" color="primary" />
@@ -1859,7 +1839,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             accept={MEDIA_ACCEPT}
             multiple
             style={{ display: 'none' }}
-            onChange={(e) => setSelectedFiles(Array.from(e.target.files))}
+            onChange={(e) => { setSelectedFiles(Array.from(e.target.files || [])); e.target.value = ''; setUploadFailures([]); }}
           />
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
@@ -1873,6 +1853,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             )}
           </Box>
 
+          <FormControlLabel control={<Checkbox checked={compressUploads} disabled={directUploadStatus.loading}
+            onChange={(e) => setCompressUploads(e.target.checked)} />} label={zh ? '压缩大图以加快加载（GIF 保留原文件）' : 'Compress large images for faster loading (keep original GIFs)'} />
+          <Typography variant="caption" sx={{ display: 'block', mb: 1 }} color="text.secondary">
+            {zh ? '研究需要原始像素时取消勾选；原文件最大 40 MB。同名文件会分别保存。' : 'Uncheck when original pixels matter. Original files: up to 40 MB. Same-name files are stored separately.'}
+          </Typography>
           {directUploadStatus.loading && (
             <Box sx={{ mb: 1.5 }}>
               <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
@@ -1887,6 +1872,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           )}
           {directUploadStatus.success && <Alert severity="success" sx={{ mb: 1.5 }}>{directUploadStatus.success}</Alert>}
           {directUploadStatus.error && <Alert severity="error" sx={{ mb: 1.5 }}>{directUploadStatus.error}</Alert>}
+          {uploadFailures.length > 0 && <Box sx={{ maxHeight: 160, overflowY: 'auto', mb: 1 }}>
+            {uploadFailures.map((failure, i) => <Typography key={i} variant="caption" component="div" sx={{ overflowWrap: 'anywhere' }}>{failure.name}: {failure.error}</Typography>)}
+          </Box>}
+          {pendingMediaSave && <Button onClick={retryMediaSave} disabled={directUploadStatus.loading} sx={{ minHeight: 44 }}>{zh ? '重试保存媒体清单' : 'Retry saving media list'}</Button>}
 
           <Box sx={{ mt: 'auto' }}>
             <Button
@@ -1894,7 +1883,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               variant="contained"
               color="primary"
               onClick={handleDirectUpload}
-              disabled={!selectedFiles.length || directUploadStatus.loading || !isR2Configured()}
+              disabled={templateImportStatus.loading || preloadStatus.loading || !selectedFiles.length || directUploadStatus.loading || !!pendingMediaSave || !isR2Configured()}
               startIcon={directUploadStatus.loading ? <CircularProgress size={16} color="inherit" /> : <CloudUpload />}
             >
               {t.mediaUploadBtn}{selectedFiles.length > 0 ? ` ${selectedFiles.length}` : ''}
@@ -1913,6 +1902,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
+          minWidth: 0,
         }}>
           <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
             {t.hfImportTitle}
@@ -1985,7 +1975,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               fullWidth
               variant="contained"
               onClick={handlePreloadAllImages}
-              disabled={!hfStatus.connected || !isR2Configured() || preloadStatus.loading}
+              disabled={!hfStatus.connected || !isR2Configured() || preloadStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
               startIcon={preloadStatus.loading ? <CircularProgress size={16} /> : <CloudDownload />}
             >
               {preloadedCount > 0 ? t.hfRePreload : t.hfPreload}
@@ -2011,9 +2001,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         onProjectUpdate={onProjectUpdate}
         currentFolder={currentFolder}
         onCurrentFolderChange={setCurrentFolder}
-        selectedMediaEntries={(currentProject?.preloadedImages || []).filter((m) => selectedMedia.has(m.name))}
+        selectedMediaEntries={(currentProject?.preloadedImages || []).filter((m) => selectedMedia.has(getMediaId(m)))}
         openMoveSignal={openMoveSignal}
         mediaCount={preloadedCount}
+        disabled={directUploadStatus.loading || !!pendingMediaSave}
       >
         {preloadedCount === 0 ? (
           <Alert severity="info">
@@ -2029,7 +2020,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   variant="outlined"
                   startIcon={refreshingMedia ? <CircularProgress size={14} /> : <Refresh />}
                   onClick={refreshMediaFromR2}
-                  disabled={refreshingMedia || !isR2Configured()}
+                  disabled={refreshingMedia || !isR2Configured() || directUploadStatus.loading || !!pendingMediaSave}
                 >
                   Refresh from R2
                 </Button>
@@ -2056,7 +2047,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   variant="outlined"
                   startIcon={mediaActionStatus.loading && mediaDownloadProgress ? <CircularProgress size={14} /> : <CloudDownload />}
                   onClick={handleDownloadSelectedMedia}
-                  disabled={!selectedMedia.size || mediaActionStatus.loading}
+                  disabled={!selectedMedia.size || mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
                 >
                   ZIP selected ({selectedMedia.size})
                 </Button>
@@ -2092,7 +2083,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   variant="outlined"
                   startIcon={<DriveFileMove />}
                   onClick={() => setOpenMoveSignal((n) => n + 1)}
-                  disabled={!selectedMedia.size || mediaActionStatus.loading}
+                  disabled={!selectedMedia.size || mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
                 >
                   Move to folder… ({selectedMedia.size})
                 </Button>
@@ -2102,11 +2093,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   color="error"
                   startIcon={<Delete />}
                   onClick={handleDeleteSelectedMedia}
-                  disabled={!selectedMedia.size || mediaActionStatus.loading}
+                  disabled={!selectedMedia.size || mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
                 >
                   Delete selected ({selectedMedia.size})
                 </Button>
-                <Button variant="outlined" color="error" onClick={handleClearImages} startIcon={<Delete />} size="small">
+                <Button variant="outlined" color="error" onClick={handleClearImages} disabled={directUploadStatus.loading || !!pendingMediaSave} startIcon={<Delete />} size="small">
                   Clear all
                 </Button>
               </Box>
@@ -2174,8 +2165,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 1.5, mb: 2 }}>
                   {pagedMedia.map((img) => {
                     const t = img.type || inferMediaType(img.name || img.url);
-                    const selected = selectedMedia.has(img.name);
-                    const focused = preannotateFocusName === img.name;
+                    const selected = selectedMedia.has(getMediaId(img));
+                    const focused = preannotateFocusName === getMediaId(img);
                     const feat = featureStatusByName.get(img.name);
                     const l0Status = feat?.status?.[L0_MODEL];
                     const segStatus = feat?.status?.[SEG_MODEL];
@@ -2206,7 +2197,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                           size="small"
                           checked={selected}
                           onClick={(e) => e.stopPropagation()}
-                          onChange={() => toggleMediaSelection(img.name)}
+                          onChange={() => toggleMediaSelection(getMediaId(img))}
                           sx={{ position: 'absolute', top: 2, left: 2, zIndex: 2, bgcolor: 'rgba(255,255,255,0.85)', borderRadius: 1, p: 0.25 }}
                         />
                         <Box sx={{ position: 'absolute', top: 2, right: 2, zIndex: 2, display: 'flex', gap: 0.25 }}>
@@ -2227,7 +2218,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                               className="media-action-btn"
                               size="small"
                               color="primary"
-                              disabled={mediaActionStatus.loading}
+                              disabled={mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
                               onClick={(e) => handleDownloadSingleMedia(img, e)}
                               sx={{
                                 bgcolor: 'rgba(255,255,255,0.9)', opacity: 0, transition: 'opacity .15s',
@@ -2241,7 +2232,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                               className="media-action-btn"
                               size="small"
                               color="error"
-                              disabled={mediaActionStatus.loading}
+                              disabled={mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
                               onClick={(e) => { e.stopPropagation(); handleDeleteSingleMedia(img); }}
                               sx={{
                                 bgcolor: 'rgba(255,255,255,0.9)', opacity: 0, transition: 'opacity .15s',
@@ -2496,7 +2487,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           imageIndex={preannotateIndex}
           imageTotal={preannotateImages.length}
           mediaList={preannotateImages}
-          selectedNames={selectedMedia}
+          selectedMediaIds={selectedMedia}
           labelDefs={currentProject?.imageDatasetConfig?.preannotateLabels || null}
           onLabelDefsChange={(next) => {
             onProjectUpdate({
@@ -2572,7 +2563,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             }
             if (preannotateIndex <= 0) return;
             const prev = preannotateImages[preannotateIndex - 1];
-            if (prev) focusMediaInGallery(prev.name);
+            if (prev) focusMediaInGallery(getMediaId(prev));
           }}
           onNext={() => {
             if (preannotateReviewFilter && reviewQueueNames.length) {
@@ -2581,7 +2572,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             }
             if (preannotateIndex >= preannotateImages.length - 1) return;
             const next = preannotateImages[preannotateIndex + 1];
-            if (next) focusMediaInGallery(next.name);
+            if (next) focusMediaInGallery(getMediaId(next));
           }}
           r2Prefix={projectPrefix}
           falKey={currentProject?.imageDatasetConfig?.falApiKey || ''}
@@ -2636,7 +2627,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
       {onNextStep && (
         <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant="contained" color="primary" size="large" onClick={onNextStep} sx={{ px: 4, py: 1.5, fontWeight: 600 }}>
+          <Button variant="contained" color="primary" size="large" onClick={onNextStep} disabled={directUploadStatus.loading || !!pendingMediaSave} sx={{ px: 4, py: 1.5, fontWeight: 600 }}>
             Next: Survey Builder →
           </Button>
         </Box>

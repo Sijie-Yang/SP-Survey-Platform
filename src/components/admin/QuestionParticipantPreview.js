@@ -168,7 +168,10 @@ export default function QuestionParticipantPreview({ question, currentProject, s
         bgcolor: 'white',
         p: 1,
         '& .sd-root-modern': { ['--sjs-font-size']: '14px' },
-        '& .sd-body': { padding: '8px !important' },
+        '& .sd-body': { padding: '8px !important', minWidth: 0 },
+        '& .sd-page': { minWidth: '0 !important', paddingLeft: '0 !important', paddingRight: '0 !important' },
+        '& .sd-row > div': { minWidth: '0 !important' },
+        '& .sd-question': { padding: { xs: '12px !important', sm: '24px !important' } },
       }}
     >
       <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>

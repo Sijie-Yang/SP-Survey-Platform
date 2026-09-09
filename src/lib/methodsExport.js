@@ -1,3 +1,4 @@
+import { responseRecordKey } from './responseIdentity';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { flattenQuestions, getAttentionCheckQuestions, summarizeQuality } from './quality.js';
 import { computeQuestionIrr, irrLevelForQuestion } from './reliability.js';
@@ -54,7 +55,7 @@ export function generateMethodsText({
       .map(([id]) => id),
   );
   const effective = excludeFlagged
-    ? responses.filter((r) => !flaggedIds.has(r.id ?? r.participant_id))
+    ? responses.filter((r) => !flaggedIds.has(responseRecordKey(r)))
     : responses;
 
   const attentionQs = getAttentionCheckQuestions(surveyConfig);

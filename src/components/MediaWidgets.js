@@ -42,13 +42,13 @@ export function MediaPlayer({ url, type, name }) {
         src={url}
         controls
         playsInline
-        style={{ width: '100%', maxHeight: 480, borderRadius: 8, background: '#111' }}
+        style={{ display: 'block', width: '100%', maxHeight: 480, borderRadius: 8, background: '#111' }}
       />
     );
   }
   if (type === 'audio') {
     return (
-      <audio key={url} src={url} controls style={{ width: '100%' }} />
+      <audio key={url} src={url} controls style={{ display: 'block', width: '100%' }} />
     );
   }
   return (
@@ -56,7 +56,7 @@ export function MediaPlayer({ url, type, name }) {
       key={url}
       src={url}
       alt={name || 'media'}
-      style={{ width: '100%', maxHeight: 480, objectFit: 'contain', borderRadius: 8 }}
+      style={{ display: 'block', width: '100%', maxHeight: 480, objectFit: 'contain', borderRadius: 8 }}
     />
   );
 }
@@ -414,12 +414,13 @@ export function MediaDisplayContent({
 export function MediaRatingContent({
   mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation,
   value, onChange, rateMin = 1, rateMax = 5,
-  minRateDescription = '', maxRateDescription = '',
+  minRateDescription = '', maxRateDescription = '', disabled = false,
 }) {
   return (
     <Box sx={{ width: '100%' }}>
       {renderStimulus({ mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation })}
       <SurveyJsRatingControl
+        disabled={disabled}
         rateMin={rateMin}
         rateMax={rateMax}
         minRateDescription={minRateDescription}
@@ -433,7 +434,7 @@ export function MediaRatingContent({
 
 export function MediaBooleanContent({
   mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation,
-  value, onChange, labelTrue = 'Yes', labelFalse = 'No', name = 'mediaboolean',
+  value, onChange, labelTrue = 'Yes', labelFalse = 'No', name = 'mediaboolean', disabled = false,
 }) {
   return (
     <Box sx={{ width: '100%' }}>
@@ -442,6 +443,7 @@ export function MediaBooleanContent({
         name={name}
         labelTrue={labelTrue}
         labelFalse={labelFalse}
+        disabled={disabled}
         value={value}
         onChange={onChange}
       />
@@ -470,7 +472,7 @@ export function MediaCheckboxContent({
 
 /** Choice among media items (video/audio/image). */
 export function MediaPickerContent({
-  mediaItems, mediaSlots, choices, value, onChange, multiSelect = false,
+  mediaItems, mediaSlots, choices, value, onChange, multiSelect = false, disabled = false, language = 'en',
 }) {
   const items = (mediaItems?.length ? mediaItems : (mediaSlots || []).filter((s) => s.role === 'choice' || !s.role))
     .filter((m) => m?.url);
@@ -484,7 +486,9 @@ export function MediaPickerContent({
     ? (Array.isArray(value) ? value : [])
     : value;
 
+  const zh = language === 'zh';
   const toggle = (v) => {
+    if (disabled) return;
     if (!multiSelect) {
       onChange(v);
       return;
@@ -496,7 +500,7 @@ export function MediaPickerContent({
   };
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+    <Box sx={{ display: 'grid', whiteSpace: 'normal', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: 1.5 }}>
       {choiceList.map((c, i) => {
         const url = c.imageLink || items[i]?.url;
         const type = items[i]?.type || inferTypeFromUrl(url);
@@ -506,13 +510,15 @@ export function MediaPickerContent({
         return (
           <Box
             key={v || i}
-            onClick={() => toggle(v)}
+            onClick={type === 'image' ? () => toggle(v) : undefined}
             sx={{
+              minWidth: 0,
+              overflowWrap: 'anywhere',
               border: '2px solid',
               borderColor: isOn ? 'primary.main' : 'divider',
               borderRadius: 2,
               p: 1.5,
-              cursor: 'pointer',
+              cursor: disabled || type !== 'image' ? 'default' : 'pointer',
               bgcolor: isOn ? 'action.selected' : 'background.paper',
             }}
           >
@@ -520,6 +526,11 @@ export function MediaPickerContent({
               {name}
             </Typography>
             <MediaPlayer url={url} type={type} name={name} />
+            <Button fullWidth variant={isOn ? 'contained' : 'outlined'} aria-pressed={isOn} disabled={disabled}
+              aria-label={`${isOn ? (zh ? '已选择' : 'Selected') : (zh ? '选择' : 'Select')} · ${name}`}
+              sx={{ mt: 1, minHeight: 44, whiteSpace: 'normal', overflowWrap: 'anywhere' }} onClick={(event) => { event.stopPropagation(); toggle(v); }}>
+              {isOn ? (zh ? '已选择' : 'Selected') : (zh ? '选择' : 'Select')}
+            </Button>
           </Box>
         );
       })}

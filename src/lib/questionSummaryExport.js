@@ -1,3 +1,4 @@
+import { responseRecordKey } from './responseIdentity';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { allocationStatus } from './allocationStats.js';
 import { computeQuestionIrr } from './reliability.js';
@@ -2217,7 +2218,7 @@ export function buildDataQualityCsv(responses, surveyConfig, { excludeFlagged = 
 }
 
 function responseKey(row) {
-  return String(row.id ?? `${row.participant_id}|${row.created_at}|${row.survey_metadata?.session_id}`);
+  return responseRecordKey(row);
 }
 
 export function buildManifest({
@@ -2295,6 +2296,8 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     '',
     'Layout',
     '------',
+    'responses_raw.json preserves the exact selected submissions, including original text and missing values.',
+    'Spreadsheet-safe CSV prefixes formula-like text with an apostrophe; use raw JSON for lossless reanalysis.',
     'responses_wide.csv     One row per participant/submission',
     'data_quality.csv       Quality flags per response',
     'methods.txt            Methods narrative',
@@ -2424,6 +2427,7 @@ export function buildResultsExportBundle({
     { path: 'README.txt', content: readme },
     { path: 'manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` },
     { path: 'responses_wide.csv', content: wideCsv || rowsToCsv([['participant_id']]) },
+    { path: 'responses_raw.json', content: JSON.stringify(filteredResponses || [], null, 2) + '\n' },
     { path: 'data_quality.csv', content: qualityCsv },
     { path: 'methods.txt', content: methodsText || '' },
     ...questionFiles,

@@ -94,7 +94,7 @@ export const adminI18n = {
     mediaUploadTitle: 'Upload Media',
     mediaUploadHelpPrefix: 'Upload into the current folder in Media library',
     mediaUploadLimitsHelp:
-      'Images are compressed to ~300 KB. Video/audio max {mb} MB (no in-browser A/V compression).',
+      'Each file: max {mb} MB. Image compression is optional; video, audio and animated GIFs retain their original data.',
     mediaAvTooLarge: '"{name}" is too large ({size} MB). Video/audio max is {mb} MB.',
     mediaChooseFiles: 'Choose files',
     mediaSelected: 'selected',
@@ -734,7 +734,7 @@ export const adminI18n = {
     mediaUploadTitle: '上传媒体',
     mediaUploadHelpPrefix: '上传到媒体库中的当前文件夹',
     mediaUploadLimitsHelp:
-      '图片会压缩到约 300 KB；视频/音频上限 {mb} MB（浏览器端不做可靠音视频压缩）。',
+      '单文件上限 {mb} MB。图片可选择压缩；视频、音频和动态 GIF 保留原文件。',
     mediaAvTooLarge: '「{name}」过大（{size} MB）。视频/音频上限 {mb} MB。',
     mediaChooseFiles: '选择文件',
     mediaSelected: '已选',

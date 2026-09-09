@@ -37,7 +37,7 @@ import {
   BATCH_MODE_APPEND_DEDUPE,
 } from '../../lib/batchSamText';
 import { findDuplicateShapePairs } from '../../lib/annotationGeometry';
-import { normalizeMediaEntry } from '../../lib/mediaUtils';
+import { normalizeMediaEntry, getMediaId } from '../../lib/mediaUtils';
 import { isR2Configured } from '../../lib/r2';
 
 const AUTOSAVE_MS = 700;
@@ -115,6 +115,7 @@ export default function MediaPreannotatePanel({
   onReviewStatusKnown,
   mediaList = [],
   selectedNames = null,
+  selectedMediaIds = null,
   labelDefs: labelDefsProp = null,
   onLabelDefsChange,
   /** Notify parent of last batch for review queue */
@@ -178,9 +179,10 @@ export default function MediaPreannotatePanel({
   const shapeCount = value?.shapes?.length || 0;
   const canPrev = imageTotal > 0 && imageIndex > 0;
   const canNext = imageTotal > 0 && imageIndex < imageTotal - 1;
-  const selectedCount = selectedNames instanceof Set
-    ? selectedNames.size
-    : (Array.isArray(selectedNames) ? selectedNames.length : 0);
+  const selection = selectedMediaIds ?? selectedNames;
+  const selectedCount = selection instanceof Set
+    ? selection.size
+    : (Array.isArray(selection) ? selection.length : 0);
 
   const callEstimate = useMemo(() => {
     const n = batchScope === 'current' ? 1
@@ -372,10 +374,10 @@ export default function MediaPreannotatePanel({
     const pool = (mediaList || []).map((m) => normalizeMediaEntry(m)).filter((m) => m?.url);
     if (batchScope === 'current') return entry?.url ? [entry] : [];
     if (batchScope === 'selected') {
-      const set = selectedNames instanceof Set
-        ? selectedNames
-        : new Set(Array.isArray(selectedNames) ? selectedNames : []);
-      return pool.filter((m) => set.has(m.name));
+      const set = selection instanceof Set
+        ? selection
+        : new Set(Array.isArray(selection) ? selection : []);
+      return pool.filter((m) => set.has(selectedMediaIds != null ? getMediaId(m) : m.name));
     }
     return pool;
   };

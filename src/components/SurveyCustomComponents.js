@@ -697,6 +697,7 @@ function ImageMatrixQuestionComponent(props) {
         rows={rows}
         columns={columns}
         value={question.value}
+        disabled={!!question.isReadOnly}
         onChange={(next) => { question.value = next; }}
       />
     </div>
@@ -911,6 +912,7 @@ export function registerMediaRatingWidget() {
   });
   function MediaRatingQuestionComponent({ question: q, trialStimulusMedia = null }) {
     return React.createElement(MediaRatingContent, {
+      disabled: !!q.isReadOnly,
       ...mediaStimulusProps(q, trialStimulusMedia),
       value: q.value,
       rateMin: q.rateMin ?? 1,
@@ -943,6 +945,7 @@ export function registerMediaBooleanWidget() {
   });
   function MediaBooleanQuestionComponent({ question: q, trialStimulusMedia = null }) {
     return React.createElement(MediaBooleanContent, {
+      disabled: !!q.isReadOnly,
       ...mediaStimulusProps(q, trialStimulusMedia),
       name: q.name || 'mediaboolean',
       value: q.value,
@@ -1041,11 +1044,13 @@ export function registerMediaPickerWidget() {
     const items = resolveQuestionMediaItems(q);
     const slots = resolveQuestionSlots(q);
     return React.createElement(MediaPickerContent, {
+      disabled: !!q.isReadOnly,
       mediaItems: items,
       mediaSlots: slots,
       choices: q.choices || [],
       value: q.value,
       multiSelect: !!q.multiSelect,
+      language: resolveSurveyUiLanguage(q.survey),
       onChange: (v) => { q.value = v; },
     });
   }
@@ -1099,6 +1104,7 @@ export function registerMediaMatrixWidget() {
     return React.createElement('div', { style: { width: '100%' }, className: 'sp-mediamatrix' },
       React.createElement(MediaQuestionStimulus, { question: q, trialStimulusMedia }),
       React.createElement(SurveyJsMatrixControl, {
+      disabled: !!q.isReadOnly,
         name: q.name || 'mediamatrix',
         rows,
         columns,

@@ -1,3 +1,5 @@
+import { validateSurveyConfig } from '../../lib/designProtocol/validate';
+import { getTrialCount } from '../../lib/trialNavigation';
 import React, { useState } from 'react';
 import {
   Box,
@@ -22,13 +24,19 @@ import {
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
 
-export default function WebsiteSetup({ currentProject, surveyConfig }) {
-  const { t } = useRegion();
+export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedChanges = false }) {
+  const { t, language } = useRegion();
+  const zh = language === 'zh';
+  const report = validateSurveyConfig(surveyConfig);
+  const questions = (surveyConfig?.pages || []).flatMap((p) => p.elements || []);
+  const answerable = questions.filter((q) => !['html', 'expression', 'image', 'mediadisplay'].includes(q.type));
+  const rounds = answerable.reduce((sum, q) => sum + getTrialCount(q), 0);
+  const issues = [...report.errors, ...report.warnings];
   const [copied, setCopied] = useState(false);
 
   const origin = window.location.origin;
   const surveyUrl = currentProject
-    ? `${origin}/survey?project=${currentProject.id}`
+    ? `${origin}/survey?project=${encodeURIComponent(currentProject.id)}`
     : null;
 
   const copy = async (text) => {
@@ -49,6 +57,12 @@ export default function WebsiteSetup({ currentProject, surveyConfig }) {
         description={t.shareDescription}
       />
 
+      <Alert severity={!answerable.length || report.errors.length ? 'warning' : 'info'} sx={{ mb: 2 }}>
+        {zh ? `${report.pageCount} 页 · ${answerable.length} 道作答题 · 共 ${rounds} 轮` : `${report.pageCount} pages · ${answerable.length} answerable questions · ${rounds} rounds`}
+        {!answerable.length && <Typography variant="body2">{zh ? '问卷还没有作答题，请先在题目设置中完善。' : 'This survey has no answerable questions. Add questions before inviting participants.'}</Typography>}
+        {issues.slice(0, 5).map((issue, i) => <Typography key={i} variant="body2">• {issue.message}</Typography>)}
+      </Alert>
+      {hasUnsavedChanges && <Alert severity="warning" sx={{ mb: 2 }}>{zh ? '当前有未保存的修改。请确认顶部显示已保存，再发送分享链接。' : 'There are unsaved changes. Wait for the toolbar to show saved before sending the share link.'}</Alert>}
       <Card sx={{ mb: 3, border: '2px solid', borderColor: 'primary.main' }}>
         <CardContent>
           <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>

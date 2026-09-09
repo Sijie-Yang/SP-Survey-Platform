@@ -376,7 +376,8 @@ export async function moveImagesInR2(moves, options = {}) {
   if (!list.length) return { success: true, moved: [], errors: [] };
   const copyResult = await copyImagesInR2(list, options);
   const copiedOk = (copyResult.copied || []).map((c) => c.from);
-  if (copiedOk.length) {
+  // A partial copy must leave all original references usable for a retry.
+  if (copyResult.success && !(copyResult.errors || []).length && copiedOk.length && !options.deferDelete) {
     await deleteImagesFromR2(copiedOk, {
       allowTemplateKeys: options.allowTemplateKeys,
       allowedPrefix: options.allowedPrefix,
