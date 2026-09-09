@@ -36,6 +36,7 @@ export const DESIGN_CAPABILITIES = {
     'Prefer deterministic operations over full surveyConfig replace.',
     'Never send API keys, HuggingFace tokens, fal keys, or Supabase credentials.',
     'Saves update the live participant URL immediately (preview / share / view-live).',
+    'Optional survey locale: en (default) or zh. Participant chrome (progress, trials, Next) follows this setting, not the researcher admin language.',
     'Product "Publish to Main Page" is the homepage listing flow, not gating the share URL.',
     'Use expectedDraftUpdatedAt for optimistic concurrency on every write.',
     'Prefer image*/media*/skillquestion for visual preference studies — not only text/rating.',

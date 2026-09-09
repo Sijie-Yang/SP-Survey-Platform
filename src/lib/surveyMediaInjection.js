@@ -919,7 +919,7 @@ const INJECTED_MEDIA_SYNC_KEYS = [
   'annotationImageUrl', 'trialMediaSets', 'skillImages',
   'skillId', 'skillHtml', 'skillAnalysisHtml', 'skillResultSchema',
   'skillRevision', 'skillContractVersion', 'skillConfig',
-  'assignedMediaSetId', 'assignedMediaGroupId', 'assignedMediaCategories',
+  'assignedMediaSetId', 'assignedMediaGroupId', 'assignedMediaCategories', 'trialMediaContexts',
 ];
 
 /**
@@ -947,6 +947,7 @@ export function syncInjectedMediaOntoSurveyModel(surveyModel, surveyJson) {
       try {
         if (typeof q.setPropertyValue === 'function') {
           q.setPropertyValue(key, val);
+          if (key === 'trialMediaContexts') q[key] = val;
         } else {
           q[key] = val;
         }

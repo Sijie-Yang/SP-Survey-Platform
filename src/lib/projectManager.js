@@ -50,6 +50,7 @@ const createDefaultSurveyConfig = (title) => ({
   logoPosition: 'right',
   showQuestionNumbers: 'off',
   showProgressBar: 'top',
+  locale: 'en',
   progressBarType: 'questions',
   autoGrowComment: true,
   showPreviewBeforeComplete: 'showAllQuestions',

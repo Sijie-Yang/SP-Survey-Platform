@@ -18,6 +18,7 @@ import {
   clearInjectedMediaStore,
 } from '../../lib/surveyMediaInjection';
 import { getTrialCount } from '../../lib/trialNavigation';
+import { applySurveyLocale } from '../../lib/surveyLocale';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
 import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
@@ -392,6 +393,7 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
     // Directly use processed configuration (already in standard SurveyJS format)
     const normalizedPreviewJson = normalizeBuilderSurveyJson(configToUse);
     const model = new Model(normalizedPreviewJson);
+    applySurveyLocale(model, normalizedPreviewJson);
     syncInjectedMediaOntoSurveyModel(model, normalizedPreviewJson);
     
     // Apply theme (same as Live Survey) - with error handling

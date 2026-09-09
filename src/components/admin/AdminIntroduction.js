@@ -208,7 +208,7 @@ export default function AdminIntroduction({ onGoToTab }) {
       </Stack>
 
       <Accordion
-        defaultExpanded
+        defaultExpanded={false}
         disableGutters
         elevation={0}
         sx={{

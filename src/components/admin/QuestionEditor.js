@@ -300,7 +300,7 @@ function TrialCountField({ question, onChange }) {
       value={question.trialCount ?? 1}
       onChange={(e) => onChange('trialCount', clampTrialCount(e.target.value))}
       onFocus={(e) => e.target.select()}
-      helperText="Each trial draws a new media set with the same sampling rules. Participants get progress dots and can jump back among reached trials."
+      helperText="Each trial draws a new media set with the same sampling rules. Participants see how many rounds remain. Image / media choice auto-advances after a pick; rating and yes-no stay so they can change the answer."
       inputProps={{ min: 1, max: TRIAL_COUNT_MAX, step: 1 }}
       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
     />

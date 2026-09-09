@@ -497,13 +497,14 @@ function rowToAdminProject(row) {
     description:     row.description     || '',
     user_id:         row.user_id         || null,
     template_id:     row.template_id     || null,
-    config:          row.survey_config   || {},
+    config:          row.survey_config_draft ?? row.survey_config ?? {},
     preloadedImages: row.preloaded_images || [],
     preloadedAt:     row.preloaded_at    || null,
     preloadedSource: row.preloaded_source || null,
     imageDatasetConfig: row.image_dataset_config || {},
     created_at:      row.created_at,
     updated_at:      row.updated_at,
+    draftUpdatedAt:  row.draft_updated_at ?? null,
   };
 }
 
@@ -531,12 +532,18 @@ export async function listAllProjects() {
  * Always .select() so RLS/no-op updates surface as errors (Supabase otherwise
  * returns success with 0 rows).
  */
-export async function updateProjectAdmin(id, updates) {
+export async function updateProjectAdmin(id, updates, { expectedDraftUpdatedAt } = {}) {
   if (!supabase) throw new Error('Supabase not configured');
   const row = { updated_at: new Date().toISOString() };
   if ('name'             in updates) row.name              = updates.name;
   if ('description'      in updates) row.description       = updates.description;
-  if ('survey_config'    in updates) row.survey_config     = updates.survey_config;
+  if ('survey_config' in updates) {
+    // Save is live: participant RPCs and the owner builder prefer the draft.
+    row.survey_config = updates.survey_config;
+    row.survey_config_draft = updates.survey_config;
+    row.draft_updated_at = row.updated_at;
+    row.last_writer = { source: 'admin', at: row.updated_at };
+  }
   if ('preloaded_images' in updates) row.preloaded_images  = updates.preloaded_images;
   if ('preloaded_at'     in updates) row.preloaded_at      = updates.preloaded_at;
   if ('preloaded_source' in updates) row.preloaded_source  = updates.preloaded_source;
@@ -544,16 +551,22 @@ export async function updateProjectAdmin(id, updates) {
     row.image_dataset_config = updates.image_dataset_config;
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('projects')
     .update(row)
-    .eq('id', id)
-    .select('id, survey_config')
+    .eq('id', id);
+  if ('survey_config' in updates && expectedDraftUpdatedAt !== undefined) {
+    query = expectedDraftUpdatedAt === null
+      ? query.is('draft_updated_at', null)
+      : query.eq('draft_updated_at', expectedDraftUpdatedAt);
+  }
+  const { data, error } = await query
+    .select('id, survey_config, survey_config_draft, draft_updated_at')
     .maybeSingle();
   if (error) throw error;
   if (!data?.id) {
     throw new Error(
-      '保存失败：没有更新到任何项目行（可能是管理员 RLS 未允许更新他人项目）。请检查 Supabase projects 表的 UPDATE 策略。',
+      '保存失败：项目可能已被其他人修改，或当前账号没有更新权限。请刷新项目后重试。',
     );
   }
   return { success: true, project: data };

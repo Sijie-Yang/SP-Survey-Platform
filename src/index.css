@@ -59,6 +59,17 @@ code {
   width: 100%;
 }
 
+/* Phone A/B (2 images): one full-width image per row so choices stay large. */
+.sd-imagepicker.sp-gallery-stack {
+  flex-flow: column nowrap !important;
+  align-items: stretch !important;
+}
+
+.sd-imagepicker.sp-gallery-stack .sd-imagepicker__item {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
 .sd-imagepicker__column,
 .sd-selectbase__column.sd-imagepicker__column {
   /* Flatten SurveyJS column wrappers so JS can pack thumbs across the full width */
@@ -214,7 +225,8 @@ code {
    layout module sizes the *image* inside each item (centered horizontally),
    keeping each row's draggable hit area full width — the surrounding card
    stays full-width, only the image shrinks/grows around its own AR. */
-.sp-image-gallery.sp-image-gallery--vertical {
+.sp-image-gallery.sp-image-gallery--vertical,
+.sp-image-gallery.sp-gallery-stack {
   flex-flow: column nowrap;
   gap: var(--sp-gallery-gap, 12px);
   align-items: stretch;
@@ -230,7 +242,8 @@ code {
   box-sizing: border-box;
 }
 
-.sp-image-gallery.sp-image-gallery--vertical > .sp-image-gallery__item {
+.sp-image-gallery.sp-image-gallery--vertical > .sp-image-gallery__item,
+.sp-image-gallery.sp-gallery-stack > .sp-image-gallery__item {
   width: 100%;
   max-width: 100%;
 }
@@ -373,6 +386,19 @@ iframe[title="skill-question"] {
   opacity: 1 !important;
 }
 
+/* Hide page Next while a multi-trial question on this page is unfinished. */
+.sd-root-modern.sp-trials-incomplete .sd-navigation__next-btn,
+.sd-root-modern.sp-trials-incomplete .sd-navigation__complete-btn,
+.sd-root-modern.sp-trials-incomplete .sd-navigation__preview-btn,
+.sv-root.sp-trials-incomplete input.sv_next_btn,
+.sv-root.sp-trials-incomplete input.sv_complete_btn,
+.sv-root.sp-trials-incomplete input.sv_preview_btn,
+.sv_default_css.sp-trials-incomplete input.sv_next_btn,
+.sv_default_css.sp-trials-incomplete input.sv_complete_btn,
+.sv_default_css.sp-trials-incomplete input.sv_preview_btn {
+  display: none !important;
+}
+
 /* Participant shell + SurveyJS both add horizontal padding — tighten on phones. */
 @media (max-width: 600px) {
   .sp-survey-with-progress {
@@ -496,4 +522,18 @@ iframe[title="skill-question"] {
   .sp-landing-hero-video {
     animation: none;
   }
+}
+
+/* Main experience polish */
+.sp-media-retry {
+  display: block; position: relative; z-index: 2; margin: 8px auto;
+  min-height: 44px; padding: 8px 12px; border: 1px solid currentColor;
+  border-radius: 6px; background: #fff; color: #9b3418; cursor: pointer;
+  font: inherit; line-height: 1.4; max-width: 100%;
+}
+@media (max-width: 600px) {
+  .sp-survey-with-progress .sd-title.sd-container-modern__title { padding-top: 12px; padding-bottom: 12px; }
+  .sp-survey-with-progress .sd-header__text h3 { font-size: 1.25rem; line-height: 1.4; }
+  .sp-survey-with-progress .sd-description { line-height: 1.5; }
+  .sp-trial-shell .MuiAlert-root { padding: 6px 10px; }
 }

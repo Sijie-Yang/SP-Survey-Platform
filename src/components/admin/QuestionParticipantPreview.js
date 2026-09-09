@@ -13,6 +13,7 @@ import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import { getTrialCount } from '../../lib/trialNavigation';
 import { resolveSkillQuestions, syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
 import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
+import { applySurveyLocale } from '../../lib/surveyLocale';
 
 let widgetsRegistered = false;
 function ensureWidgets() {
@@ -113,6 +114,7 @@ export default function QuestionParticipantPreview({ question, currentProject, s
           showNavigationButtons: false,
         });
         const m = new Model(surveyJson);
+        applySurveyLocale(m, surveyConfig || currentProject?.config);
         // Allow interacting with ranking / trial controls in the editor preview
         m.mode = 'edit';
         m.showPreviewBeforeComplete = false;

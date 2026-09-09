@@ -1,3 +1,4 @@
+import { mediaIdentityKey, resolveMediaAnswerKey } from './mediaIdentity.js';
 /** TrueSkill-style 1v1 rating for imagepicker (any count, single or multi-select). */
 
 import { expandQuestionAnswerUnits } from './responseAnswerUnits.js';
@@ -43,10 +44,7 @@ function ensurePlayer(players, key) {
   return players.get(key);
 }
 
-export function filenameKey(val) {
-  if (!val || typeof val !== 'string') return String(val ?? '');
-  return val.split('?')[0].split('/').pop();
-}
+export function filenameKey(val) { return mediaIdentityKey(val); }
 
 /**
  * Map imagepicker/mediapicker answer(s) to filename keys from the shown set.
@@ -68,15 +66,8 @@ export function answerToSelectedKeys(answer, shownImages) {
       if (shownKeys[idx]) selected.add(shownKeys[idx]);
       return;
     }
-    const fk = filenameKey(str);
-    const exact = shownKeys.find((k) => k === fk);
-    if (exact) {
-      selected.add(exact);
-      return;
-    }
-    const byUrl = shown.find((s) => filenameKey(s) === fk || s === str || s.includes(fk));
-    if (byUrl) selected.add(filenameKey(byUrl));
-    else if (fk) selected.add(fk);
+    const resolved = resolveMediaAnswerKey(str, shown);
+    if (resolved && (!shownKeys.length || shownKeys.includes(resolved))) selected.add(resolved);
   });
 
   return [...selected];

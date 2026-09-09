@@ -43,6 +43,7 @@ function shortName(str) {
 
 function resolveImageKey(key, resolvedUrl) {
   if (!key) return null;
+  if (resolvedUrl?.has(key)) return resolvedUrl.get(key);
   if (key.startsWith('http') || key.startsWith('/') || key.startsWith('data:')) return key;
   return resolvedUrl?.get(key) || resolvedUrl?.get(shortName(key)) || null;
 }

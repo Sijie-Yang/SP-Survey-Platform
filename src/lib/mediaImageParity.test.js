@@ -9,8 +9,8 @@ describe('image / media parity fixes', () => {
 
   test('answerToSelectedKeys resolves media_N like image_N', () => {
     const shown = ['https://r2.test/a.jpg', 'https://r2.test/b.jpg'];
-    expect(answerToSelectedKeys('image_0', shown)).toEqual(['a.jpg']);
-    expect(answerToSelectedKeys('media_1', shown)).toEqual(['b.jpg']);
-    expect(answerToSelectedKeys(['media_0', 'media_1'], shown)).toEqual(['a.jpg', 'b.jpg']);
+    expect(answerToSelectedKeys('image_0', shown)).toEqual([shown[0]]);
+    expect(answerToSelectedKeys('media_1', shown)).toEqual([shown[1]]);
+    expect(answerToSelectedKeys(['media_0', 'media_1'], shown)).toEqual(shown);
   });
 });

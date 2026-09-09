@@ -4,6 +4,7 @@ import { tf } from './contexts/adminI18n';
 import RegionSwitcher from './components/admin/RegionSwitcher';
 import {
   AppBar,
+  useMediaQuery,
   Toolbar,
   Typography,
   Container,
@@ -123,7 +124,8 @@ function AdminLoadingLabel() {
 }
 
 export default function AdminApp() {
-  const { t } = useRegion();
+  const { t, language, setLanguage } = useRegion();
+  const compactToolbar = useMediaQuery('(max-width:899px)');
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [isAdminUser, setIsAdminUser] = useState(false);
@@ -1019,24 +1021,25 @@ export default function AdminApp() {
             zIndex: (theme) => theme.zIndex.drawer + 1,
           }}
         >
-          <Toolbar>
+          <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 }, minWidth: 0 }}>
           <Tooltip title={t.toggleSidebar}>
             <IconButton
               color="inherit"
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              sx={{ mr: 2 }}
+              sx={{ mr: { xs: 0, sm: 2 } }}
             >
               <MenuIcon />
             </IconButton>
           </Tooltip>
           
-          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, minWidth: 0 }}>
             <Box
               component="img"
               src="/logo-header.png"
               alt="SP-Survey"
               sx={{
-                height: '35px',
+                height: { xs: 26, sm: 35 },
+                maxWidth: { xs: 92, sm: 150 },
                 objectFit: 'contain'
               }}
             />
@@ -1049,7 +1052,7 @@ export default function AdminApp() {
               rel="noopener noreferrer"
               sx={{
                 ml: 1.5,
-                display: 'flex',
+                display: { xs: 'none', lg: 'flex' },
                 alignItems: 'center',
                 gap: 0.5,
                 px: 1,
@@ -1105,9 +1108,9 @@ export default function AdminApp() {
             </Box>
             
             {currentProject && (
-              <Box sx={{ ml: 2, display: 'flex', alignItems: 'center' }}>
+              <Box sx={{ ml: 2, display: { xs: 'none', md: 'flex' }, minWidth: 0, alignItems: 'center' }}>
                 <FolderOpen sx={{ mr: 1, fontSize: '1.2rem' }} />
-                <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                <Typography variant="subtitle1" noWrap sx={{ fontWeight: 'bold', minWidth: 0 }}>
                   {currentProject.name}
                 </Typography>
               </Box>
@@ -1116,14 +1119,14 @@ export default function AdminApp() {
           
           {/* Backend Server Status Monitor — only shown in self-hosted mode */}
           {!process.env.REACT_APP_SUPABASE_URL && (
-            <Box sx={{ mr: 2 }}>
+            <Box sx={{ mr: { xs: 0, sm: 2 } }}>
               <BackendStatus />
             </Box>
           )}
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: { xs: 0, sm: 1 }, flexShrink: 0 }}>
             {currentProject && (
-              <Typography variant="caption" sx={{ opacity: 0.9, minWidth: 140, textAlign: 'right' }}>
+              <Typography variant="caption" sx={{ display: { xs: 'none', lg: 'block' }, opacity: 0.9, minWidth: 140, textAlign: 'right' }}>
                 {formatSaveStatusLabel(t, saveStatus, lastSavedAt)}
               </Typography>
             )}
@@ -1184,7 +1187,7 @@ export default function AdminApp() {
               </IconButton>
             </Tooltip>
 
-            <Tooltip title={t.aiTooltip}>
+            <Box sx={{ display: { xs: 'none', md: 'block' } }}><Tooltip title={t.aiTooltip}>
               <Button
                 color="inherit"
                 size="small"
@@ -1211,7 +1214,7 @@ export default function AdminApp() {
               </Button>
             </Tooltip>
 
-            <RegionSwitcher />
+            </Box><Box sx={{ display: { xs: 'none', md: 'block' } }}><RegionSwitcher /></Box>
           </Box>
           
           <Button
@@ -1227,6 +1230,7 @@ export default function AdminApp() {
             }}
             disabled={!currentProject || !surveyConfig}
             sx={{
+              display: { xs: 'none', md: 'inline-flex' },
               mr: 1,
               px: 1.25,
               py: 0.35,
@@ -1274,6 +1278,16 @@ export default function AdminApp() {
         onClose={handleToolsMenuClose}
         PaperProps={{ sx: { mt: 1, minWidth: 240 } }}
       >
+        {compactToolbar && <MenuItem onClick={() => { handleToolsMenuClose(); navigate('/admin/integrations'); }}>{t.aiLabel}</MenuItem>}
+        {compactToolbar && <MenuItem disabled={!currentProject || !surveyConfig} onClick={() => {
+          handleToolsMenuClose();
+          window.open('/survey?project=' + encodeURIComponent(currentProject.id), '_blank', 'noopener,noreferrer');
+        }}>{t.viewLive}</MenuItem>}
+        {compactToolbar && <MenuItem onClick={() => { setLanguage(language === 'zh' ? 'en' : 'zh'); handleToolsMenuClose(); }}>
+          {language === 'zh' ? 'Switch to English' : '切换为中文'}
+        </MenuItem>}
+        {compactToolbar && <MenuItem disabled>{formatSaveStatusLabel(t, saveStatus, lastSavedAt)}</MenuItem>}
+        {compactToolbar && <Divider />}
         {user && (
           <Box sx={{ px: 2, py: 1 }}>
             <Typography variant="caption" color="text.secondary">{t.signedInAs}</Typography>
@@ -1409,9 +1423,9 @@ export default function AdminApp() {
         maxWidth="xl" 
         sx={{ 
           mt: 10, // Increase top spacing to accommodate fixed AppBar
-          ml: sidebarOpen ? '400px' : 0,
+          ml: { xs: 0, md: sidebarOpen ? '400px' : 0 },
           transition: 'margin-left 0.3s ease',
-          width: sidebarOpen ? 'calc(100% - 400px)' : '100%'
+          width: { xs: '100%', md: sidebarOpen ? 'calc(100% - 400px)' : '100%' }, minWidth: 0
         }}
       >
         {!currentProject ? (

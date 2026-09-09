@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { MediaPlayer } from './MediaWidgets';
+import { resolveSurveyUiLanguage } from '../lib/surveyLocale';
+import React, { useState, useEffect } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -16,7 +18,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Box, Typography, Card } from '@mui/material';
+import { Box, Typography, Card, Button } from '@mui/material';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { resolveQuestionImageChoices } from '../lib/questionImageChoices';
 
@@ -44,11 +46,12 @@ function SortableItem({ id, image, index }) {
     );
   }
 
+  const isPlayable = image.mediaType === 'video' || image.mediaType === 'audio';
   return (
     <Card
       ref={setNodeRef}
       style={style}
-      className="sp-image-gallery__item"
+      className={isPlayable ? 'sp-media-ranking-item' : 'sp-image-gallery__item'}
       sx={{
         position: 'relative',
         width: '100%',
@@ -61,15 +64,15 @@ function SortableItem({ id, image, index }) {
     >
       <Box
         className="sp-image-gallery__image-container"
-        sx={{ position: 'relative', lineHeight: 0, flex: '0 0 auto', minWidth: 0 }}
+        sx={{ position: 'relative', lineHeight: 0, flex: isPlayable ? '1 1 auto' : '0 0 auto', minWidth: 0 }}
       >
-        <Box
+        {isPlayable ? <MediaPlayer url={image.imageLink} type={image.mediaType} name={image.name} /> : <Box
           component="img"
           src={image.imageLink}
           alt={`Image ${index + 1}`}
           sx={{ display: 'block' }}
           draggable={false}
-        />
+        />}
         <Box
           sx={{
             position: 'absolute',
@@ -116,7 +119,7 @@ function SortableItem({ id, image, index }) {
 
 export default function ImageRankingWidget({ question, value, onValueChanged, trialStimulusMedia = null }) {
   const [items, setItems] = useState([]);
-  const seededOrderKeyRef = useRef('');
+  const zh = resolveSurveyUiLanguage(question?.survey) === 'zh';
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -147,6 +150,9 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
       value: choice.value,
       imageLink: choice.imageLink,
       originalIndex: index,
+      mediaType: trialStimulusMedia?.[index]?.type || question.mediaItems?.[index]?.type || question.mediaTypes?.[index]
+        || (/\.(mp4|webm|mov)(\?|$)/i.test(choice.imageLink) ? 'video' : /\.(mp3|wav|ogg|m4a)(\?|$)/i.test(choice.imageLink) ? 'audio' : 'image'),
+      name: choice.imageName,
     }));
 
     if (value && Array.isArray(value) && value.length > 0) {
@@ -156,18 +162,10 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
       const usedValues = new Set(value);
       const missingItems = initialItems.filter((item) => !usedValues.has(item.value));
       setItems([...orderedItems, ...missingItems]);
-      seededOrderKeyRef.current = trialMediaKey;
+
     } else {
       setItems(initialItems);
-      // First paint: persist the displayed order so "no drag" still counts as answered.
-      if (
-        initialItems.length > 0
-        && typeof onValueChanged === 'function'
-        && seededOrderKeyRef.current !== trialMediaKey
-      ) {
-        seededOrderKeyRef.current = trialMediaKey;
-        onValueChanged(initialItems.map((item) => item.value));
-      }
+
     }
   }, [question, question.choices, question.imageLinks, value, trialMediaKey, trialStimulusMedia, onValueChanged]);
 
@@ -196,8 +194,12 @@ export default function ImageRankingWidget({ question, value, onValueChanged, tr
   return (
     <Box sx={{ width: '100%', maxWidth: 600, mx: 'auto' }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        Drag the handle on the right to reorder (touch: press & hold).
+        {zh ? '拖动右侧手柄调整顺序（手机上长按拖动），或确认当前顺序。' : 'Drag the handle to reorder (touch: press and hold), or confirm the current order.'}
       </Typography>
+      <Button variant="outlined" sx={{ mb: 1 }} disabled={!items.length || question?.survey?.mode === 'display'}
+        onClick={() => onValueChanged?.(items.map((item) => item.value))}>
+        {Array.isArray(value) && value.length ? (zh ? '已确认顺序' : 'Order confirmed') : (zh ? '确认当前顺序' : 'Confirm current order')}
+      </Button>
       <Box
         className="sp-image-gallery sp-image-gallery--vertical sp-image-gallery--with-handle"
         sx={{ width: '100%' }}

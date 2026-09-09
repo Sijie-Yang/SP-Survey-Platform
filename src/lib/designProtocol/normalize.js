@@ -113,6 +113,7 @@ export function createDefaultSurveyConfig(name, description = '') {
     logoPosition: 'right',
     showQuestionNumbers: 'off',
     showProgressBar: 'top',
+    locale: 'en',
     progressBarType: 'questions',
     autoGrowComment: true,
     showPreviewBeforeComplete: 'showAllQuestions',

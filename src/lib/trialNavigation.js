@@ -22,6 +22,19 @@ export function supportsTrialLoop(type) {
   return TRIAL_LOOP_TYPES.has(type);
 }
 
+/** Forced-choice pickers only — rating / yes-no stay so people can change their mind. */
+export const AUTO_ADVANCE_TRIAL_TYPES = new Set([
+  'imagepicker', 'mediapicker',
+]);
+
+export function canAutoAdvanceTrial(question) {
+  if (!question) return false;
+  const type = question.type || question.getType?.();
+  if (!AUTO_ADVANCE_TRIAL_TYPES.has(type)) return false;
+  if (question.multiSelect === true) return false;
+  return true;
+}
+
 export function getTrialCount(questionOrElement) {
   if (!questionOrElement) return 1;
   const type = questionOrElement.type || questionOrElement.getType?.();

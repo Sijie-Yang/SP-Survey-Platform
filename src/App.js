@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -7,22 +7,22 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RegionProvider } from './contexts/RegionContext';
 import { createCustomTheme, DEFAULT_THEME_KEY } from './themes/themeConfig';
 import { ToastProvider } from './components/layout/ToastProvider';
-import SurveyApp from './SurveyApp';
-import AdminApp from './AdminApp';
-import LoginPage from './pages/LoginPage';
-import LandingPage from './pages/LandingPage';
-import LiveSurveysPage from './pages/LiveSurveysPage';
-import PapersLibraryPage from './pages/PapersLibraryPage';
-import RequestTemplatePage from './pages/RequestTemplatePage';
-import RequestSurveyDesignPage from './pages/RequestSurveyDesignPage';
-import TeamPage from './pages/TeamPage';
-import AdminDashboard from './pages/AdminDashboard';
-import SkillEditorPage from './pages/SkillEditorPage';
-import SkillLibraryPage from './pages/SkillLibraryPage';
-import IntegrationsPage from './pages/IntegrationsPage';
-import McpOAuthPage from './pages/McpOAuthPage';
-import SpBenchPage from './pages/SpBenchPage';
-import NewsPage from './pages/NewsPage';
+const SurveyApp = lazy(() => import('./SurveyApp'));
+const AdminApp = lazy(() => import('./AdminApp'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const LiveSurveysPage = lazy(() => import('./pages/LiveSurveysPage'));
+const PapersLibraryPage = lazy(() => import('./pages/PapersLibraryPage'));
+const RequestTemplatePage = lazy(() => import('./pages/RequestTemplatePage'));
+const RequestSurveyDesignPage = lazy(() => import('./pages/RequestSurveyDesignPage'));
+const TeamPage = lazy(() => import('./pages/TeamPage'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const SkillEditorPage = lazy(() => import('./pages/SkillEditorPage'));
+const SkillLibraryPage = lazy(() => import('./pages/SkillLibraryPage'));
+const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
+const McpOAuthPage = lazy(() => import('./pages/McpOAuthPage'));
+const SpBenchPage = lazy(() => import('./pages/SpBenchPage'));
+const NewsPage = lazy(() => import('./pages/NewsPage'));
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -124,6 +124,7 @@ export default function App() {
         <AuthProvider>
           <RegionProvider>
             <Router>
+              <Suspense fallback={<Box role="status" sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress aria-label="Loading" /></Box>}>
               <Routes>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/papers" element={<PapersLibraryPage />} />
@@ -144,6 +145,7 @@ export default function App() {
                 <Route path="/skill-editor" element={<ProtectedSkillEditor />} />
                 <Route path="/skill-editor/:id" element={<ProtectedSkillEditor />} />
               </Routes>
+              </Suspense>
             </Router>
           </RegionProvider>
         </AuthProvider>

@@ -1,6 +1,14 @@
 const DRAFT_PREFIX = 'survey_draft_';
 const PENDING_PREFIX = 'survey_pending_';
 
+/** Keep the answered questions/media snapshot, but use the current UI language. */
+export function restoreDraftSurveyJson(draft, currentConfig) {
+  if (!draft?.finalSurveyJson) return null;
+  const restored = JSON.parse(JSON.stringify(draft.finalSurveyJson));
+  if (currentConfig?.locale != null) restored.locale = currentConfig.locale;
+  return restored;
+}
+
 export function buildDraftKey(projectId, participantId) {
   return `${DRAFT_PREFIX}${projectId}_${participantId}`;
 }

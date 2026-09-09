@@ -1,3 +1,5 @@
+import { handleSurveyMediaError } from './lib/mediaRecovery';
+import { surveyRevision } from './lib/surveyRevision';
 import React, { useState, useEffect, useRef } from "react";
 import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
@@ -7,6 +9,7 @@ import { saveSurveyResponse, isSupabaseConfigured } from './lib/supabase';
 import {
   findDraftForProject, saveDraft, clearDraft, clearDraftByKey, clearAllDraftsForProject,
   savePendingSubmission, findPendingSubmission, clearPendingSubmission, clearPendingByKey,
+  restoreDraftSurveyJson,
 } from './lib/surveyDraft';
 import { surveyJson, displayedImages } from './config/questions';
 import { surveyConfig } from './config/surveyConfig';
@@ -36,6 +39,8 @@ import {
   rehydrateTrialsAnswerStoreFromSurvey,
 } from './lib/trialNavigation';
 import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
+import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale } from './lib/surveyLocale';
+import { tf } from './contexts/adminI18n';
 import SurveyProgressBridge, {
   normalizeShowProgressBar,
 } from './components/SurveyProgressBridge';
@@ -92,6 +97,8 @@ export default function SurveyApp() {
   const surveyPhaseRef = useRef('loading');
   const finalSurveyJsonRef = useRef(null);
   const imageTrackerRef = useRef({});
+  const participantLocale = surveyModel || resumeDialog?.model || finalSurveyJsonRef.current;
+  const participantText = surveyUiStrings(participantLocale);
 
   useEffect(() => {
     surveyPhaseRef.current = surveyPhase;
@@ -364,7 +371,7 @@ export default function SurveyApp() {
       try {
         const { getProjectById } = await import('./lib/projectManager');
         projectData = await getProjectById(projectId);
-        console.log('✅ Loaded project data:', projectData);
+
       } catch (error) {
         console.error('❌ Error loading project data:', error);
       }
@@ -467,7 +474,7 @@ export default function SurveyApp() {
       // Resume path: rebuild from the exact survey JSON that was answered (same stimuli).
       const resumeDraft = options.resumeDraft || null;
       if (resumeDraft?.finalSurveyJson) {
-        finalSurveyJson = JSON.parse(JSON.stringify(resumeDraft.finalSurveyJson));
+        finalSurveyJson = restoreDraftSurveyJson(resumeDraft, adminConfig);
         setAdminConfigExists(true);
         setLoadingMessage('Restoring previous session…');
         if (resumeDraft.participantId) {
@@ -585,6 +592,11 @@ export default function SurveyApp() {
                           folderTags,
                         );
                         element.trialMediaSets = trialMediaSets;
+                        element.trialMediaContexts = trialAssignments.map((a) => ({
+                          shown_media_set: a.setId || a.groupId || null,
+                          shown_media_categories: a.categories || [],
+                          shown_media: a.slots || [],
+                        }));
                         element.trialCount = elementTrialCount;
                         const assignment = trialAssignments[0] || { images: [] };
                         let selectedImages = assignment.flatMedia || assignment.images || [];
@@ -871,7 +883,10 @@ export default function SurveyApp() {
       
       // Create survey model (map builder-only types like number/consent)
       finalSurveyJson = normalizeBuilderSurveyJson(finalSurveyJson);
+      const revision = finalSurveyJson._spRevision || await surveyRevision(resumeDraft?.finalSurveyJson ? finalSurveyJson : (adminConfig || finalSurveyJson));
+      finalSurveyJson._spRevision = revision;
       const model = new Model(finalSurveyJson);
+      applySurveyLocale(model, finalSurveyJson);
       // Re-apply media fields SurveyJS may have stripped (esp. media* + trialMediaSets)
       syncInjectedMediaOntoSurveyModel(model, finalSurveyJson);
       
@@ -999,8 +1014,7 @@ export default function SurveyApp() {
         });
         
         // Check Supabase configuration before saving
-        const currentSupabaseConfig = sessionStorage.getItem('supabase_config');
-        console.log('Current Supabase config in sessionStorage:', currentSupabaseConfig);
+
         
         // Combine user responses with displayed images information
         const attemptIndex = isRepeatMode ? repeatAttemptRef.current : 1;
@@ -1031,6 +1045,9 @@ export default function SurveyApp() {
             screen_resolution: `${window.screen.width}x${window.screen.height}`,
             survey_version: useAdminConfig ? `2.0-admin-${projectId}` : "1.0-original",
             project_id: projectId,
+            survey_revision: revision.id,
+            survey_response_contract: revision.contract,
+            survey_draft_updated_at: resumeDraft?.finalSurveyJson ? null : projectData?.draftUpdatedAt || null,
             timing: {
               total_seconds: totalSeconds,
               page_seconds: { ...pageTimingRef.current },
@@ -1177,7 +1194,7 @@ export default function SurveyApp() {
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', gap: 2 }}>
         <CircularProgress />
-        <Typography variant="body2" color="text.secondary">Saving your responses…</Typography>
+        <Typography variant="body2" color="text.secondary">{participantText.participantSaving}</Typography>
       </Box>
     );
   }
@@ -1196,28 +1213,28 @@ export default function SurveyApp() {
 
   if (surveyPhase === 'completed' && completionInfo) {
     const defaultMsg = completionInfo.isRepeatMode
-      ? `All ${completionInfo.repeatTotal} annotation rounds completed!`
-      : 'Thank you for completing the survey!';
+      ? tf(participantText.participantRoundsCompleted, { n: completionInfo.repeatTotal })
+      : participantText.participantCompleted;
     return (
       <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
-        <Typography variant="h4" sx={{ mb: 2, fontWeight: 600 }}>Thank you!</Typography>
+        <Typography variant="h4" sx={{ mb: 2, fontWeight: 600 }}>{participantText.participantThanks}</Typography>
         <Typography variant="body1" sx={{ mb: 2 }}>
           {completionMessage || defaultMsg}
         </Typography>
         {completionInfo.completionCode && (
           <Typography variant="body1" sx={{ mb: 2, fontWeight: 600, letterSpacing: 1 }}>
-            Completion code: <strong>{completionInfo.completionCode}</strong>
+            {participantText.participantCompletionCode} <strong>{completionInfo.completionCode}</strong>
           </Typography>
         )}
         {completionInfo.participantId && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Your participant ID: <strong>{completionInfo.participantId}</strong>
+            {participantText.participantIdLabel} <strong>{completionInfo.participantId}</strong>
           </Typography>
         )}
         <Typography variant="caption" color="text.secondary">
           {completionInfo.storage === 'file'
-            ? 'Responses saved locally.'
-            : 'Responses saved successfully.'}
+            ? participantText.participantSavedLocally
+            : participantText.participantSaved}
         </Typography>
       </Box>
     );
@@ -1227,7 +1244,7 @@ export default function SurveyApp() {
     return (
       <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
         <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
-          We could not save your responses due to a network or server issue. Your answers are preserved — please try again.
+          {participantText.participantSaveError}
         </Alert>
         <Button
           variant="contained"
@@ -1242,7 +1259,7 @@ export default function SurveyApp() {
             });
           }}
         >
-          Retry submission
+          {participantText.participantRetrySubmission}
         </Button>
       </Box>
     );
@@ -1340,6 +1357,7 @@ export default function SurveyApp() {
               py: { xs: 1, sm: 3 },
             }}
             className="sp-survey-with-progress"
+            onErrorCapture={(e) => handleSurveyMediaError(e, participantLocale)}
           >
             <SurveyProgressBridge
               surveyModel={surveyModel}
@@ -1357,14 +1375,14 @@ export default function SurveyApp() {
       )}
 
       <Dialog open={!!resumeDialog} onClose={() => {}}>
-        <DialogTitle>Resume previous session?</DialogTitle>
+        <DialogTitle>{participantText.participantResumeTitle}</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            We found an unfinished survey from{' '}
-            {resumeDialog?.draft?.savedAt
-              ? new Date(resumeDialog.draft.savedAt).toLocaleString()
-              : 'a previous visit'}.
-            Would you like to continue where you left off?
+            {tf(participantText.participantResumeBody, {
+              date: resumeDialog?.draft?.savedAt
+                ? new Date(resumeDialog.draft.savedAt).toLocaleString(resolveSurveyJsLocale(participantLocale))
+                : participantText.participantPreviousVisit,
+            })}
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -1392,7 +1410,7 @@ export default function SurveyApp() {
               setLoading(false);
             }}
           >
-            Start over
+            {participantText.participantStartFresh}
           </Button>
           <Button
             variant="contained"
@@ -1410,7 +1428,7 @@ export default function SurveyApp() {
               });
             }}
           >
-            Continue
+            {participantText.participantResume}
           </Button>
         </DialogActions>
       </Dialog>

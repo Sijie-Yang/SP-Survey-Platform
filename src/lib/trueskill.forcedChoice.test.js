@@ -12,12 +12,12 @@ describe('matchesFromForcedChoiceAnswer', () => {
 
   test('choice A → A beats B', () => {
     const matches = matchesFromForcedChoiceAnswer({ choice: 'A', chosenIndex: 0 }, shown);
-    expect(matches).toEqual([{ winner: 'a.jpg', loser: 'b.jpg' }]);
+    expect(matches).toEqual([{ winner: 'https://cdn.example/a.jpg', loser: 'https://cdn.example/b.jpg' }]);
   });
 
   test('choice B → B beats A', () => {
     const matches = matchesFromForcedChoiceAnswer({ choice: 'B', chosenIndex: 1 }, shown);
-    expect(matches).toEqual([{ winner: 'b.jpg', loser: 'a.jpg' }]);
+    expect(matches).toEqual([{ winner: 'https://cdn.example/b.jpg', loser: 'https://cdn.example/a.jpg' }]);
   });
 
   test('falls back to imageA/imageB when shown empty', () => {
@@ -27,14 +27,14 @@ describe('matchesFromForcedChoiceAnswer', () => {
       imageA: 'https://cdn.example/left.png',
       imageB: 'https://cdn.example/right.png',
     }, []);
-    expect(matches).toEqual([{ winner: 'right.png', loser: 'left.png' }]);
+    expect(matches).toEqual([{ winner: 'https://cdn.example/right.png', loser: 'https://cdn.example/left.png' }]);
   });
 
   test('resolves winner from chosenUrl', () => {
     const matches = matchesFromForcedChoiceAnswer({
       chosenUrl: 'https://cdn.example/b.jpg',
     }, shown);
-    expect(matches).toEqual([{ winner: 'b.jpg', loser: 'a.jpg' }]);
+    expect(matches).toEqual([{ winner: 'https://cdn.example/b.jpg', loser: 'https://cdn.example/a.jpg' }]);
   });
 });
 
@@ -60,7 +60,7 @@ describe('computeForcedChoiceTrueSkill', () => {
     ];
     const { rankings, matches } = computeForcedChoiceTrueSkill(responses, 'q1');
     expect(matches.length).toBe(2);
-    expect(filenameKey(rankings[0].imageKey)).toBe('win.jpg');
+    expect(filenameKey(rankings[0].imageKey)).toBe('https://x/win.jpg');
     expect(rankings[0].wins).toBe(2);
   });
 });

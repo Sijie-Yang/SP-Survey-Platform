@@ -3,6 +3,7 @@ import {
   ReactQuestionFactory, SurveyQuestionImagePicker,
 } from 'survey-react-ui';
 import { Serializer, Question, QuestionMatrixModel, QuestionBooleanModel, CustomError } from 'survey-core';
+import 'survey-core/survey.i18n';
 import ImageRankingWidget from './ImageRankingWidget';
 import ImageRatingWidget from './ImageRatingWidget';
 import ImageBooleanWidget from './ImageBooleanWidget';
@@ -1547,9 +1548,10 @@ export function registerMediaRankingWidget() {
     'question',
   );
 
-  function MediaRankingQuestionComponent({ question }) {
+  function MediaRankingQuestionComponent({ question, trialStimulusMedia }) {
     return React.createElement(ImageRankingWidget, {
       question,
+      trialStimulusMedia,
       value: question.value,
       onValueChanged: (v) => { question.value = v; },
     });

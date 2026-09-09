@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Drawer,
+  useMediaQuery,
   Box,
   Typography,
   List,
@@ -114,6 +115,7 @@ export default function ProjectSidebar({
   width = 400 
 }) {
   const { t } = useRegion();
+  const narrow = useMediaQuery('(max-width:899px)');
   const [projects, setProjects] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState(null);
@@ -339,6 +341,7 @@ export default function ProjectSidebar({
     setActiveProject(project.id);
     setActiveProjectId(project.id);
     onProjectSelect(project);
+    if (narrow) onClose?.();
   };
 
   const handleProjectMenu = (event, project) => {
@@ -918,12 +921,12 @@ export default function ProjectSidebar({
         anchor="left"
         open={open}
         onClose={onClose}
-        variant="persistent"
+        variant={narrow ? "temporary" : "persistent"}
         sx={{
-          width: width,
+          width: narrow ? 'min(400px, 100vw)' : width,
           flexShrink: 0,
           '& .MuiDrawer-paper': {
-            width: width,
+            width: narrow ? 'min(400px, 100vw)' : width,
             boxSizing: 'border-box',
             top: '64px', // Below AppBar
             height: 'calc(100vh - 64px)',
@@ -937,7 +940,7 @@ export default function ProjectSidebar({
             <Typography variant="h6" sx={{ fontWeight: 'bold', fontSize: '1.1rem' }}>
               {t.sidebarProjects}
             </Typography>
-            <IconButton onClick={onClose} size="small">
+            <IconButton onClick={onClose} size="small" aria-label="Close project sidebar">
               <Close />
             </IconButton>
           </Box>

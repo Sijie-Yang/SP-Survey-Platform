@@ -6,12 +6,12 @@ import {
   Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, TextField, Switch, Alert, Snackbar, Checkbox,
   CircularProgress, Tooltip, Stack, Select, MenuItem, FormControl, InputLabel,
-  LinearProgress, Accordion, AccordionSummary, AccordionDetails,
+  LinearProgress, Accordion, AccordionSummary, AccordionDetails, Link,
 } from '@mui/material';
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
   EditNote, PhotoLibrary, DeleteForever, ExpandMore, PushPin, AutoFixHigh, Stop,
-  CloudDownload,
+  CloudDownload, OpenInNew, ContentCopy,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -65,6 +65,8 @@ import SpBenchManagement from '../components/admin/SpBenchManagement';
 import NewsManagement from '../components/admin/NewsManagement';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
+const projectSurveyPath = (projectId) => `/survey?project=${encodeURIComponent(projectId)}`;
+const projectSurveyUrl = (projectId) => `${window.location.origin}${projectSurveyPath(projectId)}`;
 
 // ─── Edit Template Dialog ────────────────────────────────────────────────────
 
@@ -1612,7 +1614,9 @@ function ProjectSurveyBuilderDialog({ project, open, onClose, onSaved }) {
     setSaving(true);
     setError('');
     try {
-      await updateProjectAdmin(project.id, { survey_config: draftConfig });
+      await updateProjectAdmin(project.id, { survey_config: draftConfig }, {
+        expectedDraftUpdatedAt: project.draftUpdatedAt,
+      });
       onSaved();
       onClose();
     } catch (err) {
@@ -1761,6 +1765,15 @@ function ProjectOverview() {
   const [repairingId, setRepairingId]     = useState(null);
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
+
+  const handleCopySurveyLink = async (projectId) => {
+    try {
+      await navigator.clipboard.writeText(projectSurveyUrl(projectId));
+      showSnack('已复制问卷链接');
+    } catch {
+      showSnack('复制失败，请手动复制', 'error');
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1921,8 +1934,21 @@ function ProjectOverview() {
                 return (
                 <TableRow key={p.id} hover>
                   <TableCell>
-                    <Typography variant="body2" fontWeight={600}>{p.name || '未命名'}</Typography>
-                    <Typography variant="caption" color="text.secondary">{p.id}</Typography>
+                    <Link
+                      href={projectSurveyPath(p.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      underline="hover"
+                      variant="body2"
+                      fontWeight={600}
+                      display="inline-flex"
+                      alignItems="center"
+                      gap={0.5}
+                    >
+                      {p.name || '未命名'}
+                      <OpenInNew sx={{ fontSize: 14 }} />
+                    </Link>
+                    <Typography variant="caption" color="text.secondary" display="block">{p.id}</Typography>
                     {dups.length > 0 && (
                       <Chip
                         size="small"
@@ -1975,6 +2001,23 @@ function ProjectOverview() {
                         <IconButton size="small" color="primary"
                           onClick={() => { setPreviewTarget(p); setPreviewOpen(true); }}>
                           <Preview fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="打开问卷">
+                        <IconButton
+                          size="small"
+                          color="success"
+                          component="a"
+                          href={projectSurveyPath(p.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <OpenInNew fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="复制链接">
+                        <IconButton size="small" onClick={() => handleCopySurveyLink(p.id)}>
+                          <ContentCopy fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="管理图片">

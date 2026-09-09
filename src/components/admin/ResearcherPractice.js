@@ -56,6 +56,7 @@ import {
 import { enrichSurveyResponses } from '../../lib/enrichSurveyResponses';
 import { resolveSkillQuestions, syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
 import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
+import { applySurveyLocale } from '../../lib/surveyLocale';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
@@ -649,6 +650,7 @@ export default function ResearcherPractice({
         }
       }
       const m = new Model(built.surveyJson);
+      applySurveyLocale(m, surveyConfig);
       m.showPreviewBeforeComplete = false;
       m.showCompletedPage = false;
       applyAdminThemeToSurveyModel(m, surveyConfig);

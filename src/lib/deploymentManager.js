@@ -317,6 +317,7 @@ import { Box, Alert, CircularProgress, Typography } from '@mui/material';
 import { saveSurveyResponse } from './lib/supabase';
 import { deploymentConfig, getPreloadedImages } from './config/deploymentConfig';
 import { generateCustomTheme } from './lib/surveyStorage';
+import { applySurveyLocale } from './lib/surveyLocale';
 import registerImageRankingWidget, { registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget } from './components/SurveyCustomComponents';
 
 export default function SurveyAppClean() {
@@ -439,6 +440,7 @@ export default function SurveyAppClean() {
       // Create survey model
       console.log('Creating survey model...');
       const model = new Model(surveyConfig);
+      applySurveyLocale(model, surveyConfig);
       console.log('Survey model created successfully');
       
       // Apply theme

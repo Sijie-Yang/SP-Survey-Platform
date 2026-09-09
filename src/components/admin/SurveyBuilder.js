@@ -1584,6 +1584,23 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
             <Divider />
 
+            <FormControl size="small" sx={{ minWidth: 220 }}>
+              <InputLabel>{t.builderSurveyLanguage}</InputLabel>
+              <Select
+                label={t.builderSurveyLanguage}
+                value={String(config.locale || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en'}
+                onChange={(e) => handleBasicInfoChange('locale', e.target.value)}
+              >
+                <MenuItem value="en">{t.builderSurveyLanguageEn}</MenuItem>
+                <MenuItem value="zh">{t.builderSurveyLanguageZh}</MenuItem>
+              </Select>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.75, display: 'block' }}>
+                {t.builderSurveyLanguageHelp}
+              </Typography>
+            </FormControl>
+
+            <Divider />
+
             {/* Display Settings — collapsed by default since most users
                 rarely need to toggle question numbers / progress bar. */}
             <Box>

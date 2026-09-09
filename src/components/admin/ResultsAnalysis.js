@@ -1,3 +1,4 @@
+import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from '../../lib/mediaIdentity';
 import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import {
   Box,
@@ -17,6 +18,7 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TablePagination,
   TableHead,
   TableRow,
   Collapse,
@@ -68,7 +70,7 @@ import {
   attentionCheckQuestionStats,
 } from '../../lib/quality';
 import { computeQuestionIrr } from '../../lib/reliability';
-import { expandQuestionAnswerUnits } from '../../lib/responseAnswerUnits';
+import { expandQuestionAnswerUnits, normalizeBooleanAnswer } from '../../lib/responseAnswerUnits';
 import { supportsTrialCount } from '../../lib/questionTypeConstraints';
 import {
   computeQuestionTrueSkill,
@@ -114,7 +116,7 @@ import {
   checkAnswerAgainstResultSchema,
 } from '../../lib/skillResultTypes';
 import { getSkillById } from '../../lib/skillManager';
-import { saveProjectFull } from '../../lib/projectManager';
+
 import { deleteSurveyResponse, responseRecordKey } from '../../lib/surveyResponses';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
@@ -249,25 +251,10 @@ function frequencyMap(answers, getValue) {
   return freq;
 }
 
-function imageKeyFromShown(entry) {
-  if (!entry) return '';
-  const s = typeof entry === 'string' ? entry : (entry.url || entry.name || '');
-  return s.split('?')[0].split('/').pop() || s;
-}
+function imageKeyFromShown(entry) { return mediaIdentityKey(entry); }
 
-/** Map image/media picker·ranking choice values (image_N / media_N or URL) to a filename key. */
-function resolveImageChoiceKey(value, shownImages) {
-  if (value == null || value === '') return '';
-  const str = String(value);
-  const match = str.match(/^(?:image|media)_(\d+)$/);
-  if (match && Array.isArray(shownImages) && shownImages.length) {
-    const img = shownImages[Number(match[1])];
-    if (img != null) return imageKeyFromShown(img) || String(img);
-  }
-  return imageKeyFromShown(str) || str;
-}
+function resolveImageChoiceKey(value, shownImages) { return resolveMediaAnswerKey(value, shownImages); }
 
-/** Best-effort display URL for a choice value given that trial's shown_images. */
 function resolveImageChoiceUrl(value, shownImages) {
   if (value == null || value === '') return null;
   const str = String(value);
@@ -417,7 +404,11 @@ function ChoiceDistribution({ answers, choices, isCheckbox = false }) {
 // ── imagepicker distribution ──────────────────────────────────────────────────
 // Choices: { value, imageLink?, text? }. Answer = value (may be a URL or filename).
 function IrrSummary({ responses, question }) {
-  const { alpha, agreement, interpretation } = computeQuestionIrr(responses, question);
+  const { alpha, agreement, interpretation, dimensions } = computeQuestionIrr(responses, question);
+  if (dimensions) return <Box>{dimensions.map((d) => (
+    <Typography key={d.id} variant="caption" display="block">
+      {d.label}: {d.alpha == null ? 'Insufficient overlapping ratings' : 'α = ' + d.alpha.toFixed(3)}
+    </Typography>))}<Typography variant="caption">Repeated ratings by the same participant are averaged per stimulus and dimension.</Typography></Box>;
   if (alpha == null && agreement == null) return null;
   return (
     <Alert severity={alpha != null && alpha >= 0.667 ? 'success' : 'info'} sx={{ mb: 2 }}>
@@ -452,7 +443,7 @@ function CompactImageRanking({ title, items, getImageUrl, formatLabel, maxValue 
           )}
           <Box sx={{ flex: 1 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
-              <Typography variant="body2" noWrap sx={{ maxWidth: '50%' }}>{shortName(url || key)}</Typography>
+              <Typography variant="body2" noWrap sx={{ maxWidth: '50%' }}>{stimulusUnitLabel(key) || shortName(url || key)}</Typography>
               <Typography variant="caption" color="text.secondary">
                 {formatLabel ? formatLabel(value, label) : `${(value * 100).toFixed(0)}%`}
               </Typography>
@@ -484,7 +475,7 @@ function ImageMatrixAttributeTabs({ question, answers, getImageUrl }) {
     for (const { answer, shown_images } of answers || []) {
       if (typeof answer !== 'object' || !answer || !shown_images?.length) continue;
       const img = shown_images[0];
-      const key = imageKeyFromShown(img) || img;
+      const key = stimulusUnitKey(shown_images);
       if (!map[key]) map[key] = { url: img, rows: {} };
       for (const [row, val] of Object.entries(answer)) {
         if (!map[key].rows[row]) map[key].rows[row] = {};
@@ -713,8 +704,8 @@ function TextAnswers({ answers, maxVisible = 5, showWordFreq = true }) {
 }
 
 function BooleanDistribution({ answers, showWilson = true }) {
-  const trueCount = answers.filter(a => a.answer === true || a.answer === 'true').length;
-  const falseCount = answers.filter(a => a.answer === false || a.answer === 'false').length;
+  const trueCount = answers.filter(a => normalizeBooleanAnswer(a.answer) === 1).length;
+  const falseCount = answers.filter(a => normalizeBooleanAnswer(a.answer) === 0).length;
   const total = trueCount + falseCount;
   const ci = wilsonCI(trueCount, total);
 
@@ -1072,6 +1063,7 @@ function ImageQuestionAnalysis({ answers, type, question }) {
   const resolvedUrl = useContext(ImageResolverContext);
   const getImageUrl = (value) => {
     if (!value) return null;
+    if (resolvedUrl?.has(value)) return resolvedUrl.get(value);
     if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('/'))) return value;
     const key = imageKeyFromShown(value);
     return resolvedUrl?.get(key) || resolvedUrl?.get(value) || null;
@@ -1091,11 +1083,18 @@ function ImageQuestionAnalysis({ answers, type, question }) {
     for (const { answer, shown_images } of answers) {
       const rating = Number(answer);
       if (Number.isNaN(rating) || !shown_images?.length) continue;
-      for (const img of shown_images) {
-        const key = imageKeyFromShown(img) || img;
+      for (const img of [shown_images[0]]) {
+        const key = stimulusUnitKey(shown_images);
         if (!perImage[key]) perImage[key] = { url: img, ratings: [] };
         perImage[key].ratings.push(rating);
       }
+    }
+
+    if (question.numericMeasure) {
+      return <Box>{Object.entries(perImage).map(([key, block]) => <Box key={key} sx={{ mb: 2 }}>
+        <Typography variant="subtitle2">{stimulusUnitLabel(key)}</Typography>
+        <NumberDistribution question={question} answers={block.ratings.map((answer) => ({answer}))} />
+      </Box>)}</Box>;
     }
 
     const rankedItems = Object.entries(perImage)
@@ -1105,7 +1104,7 @@ function ImageQuestionAnalysis({ answers, type, question }) {
           key,
           url,
           value: avg ?? rateMin,
-          label: `${avg?.toFixed(2) ?? '–'} / ${rateMax} · n=${ratings.length}`,
+          label: (avg?.toFixed(2) ?? '–') + (question.numericMeasure ? '' : ' / ' + rateMax) + ' · n=' + ratings.length,
         };
       })
       .sort((a, b) => b.value - a.value);
@@ -1117,7 +1116,7 @@ function ImageQuestionAnalysis({ answers, type, question }) {
           title={`Average rating by ${mediaNoun}`}
           items={rankedItems}
           getImageUrl={getImageUrl}
-          maxValue={rateMax}
+          maxValue={question.numericMeasure ? undefined : rateMax}
           formatLabel={(_, label) => label}
         />
         {rankedItems.length === 0 && (
@@ -1133,11 +1132,11 @@ function ImageQuestionAnalysis({ answers, type, question }) {
 
     for (const { answer, shown_images } of answers) {
       if (!shown_images?.length) continue;
-      for (const img of shown_images) {
-        const key = imageKeyFromShown(img) || img;
+      for (const img of [shown_images[0]]) {
+        const key = stimulusUnitKey(shown_images);
         if (!perImage[key]) perImage[key] = { url: img, yes: 0, no: 0 };
-        if (answer === true || answer === 'true') perImage[key].yes += 1;
-        else perImage[key].no += 1;
+        if (normalizeBooleanAnswer(answer) === 1) perImage[key].yes += 1;
+        else if (normalizeBooleanAnswer(answer) === 0) perImage[key].no += 1;
       }
     }
 
@@ -1184,8 +1183,8 @@ function ImageQuestionAnalysis({ answers, type, question }) {
       const selected = Array.isArray(answer) ? answer.map(String)
         : (answer == null || answer === '' ? [] : [String(answer)]);
       const stims = shown_images?.length ? shown_images : ['(no_media)'];
-      for (const img of stims) {
-        const key = imageKeyFromShown(img) || String(img);
+      for (const img of [stims[0]]) {
+        const key = stimulusUnitKey(stims);
         if (!perImage[key]) perImage[key] = { url: img, n: 0, counts: {} };
         perImage[key].n += 1;
         selected.forEach((opt) => {
@@ -1216,6 +1215,7 @@ function ImageQuestionAnalysis({ answers, type, question }) {
       <Box>
         {blocks.map((block) => (
           <Box key={block.key} sx={{ mb: 2.5 }}>
+            <Typography variant="caption" sx={{ overflowWrap: 'anywhere' }}>{stimulusUnitLabel(block.key)}</Typography>
             {(typeof block.url === 'string' && (block.url.startsWith('http') || block.url.startsWith('/'))) ? (
               <Box
                 component="img"
@@ -1293,6 +1293,7 @@ function SkillFieldSummary({ field, answers }) {
   const resolvedUrl = useContext(ImageResolverContext);
   const getImageUrl = (value) => {
     if (!value) return null;
+    if (resolvedUrl?.has(value)) return resolvedUrl.get(value);
     if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('/'))) return value;
     const key = imageKeyFromShown(value);
     return resolvedUrl?.get(key) || resolvedUrl?.get(value) || null;
@@ -1943,6 +1944,7 @@ function useImageUrlResolver() {
   const resolvedUrl = useContext(ImageResolverContext);
   return (value) => {
     if (!value) return null;
+    if (resolvedUrl?.has(value)) return resolvedUrl.get(value);
     if (typeof value === 'string' && (value.startsWith('http') || value.startsWith('/'))) return value;
     const key = imageKeyFromShown(value);
     return resolvedUrl?.get(key) || resolvedUrl?.get(value) || null;
@@ -1984,7 +1986,7 @@ function ImageSliderGroupAnalysis({ question, answers }) {
       if (Number.isNaN(val)) continue;
       vals.push(val);
       const img = shown_images[0];
-      const key = imageKeyFromShown(img) || img;
+      const key = stimulusUnitKey(shown_images);
       if (!perImage[key]) perImage[key] = { url: img, vals: [] };
       perImage[key].vals.push(val);
     }
@@ -2112,7 +2114,7 @@ function ImagePointAllocationAnalysis({ question, answers }) {
       const pts = Number(answer[choiceKey]);
       if (Number.isNaN(pts)) continue;
       const img = shown_images[0];
-      const key = imageKeyFromShown(img) || img;
+      const key = stimulusUnitKey(shown_images);
       if (!perImage[key]) perImage[key] = { url: img, vals: [] };
       perImage[key].vals.push(pts);
     }
@@ -2263,18 +2265,18 @@ function PointAllocationAnalysis({ question, answers }) {
 // ─── Question Card ────────────────────────────────────────────────────────────
 
 export function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses, surveyConfig, exportResponses }) {
+  const { t } = useRegion();
   const [expanded, setExpanded] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const exportLock = React.useRef(false);
   const type = question.type || 'text';
   const trialUnitCount = answers.length;
-  const participantCount = useMemo(() => {
-    const ids = new Set();
-    (answers || []).forEach((a, i) => {
-      ids.add(a.participant_id || `row_${i}`);
-    });
-    return ids.size;
-  }, [answers]);
-  // Completion rate is per participant; charts/stats use per-trial units in `answers`.
-  const responseCount = participantCount;
+  const participantCount = useMemo(() => new Set((allResponses || [])
+    .filter((row) => expandQuestionAnswerUnits(row, question.name).length > 0)
+    .map((row, i) => row.participant_id || row.id || 'row_' + i)).size, [allResponses, question.name]);
+  // Answer rate is per submission; charts/stats use per-trial units in `answers`.
+  const responseCount = (allResponses || []).filter((row) => expandQuestionAnswerUnits(row, question.name).length > 0).length;
 
   const renderAnalysis = () => {
     if (type === 'skillquestion') {
@@ -2353,7 +2355,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
               </Typography>
             ) : (
               <Typography variant="caption" color="text.secondary">
-                {responseCount} / {totalResponses} responses ({responseRate}%)
+                {tf(t.resultsCounts, { answered: responseCount, total: totalResponses, rate: responseRate, people: participantCount })}
                 {supportsTrialCount(type) && (
                   <> · {trialUnitCount} trial ratings</>
                 )}
@@ -2368,13 +2370,16 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
             variant="outlined"
             startIcon={<Download />}
             sx={{ mr: 1, flexShrink: 0 }}
-            onClick={(e) => {
+            disabled={exporting}
+            onClick={async (e) => {
               e.stopPropagation();
-              downloadQuestionExportZip(
-                question,
-                exportResponses || allResponses,
-                surveyConfig,
-              );
+              if (exportLock.current) return;
+              exportLock.current = true; setExporting(true); setExportError('');
+              try {
+                await new Promise((resolve) => setTimeout(resolve, 30));
+                downloadQuestionExportZip(question, exportResponses || allResponses, surveyConfig);
+              } catch (err) { setExportError(err.message || 'Export failed'); }
+              finally { exportLock.current = false; setExporting(false); }
             }}
           >
             Export
@@ -2386,9 +2391,14 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
         </IconButton>
       </Box>
 
+      {exporting && <Typography role="status" sx={{ p: 1 }}>{t.resultsPreparingExport}</Typography>}
+      {exportError && <Alert severity="error" onClose={() => setExportError('')}>{exportError}</Alert>}
       <Collapse in={expanded}>
         <Divider />
         <CardContent>
+          {answers.some((a) => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && (
+            <Alert severity="info" sx={{ mb: 2 }}>{t.resultsGroupExplanation}</Alert>
+          )}
           <AttentionCheckPassRate question={question} allResponses={allResponses} />
           {responseCount === 0 && !isDisplayOnlyQuestion(question) ? (
             <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography>
@@ -2417,75 +2427,81 @@ function readIncludePracticeFromConfig(surveyConfig) {
     : true; // default ON for new projects
 }
 
-export default function ResultsAnalysis({ currentProject, surveyConfig, onSurveyConfigChange }) {
+export default function ResultsAnalysis({ currentProject, surveyConfig: currentSurveyConfig }) {
   const { t } = useRegion();
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState(null);
+  const fetchSequence = React.useRef(0);
   const [error, setError] = useState(null);
   const [dataSource, setDataSource] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sessionFilter, setSessionFilter] = useState('');
+  const [revisionFilter, setRevisionFilter] = useState('');
+  const surveyConfig = useMemo(() => {
+    const firstRevision = responses[0]?.survey_metadata?.survey_revision;
+    const singleRevision = firstRevision && responses.every((r) => r.survey_metadata?.survey_revision === firstRevision) ? firstRevision : '';
+    const selectedRevision = revisionFilter || singleRevision;
+    const contract = selectedRevision && responses.find((r) =>
+      r.survey_metadata?.survey_revision === selectedRevision)?.survey_metadata?.survey_response_contract;
+    if (!contract?.questions) return currentSurveyConfig;
+    return {...currentSurveyConfig, locale: contract.locale, pages: [{name: 'recorded_revision', title: t.resultsRevision, elements: contract.questions}]};
+  }, [revisionFilter, responses, currentSurveyConfig, t.resultsRevision]);
+  const [recordPage, setRecordPage] = useState(0);
+  const [recordsPerPage, setRecordsPerPage] = useState(25);
   const [includePractice, setIncludePractice] = useState(() => readIncludePracticeFromConfig(surveyConfig));
   const [excludeFlagged, setExcludeFlagged] = useState(() => readExcludeFlaggedFromConfig(surveyConfig));
-  const [savingExcludePref, setSavingExcludePref] = useState(false);
-  const [savingPracticePref, setSavingPracticePref] = useState(false);
-  const [excludePrefError, setExcludePrefError] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
 
   useEffect(() => {
-    setExcludeFlagged(readExcludeFlaggedFromConfig(surveyConfig));
-  }, [currentProject?.id, surveyConfig?.excludeFlaggedFromAnalysis]);
+    let prefs = {};
+    try { prefs = JSON.parse(localStorage.getItem('sp-analysis-prefs:' + currentProject?.id) || '{}'); } catch { /* storage unavailable */ }
+    setExcludeFlagged(prefs.excludeFlagged ?? readExcludeFlaggedFromConfig(surveyConfig));
+    setIncludePractice(prefs.includePractice ?? readIncludePracticeFromConfig(surveyConfig));
+    setDateFrom(''); setDateTo(''); setSessionFilter(''); setRevisionFilter(''); setSearchText(''); setRecordPage(0);
+  }, [currentProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    setIncludePractice(readIncludePracticeFromConfig(surveyConfig));
-  }, [currentProject?.id, surveyConfig?.includeResearcherPractice]);
-
-  const handleExcludeFlaggedChange = async (checked) => {
-    const previous = excludeFlagged;
-    setExcludeFlagged(checked);
-    setExcludePrefError(null);
-    if (!currentProject?.id || !surveyConfig) return;
-
-    const nextConfig = { ...surveyConfig, excludeFlaggedFromAnalysis: checked };
-    setSavingExcludePref(true);
+  const saveAnalysisPreference = (key, value) => {
     try {
-      const result = await saveProjectFull(currentProject, nextConfig);
-      if (!result.success) throw new Error(result.error || 'Failed to save preference');
-      onSurveyConfigChange?.(nextConfig);
-    } catch (err) {
-      setExcludeFlagged(previous);
-      setExcludePrefError(err.message || 'Could not save analysis preference');
-    } finally {
-      setSavingExcludePref(false);
-    }
+      const storageKey = 'sp-analysis-prefs:' + currentProject?.id;
+      const previous = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      localStorage.setItem(storageKey, JSON.stringify({ ...previous, [key]: value }));
+    } catch { /* preference remains usable for this session */ }
   };
-
-  const handleIncludePracticeChange = async (checked) => {
-    const previous = includePractice;
+  const handleExcludeFlaggedChange = (checked) => {
+    setExcludeFlagged(checked);
+    saveAnalysisPreference('excludeFlagged', checked);
+  };
+  const handleIncludePracticeChange = (checked) => {
     setIncludePractice(checked);
-    setExcludePrefError(null);
-    if (!currentProject?.id || !surveyConfig) return;
-
-    const nextConfig = { ...surveyConfig, includeResearcherPractice: checked };
-    setSavingPracticePref(true);
+    saveAnalysisPreference('includePractice', checked);
+  };
+  const resetFilters = () => {
+    setDateFrom(''); setDateTo(''); setSessionFilter(''); setRevisionFilter(''); setSearchText(''); setRecordPage(0);
+    handleExcludeFlaggedChange(false); handleIncludePracticeChange(true);
+  };
+  const [detailTarget, setDetailTarget] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const exportLock = React.useRef(false);
+  const runExport = async (download) => {
+    if (exportLock.current) return;
+    exportLock.current = true;
+    setExporting(true); setExportError('');
     try {
-      const result = await saveProjectFull(currentProject, nextConfig);
-      if (!result.success) throw new Error(result.error || 'Failed to save preference');
-      onSurveyConfigChange?.(nextConfig);
-    } catch (err) {
-      setIncludePractice(previous);
-      setExcludePrefError(err.message || 'Could not save analysis preference');
-    } finally {
-      setSavingPracticePref(false);
-    }
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await download();
+    } catch (err) { setExportError(err.message || 'Export failed. Please retry.'); }
+    finally { exportLock.current = false; setExporting(false); }
   };
 
   const fetchResponses = useCallback(async () => {
+    const sequence = ++fetchSequence.current;
+    setResponses([]);
     setLoading(true);
     setLoadProgress(null);
     setError(null);
@@ -2507,6 +2523,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             .range(from, to);
           if (sbError) throw sbError;
           const batch = data || [];
+          if (sequence !== fetchSequence.current) return;
           all.push(...batch);
           if (batch.length < pageSize) break;
           offset += pageSize;
@@ -2519,6 +2536,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
         const resp = await fetch('http://localhost:3001/api/responses');
         if (resp.ok) {
           const json = await resp.json();
+          if (sequence !== fetchSequence.current) return;
           setResponses(json.responses || []);
           setDataSource('file');
         } else {
@@ -2527,15 +2545,16 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
         }
       }
     } catch (err) {
+      if (sequence !== fetchSequence.current) return;
       setError(`Failed to load responses: ${err.message}`);
     } finally {
-      setLoading(false);
-      setLoadProgress(null);
+      if (sequence === fetchSequence.current) { setLoading(false); setLoadProgress(null); }
     }
   }, [currentProject?.id]);
 
   useEffect(() => {
-    if (currentProject) fetchResponses();
+    if (currentProject?.id) fetchResponses();
+    return () => { fetchSequence.current += 1; };
   }, [currentProject?.id, fetchResponses]);
 
   // Flatten all questions from survey pages
@@ -2569,11 +2588,12 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       const ts = row.created_at || row.survey_metadata?.completion_time || row.saved_at;
       if (dateFrom && ts && new Date(ts) < new Date(`${dateFrom}T00:00:00`)) return false;
       if (dateTo && ts && new Date(ts) > new Date(`${dateTo}T23:59:59`)) return false;
+      if (revisionFilter && (row.survey_metadata?.survey_revision || 'historical_unknown') !== revisionFilter) return false;
       if (sessionFilter && row.survey_metadata?.session_id !== sessionFilter) return false;
       if (!includePractice && row.survey_metadata?.practice_mode) return false;
       return true;
     });
-  }, [responses, currentProject?.id, dateFrom, dateTo, sessionFilter, includePractice]);
+  }, [responses, currentProject?.id, dateFrom, dateTo, sessionFilter, revisionFilter, includePractice]);
 
   const handleDeleteResponse = async () => {
     if (!deleteTarget) return;
@@ -2617,6 +2637,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
     });
   }, [dateFilteredResponses, excludeFlagged, surveyConfig, qualitySummary]);
 
+  const revisionOptions = [...new Set(responses.map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))];
+  useEffect(() => { setRecordPage(0); }, [dateFrom, dateTo, sessionFilter, revisionFilter, includePractice, dateFilteredResponses.length]);
   const sessionOptions = useMemo(() => {
     const ids = new Set();
     responses.forEach((r) => {
@@ -2688,6 +2710,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
     const imgs = currentProject?.preloadedImages || [];
     for (const img of imgs) {
       if (img.name && img.url) map.set(img.name, img.url);
+      if (img.url) map.set(mediaIdentityKey(img.url), img.url);
     }
     for (const [key, url] of buildResponseMediaUrlMap(filteredResponses)) {
       if (!map.has(key)) map.set(key, url);
@@ -2717,8 +2740,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
           <Button
             variant="outlined"
             startIcon={<Download />}
-            disabled={!filteredResponses.length}
-            onClick={() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)}
+            disabled={exporting || loading || !filteredResponses.length}
+            onClick={() => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))}
             size="small"
           >
             {t.resultsExportCsv}
@@ -2726,8 +2749,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
           <Button
             variant="contained"
             startIcon={<Download />}
-            disabled={!filteredResponses.length || !surveyConfig}
-            onClick={() => {
+            disabled={exporting || loading || !filteredResponses.length || !surveyConfig}
+            onClick={() => runExport(() => {
               const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
               downloadResultsExportZip({
                 project: currentProject,
@@ -2741,11 +2764,12 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                   date_from: dateFrom || null,
                   date_to: dateTo || null,
                   session_id: sessionFilter || null,
+                  survey_revision: revisionFilter || null,
                   include_practice: includePractice,
                   exclude_flagged: excludeFlagged,
                 },
               });
-            }}
+            })}
             size="small"
           >
             {t.resultsExportAll}
@@ -2753,8 +2777,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
           <Button
             variant="outlined"
             startIcon={<Description />}
-            disabled={!filteredResponses.length || !surveyConfig}
-            onClick={() => {
+            disabled={exporting || loading || !filteredResponses.length || !surveyConfig}
+            onClick={() => runExport(() => {
               const { methodsText, bibtex } = generateMethodsText({
                 project: currentProject,
                 surveyConfig,
@@ -2766,7 +2790,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
               if (bibtex) {
                 downloadTextFile(bibtex, `references_${currentProject?.id || 'survey'}.bib`);
               }
-            }}
+            })}
             size="small"
           >
             {t.resultsExportMethods}
@@ -2775,6 +2799,12 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
         )}
       />
 
+      {exporting && <Alert severity="info" sx={{ mb: 2 }} icon={<CircularProgress size={18} />}>{t.resultsPreparingExport}</Alert>}
+      {exportError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setExportError('')}>{exportError}</Alert>}
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {tf(t.resultsScopeHint, { shown: filteredResponses.length, total: responses.length })}
+      </Typography>
+      {revisionOptions.length > 1 && <Alert severity="info" sx={{ mb: 2 }}>{t.resultsMixedRevisions}</Alert>}
       {/* Data source badge */}
       {dataSource && (
         <Box sx={{ mb: 2 }}>
@@ -2833,7 +2863,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             <Switch
               checked={includePractice}
               onChange={(e) => handleIncludePracticeChange(e.target.checked)}
-              disabled={savingPracticePref}
+
               size="small"
             />
           }
@@ -2845,6 +2875,14 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
         />
       </Box>
 
+      {revisionOptions.some((id) => id !== 'historical_unknown') && <TextField select size="small" label={t.resultsRevision} value={revisionFilter} onChange={(e) => setRevisionFilter(e.target.value)} SelectProps={{ native: true }} InputLabelProps={{ shrink: true }} sx={{ mr: 1, mb: 1 }}>
+        <option value="">{t.resultsAllRevisions}</option>
+        {revisionOptions.map((id) => <option key={id} value={id}>{id === 'historical_unknown' ? t.resultsHistoricalRevision : id.slice(-12)}</option>)}
+      </TextField>}
+      <Button size="small" onClick={resetFilters}>{t.resultsResetFilters}</Button>
+      <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 2 }}>
+        {t.resultsBrowserPrefs}
+      </Typography>
       {sessionStats.length > 0 && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Research sessions: {sessionStats.length} ({sessionStats.map(([sid, s]) => `${sid.slice(-6)}: ${s.count} rounds`).join(', ')})
@@ -2887,16 +2925,13 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                   <Switch
                     checked={excludeFlagged}
                     onChange={(e) => handleExcludeFlaggedChange(e.target.checked)}
-                    disabled={savingExcludePref}
+
                     size="small"
                   />
                 }
                 label={t.resultsExcludeFlagged}
               />
             </Box>
-            {excludePrefError && (
-              <Alert severity="warning" sx={{ mb: 1, py: 0 }}>{excludePrefError}</Alert>
-            )}
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
               Flags: {Object.entries(QUALITY_FLAG_LABELS).map(([k, v]) => `${k} (${v})`).join(' · ')}
             </Typography>
@@ -2939,7 +2974,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
 
       {/* Overview cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{ xs: 12, sm: 4 }}>
           <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
             <People sx={{ fontSize: 32, color: 'primary.main', mb: 0.5 }} />
             <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
@@ -2953,7 +2988,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             )}
           </Paper>
         </Grid>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{ xs: 12, sm: 4 }}>
           <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
             <Assessment sx={{ fontSize: 32, color: 'success.main', mb: 0.5 }} />
             <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
@@ -2968,7 +3003,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             </Typography>
           </Paper>
         </Grid>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{ xs: 12, sm: 4 }}>
           <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
             <QuestionAnswer sx={{ fontSize: 32, color: 'warning.main', mb: 0.5 }} />
             <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
@@ -3020,7 +3055,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {dateFilteredResponses.map((row) => {
+                  {dateFilteredResponses.slice(recordPage * recordsPerPage, (recordPage + 1) * recordsPerPage).map((row) => {
                     const key = responseRecordKey(row);
                     const qKey = row.id ?? row.participant_id;
                     const flags = surveyConfig
@@ -3062,6 +3097,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                           )}
                         </TableCell>
                         <TableCell align="right">
+                          <Button size="small" onClick={() => setDetailTarget(row)}>{t.resultsViewResponse}</Button>
                           <Tooltip title="Delete this response">
                             <IconButton
                               size="small"
@@ -3081,6 +3117,9 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
                 </TableBody>
               </Table>
             </TableContainer>
+            <TablePagination component="div" count={dateFilteredResponses.length} page={Math.min(recordPage, Math.max(0, Math.ceil(dateFilteredResponses.length / recordsPerPage) - 1))}
+              rowsPerPage={recordsPerPage} rowsPerPageOptions={[25, 50, 100]} labelRowsPerPage={t.resultsRowsPerPage}
+              onPageChange={(_, page) => setRecordPage(page)} onRowsPerPageChange={(e) => { setRecordsPerPage(Number(e.target.value)); setRecordPage(0); }} />
           </AccordionDetails>
         </Accordion>
       )}
@@ -3108,7 +3147,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
       {/* No responses yet */}
       {!loading && surveyConfig && totalResponses === 0 && !error && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          {t.resultsEmpty}
+          {responses.length ? t.resultsFilteredEmpty : t.resultsEmpty}
         </Alert>
       )}
 
@@ -3128,7 +3167,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
             InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> }}
-            sx={{ mb: 2, width: 320 }}
+            sx={{ mb: 2, width: '100%', maxWidth: 320 }}
           />
 
           {filteredQuestions.length === 0 && (
@@ -3164,6 +3203,31 @@ export default function ResultsAnalysis({ currentProject, surveyConfig, onSurvey
           })}
         </>
       )}
+
+      <Dialog open={!!detailTarget} onClose={() => setDetailTarget(null)} maxWidth="md" fullWidth>
+        <DialogTitle>{t.resultsSubmissionDetail} · {detailTarget?.participant_id}</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            {detailTarget && formatResponseTime(detailTarget)} · {t.resultsDetailSession}: {detailTarget?.survey_metadata?.session_id || '—'}
+            {' · '}{t.resultsRevision}: {detailTarget?.survey_metadata?.survey_revision || t.resultsHistoricalRevision}
+          </Typography>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            {t.resultsQuality}: {(qualitySummary.perResponse[detailTarget?.id ?? detailTarget?.participant_id] || []).join(', ') || 'clean'}
+          </Alert>
+          {allQuestions.map((q) => {
+            const units = expandQuestionAnswerUnits(detailTarget, q.name, { requireAnswer: false });
+            if (!units.length) return null;
+            return <Box key={q.name} sx={{ mb: 2 }}>
+              <Typography fontWeight={700}>{typeof q.title === 'string' ? q.title : q.name}</Typography>
+              {units.map((unit, i) => <Box key={i} sx={{ p: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
+                <Typography variant="caption">{t.resultsRecordTrial} {unit.trial_index + 1} · {unit.shown_images.map(stimulusUnitLabel).join(' + ') || t.resultsNoMedia}</Typography>
+                <Box component="pre" sx={{ m: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: '0.85rem' }}>{JSON.stringify(unit.answer, null, 2)}</Box>
+              </Box>)}
+            </Box>;
+          })}
+        </DialogContent>
+        <DialogActions><Button onClick={() => setDetailTarget(null)}>{t.resultsClose}</Button></DialogActions>
+      </Dialog>
 
       <Dialog open={!!deleteTarget} onClose={() => !deleting && setDeleteTarget(null)}>
         <DialogTitle>Delete response?</DialogTitle>
