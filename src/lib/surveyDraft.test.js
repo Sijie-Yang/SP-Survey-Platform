@@ -32,3 +32,13 @@ test('restoring tolerates legacy configs and language changes back to English', 
   expect(restoreDraftSurveyJson(draft, { locale: 'en' }).locale).toBe('en');
   expect(restoreDraftSurveyJson(null, { locale: 'zh' })).toBeNull();
 });
+
+test('resuming restores custom progress instead of inheriting the disabled native bar', () => {
+  const legacy = { finalSurveyJson: { showProgressBar: 'off', pages: [] } };
+  expect(restoreDraftSurveyJson(legacy, { showProgressBar: 'top' }).showProgressBar).toBe('top');
+  expect(restoreDraftSurveyJson(legacy, { showProgressBar: 'off' }).showProgressBar).toBe('off');
+  const modern = { finalSurveyJson: { showProgressBar: 'off', _spProgressEnabled: false, pages: [] } };
+  expect(restoreDraftSurveyJson(modern, { showProgressBar: 'top' })._spProgressEnabled).toBe(false);
+  modern.finalSurveyJson._spProgressEnabled = true;
+  expect(restoreDraftSurveyJson(modern, { showProgressBar: 'off' })._spProgressEnabled).toBe(true);
+});

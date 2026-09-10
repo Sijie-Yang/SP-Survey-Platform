@@ -54,7 +54,7 @@ npm run deploy
 3. Copy the MCP endpoint + config snippet into `~/.codex/config.toml`
 4. Run `codex mcp login sp_survey`
 5. Approve scopes on `/oauth/mcp`
-6. Ask Codex to create/edit, validate, and share the preview / live URL (saves are live immediately)
+6. Ask Codex to create/edit, validate, and share the preview / live URL (managed projects need a release before participants see draft changes)
 
 ### Claude Code
 
@@ -96,10 +96,10 @@ claude mcp add --transport http sp_survey "https://<host>/mcp" --scope user
 
 | Surface | Behavior |
 |---------|----------|
-| Admin save / Codex write | Dual-writes `survey_config` + `survey_config_draft` — **live immediately** |
-| Preview / View live / Share `/survey?project=` | Always latest via `get_survey_project` |
+| Admin save / Codex write | Updates the draft. Legacy projects remain live on save until their first release; managed projects keep the previous release live. |
+| Preview / View live / Share `/survey?project=` | Released config and media for managed projects; latest config for legacy projects. Owner sign-in does not bypass the participant view. |
 | **Publish to Main Page** (project menu) | Homepage listing application + admin approval |
-| MCP `survey_publish` | Optional version snapshot for rollback only — **not** required for share links |
+| MCP `survey_publish` | Atomically releases a version and media snapshot, enabling version management; distinct from homepage listing. |
 
 ## MCP tools
 
@@ -110,7 +110,7 @@ claude mcp add --transport http sp_survey "https://<host>/mcp" --scope user
 - `survey_apply_operations`, `survey_replace_draft`
 - `survey_acquire_lease`, `survey_release_lease`
 - `survey_preview_urls`
-- `survey_publish` / `survey_list_versions` / `survey_rollback` — optional **version snapshots** only
+- `survey_publish` / `survey_list_versions` / `survey_rollback` — release drafts, inspect history, or restore as a new release; publish and rollback require `expectedDraftUpdatedAt` from the reviewed draft
 
 **Project lifecycle (own projects only)**
 
@@ -144,7 +144,12 @@ claude mcp add --transport http sp_survey "https://<host>/mcp" --scope user
 **Results** (`results:read`)
 
 - `survey_list_responses`, `survey_export_responses` (`json` | `wide_csv` | `both` | `long_csv` | `summary_csv` | `analysis_bundle`, optional `questionName`), `survey_results_summary`
-- Not full Admin analysis (no charts / TrueSkill). Export for offline analysis.
+
+Results tools accept an optional `surveyRevision`. Typed exports and summaries select one recorded revision when several designs occur in a project, and return `surveyRevision` / `availableRevisions` so callers can switch explicitly. Raw `json` exports and response listings retain all revisions unless filtered. An unknown explicit revision returns `UNKNOWN_SURVEY_REVISION`. Where a saved question contract exists, its question names, scales and Skill schema drive analysis instead of today's draft. Historical records without a saved contract still require manual verification.
+
+`analysis_bundle` uses the same package builder as Admin Results Analysis: raw JSON, wide CSV, per-question tables, quality checks, methods, manifest, `data_dictionary.json` and `analysis_plan.json`. The latter records export filters and included submissions; it is not a preregistration.
+
+The summary tool remains a lightweight inspection endpoint; use the exported tables for offline analysis and Admin Results Analysis for charts.
 
 **Destructive results** (`surveys:write`)
 
@@ -154,7 +159,7 @@ claude mcp add --transport http sp_survey "https://<host>/mcp" --scope user
 
 - `credentials_status` (hint only)
 
-Do not confuse: **save = live share** · **`survey_publish` = version snapshot** · **`survey_save_as_template` = template review** · **`survey_apply_main_page` = homepage listing**.
+Do not confuse: **save = draft (managed projects)** · **`survey_publish` = participant release** · **`survey_save_as_template` = template review** · **`survey_apply_main_page` = homepage listing**.
 
 Visual pipeline: upload → tag folders (`survey_update_media_dataset`) → design with `mediaAssignmentMode` set/category → validate.
 
@@ -165,7 +170,7 @@ MCP never calls the in-platform LLM (no nested-agent loops).
 - MCP tokens are opaque, audience-bound Platform tokens (not the Supabase service role)
 - BYOK keys are AES-256-GCM encrypted; plaintext never returned after store
 - R2 mutating routes require auth and `{userId}/` prefix ownership when Supabase is configured
-- `surveys:publish` is only needed for optional version snapshots / rollback, not for live share URLs
+- `surveys:publish` is required to update a managed participant release or restore a version
 
 ## Local development
 

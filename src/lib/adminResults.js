@@ -2,10 +2,11 @@ import { supabase } from './supabase';
 
 const API_BASE = process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_URL || '';
 
-export async function fetchAdminResponsePage(projectId, offset = 0) {
+export async function fetchAdminResponsePage(projectId, offset = 0, after = null) {
   const { data: { session } = {} } = supabase ? await supabase.auth.getSession() : {};
   if (!session?.access_token) throw new Error('请先登录管理员账户。');
   const query = new URLSearchParams({ project: projectId, offset: String(offset) });
+  if (after) query.set('after', JSON.stringify({ id: after.id, created_at: after.created_at || null }));
   const response = await fetch(`${API_BASE}/api/admin/project-responses?${query}`, {
     headers: { Authorization: `Bearer ${session.access_token}` },
     cache: 'no-store',

@@ -881,6 +881,7 @@ export function registerMediaDisplayWidget() {
     return React.createElement(MediaDisplayContent, {
       ...mediaStimulusProps(q, trialStimulusMedia),
       displayMode: q.displayMode || 'single',
+      language: resolveSurveyUiLanguage(q.survey),
       exposureSeconds: q.exposureSeconds || 5,
       beforeLabel: q.beforeLabel || 'Before',
       afterLabel: q.afterLabel || 'After',
@@ -1237,6 +1238,7 @@ export function registerImageAnnotationWidget() {
   function ImageAnnotationQuestionComponent({ question: q }) {
     const url = q.annotationImageUrl || q.mediaUrl || '';
     return React.createElement(ImageAnnotationCanvas, {
+      language: q.survey?.locale || 'en',
       imageUrl: url,
       value: q.value,
       allowedTools: normalizeAllowedTools(q.allowedTools || ['point', 'line', 'polygon', 'bbox']),

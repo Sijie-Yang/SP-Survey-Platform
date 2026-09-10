@@ -47,7 +47,18 @@ const INT_COLS = new Set([
 ]);
 const ASC_DEFAULT_COLS = new Set(['avgRank', 'imageKey']);
 
+function imageDisplayName(key) {
+  const source = String(key || '');
+  const filename = source.split(/[?#]/)[0].split('/').pop() || source;
+  try { return decodeURIComponent(filename); } catch { return filename; }
+}
+
 export function compareTrueSkillRows(a, b, orderBy, order) {
+  if (orderBy === 'imageKey') {
+    const cmp = imageDisplayName(a.imageKey).localeCompare(imageDisplayName(b.imageKey), undefined, { numeric: true })
+      || String(a.imageKey).localeCompare(String(b.imageKey));
+    return order === 'asc' ? cmp : -cmp;
+  }
   const av = a[orderBy];
   const bv = b[orderBy];
   if (av == null && bv == null) return String(a.imageKey).localeCompare(String(b.imageKey));
@@ -176,11 +187,13 @@ export function TrueSkillTable({
                       <Box
                         component="img"
                         src={resolveImg(row)}
-                        alt={row.imageKey}
-                        sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 0.5 }}
+                        alt={imageDisplayName(row.imageKey)}
+                        sx={{ width: 40, height: 40, flexShrink: 0, objectFit: 'cover', borderRadius: 0.5 }}
                       />
                     )}
-                    <Typography variant="caption">{row.imageKey}</Typography>
+                    <Typography variant="caption" noWrap title={row.imageKey} sx={{ maxWidth: { xs: 160, sm: 280 } }}>
+                      {imageDisplayName(row.imageKey)}
+                    </Typography>
                   </Box>
                 </TableCell>
                 {columns.map((col) => (

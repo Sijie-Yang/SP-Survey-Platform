@@ -6,6 +6,11 @@ export function restoreDraftSurveyJson(draft, currentConfig) {
   if (!draft?.finalSurveyJson) return null;
   const restored = JSON.parse(JSON.stringify(draft.finalSurveyJson));
   if (currentConfig?.locale != null) restored.locale = currentConfig.locale;
+  // Older snapshots disabled the native bar without recording the custom bar's setting.
+  // Recover that UI preference from current settings; new snapshots keep it explicitly.
+  if (restored._spProgressEnabled == null && currentConfig?.showProgressBar != null) {
+    restored.showProgressBar = currentConfig.showProgressBar;
+  }
   return restored;
 }
 
@@ -70,9 +75,9 @@ export function clearAllDraftsForProject(projectId) {
   keys.forEach((key) => localStorage.removeItem(key));
 }
 
-/** Persist a failed submission so refresh/retry can recover. */
+/** Persist before sending so refresh/retry recovers even without a server acknowledgement. */
 export function savePendingSubmission(projectId, participantId, completeData, meta = {}) {
-  if (!projectId || !participantId || !completeData) return;
+  if (!projectId || !participantId || !completeData) return false;
   try {
     localStorage.setItem(buildPendingKey(projectId, participantId), JSON.stringify({
       completeData,
@@ -81,8 +86,10 @@ export function savePendingSubmission(projectId, participantId, completeData, me
       projectId,
       savedAt: new Date().toISOString(),
     }));
+    return true;
   } catch (err) {
     console.warn('savePendingSubmission failed (quota?):', err?.message || err);
+    return false;
   }
 }
 

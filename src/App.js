@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box, CircularProgress } from '@mui/material';
@@ -116,16 +116,8 @@ function ProtectedIntegrations() {
   return <IntegrationsPage />;
 }
 
-export default function App() {
-  return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <ToastProvider>
-        <AuthProvider>
-          <RegionProvider>
-            <Router>
-              <Suspense fallback={<Box role="status" sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress aria-label="Loading" /></Box>}>
-              <Routes>
+const router = createBrowserRouter(createRoutesFromElements(
+              <>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/papers" element={<PapersLibraryPage />} />
                 <Route path="/news" element={<NewsPage />} />
@@ -144,9 +136,22 @@ export default function App() {
                 <Route path="/skills" element={<ProtectedSkillLibrary />} />
                 <Route path="/skill-editor" element={<ProtectedSkillEditor />} />
                 <Route path="/skill-editor/:id" element={<ProtectedSkillEditor />} />
-              </Routes>
+              </>
+));
+
+export default function App() {
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <ToastProvider>
+        <AuthProvider>
+          <RegionProvider>
+
+              <Suspense fallback={<Box role="status" sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress aria-label="Loading" /></Box>}>
+              <RouterProvider router={router} />
+
               </Suspense>
-            </Router>
+
           </RegionProvider>
         </AuthProvider>
       </ToastProvider>

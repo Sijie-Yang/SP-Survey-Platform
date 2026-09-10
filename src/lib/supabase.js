@@ -73,32 +73,14 @@ export async function saveSurveyResponse(completeData) {
       throw new Error('File save failed');
     }
 
-    // Idempotent retry: same participant + completion_code ⇒ treat as already saved.
-    if (idempotencyKey && projectId) {
-      const { data: existing, error: lookupError } = await supabase
-        .from('survey_responses')
-        .select('id, participant_id, project_id')
-        .eq('participant_id', participantId)
-        .eq('project_id', projectId)
-        .filter('survey_metadata->>completion_code', 'eq', completionCode)
-        .limit(1);
-      if (!lookupError && Array.isArray(existing) && existing.length) {
-        return { success: true, data: existing[0], storage: 'supabase', deduped: true };
-      }
-    }
-
-    const { data, error } = await supabase.from('survey_responses').insert([
-      {
-        participant_id: participantId,
-        project_id: projectId,
-        responses: completeData.responses,
-        displayed_images: completeData.displayed_images,
-        survey_metadata: completeData.survey_metadata,
-      },
-    ]).select('id, participant_id, project_id');
-
+    const { data, error } = await supabase.rpc('submit_survey_response', {
+      p_response: { participant_id: participantId, project_id: projectId,
+        responses: completeData.responses, displayed_images: completeData.displayed_images,
+        survey_metadata: completeData.survey_metadata },
+    });
     if (error) throw error;
-    return { success: true, data, storage: 'supabase' };
+    if (!data?.id) throw new Error('Submission was not acknowledged. Please retry.');
+    return { success: true, data, storage: 'supabase', deduped: !!data.deduped };
   } catch (error) {
     console.error('Error saving survey response:', error);
     return { success: false, error };

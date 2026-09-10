@@ -1,3 +1,4 @@
+import { buildExportDictionary } from './exportDictionary.js';
 import { responseRecordKey } from './responseIdentity';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { allocationStatus } from './allocationStats.js';
@@ -2296,6 +2297,8 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     '',
     'Layout',
     '------',
+    'data_dictionary.json describes fields and recorded question settings.',
+    'analysis_plan.json records this export selection and algorithm version.',
     'responses_raw.json preserves the exact selected submissions, including original text and missing values.',
     'Spreadsheet-safe CSV prefixes formula-like text with an apostrophe; use raw JSON for lossless reanalysis.',
     'responses_wide.csv     One row per participant/submission',
@@ -2428,6 +2431,8 @@ export function buildResultsExportBundle({
     { path: 'manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` },
     { path: 'responses_wide.csv', content: wideCsv || rowsToCsv([['participant_id']]) },
     { path: 'responses_raw.json', content: JSON.stringify(filteredResponses || [], null, 2) + '\n' },
+    { path: 'data_dictionary.json', content: JSON.stringify(buildExportDictionary(answerable, (q) => buildQuestionLongTable(q, [], surveyConfig)?.headers || []), null, 2) + '\n' },
+    { path: 'analysis_plan.json', content: JSON.stringify({ algorithm_version: ANALYSIS_ALGORITHM_VERSION, filters: filters || {}, exclude_flagged: !!excludeFlagged, included_response_ids: [...includedKeys], submission_count: (filteredResponses || []).length, participant_count: new Set((filteredResponses || []).map((r) => r.participant_id).filter(Boolean)).size, note: 'Export configuration for reproducibility; this is not a preregistration.' }, null, 2) + '\n' },
     { path: 'data_quality.csv', content: qualityCsv },
     { path: 'methods.txt', content: methodsText || '' },
     ...questionFiles,

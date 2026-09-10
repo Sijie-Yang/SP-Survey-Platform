@@ -1,25 +1,26 @@
+import { useWorkflowText } from '../../contexts/workflowI18n';
+import PerceptionCoverage from './PerceptionCoverage';
+import { useRegion } from '../../contexts/RegionContext';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Accordion, AccordionSummary, AccordionDetails, Box, Button, Typography,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
   Chip, Alert, FormControl, InputLabel, Select, MenuItem, CircularProgress,
-  TableSortLabel,
+  TableSortLabel, TablePagination,
 } from '@mui/material';
 import { ExpandMore, Download } from '@mui/icons-material';
 import {
   buildImagePerceptionRows,
+  perceptionAnalysisSnapshot, downloadPerceptionFile,
   correlateFeaturesWithPerception,
   exportImagePerceptionCsv,
   listPerceptionScoreQuestions,
   scoreKindLabel,
   featureKeyMatchesModelFilter,
   perceptionFeatureValue,
-  L0_MODEL,
-  SEG_MODEL,
-  SAM_PREANNOT_MODEL,
 } from '../../lib/imagePerceptionJoin';
 import { loadFeaturesMapFromR2, FEATURE_MODELS } from '../../lib/imageFeaturesR2';
-import { isR2Configured } from '../../lib/r2';
+import { isR2Configured, resetR2ProxyUnreachable } from '../../lib/r2';
 import { useAuth } from '../../contexts/AuthContext';
 import { CorrelationBarChart, FeatureScoreScatterChart, ScoreExtremeGallery } from './analysisCharts';
 import PerceptionAblationPanel from './PerceptionAblationPanel';
@@ -28,8 +29,17 @@ import PerceptionAblationPanel from './PerceptionAblationPanel';
  * Results: join image features with a selected image-question score
  * (and attribute when the question is multi-dimensional).
  */
-export default function ImagePerceptionPanel({ currentProject, responses, questions }) {
+export default function ImagePerceptionPanel({ currentProject, responses, questions, onOpenMedia }) {
+  const tx = useWorkflowText();
   const { user } = useAuth();
+  const { language } = useRegion();
+  const zh = language === 'zh';
+  const [method, setMethod] = useState('pearson');
+  const [reviewFilter, setReviewFilter] = useState('all');
+  const [featureError, setFeatureError] = useState(null);
+  const [refresh, setRefresh] = useState(0);
+  const [tablePage, setTablePage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [modelFilter, setModelFilter] = useState('all');
   const [questionName, setQuestionName] = useState('');
   const [attributeId, setAttributeId] = useState('');
@@ -39,8 +49,9 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
   const [order, setOrder] = useState('desc');
   const [scatterFeature, setScatterFeature] = useState('');
   const [scatterFeatureManual, setScatterFeatureManual] = useState(false);
+  useEffect(() => { setTablePage(0); }, [modelFilter, questionName, attributeId, reviewFilter, refresh, responses]);
 
-  const userId = user?.id || currentProject?.user_id || 'anonymous';
+  const userId = currentProject?.user_id || user?.id || 'anonymous';
   const projectId = currentProject?.id;
   const r2Prefix = projectId ? `${userId}/${projectId}/` : '';
 
@@ -50,7 +61,7 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
   );
 
   const selectedMeta = scoreQuestions.find((q) => q.name === questionName) || null;
-  const attributes = selectedMeta?.attributes || [];
+  const attributes = useMemo(() => selectedMeta?.attributes || [], [selectedMeta]);
   const needsAttribute = !!selectedMeta?.needsAttribute;
 
   useEffect(() => {
@@ -78,20 +89,21 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
         return;
       }
       setLoadingFeatures(true);
+      setFeatureMap(null);
+      setFeatureError(null);
       try {
         const map = await loadFeaturesMapFromR2(r2Prefix, FEATURE_MODELS);
         if (!cancelled) setFeatureMap(map);
       } catch (err) {
-        console.warn(err);
-        if (!cancelled) setFeatureMap({});
+        if (!cancelled) { setFeatureMap({}); setFeatureError(err.message || String(err)); }
       } finally {
         if (!cancelled) setLoadingFeatures(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [r2Prefix]);
+  }, [r2Prefix, refresh]);
 
-  const selectionReady = !!questionName && (!needsAttribute || !!attributeId);
+  const selectionReady = !loadingFeatures && !featureError && !!questionName && (!needsAttribute || !!attributeId);
 
   const rows = useMemo(
     () => buildImagePerceptionRows(
@@ -105,17 +117,19 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
     [currentProject, responses, questions, featureMap, selectionReady, questionName, needsAttribute, attributeId],
   );
 
-  const filteredRows = useMemo(() => {
-    if (modelFilter === 'l0') return rows.filter((r) => r.l0_status === 'ready');
-    if (modelFilter === 'seg') return rows.filter((r) => r.seg_status === 'ready');
-    if (modelFilter === 'sam') return rows.filter((r) => r.sam_status === 'ready');
-    return rows;
-  }, [rows, modelFilter]);
+  const filteredRows = useMemo(() => rows.filter((r) => {
+    if (reviewFilter === 'accepted' && r.sam_review_status !== 'accepted') return false;
+    if (reviewFilter === 'unreviewed' && r.sam_review_status === 'accepted') return false;
+    if (modelFilter === 'l0') return r.l0_status === 'ready';
+    if (modelFilter === 'seg') return r.seg_status === 'ready';
+    if (modelFilter === 'sam') return r.sam_status === 'ready';
+    return true;
+  }), [rows, modelFilter, reviewFilter]);
 
   const correlations = useMemo(() => {
     if (!selectionReady) return [];
-    return correlateFeaturesWithPerception(filteredRows, modelFilter);
-  }, [filteredRows, selectionReady, modelFilter]);
+    return correlateFeaturesWithPerception(filteredRows, modelFilter, method);
+  }, [filteredRows, selectionReady, modelFilter, method]);
 
   const featureCols = useMemo(() => {
     const skip = new Set([
@@ -202,6 +216,14 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
       .filter(Boolean);
   }, [filteredRows, scatterFeature]);
 
+  const featureLabel = (key) => {
+    const match = key.match(/^sam_(count|ratio|area_sum)_(.+)$/);
+    if (!match) return key;
+    const label = rows.find((r) => r.sam_label_dictionary?.[match[2]])?.sam_label_dictionary?.[match[2]];
+    const kind = { count: zh ? '数量' : 'count', ratio: zh ? '覆盖率' : 'coverage', area_sum: zh ? '面积之和' : 'summed area' }[match[1]];
+    return label ? `${label} · ${kind}` : key;
+  };
+
   const scatterCorr = correlations.find((c) => c.feature === scatterFeature);
 
   const sortedRows = useMemo(() => {
@@ -258,25 +280,21 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
   const scoredCount = rows.filter((r) => r.n_ratings > 0 && r.mean_score != null).length;
 
   const scoreLabel = selectedMeta
-    ? scoreKindLabel(selectedMeta.type, needsAttribute ? attributeId : null)
+    ? tx(scoreKindLabel(selectedMeta.type, needsAttribute ? attributeId : null))
     : 'Score';
 
   if (loadingFeatures || featureMap == null) {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
         <CircularProgress size={18} />
-        <Typography variant="body2" color="text.secondary">Loading R2 feature CSVs…</Typography>
+        <Typography variant="body2" color="text.secondary">{' '}{tx("Loading R2 feature CSVs…")}{' '}</Typography>
       </Box>
     );
   }
 
   if (!scoreQuestions.length) {
     return (
-      <Alert severity="info" sx={{ mb: 2 }}>
-        No image questions found for Image × Perception. Add image choice / rating / ranking /
-        boolean / matrix / slider / point allocation / annotation questions, extract features,
-        then return here.
-      </Alert>
+      <Alert severity="info" sx={{ mb: 2 }}>{' '}{tx("No image questions found for Image × Perception. Add image choice / rating / ranking / boolean / matrix / slider / point allocation / annotation questions, extract features, then return here.")}{' '}</Alert>
     );
   }
 
@@ -285,20 +303,47 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
       <AccordionSummary expandIcon={<ExpandMore />}>
         <Box>
           <Typography variant="subtitle1" fontWeight={700}>
-            Image × Perception
+            {zh ? '标注与图像特征 × 感知' : 'Annotation & Image Features × Perception'}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Join {L0_MODEL} / {SEG_MODEL} / {SAM_PREANNOT_MODEL} with any image-question score
+            {zh ? '选择感知题目，检查标注与评分的对应关系，再分析和导出。' : 'Choose a perception question, check feature–score matching, then analyze and export.'}
           </Typography>
         </Box>
       </AccordionSummary>
       <AccordionDetails>
+        {featureError && <Alert severity="error" action={<Button color="inherit" onClick={() => { resetR2ProxyUnreachable(); setRefresh((n) => n + 1); }}>{zh ? '重试' : 'Retry'}</Button>}>
+          {zh ? '特征加载失败，已暂停分析与导出：' : 'Feature loading failed. Analysis and export paused: '}{featureError}
+        </Alert>}
+        <Alert severity="info" sx={{ mb: 2 }}>{zh
+          ? '探索性分析：使用当前标注和图像特征，不会随问卷版本自动冻结。标注覆盖率去除重叠；矩形框面积不等于物体分割面积。成组评分不能归给单张图片，因此不纳入单图分析。'
+          : 'Exploratory analysis uses current annotations and features, not a feature snapshot frozen with the questionnaire. Coverage removes overlaps; box area is not segmented object area. Group-level ratings are excluded from per-image analysis.'}</Alert>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel id="annotation-review-label">{zh ? '标注审核' : 'Annotation review'}</InputLabel>
+            <Select labelId="annotation-review-label" value={reviewFilter} label={zh ? '标注审核' : 'Annotation review'} onChange={(e) => setReviewFilter(e.target.value)}>
+              <MenuItem value="all">{zh ? '全部状态' : 'All statuses'}</MenuItem>
+              <MenuItem value="accepted">{zh ? '仅已审核' : 'Accepted only'}</MenuItem>
+              <MenuItem value="unreviewed">{zh ? '未审核 / 未知' : 'Unreviewed / unknown'}</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel id="annotation-correlation-label">{zh ? '相关方法' : 'Correlation'}</InputLabel>
+            <Select labelId="annotation-correlation-label" value={method} label={zh ? '相关方法' : 'Correlation'} onChange={(e) => setMethod(e.target.value)}>
+              <MenuItem value="pearson">Pearson</MenuItem><MenuItem value="spearman">Spearman</MenuItem>
+            </Select>
+          </FormControl>
+          <Button disabled={loadingFeatures} onClick={() => { resetR2ProxyUnreachable(); setRefresh((n) => n + 1); }}>{zh ? '刷新特征' : 'Refresh features'}</Button>
+        </Box>
+        <PerceptionCoverage reviewFilter={reviewFilter} rows={rows} filteredRows={filteredRows} featureCols={featureCols} selectionReady={selectionReady} onOpenMedia={onOpenMedia} />
+        {rows.some((r) => r.sam_status === 'ready' && r.sam_feature_version !== '2') && <Alert severity="warning" sx={{ mb: 2 }}>{zh ? '部分旧特征缺少原始标注，无法重算覆盖率或确认零值；请核对后再用于正式分析。' : 'Some legacy features have no source annotations and cannot be rebuilt or assigned verified zeros. Review before formal analysis.'}</Alert>}
+        {rows.some((r) => !r.media_matched && r.n_ratings > 0) && <Alert severity="warning" sx={{ mb: 2 }}>{zh ? '部分历史评分无法对应当前媒体。已保留原始身份，不会按同名图片强行匹配。' : 'Some historical scores do not match current media. Original identities are retained; same-name images are not guessed.'}</Alert>}
+
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2, alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 280 }}>
-            <InputLabel shrink id="img-perception-q-label">Image question</InputLabel>
+          <FormControl size="small" sx={{ minWidth: 0, width: { xs: '100%', sm: 320 } }}>
+            <InputLabel shrink id="img-perception-q-label">{' '}{tx("Image question")}{' '}</InputLabel>
             <Select
               labelId="img-perception-q-label"
-              label="Image question"
+              label={tx("Image question")}
               value={questionName}
               displayEmpty
               notched
@@ -308,7 +353,7 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
               }}
             >
               <MenuItem value="">
-                <em>Select an image question…</em>
+                <em>{' '}{tx("Select an image question…")}{' '}</em>
               </MenuItem>
               {scoreQuestions.map((q) => (
                 <MenuItem key={q.name} value={q.name}>
@@ -323,17 +368,17 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
 
           {needsAttribute && (
             <FormControl size="small" sx={{ minWidth: 220 }} disabled={!questionName}>
-              <InputLabel shrink id="img-perception-attr-label">Attribute / dimension</InputLabel>
+              <InputLabel shrink id="img-perception-attr-label">{' '}{tx("Attribute / dimension")}{' '}</InputLabel>
               <Select
                 labelId="img-perception-attr-label"
-                label="Attribute / dimension"
+                label={tx("Attribute / dimension")}
                 value={attributeId}
                 displayEmpty
                 notched
                 onChange={(e) => setAttributeId(e.target.value)}
               >
                 <MenuItem value="">
-                  <em>Select attribute…</em>
+                  <em>{' '}{tx("Select attribute…")}{' '}</em>
                 </MenuItem>
                 {attributes.map((a) => (
                   <MenuItem key={a.id} value={a.id}>{a.label}</MenuItem>
@@ -343,52 +388,51 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
           )}
 
           <FormControl size="small" sx={{ minWidth: 150 }} disabled={!selectionReady}>
-            <InputLabel>Features</InputLabel>
+            <InputLabel id="annotation-features-label">{' '}{tx("Features")}{' '}</InputLabel>
             <Select
-              label="Features"
+              labelId="annotation-features-label"
+              label={tx("Features")}
               value={modelFilter}
               onChange={(e) => setModelFilter(e.target.value)}
             >
-              <MenuItem value="all">All models</MenuItem>
-              <MenuItem value="l0">L0 only</MenuItem>
-              <MenuItem value="seg">Seg only</MenuItem>
-              <MenuItem value="sam">SAM pre-annot only</MenuItem>
+              <MenuItem value="all">{' '}{tx("All models")}{' '}</MenuItem>
+              <MenuItem value="l0">{' '}{tx("L0 only")}{' '}</MenuItem>
+              <MenuItem value="seg">{' '}{tx("Seg only")}{' '}</MenuItem>
+              <MenuItem value="sam">{' '}{tx("SAM pre-annot only")}{' '}</MenuItem>
             </Select>
           </FormControl>
 
-          <Chip size="small" label={`L0: ${l0Count}`} color={l0Count ? 'success' : 'default'} />
-          <Chip size="small" label={`Seg: ${segCount}`} color={segCount ? 'success' : 'default'} />
-          <Chip size="small" label={`SAM: ${samCount}`} color={samCount ? 'secondary' : 'default'} />
-          <Chip size="small" label={`Scored images: ${scoredCount}`} />
+          <Chip size="small" label={`${tx("Basic image features")}: ${l0Count}`} color={l0Count ? 'success' : 'default'} />
+          <Chip size="small" label={`${tx("Semantic segmentation features")}: ${segCount}`} color={segCount ? 'success' : 'default'} />
+          <Chip size="small" label={`${tx("Researcher annotation features")}: ${samCount}`} color={samCount ? 'secondary' : 'default'} />
+          <Chip size="small" label={`${tx("Scored images")}: ${scoredCount}`} />
           <Button
             size="small"
             variant="outlined"
             startIcon={<Download />}
-            onClick={() => exportImagePerceptionCsv(filteredRows)}
+            onClick={() => exportImagePerceptionCsv(filteredRows, modelFilter)}
             disabled={!selectionReady || !filteredRows.length}
           >
-            Export wide CSV
+            {zh ? '导出分析数据 CSV' : 'Export analysis CSV'}
           </Button>
+          <Button size="small" variant="outlined" disabled={!selectionReady || !filteredRows.length} onClick={() => {
+            const snapshot = perceptionAnalysisSnapshot({ rows: filteredRows, modelFilter, method, reviewFilter, responses,
+              question: questions.find((q) => q.name === questionName), attributeId, projectId });
+            downloadPerceptionFile(JSON.stringify(snapshot, null, 2), `annotation_perception_${projectId}_${Date.now()}.json`);
+          }}>{zh ? '导出分析快照与方法' : 'Export snapshot & methods'}</Button>
         </Box>
 
         {!questionName && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Select an image question to define the subjective score used for correlations.
-            Choice / ranking → μ std (0–5); rating → mean rating; boolean → yes rate;
-            matrix / slider / points → pick an attribute; annotation → count (or per-label count).
-          </Alert>
+          <Alert severity="info" sx={{ mb: 2 }}>{' '}{tx("Select an image question to define the subjective score used for correlations. Choice / ranking → μ std (0–5); rating → mean rating; boolean → yes rate; matrix / slider / points → pick an attribute; annotation → count (or per-label count).")}{' '}</Alert>
         )}
 
         {questionName && needsAttribute && !attributeId && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            This question has multiple attributes. Select one dimension / row / label to analyze.
-          </Alert>
+          <Alert severity="info" sx={{ mb: 2 }}>{' '}{tx("This question has multiple attributes. Select one dimension / row / label to analyze.")}{' '}</Alert>
         )}
 
         {selectionReady && (
           <>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-              Score = <strong>{scoreLabel}</strong>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>{' '}{tx("Score =")}{' '}<strong>{scoreLabel}</strong>
               {' for '}
               <strong>{selectedMeta?.title || questionName}</strong>
               {needsAttribute && attributeId ? (
@@ -396,9 +440,7 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
                   {' · attribute '}
                   <strong>{attributes.find((a) => a.id === attributeId)?.label || attributeId}</strong>
                 </>
-              ) : null}
-              . Mean column is that score per image.
-            </Typography>
+              ) : null}{' '}{tx(". Mean column is that score per image.")}{' '}</Typography>
 
             {(correlations.length > 0 || scatterFeatureOptions.length > 0) ? (
               <Box
@@ -413,15 +455,14 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
                 <Box sx={{ minWidth: 0, overflowX: 'auto' }}>
                   {correlations.length > 0 ? (
                     <CorrelationBarChart
-                      correlations={correlations}
-                      title={`Correlation with ${scoreLabel}`}
+                      correlations={correlations.map((c) => ({ ...c, feature: featureLabel(c.feature) }))}
+                      title={`${method === 'spearman' ? 'Spearman' : 'Pearson'} · ${scoreLabel}`}
+                      caption={zh ? '星号使用全部特征的 BH-FDR 校正 p 值；小样本及重复评分需谨慎解释，不表示因果。' : 'Stars use BH-FDR adjusted p-values across all tested features. Small samples and repeated ratings require caution; not causal.'}
                       maxItems={24}
                       chartW={520}
                     />
                   ) : (
-                    <Alert severity="info">
-                      Not enough scored images with features for correlation yet (need ≥3).
-                    </Alert>
+                    <Alert severity="info">{' '}{tx("Not enough scored images with features for correlation yet (need ≥3).")}{' '}</Alert>
                   )}
                 </Box>
 
@@ -430,10 +471,10 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
                     <>
                       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center', mb: 1 }}>
                         <FormControl size="small" sx={{ minWidth: 200, flex: 1 }}>
-                          <InputLabel shrink id="img-perception-scatter-feat">Scatter feature</InputLabel>
+                          <InputLabel shrink id="img-perception-scatter-feat">{' '}{tx("Scatter feature")}{' '}</InputLabel>
                           <Select
                             labelId="img-perception-scatter-feat"
-                            label="Scatter feature"
+                            label={tx("Scatter feature")}
                             value={scatterFeature}
                             notched
                             onChange={(e) => {
@@ -469,28 +510,23 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
                       {scatterPoints.length >= 2 ? (
                         <FeatureScoreScatterChart
                           points={scatterPoints}
-                          featureLabel={scatterFeature}
+                          featureLabel={featureLabel(scatterFeature)}
                           scoreLabel={scoreLabel}
-                          title={`${scatterFeature} vs ${scoreLabel}`}
-                          caption="Each point is one image. Orange dashed line is OLS fit."
+                          title={`${featureLabel(scatterFeature)} vs ${scoreLabel}`}
+                          caption={tx("Each point is one image. Orange dashed line is OLS fit.")}
                           size={400}
                         />
                       ) : (
-                        <Alert severity="info">
-                          Not enough points to draw a scatter for this feature.
-                        </Alert>
+                        <Alert severity="info">{' '}{tx("Not enough points to draw a scatter for this feature.")}{' '}</Alert>
                       )}
                     </>
                   ) : (
-                    <Alert severity="info">Select features to enable scatter.</Alert>
+                    <Alert severity="info">{' '}{tx("Select features to enable scatter.")}{' '}</Alert>
                   )}
                 </Box>
               </Box>
             ) : (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                Not enough scored images with features for correlation yet (need ≥3 images with both
-                a score and numeric features).
-              </Alert>
+              <Alert severity="info" sx={{ mb: 2 }}>{' '}{tx("Not enough scored images with features for correlation yet (need ≥3 images with both a score and numeric features).")}{' '}</Alert>
             )}
 
             <PerceptionAblationPanel
@@ -506,23 +542,23 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
               count={8}
               featureKey={scatterFeature || null}
               getFeatureValue={perceptionFeatureValue}
-              title="High / low score images"
+              title={tx("High / low score images")}
             />
 
             <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 420 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    {sortLabel('name', 'Image')}
-                    {sortLabel('mean_score', 'Score', 'right')}
-                    {sortLabel('l0_status', 'L0')}
-                    {sortLabel('seg_status', 'Seg')}
-                    {sortLabel('sam_status', 'SAM')}
-                    {featureCols.map((c) => sortLabel(c, c, 'right'))}
+                    {sortLabel('name', tx('Image'))}
+                    {sortLabel('mean_score', tx('Score'), 'right')}
+                    {sortLabel('l0_status', tx('Basic image features'))}
+                    {sortLabel('seg_status', tx('Semantic segmentation features'))}
+                    {sortLabel('sam_status', tx('Researcher annotation features'))}
+                    {featureCols.map((c) => sortLabel(c, featureLabel(c), 'right'))}
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedRows.slice(0, 100).map((r) => (
+                  {sortedRows.slice(tablePage * pageSize, (tablePage + 1) * pageSize).map((r) => (
                     <TableRow key={r.media_id}>
                       <TableCell sx={{ maxWidth: 220 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
@@ -574,17 +610,17 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
                         {r.mean_score != null ? r.mean_score.toFixed(2) : '—'}
                       </TableCell>
                       <TableCell>
-                        <Chip size="small" label={r.l0_status} color={r.l0_status === 'ready' ? 'success' : 'default'} />
+                        <Chip size="small" label={tx(r.l0_status)} color={r.l0_status === 'ready' ? 'success' : 'default'} />
                       </TableCell>
                       <TableCell>
-                        <Chip size="small" label={r.seg_status} color={r.seg_status === 'ready' ? 'success' : 'default'} />
+                        <Chip size="small" label={tx(r.seg_status)} color={r.seg_status === 'ready' ? 'success' : 'default'} />
                       </TableCell>
                       <TableCell>
-                        <Chip size="small" label={r.sam_status || 'missing'} color={r.sam_status === 'ready' ? 'secondary' : 'default'} />
+                        <Chip size="small" label={tx(r.sam_status || 'missing')} color={r.sam_status === 'ready' ? 'secondary' : 'default'} />
                       </TableCell>
                       {featureCols.map((c) => (
                         <TableCell key={c} align="right">
-                          {typeof r[c] === 'number' ? r[c].toFixed(3) : (r[c] ?? '—')}
+                          {Number.isFinite(perceptionFeatureValue(r, c)) ? perceptionFeatureValue(r, c).toFixed(3) : '—'}
                         </TableCell>
                       ))}
                     </TableRow>
@@ -592,6 +628,7 @@ export default function ImagePerceptionPanel({ currentProject, responses, questi
                 </TableBody>
               </Table>
             </TableContainer>
+            <TablePagination component="div" count={sortedRows.length} page={Math.min(tablePage, Math.max(0, Math.ceil(sortedRows.length / pageSize) - 1))} rowsPerPage={pageSize} rowsPerPageOptions={[10, 25, 50, 100]} onPageChange={(_event, page) => setTablePage(page)} onRowsPerPageChange={(event) => { setPageSize(Number(event.target.value)); setTablePage(0); }} labelRowsPerPage={zh ? '每页' : 'Rows per page'} sx={{ '& .MuiTablePagination-toolbar': { flexWrap: 'wrap', px: 0 } }} />
           </>
         )}
       </AccordionDetails>

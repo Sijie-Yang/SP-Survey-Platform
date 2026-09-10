@@ -136,12 +136,13 @@ export function mergeCopiedIntoProjectImages(existingImages, copiedImages, r2Pub
     const e = normalizeMediaEntry(img, projectPrefix);
     const rel = mediaRelativePathFromListing(e, projectPrefix)
       || (e.folder ? `${e.folder}/${e.name}` : e.name);
-    byPath.set(rel, {
+    byPath.set(e.key || e.media_id || rel, {
+      ...img, ...e,
       url: e.url || (r2PublicUrl && e.key ? `${r2PublicUrl}/${e.key}` : ''),
       name: e.name,
       key: e.key,
       type: e.type || inferMediaType(e.name),
-      folder: e.folder || folderFromR2Key(e.key, projectPrefix),
+      folder: e.folder,
       media_id: e.media_id || e.key || e.name,
     });
   });
@@ -149,7 +150,7 @@ export function mergeCopiedIntoProjectImages(existingImages, copiedImages, r2Pub
     const name = c.to.split('/').pop();
     const folder = folderFromR2Key(c.to, projectPrefix);
     const rel = folder ? `${folder}/${name}` : name;
-    byPath.set(rel, {
+    byPath.set(c.to || rel, {
       url: c.url || (r2PublicUrl ? `${r2PublicUrl}/${c.to}` : ''),
       name,
       key: c.to,

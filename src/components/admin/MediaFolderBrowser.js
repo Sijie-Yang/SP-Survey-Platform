@@ -16,9 +16,9 @@ import {
   MEDIA_FOLDER_TAG_SET, MEDIA_FOLDER_TAG_CATEGORY, compareMediaNames,
   analyzeTaggedSets, analyzeTaggedCategories, normalizeMediaEntry,
   buildProjectMediaKey, removeMediaFolders, isFolderOrDescendant,
-  remapMediaFolderTags, remapMediaFolderList, mediaBasename,
+  remapMediaFolderTags, remapMediaFolderList, getMediaId,
 } from '../../lib/mediaUtils';
-import { moveImagesInR2, deleteImagesFromR2, projectR2Prefix } from '../../lib/r2';
+import { deleteImagesFromR2, projectR2Prefix } from '../../lib/r2';
 
 function folderChildrenMap(folders) {
   const roots = [];
@@ -332,75 +332,20 @@ export default function MediaFolderBrowser({
     setBusy(true);
     setStatus(null);
     try {
-      const publicBase = (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
-      const remapFolderPath = (folderPath) => {
-        let next = normalizeFolderPath(folderPath);
-        // Apply deepest moves first (folderMoves already deepest-first)
-        folderMoves.forEach(({ from, to }) => {
-          if (next === from) {
-            next = to;
-            return;
-          }
-          if (next.startsWith(`${from}/`)) {
-            next = joinFolderPath(to, next.slice(from.length + 1));
-          }
-        });
-        return next;
-      };
-
-      const movedByFolder = new Set();
-      const moves = [];
-      let updated = (pool || []).map((raw) => {
-        const entry = normalizeMediaEntry(raw, prefix);
+      const selectedIds = new Set(selectedMediaEntries.map(getMediaId));
+      let movedCount = 0;
+      const updated = pool.map((raw) => {
+        const entry = { ...raw, ...normalizeMediaEntry(raw, prefix) };
         const oldFolder = entry.folder || '';
-        const covered = folderMoves.some(({ from }) => isFolderOrDescendant(oldFolder, from));
-        if (!covered) return entry;
-        const newFolder = remapFolderPath(oldFolder);
-        const fromKey = entry.key || buildProjectMediaKey(prefix, entry.folder, entry.name);
-        const toKey = buildProjectMediaKey(prefix, newFolder, mediaBasename(fromKey));
-        if (fromKey !== toKey) moves.push({ from: fromKey, to: toKey });
-        movedByFolder.add(entry.media_id || entry.key || entry.name);
-        return {
-          ...entry,
-          folder: newFolder,
-          key: toKey,
-          media_id: toKey,
-          url: publicBase ? `${publicBase}/${toKey}` : entry.url,
-        };
+        const folderMove = folderMoves.find(({ from }) => isFolderOrDescendant(oldFolder, from));
+        const nextFolder = folderMove
+          ? joinFolderPath(folderMove.to, oldFolder.slice(folderMove.from.length))
+          : selectedIds.has(getMediaId(entry)) ? target : oldFolder;
+        if (nextFolder === oldFolder) return entry;
+        movedCount += 1;
+        // Organization is metadata only. Keys, URLs, feature IDs and old answers stay valid.
+        return { ...entry, folder: nextFolder, logicalFolder: nextFolder };
       });
-
-      // Also move individually selected files not already moved with a folder
-      updated = updated.map((entry) => {
-        const id = entry.media_id || entry.key || entry.name;
-        if (movedByFolder.has(id)) return entry;
-        const selected = selectedMediaEntries.some((s) => (s.media_id || s.key || s.name) === id);
-        if (!selected) return entry;
-        const fromKey = entry.key || buildProjectMediaKey(prefix, entry.folder, entry.name);
-        const toKey = buildProjectMediaKey(prefix, target, mediaBasename(fromKey));
-        if (fromKey !== toKey) moves.push({ from: fromKey, to: toKey });
-        return {
-          ...entry,
-          folder: target,
-          key: toKey,
-          media_id: toKey,
-          url: publicBase ? `${publicBase}/${toKey}` : entry.url,
-        };
-      });
-
-      const destinations = new Set();
-      const occupied = new Set(pool.map((entry) => entry.key).filter(Boolean));
-      for (const move of moves) {
-        if (destinations.has(move.to) || occupied.has(move.to)) {
-          throw new Error('The target already contains a file with the same storage name. Choose a different folder.');
-        }
-        destinations.add(move.to);
-      }
-      if (moves.length) {
-        const result = await moveImagesInR2(moves, { ...deleteOpts, deferDelete: true });
-        if (!result.success) {
-          throw new Error(result.errors?.[0]?.error || result.error || 'Move failed');
-        }
-      }
 
       let nextTags = folderTags;
       let nextFolderList = currentProject.imageDatasetConfig?.mediaFolders || folders;
@@ -426,21 +371,12 @@ export default function MediaFolderBrowser({
           mediaFolderTags: nextTags,
         },
       }, { throwOnError: true });
-      // Keep sources until the project points to the successfully copied files.
-      if (moves.length) {
-        const cleanup = await deleteImagesFromR2(moves.map((m) => m.from), deleteOpts);
-        if (!cleanup.success) {
-          setStatus({ severity: 'warning', message: 'Move saved, but original copies could not be removed. Refresh and check the media library before retrying.' });
-          setMoveOpen(false);
-          return;
-        }
-      }
       setMoveOpen(false);
       setSelectedFolders(new Set());
-      if (target) onCurrentFolderChange(target);
+      onCurrentFolderChange(target);
       const parts = [];
       if (folderMoves.length) parts.push(`${folderMoves.length} folder(s)`);
-      if (moves.length) parts.push(`${moves.length} file(s)`);
+      if (movedCount) parts.push(`${movedCount} file(s)`);
       setStatus({
         severity: 'success',
         message: `Moved ${parts.join(' / ') || 'items'} to ${target || '(root)'}.`,
@@ -640,9 +576,9 @@ export default function MediaFolderBrowser({
           {selectedMediaEntries.length ? ` ${selectedMediaEntries.length} file(s)` : ''}
         </DialogTitle>
         <DialogContent>
-          <Alert severity="warning" sx={{ mt: 1, mb: 1 }}>
-            Moving files changes their URLs. Finish organizing media before collecting responses;
-            existing questions and collected answers may still reference the old locations.
+          <Alert severity="info" sx={{ mt: 1, mb: 1 }}>
+            Moving changes the library folder only. File links and previously collected answers stay unchanged.
+            Check question folder filters when moving tagged sets or categories.
           </Alert>
           {!selectedMediaEntries.length && !selectedFolders.size ? (
             <Alert severity="warning" sx={{ mt: 1 }}>

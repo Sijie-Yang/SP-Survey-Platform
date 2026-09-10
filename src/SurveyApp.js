@@ -1,3 +1,4 @@
+import { submitWithRecovery } from './lib/recoverableSubmission';
 import { handleSurveyMediaError } from './lib/mediaRecovery';
 import { surveyRevision } from './lib/surveyRevision';
 import React, { useState, useEffect, useRef } from "react";
@@ -8,7 +9,7 @@ import { Box, Alert, CircularProgress, Button, Dialog, DialogTitle, DialogConten
 import { saveSurveyResponse, isSupabaseConfigured } from './lib/supabase';
 import {
   findDraftForProject, saveDraft, clearDraft, clearDraftByKey, clearAllDraftsForProject,
-  savePendingSubmission, findPendingSubmission, clearPendingSubmission, clearPendingByKey,
+  findPendingSubmission, clearPendingSubmission, clearPendingByKey,
   restoreDraftSurveyJson,
 } from './lib/surveyDraft';
 import { surveyJson, displayedImages } from './config/questions';
@@ -72,6 +73,14 @@ export default function SurveyApp() {
   const [quotaClosed, setQuotaClosed] = useState(false);
   const [liveClosedMessage, setLiveClosedMessage] = useState(null);
   const [pendingSubmission, setPendingSubmission] = useState(null);
+  const [recoverySaved, setRecoverySaved] = useState(true);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const submissionInFlight = useRef(false);
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener('online', update); window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
   const [resumeDialog, setResumeDialog] = useState(null);
   const [completionMessage, setCompletionMessage] = useState('');
   const repeatSessionRef = useRef(null);
@@ -97,7 +106,7 @@ export default function SurveyApp() {
   const surveyPhaseRef = useRef('loading');
   const finalSurveyJsonRef = useRef(null);
   const imageTrackerRef = useRef({});
-  const participantLocale = surveyModel || resumeDialog?.model || finalSurveyJsonRef.current;
+  const participantLocale = surveyModel || resumeDialog?.model || finalSurveyJsonRef.current || pendingSubmission?.survey_metadata?.survey_response_contract;
   const participantText = surveyUiStrings(participantLocale);
 
   useEffect(() => {
@@ -198,6 +207,9 @@ export default function SurveyApp() {
       const projectId = urlParams.get('project') || 'default';
       
       if (e.key === `survey_config_${projectId}` && useAdminConfig) {
+        if (['active', 'submitting', 'submit-error'].includes(surveyPhaseRef.current)) {
+          return;
+        }
         console.log(`Project ${projectId} configuration updated, reloading survey...`);
         initializeSurvey();
       }
@@ -206,16 +218,19 @@ export default function SurveyApp() {
     // Listen to storage events
     window.addEventListener('storage', handleStorageChange);
     
-    // Also listen to custom storage events (updates within the same page)
-    window.addEventListener('storage', handleStorageChange);
-
     return () => {
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [useAdminConfig]);
 
   const submitSurveyResponse = async (completeData, { isRepeatMode, repeatTotal, attemptIndex }) => {
-    const result = await saveSurveyResponse(completeData);
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
+    const result = await submitWithRecovery(projectIdRef.current, completeData, {
+      isRepeatMode: !!isRepeatMode, repeatTotal: repeatTotal || 1, attemptIndex: attemptIndex || 1,
+    }, saveSurveyResponse);
+    submissionInFlight.current = false;
+    setRecoverySaved(result.recoverySaved);
     if (result.success) {
       // Only clear drafts AFTER a successful save (including idempotent dedupe).
       discardDraftForProject(projectIdRef.current, completeData.participant_id);
@@ -247,11 +262,6 @@ export default function SurveyApp() {
     }
     submissionGuardRef.current = false;
     setPendingSubmission(completeData);
-    savePendingSubmission(projectIdRef.current, completeData.participant_id, completeData, {
-      isRepeatMode: !!isRepeatMode,
-      repeatTotal: repeatTotal || 1,
-      attemptIndex: attemptIndex || 1,
-    });
     setSurveyPhase('submit-error');
   };
 
@@ -364,20 +374,34 @@ export default function SurveyApp() {
         participantIdRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
       }
       
+      // Failed submission recovery (refresh after submit-error)
+      const pendingFound = !options.skipDraftCheck ? findPendingSubmission(projectId) : null;
+      if (pendingFound?.pending?.completeData && !options.resumeDraft) {
+        participantIdRef.current = pendingFound.pending.participantId
+          || pendingFound.pending.completeData.participant_id
+          || participantIdRef.current;
+        setPendingSubmission(pendingFound.pending.completeData);
+        setSurveyPhase('submit-error');
+        setLoading(false);
+        resumeChoiceRef.current = null;
+        return;
+      }
+
       console.log('📂 Loading survey for project:', projectId);
 
       // Load project object (including Supabase configuration)
       let projectData = null;
       try {
-        const { getProjectById } = await import('./lib/projectManager');
-        projectData = await getProjectById(projectId);
+        const { getParticipantProject } = await import('./lib/projectManager');
+        projectData = await getParticipantProject(projectId);
 
       } catch (error) {
         console.error('❌ Error loading project data:', error);
+        if (isSupabaseConfigured()) throw error;
       }
       
       // Load survey configuration (platform mode: Supabase, self-hosted: local server)
-      const adminConfig = await loadSurveyConfig(projectId);
+      const adminConfig = projectData?._surveyConfig || await loadSurveyConfig(projectId);
       setCompletionMessage(adminConfig?.completionMessage || '');
 
       // Live Surveys approved-window gate (projects without a listing stay open by link)
@@ -492,7 +516,7 @@ export default function SurveyApp() {
           ? projectData.preloadedImages.filter(Boolean)
           : [];
         let fromPreviewLibrary = false;
-        if (!mediaPool.length) {
+        if (!mediaPool.length && !adminConfig?._spPublishedVersion) {
           setLoadingMessage('Loading preview media library…');
           try {
             const { listPreviewMedia } = await import('./lib/previewMediaLibrary');
@@ -876,14 +900,15 @@ export default function SurveyApp() {
       }
       {
         const normalizedProgress = normalizeShowProgressBar(finalSurveyJson.showProgressBar);
-        progressChromeEnabledRef.current = normalizedProgress !== 'off';
+        progressChromeEnabledRef.current = finalSurveyJson._spProgressEnabled ?? (normalizedProgress !== 'off');
+        finalSurveyJson._spProgressEnabled = progressChromeEnabledRef.current;
         // ProgressChrome replaces the native SurveyJS bar
         finalSurveyJson.showProgressBar = 'off';
       }
       
       // Create survey model (map builder-only types like number/consent)
       finalSurveyJson = normalizeBuilderSurveyJson(finalSurveyJson);
-      const revision = finalSurveyJson._spRevision || await surveyRevision(resumeDraft?.finalSurveyJson ? finalSurveyJson : (adminConfig || finalSurveyJson));
+      const revision = finalSurveyJson._spRevision || await surveyRevision(resumeDraft?.finalSurveyJson ? finalSurveyJson : (adminConfig || finalSurveyJson), finalSurveyJson);
       finalSurveyJson._spRevision = revision;
       const model = new Model(finalSurveyJson);
       applySurveyLocale(model, finalSurveyJson);
@@ -1047,6 +1072,7 @@ export default function SurveyApp() {
             project_id: projectId,
             survey_revision: revision.id,
             survey_response_contract: revision.contract,
+            published_version: finalSurveyJson._spPublishedVersion || null,
             survey_draft_updated_at: resumeDraft?.finalSurveyJson ? null : projectData?.draftUpdatedAt || null,
             timing: {
               total_seconds: totalSeconds,
@@ -1098,19 +1124,6 @@ export default function SurveyApp() {
 
       finalSurveyJsonRef.current = finalSurveyJson;
       imageTrackerRef.current = imageTracker;
-
-      // Failed submission recovery (refresh after submit-error)
-      const pendingFound = !options.skipDraftCheck ? findPendingSubmission(projectId) : null;
-      if (pendingFound?.pending?.completeData && !options.resumeDraft) {
-        participantIdRef.current = pendingFound.pending.participantId
-          || pendingFound.pending.completeData.participant_id
-          || participantIdRef.current;
-        setPendingSubmission(pendingFound.pending.completeData);
-        setSurveyPhase('submit-error');
-        setLoading(false);
-        resumeChoiceRef.current = null;
-        return;
-      }
 
       const existingDraft = !options.skipDraftCheck ? findDraftForProject(projectId) : null;
       if (existingDraft && !resumeChoiceRef.current && !options.resumeDraft) {
@@ -1246,10 +1259,17 @@ export default function SurveyApp() {
         <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
           {participantText.participantSaveError}
         </Alert>
+        {!online && <Alert severity="warning" sx={{ mb: 2 }}>{resolveSurveyJsLocale(participantLocale) === 'zh-cn' ? '网络已断开。连接恢复后，请点击重试提交。' : 'You are offline. Reconnect, then retry the submission.'}</Alert>}
+        {!recoverySaved && <Alert severity="warning" sx={{ mb: 2 }}>{resolveSurveyJsLocale(participantLocale) === 'zh-cn' ? '浏览器无法保存恢复副本，请保持此页面打开，或下载答卷备份。' : 'This browser could not save a recovery copy. Keep this page open or download your answers.'}</Alert>}
+        <Button sx={{ mb: 2 }} onClick={() => {
+          const url = URL.createObjectURL(new Blob([JSON.stringify(pendingSubmission, null, 2)], { type: 'application/json' }));
+          const a = document.createElement('a'); a.href = url; a.download = 'survey-response-backup.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }}>{resolveSurveyJsLocale(participantLocale) === 'zh-cn' ? '下载答卷备份' : 'Download answer backup'}</Button>
         <Button
           variant="contained"
           size="large"
           onClick={() => {
+            if (submissionInFlight.current) return;
             submissionGuardRef.current = true;
             setSurveyPhase('submitting');
             submitSurveyResponse(pendingSubmission, {
@@ -1312,7 +1332,7 @@ export default function SurveyApp() {
           
           {useAdminConfig && adminConfigExists && (
             <Alert severity="success" sx={{ py: 0 }}>
-              Live: Updates automatically from Admin Panel
+              Survey loaded from the participant link
             </Alert>
           )}
           

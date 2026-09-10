@@ -120,6 +120,8 @@ npm install && npm run dev
 
 Setup overview: configure Supabase Storage → build survey → create `survey_responses` → deploy survey site to Vercel with the **anon** key. Full steps: **https://github.com/Sijie-Yang/SP-Survey**
 
+For the multi-user platform's version management and reliable submission upgrade, apply the two Supabase migrations **before deploying the new frontend**. See [release workflow and migration order](docs/research-releases-2026-09-10.md). Existing projects keep live-on-save behavior until version management is enabled for that project.
+
 ---
 
 ## Cite

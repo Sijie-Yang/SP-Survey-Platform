@@ -110,9 +110,6 @@ export default function ProgressChrome({ enabled = true, surveyModel = null }) {
         borderBottom: '1px solid',
         borderColor: 'var(--sp-progress-border, #e0e0e0)',
         bgcolor: 'var(--sp-progress-bg, #ffffff)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 20,
       }}
     >
       <Typography

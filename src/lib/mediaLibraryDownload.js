@@ -21,6 +21,7 @@ import { L0_MODEL } from './imageFeaturesL0';
 import { SEG_MODEL } from './falInference';
 import {
   SAM_PREANNOT_MODEL,
+  deriveSamPreannotFeatures, recordsToCsv,
   loadFeatureCsvText,
   loadPreannotationsForMediaList,
   preannotationSafeId,
@@ -152,6 +153,7 @@ export async function downloadMediaEntriesZip(entries, {
   if (!list.length) throw new Error('No media files to download.');
 
   const files = [];
+  const usedPaths = new Set();
   const failures = [];
   for (let i = 0; i < list.length; i += 1) {
     const entry = list[i];
@@ -159,7 +161,15 @@ export async function downloadMediaEntriesZip(entries, {
       || mediaRelativePath(entry.folder, entry.name)
       || entry.name
       || `file_${i}`;
-    const zipPath = pathPrefix ? `${String(pathPrefix).replace(/\/?$/, '/')}${rel}` : rel;
+    let zipPath = pathPrefix ? `${String(pathPrefix).replace(/\/?$/, '/')}${rel}` : rel;
+    const desiredPath = zipPath;
+    let duplicate = 1;
+    while (usedPaths.has(zipPath)) {
+      const dot = desiredPath.lastIndexOf('.');
+      zipPath = dot > desiredPath.lastIndexOf('/')
+        ? `${desiredPath.slice(0, dot)}__${++duplicate}${desiredPath.slice(dot)}` : `${desiredPath}__${++duplicate}`;
+    }
+    usedPaths.add(zipPath);
     try {
       const content = await fetchUrlBytes(entry.url);
       files.push({ path: zipPath, content });
@@ -271,15 +281,27 @@ export async function downloadPreannotatePackageZip({
     throw new Error('R2 is not configured.');
   }
 
-  let annotatedItems = Array.isArray(items) ? items.filter((it) => it?.annotation?.shapes?.length) : null;
+  let annotatedItems = Array.isArray(items) ? items.filter((it) => Array.isArray(it?.annotation?.shapes)) : null;
   if (!annotatedItems) {
     const loaded = await loadPreannotationsForMediaList(r2Prefix, mediaList, { concurrency: 12 });
-    annotatedItems = loaded.filter(({ annotation }) => annotation?.shapes?.length);
+    annotatedItems = loaded.filter(({ annotation }) => Array.isArray(annotation?.shapes));
   }
   if (!annotatedItems.length) {
     throw new Error('No saved pre-annotations to export.');
   }
 
+  const failures = [];
+  const usedPaths = new Set();
+  const paths = annotatedItems.map(({ mediaEntry, annotation }, index) => {
+    const entry = normalizeMediaEntry(mediaEntry || { name: annotation.name, url: annotation.image, media_id: annotation.media_id }, projectPrefix);
+    const desired = mediaRelativePathFromListing(entry, projectPrefix) || mediaRelativePath(entry?.folder, entry?.name) || `file_${index}.jpg`;
+    let path = desired, suffix = 1;
+    while (usedPaths.has(path)) {
+      const dot = desired.lastIndexOf('.');
+      path = dot > desired.lastIndexOf('/') ? `${desired.slice(0, dot)}__${++suffix}${desired.slice(dot)}` : `${desired}__${++suffix}`;
+    }
+    usedPaths.add(path); return path;
+  });
   const files = [];
   const manifest = [];
   const perItemSteps = 1 + (includeImages ? 1 : 0) + (includeOverlays ? 1 : 0);
@@ -290,16 +312,14 @@ export async function downloadPreannotatePackageZip({
     onProgress?.(step, totalSteps);
   };
 
-  for (const { mediaEntry, annotation } of annotatedItems) {
+  for (const [index, { mediaEntry, annotation }] of annotatedItems.entries()) {
     const entry = normalizeMediaEntry(mediaEntry || {
       name: annotation?.name,
       url: annotation?.image,
       media_id: annotation?.media_id,
     }, projectPrefix);
-    const safeId = preannotationSafeId(entry || annotation?.name, annotation?.name);
-    const rel = mediaRelativePathFromListing(entry, projectPrefix)
-      || mediaRelativePath(entry?.folder, entry?.name || annotation?.name)
-      || `${safeId}.jpg`;
+    const safeId = `${String(index + 1).padStart(4, '0')}_${preannotationSafeId(entry || annotation?.name, annotation?.name)}`;
+    const rel = paths[index];
     const shapes = annotation.shapes || [];
     const dupPairs = findDuplicateShapePairs(shapes, { iouThreshold: 0.7 });
     const sources = {};
@@ -349,9 +369,7 @@ export async function downloadPreannotatePackageZip({
         media_id: annotation?.media_id,
       }, projectPrefix);
       const url = entry?.url || annotation?.image;
-      const rel = mediaRelativePathFromListing(entry, projectPrefix)
-        || mediaRelativePath(entry?.folder, entry?.name || annotation?.name)
-        || `file_${i}.jpg`;
+      const rel = paths[i];
       if (!url) {
         if (includeImages) tick();
         if (includeOverlays) tick();
@@ -361,24 +379,23 @@ export async function downloadPreannotatePackageZip({
         try {
           const content = await fetchUrlBytes(url);
           files.push({ path: `images/${rel}`, content });
-        } catch {
-          /* skip missing images; JSON still exported */
-        }
+        } catch (err) { failures.push({ media_id: annotation.media_id, path: `images/${rel}`, error: err.message }); }
         tick();
       }
       if (includeOverlays) {
         try {
           const overlay = await renderAnnotatedImageBytes(url, annotation?.shapes || []);
           files.push({ path: `overlays/${annotatedRelPath(rel)}`, content: overlay });
-        } catch {
-          /* skip failed burn-in; JSON / source image still exported */
-        }
+        } catch (err) { failures.push({ media_id: annotation.media_id, path: `overlays/${annotatedRelPath(rel)}`, error: err.message }); }
         tick();
       }
     }
   }
 
-  const samCsv = await loadFeatureCsvText(r2Prefix, SAM_PREANNOT_MODEL);
+  const samCsv = recordsToCsv(annotatedItems.map(({ mediaEntry, annotation }) => deriveSamPreannotFeatures(annotation.shapes, {
+    mediaId: annotation.media_id || mediaEntry?.media_id, name: annotation.name || mediaEntry?.name,
+    labels: annotation.labels || [], reviewStatus: annotation.review_status, updatedAt: annotation.updated_at,
+  })));
   if (samCsv) {
     files.push({ path: `features/${SAM_PREANNOT_MODEL}.csv`, content: samCsv });
   }
@@ -404,6 +421,8 @@ export async function downloadPreannotatePackageZip({
       annotated_count: annotatedItems.length,
       include_images: includeImages,
       include_overlays: includeOverlays,
+      failures, feature_version: '2',
+      area_definition: 'ratio = union coverage; area_sum includes overlaps; bounding boxes represent box area, not segmentation masks',
       items: manifest,
     }, null, 2)}\n`,
   });
@@ -427,5 +446,5 @@ export async function downloadPreannotatePackageZip({
 
   const outName = filename || `preannotate_${dateStamp()}.zip`;
   downloadZip(outName, files);
-  return { filename: outName, annotatedCount: annotatedItems.length, fileCount: files.length };
+  return { filename: outName, annotatedCount: annotatedItems.length, fileCount: files.length, failures };
 }

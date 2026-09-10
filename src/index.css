@@ -399,6 +399,17 @@ iframe[title="skill-question"] {
   display: none !important;
 }
 
+/* Keep question jumps and browser focus scrolling below the sticky progress bar. */
+.sp-survey-with-progress .sd-question,
+.sp-survey-with-progress .sd-page,
+.sp-survey-with-progress .sv_q,
+.sp-survey-with-progress input,
+.sp-survey-with-progress textarea,
+.sp-survey-with-progress select,
+.sp-survey-with-progress [tabindex] {
+  scroll-margin-top: calc(var(--sp-progress-height, 0px) + 12px);
+}
+
 /* Participant shell + SurveyJS both add horizontal padding — tighten on phones. */
 @media (max-width: 600px) {
   .sp-survey-with-progress {

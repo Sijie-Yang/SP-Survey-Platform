@@ -1,5 +1,5 @@
 import ConfirmDialog from '../components/layout/ConfirmDialog';
-import useUnsavedChanges from '../hooks/useUnsavedChanges';
+import useRouteUnsavedChanges from '../hooks/useRouteUnsavedChanges';
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   Box, Typography, TextField, Button,
@@ -40,6 +40,7 @@ export default function SkillEditorPage() {
   const [status, setStatus] = useState('draft');
   const [loading, setLoading] = useState(!!routeId);
   const [saving, setSaving] = useState(false);
+  const [savedRoute, setSavedRoute] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -48,7 +49,11 @@ export default function SkillEditorPage() {
   const snapshot = JSON.stringify({ name, description, sourceHtml, configSchema, resultSchema, exampleAnswer, defaultConfig });
   const initialSnapshot = useRef(snapshot);
   const [savedSnapshot, setSavedSnapshot] = useState(initialSnapshot.current);
-  const guard = useUnsavedChanges(!loading && snapshot !== savedSnapshot);
+  const dirty = !loading && snapshot !== savedSnapshot;
+  const guard = useRouteUnsavedChanges(dirty);
+  useEffect(() => {
+    if (savedRoute && !dirty) { navigate(savedRoute, { replace: true }); setSavedRoute(null); }
+  }, [savedRoute, dirty, navigate]);
   const [openaiApiKey] = useState(() => localStorage.getItem('openaiApiKey') || sessionStorage.getItem('openai_api_key') || '');
 
   useEffect(() => {
@@ -190,7 +195,7 @@ export default function SkillEditorPage() {
       setSuccess(warn.length
         ? `Saved to your skill library. Note: ${warn.join(' ')}`
         : 'Saved to your skill library');
-      if (!routeId) navigate(`/skill-editor/${result.skill.id}`, { replace: true });
+      if (!routeId) setSavedRoute(`/skill-editor/${result.skill.id}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -209,7 +214,7 @@ export default function SkillEditorPage() {
       await submitSkillForReview(result.skill.id);
       setStatus('pending');
       setSuccess('Submitted for review — it will be public for everyone once approved');
-      if (!routeId) navigate(`/skill-editor/${result.skill.id}`, { replace: true });
+      if (!routeId) setSavedRoute(`/skill-editor/${result.skill.id}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -259,7 +264,7 @@ export default function SkillEditorPage() {
     <AdminShell
       title={zh ? (skillId ? '编辑自定义交互' : '新建自定义交互') : (skillId ? 'Edit custom interaction' : 'New custom interaction')}
       backTo="/skills"
-      onBack={() => guard.request(() => navigate('/skills'))}
+      onBack={() => navigate('/skills')}
       maxWidth="lg"
       actions={statusChip ? (
         <Chip size="small" label={statusChip.label} color={statusChip.color} />

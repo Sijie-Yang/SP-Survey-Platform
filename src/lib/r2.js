@@ -256,7 +256,7 @@ export async function deleteImagesFromR2(keys, options = {}) {
  * @param {string} prefix - folder prefix (e.g. "userId/projectId")
  * @returns {{ success: boolean, images: Array, error?: string }}
  */
-export async function listImagesFromR2(prefix = '') {
+export async function listImagesFromR2(prefix = '', { annotations = false } = {}) {
   if (r2ProxyUnreachable) {
     return {
       success: false,
@@ -267,12 +267,13 @@ export async function listImagesFromR2(prefix = '') {
   }
   try {
     const res = await fetch(
-      `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}`,
+      `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}${annotations ? '&kind=annotations' : ''}`,
       { headers: await authHeaders() },
     );
     if (!res.ok) throw await describeNonOk(res, 'R2 list');
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'List failed');
+    if (annotations && !json.annotationIndex) throw new Error('Annotation service needs updating. Restart the local API server or deploy the matching backend.');
     return { success: true, images: json.images };
   } catch (error) {
     if (!noteR2ProxyFailure(error, 'list')) console.error('listImagesFromR2:', error);

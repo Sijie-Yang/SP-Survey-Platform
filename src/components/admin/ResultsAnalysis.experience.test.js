@@ -19,10 +19,10 @@ const responses = [
 beforeEach(() => { localStorage.clear(); jest.clearAllMocks(); });
 
 test('platform admin reads the selected project through the admin API without delete controls', async () => {
-  fetchAdminResponsePage.mockResolvedValue(responses);
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', name: 'Other project' }} surveyConfig={config} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
-  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0);
+  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null);
   fireEvent.click(screen.getByRole('button', {name: /Response Records/i}));
   expect(screen.getAllByRole('button', {name: 'View'})).toHaveLength(2);
   expect(screen.queryByRole('button', {name: 'Delete this response'})).toBeNull();

@@ -2661,7 +2661,7 @@ app.get('/api/r2/list', async (req, res) => {
     } while (continuationToken);
 
     const images = allObjects
-      .filter(obj => MEDIA_FILE_RE.test(obj.Key))
+      .filter(obj => req.query.kind === 'annotations' && /\/preannotations\/$/.test(prefix) ? obj.Key.endsWith('.json') : MEDIA_FILE_RE.test(obj.Key))
       .map(obj => {
         const name = obj.Key.split('/').pop();
         const prefixNorm = String(prefix || '').replace(/\/?$/, '/');
@@ -2683,7 +2683,7 @@ app.get('/api/r2/list', async (req, res) => {
         };
       })
       .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
-    res.json({ success: true, images });
+    res.json({ success: true, images, annotationIndex: req.query.kind === 'annotations' && /\/preannotations\/$/.test(prefix) });
   } catch (error) {
     console.error('R2 list error:', error);
     res.status(500).json({ success: false, error: error.message });

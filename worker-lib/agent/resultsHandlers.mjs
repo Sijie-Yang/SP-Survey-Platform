@@ -1,3 +1,5 @@
+import { readAllResponsePages, responseCursorFilter } from '../../src/lib/responsePagination.js';
+import { recordedRevisionSelection, recordedSurveyConfig } from '../../src/lib/recordedSurvey.js';
 /**
  * Survey response list / export / light summary for Agent + MCP.
  */
@@ -6,9 +8,8 @@ import { supabaseRest } from '../supabaseUserClient.mjs';
 import { loadOwned } from './projectLifecycle.mjs';
 import { buildResponsesWideCsv, flattenQuestions, qualityFlags } from '../results/wideExport.mjs';
 import {
-  buildExportReadme,
+  buildResultsExportBundle,
   buildManifest,
-  buildQuestionExportFiles,
   buildQuestionLongCsv,
   buildQuestionSummaryCsv,
   buildQuestionSummaryRows,
@@ -22,12 +23,19 @@ function draftConfig(row) {
   return row.survey_config_draft ?? row.survey_config ?? {};
 }
 
+function requireKnownRevision(rows, revision) {
+  if (revision && !rows.some((r) => (r.survey_metadata?.survey_revision || 'historical_unknown') === revision)) {
+    throw Object.assign(new Error('Requested survey revision was not found in these responses.'), { status: 400, code: 'UNKNOWN_SURVEY_REVISION' });
+  }
+}
+
 function parseFilters(raw = {}) {
   return {
     includePractice: Boolean(raw.includePractice),
     dateFrom: raw.dateFrom ? String(raw.dateFrom) : null,
     dateTo: raw.dateTo ? String(raw.dateTo) : null,
     sessionId: raw.sessionId ? String(raw.sessionId) : null,
+    surveyRevision: raw.surveyRevision ? String(raw.surveyRevision) : null,
     includeAnswers: Boolean(raw.includeAnswers),
     limit: Math.min(Math.max(Number(raw.limit) || LIST_DEFAULT_LIMIT, 1), EXPORT_MAX),
     offset: Math.max(Number(raw.offset) || 0, 0),
@@ -41,6 +49,7 @@ function rowTimestamp(row) {
 
 function filterRows(rows, filters, surveyConfig) {
   let out = Array.isArray(rows) ? [...rows] : [];
+  if (filters.surveyRevision) out = out.filter((r) => (r.survey_metadata?.survey_revision || 'historical_unknown') === filters.surveyRevision);
   if (!filters.includePractice) {
     out = out.filter((r) => !r.survey_metadata?.practice_mode);
   }
@@ -62,7 +71,7 @@ function filterRows(rows, filters, surveyConfig) {
     });
   }
   if (filters.excludeFlagged && surveyConfig) {
-    out = out.filter((r) => qualityFlags(r, surveyConfig, out).length === 0);
+    out = out.filter((r) => qualityFlags(r, recordedSurveyConfig([r], surveyConfig), out).length === 0);
   }
   return out;
 }
@@ -74,6 +83,7 @@ function metaSummary(meta = {}) {
     attempt_index: meta.attempt_index ?? null,
     practice_mode: Boolean(meta.practice_mode),
     practice_question: meta.practice_question || null,
+    survey_revision: meta.survey_revision || null,
     timing_total_seconds: meta.timing?.total_seconds ?? null,
     browser_id: meta.browser_id || null,
   };
@@ -103,13 +113,10 @@ function hasAnswer(qData) {
 }
 
 async function fetchAllResponses(env, projectId) {
-  // Ownership already verified; service role avoids opaque-token RLS gaps.
-  const rows = await supabaseRest(env, {
-    path: '/rest/v1/survey_responses',
-    serviceRole: true,
-    query: `?project_id=eq.${encodeURIComponent(projectId)}&select=*&order=created_at.desc`,
-  });
-  return Array.isArray(rows) ? rows : [];
+  return readAllResponsePages((offset, after) => supabaseRest(env, {
+    path: '/rest/v1/survey_responses', serviceRole: true,
+    query: `?project_id=eq.${encodeURIComponent(projectId)}&select=*&order=created_at.desc.nullslast,id.desc&limit=1000${after ? `&or=${encodeURIComponent(`(${responseCursorFilter(after)})`)}` : ''}`,
+  }));
 }
 
 function toFullRow(row) {
@@ -132,6 +139,7 @@ export async function listResponses(env, ctx, projectId, filters = {}) {
   const opts = parseFilters(filters);
   const surveyConfig = draftConfig(project);
   const all = await fetchAllResponses(env, projectId);
+  requireKnownRevision(all, opts.surveyRevision);
   const filtered = filterRows(all, opts, surveyConfig);
   const slice = filtered.slice(opts.offset, opts.offset + opts.limit);
 
@@ -181,8 +189,10 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
     throw Object.assign(new Error('format must be json, wide_csv, both, long_csv, summary_csv, or analysis_bundle'), { status: 400 });
   }
 
-  const surveyConfig = draftConfig(project);
   const all = await fetchAllResponses(env, projectId);
+  requireKnownRevision(all, opts.surveyRevision);
+  opts.surveyRevision = format === 'json' ? opts.surveyRevision : recordedRevisionSelection(all, opts.surveyRevision);
+  const surveyConfig = recordedSurveyConfig(all, draftConfig(project), opts.surveyRevision);
   const filtered = filterRows(all, opts, surveyConfig);
   if (filtered.length > EXPORT_MAX) {
     throw Object.assign(
@@ -204,6 +214,8 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
     projectId,
     format,
     n: filtered.length,
+    surveyRevision: opts.surveyRevision || null,
+    availableRevisions: [...new Set(all.map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))],
     note: 'Typed Skill exports use the frozen question contract; every Skill trial also retains answer_json.',
   };
 
@@ -245,32 +257,21 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
         result.note = 'Multi-question summary_csv returns one native-format file per question. Pass questionName for a single CSV.';
       }
     } else {
-      const questionFiles = questions.flatMap((question) => (
-        buildQuestionExportFiles(question, filtered, surveyConfig) || []
-      ));
       const manifestFilters = {
         date_from: opts.dateFrom,
         date_to: opts.dateTo,
         session_id: opts.sessionId,
         include_practice: opts.includePractice,
         exclude_flagged: opts.excludeFlagged,
+        survey_revision: opts.surveyRevision,
       };
-      const manifest = buildManifest({
-        project, questions, responses: filtered, filters: manifestFilters, questionFiles,
+      const files = buildResultsExportBundle({
+        project, surveyConfig, questions, filteredResponses: filtered,
+        dateFilteredResponses: filterRows(all, { ...opts, excludeFlagged: false }, surveyConfig),
+        filters: manifestFilters, excludeFlagged: opts.excludeFlagged,
+        wideCsv: buildResponsesWideCsv(filtered, questions, surveyConfig),
       });
-      const files = [
-        { path: 'manifest.json', content: JSON.stringify(manifest, null, 2) },
-        {
-          path: 'README.md',
-          content: buildExportReadme({
-            project,
-            filters: manifestFilters,
-            nResponses: filtered.length,
-            questionCount: questions.length,
-          }),
-        },
-        ...questionFiles,
-      ];
+      const manifest = JSON.parse(files.find((file) => file.path === 'manifest.json').content);
       result.analysisBundle = { manifest, files };
     }
   }
@@ -283,8 +284,10 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
 export async function summarizeResponses(env, ctx, projectId, filters = {}) {
   const project = await loadOwned(env, { ...ctx, projectId });
   const opts = parseFilters({ ...filters, limit: EXPORT_MAX });
-  const surveyConfig = draftConfig(project);
   const all = await fetchAllResponses(env, projectId);
+  requireKnownRevision(all, opts.surveyRevision);
+  opts.surveyRevision = recordedRevisionSelection(all, opts.surveyRevision);
+  const surveyConfig = recordedSurveyConfig(all, draftConfig(project), opts.surveyRevision);
   const nPractice = all.filter((r) => r.survey_metadata?.practice_mode).length;
   const filtered = filterRows(all, { ...opts, excludeFlagged: false }, surveyConfig);
   if (filtered.length > EXPORT_MAX) {
@@ -342,6 +345,8 @@ export async function summarizeResponses(env, ctx, projectId, filters = {}) {
   return {
     success: true,
     projectId,
+    surveyRevision: opts.surveyRevision || null,
+    availableRevisions: [...new Set(all.map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))],
     projectName: project.name,
     n_total: all.length,
     n_practice: nPractice,

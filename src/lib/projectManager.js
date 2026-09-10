@@ -104,8 +104,8 @@ async function sbSaveProject(project, surveyConfig, { writer = null } = {}) {
   const userId = await getCurrentUserId();
   const now = new Date().toISOString();
   const config = surveyConfig || {};
-  // Save = live: share / preview / view-live always follow the latest config.
-  // Dual-write draft + survey_config so owner RLS and anonymous RPC stay in sync.
+  // Legacy projects stay live on save. The release trigger protects managed
+  // survey_config; participant reads always use get_survey_project.
   const row = {
     id: project.id,
     user_id: userId,
@@ -172,7 +172,7 @@ async function sbDeleteProject(projectId) {
 }
 
 function rowToProject(row) {
-  // Latest wins: draft and survey_config are kept in sync on save.
+  // Owner/editor views use the draft; participant RPC payloads contain only the live config.
   const latest = row.survey_config_draft ?? row.survey_config ?? {};
   const draftUpdatedAt = row.draft_updated_at || row.updated_at || null;
   const meta = (row.metadata && typeof row.metadata === 'object') ? row.metadata : {};
@@ -199,6 +199,7 @@ function rowToProject(row) {
     draftUpdatedAt,
     publishedAt: row.published_at || null,
     publishedVersion: row.published_version || 0,
+    releaseManaged: !!row.release_managed,
     lastWriter: row.last_writer || null,
     _surveyConfig: latest,
   };
@@ -394,6 +395,41 @@ export const getProjectById = async (projectId) => {
     return null;
   }
 };
+
+// The participant link must use the released view even when the owner is signed in.
+export const getParticipantProject = async (projectId) => {
+  if (!isPlatformMode()) return localLoadProject(projectId);
+  const { data, error } = await supabase.rpc('get_survey_project', { p_id: projectId });
+  if (error) throw error;
+  if (!data?.[0]) throw new Error('Survey not found');
+  return rowToProject(data[0]);
+};
+
+export async function getProjectReleaseState(projectId) {
+  if (!isPlatformMode()) throw new Error('Version management requires a Supabase project.');
+  const { data, error } = await supabase.from('projects')
+    .select('release_managed,published_version,published_at,draft_updated_at,survey_config_draft,survey_config_published,published_media,preloaded_images,image_dataset_config')
+    .eq('id', projectId).single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getProjectReleaseVersions(projectId, offset = 0) {
+  const { data, error } = await supabase.from('project_config_versions')
+    .select('version,published_at,change_summary,config,media_snapshot')
+    .eq('project_id', projectId).order('version', { ascending: false }).range(offset, offset + 19);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function releaseProjectVersion(projectId, expectedDraftUpdatedAt, { summary = '', restoreVersion = null } = {}) {
+  const { data, error } = await supabase.rpc('release_project_version', {
+    p_project_id: projectId, p_expected_draft_updated_at: expectedDraftUpdatedAt,
+    p_summary: summary, p_restore_version: restoreVersion,
+  });
+  if (error) throw error;
+  return data;
+}
 
 export const saveProjectFull = async (project, surveyConfig, options = {}) => {
   try {

@@ -67,10 +67,13 @@ export function normalizeMediaEntry(entry, projectPrefix = null) {
   }
   const name = entry.name || entry.url?.split('?')[0].split('/').pop() || '';
   const mediaId = entry.media_id || entry.key || name || entry.url || '';
-  const folder = entry.folder != null && String(entry.folder).trim() !== ''
+  const folder = typeof entry.logicalFolder === 'string'
+    ? normalizeProjectRelativeFolder(entry.logicalFolder)
+    : entry.folder != null && String(entry.folder).trim() !== ''
     ? normalizeProjectRelativeFolder(entry.folder)
     : folderFromR2Key(entry.key, projectPrefix);
   return {
+    ...(typeof entry.logicalFolder === 'string' ? { logicalFolder: folder } : {}),
     name,
     url: entry.url,
     key: entry.key,
@@ -309,6 +312,10 @@ export function mediaRelativePath(folder, filename) {
  */
 export function mediaRelativePathFromListing(img, prefix = '') {
   if (!img) return '';
+  if (typeof img.logicalFolder === 'string') {
+    // Keep unique object basenames in ZIPs when display names collide.
+    return mediaRelativePath(img.logicalFolder, mediaBasename(img.key || img.name));
+  }
   const key = String(img.key || '').replace(/^\/+/, '');
   const p = prefix ? String(prefix).replace(/^\/+/, '').replace(/\/?$/, '/') : '';
   if (p && key.startsWith(p)) return key.slice(p.length);

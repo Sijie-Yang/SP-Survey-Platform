@@ -415,6 +415,7 @@ const TOOLS = [
         dateFrom: { type: 'string', description: 'YYYY-MM-DD' },
         dateTo: { type: 'string', description: 'YYYY-MM-DD' },
         sessionId: { type: 'string' },
+        surveyRevision: { type: 'string', description: 'Recorded questionnaire revision; typed exports and summaries automatically select one version when revisions differ.' },
         limit: { type: 'number' },
         offset: { type: 'number' },
       },
@@ -435,6 +436,7 @@ const TOOLS = [
         dateFrom: { type: 'string' },
         dateTo: { type: 'string' },
         sessionId: { type: 'string' },
+        surveyRevision: { type: 'string', description: 'Recorded questionnaire revision; typed exports and summaries automatically select one version when revisions differ.' },
       },
       required: ['projectId'],
     },
@@ -451,6 +453,7 @@ const TOOLS = [
         dateFrom: { type: 'string' },
         dateTo: { type: 'string' },
         sessionId: { type: 'string' },
+        surveyRevision: { type: 'string', description: 'Recorded questionnaire revision; typed exports and summaries automatically select one version when revisions differ.' },
         questionName: { type: 'string' },
       },
       required: ['projectId'],
@@ -491,7 +494,7 @@ const TOOLS = [
   },
   {
     name: 'survey_apply_operations',
-    description: 'Apply deterministic survey operations. Saves update the live share URL immediately.',
+    description: 'Apply deterministic survey operations. Saves update the draft. Version-managed projects require survey_publish to update the participant link.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -505,7 +508,7 @@ const TOOLS = [
   },
   {
     name: 'survey_replace_draft',
-    description: 'Replace the full surveyConfig (escape hatch). Saves update the live share URL immediately.',
+    description: 'Replace the full surveyConfig (escape hatch). Saves update the draft. Version-managed projects require survey_publish to update the participant link.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -553,15 +556,16 @@ const TOOLS = [
   },
   {
     name: 'survey_publish',
-    description: 'Optional: create a version snapshot for rollback. Not required for the live share URL (saves are already live). Product homepage listing uses Publish to Main Page in Admin.',
+    description: 'Release the saved draft and media manifest to the participant link, enabling version management. Review the draft first. Homepage listing still uses Publish to Main Page in Admin.',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
         summary: { type: 'string' },
+        expectedDraftUpdatedAt: { type: 'string' },
         confirm: { type: 'boolean' },
       },
-      required: ['projectId', 'confirm'],
+      required: ['projectId', 'expectedDraftUpdatedAt', 'confirm'],
     },
   },
   {
@@ -581,9 +585,10 @@ const TOOLS = [
       properties: {
         projectId: { type: 'string' },
         version: { type: 'number' },
+        expectedDraftUpdatedAt: { type: 'string' },
         confirm: { type: 'boolean' },
       },
-      required: ['projectId', 'version', 'confirm'],
+      required: ['projectId', 'version', 'expectedDraftUpdatedAt', 'confirm'],
     },
   },
   {
@@ -812,7 +817,7 @@ async function callTool(env, auth, request, name, args = {}) {
       requireScope(auth, 'surveys:publish');
       if (!args.confirm) return toolResult({ error: 'Set confirm:true to rollback.' }, true);
       if (useService) {
-        return toolResult(await rollbackViaService(env, auth.userId, args.projectId, args.version));
+        return toolResult(await publishViaService(env, auth.userId, args.projectId, { ...args, restoreVersion: Number(args.version) }));
       }
       return toolResult(await rollbackProject(env, auth.accessToken, args.projectId, args));
     }
@@ -1049,96 +1054,14 @@ async function leaseViaService(env, userId, projectId, body) {
 
 async function publishViaService(env, userId, projectId, body) {
   await assertOwned(env, userId, projectId);
-  // Inline publish (service role) mirroring SQL RPC
-  const rows = await supabaseRest(env, {
-    path: '/rest/v1/projects',
-    serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(projectId)}&select=survey_config_draft,published_version`,
+  if (!body.expectedDraftUpdatedAt) throw Object.assign(new Error('Read the draft first and supply expectedDraftUpdatedAt.'), { status: 400 });
+  const result = await supabaseRest(env, {
+    path: '/rest/v1/rpc/release_project_version', method: 'POST', serviceRole: true,
+    body: { p_project_id: projectId, p_owner: userId,
+      p_expected_draft_updated_at: body.expectedDraftUpdatedAt,
+      p_summary: body.summary || null, p_restore_version: body.restoreVersion || null },
   });
-  const row = rows?.[0];
-  const draft = row?.survey_config_draft;
-  if (!draft) throw Object.assign(new Error('draft is empty'), { status: 400 });
-  const ver = (row.published_version || 0) + 1;
-  const now = new Date().toISOString();
-  await supabaseRest(env, {
-    path: '/rest/v1/projects',
-    method: 'PATCH',
-    serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(projectId)}`,
-    body: {
-      survey_config_published: draft,
-      survey_config: draft,
-      published_at: now,
-      published_version: ver,
-      updated_at: now,
-      last_writer: { source: 'publish', at: now },
-    },
-  });
-  await supabaseRest(env, {
-    path: '/rest/v1/project_config_versions',
-    method: 'POST',
-    serviceRole: true,
-    body: {
-      project_id: projectId,
-      version: ver,
-      config: draft,
-      published_by: userId,
-      change_summary: body.summary || null,
-    },
-  });
-  return { success: true, publishedVersion: ver, publishedAt: now };
-}
-
-async function rollbackViaService(env, userId, projectId, version) {
-  // Mirror SQL RPC rollback_project_config:
-  // 1) load target version config
-  // 2) write it as draft/live/published
-  // 3) insert a NEW version snapshot of that restored config (not the pre-rollback draft)
-  await assertOwned(env, userId, projectId);
-  const versions = await supabaseRest(env, {
-    path: '/rest/v1/project_config_versions',
-    serviceRole: true,
-    query: `?project_id=eq.${encodeURIComponent(projectId)}&version=eq.${Number(version)}&select=config`,
-  });
-  const config = versions?.[0]?.config;
-  if (!config) throw Object.assign(new Error('version not found'), { status: 404 });
-
-  const rows = await supabaseRest(env, {
-    path: '/rest/v1/projects',
-    serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(projectId)}&select=published_version`,
-  });
-  const nextVer = (rows?.[0]?.published_version || 0) + 1;
-  const now = new Date().toISOString();
-  await supabaseRest(env, {
-    path: '/rest/v1/projects',
-    method: 'PATCH',
-    serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(projectId)}`,
-    body: {
-      survey_config_draft: config,
-      survey_config_published: config,
-      survey_config: config,
-      draft_updated_at: now,
-      published_at: now,
-      published_version: nextVer,
-      updated_at: now,
-      last_writer: { source: 'rollback', fromVersion: Number(version), at: now },
-    },
-  });
-  await supabaseRest(env, {
-    path: '/rest/v1/project_config_versions',
-    method: 'POST',
-    serviceRole: true,
-    body: {
-      project_id: projectId,
-      version: nextVer,
-      config,
-      published_by: userId,
-      change_summary: `Rollback to version ${version}`,
-    },
-  });
-  return { success: true, restoredFrom: Number(version), publishedVersion: nextVer };
+  return { success: true, ...result };
 }
 
 export async function handleMcpRequest(request, env, auth) {

@@ -194,7 +194,7 @@ function mediaEntryIdentity(entry, userId, projectId) {
     || null;
 }
 
-export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep }) {
+export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep, focusRequest }) {
   const { t, language } = useRegion();
   const zh = language === 'zh';
   const { user } = useAuth();
@@ -292,9 +292,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   }, [projectPrefix, currentProject?.preloadedImages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const normalizeR2Listing = (images = []) => {
-    const existing = new Map((currentProject?.preloadedImages || []).map((m) => [getMediaId(m), m]));
+    const existing = new Map((currentProject?.preloadedImages || []).flatMap((m) => [getMediaId(m), m.key, m.url].filter(Boolean).map((id) => [id, m])));
     return sortMediaByName(images.map((img) => {
-      const saved = existing.get(img.media_id || img.key);
+      const saved = existing.get(img.key) || existing.get(img.media_id) || existing.get(img.url);
       // Refresh storage presence without losing original names or research metadata.
       const merged = { ...img, ...saved, url: img.url, key: img.key, media_id: img.media_id || img.key };
       return { ...merged, ...normalizeMediaEntry(merged, projectPrefix) };
@@ -567,9 +567,24 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     if (!preannotateFocusName) return 0;
     const idx = preannotateImages.findIndex((m) => getMediaId(m) === preannotateFocusName || m.name === preannotateFocusName);
     return idx >= 0 ? idx : 0;
-  }, [preannotateImages, preannotateFocusName]);
+  }, [preannotateImages, preannotateFocusName, focusRequest]);
 
   const preannotateEntry = preannotateImages[preannotateIndex] || null;
+  const handledFocusRef = useRef(null);
+  useEffect(() => {
+    if (!focusRequest?.mediaId || handledFocusRef.current === focusRequest.token) return;
+    const entry = (currentProject?.preloadedImages || []).map((m) => normalizeMediaEntry(m, projectPrefix)).find((m) => getMediaId(m) === focusRequest.mediaId);
+    if (!entry) return;
+    handledFocusRef.current = focusRequest.token;
+    setCurrentFolder(entry.folder || ''); setMediaSearch(''); setMediaFilter('all');
+    const folderItems = sortMediaByName((currentProject.preloadedImages || []).map((m) => normalizeMediaEntry(m, projectPrefix)).filter((m) => (m.folder || '') === (entry.folder || '')));
+    setMediaPage(Math.floor(folderItems.findIndex((m) => getMediaId(m) === getMediaId(entry)) / MEDIA_PAGE_SIZE) + 1);
+    setPreannotateReviewFilter(null); setPreannotateFocusName(getMediaId(entry));
+    setSelectedMedia(new Set([getMediaId(entry)]));
+    const timer = setTimeout(() => document.getElementById('media-preannotate-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 200);
+    return () => clearTimeout(timer);
+  }, [focusRequest, currentProject?.preloadedImages, projectPrefix]);
+
 
   const preannotScrollLockRef = useRef(null); // { top: number } panel viewport top before nav
 
@@ -592,17 +607,18 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   const reviewQueueNames = useMemo(() => {
     const batch = preannotateLastBatch;
-    const imgs = Array.isArray(batch?.images) ? batch.images : [];
-    const failNames = new Set((batch?.failures || []).map((f) => f.name).filter(Boolean));
-    const inGallery = (n) => preannotateImages.some((m) => m.name === n);
+    const identify = (item) => item.media_id || item.url || (preannotateImages.filter((m) => m.name === item.name).length === 1 ? getMediaId(preannotateImages.find((m) => m.name === item.name)) : null);
+    const imgs = (Array.isArray(batch?.images) ? batch.images : []).map((item) => ({ ...item, media_id: identify(item) }));
+    const failNames = new Set((batch?.failures || []).map(identify).filter(Boolean));
+    const inGallery = (n) => preannotateImages.some((m) => getMediaId(m) === n);
     if (preannotateReviewFilter === 'last_batch') {
       return imgs
         .filter((i) => (i.status === 'done' || i.status === 'partial') && (i.polygonsAdded > 0 || (i.addedShapeIds || []).length))
-        .map((i) => i.name)
+        .map((i) => i.media_id)
         .filter(inGallery);
     }
     if (preannotateReviewFilter === 'zero') {
-      return imgs.filter((i) => i.status === 'zero').map((i) => i.name).filter(inGallery);
+      return imgs.filter((i) => i.status === 'zero').map((i) => i.media_id).filter(inGallery);
     }
     if (preannotateReviewFilter === 'failed') {
       return [...failNames].filter(inGallery);
@@ -610,8 +626,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     if (preannotateReviewFilter === 'needs_review') {
       // Real Accept / Needs fix marks — not "everything from last batch".
       return preannotateImages
-        .filter((m) => preannotateReviewByName[m.name] === 'needs_review')
-        .map((m) => m.name);
+        .filter((m) => preannotateReviewByName[getMediaId(m)] === 'needs_review')
+        .map(getMediaId);
     }
     return [];
   }, [preannotateLastBatch, preannotateReviewFilter, preannotateImages, preannotateReviewByName]);
@@ -652,9 +668,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       return;
     }
     if (!preannotateFocusName || !preannotateImages.some((m) => getMediaId(m) === preannotateFocusName || m.name === preannotateFocusName)) {
-      setPreannotateFocusName(getMediaId(preannotateImages[0]));
+      const requested = preannotateImages.find((m) => getMediaId(m) === focusRequest?.mediaId);
+      setPreannotateFocusName(getMediaId(requested || preannotateImages[0]));
     }
-  }, [preannotateImages, preannotateFocusName]);
+  }, [preannotateImages, preannotateFocusName, focusRequest]);
 
   // One-time: stock labels still on old index colors → semantic defaults
   useEffect(() => {
@@ -2579,10 +2596,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           projectId={projectId || ''}
           onSaved={(result) => {
             const annotation = result?.annotation || null;
-            const mediaEntry = preannotateEntry
-              || (annotation
-                ? { name: annotation.name, url: annotation.image, media_id: annotation.media_id }
-                : null);
+            const mediaEntry = annotation
+              ? (currentProject?.preloadedImages || []).find((m) => getMediaId(m) === annotation.media_id)
+                || { name: annotation.name, url: annotation.image, media_id: annotation.media_id, folder: annotation.folder }
+              : preannotateEntry;
             const patch = {
               mediaEntry,
               annotation,
@@ -2590,13 +2607,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             };
             setPreannotateSavedPatch(patch);
             setPreannotateBatchPatches((prev) => {
-              const key = mediaEntry?.name || annotation?.name;
+              const key = getMediaId(mediaEntry) || annotation?.media_id;
               if (!key) return prev;
-              const next = prev.filter((p) => (p.mediaEntry?.name || p.annotation?.name) !== key);
+              const next = prev.filter((p) => (getMediaId(p.mediaEntry) || p.annotation?.media_id) !== key);
               next.push(patch);
               return next.slice(-200);
             });
-            const reviewName = mediaEntry?.name || annotation?.name;
+            const reviewName = getMediaId(mediaEntry) || annotation?.media_id;
             const rs = annotation?.review_status;
             if (reviewName && (rs === 'accepted' || rs === 'needs_review')) {
               setPreannotateReviewByName((prev) => ({ ...prev, [reviewName]: rs }));
@@ -2607,7 +2624,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               setR2FeatureMap((prev) => {
                 const next = { ...prev };
                 if (rec.media_id) next[featureStorageKey(rec.media_id, SAM_PREANNOT_MODEL)] = rec;
-                if (rec.name) next[featureStorageKey(rec.name, SAM_PREANNOT_MODEL)] = rec;
+                if (rec.name && (currentProject?.preloadedImages || []).filter((m) => m.name === rec.name).length === 1) next[featureStorageKey(rec.name, SAM_PREANNOT_MODEL)] = rec;
                 return next;
               });
             }

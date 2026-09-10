@@ -1,3 +1,4 @@
+import { useWorkflowText } from '../../contexts/workflowI18n';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Model } from 'survey-core';
 import { Survey } from 'survey-react-ui';
@@ -40,6 +41,7 @@ import registerImageRankingWidget, {
 import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 import { applyAdminThemeToSurveyModel } from '../../lib/surveyStorage';
 import { saveSurveyResponse, supabase } from '../../lib/supabase';
+import { createPracticeSubmission } from '../../lib/practiceSubmission';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildResponseMediaUrlMap } from '../../lib/skillMediaUtils';
 import { ImageResolverContext } from './imageResolverContext';
@@ -180,8 +182,9 @@ export default function ResearcherPractice({
   onSurveyConfigChange,
   onSessionActiveChange,
 }) {
+  const tx = useWorkflowText();
   const { user } = useAuth();
-  const { t } = useRegion();
+  const { t, language } = useRegion();
   const projectId = currentProject?.id || null;
   const questions = useMemo(
     () => flattenQuestions(surveyConfig).filter(isPracticeable),
@@ -236,6 +239,8 @@ export default function ResearcherPractice({
   const [roundMeta, setRoundMeta] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [retrySubmission, setRetrySubmission] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState(null);
   const [statusMsg, setStatusMsg] = useState(null); // durable messages only (session start/stop)
   const [toast, setToast] = useState(null); // brief overlay — no layout shift
@@ -417,7 +422,7 @@ export default function ResearcherPractice({
         totalSaved: saved.totalSaved || 0,
       };
       applySession(restored, { persist: false, reload: true });
-      setToast('Practice session restored');
+      setToast(tx("Practice session restored"));
     } else {
       setSession(null);
       sessionRef.current = null;
@@ -473,7 +478,7 @@ export default function ResearcherPractice({
       && valid.every((n, i) => n === session.questionNames[i])) return;
     if (!valid.length) {
       applySession(null);
-      setToast('Session questions were removed — session ended');
+      setToast(tx("Session questions were removed — session ended"));
       return;
     }
     const currentName = session.questionNames[session.queueIndex];
@@ -577,7 +582,7 @@ export default function ResearcherPractice({
       setupSelected.filter((n) => questions.some((q) => q.name === n)),
     );
     if (!names.length) {
-      setError('Select at least one question for the session.');
+      setError(tx("Select at least one question for the session."));
       return;
     }
     const repeats = setupUnlimited ? 1 : Math.max(1, parseInt(setupRepeats, 10) || 1);
@@ -602,7 +607,7 @@ export default function ResearcherPractice({
       ? 'one of each question per round'
       : 'finish one question before the next';
     setToast(
-      setupUnlimited
+      language === 'zh' ? `已开始连续练习，共 ${names.length} 道题${setupUnlimited ? '，不限次数' : '，每题 ' + repeats + ' 次'}` : setupUnlimited
         ? `Session started · ${names.length} Q · ${paceLabel} · unlimited`
         : `Session started · ${names.length} Q · ${paceLabel} · ${repeats}×`,
     );
@@ -613,7 +618,7 @@ export default function ResearcherPractice({
     applySession(null, { persist: true, reload: false });
     setModel(null);
     setRoundMeta(null);
-    setToast('Session stopped. Free practice is available again.');
+    setToast(tx("Session stopped. Free practice is available again."));
   };
 
   const loadRound = useCallback(async () => {
@@ -665,11 +670,12 @@ export default function ResearcherPractice({
       };
       setRoundMeta(meta);
       roundMetaRef.current = meta;
+      setRetrySubmission(false);
       setPracticeNavKey((k) => k + 1);
       setModel(m);
     } catch (err) {
       console.error('Practice round failed:', err);
-      setError(err.message || 'Failed to load question');
+      setError(err.message || tx("Failed to load question"));
       setModel(null);
     } finally {
       setLoading(false);
@@ -691,6 +697,13 @@ export default function ResearcherPractice({
   const enrichAndSave = async (surveyModel) => {
     const meta = roundMetaRef.current;
     if (!meta?.questionName) throw new Error('No active question');
+
+    // A failed response may already have reached the database. Resend the exact request.
+    if (meta.pendingSubmission) {
+      const result = await saveSurveyResponse(meta.pendingSubmission);
+      if (!result.success) throw new Error(result.error?.message || result.error || 'Save failed');
+      return result;
+    }
 
     const questionName = meta.questionName;
     // Multi-trial answers live in trialsAnswerStore / spTrialsAnswer — not model.data alone.
@@ -744,7 +757,9 @@ export default function ResearcherPractice({
       },
     };
 
-    const result = await saveSurveyResponse(completeData);
+    meta.pendingSubmission = createPracticeSubmission(completeData);
+    surveyModel.mode = 'display';
+    const result = await saveSurveyResponse(meta.pendingSubmission);
     if (!result.success) {
       throw new Error(result.error?.message || result.error || 'Save failed');
     }
@@ -782,7 +797,7 @@ export default function ResearcherPractice({
         applySession(null, { persist: true, reload: false });
         setModel(null);
         setRoundMeta(null);
-        setToast(`Session complete — saved ${totalSaved} response(s)`);
+        setToast(language === 'zh' ? `练习完成，已保存 ${totalSaved} 次回答` : `Session complete — saved ${totalSaved} response(s)`);
         refreshAnalysisData();
         return false;
       }
@@ -801,7 +816,7 @@ export default function ResearcherPractice({
         applySession(null, { persist: true, reload: false });
         setModel(null);
         setRoundMeta(null);
-        setToast(`Session complete — saved ${totalSaved} response(s)`);
+        setToast(language === 'zh' ? `练习完成，已保存 ${totalSaved} 次回答` : `Session complete — saved ${totalSaved} response(s)`);
         refreshAnalysisData();
         return false;
       }
@@ -820,12 +835,13 @@ export default function ResearcherPractice({
   };
 
   const submitAnswer = async () => {
-    if (!model || submitting) return;
+    if (!model || submittingRef.current || loading) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
       if (!model.validate(true)) {
-        setError('Please complete the required fields before submitting.');
+        setError(tx("Please complete the required fields before submitting."));
         setSubmitting(false);
         return;
       }
@@ -834,7 +850,7 @@ export default function ResearcherPractice({
         ...prev,
         [selectedName]: (prev[selectedName] || 0) + 1,
       }));
-      setToast('Saved');
+      setToast(tx("Saved"));
       // Refresh analysis so the collapsed Result card updates (free + session).
       refreshAnalysisData();
 
@@ -846,14 +862,16 @@ export default function ResearcherPractice({
       }
     } catch (err) {
       console.error(err);
-      setError(err.message || 'Failed to save response');
+      setError(err.message || tx("Failed to save response"));
+      setRetrySubmission(!!roundMetaRef.current?.pendingSubmission);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   const skipWithoutSave = () => {
-    setToast('Skipped');
+    setToast(tx("Skipped"));
     if (sessionActive) {
       advanceSessionAfterAnswer(false);
     } else {
@@ -862,19 +880,18 @@ export default function ResearcherPractice({
   };
 
   if (!currentProject) {
-    return <Alert severity="info">Select a project to practice questions.</Alert>;
+    return <Alert severity="info">{' '}{tx("Select a project to practice questions.")}{' '}</Alert>;
   }
 
   if (!questions.length) {
     return (
-      <Alert severity="warning">
-        This project has no answerable questions yet. Add questions in Survey Builder first.
-      </Alert>
+      <Alert severity="warning">{' '}{tx("This project has no answerable questions yet. Add questions in Survey Builder first.")}{' '}</Alert>
     );
   }
 
   const sessionProgressLabel = (() => {
     if (!session) return null;
+    if (language === 'zh') return `连续练习 · 第 ${session.queueIndex + 1}/${session.questionNames.length} 题 · ${session.paceMode === 'round' ? '第 ' + (session.roundIndex || 1) + ' 轮' : '本题第 ' + session.attemptInQuestion + ' 次'} · 已保存 ${session.totalSaved} 次${session.unlimited ? ' · 不限次数' : ' · 每题 ' + session.repeats + ' 次'}`;
     const qPos = `${session.queueIndex + 1}/${session.questionNames.length}`;
     const pace = session.paceMode === 'round' ? 'round' : 'block';
     if (session.unlimited) {
@@ -978,11 +995,11 @@ export default function ResearcherPractice({
                             color={count > 0 ? 'primary' : 'default'}
                             variant={count > 0 ? 'filled' : 'outlined'}
                             sx={{ height: 20, fontSize: '0.7rem' }}
-                            title="Researcher practice responses for this question"
+                            title={tx("Researcher practice responses for this question")}
                           />
                         </Stack>
                       }
-                      secondary={`${q.type}${inSession ? ' · in session' : ''}`}
+                      secondary={`${q.type}${inSession ? (language === 'zh' ? ' · 练习中' : ' · in session') : ''}`}
                       secondaryTypographyProps={{ noWrap: true, fontSize: 11 }}
                     />
                     <Tooltip title={t.practiceEditSettings}>
@@ -1062,6 +1079,11 @@ export default function ResearcherPractice({
             </Stack>
 
             {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            {retrySubmission && <Alert severity="info" sx={{ mb: 2 }}>
+              {language === 'zh'
+                ? '本次答案已在当前页面保留。请重试提交以确认保存，不会重复新增记录。'
+                : 'This attempt is kept unchanged on this page. Retry submission to confirm it without creating a duplicate.'}
+            </Alert>}
             {statusMsg && (
               <Alert severity="info" sx={{ mb: 2 }} onClose={() => setStatusMsg(null)}>
                 {statusMsg}
@@ -1089,6 +1111,7 @@ export default function ResearcherPractice({
 
               {model && (
                 <Box
+                  inert={submitting || retrySubmission ? '' : undefined}
                   sx={{
                     border: '1px solid',
                     borderColor: 'divider',
@@ -1112,22 +1135,19 @@ export default function ResearcherPractice({
             {model && (
               <Stack direction="row" spacing={1} alignItems="center">
                 <Button variant="contained" disabled={submitting || loading} onClick={submitAnswer}>
-                  {submitting ? 'Saving…' : (sessionActive ? 'Submit & Next' : 'Submit')}
+                  {submitting ? tx("Saving…") : (retrySubmission ? (language === 'zh' ? '重试提交' : 'Retry submission') : (sessionActive ? tx("Submit & Next") : tx("Submit")))}
                 </Button>
                 <Button
                   variant="outlined"
                   startIcon={<SkipNext />}
                   disabled={submitting || loading}
                   onClick={skipWithoutSave}
-                >
-                  Skip (no save)
-                </Button>
+                >{' '}{tx("Skip (no save)")}{' '}</Button>
               </Stack>
             )}
 
             {roundMeta?.shownImages?.length > 0 && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-                Shown media: {roundMeta.shownImages.map((u) => String(u).split('/').pop()).join(', ')}
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>{' '}{tx("Shown media:")}{' '}{roundMeta.shownImages.map((u) => String(u).split('/').pop()).join(', ')}
               </Typography>
             )}
 
@@ -1136,9 +1156,7 @@ export default function ResearcherPractice({
               if (!analysisProps) return null;
               return (
                 <Box sx={{ mt: 2.5 }}>
-                  <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-                    Result analysis
-                  </Typography>
+                  <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>{' '}{tx("Result analysis")}{' '}</Typography>
                   <QuestionCard {...analysisProps} />
                 </Box>
               );
@@ -1167,12 +1185,9 @@ export default function ResearcherPractice({
       )}
 
       <Dialog open={setupOpen} onClose={() => setSetupOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Start practice session</DialogTitle>
+        <DialogTitle>{' '}{tx("Start practice session")}{' '}</DialogTitle>
         <DialogContent dividers>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Selected questions always run in survey order (not click order).
-            The Practice tab stays mounted while the session is running.
-          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{' '}{tx("Selected questions always run in survey order (not click order). The Practice tab stays mounted while the session is running.")}{' '}</Typography>
           <List dense sx={{ maxHeight: 260, overflow: 'auto', mb: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
             {questionsByPage.map((group) => {
               const pageNames = group.questions.map((q) => q.name);
@@ -1223,7 +1238,7 @@ export default function ResearcherPractice({
           </List>
 
           <FormControl component="fieldset" sx={{ mb: 2, width: '100%' }}>
-            <FormLabel component="legend">Answering pace</FormLabel>
+            <FormLabel component="legend">{' '}{tx("Answering pace")}{' '}</FormLabel>
             <RadioGroup
               value={setupPaceMode}
               onChange={(e) => setSetupPaceMode(e.target.value)}
@@ -1231,12 +1246,12 @@ export default function ResearcherPractice({
               <FormControlLabel
                 value="round"
                 control={<Radio size="small" />}
-                label="One of each selected question per round"
+                label={tx("One of each selected question per round")}
               />
               <FormControlLabel
                 value="block"
                 control={<Radio size="small" />}
-                label="Finish all repeats of one question, then the next"
+                label={tx("Finish all repeats of one question, then the next")}
               />
             </RadioGroup>
           </FormControl>
@@ -1250,37 +1265,35 @@ export default function ResearcherPractice({
             )}
             label={
               setupPaceMode === 'round'
-                ? 'Unlimited rounds (keep going until you end the session)'
-                : 'Unlimited repeats on each question (stay on current Q until you end)'
+                ? tx("Unlimited rounds (keep going until you end the session)")
+                : tx("Unlimited repeats on each question (stay on current Q until you end)")
             }
           />
           {!setupUnlimited && (
             <TextField
               fullWidth
               type="number"
-              label={setupPaceMode === 'round' ? 'Number of rounds' : 'Repeats per question'}
+              label={setupPaceMode === 'round' ? tx("Number of rounds") : tx("Repeats per question")}
               value={setupRepeats}
               onChange={(e) => setSetupRepeats(e.target.value)}
               inputProps={{ min: 1, max: 9999 }}
               helperText={
                 setupPaceMode === 'round'
-                  ? 'Each round answers every selected question once, in survey order.'
-                  : 'Each selected question is answered this many times before moving on.'
+                  ? tx("Each round answers every selected question once, in survey order.")
+                  : tx("Each selected question is answered this many times before moving on.")
               }
               sx={{ mt: 1 }}
             />
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSetupOpen(false)}>Cancel</Button>
+          <Button onClick={() => setSetupOpen(false)}>{' '}{tx("Cancel")}{' '}</Button>
           <Button
             variant="contained"
             startIcon={<PlayArrow />}
             disabled={!setupSelected.length}
             onClick={startSessionFromSetup}
-          >
-            Start session
-          </Button>
+          >{' '}{tx("Start session")}{' '}</Button>
         </DialogActions>
       </Dialog>
       </Box>

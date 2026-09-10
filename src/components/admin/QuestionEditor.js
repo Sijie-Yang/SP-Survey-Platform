@@ -1,3 +1,4 @@
+import QuestionDataPreview from './QuestionDataPreview';
 import ConfirmDialog from '../layout/ConfirmDialog';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import { useRegion } from '../../contexts/RegionContext';
@@ -2402,6 +2403,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
         <Box sx={{ display: wide || editorTab === 1 ? 'block' : 'none', overflowY: 'auto', minWidth: 0, p: { xs: 1, sm: 2 }, borderLeft: wide ? '1px solid' : 0, borderColor: 'divider' }}>
           <Typography variant="subtitle2" sx={{ mb: 1 }}>{zh ? '参与者预览（修改设置后自动更新）' : 'Participant preview (updates as you edit)'}</Typography>
           <QuestionParticipantPreview question={editedQuestion} currentProject={currentProject} surveyConfig={surveyConfig} />
+          <QuestionDataPreview question={editedQuestion} currentProject={currentProject} />
         </Box>
       </DialogContent>
       <DialogActions sx={{ flexWrap: 'wrap', px: 2, pb: 'max(12px, env(safe-area-inset-bottom))', '& .MuiButton-root': { minHeight: 44 } }}>

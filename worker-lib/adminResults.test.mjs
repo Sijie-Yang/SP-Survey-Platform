@@ -49,7 +49,7 @@ test('admin access is scoped to the requested project and bounded page', async (
   assert.equal(url.searchParams.get('project_id'), 'eq.project-a');
   assert.equal(url.searchParams.get('limit'), '1000');
   assert.equal(url.searchParams.get('offset'), '1000');
-  assert.equal(url.searchParams.get('order'), 'created_at.desc,id.desc');
+  assert.equal(url.searchParams.get('order'), 'created_at.desc.nullslast,id.desc');
 });
 
 test('missing projects produce a clear not-found result', async (t) => {

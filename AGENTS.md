@@ -12,8 +12,8 @@ This repository hosts the multi-user SP-Survey Platform. External agents (Codex,
 6. Skills: prefer `preset_*` on `skillquestion`. Custom: `skill_save` with exactly one typed `resultSchema` field + matching object `exampleAnswer`, then use only `skillId` — never put `skillHtml` on the question. HTML **must** call `SPSkill.setAnswer(object)` (no `skill-result` postMessage); one task per skill. Interaction may be novel, but the result field and its settings must map exactly to one existing native question/results/export family — rating `rating`; numeric/count `number`/`count`; annotation `points`/`path`/`polygon`/`bbox`; media `rating`/`number`/`boolean`/`scaleGroup`/`mediaChoice`/`mediaRankedList`/`mediaMatrix`+`imageUrl`; structured `multiChoice`/`matrix`/`rankedList`/`allocation`/`compositeBlocks`; comparison `pairwiseChoice`/`pairwisePreference`/`bestWorst`; color `color`; video `timeRanges`/`timeSeries`. New revisions may not use `json`, legacy `pairwise`, or `analysisHtml`; use `compositeBlocks`, separate Skills, or redesign unmatched answers (`survey_capabilities.skillAnalysisGuide`).
 7. Results: `survey_list_responses` / `survey_export_responses` / `survey_results_summary` (`results:read`)
 8. Never send API keys, HuggingFace tokens, fal keys, or Supabase credentials
-9. Saves update the live share URL immediately
-10. Optional: `survey_publish` with `confirm: true` = version snapshot only
+9. For version-managed projects, saves update the draft only. Review it, then explicitly release with survey_publish to update the participant URL. Legacy projects remain live on save until their first release.
+10. `survey_publish` with `confirm: true` releases a version plus media manifest and enables version management. It is separate from Publish to Main Page.
 
 ## Local config example
 
@@ -39,7 +39,7 @@ Pure modules live under `src/lib/designProtocol/` (mirrored for Workers in `work
 
 - Call `/api/agent/chat` from Codex (browser assistant only)
 - Bypass optimistic concurrency (`expectedDraftUpdatedAt`)
-- Confuse **Save as Template** / **Publish to Main Page** / **`survey_publish`** (version snapshot)
+- Confuse **Save as Template** / **Publish to Main Page** / **`survey_publish`** (participant release plus version snapshot)
 - Expose or log BYOK ciphertext/plaintext
 
 See `docs/agent-mcp.md` for the full tool catalog.

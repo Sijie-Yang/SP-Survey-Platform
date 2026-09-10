@@ -35,7 +35,7 @@ export const DESIGN_CAPABILITIES = {
     'Question names must be unique across the survey.',
     'Prefer deterministic operations over full surveyConfig replace.',
     'Never send API keys, HuggingFace tokens, fal keys, or Supabase credentials.',
-    'Saves update the live participant URL immediately (preview / share / view-live).',
+    'For version-managed projects, saves update the draft; survey_publish updates the participant URL. Legacy projects remain live on save until their first release.',
     'Optional survey locale: en (default) or zh. Participant chrome (progress, trials, Next) follows this setting, not the researcher admin language.',
     'Product "Publish to Main Page" is the homepage listing flow, not gating the share URL.',
     'Use expectedDraftUpdatedAt for optimistic concurrency on every write.',

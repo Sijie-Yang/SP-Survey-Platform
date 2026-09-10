@@ -55,7 +55,7 @@ export async function handleAgentDiscovery(request, env) {
   return {
     success: true,
     name: 'SP-Survey Platform Agent API',
-    workflow: 'Call survey_capabilities (image/media/skillquestion guides), then get draft, edit with apply_operations (saves are live), validate, share preview/live URL. Prefer image*/media*/preset skillquestion for visual studies. Media: import from template or use project/preview library — never AI-generate uploads. Use survey_delete_project / survey_update_project for owned-project CRUD.',
+    workflow: 'Call survey_capabilities (image/media/skillquestion guides), then get draft, edit with apply_operations, validate, then explicitly publish for version-managed projects and share the participant URL. Prefer image*/media*/preset skillquestion for visual studies. Media: import from template or use project/preview library — never AI-generate uploads. Use survey_delete_project / survey_update_project for owned-project CRUD.',
     capabilities: DESIGN_CAPABILITIES,
     endpoints: {
       credentialsStatus: 'GET /api/agent/credentials/status',
@@ -326,8 +326,9 @@ export async function applyProjectOperations(env, accessToken, projectId, body, 
 }
 
 export async function publishProject(env, accessToken, projectId, body) {
-  const result = await rpc(env, 'publish_project_config', {
+  const result = await rpc(env, 'release_project_version', {
     p_project_id: projectId,
+    p_expected_draft_updated_at: body?.expectedDraftUpdatedAt || null,
     p_summary: body?.summary || null,
   }, accessToken);
   return { success: true, projectId, ...result };
@@ -348,9 +349,10 @@ export async function rollbackProject(env, accessToken, projectId, body) {
   if (!Number.isInteger(version)) {
     throw Object.assign(new Error('version is required'), { status: 400 });
   }
-  const result = await rpc(env, 'rollback_project_config', {
+  const result = await rpc(env, 'release_project_version', {
     p_project_id: projectId,
-    p_version: version,
+    p_expected_draft_updated_at: body?.expectedDraftUpdatedAt || null,
+    p_restore_version: version,
   }, accessToken);
   return { success: true, projectId, ...result };
 }

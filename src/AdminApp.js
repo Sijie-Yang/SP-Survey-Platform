@@ -139,6 +139,7 @@ export default function AdminApp() {
   const theme = createCustomTheme(currentTheme);
   
   const [tabValue, setTabValue] = useState(0);
+  const [analysisMediaFocus, setAnalysisMediaFocus] = useState(null);
   // Keep Practice mounted after first visit so free-pick selection + list scroll survive tab switches.
   const [practiceKeepAlive, setPracticeKeepAlive] = useState(false);
   const handlePracticeSessionActive = useCallback((active) => {
@@ -1465,6 +1466,7 @@ export default function AdminApp() {
 
             <TabPanel value={tabValue} index={1}>
               <ImageDataset key={currentProject?.id}
+                focusRequest={analysisMediaFocus?.projectId === currentProject?.id ? analysisMediaFocus : null}
                 currentProject={currentProject}
                 onProjectUpdate={handleProjectUpdate}
                 onConfigChange={(hasChanges, latestConfig) => {
@@ -1497,6 +1499,7 @@ export default function AdminApp() {
 
             <TabPanel value={tabValue} index={3}>
               <WebsiteSetup
+                onReleased={() => handleProjectSelect(currentProject)}
                 hasUnsavedChanges={hasUnsavedChanges}
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
@@ -1505,6 +1508,7 @@ export default function AdminApp() {
 
             <TabPanel value={tabValue} index={4}>
               <ResultsAnalysis
+                onOpenMedia={(mediaId) => { setAnalysisMediaFocus({ projectId: currentProject.id, mediaId, token: Date.now() }); goToAdminTab(1); }}
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
                 onSurveyConfigChange={handleResultsConfigSync}

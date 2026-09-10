@@ -1,5 +1,6 @@
 import { getUserFromBearer, jsonResponse } from './auth/supabaseJwt.mjs';
 import { supabaseRest } from './supabaseUserClient.mjs';
+import { responseCursorFilter } from '../src/lib/responsePagination.js';
 
 // Read-only platform-admin access. Owners continue to use their existing RLS path.
 export async function handleAdminResultsRoutes(request, env) {
@@ -20,6 +21,11 @@ export async function handleAdminResultsRoutes(request, env) {
 
     const projectId = url.searchParams.get('project');
     const offset = Number(url.searchParams.get('offset') || 0);
+    let after = null;
+    try {
+      after = url.searchParams.has('after') ? JSON.parse(url.searchParams.get('after')) : null;
+      if (after && (!['string', 'number'].includes(typeof after.id) || !String(after.id) || String(after.id).length > 256 || (after.created_at != null && !Number.isFinite(Date.parse(after.created_at))))) throw new Error('Invalid cursor');
+    } catch { return reply({ error: 'Invalid response cursor' }, 400); }
     if (!projectId || !Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) {
       return reply({ error: 'Invalid project or page' }, 400);
     }
@@ -32,7 +38,8 @@ export async function handleAdminResultsRoutes(request, env) {
       path: '/rest/v1/survey_responses', serviceRole: true,
       query: `?${new URLSearchParams({
         project_id: `eq.${projectId}`, select: '*',
-        order: 'created_at.desc,id.desc', limit: '1000', offset: String(offset),
+        order: 'created_at.desc.nullslast,id.desc', limit: '1000', offset: after ? '0' : String(offset),
+        ...(after ? { or: `(${responseCursorFilter(after)})` } : {}),
       })}`,
     });
     return reply({ responses: rows || [] });

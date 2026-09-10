@@ -283,7 +283,7 @@ async function handleList(request, env) {
   const publicBase = publicBaseUrl(env);
   const objects = await backend.list(prefix);
   const images = objects
-    .filter((o) => MEDIA_FILE_RE.test(o.key))
+    .filter((o) => url.searchParams.get('kind') === 'annotations' && /\/preannotations\/$/.test(prefix) ? o.key.endsWith('.json') : MEDIA_FILE_RE.test(o.key))
     .map((o) => {
       const name = o.key.split('/').pop();
       const prefixNorm = String(prefix || '').replace(/\/?$/, '/');
@@ -305,7 +305,7 @@ async function handleList(request, env) {
       };
     })
     .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
-  return json({ success: true, images });
+  return json({ success: true, images, annotationIndex: url.searchParams.get('kind') === 'annotations' && /\/preannotations\/$/.test(prefix) });
 }
 
 async function handleDelete(request, env) {

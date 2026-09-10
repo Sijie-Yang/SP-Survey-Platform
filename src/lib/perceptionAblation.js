@@ -774,7 +774,7 @@ async function fitMlp(X, y, rng, signal, onProgress, {
  * @param {boolean} [opts.impute=true] — fill missing feature cells with column median
  */
 export function buildAblationMatrix(rows, modelFilter = 'all', { impute = true, deferImpute = false } = {}) {
-  const scored = (rows || []).filter((r) => r.mean_score != null && r.n_ratings > 0);
+  const scored = (rows || []).filter((r) => Number.isFinite(r.mean_score) && r.n_ratings > 0);
   const keySet = new Set();
   scored.forEach((r) => {
     Object.keys(r).forEach((k) => {
@@ -802,6 +802,11 @@ export function buildAblationMatrix(rows, modelFilter = 'all', { impute = true, 
   let droppedIncomplete = 0;
 
   for (const r of scored) {
+    // Imputation can repair partial observations, not invent an entire image's features.
+    if (!featureNames.some((key) => Number.isFinite(perceptionFeatureValue(r, key)))) {
+      droppedIncomplete += 1;
+      continue;
+    }
     const row = [];
     let ok = true;
     let rowImputed = 0;
@@ -988,6 +993,17 @@ function kFoldIndices(n, k, rng) {
   return folds;
 }
 
+/** Keep every scene/folder wholly in one split. Exported for deterministic validation. */
+export function groupedFoldIndices(groups, k, rng) {
+  const grouped = new Map();
+  groups.forEach((group, i) => { const key = group || '(root)'; if (!grouped.has(key)) grouped.set(key, []); grouped.get(key).push(i); });
+  if (grouped.size < k) throw new Error(`Need at least ${k} distinct folders for grouped validation; have ${grouped.size}.`);
+  const buckets = Array.from({ length: k }, () => []);
+  const chunks = shuffleInPlace([...grouped.values()], rng).sort((a, b) => b.length - a.length);
+  chunks.forEach((chunk) => { const target = buckets.reduce((best, bucket, i) => bucket.length < buckets[best].length ? i : best, 0); buckets[target].push(...chunk); });
+  return buckets;
+}
+
 /**
  * Run full ablation pipeline. Cancel with signal.abort().
  * @param {number} [folds=1] — 1 = single holdout; ≥2 = K-fold CV (report mean±std Test R²)
@@ -1002,6 +1018,7 @@ export async function runPerceptionAblation({
   folds = 1,
   imputeMissing = true,
   seed = 42,
+  groupByFolder = false,
   signal = null,
   onProgress = null,
 } = {}) {
@@ -1042,11 +1059,23 @@ export async function runPerceptionAblation({
     : null;
 
   let splitMeta = { nTrain: 0, nTest: 0, foldsUsed: 1 };
+  const splitRecords = [];
+  const foldersById = new Map((rows || []).map((r) => [r.media_id, r.media_folder || '(root)']));
+  const groups = built.mediaIds.map((id) => foldersById.get(id));
+  const recordSplit = (trainIdx, testIdx) => {
+    if (trainIdx.length < 5 || testIdx.length < 2) throw new Error('Each split needs at least 5 training and 2 test images. Use fewer folds or larger groups.');
+    splitRecords.push({ train_media_ids: trainIdx.map((i) => built.mediaIds[i]), test_media_ids: testIdx.map((i) => built.mediaIds[i]) });
+  };
   const foldResultsByModel = Object.fromEntries(selectedModels.map((id) => [id, []]));
   const importanceAcc = Object.fromEntries(selectedModels.map((id) => [id, new Map()]));
 
   if (!useCv) {
-    const split = trainTestSplit(built.X, built.y, testFraction, rng);
+    let split;
+    if (groupByFolder) {
+      const [trainIdx, testIdx] = groupedFoldIndices(groups, 2, rng);
+      split = { trainIdx, testIdx, Xtrain: trainIdx.map((i) => built.X[i]), Xtest: testIdx.map((i) => built.X[i]), ytrain: trainIdx.map((i) => built.y[i]), ytest: testIdx.map((i) => built.y[i]) };
+    } else split = trainTestSplit(built.X, built.y, testFraction, rng);
+    recordSplit(split.trainIdx, split.testIdx);
     splitMeta = {
       nTrain: split.ytrain.length,
       nTest: split.ytest.length,
@@ -1085,7 +1114,7 @@ export async function runPerceptionAblation({
       }
     }
   } else {
-    const foldIdx = kFoldIndices(built.X.length, nFolds, rng);
+    const foldIdx = groupByFolder ? groupedFoldIndices(groups, nFolds, rng) : kFoldIndices(built.X.length, nFolds, rng);
     splitMeta = {
       nTrain: Math.round(built.X.length * ((nFolds - 1) / nFolds)),
       nTest: Math.round(built.X.length / nFolds),
@@ -1095,6 +1124,7 @@ export async function runPerceptionAblation({
       assertNotAborted(signal);
       const testIdx = foldIdx[f];
       const trainIdx = foldIdx.flatMap((arr, i) => (i === f ? [] : arr));
+      recordSplit(trainIdx, testIdx);
       const Xtrain = trainIdx.map((i) => built.X[i]);
       const ytrain = trainIdx.map((i) => built.y[i]);
       const Xtest = testIdx.map((i) => built.X[i]);
@@ -1190,6 +1220,8 @@ export async function runPerceptionAblation({
   report('Done', { phase: 'done', pct: 100 });
   return {
     n: built.n,
+    seed, groupByFolder, splits: splitRecords,
+    splitDescription: groupByFolder && !useCv ? 'Two balanced groups of folders; testFraction is not used.' : (groupByFolder ? 'Grouped K-fold by folder' : 'Random image split'),
     nTrain: splitMeta.nTrain,
     nTest: splitMeta.nTest,
     foldsUsed: splitMeta.foldsUsed,

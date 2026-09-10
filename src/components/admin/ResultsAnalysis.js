@@ -1,3 +1,5 @@
+import { readAllResponsePages, responseCursorFilter } from '../../lib/responsePagination';
+import { recordedRevisionSelection, recordedSurveyConfig } from '../../lib/recordedSurvey';
 import { responseWithinDateRange } from '../../lib/responseIdentity';
 import { sliderScale } from '../../lib/sliderScale';
 import { allocationStatus } from '../../lib/allocationStats';
@@ -2433,8 +2435,8 @@ function readIncludePracticeFromConfig(surveyConfig) {
     : true; // default ON for new projects
 }
 
-export default function ResultsAnalysis({ currentProject, surveyConfig: currentSurveyConfig, adminMode = false }) {
-  const { t } = useRegion();
+export default function ResultsAnalysis({ currentProject, surveyConfig: currentSurveyConfig, adminMode = false, onOpenMedia }) {
+  const { t, language } = useRegion();
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState(null);
@@ -2445,16 +2447,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sessionFilter, setSessionFilter] = useState('');
-  const [revisionFilter, setRevisionFilter] = useState('');
-  const surveyConfig = useMemo(() => {
-    const firstRevision = responses[0]?.survey_metadata?.survey_revision;
-    const singleRevision = firstRevision && responses.every((r) => r.survey_metadata?.survey_revision === firstRevision) ? firstRevision : '';
-    const selectedRevision = revisionFilter || singleRevision;
-    const contract = selectedRevision && responses.find((r) =>
-      r.survey_metadata?.survey_revision === selectedRevision)?.survey_metadata?.survey_response_contract;
-    if (!contract?.questions) return currentSurveyConfig;
-    return {...currentSurveyConfig, locale: contract.locale, pages: [{name: 'recorded_revision', title: t.resultsRevision, elements: contract.questions}]};
-  }, [revisionFilter, responses, currentSurveyConfig, t.resultsRevision]);
+  const [requestedRevision, setRevisionFilter] = useState('');
+  const revisionFilter = recordedRevisionSelection(responses, requestedRevision);
+  const surveyConfig = useMemo(() => recordedSurveyConfig(responses, currentSurveyConfig, revisionFilter),
+    [revisionFilter, responses, currentSurveyConfig]);
   const [recordPage, setRecordPage] = useState(0);
   const [recordsPerPage, setRecordsPerPage] = useState(25);
   const [includePractice, setIncludePractice] = useState(() => readIncludePracticeFromConfig(surveyConfig));
@@ -2515,30 +2511,18 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
     setError(null);
     try {
       if ((adminMode || platformSupabase) && currentProject?.id) {
-        // Page through all rows — PostgREST default max is 1000.
-        const pageSize = 1000;
-        const all = [];
-        let offset = 0;
-        for (;;) {
-          const from = offset;
-          const to = offset + pageSize - 1;
-          setLoadProgress({ loaded: all.length, page: Math.floor(offset / pageSize) + 1 });
-          const { data, error: sbError } = adminMode
-            ? { data: await fetchAdminResponsePage(currentProject.id, from) }
-            : await platformSupabase
-            .from('survey_responses')
-            .select('*')
-            .eq('project_id', currentProject.id)
-            .order('created_at', { ascending: false })
-            .range(from, to);
+        const all = await readAllResponsePages(async (offset, after) => {
+          if (adminMode) return fetchAdminResponsePage(currentProject.id, 0, after);
+          let query = platformSupabase
+            .from('survey_responses').select('*').eq('project_id', currentProject.id)
+            .order('created_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false })
+            .limit(1000);
+          if (after) query = query.or(responseCursorFilter(after));
+          const { data, error: sbError } = await query;
           if (sbError) throw sbError;
-          const batch = data || [];
-          if (sequence !== fetchSequence.current) return;
-          all.push(...batch);
-          if (batch.length < pageSize) break;
-          offset += pageSize;
-          if (offset > 500000) break;
-        }
+          return data || [];
+        }, { cancelled: () => sequence !== fetchSequence.current,
+          onProgress: (loaded) => setLoadProgress({ loaded, page: Math.ceil(loaded / 1000) }) });
         setResponses(all);
         setDataSource('supabase');
       } else {
@@ -2813,6 +2797,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
         {tf(t.resultsScopeHint, { shown: filteredResponses.length, total: responses.length })}
       </Typography>
       {revisionOptions.length > 1 && <Alert severity="info" sx={{ mb: 2 }}>{t.resultsMixedRevisions}</Alert>}
+      {dateFilteredResponses.some((r) => !r.survey_metadata?.survey_response_contract?.questions) && <Alert severity="warning" sx={{ mb: 2 }}>{language === 'zh' ? '部分历史答卷没有保存题目定义，无法还原当时的全部设置。当前分析可能使用现有题目作为参考，请结合原始 JSON 复核。' : 'Some historical responses have no recorded question definitions. Their original settings cannot be fully restored; analysis may use current settings as a reference. Verify against raw JSON.'}</Alert>}
       {dateFrom && dateTo && dateFrom > dateTo && <Alert severity="warning" sx={{ mb: 2 }}>Start date must be on or before end date.</Alert>}
       {/* Data source badge */}
       {dataSource && (
@@ -2888,7 +2873,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
         Dates use your local timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Records without a valid timestamp are excluded when a date filter is active.
       </Typography>
       {revisionOptions.some((id) => id !== 'historical_unknown') && <TextField select size="small" label={t.resultsRevision} value={revisionFilter} onChange={(e) => setRevisionFilter(e.target.value)} SelectProps={{ native: true }} InputLabelProps={{ shrink: true }} sx={{ mr: 1, mb: 1 }}>
-        <option value="">{t.resultsAllRevisions}</option>
+        {revisionOptions.length <= 1 && <option value="">{t.resultsAllRevisions}</option>}
         {revisionOptions.map((id) => <option key={id} value={id}>{id === 'historical_unknown' ? t.resultsHistoricalRevision : id.slice(-12)}</option>)}
       </TextField>}
       <Button size="small" onClick={resetFilters}>{t.resultsResetFilters}</Button>
@@ -3167,6 +3152,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
       {!loading && surveyConfig && allQuestions.length > 0 && (
         <>
           <ImagePerceptionPanel
+            onOpenMedia={onOpenMedia}
             currentProject={currentProject}
             responses={filteredResponses}
             questions={allQuestions}
