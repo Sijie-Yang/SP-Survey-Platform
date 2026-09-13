@@ -200,6 +200,10 @@ export function generateMethodsText({
     tsLines.forEach((l) => lines.push(`  • ${l}`));
   }
 
+  if (allQuestions.some((q) => q.allowTie)) {
+    lines.push('No-preference responses are recorded as ties and summarized separately. TrueSkill rankings use decisive outcomes only; ties are excluded.');
+  }
+
   let bibtex = '';
   if (templateMeta?.author && templateMeta?.name) {
     const citeKey = (templateMeta.id || 'template').replace(/[^a-z0-9]/gi, '_');

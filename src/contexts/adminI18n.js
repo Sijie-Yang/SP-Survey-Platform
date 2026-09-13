@@ -770,19 +770,19 @@ export const adminI18n = {
     noMediaYet: '尚未上传媒体',
     mediaInR2: '个媒体文件在 R2',
 
-    guideFixedSets: '固定集合',
+    guideFixedSets: '固定分组',
     guideFixedSetsBody:
-      '将文件夹标记为 set。每个已标记文件夹的直接文件会一起展示（集合大小须与题目媒体数量一致）。',
+      '将文件夹标记为分组（Set）。每个分组文件夹的直属文件会一起展示，每组文件数须与题目的媒体数量一致。',
     guideExample: '示例',
     guideFixedSetsExample:
-      '1. 创建文件夹 block01、block02、block03\n2. 每个文件夹放 2 张图（数量相同）\n3. 勾选这些文件夹 → 点击 Set\n4. 在问卷构建中选择媒体模式「随机固定集合」，数量 = 2\n→ 每位受访者看到一整文件夹（两张图一起）',
-    guideTaggedSets: '当前已标记集合：{n}',
-    guideCategories: '类别',
+      '1. 创建文件夹 block01、block02、block03\n2. 每个文件夹放 2 张图（数量相同）\n3. 勾选这些文件夹 → 点击分组（Set）\n4. 在问卷构建中选择媒体分配方式「随机抽取完整分组」，数量 = 2\n→ 每位受访者看到一整文件夹（两张图一起）',
+    guideTaggedSets: '当前已标记分组：{n}',
+    guideCategories: '分类',
     guideCategoriesBody:
-      '将文件夹标记为 category。在问卷构建中选择「按类别」，并设置「每类文件数」。每个已标记文件夹会递归抽取相应数量的随机文件。',
+      '将文件夹标记为分类（Category）。在题目中选择「按分类抽取」，并设置每个分类抽取的文件数。每个分类会从该文件夹及其子文件夹中随机抽取。',
     guideCategoriesExample:
-      '1. 创建文件夹 street 与 park\n2. 每个放若干图片（可用子文件夹）\n3. 勾选这些文件夹 → 点击 Category\n4. 在题目中：媒体分配 → 按类别，每类文件数 = 2\n→ 每位受访者看到 2 张 street + 2 张 park（共 4 张）',
-    guideTaggedCategories: '当前已标记类别：{n}',
+      '1. 创建文件夹 street 与 park\n2. 每个放若干图片（可用子文件夹）\n3. 勾选这些文件夹 → 点击分类（Category）\n4. 在题目中：媒体分配 → 按分类抽取，每类文件数 = 2\n→ 每位受访者看到 2 张 street + 2 张 park（共 4 张）',
+    guideTaggedCategories: '当前已标记分类：{n}',
     guideProjectFiles: ' · 项目文件：{n}',
 
     builderTitle: '问卷构建',

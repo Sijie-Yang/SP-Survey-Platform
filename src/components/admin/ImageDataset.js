@@ -1,4 +1,4 @@
-import { uploadMediaBatch } from '../../lib/mediaUploadBatch';
+import { uploadMediaBatch, pickUploadMedia } from '../../lib/mediaUploadBatch';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import {
@@ -72,6 +72,7 @@ import { migrateLegacyDefaultLabelColors } from '../../lib/preannotateLabels';
 import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import MediaFolderBrowser from './MediaFolderBrowser';
+import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
 import MediaPreannotatePanel from './MediaPreannotatePanel';
@@ -205,6 +206,16 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     loading: false, progress: 0, total: 0, error: null, success: null,
   });
   const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
+  const uploadBaseFolder = useRef(null);
+  const [skippedUploadFiles, setSkippedUploadFiles] = useState(0);
+  const chooseUploadFiles = (list) => {
+    if (!list?.length) return;
+    const { files, skipped } = pickUploadMedia(list);
+    setSelectedFiles(files); setSkippedUploadFiles(skipped); setUploadFailures([]);
+    uploadBaseFolder.current = null;
+    setDirectUploadStatus({ loading: false, progress: 0, total: 0, error: null, success: null });
+  };
   const uploadLock = useRef(false);
   const stopUpload = useRef(false);
   const [uploadFailures, setUploadFailures] = useState([]);
@@ -264,6 +275,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const [preannotateReviewByName, setPreannotateReviewByName] = useState(() => ({}));
   const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, onConfirm }
   const [currentFolder, setCurrentFolder] = useState('');
+  const [selectedFolders, setSelectedFolders] = useState(() => new Set());
+  useEffect(() => { setSelectedFolders(new Set()); setSelectedMedia(new Set()); }, [currentProject?.id]);
   const [openMoveSignal, setOpenMoveSignal] = useState(0);
 
   const userId = user?.id || 'anonymous';
@@ -441,7 +454,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   const handleDeleteSingleMedia = (entry) => deleteMediaEntries([entry]);
   const handleDeleteSelectedMedia = () => {
-    const selected = filteredMedia.filter((m) => selectedMedia.has(getMediaId(m)));
+    const selected = (currentProject?.preloadedImages || []).filter((m) => selectedMedia.has(getMediaId(m)));
     if (!selected.length) return;
     deleteMediaEntries(selected);
   };
@@ -484,7 +497,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   };
 
   const handleDownloadSelectedMedia = () => {
-    const selected = filteredMedia.filter((m) => selectedMedia.has(getMediaId(m)));
+    const selected = (currentProject?.preloadedImages || []).filter((m) => selectedMedia.has(getMediaId(m)));
     if (!selected.length) return;
     downloadMediaEntriesAsZip(selected, `media_selected_${new Date().toISOString().slice(0, 10)}.zip`);
   };
@@ -556,6 +569,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     });
     return sortMediaByName(filtered);
   }, [currentProject?.preloadedImages, mediaSearch, mediaFilter, currentFolder, projectPrefix]);
+
+  const selectionCandidates = useMemo(() => mediaSelectionCandidates(currentProject?.preloadedImages, {
+    folders: selectedFolders, currentFolder, search: mediaSearch, type: mediaFilter, prefix: projectPrefix,
+  }), [currentProject?.preloadedImages, selectedFolders, currentFolder, mediaSearch, mediaFilter, projectPrefix]);
 
   /** Images available for SAM pre-annotate (respects gallery filter/search). */
   const preannotateImages = useMemo(
@@ -723,7 +740,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   };
 
   const selectAllFiltered = () => {
-    setSelectedMedia(new Set(filteredMedia.map(getMediaId)));
+    setSelectedMedia(new Set(selectionCandidates.map(getMediaId)));
   };
 
   const clearMediaSelection = () => setSelectedMedia(new Set());
@@ -1191,7 +1208,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     stopUpload.current = false;
     const files = [...selectedFiles];
     const project = currentProject;
-    const folder = currentFolder;
+    const folder = uploadBaseFolder.current ?? currentFolder;
+    uploadBaseFolder.current = folder;
     let latestProject = project;
     setUploadFailures([]);
     setDirectUploadStatus({ loading: true, progress: 0, total: files.length, error: null, success: null });
@@ -1201,7 +1219,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         // Animated GIFs must retain their frames; compression remains explicit.
         prepare: (raw, type) => type === 'image' && compressUploads && !/\.gif$/i.test(raw.name) ? compressImage(raw) : raw,
         upload: uploadImageToR2,
-        makeId: () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+        makeId: () => typeof window.crypto?.randomUUID === 'function' ? window.crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
         shouldStop: () => stopUpload.current,
         persist: async (uploaded) => {
           latestProject = { ...project, preloadedImages: [...(project.preloadedImages || []), ...uploaded],
@@ -1856,12 +1874,18 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             accept={MEDIA_ACCEPT}
             multiple
             style={{ display: 'none' }}
-            onChange={(e) => { setSelectedFiles(Array.from(e.target.files || [])); e.target.value = ''; setUploadFailures([]); }}
+            onChange={(e) => { chooseUploadFiles(e.target.files); e.target.value = ''; }}
           />
 
+          <input ref={folderInputRef} type="file" webkitdirectory="" multiple style={{ display: 'none' }}
+            aria-label={zh ? '选择媒体文件夹' : 'Choose media folder'}
+            onChange={(e) => { chooseUploadFiles(e.target.files); e.target.value = ''; }} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5, flexWrap: 'wrap' }}>
-            <Button size="small" variant="outlined" onClick={() => fileInputRef.current?.click()} disabled={directUploadStatus.loading}>
+            <Button size="small" variant="outlined" onClick={() => fileInputRef.current?.click()} disabled={directUploadStatus.loading || !!pendingMediaSave}>
               {t.mediaChooseFiles}
+            </Button>
+            <Button size="small" variant="outlined" onClick={() => folderInputRef.current?.click()} disabled={directUploadStatus.loading || !!pendingMediaSave}>
+              {zh ? '选择文件夹' : 'Choose folder'}
             </Button>
             {selectedFiles.length > 0 && (
               <Typography variant="caption" color="text.secondary">
@@ -1870,6 +1894,18 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             )}
           </Box>
 
+          <Typography variant="caption" sx={{ display: 'block', mb: 1 }} color="text.secondary">
+            {zh ? '文件夹上传会保留所选文件夹名称和子文件夹层级，放入当前目录。仅导入媒体文件；空文件夹不会导入。' : 'Folder uploads keep the selected folder name and subfolders inside the current directory. Only media files are imported; empty folders are omitted.'}
+          </Typography>
+          {skippedUploadFiles > 0 && <Alert severity="info" sx={{ mb: 1 }}>
+            {zh ? `已跳过 ${skippedUploadFiles} 个非媒体或系统文件。` : `Skipped ${skippedUploadFiles} non-media or system files.`}
+          </Alert>}
+          {selectedFiles.some((f) => f.webkitRelativePath) && <Box sx={{ mb: 1, maxHeight: 110, overflowY: 'auto' }}>
+            {selectedFiles.slice(0, 5).map((f, i) => <Typography key={i} variant="caption" component="div" sx={{ overflowWrap: 'anywhere' }}>
+              {[uploadBaseFolder.current ?? currentFolder, f.webkitRelativePath || f.name].filter(Boolean).join('/')}
+            </Typography>)}
+            {selectedFiles.length > 5 && <Typography variant="caption">{zh ? `另有 ${selectedFiles.length - 5} 个文件` : `${selectedFiles.length - 5} more files`}</Typography>}
+          </Box>}
           <FormControlLabel control={<Checkbox checked={compressUploads} disabled={directUploadStatus.loading}
             onChange={(e) => setCompressUploads(e.target.checked)} />} label={zh ? '压缩大图以加快加载（GIF 保留原文件）' : 'Compress large images for faster loading (keep original GIFs)'} />
           <Typography variant="caption" sx={{ display: 'block', mb: 1 }} color="text.secondary">
@@ -1904,7 +1940,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               startIcon={directUploadStatus.loading ? <CircularProgress size={16} color="inherit" /> : <CloudUpload />}
             >
               {t.mediaUploadBtn}{selectedFiles.length > 0 ? ` ${selectedFiles.length}` : ''}
-              {currentFolder ? ` → ${currentFolder}` : ` ${t.mediaUploadRoot}`}
+              {(uploadBaseFolder.current ?? currentFolder) ? ` → ${uploadBaseFolder.current ?? currentFolder}` : ` ${t.mediaUploadRoot}`}
             </Button>
           </Box>
         </Box>
@@ -2018,6 +2054,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         onProjectUpdate={onProjectUpdate}
         currentFolder={currentFolder}
         onCurrentFolderChange={setCurrentFolder}
+        selectedFolders={selectedFolders}
+        onSelectedFoldersChange={setSelectedFolders}
+        onMoveComplete={clearMediaSelection}
         selectedMediaEntries={(currentProject?.preloadedImages || []).filter((m) => selectedMedia.has(getMediaId(m)))}
         openMoveSignal={openMoveSignal}
         mediaCount={preloadedCount}
@@ -2046,9 +2085,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   variant="outlined"
                   startIcon={<SelectAll />}
                   onClick={selectAllFiltered}
-                  disabled={!filteredMedia.length}
+                  disabled={!selectionCandidates.length}
                 >
-                  Select filtered
+                  Select filtered ({selectionCandidates.length})
                 </Button>
                 <Button
                   size="small"
@@ -2169,6 +2208,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               </Box>
             )}
 
+            {selectedFolders.size > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>
+              Select filtered uses {selectedFolders.size} checked folder(s), including subfolders, and the current search/type filters.
+              {' '}{selectionCandidates.length} matching file(s). The gallery shows the open folder.
+            </Alert>}
             {filteredMedia.length === 0 ? (
               <Alert severity="info">No media matches your search or filter.</Alert>
             ) : (

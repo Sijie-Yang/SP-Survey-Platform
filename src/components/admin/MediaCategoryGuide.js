@@ -1,3 +1,4 @@
+import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
 /**
  * Guide: category sampling via folders tagged category.
  */
@@ -18,6 +19,7 @@ export default function MediaCategoryGuide({
   mediaPerCategory = 1,
 }) {
   const { t } = useRegion();
+  const { tr, zh } = useQuestionEditorText();
   const per = mediaPerCategory || 1;
   const body = (
     <Box>
@@ -51,14 +53,14 @@ export default function MediaCategoryGuide({
       </Box>
       {context === 'question' && (
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-          Categories: {categoryCount}
+          {zh ? '分类数：' : 'Categories: '}{categoryCount}
           {categoryLabels?.length ? ` (${categoryLabels.join(', ')})` : ''}
-          {' · '}{per} per category
-          {categoryCount > 0 ? ` · total ${categoryCount * per}` : ''}
-          {projectCategoryCount != null ? ` · tagged in project: ${projectCategoryCount}` : ''}
-          {matchingFileCount != null ? ` · matching files: ${matchingFileCount}` : ''}
-          {mediaTypeFilter && mediaTypeFilter !== 'any' ? ` (${mediaTypeFilter})` : ''}
-          {totalFileCount != null ? ` · project: ${totalFileCount}` : ''}
+          {zh ? ` · 每类 ${per} 个文件` : ` · ${per} per category`}
+          {categoryCount > 0 ? (zh ? ` · 共 ${categoryCount * per} 个` : ` · total ${categoryCount * per}`) : ''}
+          {projectCategoryCount != null ? (zh ? ` · 项目中已标记：${projectCategoryCount}` : ` · tagged in project: ${projectCategoryCount}`) : ''}
+          {matchingFileCount != null ? (zh ? ` · 匹配文件：${matchingFileCount}` : ` · matching files: ${matchingFileCount}`) : ''}
+          {mediaTypeFilter && mediaTypeFilter !== 'any' ? ` (${tr(mediaTypeFilter)})` : ''}
+          {totalFileCount != null ? (zh ? ` · 项目文件：${totalFileCount}` : ` · project: ${totalFileCount}`) : ''}
         </Typography>
       )}
       {context === 'dataset' && (categoryCount > 0 || categoryLabels?.length > 0) && (

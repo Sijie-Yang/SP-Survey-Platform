@@ -214,7 +214,7 @@ document.getElementById('hard').onchange = report;
     ],
     resultSchema: [
       { key: 'choice', label: 'Chosen side (A or B)', type: 'choice' },
-      { key: 'chosenIndex', label: 'Chosen index (0=A, 1=B)', type: 'number' },
+      { key: 'chosenIndex', label: 'Chosen index (0=A, 1=B, -1=tie when enabled)', type: 'number' },
     ],
     defaultConfig: {
       mediaCount: 2,

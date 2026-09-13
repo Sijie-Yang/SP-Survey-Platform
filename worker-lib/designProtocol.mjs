@@ -468,6 +468,7 @@ export const DESIGN_CAPABILITIES = {
   ],
   rules: [
     'Question names must be unique across the survey.',
+    'Binary imagepicker/mediapicker and the built-in Forced-Choice A/B task support allowTie (default false) and tieLabel (empty follows survey language). Requires two options and single selection. No preference is stored separately; TrueSkill uses decisive outcomes only.',
     'Prefer deterministic operations over full surveyConfig replace.',
     'Never send API keys or storage credentials.',
     'For version-managed projects, saves update the draft; survey_publish updates the participant URL. Legacy projects remain live on save until their first release.',

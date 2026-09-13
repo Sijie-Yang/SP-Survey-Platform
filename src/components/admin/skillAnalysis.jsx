@@ -1,3 +1,4 @@
+import ChoiceOutcomeSummary from './ChoiceOutcomeSummary';
 /** Preset skill specialized analysis components. */
 
 import React, { useMemo, useContext, useState } from 'react';
@@ -173,6 +174,7 @@ export function ForcedChoicePreferenceAnalysis({ answers, question }) {
 
   return (
     <Box>
+      <ChoiceOutcomeSummary units={answers} enabled={question?.allowTie} />
       <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
         TrueSkill (pairwise from forced-choice A/B)
       </Typography>

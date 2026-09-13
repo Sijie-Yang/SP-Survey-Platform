@@ -1,3 +1,4 @@
+import ParticipantSurveySurface from './components/ParticipantSurveySurface';
 import { submitWithRecovery } from './lib/recoverableSubmission';
 import { handleSurveyMediaError } from './lib/mediaRecovery';
 import { surveyRevision } from './lib/surveyRevision';
@@ -1368,15 +1369,7 @@ export default function SurveyApp() {
       
       {surveyModel && surveyPhase === 'active' && (
         <SurveyTrialNavProvider>
-          <Box
-            sx={{
-              maxWidth: 1200,
-              mx: 'auto',
-              // Phones: horizontal gutters come from SurveyJS .sd-body (see index.css)
-              px: { xs: 0, sm: 2 },
-              py: { xs: 1, sm: 3 },
-            }}
-            className="sp-survey-with-progress"
+          <ParticipantSurveySurface
             onErrorCapture={(e) => handleSurveyMediaError(e, participantLocale)}
           >
             <SurveyProgressBridge
@@ -1390,7 +1383,7 @@ export default function SurveyApp() {
               </Alert>
             )}
             <Survey model={surveyModel} />
-          </Box>
+          </ParticipantSurveySurface>
         </SurveyTrialNavProvider>
       )}
 

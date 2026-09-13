@@ -1,4 +1,5 @@
 import { mediaIdentityKey, resolveMediaAnswerKey } from './mediaIdentity.js';
+import { isNoPreference } from './choiceTie.js';
 /** TrueSkill-style 1v1 rating for imagepicker (any count, single or multi-select). */
 
 import { expandQuestionAnswerUnits } from './responseAnswerUnits.js';
@@ -52,6 +53,7 @@ export function filenameKey(val) { return mediaIdentityKey(val); }
  * Handles enriched filenames/URLs and legacy image_0 / media_0 indices.
  */
 export function answerToSelectedKeys(answer, shownImages) {
+  if (isNoPreference(answer)) return [];
   if (answer === null || answer === undefined || answer === '') return [];
   const shown = (shownImages || []).map((s) => (typeof s === 'string' ? s : s?.url || s?.name || ''));
   const shownKeys = shown.map(filenameKey);
@@ -197,6 +199,7 @@ export function matchesFromOrderedRanking(orderedKeys) {
  * shownImages: trial media list (preferred)
  */
 export function matchesFromForcedChoiceAnswer(answer, shownImages) {
+  if (isNoPreference(answer)) return [];
   if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return [];
 
   let rawShown = Array.isArray(shownImages) && shownImages.length ? shownImages : [];

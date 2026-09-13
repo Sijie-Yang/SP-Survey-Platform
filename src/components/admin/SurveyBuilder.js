@@ -39,6 +39,7 @@ import {
   Collapse
 } from '@mui/material';
 import { useRegion } from '../../contexts/RegionContext';
+import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
 import {
   ExpandMore,
   Add,
@@ -168,6 +169,7 @@ function ThemeColorPart({ step, title, description, children }) {
 
 // Sortable Page Item Component
 function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
+  const { tr } = useQuestionEditorText();
   const {
     attributes,
     listeners,
@@ -202,6 +204,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
       <Box
         {...attributes}
         {...listeners}
+        aria-label={tr('Drag to reorder page')}
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -217,12 +220,12 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
       
       <ListItemText
         primary={
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
             <Typography variant="h6">
-              {page.title || `Page ${pageIndex + 1}`}
+              {page.title || tr('Page {number}', { number: pageIndex + 1 })}
             </Typography>
             <Chip
-              label={`${page.elements?.length || 0} questions`}
+              label={tr(page.elements?.length === 1 ? '{count} question' : '{count} questions', { count: page.elements?.length || 0 })}
               size="small"
               color="primary"
               variant="outlined"
@@ -231,7 +234,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
         }
         secondary={
           <Typography variant="body2" color="text.secondary">
-            {page.description || 'No description provided'}
+            {page.description || tr('No description provided')}
           </Typography>
         }
       />
@@ -241,7 +244,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
           <IconButton
             size="small"
             color="primary"
-            aria-label="Edit page"
+            aria-label={tr("Edit page")}
             onClick={() => onEdit({ page, index: pageIndex })}
             sx={{ 
               border: 1, 
@@ -254,7 +257,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
           <IconButton
             size="small"
             color="primary"
-            aria-label="Duplicate page"
+            aria-label={tr("Duplicate page")}
             onClick={() => onDuplicate(pageIndex)}
             sx={{ 
               border: 1, 
@@ -267,7 +270,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
           <IconButton
             size="small"
             color="error"
-            aria-label="Delete page"
+            aria-label={tr("Delete page")}
             onClick={() => onDelete(pageIndex)}
             sx={{ 
               border: 1, 
@@ -285,6 +288,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
 
 export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete }) {
   const { t } = useRegion();
+  const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
 
@@ -798,13 +802,14 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const deletePage = (pageIndex) => {
     const page = config.pages[pageIndex];
     const questionCount = page?.elements?.length || 0;
-    const pageTitle = page?.title || `Page ${pageIndex + 1}`;
+    const pageTitle = page?.title || tr('Page {number}', { number: pageIndex + 1 });
     const message = questionCount > 0
-      ? `Delete "${pageTitle}" and its ${questionCount} question(s)? This cannot be undone.`
-      : `Delete "${pageTitle}"? This cannot be undone.`;
+      ? 'Delete "{title}" and its {count} question(s)? This cannot be undone.'
+      : 'Delete "{title}"? This cannot be undone.';
     setConfirmDialog({
       title: 'Delete page',
       message,
+      values: { title: pageTitle, count: questionCount },
       confirmLabel: 'Delete',
       confirmColor: 'error',
       onConfirm: () => {
@@ -2100,9 +2105,10 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       </Snackbar>
       <ConfirmDialog
         open={Boolean(confirmDialog)}
-        title={confirmDialog?.title}
-        message={confirmDialog?.message}
-        confirmLabel={confirmDialog?.confirmLabel}
+        title={tr(confirmDialog?.title)}
+        message={tr(confirmDialog?.message, confirmDialog?.values)}
+        confirmLabel={tr(confirmDialog?.confirmLabel)}
+        cancelLabel={tr('Cancel')}
         confirmColor={confirmDialog?.confirmColor || 'error'}
         onConfirm={() => confirmDialog?.onConfirm?.()}
         onCancel={() => setConfirmDialog(null)}

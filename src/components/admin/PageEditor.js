@@ -49,6 +49,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import QuestionEditor from './QuestionEditor';
+import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
 import { getPresetSkill } from '../../lib/presetSkills';
 
 function skillQuestionTypeLabel(question) {
@@ -61,6 +62,7 @@ function skillQuestionTypeLabel(question) {
 
 // Sortable Question Item Component
 function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDuplicate }) {
+  const { tr } = useQuestionEditorText();
   const {
     attributes,
     listeners,
@@ -145,6 +147,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
       <Box
         {...attributes}
         {...listeners}
+        aria-label={tr('Drag to reorder question')}
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -160,19 +163,19 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
       
       <ListItemText
         primary={
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
             <Typography variant="subtitle1">
-              {question.title || `Question ${questionIndex + 1}`}
+              {question.title || tr('Question {number}', { number: questionIndex + 1 })}
             </Typography>
             <Chip
-              label={getQuestionTypeLabel(question)}
+              label={tr(getQuestionTypeLabel(question))}
               size="small"
               color="secondary"
               variant="outlined"
             />
             {question.isRequired && (
               <Chip
-                label="Required"
+                label={tr("Required")}
                 size="small"
                 color="error"
                 variant="outlined"
@@ -182,7 +185,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
         }
         secondary={
           <Typography variant="body2" color="text.secondary">
-            {question.description || 'No description provided'}
+            {question.description || tr('No description provided')}
           </Typography>
         }
       />
@@ -192,7 +195,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
           <IconButton
             size="small"
             color="primary"
-            aria-label="Edit question"
+            aria-label={tr("Edit question")}
             onClick={() => onEdit({ question, index: questionIndex })}
             sx={{ 
               border: 1, 
@@ -205,7 +208,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
           <IconButton
             size="small"
             color="primary"
-            aria-label="Duplicate question"
+            aria-label={tr("Duplicate question")}
             onClick={() => onDuplicate(questionIndex)}
             sx={{ 
               border: 1, 
@@ -218,7 +221,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
           <IconButton
             size="small"
             color="error"
-            aria-label="Delete question"
+            aria-label={tr("Delete question")}
             onClick={() => onDelete(questionIndex)}
             sx={{ 
               border: 1, 
@@ -235,6 +238,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
 }
 
 export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig }) {
+  const { tr } = useQuestionEditorText();
   const [editedPage, setEditedPage] = useState({ ...page });
   const [selectedQuestion, setSelectedQuestion] = useState(null);
   const initialPage = useRef(JSON.stringify(page));
@@ -272,10 +276,11 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
 
   const deleteQuestion = (questionIndex) => {
     const question = editedPage.elements[questionIndex];
-    const title = question?.title || question?.name || `Question ${questionIndex + 1}`;
+    const title = question?.title || question?.name || tr('Question {number}', { number: questionIndex + 1 });
     setConfirmDialog({
       title: 'Delete question',
-      message: `Delete "${title}"? This cannot be undone.`,
+      message: 'Delete "{title}"? This cannot be undone.',
+      values: { title },
       confirmLabel: 'Delete',
       confirmColor: 'error',
       onConfirm: () => {
@@ -354,75 +359,25 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
     }
   };
 
-  const getQuestionTypeLabel = (question) => {
-    const type = typeof question === 'string' ? question : question.type;
-    
-    // Special handling for image ranking questions
-    if (typeof question === 'object' && type === 'ranking' && question.isImageRanking) {
-      return 'Image Ranking';
-    }
-
-    if (type === 'skillquestion') {
-      return skillQuestionTypeLabel(typeof question === 'object' ? question : null) || 'Custom interactive task';
-    }
-    
-    const typeLabels = {
-      text: 'Text Input',
-      comment: 'Text Multi-line Input',
-      radiogroup: 'Text Single Choice',
-      checkbox: 'Text Multiple Choice',
-      imagepicker: 'Image Choice',
-      imageranking: 'Image Ranking',
-      imagerating: 'Image Rating Scale',
-      imageboolean: 'Image Yes/No',
-      imagecheckbox: 'Image Multi-select',
-      ranking: 'Text Ranking',
-      rating: 'Text Rating Scale',
-      boolean: 'Text Yes/No',
-      dropdown: 'Text Dropdown',
-      matrix: 'Text Matrix',
-      imagematrix: 'Image Matrix',
-      expression: 'Text Instruction',
-      number: 'Text Number',
-      consent: 'Text Consent',
-      image: 'Image Display (1 image)',
-      mediadisplay: 'Media Display',
-      mediapicker: 'Media Choice',
-      mediaranking: 'Media Ranking',
-      mediarating: 'Media Rating',
-      mediaboolean: 'Media Yes/No',
-      mediacheckbox: 'Media Multi-select',
-      mediamatrix: 'Media Matrix',
-      mediaslidergroup: 'Media Slider Group',
-      mediapointallocation: 'Media Point Allocation',
-      imageannotation: 'Image Annotation',
-      slidergroup: 'Text Slider Group',
-      imageslidergroup: 'Image Slider Group',
-      pointallocation: 'Text Point Allocation',
-      imagepointallocation: 'Image Point Allocation',
-    };
-    return typeLabels[type] || type;
-  };
-
   return (
     <>
       <Dialog open={true} onClose={closeEditor} maxWidth="lg" fullWidth>
         <DialogTitle>
-          Edit Page: {page.title}
+          {tr('Edit Page: {title}', { title: page.title || tr('Page {number}', { number: pageIndex + 1 }) })}
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mb: 4 }}>
             <Typography variant="h6" sx={{ mb: 3, color: 'primary.main' }}>
-              Page Settings
+              {tr("Page Settings")}
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
               <TextField
                 fullWidth
                 variant="outlined"
-                label="Page Title"
+                label={tr("Page Title")}
                 value={editedPage.title || ''}
                 onChange={(e) => handlePageChange('title', e.target.value)}
-                helperText="The title that appears at the top of this page"
+                helperText={tr("The title that appears at the top of this page")}
                 sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               />
               
@@ -431,10 +386,10 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
                 variant="outlined"
                 multiline
                 rows={3}
-                label="Page Description"
+                label={tr("Page Description")}
                 value={editedPage.description || ''}
                 onChange={(e) => handlePageChange('description', e.target.value)}
-                helperText="Optional description to explain what this page is about"
+                helperText={tr("Optional description to explain what this page is about")}
                 sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               />
             </Box>
@@ -442,7 +397,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
 
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <Typography variant="h6" sx={{ color: 'primary.main' }}>
-              Questions
+              {tr("Questions")}
             </Typography>
             <Button
               variant="contained"
@@ -450,14 +405,14 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
               onClick={addNewQuestion}
               size="large"
             >
-              Add Question
+              {tr("Add Question")}
             </Button>
           </Box>
 
           {editedPage.elements && editedPage.elements.length > 0 ? (
             <Box sx={{ mb: 2 }}>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Drag and drop to reorder questions within this page.
+                {tr("Drag and drop to reorder questions within this page.")}
               </Typography>
               <DndContext
                 sensors={sensors}
@@ -486,15 +441,15 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
           ) : (
             <Box sx={{ textAlign: 'center', py: 4, bgcolor: 'grey.50', borderRadius: 2 }}>
               <Typography variant="body2" color="text.secondary">
-                No questions added yet. Click "Add Question" to get started.
+                {tr("No questions added yet. Click \"Add Question\" to get started.")}
               </Typography>
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeEditor}>Cancel</Button>
+          <Button onClick={closeEditor}>{tr('Cancel')}</Button>
           <Button onClick={() => onSave(editedPage)} variant="contained">
-            Save Page
+            {tr("Save Page")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -514,13 +469,14 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
         />
       )}
       <ConfirmDialog open={guard.open} onCancel={guard.cancel} onConfirm={guard.discard}
-        title="Discard unsaved page changes?" message="Your page and question changes have not been saved."
-        confirmLabel="Discard changes" cancelLabel="Keep editing" />
+        title={tr("Discard unsaved page changes?")} message={tr("Your page and question changes have not been saved.")}
+        confirmLabel={tr("Discard changes")} cancelLabel={tr("Keep editing")} />
       <ConfirmDialog
         open={Boolean(confirmDialog)}
-        title={confirmDialog?.title}
-        message={confirmDialog?.message}
-        confirmLabel={confirmDialog?.confirmLabel}
+        title={tr(confirmDialog?.title)}
+        message={tr(confirmDialog?.message, confirmDialog?.values)}
+        confirmLabel={tr(confirmDialog?.confirmLabel)}
+        cancelLabel={tr('Cancel')}
         confirmColor={confirmDialog?.confirmColor || 'error'}
         onConfirm={() => confirmDialog?.onConfirm?.()}
         onCancel={() => setConfirmDialog(null)}

@@ -1,3 +1,4 @@
+import ChoiceOutcomeSummary from './ChoiceOutcomeSummary';
 import { readAllResponsePages, responseCursorFilter } from '../../lib/responsePagination';
 import { recordedRevisionSelection, recordedSurveyConfig } from '../../lib/recordedSurvey';
 import { responseWithinDateRange } from '../../lib/responseIdentity';
@@ -601,6 +602,7 @@ function ImagePickerDistribution({ question, allResponses }) {
 
   return (
     <Box>
+      <ChoiceOutcomeSummary units={collectAnswers(question.name, allResponses)} enabled={question.allowTie} />
       <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
         TrueSkill (pairwise from selections vs non-selected shown images)
       </Typography>

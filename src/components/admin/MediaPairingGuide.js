@@ -1,3 +1,4 @@
+import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
 /**
  * Guide: organize media with folders tagged set.
  */
@@ -18,6 +19,7 @@ export default function MediaPairingGuide({
   filesPerSet = null,
 }) {
   const { t } = useRegion();
+  const { tr, zh } = useQuestionEditorText();
   const eligible = eligibleSetCount ?? eligibleGroupCount;
   const body = (
     <Box>
@@ -51,11 +53,11 @@ export default function MediaPairingGuide({
       </Box>
       {context === 'question' && eligible != null && (
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-          Eligible sets: {eligible}
-          {pairedSetCount != null ? ` · tagged: ${pairedSetCount}` : ''}
-          {matchingFileCount != null ? ` · matching files: ${matchingFileCount}` : ''}
-          {mediaTypeFilter && mediaTypeFilter !== 'any' ? ` (${mediaTypeFilter})` : ''}
-          {totalFileCount != null ? ` · project: ${totalFileCount}` : ''}
+          {zh ? '可用分组：' : 'Eligible sets: '}{eligible}
+          {pairedSetCount != null ? (zh ? ` · 已标记：${pairedSetCount}` : ` · tagged: ${pairedSetCount}`) : ''}
+          {matchingFileCount != null ? (zh ? ` · 匹配文件：${matchingFileCount}` : ` · matching files: ${matchingFileCount}`) : ''}
+          {mediaTypeFilter && mediaTypeFilter !== 'any' ? ` (${tr(mediaTypeFilter)})` : ''}
+          {totalFileCount != null ? (zh ? ` · 项目文件：${totalFileCount}` : ` · project: ${totalFileCount}`) : ''}
         </Typography>
       )}
       {context === 'dataset' && pairedSetCount > 0 && (

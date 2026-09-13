@@ -2,6 +2,10 @@ import { sliderGroupAnswerValid } from '../lib/sliderScale';
 import { resolveSurveyUiLanguage } from '../lib/surveyLocale';
 import { allocationStatus } from '../lib/allocationStats';
 import React from 'react';
+import NoPreferenceButton from './NoPreferenceButton';
+import ForcedChoiceWithTie from './ForcedChoiceWithTie';
+import { isForcedChoiceSkill } from '../lib/skillMediaUtils';
+import { NO_PREFERENCE, isNoPreference, noPreferenceLabel } from '../lib/choiceTie';
 import {
   ReactQuestionFactory, SurveyQuestionImagePicker,
 } from 'survey-react-ui';
@@ -107,6 +111,24 @@ try {
 } catch {
   /* ignore */
 }
+
+// Imagepicker's built-in exclusive None value protects ties during SurveyJS cleanup.
+Serializer.addProperty('question', { name: 'allowTie:boolean', default: false,
+  onSetValue: (q, enabled) => {
+    q.setPropertyValue('allowTie', enabled);
+    if (enabled && !q.__spTieDisplayInstalled) {
+      const original = q.getDisplayValueCore.bind(q);
+      q.getDisplayValueCore = (keysAsText, value) => isNoPreference(value)
+        ? noPreferenceLabel(q, resolveSurveyUiLanguage(q.survey)) : original(keysAsText, value);
+      q.__spTieDisplayInstalled = true;
+    }
+    if (q.getType?.() === 'imagepicker') {
+      q.noneItem.value = NO_PREFERENCE;
+      q.showNoneItem = !!enabled;
+    }
+  },
+});
+Serializer.addProperty('question', { name: 'tieLabel:string', default: '' });
 
 function registerTrialAwareQuestion(typeName, Component) {
   ensureTrialCountProperty(typeName);
@@ -1051,6 +1073,8 @@ export function registerMediaPickerWidget() {
       choices: q.choices || [],
       value: q.value,
       multiSelect: !!q.multiSelect,
+      allowTie: !!q.allowTie,
+      tieLabel: q.tieLabel,
       language: resolveSurveyUiLanguage(q.survey),
       onChange: (v) => { q.value = v; },
     });
@@ -1492,6 +1516,10 @@ export function registerSkillQuestionWidget() {
     // question read-only. Only SurveyJS state="preview" is answer review.
     const readOnly = isSkillAnswerReviewMode(q);
     const value = resolveSkillQuestionValue(q, fieldValue, readOnly);
+    if (q.allowTie && isForcedChoiceSkill(q.skillId) && images.length === 2) {
+      return React.createElement(ForcedChoiceWithTie, { question: q, images, config, readOnly,
+        language: resolveSurveyUiLanguage(q.survey) });
+    }
     return React.createElement(SkillQuestionFrame, {
       skillHtml: q.skillHtml || '',
       skillId: q.skillId || '',
@@ -1582,7 +1610,9 @@ export function registerMediaRankingWidget() {
 export function registerImagePickerTrialSupport() {
   ensureTrialCountProperty('imagepicker');
   function ImagePickerQuestionComponent({ question, ...rest }) {
-    return React.createElement(SurveyQuestionImagePicker, { question, ...rest });
+    return React.createElement(React.Fragment, null,
+      React.createElement(SurveyQuestionImagePicker, { question, ...rest }),
+      React.createElement(NoPreferenceButton, { question, count: resolveQuestionImageChoices(question).length }));
   }
   registerTrialAwareQuestion('imagepicker', ImagePickerQuestionComponent);
 }

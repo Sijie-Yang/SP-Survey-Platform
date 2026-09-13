@@ -1,3 +1,5 @@
+import { isNoPreference } from './choiceTie.js';
+import { choiceOutcome, summarizeChoiceOutcomes } from './choiceOutcomes.js';
 import { buildExportDictionary } from './exportDictionary.js';
 import { responseRecordKey } from './responseIdentity';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
@@ -121,7 +123,7 @@ const LONG_EXTRA_BY_FAMILY = {
   // Stimulus + text multi-select: one row per selected tag
   image_checkbox: ['value', 'label'],
   // value = media key the participant chose (options are in shown_*)
-  imagepicker: ['value'],
+  imagepicker: ['value', 'outcome'],
   // Best–Worst MaxDiff: one row per trial with both picks (media keys)
   maxdiff: ['best', 'worst'],
   // Video key moments: one row per marked segment (video in shown_*)
@@ -283,7 +285,7 @@ function pushTrueSkillSummary(out, question, nResponses, rankings, longObjs, {
   const freq = {};
   longObjs.forEach((r) => {
     const k = r[valueKey];
-    if (!k) return;
+    if (!k || r.outcome === 'tie') return;
     freq[k] = (freq[k] || 0) + 1;
   });
   const exposures = {};
@@ -1065,21 +1067,14 @@ function buildLongObjects(question, responses, surveyConfig) {
         });
       });
     } else if (fam === 'imagepicker') {
-      if (forcedChoice) {
-        objects.push({
-          ...base,
-          ...extra,
-          value: chosenKeyFromForcedChoice(answer, shownImages),
-        });
+      const outcome = choiceOutcome(answer, shownImages);
+      if (isNoPreference(answer)) {
+        objects.push({ ...base, ...extra, value: 'tie', outcome: 'tie' });
+      } else if (forcedChoice) {
+        objects.push({ ...base, ...extra, value: chosenKeyFromForcedChoice(answer, shownImages), outcome });
       } else {
         const vals = Array.isArray(answer) ? answer : [answer];
-        vals.forEach((v) => {
-          objects.push({
-            ...base,
-            ...extra,
-            value: resolveImageChoiceKey(v, shownImages),
-          });
-        });
+        vals.forEach((v) => objects.push({ ...base, ...extra, value: resolveImageChoiceKey(v, shownImages), outcome }));
       }
     } else if (fam === 'maxdiff') {
       const { best, worst } = bestWorstKeysFromAnswer(answer, shownImages);
@@ -1847,6 +1842,13 @@ function buildSummaryObjects(question, responses) {
       ? computeForcedChoiceTrueSkill(eligible, question.name)
       : computeQuestionTrueSkill(eligible, question.name);
     pushTrueSkillSummary(out, question, nResponses, rankings, longObjs);
+    const outcomes = summarizeChoiceOutcomes(eligible.flatMap((row) => expandQuestionAnswerUnits(row, question.name, { requireAnswer: true })));
+    if (question.allowTie || outcomes.tie) {
+      ['A', 'B', 'tie'].forEach((key) => {
+        out.push(summaryRow(question, nResponses, key, key, 'outcome_count', outcomes[key], outcomes.total));
+        out.push(summaryRow(question, nResponses, key, key, 'outcome_rate', outcomes.total ? outcomes[key] / outcomes.total : 0, outcomes.total));
+      });
+    }
   } else if (fam === 'maxdiff') {
     pushMaxDiffSummary(out, question, nResponses, eligible);
   } else if (fam === 'video_moments') {
@@ -2347,7 +2349,7 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     'text ranking: value, label  (pipe-ordered; label = choice text when set)',
     'image/media ranking: value only  (pipe-ordered media sources; no separate image labels)',
     'imagerating* / imageboolean*: value (and value_norm for boolean)',
-    'imagepicker*: value = chosen media key (options are in shown_*)',
+    'imagepicker*: value = chosen media key, or tie for no preference. outcome = A/B/tie for binary trials; A/B follow the recorded shown_images order. Ties count as answered and are excluded from decisive-only TrueSkill rankings.',
     'Forced-Choice A/B (skill): same long/summary as imagepicker (value = chosen key; TrueSkill μ/σ/wins/…)',
     'Best–Worst MaxDiff (skill) long: best, worst (= media keys; one row per trial)',
     'Best–Worst MaxDiff summary: unit_* = image; metrics = rank/mu/… + bws/best/worst/appearances (μ-sorted)',

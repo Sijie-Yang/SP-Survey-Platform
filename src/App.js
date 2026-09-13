@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RegionProvider } from './contexts/RegionContext';
 import { createCustomTheme, DEFAULT_THEME_KEY } from './themes/themeConfig';
 import { ToastProvider } from './components/layout/ToastProvider';
+const QuestionPreviewPage = lazy(() => import('./components/admin/QuestionPreviewPage'));
 const SurveyApp = lazy(() => import('./SurveyApp'));
 const AdminApp = lazy(() => import('./AdminApp'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
@@ -140,6 +141,12 @@ const router = createBrowserRouter(createRoutesFromElements(
 ));
 
 export default function App() {
+  // A preview only consumes its parent's draft snapshot; never load auth, projects or responses.
+  if (window.location.pathname === '/question-preview') {
+    return <ThemeProvider theme={theme}><CssBaseline /><RegionProvider>
+      <Suspense fallback={<CircularProgress aria-label="Loading preview" />}><QuestionPreviewPage /></Suspense>
+    </RegionProvider></ThemeProvider>;
+  }
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />

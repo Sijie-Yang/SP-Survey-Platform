@@ -13,6 +13,8 @@ import {
   DriveFileMove, OpenInNew, Visibility, Audiotrack, PhotoLibrary,
 } from '@mui/icons-material';
 import MediaFolderBrowser from './MediaFolderBrowser';
+import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
+import { uploadFolderForFile, uploadObjectKey, pickUploadMedia } from '../../lib/mediaUploadBatch';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import {
   normalizeMediaEntry, sortMediaByName, MEDIA_ACCEPT, buildProjectMediaKey,
@@ -129,6 +131,7 @@ export default function AdminScopedMediaLibrary({
   const [surveyConfig, setSurveyConfig] = useState(() => readSurveyConfig(owner));
   const [supplementaryFiles, setSupplementaryFiles] = useState(() => readSupplementaryFiles(owner));
   const [currentFolder, setCurrentFolder] = useState('');
+  const [selectedFolders, setSelectedFolders] = useState(() => new Set());
   const [selected, setSelected] = useState(() => new Set());
   const [openMoveSignal, setOpenMoveSignal] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -141,6 +144,7 @@ export default function AdminScopedMediaLibrary({
   const [mediaFilter, setMediaFilter] = useState('all');
   const [previewEntry, setPreviewEntry] = useState(null);
   const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
   const suppInputRef = useRef(null);
   const persistRef = useRef(onPersist);
   useEffect(() => { persistRef.current = onPersist; }, [onPersist]);
@@ -165,14 +169,13 @@ export default function AdminScopedMediaLibrary({
     setSurveyConfig(readSurveyConfig(owner));
     setSupplementaryFiles(readSupplementaryFiles(owner));
     setCurrentFolder('');
+    setSelectedFolders(new Set());
     setSelected(new Set());
     setError('');
     setInfo('');
   }, [owner?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const persist = useCallback(async (nextOwner, { silent = false } = {}) => {
-    setMediaOwner(nextOwner);
-    onImagesChange?.(nextOwner.preloadedImages || []);
+  const persist = useCallback(async (nextOwner, { silent = false, throwOnError = false } = {}) => {
     try {
       await persistRef.current?.({
         preloaded_images: (nextOwner.preloadedImages || []).map((img) => {
@@ -192,9 +195,12 @@ export default function AdminScopedMediaLibrary({
           ...sanitizeMediaFolderConfig(nextOwner.imageDatasetConfig),
         },
       });
+      setMediaOwner(nextOwner);
+      onImagesChange?.(nextOwner.preloadedImages || []);
       if (!silent) setInfo('Saved.');
     } catch (err) {
       setError(err.message || 'Failed to save');
+      if (throwOnError) throw err;
     }
   }, [prefix, onImagesChange]);
 
@@ -263,14 +269,14 @@ export default function AdminScopedMediaLibrary({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner?.id, prefix]);
 
-  const handleOwnerUpdate = useCallback((updated) => {
-    persist({
+  const handleOwnerUpdate = useCallback((updated, options) => {
+    return persist({
       id: updated.id || mediaOwner.id,
       preloadedImages: updated.preloadedImages || [],
       imageDatasetConfig: updated.imageDatasetConfig || {},
       preloadedSource: updated.preloadedSource || 'r2',
       preloadedAt: updated.preloadedAt || new Date().toISOString(),
-    });
+    }, options);
   }, [mediaOwner.id, persist]);
 
   const pool = mediaOwner.preloadedImages || [];
@@ -290,6 +296,10 @@ export default function AdminScopedMediaLibrary({
         || String(img.folder || '').toLowerCase().includes(q);
     });
   }, [folderView, mediaSearch, mediaFilter]);
+
+  const selectionCandidates = useMemo(() => mediaSelectionCandidates(pool, {
+    folders: selectedFolders, currentFolder, search: mediaSearch, type: mediaFilter, prefix,
+  }), [pool, selectedFolders, currentFolder, mediaSearch, mediaFilter, prefix]);
 
   const selectedEntries = useMemo(
     () => pool.filter((m) => selected.has(entryId(normalizeMediaEntry(m, prefix)))),
@@ -313,17 +323,13 @@ export default function AdminScopedMediaLibrary({
   };
 
   const selectAllFiltered = () => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      filteredMedia.forEach((img) => next.add(entryId(normalizeMediaEntry(img, prefix))));
-      return next;
-    });
+    setSelected(new Set(selectionCandidates.map((img) => entryId(normalizeMediaEntry(img, prefix)))));
   };
 
   const handleUpload = async (fileList) => {
     if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
-    const files = Array.from(fileList || []);
-    if (!files.length) return;
+    const { files, skipped } = pickUploadMedia(fileList);
+    if (!files.length) { setInfo('No supported media files found in this selection.'); return; }
     setUploading({ active: true, progress: 0, total: files.length });
     setError('');
     setInfo('');
@@ -335,14 +341,16 @@ export default function AdminScopedMediaLibrary({
 
     const results = await asyncPool(6, files, async (file) => {
       try {
+        const folderForFile = uploadFolderForFile(file, folder);
         const type = inferMediaType(file.name);
         assertAvMediaUploadAllowed(file, type);
         const isImage = type === 'image' || file.type.startsWith('image/');
-        const payload = isImage ? await compressImage(file) : file;
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const key = buildProjectMediaKey(prefix, folder, safeName);
+        const payload = isImage && !/\.gif$/i.test(file.name) ? await compressImage(file) : file;
+        const safeName = file.name;
+        const id = typeof window.crypto?.randomUUID === 'function' ? window.crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+        const key = uploadObjectKey(prefix, folderForFile, payload.name, id);
         const result = await uploadImageToR2(payload, key);
-        return { safeName, key, result, type };
+        return { safeName, key, result, type, folderForFile };
       } catch (e) {
         return { safeName: file.name, key: null, result: { success: false, error: e.message } };
       } finally {
@@ -351,7 +359,7 @@ export default function AdminScopedMediaLibrary({
       }
     });
 
-    results.forEach(({ safeName, key, result, type }) => {
+    results.forEach(({ safeName, key, result, type, folderForFile }) => {
       if (result.success) {
         const id = key;
         const filtered = uploaded.filter((img) => {
@@ -362,7 +370,8 @@ export default function AdminScopedMediaLibrary({
           url: result.url,
           name: safeName,
           key,
-          folder,
+          folder: folderForFile,
+          logicalFolder: folderForFile,
           type: type || 'image',
           media_id: key,
         }, prefix));
@@ -381,9 +390,10 @@ export default function AdminScopedMediaLibrary({
       preloadedAt: new Date().toISOString(),
       preloadedSource: 'r2',
     });
-    setInfo(failCount > 0
+    setInfo((failCount > 0
       ? `Uploaded ${okCount}, ${failCount} failed.`
-      : `Uploaded ${okCount} file(s) to ${folder || 'root'}.`);
+      : `Uploaded ${okCount} file(s) to ${folder || 'root'}.`)
+      + (skipped ? ` Skipped ${skipped} non-media or system files.` : ''));
   };
 
   const handleDeleteSelected = async () => {
@@ -723,6 +733,9 @@ export default function AdminScopedMediaLibrary({
           style={{ display: 'none' }}
           onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }}
         />
+        <input ref={folderInputRef} type="file" webkitdirectory="" multiple style={{ display: 'none' }}
+          aria-label="Upload media folder"
+          onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
         <Button
           startIcon={<CloudUpload />}
           variant="contained"
@@ -732,6 +745,8 @@ export default function AdminScopedMediaLibrary({
         >
           Upload{currentFolder ? ` → ${currentFolder}` : ' → root'}
         </Button>
+        <Button variant="outlined" size="small" disabled={!isR2Configured() || uploading.active || busy}
+          onClick={() => folderInputRef.current?.click()}>Upload folder</Button>
         <Typography variant="caption" color="text.secondary">
           Images ~300 KB · A/V max {formatMediaMb(MAX_AV_MEDIA_BYTES)} MB
         </Typography>
@@ -754,6 +769,9 @@ export default function AdminScopedMediaLibrary({
         </Button>
       </Stack>
 
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+        Folder uploads keep the selected folder name and all media subfolders inside the current directory. Non-media files and empty folders are omitted.
+      </Typography>
       {uploading.active && (
         <Box sx={{ mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
@@ -776,6 +794,9 @@ export default function AdminScopedMediaLibrary({
         onProjectUpdate={handleOwnerUpdate}
         currentFolder={currentFolder}
         onCurrentFolderChange={setCurrentFolder}
+        selectedFolders={selectedFolders}
+        onSelectedFoldersChange={setSelectedFolders}
+        onMoveComplete={() => setSelected(new Set())}
         selectedMediaEntries={selectedEntries}
         openMoveSignal={openMoveSignal}
         mediaCount={pool.length}
@@ -783,6 +804,10 @@ export default function AdminScopedMediaLibrary({
         r2DeleteOptions={r2DeleteOptions}
         rootLabel={rootLabel}
       >
+        {selectedFolders.size > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>
+          Select filtered uses {selectedFolders.size} checked folder(s), including subfolders, and the current search/type filters.
+          {' '}{selectionCandidates.length} matching file(s). The gallery shows the open folder.
+        </Alert>}
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }} alignItems="center">
           <TextField
             size="small"
@@ -804,8 +829,8 @@ export default function AdminScopedMediaLibrary({
               <MenuItem value="audio">Audio</MenuItem>
             </Select>
           </FormControl>
-          <Button size="small" variant="outlined" startIcon={<SelectAll />} onClick={selectAllFiltered} disabled={!filteredMedia.length}>
-            Select filtered
+          <Button size="small" variant="outlined" startIcon={<SelectAll />} onClick={selectAllFiltered} disabled={!selectionCandidates.length}>
+            Select filtered ({selectionCandidates.length})
           </Button>
           <Button size="small" variant="outlined" startIcon={<Deselect />} onClick={() => setSelected(new Set())} disabled={!selected.size}>
             Clear selection

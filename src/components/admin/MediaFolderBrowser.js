@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box, Typography, Button, Chip, List, ListItemButton, ListItemText,
   TextField, Dialog, DialogTitle, DialogContent, DialogActions,
-  Stack, Alert, Divider, Paper,
+  Stack, Alert, Divider, Paper, Autocomplete, Checkbox,
 } from '@mui/material';
 import {
   CreateNewFolder, DriveFileMove, Folder, FolderOpen, Delete,
@@ -70,14 +70,13 @@ function FolderTreeNode({
         onClick={() => onSelect(folder)}
         sx={{ pl: 1 + depth * 1.5 }}
       >
-        <Box
-          component="span"
-          onClick={(e) => { e.stopPropagation(); onToggleSelect?.(folder); }}
-          sx={{
-            width: 16, height: 16, mr: 1, border: '1px solid', borderColor: 'divider',
-            borderRadius: 0.5, bgcolor: selected ? 'primary.main' : 'transparent', flexShrink: 0,
-          }}
-          title="Select folder for tagging"
+        <Checkbox
+          size="small"
+          checked={!!selected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect?.(folder)}
+          inputProps={{ 'aria-label': `Select folder ${folder}` }}
+          sx={{ mr: 0.5 }}
         />
         {kids.length ? <FolderOpen fontSize="small" sx={{ mr: 0.75, color: 'text.secondary' }} />
           : <Folder fontSize="small" sx={{ mr: 0.75, color: 'text.secondary' }} />}
@@ -112,6 +111,9 @@ export default function MediaFolderBrowser({
   currentFolder,
   onCurrentFolderChange,
   selectedMediaEntries = [],
+  selectedFolders: controlledFolders,
+  onSelectedFoldersChange,
+  onMoveComplete,
   openMoveSignal = 0,
   children = null,
   mediaCount = 0,
@@ -131,7 +133,11 @@ export default function MediaFolderBrowser({
   const deleteOpts = { allowedPrefix: prefix, ...(r2DeleteOptions || {}) };
 
   const [newFolderName, setNewFolderName] = useState('');
-  const [selectedFolders, setSelectedFolders] = useState(() => new Set());
+  const [localFolders, setLocalFolders] = useState(() => new Set());
+  const selectedFolders = controlledFolders ?? localFolders;
+  const setSelectedFolders = onSelectedFoldersChange ?? setLocalFolders;
+  const [moveFilesOnly, setMoveFilesOnly] = useState(false);
+  const movingFolders = moveFilesOnly ? new Set() : selectedFolders;
   const [moveOpen, setMoveOpen] = useState(false);
   const [moveTarget, setMoveTarget] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -140,6 +146,7 @@ export default function MediaFolderBrowser({
 
   useEffect(() => {
     if (openMoveSignal > 0) {
+      setMoveFilesOnly(true);
       setMoveTarget(currentFolder || '');
       setMoveOpen(true);
     }
@@ -172,12 +179,10 @@ export default function MediaFolderBrowser({
   };
 
   const toggleFolderSelect = (folder) => {
-    setSelectedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(folder)) next.delete(folder);
-      else next.add(folder);
-      return next;
-    });
+    const next = new Set(selectedFolders);
+    if (next.has(folder)) next.delete(folder);
+    else next.add(folder);
+    setSelectedFolders(next);
   };
 
   /** Checked folders, else the currently open folder (not root). */
@@ -306,8 +311,10 @@ export default function MediaFolderBrowser({
   };
 
   const moveSelectedMedia = async () => {
+    if (moveTarget === null || (moveTarget && !folders.includes(moveTarget))
+      || [...movingFolders].some((folder) => isFolderOrDescendant(moveTarget, folder))) return;
     const target = normalizeFolderPath(moveTarget);
-    const selectedFolderList = [...selectedFolders]
+    const selectedFolderList = [...movingFolders]
       .map(normalizeFolderPath)
       .filter(Boolean)
       .sort((a, b) => b.length - a.length); // deepest first for mapping
@@ -373,6 +380,7 @@ export default function MediaFolderBrowser({
       }, { throwOnError: true });
       setMoveOpen(false);
       setSelectedFolders(new Set());
+      onMoveComplete?.();
       onCurrentFolderChange(target);
       const parts = [];
       if (folderMoves.length) parts.push(`${folderMoves.length} folder(s)`);
@@ -551,7 +559,7 @@ export default function MediaFolderBrowser({
               variant="outlined"
               startIcon={<DriveFileMove />}
               disabled={disabled || busy || (!selectedMediaEntries.length && !selectedFolders.size)}
-              onClick={() => { setMoveTarget(currentFolder || ''); setMoveOpen(true); }}
+              onClick={() => { setMoveFilesOnly(false); setMoveTarget(selectedFolders.size ? '' : currentFolder || ''); setMoveOpen(true); }}
             >
               Move selected
               {(selectedFolders.size || selectedMediaEntries.length)
@@ -571,8 +579,8 @@ export default function MediaFolderBrowser({
       <Dialog open={moveOpen} onClose={() => !busy && setMoveOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>
           Move
-          {selectedFolders.size ? ` ${selectedFolders.size} folder(s)` : ''}
-          {selectedFolders.size && selectedMediaEntries.length ? ' +' : ''}
+          {movingFolders.size ? ` ${movingFolders.size} folder(s)` : ''}
+          {movingFolders.size && selectedMediaEntries.length ? ' +' : ''}
           {selectedMediaEntries.length ? ` ${selectedMediaEntries.length} file(s)` : ''}
         </DialogTitle>
         <DialogContent>
@@ -580,22 +588,29 @@ export default function MediaFolderBrowser({
             Moving changes the library folder only. File links and previously collected answers stay unchanged.
             Check question folder filters when moving tagged sets or categories.
           </Alert>
-          {!selectedMediaEntries.length && !selectedFolders.size ? (
+          {!selectedMediaEntries.length && !movingFolders.size ? (
             <Alert severity="warning" sx={{ mt: 1 }}>
               Check folders in the tree and/or select files, then try again.
             </Alert>
           ) : (
-            <TextField
+            <Autocomplete
+              options={['', ...folders]}
+              value={moveTarget}
+              onChange={(_, value) => setMoveTarget(value)}
+              getOptionLabel={(folder) => folder || rootLabel}
+              getOptionDisabled={(folder) => [...movingFolders].some((from) => isFolderOrDescendant(folder, from))}
+              disabled={busy}
               fullWidth
               size="small"
-              label="Target folder (empty = root)"
-              value={moveTarget}
-              onChange={(e) => setMoveTarget(e.target.value)}
-              helperText={
-                selectedFolders.size
-                  ? 'Folders keep their names under the target (e.g. street → archive/street)'
-                  : 'e.g. sets/block01'
-              }
+              renderOption={(props, folder) => (
+                <li {...props} key={folder || '__root__'} style={{ overflowWrap: 'anywhere' }}>
+                  <Folder fontSize="small" sx={{ mr: 1, flexShrink: 0 }} />{folder || rootLabel}
+                </li>
+              )}
+              renderInput={(params) => <TextField {...params} label="Target folder"
+                helperText={movingFolders.size
+                  ? 'Choose a folder. Selected folders keep their names inside it.'
+                  : 'Choose an existing folder or the project root. Type to search.'} />}
               sx={{ mt: 1 }}
             />
           )}
@@ -605,7 +620,7 @@ export default function MediaFolderBrowser({
           <Button
             variant="contained"
             onClick={moveSelectedMedia}
-            disabled={disabled || busy || (!selectedMediaEntries.length && !selectedFolders.size)}
+            disabled={disabled || busy || moveTarget === null || [...movingFolders].some((from) => isFolderOrDescendant(moveTarget, from)) || (!selectedMediaEntries.length && !movingFolders.size)}
           >
             Move
           </Button>

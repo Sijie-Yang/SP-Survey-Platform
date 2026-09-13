@@ -16,6 +16,7 @@ export const EXPORT_FIELD_DESCRIPTIONS = {
   survey_revision: 'Recorded question-contract revision; missing historical revisions are unknown.',
   n_responses: 'Response units contributing to a summary, not necessarily independent participants.',
   value: 'Answer or metric value; interpret using question settings, metric and attribute columns.',
+  outcome: 'Binary choice outcome: A/B refer to first/second entries in shown_images; tie is an explicit no-preference answer. Blank means not a recognized binary outcome. Ties are excluded from decisive-only TrueSkill.',
   metric: 'Name of the computed descriptive metric.', n: 'Number of contributing observations for this metric.',
 };
 

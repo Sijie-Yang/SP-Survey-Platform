@@ -1,3 +1,4 @@
+import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
 import React from 'react';
 import {
   Box, TextField, Button, IconButton, Typography, Stack,
@@ -7,6 +8,7 @@ import { Add, Delete, ArrowUpward, ArrowDownward } from '@mui/icons-material';
 const DEFAULT_DIMENSION = { id: 'dim1', left: 'Low', right: 'High' };
 
 export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scaleMax = 7 }) {
+  const { tr, zh } = useQuestionEditorText();
   const dims = Array.isArray(value) && value.length ? value : [{ ...DEFAULT_DIMENSION }];
 
   const update = (next) => onChange(next);
@@ -38,7 +40,7 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
       <Typography variant="caption" color="text.secondary">
-        Bipolar scale pairs (participants rate {scaleMin}–{scaleMax} on each row)
+        {zh ? `双极量表：参与者对每行按 ${scaleMin}–${scaleMax} 评分` : `Bipolar scale pairs (participants rate ${scaleMin}–${scaleMax} on each row)`}
       </Typography>
       {dims.map((d, i) => (
         <Box
@@ -57,46 +59,45 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
         >
           <TextField
             size="small"
-            label="ID"
+            label={tr("ID")}
             value={d.id || ''}
             onChange={(e) => patch(i, { id: e.target.value.replace(/\s/g, '_') })}
           />
           <TextField
             size="small"
-            label="Left pole"
+            label={tr("Left pole")}
             value={d.left || ''}
             onChange={(e) => patch(i, { left: e.target.value })}
           />
           <TextField
             size="small"
-            label="Right pole"
+            label={tr("Right pole")}
             value={d.right || ''}
             onChange={(e) => patch(i, { right: e.target.value })}
           />
           {['min', 'max', 'step'].map((key) => <TextField key={key} size="small" type="number"
-            name={`dimensions[${i}].${key}`} label={key === 'min' ? 'Minimum (optional)' : key === 'max' ? 'Maximum (optional)' : 'Step (optional)'}
+            name={`dimensions[${i}].${key}`} label={tr(key === 'min' ? 'Minimum (optional)' : key === 'max' ? 'Maximum (optional)' : 'Step (optional)')}
             value={d[key] ?? ''} onChange={(e) => patch(i, { [key]: e.target.value === '' ? undefined : Number(e.target.value) })} />)}
           <Stack direction="row" sx={{ gridColumn: '1 / -1', '& .MuiIconButton-root': { width: 44, height: 44 } }}>
-            <IconButton size="small" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">
+            <IconButton size="small" onClick={() => move(i, -1)} disabled={i === 0} aria-label={tr("Move up")}>
               <ArrowUpward fontSize="small" />
             </IconButton>
-            <IconButton size="small" onClick={() => move(i, 1)} disabled={i === dims.length - 1} aria-label="Move down">
+            <IconButton size="small" onClick={() => move(i, 1)} disabled={i === dims.length - 1} aria-label={tr("Move down")}>
               <ArrowDownward fontSize="small" />
             </IconButton>
-            <IconButton size="small" color="error" onClick={() => remove(i)} disabled={dims.length <= 1} aria-label="Remove">
+            <IconButton size="small" color="error" onClick={() => remove(i)} disabled={dims.length <= 1} aria-label={tr("Remove")}>
               <Delete fontSize="small" />
             </IconButton>
           </Stack>
         </Box>
       ))}
-      <Button size="small" startIcon={<Add />} onClick={add} sx={{ alignSelf: 'flex-start' }}>
-        Add dimension
-      </Button>
+      <Button size="small" startIcon={<Add />} onClick={add} sx={{ alignSelf: 'flex-start' }}>{tr("Add dimension")} </Button>
     </Box>
   );
 }
 
 export function SkillStringListEditor({ value = [], onChange, label = 'Items', placeholder = 'New item' }) {
+  const { tr, zh } = useQuestionEditorText();
   const items = Array.isArray(value) ? value : [];
 
   const update = (next) => onChange(next);
@@ -108,7 +109,7 @@ export function SkillStringListEditor({ value = [], onChange, label = 'Items', p
           <TextField
             size="small"
             fullWidth
-            label={`${label} ${i + 1}`}
+            label={tr(`${tr(label)} ${i + 1}`)}
             value={item}
             onChange={(e) => {
               const next = [...items];
@@ -120,7 +121,7 @@ export function SkillStringListEditor({ value = [], onChange, label = 'Items', p
           <IconButton
             color="error"
             onClick={() => update(items.filter((_, j) => j !== i))}
-            aria-label="Remove"
+            aria-label={tr("Remove")}
           >
             <Delete fontSize="small" />
           </IconButton>
@@ -131,17 +132,14 @@ export function SkillStringListEditor({ value = [], onChange, label = 'Items', p
         startIcon={<Add />}
         onClick={() => update([...items, ''])}
         sx={{ alignSelf: 'flex-start' }}
-      >
-        Add {label.toLowerCase()}
+      >{tr("Add")} {zh ? tr(label) : label.toLowerCase()}
       </Button>
       {items.length === 0 && (
-        <Typography variant="caption" color="text.secondary">
-          No items yet — click Add or paste comma-separated values below.
-        </Typography>
+        <Typography variant="caption" color="text.secondary">{tr("No items yet — click Add or paste comma-separated values below.")} </Typography>
       )}
       <TextField
         size="small"
-        placeholder={`Paste comma-separated ${placeholder}`}
+        placeholder={tr(zh ? `粘贴用逗号分隔的${tr(placeholder)}` : `Paste comma-separated ${placeholder}`)}
         onBlur={(e) => {
           const raw = e.target.value.trim();
           if (!raw) return;

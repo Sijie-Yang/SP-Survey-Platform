@@ -1,3 +1,4 @@
+import { canChooseTie, isNoPreference, noPreferenceLabel, NO_PREFERENCE } from '../lib/choiceTie';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Box, Typography, Button, Chip } from '@mui/material';
 import { Visibility, TimerOutlined } from '@mui/icons-material';
@@ -445,7 +446,7 @@ export function MediaCheckboxContent({
 
 /** Choice among media items (video/audio/image). */
 export function MediaPickerContent({
-  mediaItems, mediaSlots, choices, value, onChange, multiSelect = false, disabled = false, language = 'en',
+  mediaItems, mediaSlots, choices, value, onChange, multiSelect = false, disabled = false, language = 'en', allowTie = false, tieLabel = '',
 }) {
   const items = (mediaItems?.length ? mediaItems : (mediaSlots || []).filter((s) => s.role === 'choice' || !s.role))
     .filter((m) => m?.url);
@@ -507,6 +508,11 @@ export function MediaPickerContent({
           </Box>
         );
       })}
+      {canChooseTie({ allowTie, multiSelect }, choiceList.length) && <Box sx={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'center' }}>
+        <Button variant={isNoPreference(value) ? 'contained' : 'outlined'} aria-pressed={isNoPreference(value)} disabled={disabled}
+          sx={{ minHeight: 44, maxWidth: '100%', whiteSpace: 'normal', overflowWrap: 'anywhere' }}
+          onClick={() => onChange(NO_PREFERENCE)}>{noPreferenceLabel({ tieLabel }, language)}</Button>
+      </Box>}
     </Box>
   );
 }

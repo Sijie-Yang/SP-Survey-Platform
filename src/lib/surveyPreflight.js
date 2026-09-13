@@ -35,6 +35,9 @@ export async function runSurveyPreflight(config, project, { participants = 5, on
           assignment.images = q.mediaItems?.length ? q.mediaItems : urls.length ? urls.map((url) => ({ url })) : (q.choices || []).filter((c) => c?.imageLink).map((c) => ({ url: c.imageLink, name: c.imageName || c.value }));
         }
         const media = assignment.flatMedia || assignment.images || [];
+        if (q.allowTie && (q.multiSelect || media.length !== 2)) {
+          detail.warnings.push('No-preference option is enabled but requires exactly two displayed alternatives and single selection. It will not appear for this assignment.');
+        }
         const expected = hasMediaSlots(q) ? q.mediaSlots.reduce((sum, s) => sum + Math.max(1, Number(s.count) || 1), 0)
           : expectedCategoryImageCount(filtered, q, tags) ?? (q.imageCount || defaultMediaCount(q));
         if ((random || isCuratedMediaMode(q) || isRandomMediaQuestion(q)) && media.length < expected) detail.missing += 1;

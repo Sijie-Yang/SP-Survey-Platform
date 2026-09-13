@@ -1,4 +1,4 @@
-import { uploadMediaBatch, uploadObjectKey } from './mediaUploadBatch';
+import { uploadMediaBatch, uploadObjectKey, pickUploadMedia } from './mediaUploadBatch';
 const file = (name = 'scene.jpg') => ({ name, size: 12 });
 function setup(overrides = {}) {
   let id = 0;
@@ -44,4 +44,37 @@ test('leaving a project stops new uploads but saves the completed files', async 
   expect(result.uploaded).toHaveLength(1);
   expect(result.pending).toEqual([options.files[1]]);
   expect(options.persist).toHaveBeenCalledWith(result.uploaded);
+});
+
+test('directory uploads preserve their root and nested folders before image conversion', async () => {
+  const options = setup({ folder: 'archive', files: [
+    { ...file('scene.png'), webkitRelativePath: '实验素材/街道/scene.png' },
+    { ...file('scene.png'), webkitRelativePath: '实验素材/公园/scene.png' },
+  ], prepare: async () => ({ name: 'scene.jpg', size: 6 }) });
+  const result = await uploadMediaBatch(options);
+  expect(result.uploaded.map((m) => m.folder)).toEqual(['archive/实验素材/街道', 'archive/实验素材/公园']);
+  expect(result.uploaded[0]).toMatchObject({ name: 'scene.png', logicalFolder: 'archive/实验素材/街道', image_compressed: true });
+  expect(result.uploaded[0].key).toBe('owner/project/archive/实验素材/街道/scene__1.jpg');
+  expect(options.persist).toHaveBeenCalledWith(result.uploaded);
+});
+test('directory retries preserve the original relative path without uploading successful files twice', async () => {
+  const raw = { ...file(), webkitRelativePath: 'Study/group/a/scene.jpg' };
+  const first = await uploadMediaBatch(setup({ files: [raw, file('ok.jpg')], upload: jest.fn()
+    .mockRejectedValueOnce(new Error('Offline')).mockResolvedValue({ success: true, url: '/ok.jpg' }) }));
+  expect(first.failures[0].name).toBe('Study/group/a/scene.jpg');
+  const retry = setup({ files: first.failures.map((f) => f.file), folder: '' });
+  const result = await uploadMediaBatch(retry);
+  expect(retry.upload).toHaveBeenCalledTimes(1);
+  expect(result.uploaded[0].folder).toBe('Study/group/a');
+});
+test('invalid relative directories are rejected before upload', async () => {
+  const options = setup({ files: [{ ...file(), webkitRelativePath: 'study/../scene.jpg' }] });
+  const result = await uploadMediaBatch(options);
+  expect(options.upload).not.toHaveBeenCalled();
+  expect(result.failures[0].error).toBe('Invalid relative file path');
+});
+
+test('directory selection skips unsupported and system files while retaining original File references', () => {
+  const image = { ...file(), webkitRelativePath: 'Study/street/scene.jpg' };
+  expect(pickUploadMedia([image, file('readme.txt'), file('.DS_Store'), file('._scene.jpg')])).toEqual({ files: [image], skipped: 3 });
 });
