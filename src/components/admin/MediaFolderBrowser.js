@@ -1,3 +1,4 @@
+import { useMediaLibraryText } from '../../contexts/mediaLibraryI18n';
 /**
  * Folder tree + set/category tagging for project media.
  */
@@ -59,6 +60,7 @@ function folderChildrenMap(folders) {
 function FolderTreeNode({
   folder, depth = 0, currentFolder, byParent, folderTags, onSelect, selectedFolders, onToggleSelect,
 }) {
+  const tx = useMediaLibraryText();
   const kids = byParent.get(folder) || [];
   const tag = getFolderTag(folderTags, folder);
   const selected = selectedFolders?.has(folder);
@@ -75,7 +77,7 @@ function FolderTreeNode({
           checked={!!selected}
           onClick={(e) => e.stopPropagation()}
           onChange={() => onToggleSelect?.(folder)}
-          inputProps={{ 'aria-label': `Select folder ${folder}` }}
+          inputProps={{ 'aria-label': tx("Select folder {v0}", { v0: folder }) }}
           sx={{ mr: 0.5 }}
         />
         {kids.length ? <FolderOpen fontSize="small" sx={{ mr: 0.75, color: 'text.secondary' }} />
@@ -84,8 +86,8 @@ function FolderTreeNode({
           primary={folder.split('/').pop()}
           primaryTypographyProps={{ variant: 'body2', noWrap: true }}
         />
-        {tag === MEDIA_FOLDER_TAG_SET && <Chip size="small" label="set" color="primary" sx={{ height: 20, ml: 0.5 }} />}
-        {tag === MEDIA_FOLDER_TAG_CATEGORY && <Chip size="small" label="category" color="secondary" sx={{ height: 20, ml: 0.5 }} />}
+        {tag === MEDIA_FOLDER_TAG_SET && <Chip size="small" label={tx("set")} color="primary" sx={{ height: 20, ml: 0.5 }} />}
+        {tag === MEDIA_FOLDER_TAG_CATEGORY && <Chip size="small" label={tx("category")} color="secondary" sx={{ height: 20, ml: 0.5 }} />}
       </ListItemButton>
       {kids.map((child) => (
         <FolderTreeNode
@@ -124,6 +126,8 @@ export default function MediaFolderBrowser({
   r2DeleteOptions = null,
   rootLabel = '(project root)',
 }) {
+  const tx = useMediaLibraryText();
+  const visibleRootLabel = ['(project root)', '(template root)', '(root)'].includes(rootLabel) ? tx(rootLabel) : rootLabel;
   const projectId = currentProject?.id;
   const prefix = r2Prefix != null && r2Prefix !== ''
     ? String(r2Prefix).replace(/\/?$/, '/')
@@ -198,7 +202,7 @@ export default function MediaFolderBrowser({
     if (!foldersToTag.length) {
       setStatus({
         severity: 'info',
-        message: 'Open a folder (or check folders in the tree), then click Set / Category.',
+        message: tx("Open a folder (or check folders in the tree), then click Set / Category."),
       });
       return;
     }
@@ -207,10 +211,10 @@ export default function MediaFolderBrowser({
       tags = setMediaFolderTag(tags, folder, tag);
     });
     persistTags(tags);
-    const label = foldersToTag.length === 1 ? foldersToTag[0] : `${foldersToTag.length} folder(s)`;
+    const label = foldersToTag.length === 1 ? foldersToTag[0] : tx("{v0} folder(s)", { v0: foldersToTag.length });
     setStatus({
       severity: 'success',
-      message: `Tagged ${label} as ${tag || 'untagged'}.`,
+      message: tx("Tagged {v0} as {v1}.", { v0: label, v1: tx(tag || 'untagged') }),
     });
   };
 
@@ -233,7 +237,7 @@ export default function MediaFolderBrowser({
     });
     onCurrentFolderChange(folder);
     setNewFolderName('');
-    setStatus({ severity: 'success', message: `Created folder “${folder}”. Upload or move files into it next.` });
+    setStatus({ severity: 'success', message: tx("Created folder “{v0}”. Upload or move files into it next.", { v0: folder }) });
   };
 
   /** Folders to delete: checked ones, else current folder (if not root). */
@@ -270,7 +274,7 @@ export default function MediaFolderBrowser({
           .filter(Boolean);
         if (keys.length) {
           const del = await deleteImagesFromR2(keys, deleteOpts);
-          if (!del.success) throw new Error(del.error || 'Failed to delete folder files from R2');
+          if (!del.success) throw new Error(del.error || tx("Failed to delete folder files from R2"));
         }
       }
       const removeIds = new Set(files.map((e) => e.media_id || e.key || e.name));
@@ -298,13 +302,13 @@ export default function MediaFolderBrowser({
       }
       setSelectedFolders(new Set());
       setDeleteOpen(false);
-      const fileNote = files.length ? ` and ${files.length} file(s)` : '';
+      const fileNote = files.length ? tx(" and {v0} file(s)", { v0: files.length }) : '';
       setStatus({
         severity: 'success',
-        message: `Deleted ${foldersPendingDelete.length} folder(s)${fileNote}.`,
+        message: tx("Deleted {v0} folder(s){v1}.", { v0: foldersPendingDelete.length, v1: fileNote }),
       });
     } catch (err) {
-      setStatus({ severity: 'error', message: err.message || 'Delete folder failed' });
+      setStatus({ severity: 'error', message: err.message || tx("Delete folder failed") });
     } finally {
       setBusy(false);
     }
@@ -331,7 +335,7 @@ export default function MediaFolderBrowser({
     if (!selectedMediaEntries.length && !folderMoves.length) {
       setStatus({
         severity: 'warning',
-        message: 'Check folders in the tree and/or select files, then move.',
+        message: tx("Check folders in the tree and/or select files, then move."),
       });
       return;
     }
@@ -383,14 +387,14 @@ export default function MediaFolderBrowser({
       onMoveComplete?.();
       onCurrentFolderChange(target);
       const parts = [];
-      if (folderMoves.length) parts.push(`${folderMoves.length} folder(s)`);
-      if (movedCount) parts.push(`${movedCount} file(s)`);
+      if (folderMoves.length) parts.push(tx("{v0} folder(s)", { v0: folderMoves.length }));
+      if (movedCount) parts.push(tx("{v0} file(s)", { v0: movedCount }));
       setStatus({
         severity: 'success',
-        message: `Moved ${parts.join(' / ') || 'items'} to ${target || '(root)'}.`,
+        message: tx("Moved {v0} to {v1}.", { v0: parts.join(' / ') || tx('items'), v1: target || tx('(root)') }),
       });
     } catch (err) {
-      setStatus({ severity: 'error', message: err.message || 'Move failed' });
+      setStatus({ severity: 'error', message: err.message || tx("Move failed") });
     } finally {
       setBusy(false);
     }
@@ -422,14 +426,10 @@ export default function MediaFolderBrowser({
         }}
       >
         <Typography variant="subtitle1" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Folder color="primary" fontSize="small" />
-          Media library
-          <Chip size="small" color="primary" variant="outlined" label={`${mediaCount || pool.length} file(s)`} />
+          <Folder color="primary" fontSize="small" />{' '}{tx("Media library")}{' '}<Chip size="small" color="primary" variant="outlined" label={tx("{v0} file(s)", { v0: mediaCount || pool.length })} />
           <Chip size="small" variant="outlined" label={currentFolder || '/'} sx={{ fontFamily: 'monospace' }} />
         </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Left: folders (create, delete, tag as set / category). Right: files in the current folder.
-        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{' '}{tx("Left: folders (create, delete, tag as set / category). Right: files in the current folder.")}{' '}</Typography>
       </Box>
 
       {status && (
@@ -465,7 +465,7 @@ export default function MediaFolderBrowser({
             <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
               <TextField
                 size="small"
-                placeholder="New folder"
+                placeholder={tx("New folder")}
                 value={newFolderName}
                 onChange={(e) => setNewFolderName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') createFolder(); }}
@@ -477,7 +477,7 @@ export default function MediaFolderBrowser({
                 onClick={createFolder}
                 disabled={!newFolderName.trim()}
                 sx={{ minWidth: 0, px: 1 }}
-                title="Create folder"
+                title={tx("Create folder")}
               >
                 <CreateNewFolder fontSize="small" />
               </Button>
@@ -488,37 +488,26 @@ export default function MediaFolderBrowser({
                 disabled={disabled || !foldersPendingDelete.length || busy}
                 onClick={() => setDeleteOpen(true)}
                 sx={{ minWidth: 0, px: 1, bgcolor: 'background.paper' }}
-                title="Delete folder"
+                title={tx("Delete folder")}
               >
                 <Delete fontSize="small" />
               </Button>
             </Stack>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-              <Button size="small" variant="outlined" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_SET)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>
-                Set
-              </Button>
-              <Button size="small" variant="outlined" color="secondary" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_CATEGORY)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>
-                Category
-              </Button>
-              <Button size="small" variant="text" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(null)} sx={{ py: 0.25 }}>
-                Clear
-              </Button>
+              <Button size="small" variant="outlined" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_SET)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>{' '}{tx("Set")}{' '}</Button>
+              <Button size="small" variant="outlined" color="secondary" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(MEDIA_FOLDER_TAG_CATEGORY)} sx={{ py: 0.25, bgcolor: 'background.paper' }}>{' '}{tx("Category")}{' '}</Button>
+              <Button size="small" variant="text" disabled={disabled || busy || !foldersToTag.length} onClick={() => tagSelected(null)} sx={{ py: 0.25 }}>{' '}{tx("Clear")}{' '}</Button>
             </Stack>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-              Tags apply to checked folders, or the open folder if none checked.
-              {' · '}{directCount} direct / {recursiveCount} in view
-            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>{' '}{tx("Tags apply to checked folders, or the open folder if none checked.")}{' '}{' · '}{directCount}{' '}{tx("direct /")}{' '}{recursiveCount}{' '}{tx("in view")}{' '}</Typography>
           </Box>
           <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
             <ListItemButton dense selected={!currentFolder} onClick={() => onCurrentFolderChange('')}>
               <FolderOpen fontSize="small" sx={{ mr: 0.75, color: 'text.secondary' }} />
-              <ListItemText primary={rootLabel} primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }} />
+              <ListItemText primary={visibleRootLabel} primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }} />
             </ListItemButton>
             <Divider />
             {folders.length === 0 ? (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', p: 1.5 }}>
-                No folders yet — create one above.
-              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', p: 1.5 }}>{' '}{tx("No folders yet — create one above.")}{' '}</Typography>
             ) : (
               <List dense disablePadding>
                 {roots.map((folder) => (
@@ -537,12 +526,10 @@ export default function MediaFolderBrowser({
             )}
           </Box>
           <Box sx={{ p: 1.25, borderTop: '1px solid', borderColor: 'divider', flexShrink: 0, bgcolor: 'background.paper' }}>
-            <Typography variant="caption" color="text.secondary" display="block">
-              Sets: {taggedSets.length}
+            <Typography variant="caption" color="text.secondary" display="block">{' '}{tx("Sets:")}{' '}{taggedSets.length}
               {taggedSets.length > 0 && ` (${taggedSets.map((s) => `${s.folder}:${s.size}`).join(', ')})`}
             </Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              Categories: {taggedCats.length}
+            <Typography variant="caption" color="text.secondary" display="block">{' '}{tx("Categories:")}{' '}{taggedCats.length}
               {taggedCats.length > 0 && ` (${taggedCats.map((c) => `${c.folder}:${c.count}`).join(', ')})`}
             </Typography>
           </Box>
@@ -551,8 +538,7 @@ export default function MediaFolderBrowser({
         {/* Files panel */}
         <Box sx={{ flex: 1, minWidth: 0, p: 2, display: 'flex', flexDirection: 'column', minHeight: { md: 420 } }}>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }} alignItems="center">
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mr: 0.5 }}>
-              Files in {currentFolder || 'root'}
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mr: 0.5 }}>{' '}{tx("Files in")}{' '}{currentFolder || tx('root')}
             </Typography>
             <Button
               size="small"
@@ -560,12 +546,10 @@ export default function MediaFolderBrowser({
               startIcon={<DriveFileMove />}
               disabled={disabled || busy || (!selectedMediaEntries.length && !selectedFolders.size)}
               onClick={() => { setMoveFilesOnly(false); setMoveTarget(selectedFolders.size ? '' : currentFolder || ''); setMoveOpen(true); }}
-            >
-              Move selected
-              {(selectedFolders.size || selectedMediaEntries.length)
+            >{' '}{tx("Move selected")}{' '}{(selectedFolders.size || selectedMediaEntries.length)
                 ? ` (${[
-                  selectedFolders.size ? `${selectedFolders.size} folder` : null,
-                  selectedMediaEntries.length ? `${selectedMediaEntries.length} file` : null,
+                  selectedFolders.size ? tx("{v0} folder", { v0: selectedFolders.size }) : null,
+                  selectedMediaEntries.length ? tx("{v0} file", { v0: selectedMediaEntries.length }) : null,
                 ].filter(Boolean).join(', ')})`
                 : ''}
             </Button>
@@ -577,79 +561,71 @@ export default function MediaFolderBrowser({
       </Box>
 
       <Dialog open={moveOpen} onClose={() => !busy && setMoveOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          Move
-          {movingFolders.size ? ` ${movingFolders.size} folder(s)` : ''}
+        <DialogTitle>{' '}{tx("Move")}{' '}{movingFolders.size ? tx(" {v0} folder(s)", { v0: movingFolders.size }) : ''}
           {movingFolders.size && selectedMediaEntries.length ? ' +' : ''}
-          {selectedMediaEntries.length ? ` ${selectedMediaEntries.length} file(s)` : ''}
+          {selectedMediaEntries.length ? tx(" {v0} file(s)", { v0: selectedMediaEntries.length }) : ''}
         </DialogTitle>
         <DialogContent>
-          <Alert severity="info" sx={{ mt: 1, mb: 1 }}>
-            Moving changes the library folder only. File links and previously collected answers stay unchanged.
-            Check question folder filters when moving tagged sets or categories.
-          </Alert>
+          <Alert severity="info" sx={{ mt: 1, mb: 1 }}>{' '}{tx("Moving changes the library folder only. File links and previously collected answers stay unchanged. Check question folder filters when moving tagged sets or categories.")}{' '}</Alert>
           {!selectedMediaEntries.length && !movingFolders.size ? (
-            <Alert severity="warning" sx={{ mt: 1 }}>
-              Check folders in the tree and/or select files, then try again.
-            </Alert>
+            <Alert severity="warning" sx={{ mt: 1 }}>{' '}{tx("Check folders in the tree and/or select files, then try again.")}{' '}</Alert>
           ) : (
             <Autocomplete
               options={['', ...folders]}
+              noOptionsText={tx('No matching folders')}
+              clearText={tx('Clear')}
+              openText={tx('Open folder list')}
+              closeText={tx('Close folder list')}
               value={moveTarget}
               onChange={(_, value) => setMoveTarget(value)}
-              getOptionLabel={(folder) => folder || rootLabel}
+              getOptionLabel={(folder) => folder || visibleRootLabel}
               getOptionDisabled={(folder) => [...movingFolders].some((from) => isFolderOrDescendant(folder, from))}
               disabled={busy}
               fullWidth
               size="small"
               renderOption={(props, folder) => (
                 <li {...props} key={folder || '__root__'} style={{ overflowWrap: 'anywhere' }}>
-                  <Folder fontSize="small" sx={{ mr: 1, flexShrink: 0 }} />{folder || rootLabel}
+                  <Folder fontSize="small" sx={{ mr: 1, flexShrink: 0 }} />{folder || visibleRootLabel}
                 </li>
               )}
-              renderInput={(params) => <TextField {...params} label="Target folder"
+              renderInput={(params) => <TextField {...params} label={tx("Target folder")}
                 helperText={movingFolders.size
-                  ? 'Choose a folder. Selected folders keep their names inside it.'
-                  : 'Choose an existing folder or the project root. Type to search.'} />}
+                  ? tx("Choose a folder. Selected folders keep their names inside it.")
+                  : tx("Choose an existing folder or the project root. Type to search.")} />}
               sx={{ mt: 1 }}
             />
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setMoveOpen(false)} disabled={busy}>Cancel</Button>
+          <Button onClick={() => setMoveOpen(false)} disabled={busy}>{tx("Cancel")}</Button>
           <Button
             variant="contained"
             onClick={moveSelectedMedia}
             disabled={disabled || busy || moveTarget === null || [...movingFolders].some((from) => isFolderOrDescendant(moveTarget, from)) || (!selectedMediaEntries.length && !movingFolders.size)}
-          >
-            Move
-          </Button>
+          >{' '}{tx("Move")}{' '}</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={deleteOpen} onClose={() => !busy && setDeleteOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Delete folder{foldersPendingDelete.length > 1 ? 's' : ''}?</DialogTitle>
+        <DialogTitle>{tx('Delete {count} folder(s)?', { count: foldersPendingDelete.length })}</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mt: 1, mb: 1.5 }}>
-            This removes the folder{foldersPendingDelete.length > 1 ? 's' : ''} from the project
-            {deletePreview.files.length
-              ? ` and permanently deletes ${deletePreview.files.length} media file(s) in R2`
-              : ''}
-            . Tags on these folders are cleared. This cannot be undone.
+            {tx('This removes {count} folder(s) from the project{files}. Tags on these folders are cleared. This cannot be undone.', {
+              count: foldersPendingDelete.length,
+              files: deletePreview.files.length ? tx(' and permanently deletes {v0} media file(s) in R2', { v0: deletePreview.files.length }) : '',
+            })}
           </Alert>
-          <Typography variant="body2" sx={{ mb: 1 }}>
-            Folders: {foldersPendingDelete.map((f) => <code key={f} style={{ marginRight: 8 }}>{f}</code>)}
+          <Typography variant="body2" sx={{ mb: 1 }}>{' '}{tx("Folders:")}{' '}{foldersPendingDelete.map((f) => <code key={f} style={{ marginRight: 8 }}>{f}</code>)}
           </Typography>
           {deletePreview.subfolders.length > foldersPendingDelete.length && (
-            <Typography variant="caption" color="text.secondary" display="block">
-              Also removes nested paths: {deletePreview.subfolders.filter((f) => !foldersPendingDelete.includes(f)).join(', ')}
+            <Typography variant="caption" color="text.secondary" display="block">{' '}{tx("Also removes nested paths:")}{' '}{deletePreview.subfolders.filter((f) => !foldersPendingDelete.includes(f)).join(', ')}
             </Typography>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteOpen(false)} disabled={busy}>Cancel</Button>
+          <Button onClick={() => setDeleteOpen(false)} disabled={busy}>{tx("Cancel")}</Button>
           <Button variant="contained" color="error" onClick={deleteFolders} disabled={busy}>
-            {busy ? 'Deleting…' : 'Delete'}
+            {busy ? tx("Deleting…") : tx("Delete")}
           </Button>
         </DialogActions>
       </Dialog>

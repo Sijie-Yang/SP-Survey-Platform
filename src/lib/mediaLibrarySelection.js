@@ -13,3 +13,16 @@ export function mediaSelectionCandidates(pool, { folders = new Set(), currentFol
     return !query || (entry.name || '').toLowerCase().includes(query) || folder.toLowerCase().includes(query);
   }));
 }
+
+/** Literal filename matching: commas/semicolons/newlines separate terms; spaces stay in phrases. */
+export function mediaKeywordCandidates(pool, { keywords = '', match = 'any', allFolders = false, ...scope } = {}) {
+  const normalize = (value) => String(value).normalize('NFKC').toLowerCase();
+  const terms = [...new Set(normalize(keywords).split(/[,;，；\n]+/).map((term) => term.trim()).filter(Boolean))];
+  if (!terms.length) return [];
+  return mediaSelectionCandidates(pool, {
+    ...scope, search: '', type: 'image', ...(allFolders ? { folders: new Set(['']) } : {}),
+  }).filter((raw) => {
+    const name = normalize(normalizeMediaEntry(raw, scope.prefix)?.name || '');
+    return match === 'all' ? terms.every((term) => name.includes(term)) : terms.some((term) => name.includes(term));
+  });
+}

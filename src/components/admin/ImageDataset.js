@@ -1,3 +1,4 @@
+import { useMediaLibraryText } from '../../contexts/mediaLibraryI18n';
 import { uploadMediaBatch, pickUploadMedia } from '../../lib/mediaUploadBatch';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
@@ -72,6 +73,7 @@ import { migrateLegacyDefaultLabelColors } from '../../lib/preannotateLabels';
 import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import MediaFolderBrowser from './MediaFolderBrowser';
+import MediaKeywordSelection from './MediaKeywordSelection';
 import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
@@ -114,25 +116,25 @@ const R2_COPY_REQUEST_BATCH = 100;
 /** How many copy requests run in parallel (up to BATCH × CONCURRENCY objects in flight). */
 const R2_COPY_CONCURRENCY = 3;
 
-function templateImportProgressLabel(status) {
+function templateImportProgressLabel(status, tx) {
   if (status.phase === 'listing') {
     return isPreviewMediaImportId(status.activeTemplateId)
-      ? 'Scanning preview media library & project folders…'
-      : 'Scanning template & project folders…';
+      ? tx("Scanning preview media library & project folders…")
+      : tx("Scanning template & project folders…");
   }
-  if (status.phase === 'features') return 'Copying feature CSVs (optional metadata)…';
-  if (status.phase === 'saving') return 'Saving project image list to database…';
+  if (status.phase === 'features') return tx("Copying feature CSVs (optional metadata)…");
+  if (status.phase === 'saving') return tx("Saving project image list to database…");
   if (status.total === 0 && status.phase !== 'idle') {
     return status.activeTemplateName
-      ? `All media from "${status.activeTemplateName}" are already in this project.`
-      : 'All source media are already in this project.';
+      ? tx("All media from \"{v0}\" are already in this project.", { v0: status.activeTemplateName })
+      : tx("All source media are already in this project.");
   }
   const shown = Math.min(status.progress, status.total);
   const pct = status.total > 0 ? Math.round((shown / status.total) * 100) : 0;
   let label = status.activeTemplateName
-    ? `Importing "${status.activeTemplateName}": ${shown} / ${status.total} (${pct}%)`
-    : `Copying ${shown} / ${status.total} (${pct}%)`;
-  if (status.skipped > 0) label += ` · ${status.skipped} skipped (already present)`;
+    ? tx("Importing \"{v0}\": {v1} / {v2} ({v3}%)", { v0: status.activeTemplateName, v1: shown, v2: status.total, v3: pct })
+    : tx("Copying {v0} / {v1} ({v2}%)", { v0: shown, v1: status.total, v2: pct });
+  if (status.skipped > 0) label += tx(" · {v0} skipped (already present)", { v0: status.skipped });
   return label;
 }
 
@@ -196,6 +198,7 @@ function mediaEntryIdentity(entry, userId, projectId) {
 }
 
 export default function ImageDataset({ currentProject, onProjectUpdate, onConfigChange, onNextStep, focusRequest }) {
+  const tx = useMediaLibraryText();
   const { t, language } = useRegion();
   const zh = language === 'zh';
   const { user } = useAuth();
@@ -375,12 +378,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         if (result.unreachable || /load failed|failed to fetch|unreachable/i.test(result.error || '')) {
           setMediaActionStatus({
             loading: false,
-            error: 'Could not refresh the R2 file list (API proxy unreachable). Saved media is unchanged.',
+            error: tx("Could not refresh the R2 file list (API proxy unreachable). Saved media is unchanged."),
             success: null,
           });
           return;
         }
-        throw new Error(result.error || 'Failed to list media from R2');
+        throw new Error(result.error || tx("Failed to list media from R2"));
       }
       const images = normalizeR2Listing(result.images);
       persistPreloadedImages(images);
@@ -389,7 +392,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setMediaActionStatus({
         loading: false,
         error: null,
-        success: `Synced ${images.length} file(s) from Cloudflare R2.`,
+        success: tx("Synced {v0} file(s) from Cloudflare R2.", { v0: images.length }),
       });
     } catch (err) {
       setMediaActionStatus({ loading: false, error: err.message, success: null });
@@ -403,11 +406,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     scrollRef.current = window.scrollY;
     restoreScrollRef.current = true;
 
-    const label = entries.length === 1 ? `"${entries[0].name}"` : `${entries.length} files`;
+    const label = entries.length === 1 ? `"${entries[0].name}"` : tx("{v0} files", { v0: entries.length });
     setConfirmDialog({
-      title: 'Delete media',
-      message: `Delete ${label} from Cloudflare R2? This cannot be undone.`,
-      confirmLabel: 'Delete',
+      title: tx("Delete media"),
+      message: tx("Delete {v0} from Cloudflare R2? This cannot be undone.", { v0: label }),
+      confirmLabel: tx("Delete"),
       confirmColor: 'error',
       onConfirm: async () => {
         setConfirmDialog(null);
@@ -421,7 +424,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               const del = await deleteImagesFromR2(keys, {
                 allowedPrefix: projectR2Prefix(userId, projectId),
               });
-              if (!del.success) throw new Error(del.error || 'Failed to delete from R2');
+              if (!del.success) throw new Error(del.error || tx("Failed to delete from R2"));
             }
           }
 
@@ -443,7 +446,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           setMediaActionStatus({
             loading: false,
             error: null,
-            success: `Deleted ${entries.length} file(s).`,
+            success: tx("Deleted {v0} file(s).", { v0: entries.length }),
           });
         } catch (err) {
           setMediaActionStatus({ loading: false, error: err.message, success: null });
@@ -470,12 +473,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         onProgress: (done, total) => setMediaDownloadProgress({ done, total }),
       });
       const failHint = failed > 0
-        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        ? tx(" {v0} failed ({v1}{v2}).", { v0: failed, v1: failures.slice(0, 2).map((f) => f.name).join(', '), v2: failures.length > 2 ? '…' : '' })
         : '';
       setMediaActionStatus({
         loading: false,
         error: null,
-        success: `ZIP ${filename}: ${succeeded} file(s), folders preserved.${failHint}`,
+        success: tx("ZIP {v0}: {v1} file(s), folders preserved.{v2}", { v0: filename, v1: succeeded, v2: failHint }),
       });
     } catch (err) {
       setMediaActionStatus({ loading: false, error: err.message, success: null });
@@ -490,7 +493,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     setMediaActionStatus({ loading: true, error: null, success: null });
     try {
       await downloadMediaFile(entry);
-      setMediaActionStatus({ loading: false, error: null, success: `Downloaded ${entry.name || 'file'}.` });
+      setMediaActionStatus({ loading: false, error: null, success: tx("Downloaded {v0}.", { v0: entry.name || 'file' }) });
     } catch (err) {
       setMediaActionStatus({ loading: false, error: err.message, success: null });
     }
@@ -523,12 +526,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         onProgress: (done, total) => setMediaDownloadProgress({ done, total }),
       });
       const failHint = failed > 0
-        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        ? tx(" {v0} failed ({v1}{v2}).", { v0: failed, v1: failures.slice(0, 2).map((f) => f.name).join(', '), v2: failures.length > 2 ? '…' : '' })
         : '';
       setMediaActionStatus({
         loading: false,
         error: null,
-        success: `ZIP ${filename}: ${succeeded} file(s) under ${currentFolder || 'root'} (recursive).${failHint}`,
+        success: tx("ZIP {v0}: {v1} file(s) under {v2} (recursive).{v3}", { v0: filename, v1: succeeded, v2: currentFolder || tx('root'), v3: failHint }),
       });
     } catch (err) {
       setMediaActionStatus({ loading: false, error: err.message, success: null });
@@ -544,11 +547,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       const { filename, included, missing } = await downloadFeatureCsvsZip(projectPrefix, {
         models: [L0_MODEL, SEG_MODEL],
       });
-      const missHint = missing.length ? ` Missing: ${missing.join(', ')}.` : '';
+      const missHint = missing.length ? tx(" Missing: {v0}.", { v0: missing.join(', ') }) : '';
       setMediaActionStatus({
         loading: false,
         error: null,
-        success: `Downloaded ${filename} (${included.join(', ')}).${missHint}`,
+        success: tx("Downloaded {v0} ({v1}).{v2}", { v0: filename, v1: included.join(', '), v2: missHint }),
       });
     } catch (err) {
       setMediaActionStatus({ loading: false, error: err.message, success: null });
@@ -898,7 +901,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       if (result.success) {
         setHfStatus({ loading: false, connected: true, error: null, datasetInfo: result.datasetInfo });
       } else {
-        setHfStatus({ loading: false, connected: false, error: result.error || 'Connection failed', datasetInfo: null });
+        setHfStatus({ loading: false, connected: false, error: result.error || tx("Connection failed"), datasetInfo: null });
       }
     } catch (e) {
       setHfStatus({ loading: false, connected: false, error: e.message, datasetInfo: null });
@@ -913,7 +916,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     if (!isR2Configured()) {
       setTemplateImportStatus((prev) => ({
         ...prev,
-        error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.',
+        error: tx("Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables."),
       }));
       return;
     }
@@ -924,14 +927,14 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     if (fromPreview) {
       template = {
         id: PREVIEW_MEDIA_IMPORT_ID,
-        name: 'Preview media library',
+        name: tx("Preview media library"),
         imageDatasetConfig: {},
       };
     } else {
       template = availableTemplates.find((t) => t.id === templateId)
         || (await getTemplateById(templateId));
       if (!template) {
-        setTemplateImportStatus((prev) => ({ ...prev, error: 'Template not found.' }));
+        setTemplateImportStatus((prev) => ({ ...prev, error: tx("Template not found.") }));
         return;
       }
     }
@@ -998,8 +1001,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           activeTemplateName: template.name,
           error: null,
           success: fromPreview
-            ? 'Preview media library is empty.'
-            : `"${template.name}" has no images in its template folder.`,
+            ? tx("Preview media library is empty.")
+            : tx("\"{v0}\" has no images in its template folder.", { v0: template.name }),
         });
         return;
       }
@@ -1135,10 +1138,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         phase: 'idle',
         activeTemplateId: template.id,
         activeTemplateName: template.name,
-        error: errors.length ? `${errors.length} file(s) failed to copy.` : null,
+        error: errors.length ? tx("{v0} file(s) failed to copy.", { v0: errors.length }) : null,
         success: total === 0
-          ? `All ${listed.images.length} ${unit}(s) from "${template.name}" are already in this project.`
-          : `Imported ${newCount} ${unit}${newCount === 1 ? '' : 's'} from "${template.name}"${skipCount > 0 ? ` (${skipCount} already present — resume supported)` : ''}.`,
+          ? tx("All {v0} {v1}(s) from \"{v2}\" are already in this project.", { v0: listed.images.length, v1: tx(unit), v2: template.name })
+          : tx("Imported {v0} {v1}{v2} from \"{v3}\"{v4}.", { v0: newCount, v1: tx(unit), v2: zh || newCount === 1 ? '' : 's', v3: template.name, v4: skipCount > 0 ? tx(" ({v0} already present — resume supported)", { v0: skipCount }) : '' }),
       });
     } catch (err) {
       setTemplateImportStatus({
@@ -1179,7 +1182,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         canvas.width = width;
         canvas.height = height;
         const context = canvas.getContext('2d');
-        if (!context) throw new Error('Image conversion unavailable; disable compression and retry.');
+        if (!context) throw new Error(tx("Image conversion unavailable; disable compression and retry."));
         context.drawImage(img, 0, 0, width, height);
         // Try progressively lower quality until under maxBytes
         const tryQuality = (q) => {
@@ -1195,7 +1198,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         tryQuality(quality);
         } catch (err) { reject(err); }
       };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image could not be decoded; check the source file.')); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(tx("Image could not be decoded; check the source file."))); };
       img.src = url;
     });
   };
@@ -1262,15 +1265,15 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     restoreScrollRef.current = true;
 
     if (!hfConfig.datasetName) {
-      setPreloadStatus(prev => ({ ...prev, error: 'Please configure and test dataset connection first.' }));
+      setPreloadStatus(prev => ({ ...prev, error: tx("Please configure and test dataset connection first.") }));
       return;
     }
     if (!isR2Configured()) {
-      setPreloadStatus(prev => ({ ...prev, error: 'Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.' }));
+      setPreloadStatus(prev => ({ ...prev, error: tx("Cloudflare R2 is not configured. Please set REACT_APP_R2_PUBLIC_URL and the server-side R2 environment variables.") }));
       return;
     }
     if (!currentProject?.id) {
-      setPreloadStatus(prev => ({ ...prev, error: 'No active project. Please select or create a project before preloading images.' }));
+      setPreloadStatus(prev => ({ ...prev, error: tx("No active project. Please select or create a project before preloading images.") }));
       return;
     }
 
@@ -1385,10 +1388,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         }
 
         const result = await getImagesFromHuggingFace(hfConfig.token, datasetNameTrimmed, limit, offset);
-        if (!result.success || !result.images) throw new Error(result.error || 'Failed to fetch images');
+        if (!result.success || !result.images) throw new Error(result.error || tx("Failed to fetch images"));
         if (!result.images.length) {
           failCount += limit;
-          lastFailReason = `HuggingFace returned 0 images for offset ${offset}`;
+          lastFailReason = tx("HuggingFace returned 0 images for offset {v0}", { v0: offset });
           continue;
         }
 
@@ -1410,13 +1413,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             const imgUrl = hfImg.url;
             if (!imgUrl) {
               failCount++;
-              lastFailReason = `Missing image URL for ${relKey}`;
+              lastFailReason = tx("Missing image URL for {v0}", { v0: relKey });
               continue;
             }
             const resp = await fetch(imgUrl, fetchOptsForHfImage(imgUrl));
             if (!resp.ok) {
               failCount++;
-              lastFailReason = `Download HTTP ${resp.status} for ${relKey}`;
+              lastFailReason = tx("Download HTTP {v0} for {v1}", { v0: resp.status, v1: relKey });
               continue;
             }
             const blob = await resp.blob();
@@ -1434,7 +1437,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             const uploadResult = await uploadImageToR2(compressed, r2Key);
             if (!uploadResult.success) {
               failCount++;
-              lastFailReason = uploadResult.error || `R2 upload failed for ${relKey}`;
+              lastFailReason = uploadResult.error || tx("R2 upload failed for {v0}", { v0: relKey });
               continue;
             }
             // Track the key we used so a re-run skips it without an extra R2 list.
@@ -1490,19 +1493,17 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       onProjectUpdate(updatedProject);
 
       const failNote = failCount > 0
-        ? ` ${failCount} failed${lastFailReason ? ` (last: ${lastFailReason})` : ''}.`
+        ? tx(" {v0} failed{v1}.", { v0: failCount, v1: lastFailReason ? tx(" (last: {v0})", { v0: lastFailReason }) : '' })
         : '';
       if (newCount === 0 && failCount > 0 && allImages.length === 0) {
         setPreloadStatus({
           loading: false, progress: 0, total: totalImages, success: null,
-          error: `Preload finished with 0 images uploaded (${failCount} failed).${lastFailReason ? ` Last error: ${lastFailReason}` : ''}`,
+          error: tx("Preload finished with 0 images uploaded ({v0} failed).{v1}", { v0: failCount, v1: lastFailReason ? tx(" Last error: {v0}", { v0: lastFailReason }) : '' }),
         });
       } else {
         setPreloadStatus({
           loading: false, progress: allImages.length, total: totalImages, error: null,
-          success: `Completed! ${allImages.length} images available (${newCount} new, ${skipCount} skipped).${
-            isFolderMode && importedFolders.size ? ` ${importedFolders.size} folder(s) preserved.` : ''
-          }${failNote}`,
+          success: tx("Completed! {v0} images available ({v1} new, {v2} skipped).{v3}{v4}", { v0: allImages.length, v1: newCount, v2: skipCount, v3: isFolderMode && importedFolders.size ? tx(" {v0} folder(s) preserved.", { v0: importedFolders.size }) : '', v4: failNote }),
         });
       }
     } catch (error) {
@@ -1517,9 +1518,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
     const count = currentProject.preloadedImages?.length || 0;
     setConfirmDialog({
-      title: 'Clear all media',
-      message: `Clear all ${count} uploaded images from Cloudflare R2? This cannot be undone.`,
-      confirmLabel: 'Clear all',
+      title: tx("Clear all media"),
+      message: tx("Clear all {v0} uploaded images from Cloudflare R2? This cannot be undone.", { v0: count }),
+      confirmLabel: tx("Clear all"),
       confirmColor: 'error',
       onConfirm: async () => {
         setConfirmDialog(null);
@@ -1616,12 +1617,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       />
 
       {!isR2Configured() && (
-        <Alert severity="warning" sx={{ mb: 2.5 }}>
-          Cloudflare R2 is not configured. Set <code>REACT_APP_R2_PUBLIC_URL</code> (client) and the
-          server-side <code>R2_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>,{' '}
-          <code>R2_SECRET_ACCESS_KEY</code>, <code>R2_BUCKET_NAME</code>, <code>R2_PUBLIC_URL</code>{' '}
-          environment variables to enable image uploads.
-        </Alert>
+        <Alert severity="warning" sx={{ mb: 2.5 }}>{' '}{tx("Cloudflare R2 is not configured. Set")}{' '}<code>REACT_APP_R2_PUBLIC_URL</code>{' '}{tx("(client) and the server-side")}{' '}<code>R2_ACCOUNT_ID</code>, <code>R2_ACCESS_KEY_ID</code>,{' '}
+          <code>R2_SECRET_ACCESS_KEY</code>, <code>R2_BUCKET_NAME</code>, <code>R2_PUBLIC_URL</code>{' '}{' '}{tx("environment variables to enable image uploads.")}{' '}</Alert>
       )}
 
       {/* ── Current Status ── */}
@@ -1635,12 +1632,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           <>
             <Chip icon={<CheckCircle />} label={`${preloadedCount} ${t.mediaInR2}`} color="success" variant="outlined" />
             {Object.entries(mediaCounts).map(([mediaType, n]) => (
-              <Chip key={mediaType} size="small" label={`${n} ${mediaType}`} variant="outlined" />
+              <Chip key={mediaType} size="small" label={`${n} ${tx(mediaType)}`} variant="outlined" />
             ))}
             <Chip label="Cloudflare R2" color="primary" size="small" variant="outlined" />
             {currentProject?.preloadedAt && (
               <Typography variant="caption" color="text.secondary">
-                {t.mediaLastUpload} {new Date(currentProject.preloadedAt).toLocaleString()}
+                {t.mediaLastUpload} {new Date(currentProject.preloadedAt).toLocaleString(zh ? 'zh-CN' : 'en-US')}
               </Typography>
             )}
           </>
@@ -1718,7 +1715,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                 {historyIds.map((tid) => {
                   const hist = templateImportHistory[tid];
                   const tpl = isPreviewMediaImportId(tid)
-                    ? { name: 'Preview media library' }
+                    ? { name: tx("Preview media library") }
                     : availableTemplates.find((t) => t.id === tid);
                   const live = templateProgressMap[tid];
                   const total = live?.totalInTemplate
@@ -1736,7 +1733,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                         <strong>{name}</strong> · {imported}/{total}
                       </Typography>
                       {isComplete ? (
-                        <Chip size="small" color="success" label="Done" sx={{ height: 20 }} />
+                        <Chip size="small" color="success" label={tx("Done")} sx={{ height: 20 }} />
                       ) : (
                         <Button
                           size="small"
@@ -1748,7 +1745,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                           }}
                           sx={{ py: 0, minHeight: 24 }}
                         >
-                          {isActive ? '…' : `Resume ${remaining}`}
+                          {isActive ? '…' : tx("Resume {v0}", { v0: remaining })}
                         </Button>
                       )}
                     </Box>
@@ -1759,22 +1756,20 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           })()}
 
           {!isR2Configured() ? (
-            <Alert severity="warning" sx={{ mb: 1.5 }}>R2 not configured.</Alert>
+            <Alert severity="warning" sx={{ mb: 1.5 }}>{tx("R2 not configured.")}</Alert>
           ) : loadingTemplates ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
               <CircularProgress size={18} />
-              <Typography variant="body2" color="text.secondary">Loading…</Typography>
+              <Typography variant="body2" color="text.secondary">{tx("Loading…")}</Typography>
             </Box>
           ) : !hasImportSources ? (
-            <Alert severity="info" sx={{ mb: 1.5 }}>
-              No templates or preview media library files yet.
-            </Alert>
+            <Alert severity="info" sx={{ mb: 1.5 }}>{' '}{tx("No templates or preview media library files yet.")}{' '}</Alert>
           ) : (
             <FormControl size="small" fullWidth sx={{ mb: 1.5 }}>
-              <InputLabel id="template-import-select">Source</InputLabel>
+              <InputLabel id="template-import-select">{tx("Source")}</InputLabel>
               <Select
                 labelId="template-import-select"
-                label="Source"
+                label={tx("Source")}
                 value={selectedTemplateId}
                 onChange={(e) => setSelectedTemplateId(e.target.value)}
                 disabled={templateImportStatus.loading}
@@ -1784,15 +1779,15 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                     const live = templateProgressMap[PREVIEW_MEDIA_IMPORT_ID];
                     const hist = templateImportHistory[PREVIEW_MEDIA_IMPORT_ID];
                     const status = formatTemplateImportStatus(live, hist)
-                      || (previewMediaCount > 0 ? `${previewMediaCount} files` : 'empty');
-                    return `Preview media library (${status})`;
+                      || (previewMediaCount > 0 ? tx("{v0} files", { v0: previewMediaCount }) : 'empty');
+                    return tx("Preview media library ({v0})", { v0: status });
                   })()}
                 </MenuItem>
                 {availableTemplates.map((t) => {
                   const live = templateProgressMap[t.id];
                   const hist = templateImportHistory[t.id];
                   const status = formatTemplateImportStatus(live, hist)
-                    || `${t.preloadedImages?.length || 0} files`;
+                    || tx("{v0} files", { v0: t.preloadedImages?.length || 0 });
                   return (
                     <MenuItem key={t.id} value={t.id}>
                       {t.name} ({status})
@@ -1806,7 +1801,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           {templateImportStatus.loading && (
             <Box sx={{ mb: 1.5 }}>
               <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
-                {templateImportProgressLabel(templateImportStatus)}
+                {templateImportProgressLabel(templateImportStatus, tx)}
               </Typography>
               <LinearProgress
                 variant={templateImportStatus.phase === 'copying' && templateImportStatus.total > 0
@@ -1913,8 +1908,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           </Typography>
           {directUploadStatus.loading && (
             <Box sx={{ mb: 1.5 }}>
-              <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
-                Uploading… {directUploadStatus.progress} / {directUploadStatus.total}
+              <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>{' '}{tx("Uploading…")}{' '}{directUploadStatus.progress} / {directUploadStatus.total}
               </Typography>
               <LinearProgress
                 variant="determinate"
@@ -2003,15 +1997,14 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             <Alert severity={hfStatus.connected ? 'success' : 'error'} sx={{ mb: 1.5 }} icon={false}>
               <Typography variant="caption">
                 {hfStatus.connected
-                  ? `Connected${hfStatus.datasetInfo?.imageCount != null ? ` · ${hfStatus.datasetInfo.imageCount} images` : ''}`
+                  ? tx("Connected{v0}", { v0: hfStatus.datasetInfo?.imageCount != null ? tx(" · {v0} images", { v0: hfStatus.datasetInfo.imageCount }) : '' })
                   : hfStatus.error}
               </Typography>
             </Alert>
           )}
           {preloadStatus.loading && (
             <Box sx={{ mb: 1.5 }}>
-              <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>
-                HF → R2… {preloadStatus.progress} / {preloadStatus.total}
+              <Typography variant="caption" display="block" sx={{ mb: 0.5 }}>{' '}{tx("HF → R2…")}{' '}{preloadStatus.progress} / {preloadStatus.total}
               </Typography>
               <LinearProgress
                 variant="determinate"
@@ -2063,9 +2056,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         disabled={directUploadStatus.loading || !!pendingMediaSave}
       >
         {preloadedCount === 0 ? (
-          <Alert severity="info">
-            No media uploaded yet. Use the import / upload cards above, then organize files with folders on the left.
-          </Alert>
+          <Alert severity="info">{' '}{tx("No media uploaded yet. Use the import / upload cards above, then organize files with folders on the left.")}{' '}</Alert>
         ) : (
           <>
 
@@ -2077,17 +2068,21 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   startIcon={refreshingMedia ? <CircularProgress size={14} /> : <Refresh />}
                   onClick={refreshMediaFromR2}
                   disabled={refreshingMedia || !isR2Configured() || directUploadStatus.loading || !!pendingMediaSave}
-                >
-                  Refresh from R2
-                </Button>
+                >{' '}{tx("Refresh from R2")}{' '}</Button>
+                <MediaKeywordSelection
+                  pool={currentProject?.preloadedImages}
+                  folders={selectedFolders} currentFolder={currentFolder} prefix={projectPrefix}
+                  selected={selectedMedia} getId={getMediaId}
+                  disabled={mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
+                  onSelect={(matches) => setSelectedMedia((prev) => new Set([...prev, ...matches.map(getMediaId)]))}
+                />
                 <Button
                   size="small"
                   variant="outlined"
                   startIcon={<SelectAll />}
                   onClick={selectAllFiltered}
                   disabled={!selectionCandidates.length}
-                >
-                  Select filtered ({selectionCandidates.length})
+                >{' '}{tx("Select filtered (")}{selectionCandidates.length})
                 </Button>
                 <Button
                   size="small"
@@ -2095,17 +2090,14 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   startIcon={<Deselect />}
                   onClick={clearMediaSelection}
                   disabled={!selectedMedia.size}
-                >
-                  Clear selection
-                </Button>
+                >{' '}{tx("Clear selection")}{' '}</Button>
                 <Button
                   size="small"
                   variant="outlined"
                   startIcon={mediaActionStatus.loading && mediaDownloadProgress ? <CircularProgress size={14} /> : <CloudDownload />}
                   onClick={handleDownloadSelectedMedia}
                   disabled={!selectedMedia.size || mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
-                >
-                  ZIP selected ({selectedMedia.size})
+                >{' '}{tx("ZIP selected (")}{selectedMedia.size})
                 </Button>
                 <Button
                   size="small"
@@ -2113,8 +2105,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   startIcon={<CloudDownload />}
                   onClick={handleDownloadFilteredMedia}
                   disabled={!filteredMedia.length || mediaActionStatus.loading}
-                >
-                  ZIP this folder view ({filteredMedia.length})
+                >{' '}{tx("ZIP this folder view (")}{filteredMedia.length})
                 </Button>
                 <Button
                   size="small"
@@ -2122,26 +2113,21 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   startIcon={<CloudDownload />}
                   onClick={handleDownloadFolderRecursive}
                   disabled={mediaActionStatus.loading || !(currentProject?.preloadedImages || []).length}
-                >
-                  ZIP folder+subfolders
-                </Button>
+                >{' '}{tx("ZIP folder+subfolders")}{' '}</Button>
                 <Button
                   size="small"
                   variant="outlined"
                   startIcon={<CloudDownload />}
                   onClick={handleDownloadFeatureCsvs}
                   disabled={!projectPrefix || !isR2Configured() || mediaActionStatus.loading}
-                >
-                  Download L0 + Seg CSV
-                </Button>
+                >{' '}{tx("Download L0 + Seg CSV")}{' '}</Button>
                 <Button
                   size="small"
                   variant="outlined"
                   startIcon={<DriveFileMove />}
                   onClick={() => setOpenMoveSignal((n) => n + 1)}
                   disabled={!selectedMedia.size || mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
-                >
-                  Move to folder… ({selectedMedia.size})
+                >{' '}{tx("Move to folder… (")}{selectedMedia.size})
                 </Button>
                 <Button
                   size="small"
@@ -2150,19 +2136,16 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   startIcon={<Delete />}
                   onClick={handleDeleteSelectedMedia}
                   disabled={!selectedMedia.size || mediaActionStatus.loading || directUploadStatus.loading || !!pendingMediaSave}
-                >
-                  Delete selected ({selectedMedia.size})
+                >{' '}{tx("Delete selected (")}{selectedMedia.size})
                 </Button>
-                <Button variant="outlined" color="error" onClick={handleClearImages} disabled={directUploadStatus.loading || !!pendingMediaSave} startIcon={<Delete />} size="small">
-                  Clear all
-                </Button>
+                <Button variant="outlined" color="error" onClick={handleClearImages} disabled={directUploadStatus.loading || !!pendingMediaSave} startIcon={<Delete />} size="small">{' '}{tx("Clear all")}{' '}</Button>
               </Box>
             </Box>
 
             <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
               <TextField
                 size="small"
-                placeholder="Search by filename…"
+                placeholder={tx("Search by filename…")}
                 value={mediaSearch}
                 onChange={(e) => setMediaSearch(e.target.value)}
                 sx={{ minWidth: 220, flex: 1 }}
@@ -2175,17 +2158,17 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                 }}
               />
               <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel id="media-filter-label">Type</InputLabel>
+                <InputLabel id="media-filter-label">{tx("Type")}</InputLabel>
                 <Select
                   labelId="media-filter-label"
-                  label="Type"
+                  label={tx("Type")}
                   value={mediaFilter}
                   onChange={(e) => setMediaFilter(e.target.value)}
                 >
-                  <MenuItem value="all">All types</MenuItem>
-                  <MenuItem value="image">Image</MenuItem>
-                  <MenuItem value="video">Video</MenuItem>
-                  <MenuItem value="audio">Audio</MenuItem>
+                  <MenuItem value="all">{tx("All types")}</MenuItem>
+                  <MenuItem value="image">{tx("Image")}</MenuItem>
+                  <MenuItem value="video">{tx("Video")}</MenuItem>
+                  <MenuItem value="audio">{tx("Audio")}</MenuItem>
                 </Select>
               </FormControl>
             </Box>
@@ -2195,7 +2178,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             {mediaDownloadProgress && (
               <Box sx={{ mb: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                  <Typography variant="body2">Downloading…</Typography>
+                  <Typography variant="body2">{tx("Downloading…")}</Typography>
                   <Typography variant="body2" color="text.secondary">
                     {mediaDownloadProgress.done} / {mediaDownloadProgress.total}
                   </Typography>
@@ -2208,20 +2191,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               </Box>
             )}
 
-            {selectedFolders.size > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>
-              Select filtered uses {selectedFolders.size} checked folder(s), including subfolders, and the current search/type filters.
-              {' '}{selectionCandidates.length} matching file(s). The gallery shows the open folder.
-            </Alert>}
+            {selectedFolders.size > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>{' '}{tx("Select filtered uses")}{' '}{selectedFolders.size}{' '}{tx("checked folder(s), including subfolders, and the current search/type filters.")}{' '}{' '}{selectionCandidates.length}{' '}{tx("matching file(s). The gallery shows the open folder.")}{' '}</Alert>}
             {filteredMedia.length === 0 ? (
-              <Alert severity="info">No media matches your search or filter.</Alert>
+              <Alert severity="info">{tx("No media matches your search or filter.")}</Alert>
             ) : (
               <>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  Showing {pagedMedia.length} of {filteredMedia.length} file(s)
-                  {mediaSearch || mediaFilter !== 'all' ? ' (filtered)' : ''}.
-                  Click a card to preview (image / video / audio); images also focus Pre-annotate below.
-                  Use checkboxes for multi-select download / move / delete.
-                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{' '}{tx("Showing")}{' '}{pagedMedia.length}{' '}{tx("of")}{' '}{filteredMedia.length}{' '}{tx("file(s)")}{' '}{mediaSearch || mediaFilter !== 'all' ? ` ${tx('(filtered)')}` : ''}{tx(". Click a card to preview (image / video / audio); images also focus Pre-annotate below. Use checkboxes for multi-select download / move / delete.")}{' '}</Typography>
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 1.5, mb: 2 }}>
                   {pagedMedia.map((img) => {
                     const t = img.type || inferMediaType(img.name || img.url);
@@ -2261,7 +2236,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                           sx={{ position: 'absolute', top: 2, left: 2, zIndex: 2, bgcolor: 'rgba(255,255,255,0.85)', borderRadius: 1, p: 0.25 }}
                         />
                         <Box sx={{ position: 'absolute', top: 2, right: 2, zIndex: 2, display: 'flex', gap: 0.25 }}>
-                          <Tooltip title="Preview">
+                          <Tooltip title={tx("Preview")}>
                             <IconButton
                               className="media-action-btn"
                               size="small"
@@ -2273,7 +2248,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                               <Visibility fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="Download">
+                          <Tooltip title={tx("Download")}>
                             <IconButton
                               className="media-action-btn"
                               size="small"
@@ -2287,7 +2262,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                               <CloudDownload fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="Delete">
+                          <Tooltip title={tx("Delete")}>
                             <IconButton
                               className="media-action-btn"
                               size="small"
@@ -2308,7 +2283,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                           ) : t === 'audio' ? (
                             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5, p: 1 }}>
                               <Audiotrack fontSize="small" color="action" />
-                              <Typography variant="caption" sx={{ textAlign: 'center' }}>Audio</Typography>
+                              <Typography variant="caption" sx={{ textAlign: 'center' }}>{tx("Audio")}</Typography>
                             </Box>
                           ) : (
                             <img
@@ -2333,7 +2308,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                             {t === 'image' && l0Ok && (
                               <Chip
                                 size="small"
-                                label="L0"
+                                label={tx("L0")}
                                 color="success"
                                 sx={{ height: 18, fontSize: '0.65rem' }}
                                 onClick={(e) => {
@@ -2348,12 +2323,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                               />
                             )}
                             {t === 'image' && l0Err && (
-                              <Chip size="small" label="L0!" color="warning" sx={{ height: 18, fontSize: '0.65rem' }} title="L0 failed" />
+                              <Chip size="small" label={tx("L0!")} color="warning" sx={{ height: 18, fontSize: '0.65rem' }} title={tx("L0 failed")} />
                             )}
                             {t === 'image' && segOk && (
                               <Chip
                                 size="small"
-                                label="Seg"
+                                label={tx("Seg")}
                                 color="info"
                                 sx={{ height: 18, fontSize: '0.65rem' }}
                                 onClick={(e) => {
@@ -2368,12 +2343,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                               />
                             )}
                             {t === 'image' && segErr && (
-                              <Chip size="small" label="Seg!" color="warning" sx={{ height: 18, fontSize: '0.65rem' }} title="Seg failed" />
+                              <Chip size="small" label={tx("Seg!")} color="warning" sx={{ height: 18, fontSize: '0.65rem' }} title={tx("Seg failed")} />
                             )}
                             {t === 'image' && samOk && (
                               <Chip
                                 size="small"
-                                label="SAM"
+                                label={tx("SAM")}
                                 color="secondary"
                                 sx={{ height: 18, fontSize: '0.65rem' }}
                                 onClick={(e) => {
@@ -2397,6 +2372,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
                     <Pagination
                       count={totalMediaPages}
+                      getItemAriaLabel={(type, page, selected) => type === 'page'
+                        ? tx(selected ? 'Current page {page}' : 'Go to page {page}', { page })
+                        : tx(`Go to ${type} page`)}
                       page={mediaPage}
                       onChange={(_, p) => setMediaPage(p)}
                       color="primary"
@@ -2437,23 +2415,23 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                   size="small"
                   color="primary"
                   variant="outlined"
-                  label={`${count} set(s) × ${size} file(s)`}
+                  label={tx("{v0} set(s) × {v1} file(s)", { v0: count, v1: size })}
                 />
               ))}
           </Box>
           <FormControl size="small" sx={{ minWidth: 160, mb: 2 }}>
-            <InputLabel id="group-size-filter">Filter by set size</InputLabel>
+            <InputLabel id="group-size-filter">{tx("Filter by set size")}</InputLabel>
             <Select
               labelId="group-size-filter"
-              label="Filter by set size"
+              label={tx("Filter by set size")}
               value={groupSizeFilter}
               onChange={(e) => setGroupSizeFilter(e.target.value)}
             >
-              <MenuItem value="all">All sizes</MenuItem>
+              <MenuItem value="all">{tx("All sizes")}</MenuItem>
               {Object.keys(groupSummary.bySize)
                 .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
                 .map((size) => (
-                  <MenuItem key={size} value={size}>{size} file(s) per set</MenuItem>
+                  <MenuItem key={size} value={size}>{size}{' '}{tx("file(s) per set")}</MenuItem>
                 ))}
             </Select>
           </FormControl>
@@ -2461,10 +2439,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             <Table size="small">
               <TableHead>
                 <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
-                  <TableCell>Set folder</TableCell>
-                  <TableCell align="center">Size</TableCell>
-                  <TableCell>Types</TableCell>
-                  <TableCell>Files</TableCell>
+                  <TableCell>{tx("Set folder")}</TableCell>
+                  <TableCell align="center">{tx("Size")}</TableCell>
+                  <TableCell>{tx("Types")}</TableCell>
+                  <TableCell>{tx("Files")}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -2475,7 +2453,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                     </TableCell>
                     <TableCell align="center">{g.size}</TableCell>
                     <TableCell>
-                      <Typography variant="caption">{g.types.join(' + ')}</Typography>
+                      <Typography variant="caption">{g.types.map((type) => tx(type)).join(' + ')}</Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="caption" component="div" sx={{ fontFamily: 'monospace' }}>
@@ -2488,12 +2466,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             </Table>
           </TableContainer>
           {filteredPairedGroups.length > 50 && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              Showing first 50 of {filteredPairedGroups.length} groups.
-            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>{' '}{tx("Showing first 50 of")}{' '}{filteredPairedGroups.length}{' '}{tx("groups.")}{' '}</Typography>
           )}
           {filteredPairedGroups.length === 0 && (
-            <Alert severity="warning" sx={{ mt: 1 }}>No groups match this size filter.</Alert>
+            <Alert severity="warning" sx={{ mt: 1 }}>{tx("No groups match this size filter.")}</Alert>
           )}
         </Box>
       )}
@@ -2510,10 +2486,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
             <Table size="small">
               <TableHead>
                 <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
-                  <TableCell>Category</TableCell>
-                  <TableCell align="center">Files</TableCell>
-                  <TableCell>Types</TableCell>
-                  <TableCell>Sample filenames</TableCell>
+                  <TableCell>{tx("Category")}</TableCell>
+                  <TableCell align="center">{tx("Files")}</TableCell>
+                  <TableCell>{tx("Types")}</TableCell>
+                  <TableCell>{tx("Sample filenames")}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -2524,12 +2500,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
                     </TableCell>
                     <TableCell align="center">{c.count}</TableCell>
                     <TableCell>
-                      <Typography variant="caption">{c.types.join(', ')}</Typography>
+                      <Typography variant="caption">{c.types.map((type) => tx(type)).join(', ')}</Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
                         {c.members.slice(0, 4).map((m) => m.name).join(' · ')}
-                        {c.count > 4 ? ` · +${c.count - 4} more` : ''}
+                        {c.count > 4 ? tx(" · +{v0} more", { v0: c.count - 4 }) : ''}
                       </Typography>
                     </TableCell>
                   </TableRow>
@@ -2687,14 +2663,12 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
       {onNextStep && (
         <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end' }}>
-          <Button variant="contained" color="primary" size="large" onClick={onNextStep} disabled={directUploadStatus.loading || !!pendingMediaSave} sx={{ px: 4, py: 1.5, fontWeight: 600 }}>
-            Next: Survey Builder →
-          </Button>
+          <Button variant="contained" color="primary" size="large" onClick={onNextStep} disabled={directUploadStatus.loading || !!pendingMediaSave} sx={{ px: 4, py: 1.5, fontWeight: 600 }}>{' '}{tx("Next: Survey Builder →")}{' '}</Button>
         </Box>
       )}
 
       <Dialog open={!!featureInspect} onClose={() => setFeatureInspect(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>{featureInspect?.name || 'Image features'}</DialogTitle>
+        <DialogTitle>{featureInspect?.name || tx("Image features")}</DialogTitle>
         <DialogContent dividers>
           {featureInspect?.url && (
             <Box sx={{ mb: 2, textAlign: 'center' }}>
@@ -2705,12 +2679,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
               />
             </Box>
           )}
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-            media_id: {featureInspect?.mediaId}
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{' '}{tx("media_id:")}{' '}{featureInspect?.mediaId}
           </Typography>
           {featureInspect?.records?.[L0_MODEL]?.features && (
             <Box sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>L0 ({L0_MODEL})</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>{tx("L0 (")}{L0_MODEL})</Typography>
               {Object.entries(featureInspect.records[L0_MODEL].features).map(([k, v]) => (
                 <Typography key={k} variant="caption" sx={{ display: 'block', fontFamily: 'monospace' }}>
                   {k}: {typeof v === 'number' ? v.toFixed(4) : String(v)}
@@ -2720,7 +2693,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           )}
           {featureInspect?.records?.[SEG_MODEL]?.features && (
             <Box sx={{ mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>Streetscape seg ({SEG_MODEL})</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>{tx("Streetscape seg (")}{SEG_MODEL})</Typography>
               {Object.entries(featureInspect.records[SEG_MODEL].features)
                 .filter(([k]) => k.startsWith('seg_ratio_'))
                 .sort((a, b) => (b[1] || 0) - (a[1] || 0))
@@ -2741,7 +2714,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           )}
           {featureInspect?.records?.[SAM_PREANNOT_MODEL]?.features && (
             <Box>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>SAM pre-annot ({SAM_PREANNOT_MODEL})</Typography>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>{tx("SAM pre-annot (")}{SAM_PREANNOT_MODEL})</Typography>
               {Object.entries(featureInspect.records[SAM_PREANNOT_MODEL].features).map(([k, v]) => (
                 <Typography key={k} variant="caption" sx={{ display: 'block', fontFamily: 'monospace' }}>
                   {k}: {typeof v === 'number' ? v.toFixed(4) : String(v)}
@@ -2751,7 +2724,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFeatureInspect(null)}>Close</Button>
+          <Button onClick={() => setFeatureInspect(null)}>{tx("Close")}</Button>
         </DialogActions>
       </Dialog>
 
@@ -2760,6 +2733,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         title={confirmDialog?.title}
         message={confirmDialog?.message}
         confirmLabel={confirmDialog?.confirmLabel}
+        cancelLabel={tx("Cancel")}
         confirmColor={confirmDialog?.confirmColor || 'error'}
         onConfirm={() => confirmDialog?.onConfirm?.()}
         onCancel={() => setConfirmDialog(null)}

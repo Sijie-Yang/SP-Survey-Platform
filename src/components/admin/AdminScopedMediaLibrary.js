@@ -1,3 +1,4 @@
+import { useMediaLibraryText } from '../../contexts/mediaLibraryI18n';
 /**
  * Admin Media Library for template or project prefixes.
  * Same folder / set / category tooling as researcher MediaFolderBrowser.
@@ -13,6 +14,7 @@ import {
   DriveFileMove, OpenInNew, Visibility, Audiotrack, PhotoLibrary,
 } from '@mui/icons-material';
 import MediaFolderBrowser from './MediaFolderBrowser';
+import MediaKeywordSelection from './MediaKeywordSelection';
 import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
 import { uploadFolderForFile, uploadObjectKey, pickUploadMedia } from '../../lib/mediaUploadBatch';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
@@ -119,6 +121,7 @@ export default function AdminScopedMediaLibrary({
   thumbnailUrl = null,
   onSetThumbnail = null,
 }) {
+  const tx = useMediaLibraryText();
   const prefix = String(r2Prefix || '').replace(/\/?$/, '/');
   const showSupplementary = enableSupplementary ?? !!allowTemplateKeys;
   const [mediaOwner, setMediaOwner] = useState(() => ({
@@ -199,7 +202,7 @@ export default function AdminScopedMediaLibrary({
       onImagesChange?.(nextOwner.preloadedImages || []);
       if (!silent) setInfo('Saved.');
     } catch (err) {
-      setError(err.message || 'Failed to save');
+      setError(err.message || tx("Failed to save"));
       if (throwOnError) throw err;
     }
   }, [prefix, onImagesChange]);
@@ -216,12 +219,12 @@ export default function AdminScopedMediaLibrary({
         if (result.unreachable || /load failed|failed to fetch|unreachable/i.test(result.error || '')) {
           if (!silent) {
             setError(
-              'Could not refresh the R2 file list (API proxy unreachable). Saved media is unchanged.',
+              tx("Could not refresh the R2 file list (API proxy unreachable). Saved media is unchanged."),
             );
           }
           return;
         }
-        throw new Error(result.error || 'Failed to list media');
+        throw new Error(result.error || tx("Failed to list media"));
       }
       const mapped = sortMediaByName(
         (result.images || []).map((img) => normalizeMediaEntry({
@@ -255,9 +258,9 @@ export default function AdminScopedMediaLibrary({
         preloaded_at: new Date().toISOString(),
         preloaded_source: 'r2',
       });
-      if (!silent) setInfo(`Synced ${mapped.length} file(s) from R2.`);
+      if (!silent) setInfo(tx("Synced {v0} file(s) from R2.", { v0: mapped.length }));
     } catch (err) {
-      if (!silent) setError(err.message || 'Refresh failed');
+      if (!silent) setError(err.message || tx("Refresh failed"));
     } finally {
       setSyncing(false);
     }
@@ -327,9 +330,9 @@ export default function AdminScopedMediaLibrary({
   };
 
   const handleUpload = async (fileList) => {
-    if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
+    if (!isR2Configured()) { setError(tx("Cloudflare R2 is not configured.")); return; }
     const { files, skipped } = pickUploadMedia(fileList);
-    if (!files.length) { setInfo('No supported media files found in this selection.'); return; }
+    if (!files.length) { setInfo(tx("No supported media files found in this selection.")); return; }
     setUploading({ active: true, progress: 0, total: files.length });
     setError('');
     setInfo('');
@@ -379,7 +382,7 @@ export default function AdminScopedMediaLibrary({
         okCount += 1;
       } else {
         failCount += 1;
-        if (!error) setError(`Upload failed: ${result.error}`);
+        if (!error) setError(tx("Upload failed: {v0}", { v0: result.error }));
       }
     });
 
@@ -391,9 +394,9 @@ export default function AdminScopedMediaLibrary({
       preloadedSource: 'r2',
     });
     setInfo((failCount > 0
-      ? `Uploaded ${okCount}, ${failCount} failed.`
-      : `Uploaded ${okCount} file(s) to ${folder || 'root'}.`)
-      + (skipped ? ` Skipped ${skipped} non-media or system files.` : ''));
+      ? tx("Uploaded {v0}, {v1} failed.", { v0: okCount, v1: failCount })
+      : tx("Uploaded {v0} file(s) to {v1}.", { v0: okCount, v1: folder || tx('root') }))
+      + (skipped ? tx(" Skipped {v0} non-media or system files.", { v0: skipped }) : ''));
   };
 
   const handleDeleteSelected = async () => {
@@ -412,7 +415,7 @@ export default function AdminScopedMediaLibrary({
           allowedPrefix: prefix,
           allowTemplateKeys: !!allowTemplateKeys,
         });
-        if (!del.success) throw new Error(del.error || 'Delete failed');
+        if (!del.success) throw new Error(del.error || tx("Delete failed"));
       }
       const remove = new Set(keys);
       const remaining = pool.filter((raw) => {
@@ -426,16 +429,16 @@ export default function AdminScopedMediaLibrary({
         preloadedImages: remaining,
         preloadedAt: new Date().toISOString(),
       });
-      setInfo(`Deleted ${keys.length} file(s).`);
+      setInfo(tx("Deleted {v0} file(s).", { v0: keys.length }));
     } catch (err) {
-      setError(err.message || 'Delete failed');
+      setError(err.message || tx("Delete failed"));
     } finally {
       setBusy(false);
     }
   };
 
   const handleClearAll = async () => {
-    if (!window.confirm('Clear ALL media under this prefix? This cannot be undone.')) return;
+    if (!window.confirm(tx("Clear ALL media under this prefix? This cannot be undone."))) return;
     setBusy(true);
     setError('');
     try {
@@ -446,7 +449,7 @@ export default function AdminScopedMediaLibrary({
           allowedPrefix: prefix,
           allowTemplateKeys: !!allowTemplateKeys,
         });
-        if (!del.success) throw new Error(del.error || 'Clear failed');
+        if (!del.success) throw new Error(del.error || tx("Clear failed"));
       }
       setSelected(new Set());
       setCurrentFolder('');
@@ -457,9 +460,9 @@ export default function AdminScopedMediaLibrary({
         preloadedSource: null,
         imageDatasetConfig: sanitizeMediaFolderConfig({}),
       });
-      setInfo('Cleared all media and folder tags.');
+      setInfo(tx("Cleared all media and folder tags."));
     } catch (err) {
-      setError(err.message || 'Clear failed');
+      setError(err.message || tx("Clear failed"));
     } finally {
       setBusy(false);
     }
@@ -475,11 +478,11 @@ export default function AdminScopedMediaLibrary({
         filename: `media_selected_${new Date().toISOString().slice(0, 10)}.zip`,
       });
       const failHint = failed > 0
-        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        ? tx(" {v0} failed ({v1}{v2}).", { v0: failed, v1: failures.slice(0, 2).map((f) => f.name).join(', '), v2: failures.length > 2 ? '…' : '' })
         : '';
-      setInfo(`ZIP ${filename}: ${succeeded} file(s), folders preserved.${failHint}`);
+      setInfo(tx("ZIP {v0}: {v1} file(s), folders preserved.{v2}", { v0: filename, v1: succeeded, v2: failHint }));
     } catch (err) {
-      setError(err.message || 'Download failed');
+      setError(err.message || tx("Download failed"));
     } finally {
       setBusy(false);
     }
@@ -494,11 +497,11 @@ export default function AdminScopedMediaLibrary({
         projectPrefix: prefix,
       });
       const failHint = failed > 0
-        ? ` ${failed} failed (${failures.slice(0, 2).map((f) => f.name).join(', ')}${failures.length > 2 ? '…' : ''}).`
+        ? tx(" {v0} failed ({v1}{v2}).", { v0: failed, v1: failures.slice(0, 2).map((f) => f.name).join(', '), v2: failures.length > 2 ? '…' : '' })
         : '';
-      setInfo(`ZIP ${filename}: ${succeeded} file(s) under ${currentFolder || 'root'} (recursive).${failHint}`);
+      setInfo(tx("ZIP {v0}: {v1} file(s) under {v2} (recursive).{v3}", { v0: filename, v1: succeeded, v2: currentFolder || tx('root'), v3: failHint }));
     } catch (err) {
-      setError(err.message || 'Download failed');
+      setError(err.message || tx("Download failed"));
     } finally {
       setBusy(false);
     }
@@ -512,10 +515,10 @@ export default function AdminScopedMediaLibrary({
       const { filename, included, missing } = await downloadFeatureCsvsZip(prefix, {
         models: [L0_MODEL, SEG_MODEL],
       });
-      const missHint = missing.length ? ` Missing: ${missing.join(', ')}.` : '';
-      setInfo(`Downloaded ${filename} (${included.join(', ')}).${missHint}`);
+      const missHint = missing.length ? tx(" Missing: {v0}.", { v0: missing.join(', ') }) : '';
+      setInfo(tx("Downloaded {v0} ({v1}).{v2}", { v0: filename, v1: included.join(', '), v2: missHint }));
     } catch (err) {
-      setError(err.message || 'Download failed');
+      setError(err.message || tx("Download failed"));
     } finally {
       setBusy(false);
     }
@@ -533,25 +536,25 @@ export default function AdminScopedMediaLibrary({
     setSupplementaryFiles(nextFiles);
     try {
       await persistRef.current?.({ survey_config: nextConfig });
-      if (!silent) setInfo('Supplementary files updated.');
+      if (!silent) setInfo(tx("Supplementary files updated."));
     } catch (err) {
-      setError(err.message || 'Failed to save supplementary files');
+      setError(err.message || tx("Failed to save supplementary files"));
     }
   };
 
   const handleUploadSupplementary = async (fileList) => {
-    if (!isR2Configured()) { setError('Cloudflare R2 is not configured.'); return; }
+    if (!isR2Configured()) { setError(tx("Cloudflare R2 is not configured.")); return; }
     const files = Array.from(fileList || []);
     if (!files.length) return;
     const room = MAX_SUPPLEMENTARY_FILES - supplementaryFiles.length;
     if (room <= 0) {
-      setError(`Supplementary file limit reached (${MAX_SUPPLEMENTARY_FILES}).`);
+      setError(tx("Supplementary file limit reached ({v0}).", { v0: MAX_SUPPLEMENTARY_FILES }));
       return;
     }
     const batch = files.slice(0, room);
     const oversized = batch.find((f) => f.size > MAX_SUPPLEMENTARY_BYTES);
     if (oversized) {
-      setError(`"${oversized.name}" is too large (max ${Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024))} MB).`);
+      setError(tx("\"{v0}\" is too large (max {v1} MB).", { v0: oversized.name, v1: Math.round(MAX_SUPPLEMENTARY_BYTES / (1024 * 1024)) }));
       return;
     }
     setSuppUploading(true);
@@ -564,7 +567,7 @@ export default function AdminScopedMediaLibrary({
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
         const key = `${prefix}supplementary/${Date.now()}_${i}_${safeName}`;
         const result = await uploadImageToR2(file, key);
-        if (!result.success) throw new Error(result.error || `Failed to upload ${file.name}`);
+        if (!result.success) throw new Error(result.error || tx("Failed to upload {v0}", { v0: file.name }));
         uploaded.push({
           url: result.url,
           name: file.name,
@@ -574,9 +577,9 @@ export default function AdminScopedMediaLibrary({
         });
       }
       await persistSupplementary(uploaded.slice(0, MAX_SUPPLEMENTARY_FILES));
-      setInfo(`Uploaded ${batch.length} supplementary file(s).`);
+      setInfo(tx("Uploaded {v0} supplementary file(s).", { v0: batch.length }));
     } catch (err) {
-      setError(err.message || 'Supplementary upload failed');
+      setError(err.message || tx("Supplementary upload failed"));
     } finally {
       setSuppUploading(false);
     }
@@ -584,7 +587,7 @@ export default function AdminScopedMediaLibrary({
 
   const handleDeleteSupplementary = async (file) => {
     if (!file) return;
-    if (!window.confirm(`Delete supplementary file "${file.name}"?`)) return;
+    if (!window.confirm(tx("Delete supplementary file \"{v0}\"?", { v0: file.name }))) return;
     setBusy(true);
     setError('');
     try {
@@ -593,7 +596,7 @@ export default function AdminScopedMediaLibrary({
           allowedPrefix: prefix,
           allowTemplateKeys: !!allowTemplateKeys,
         });
-        if (!del.success) throw new Error(del.error || 'Delete failed');
+        if (!del.success) throw new Error(del.error || tx("Delete failed"));
       }
       const next = supplementaryFiles.filter((f) => {
         if (file.key && f.key) return f.key !== file.key;
@@ -601,7 +604,7 @@ export default function AdminScopedMediaLibrary({
       });
       await persistSupplementary(next);
     } catch (err) {
-      setError(err.message || 'Delete failed');
+      setError(err.message || tx("Delete failed"));
     } finally {
       setBusy(false);
     }
@@ -610,9 +613,7 @@ export default function AdminScopedMediaLibrary({
   return (
     <Box>
       {!isR2Configured() && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Cloudflare R2 is not configured.
-        </Alert>
+        <Alert severity="warning" sx={{ mb: 2 }}>{' '}{tx("Cloudflare R2 is not configured.")}{' '}</Alert>
       )}
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {info && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo('')}>{info}</Alert>}
@@ -630,9 +631,7 @@ export default function AdminScopedMediaLibrary({
         >
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
             <AttachFile fontSize="small" color="action" />
-            <Typography variant="subtitle2" fontWeight={700}>
-              Supplementary files
-            </Typography>
+            <Typography variant="subtitle2" fontWeight={700}>{' '}{tx("Supplementary files")}{' '}</Typography>
             <Chip size="small" label={`${supplementaryFiles.length} / ${MAX_SUPPLEMENTARY_FILES}`} />
             <Box flex={1} />
             <input
@@ -651,16 +650,12 @@ export default function AdminScopedMediaLibrary({
                 || supplementaryFiles.length >= MAX_SUPPLEMENTARY_FILES}
               onClick={() => suppInputRef.current?.click()}
             >
-              {suppUploading ? 'Uploading…' : 'Upload PDF / docs'}
+              {suppUploading ? tx("Uploading…") : tx("Upload PDF / docs")}
             </Button>
           </Stack>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            Paper request attachments (PDF, Word, ZIP, etc.). Kept separate from survey dataset media.
-          </Typography>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>{' '}{tx("Paper request attachments (PDF, Word, ZIP, etc.). Kept separate from survey dataset media.")}{' '}</Typography>
           {supplementaryFiles.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No supplementary files yet.
-            </Typography>
+            <Typography variant="body2" color="text.secondary">{' '}{tx("No supplementary files yet.")}{' '}</Typography>
           ) : (
             <Stack spacing={0.75}>
               {supplementaryFiles.map((f) => (
@@ -687,7 +682,7 @@ export default function AdminScopedMediaLibrary({
                       {[f.contentType, formatBytes(f.size)].filter(Boolean).join(' · ')}
                     </Typography>
                   </Box>
-                  <Tooltip title="Open / download">
+                  <Tooltip title={tx("Open / download")}>
                     <IconButton
                       size="small"
                       component="a"
@@ -699,7 +694,7 @@ export default function AdminScopedMediaLibrary({
                       <OpenInNew fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="Delete">
+                  <Tooltip title={tx("Delete")}>
                     <IconButton
                       size="small"
                       color="error"
@@ -718,7 +713,7 @@ export default function AdminScopedMediaLibrary({
 
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
         <Chip
-          label={syncing ? 'Syncing…' : `${pool.length} file(s)`}
+          label={syncing ? tx("Syncing…") : tx("{v0} file(s)", { v0: pool.length })}
           color={pool.length > 0 ? 'success' : 'default'}
           variant="outlined"
           icon={syncing ? <CircularProgress size={14} /> : undefined}
@@ -734,7 +729,7 @@ export default function AdminScopedMediaLibrary({
           onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }}
         />
         <input ref={folderInputRef} type="file" webkitdirectory="" multiple style={{ display: 'none' }}
-          aria-label="Upload media folder"
+          aria-label={tx("Upload media folder")}
           onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
         <Button
           startIcon={<CloudUpload />}
@@ -742,40 +737,32 @@ export default function AdminScopedMediaLibrary({
           size="small"
           disabled={!isR2Configured() || uploading.active || busy}
           onClick={() => fileInputRef.current?.click()}
-        >
-          Upload{currentFolder ? ` → ${currentFolder}` : ' → root'}
+        >{' '}{tx("Upload")}{currentFolder ? ` → ${currentFolder}` : ` → ${tx('root')}`}
         </Button>
         <Button variant="outlined" size="small" disabled={!isR2Configured() || uploading.active || busy}
-          onClick={() => folderInputRef.current?.click()}>Upload folder</Button>
-        <Typography variant="caption" color="text.secondary">
-          Images ~300 KB · A/V max {formatMediaMb(MAX_AV_MEDIA_BYTES)} MB
+          onClick={() => folderInputRef.current?.click()}>{tx("Upload folder")}</Button>
+        <Typography variant="caption" color="text.secondary">{' '}{tx("Images ~300 KB · A/V max")}{' '}{formatMediaMb(MAX_AV_MEDIA_BYTES)} MB
         </Typography>
         <Button
           startIcon={<Refresh />}
           size="small"
           disabled={syncing || uploading.active || busy}
           onClick={() => refreshFromR2()}
-        >
-          Refresh
-        </Button>
+        >{' '}{tx("Refresh")}{' '}</Button>
         <Button
           startIcon={<DeleteForever />}
           size="small"
           color="error"
           disabled={!pool.length || busy || uploading.active}
           onClick={handleClearAll}
-        >
-          Clear all
-        </Button>
+        >{' '}{tx("Clear all")}{' '}</Button>
       </Stack>
 
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-        Folder uploads keep the selected folder name and all media subfolders inside the current directory. Non-media files and empty folders are omitted.
-      </Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{' '}{tx("Folder uploads keep the selected folder name and all media subfolders inside the current directory. Non-media files and empty folders are omitted.")}{' '}</Typography>
       {uploading.active && (
         <Box sx={{ mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-            <Typography variant="body2">Uploading…</Typography>
+            <Typography variant="body2">{tx("Uploading…")}</Typography>
             <Typography variant="body2" color="text.secondary">
               {uploading.progress} / {uploading.total}
             </Typography>
@@ -804,45 +791,44 @@ export default function AdminScopedMediaLibrary({
         r2DeleteOptions={r2DeleteOptions}
         rootLabel={rootLabel}
       >
-        {selectedFolders.size > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>
-          Select filtered uses {selectedFolders.size} checked folder(s), including subfolders, and the current search/type filters.
-          {' '}{selectionCandidates.length} matching file(s). The gallery shows the open folder.
-        </Alert>}
+        {selectedFolders.size > 0 && <Alert severity="info" sx={{ mb: 1.5 }}>{' '}{tx("Select filtered uses")}{' '}{selectedFolders.size}{' '}{tx("checked folder(s), including subfolders, and the current search/type filters.")}{' '}{' '}{selectionCandidates.length}{' '}{tx("matching file(s). The gallery shows the open folder.")}{' '}</Alert>}
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }} alignItems="center">
           <TextField
             size="small"
-            placeholder="Search"
+            placeholder={tx("Search")}
             value={mediaSearch}
             onChange={(e) => setMediaSearch(e.target.value)}
             sx={{ width: 160 }}
           />
           <FormControl size="small" sx={{ minWidth: 110 }}>
-            <InputLabel>Type</InputLabel>
+            <InputLabel>{tx("Type")}</InputLabel>
             <Select
-              label="Type"
+              label={tx("Type")}
               value={mediaFilter}
               onChange={(e) => setMediaFilter(e.target.value)}
             >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="image">Image</MenuItem>
-              <MenuItem value="video">Video</MenuItem>
-              <MenuItem value="audio">Audio</MenuItem>
+              <MenuItem value="all">{tx("All")}</MenuItem>
+              <MenuItem value="image">{tx("Image")}</MenuItem>
+              <MenuItem value="video">{tx("Video")}</MenuItem>
+              <MenuItem value="audio">{tx("Audio")}</MenuItem>
             </Select>
           </FormControl>
-          <Button size="small" variant="outlined" startIcon={<SelectAll />} onClick={selectAllFiltered} disabled={!selectionCandidates.length}>
-            Select filtered ({selectionCandidates.length})
+          <MediaKeywordSelection
+            pool={pool} folders={selectedFolders} currentFolder={currentFolder} prefix={prefix}
+            selected={selected} getId={(raw) => entryId(normalizeMediaEntry(raw, prefix))}
+            disabled={busy || uploading.active}
+            onSelect={(matches) => setSelected((prev) => new Set([...prev, ...matches.map((raw) => entryId(normalizeMediaEntry(raw, prefix)))]))}
+          />
+          <Button size="small" variant="outlined" startIcon={<SelectAll />} onClick={selectAllFiltered} disabled={!selectionCandidates.length}>{' '}{tx("Select filtered (")}{selectionCandidates.length})
           </Button>
-          <Button size="small" variant="outlined" startIcon={<Deselect />} onClick={() => setSelected(new Set())} disabled={!selected.size}>
-            Clear selection
-          </Button>
+          <Button size="small" variant="outlined" startIcon={<Deselect />} onClick={() => setSelected(new Set())} disabled={!selected.size}>{' '}{tx("Clear selection")}{' '}</Button>
           <Button
             size="small"
             variant="outlined"
             startIcon={<CloudDownload />}
             disabled={!selected.size || busy}
             onClick={handleDownloadSelected}
-          >
-            ZIP selected ({selected.size})
+          >{' '}{tx("ZIP selected (")}{selected.size})
           </Button>
           <Button
             size="small"
@@ -850,26 +836,21 @@ export default function AdminScopedMediaLibrary({
             startIcon={<CloudDownload />}
             disabled={!pool.length || busy}
             onClick={handleDownloadFolderRecursive}
-          >
-            ZIP folder+subfolders
-          </Button>
+          >{' '}{tx("ZIP folder+subfolders")}{' '}</Button>
           <Button
             size="small"
             variant="outlined"
             startIcon={<CloudDownload />}
             disabled={!prefix || !isR2Configured() || busy}
             onClick={handleDownloadFeatureCsvs}
-          >
-            Download L0 + Seg CSV
-          </Button>
+          >{' '}{tx("Download L0 + Seg CSV")}{' '}</Button>
           <Button
             size="small"
             variant="outlined"
             startIcon={<DriveFileMove />}
             disabled={!selected.size || busy}
             onClick={() => setOpenMoveSignal((n) => n + 1)}
-          >
-            Move ({selected.size})
+          >{' '}{tx("Move (")}{selected.size})
           </Button>
           <Button
             size="small"
@@ -878,8 +859,7 @@ export default function AdminScopedMediaLibrary({
             startIcon={<Delete />}
             disabled={!selected.size || busy}
             onClick={handleDeleteSelected}
-          >
-            Delete ({selected.size})
+          >{' '}{tx("Delete (")}{selected.size})
           </Button>
           {onSetThumbnail && (
             <>
@@ -907,14 +887,10 @@ export default function AdminScopedMediaLibrary({
         </Stack>
 
         {filteredMedia.length === 0 ? (
-          <Alert severity="info">
-            No files in {currentFolder || 'root'}. Upload here or create folders on the left and tag them as set / category.
-          </Alert>
+          <Alert severity="info">{' '}{tx("No files in")}{' '}{currentFolder || tx('root')}{tx(". Upload here or create folders on the left and tag them as set / category.")}{' '}</Alert>
         ) : (
           <>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              Click a file to preview (image / video / audio). Use checkboxes to select for download, move, or delete
-              {onSetThumbnail ? ' — or set one image as the landing cover.' : '.'}
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{' '}{tx("Click a file to preview (image / video / audio). Use checkboxes to select for download, move, or delete")}{' '}{onSetThumbnail ? tx(" — or set one image as the landing cover.") : '.'}
             </Typography>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
               {filteredMedia.map((img) => {
@@ -951,7 +927,7 @@ export default function AdminScopedMediaLibrary({
                       {isCover && (
                         <Chip
                           size="small"
-                          label="封面"
+                          label={tx("Cover")}
                           color="warning"
                           sx={{
                             position: 'absolute',
@@ -963,7 +939,7 @@ export default function AdminScopedMediaLibrary({
                           }}
                         />
                       )}
-                      <Tooltip title="Preview">
+                      <Tooltip title={tx("Preview")}>
                         <IconButton
                           className="media-preview-btn"
                           size="small"
@@ -981,7 +957,7 @@ export default function AdminScopedMediaLibrary({
                       ) : isAudio ? (
                         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 0.5, px: 1 }}>
                           <Audiotrack fontSize="small" color="action" />
-                          <Typography variant="caption">Audio</Typography>
+                          <Typography variant="caption">{tx("Audio")}</Typography>
                         </Box>
                       ) : (
                         <img

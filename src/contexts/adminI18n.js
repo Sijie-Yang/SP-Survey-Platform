@@ -732,7 +732,7 @@ export const adminI18n = {
 
     mediaTitle: '媒体数据集',
     mediaDescription:
-      '添加媒体、按文件夹整理，再将文件夹标记为 set 或 category 供问卷分配。文件存储在 Cloudflare R2。',
+      '添加媒体、按文件夹整理，再标记为分组或分类，供问卷分配使用。文件存储在 Cloudflare R2。',
     mediaAddSection: '1 · 添加媒体',
     mediaOrganizeSection: '2 · 在文件夹中整理',
     mediaTaggedSection: '3 · 已标记供分配',
@@ -748,12 +748,12 @@ export const adminI18n = {
     mediaUploadBtn: '上传',
     mediaUploadRoot: '→ 根目录',
     mediaNoFoldersTagged:
-      '尚未标记文件夹。在媒体库左侧勾选文件夹，再点击 Set 或 Category。标记后的文件夹会出现在这里，供问卷分配使用。',
-    mediaTaggedSets: '已标记集合（{n}）',
+      '尚未标记文件夹。在媒体库左侧勾选文件夹，再点击“分组”或“分类”。标记后的文件夹会显示在这里，供问卷分配使用。',
+    mediaTaggedSets: '已标记分组（{n}）',
     mediaTaggedSetsHelp:
-      '标记为 set 的文件夹。当题目使用「随机固定集合」且媒体数量匹配时，文件夹内直接文件会一起展示。',
-    mediaTaggedCategories: '已标记类别（{n}）',
-    mediaTaggedCategoriesHelp: '标记为 category 的文件夹。题目可从每个类别中随机抽取文件。',
+      '标记为分组的文件夹。题目使用“随机固定分组”且媒体数量匹配时，文件夹内直属文件会一起展示。',
+    mediaTaggedCategories: '已标记分类（{n}）',
+    mediaTaggedCategoriesHelp: '标记为分类的文件夹。题目可从每个分类中随机抽取文件。',
     mediaCheckingR2: '正在检查 R2 中的现有图片…',
     mediaLastUpload: '最近上传：',
     hfImportTitle: 'HF 数据集导入',
@@ -775,13 +775,13 @@ export const adminI18n = {
       '将文件夹标记为分组（Set）。每个分组文件夹的直属文件会一起展示，每组文件数须与题目的媒体数量一致。',
     guideExample: '示例',
     guideFixedSetsExample:
-      '1. 创建文件夹 block01、block02、block03\n2. 每个文件夹放 2 张图（数量相同）\n3. 勾选这些文件夹 → 点击分组（Set）\n4. 在问卷构建中选择媒体分配方式「随机抽取完整分组」，数量 = 2\n→ 每位受访者看到一整文件夹（两张图一起）',
+      '1. 创建文件夹 block01、block02、block03\n2. 每个文件夹放 2 张图（数量相同）\n3. 勾选这些文件夹 → 点击“分组”\n4. 在问卷构建中选择媒体分配方式「随机抽取完整分组」，数量 = 2\n→ 每位受访者看到一整文件夹（两张图一起）',
     guideTaggedSets: '当前已标记分组：{n}',
     guideCategories: '分类',
     guideCategoriesBody:
       '将文件夹标记为分类（Category）。在题目中选择「按分类抽取」，并设置每个分类抽取的文件数。每个分类会从该文件夹及其子文件夹中随机抽取。',
     guideCategoriesExample:
-      '1. 创建文件夹 street 与 park\n2. 每个放若干图片（可用子文件夹）\n3. 勾选这些文件夹 → 点击分类（Category）\n4. 在题目中：媒体分配 → 按分类抽取，每类文件数 = 2\n→ 每位受访者看到 2 张 street + 2 张 park（共 4 张）',
+      '1. 创建文件夹 street 与 park\n2. 每个放若干图片（可用子文件夹）\n3. 勾选这些文件夹 → 点击“分类”\n4. 在题目中：媒体分配 → 按分类抽取，每类文件数 = 2\n→ 每位受访者看到 2 张 street + 2 张 park（共 4 张）',
     guideTaggedCategories: '当前已标记分类：{n}',
     guideProjectFiles: ' · 项目文件：{n}',
 

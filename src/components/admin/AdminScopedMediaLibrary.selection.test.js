@@ -44,6 +44,22 @@ test('a failed persisted move retains checked folders, files, and their original
   expect(screen.getByRole('button', { name: 'Select filtered (3)', exact: true })).toBeEnabled();
 });
 
+test('keyword selection adds matching images across checked folders without clearing earlier selections or saving data', async () => {
+  const save = jest.fn();
+  render(<AdminScopedMediaLibrary owner={owner} r2Prefix="u/p/" onPersist={save} />);
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select folder one', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Select filtered (2)', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Select images by keyword', exact: true }));
+  fireEvent.change(screen.getByLabelText('Filename keywords'), { target: { value: 'b.jpg' } });
+  expect(screen.getByText('0 matching images; 0 new selections.')).toBeInTheDocument();
+  fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Search scope' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Entire library (including all subfolders)' }));
+  expect(screen.getByText('1 matching image; 1 new selection.')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Add 1 image to selection', exact: true }));
+  expect(await screen.findByRole('button', { name: 'ZIP selected (3)' })).toBeEnabled();
+  expect(save).not.toHaveBeenCalled();
+});
+
 test('folder input imports nested media into the open folder and preserves existing same-name objects', async () => {
   isR2Configured.mockReturnValue(true);
   uploadImageToR2.mockImplementation(async (_, key) => ({ success: true, url: `https://media.test/${key}` }));
