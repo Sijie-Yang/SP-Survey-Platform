@@ -1,4 +1,4 @@
-import { responseRecordKey } from './responseIdentity';
+import { responseRecordKey } from './responseIdentity.js';
 /** Data-quality evaluation for survey responses. */
 
 export function flattenQuestions(surveyConfig) {

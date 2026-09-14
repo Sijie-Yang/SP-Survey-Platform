@@ -387,7 +387,7 @@ export function getMediaPoolStatus(projectPool, question = null, folderTags = {}
       : 0)
     : null;
   const expectedCategoryTotal = mode === 'category' && matchingCategoryCount > 0
-    ? matchingCategoryCount * mediaPerCategory
+    ? (usesSingleCategoryPerTrial(question) ? 1 : matchingCategoryCount) * mediaPerCategory
     : null;
 
   return {
@@ -403,6 +403,9 @@ export function getMediaPoolStatus(projectPool, question = null, folderTags = {}
     eligibleSetCount,
     filesPerSet,
     mediaPerCategory,
+    eligibleSingleCategoryCount: usesSingleCategoryPerTrial(question)
+      ? [...buildMediaByFolderCategory(matchingFiles, folderTags, { scopeFolders: question?.mediaFolders }).values()].filter((items) => items.length >= mediaPerCategory).length
+      : null,
     expectedCategoryTotal,
     taggedSetCount: pairedSummary.total,
     folderTags,
@@ -422,6 +425,11 @@ export function usesCategoryMediaAssignment(element) {
   return normalizeMediaAssignmentMode(element?.mediaAssignmentMode) === 'category';
 }
 
+/** Missing mode preserves the original draw-from-every-category behavior. */
+export function usesSingleCategoryPerTrial(element) {
+  return usesCategoryMediaAssignment(element) && element?.mediaCategoryMode === 'single';
+}
+
 /** How many files to draw from each tagged category folder (question setting). */
 export function getMediaPerCategory(element) {
   const n = parseInt(element?.mediaPerCategory, 10);
@@ -430,7 +438,7 @@ export function getMediaPerCategory(element) {
 }
 
 /**
- * Expected total media count for category mode = categories × per-category.
+ * Expected category media count: one category per trial, or all categories × per-category.
  * Returns null if not in category mode or no categories.
  */
 export function expectedCategoryImageCount(pool, element, folderTags = {}) {
@@ -439,20 +447,29 @@ export function expectedCategoryImageCount(pool, element, folderTags = {}) {
     scopeFolders: element?.mediaFolders,
   });
   if (!labels.length) return null;
-  return labels.length * getMediaPerCategory(element);
+  return (usesSingleCategoryPerTrial(element) ? 1 : labels.length) * getMediaPerCategory(element);
 }
 
 function pickOnePerCategory(pool, element, globallyUsedImageKeys, folderTags = {}) {
   const byCategory = buildMediaByFolderCategory(pool, folderTags, {
     scopeFolders: element?.mediaFolders,
   });
-  const categories = [...byCategory.keys()].sort((a, b) =>
+  let categories = [...byCategory.keys()].sort((a, b) =>
     String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' }),
   );
   const perCategory = getMediaPerCategory(element);
   const excludeUsed = element.excludePreviouslyUsedImages !== false;
   const images = [];
   const assignedCategories = [];
+
+  if (usesSingleCategoryPerTrial(element)) {
+    // Choose among categories that can supply a complete trial after exclusions.
+    // Never fill a short category using files from another category.
+    const eligible = categories.filter((cat) => (byCategory.get(cat) || []).filter((img) => (
+      !excludeUsed || !globallyUsedImageKeys?.has(getImageKey(img))
+    )).length >= perCategory);
+    categories = eligible.length ? [eligible[Math.floor(Math.random() * eligible.length)]] : [];
+  }
 
   for (const cat of categories) {
     let catPool = byCategory.get(cat) || [];

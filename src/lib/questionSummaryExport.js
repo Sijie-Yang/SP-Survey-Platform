@@ -1,7 +1,7 @@
 import { isNoPreference } from './choiceTie.js';
 import { choiceOutcome, summarizeChoiceOutcomes } from './choiceOutcomes.js';
 import { buildExportDictionary } from './exportDictionary.js';
-import { responseRecordKey } from './responseIdentity';
+import { responseRecordKey } from './responseIdentity.js';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { allocationStatus } from './allocationStats.js';
 import { computeQuestionIrr } from './reliability.js';

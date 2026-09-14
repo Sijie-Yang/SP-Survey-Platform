@@ -72,6 +72,25 @@ test('annotation settings and media sampling details are Chinese', () => {
   expect(screen.getByText(/2 轮作答/)).toBeInTheDocument();
 });
 
+test('per-trial category mode updates the saved media count and switches back to legacy all-category sampling', () => {
+  const save = jest.fn();
+  const categoryProject = {
+    preloadedImages: [{ url: '/a.jpg', name: 'a.jpg', folder: 'a' }, { url: '/b.jpg', name: 'b.jpg', folder: 'b' }],
+    imageDatasetConfig: { mediaFolderTags: { a: 'category', b: 'category' } },
+  };
+  render(<RegionProvider><QuestionEditor question={{ ...base, type: 'imagepicker', imageCount: 2, mediaAssignmentMode: 'category', mediaPerCategory: 1, trialCount: 2 }} currentProject={categoryProject} onSave={save} onCancel={jest.fn()} /></RegionProvider>);
+  const mode = screen.getByRole('combobox', { name: '每轮分类抽取方式' });
+  fireEvent.mouseDown(mode);
+  fireEvent.click(screen.getByRole('option', { name: '每轮单个分类', exact: true }));
+  expect(screen.getByLabelText('每轮抽取文件数')).toHaveValue(1);
+  fireEvent.click(screen.getByRole('button', { name: '保存题目' }));
+  expect(save.mock.calls[0][0]).toMatchObject({ mediaCategoryMode: 'single', mediaPerCategory: 1, imageCount: 1, trialCount: 2 });
+  fireEvent.mouseDown(mode);
+  fireEvent.click(screen.getByRole('option', { name: '每轮多个分类（全部已选分类）', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: '保存题目' }));
+  expect(save.mock.calls[1][0]).toMatchObject({ mediaCategoryMode: 'all', mediaPerCategory: 1, imageCount: 2, trialCount: 2 });
+});
+
 test('matrix labels are translated while researcher row/column names stay unchanged', () => {
   setup({ type: 'matrix', rows: ['My row'], columns: [{ value: 'score_1', text: 'My answer' }] });
   expect(screen.getByText('行（评价项目）')).toBeInTheDocument();

@@ -1,8 +1,19 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, waitFor, configure } from '@testing-library/react';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import AdminScopedMediaLibrary from './AdminScopedMediaLibrary';
 import { isR2Configured, uploadImageToR2 } from '../../lib/r2';
+
+// Keep assertions about persistence/selection, without racing dialog animations
+// or the default 5-second deadline on a cold GitHub runner.
+jest.setTimeout(15000);
+configure({ asyncUtilTimeout: 3000 });
+const theme = createTheme({ components: {
+  MuiDialog: { defaultProps: { transitionDuration: 0 } },
+  MuiPopover: { defaultProps: { transitionDuration: 0 } },
+} });
+const render = (ui) => rtlRender(<ThemeProvider theme={theme}>{ui}</ThemeProvider>);
 
 jest.mock('../../lib/r2', () => ({ isR2Configured: jest.fn(() => false), projectR2Prefix: () => 'u/p/', listImagesFromR2: jest.fn(async () => ({ success: false, unreachable: true })), uploadImageToR2: jest.fn() }));
 jest.mock('../../lib/mediaLibraryDownload', () => ({ downloadMediaEntriesZip: jest.fn() }));

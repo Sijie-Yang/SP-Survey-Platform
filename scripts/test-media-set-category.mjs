@@ -17,6 +17,7 @@ const result = spawnSync(
     'react-scripts',
     'test',
     '--watchAll=false',
+    '--runInBand',
     '--testPathPattern=media(Utils|Pipeline|PerCategory|Slots)|surveyMediaInjection|templateImageImport|enrichSurveyResponses',
   ],
   { cwd: root, stdio: 'inherit', env: process.env },

@@ -48,6 +48,7 @@ import {
   applyMediaToElement,
   getMediaPerCategory,
   expectedCategoryImageCount,
+  usesSingleCategoryPerTrial,
   resolveMediaFolderTags,
 } from '../../lib/surveyMediaInjection';
 import { sortMediaByName, normalizeMediaAssignmentMode, listAllKnownFolders } from '../../lib/mediaUtils';
@@ -358,6 +359,7 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
   const mode = question.mediaAssignmentMode === 'group' ? 'set' : (question.mediaAssignmentMode || 'individual');
   const isSet = mode === 'set';
   const isCategory = mode === 'category';
+  const singleCategory = usesSingleCategoryPerTrial(question);
   const count = question.imageCount || 1;
   const folderTags = React.useMemo(
     () => resolveMediaFolderTags(currentProject, { pages: [{ elements: [question] }] }),
@@ -405,13 +407,27 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
           <MenuItem value="category">{tr("Per category (tagged folders)")}</MenuItem>
         </Select>
       </FormControl>
+      {isCategory && !hasSlots && !isCurated && (
+        <FormControl fullWidth sx={{ mt: 1 }}>
+          <InputLabel>{tr('Category selection per trial')}</InputLabel>
+          <Select
+            label={tr('Category selection per trial')}
+            inputProps={{ 'aria-label': tr('Category selection per trial') }}
+            value={singleCategory ? 'single' : 'all'}
+            onChange={(e) => onChange('mediaCategoryMode', e.target.value)}
+          >
+            <MenuItem value="single">{tr('One category per trial')}</MenuItem>
+            <MenuItem value="all">{tr('All selected categories per trial')}</MenuItem>
+          </Select>
+        </FormControl>
+      )}
       {isCategory && (
         <TextField
           fullWidth
           type="number"
           size="small"
           variant="outlined"
-          label={tr("Files per category")}
+          label={tr(singleCategory ? 'Files per trial' : 'Files per category')}
           value={question.mediaPerCategory ?? 1}
           onChange={(e) => {
             const n = Math.max(1, Math.min(50, parseInt(e.target.value, 10) || 1));
@@ -419,7 +435,9 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
           }}
           inputProps={{ min: 1, max: 50 }}
           helperText={
-            tr(poolStatus.matchingCategoryCount > 0
+            singleCategory
+              ? tr('Each trial randomly chooses one selected category and draws {count} files only from it.', { count: question.mediaPerCategory ?? 1 })
+              : tr(poolStatus.matchingCategoryCount > 0
               ? (zh ? `${poolStatus.matchingCategoryCount} 个分类 × 每类 ${poolStatus.mediaPerCategory} 个文件，共 ${poolStatus.expectedCategoryTotal} 个文件` : `${poolStatus.matchingCategoryCount} categories × ${poolStatus.mediaPerCategory} = ${poolStatus.expectedCategoryTotal} file(s) total`)
               : 'How many files to draw from each tagged category folder')
           }
@@ -434,7 +452,7 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
         helperText={tr(isSet
           ? 'Select one or more set folders. Each draw uses one complete set. Clear the selection to use all sets.'
           : isCategory
-            ? 'Select one or more category folders. Draw the specified count from each selected category, including subfolders. Clear to use all categories.'
+            ? (singleCategory ? 'Select the categories eligible for each trial. Each trial uses only one of them. Clear to use all categories.' : 'Select one or more category folders. Draw the specified count from each selected category, including subfolders. Clear to use all categories.')
             : 'Select one or more folders, including their subfolders. Files are drawn from their combined pool. Clear to use all media.')}
       />}
       {!isSet && !isCategory && !hasSlots && !isCurated && <Alert severity={poolStatus.matchingFileCount ? 'info' : 'warning'}>
@@ -474,9 +492,11 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
         <>
           {poolStatus.totalFileCount === 0 ? (
             <Alert severity="warning">{tr("No media in project — upload files in Media Dataset first.")}</Alert>
+          ) : singleCategory && poolStatus.eligibleSingleCategoryCount === 0 ? (
+            <Alert severity="warning">{tr('No selected category has enough matching files for a complete trial. Reduce the count or add media.')}</Alert>
           ) : poolStatus.matchingCategoryCount > 0 ? (
             <Alert severity="success">
-              {zh ? `将展示 ${poolStatus.expectedCategoryTotal} 个文件：从 ${poolStatus.matchingCategoryCount} 个分类中，每类抽取 ${poolStatus.mediaPerCategory} 个。` : `Will show ${poolStatus.expectedCategoryTotal} file(s): ${poolStatus.mediaPerCategory} from each of ${poolStatus.matchingCategoryCount} categories.`}
+              {singleCategory ? tr('Each trial randomly chooses one selected category and draws {count} files only from it.', { count: poolStatus.expectedCategoryTotal }) : zh ? `将展示 ${poolStatus.expectedCategoryTotal} 个文件：从 ${poolStatus.matchingCategoryCount} 个分类中，每类抽取 ${poolStatus.mediaPerCategory} 个。` : `Will show ${poolStatus.expectedCategoryTotal} file(s): ${poolStatus.mediaPerCategory} from each of ${poolStatus.matchingCategoryCount} categories.`}
               {' '}({poolStatus.matchingCategoryLabels.join(', ')}){mediaTypeHint}
             </Alert>
           ) : (
@@ -485,6 +505,7 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
             </Alert>
           )}
           <MediaCategoryGuide
+            singleCategory={singleCategory}
             compact
             context="question"
             categoryCount={poolStatus.matchingCategoryCount}
@@ -681,6 +702,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     if (
       (field === 'mediaAssignmentMode' && value === 'category')
       || (field === 'mediaPerCategory' && normalizeMediaAssignmentMode(editedQuestion.mediaAssignmentMode) === 'category')
+      || (field === 'mediaCategoryMode' && normalizeMediaAssignmentMode(editedQuestion.mediaAssignmentMode) === 'category')
       || (field === 'mediaFolders' && normalizeMediaAssignmentMode(editedQuestion.mediaAssignmentMode) === 'category')
     ) {
       const nextQ = {

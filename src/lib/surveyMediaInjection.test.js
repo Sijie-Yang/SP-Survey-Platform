@@ -94,6 +94,31 @@ describe('surveyMediaInjection set/category picking', () => {
     expect(assignment.setId).toBeNull();
   });
 
+  test('single-category trials choose one complete eligible category and preserve its metadata', () => {
+    const pool = makePool([
+      { name: 'a1.jpg', folder: 'a' }, { name: 'a2.jpg', folder: 'a' },
+      { name: 'b1.jpg', folder: 'b' }, { name: 'b2.jpg', folder: 'b' },
+      { name: 'short.jpg', folder: 'short' }, { name: 'outside.jpg', folder: 'outside' },
+    ]);
+    const tags = { a: 'category', b: 'category', short: 'category', outside: 'category' };
+    const question = categoryQuestion({ mediaCategoryMode: 'single', mediaPerCategory: 2, mediaFolders: ['a', 'b', 'short'] });
+    expect(expectedCategoryImageCount(pool, question, tags)).toBe(2);
+    expect(getMediaPoolStatus(pool, question, tags).expectedCategoryTotal).toBe(2);
+    expect(getMediaPoolStatus(pool, question, tags).eligibleSingleCategoryCount).toBe(2);
+    const used = new Set();
+    const first = pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags);
+    expect(first.images).toHaveLength(2);
+    expect(first.categories).toEqual(['a']);
+    first.images.forEach((img) => used.add(img.media_id));
+    const second = pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags);
+    expect(second.categories).toEqual(['b']);
+    second.images.forEach((img) => used.add(img.media_id));
+    expect(pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags).images).toEqual([]);
+    const repeat = pickRandomMediaForQuestion(pool, { ...question, excludePreviouslyUsedImages: false }, used, new Set(), null, tags);
+    expect(repeat.images).toHaveLength(2);
+    expect(new Set(repeat.images.map((img) => img.folder)).size).toBe(1);
+  });
+
   test('pickRandomMediaForQuestion category mode skips exhausted categories', () => {
     const used = new Set(['user/proj/cats/park/p1.jpg']);
     const assignment = pickRandomMediaForQuestion(

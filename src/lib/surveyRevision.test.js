@@ -10,3 +10,11 @@ test('response contract excludes configuration secrets and tracks question chang
   config.pages[0].elements[0].rateMax = 7;
   expect((await surveyRevision(config)).id).not.toBe(first.id);
 });
+
+test('category trial mode is retained in the response contract and changes the revision', async () => {
+  const config = { pages: [{ elements: [{ name: 'q', type: 'imagepicker', mediaAssignmentMode: 'category', mediaCategoryMode: 'all' }] }] };
+  const original = await surveyRevision(config);
+  config.pages[0].elements[0].mediaCategoryMode = 'single';
+  expect(JSON.stringify(surveyResponseContract(config))).toContain('single');
+  expect((await surveyRevision(config)).id).not.toBe(original.id);
+});

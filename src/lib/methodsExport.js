@@ -1,4 +1,4 @@
-import { responseRecordKey } from './responseIdentity';
+import { responseRecordKey } from './responseIdentity.js';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { flattenQuestions, getAttentionCheckQuestions, summarizeQuality } from './quality.js';
 import { computeQuestionIrr, irrLevelForQuestion } from './reliability.js';

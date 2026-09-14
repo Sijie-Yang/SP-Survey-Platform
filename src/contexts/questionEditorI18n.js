@@ -3,6 +3,15 @@ import { RegionContext } from './RegionContext';
 
 // Editor chrome only. Never apply translations to stored question/answer values.
 export const questionEditorZh = {
+  "No selected category has enough matching files for a complete trial. Reduce the count or add media.": "没有选定分类能提供一整轮所需的文件，请减少每轮数量或补充媒体。",
+  "Category selection per trial": "每轮分类抽取方式",
+  "One category per trial": "每轮单个分类",
+  "All selected categories per trial": "每轮多个分类（全部已选分类）",
+  "Files per trial": "每轮抽取文件数",
+  "Each trial randomly chooses one selected category and draws {count} files only from it.": "每个 trial 随机选定一个分类，仅从该分类中抽取 {count} 个文件。",
+  "Select the categories eligible for each trial. Each trial uses only one of them. Clear to use all categories.": "选择每轮可用的分类；每轮只使用其中一个。清除选择即恢复全部分类。",
+  "Categories may repeat across trials. The existing exclude-used setting still applies.": "不同轮次可能抽到同一分类；仍遵循“不重复使用媒体”的设置。",
+
   "Random draw scope": "随机抽取范围",
   "All media (all folders)": "全部媒体（所有文件夹）",
   "All tagged sets": "全部已标记分组",

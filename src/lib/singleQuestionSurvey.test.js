@@ -35,6 +35,18 @@ test('category mode draws one per category and carries context into each round',
   expect(new Set(result.shownImagesByTrial.flat()).size).toBe(4);
   result.element.trialMediaContexts.forEach(ctx => expect(ctx.shown_media_categories).toHaveLength(2));
 });
+
+test('single category selection runs per trial in participant preview with accurate category context', () => {
+  const result = build({ mediaAssignmentMode: 'category', mediaCategoryMode: 'single', mediaPerCategory: 2, trialCount: 2 }, { folderTags: { a: 'category', b: 'category' } });
+  expect(result.trialMediaSets).toHaveLength(2);
+  result.trialMediaSets.forEach((items, index) => {
+    expect(items).toHaveLength(2);
+    const folder = items[0].folder;
+    expect(items.every((item) => item.folder === folder)).toBe(true);
+    expect(result.element.trialMediaContexts[index].shown_media_categories).toEqual([folder]);
+  });
+  expect(new Set(result.shownImagesByTrial.flat()).size).toBe(4);
+});
 test('single and multi-trial slot assignment preserve a fixed video and rotate random audio', () => {
   const slotPool = makePool([{ name: 'fixed.mp4', type: 'video' }, { name: 'one.mp3', type: 'audio' }, { name: 'two.mp3', type: 'audio' }]);
   const mediaSlots = MEDIA_SLOT_PRESETS.fixedVideoRandomAudio.map(slot => slot.id === 'stimulus_video' ? { ...slot, mediaRef: { key: slotPool[0].key } } : slot);

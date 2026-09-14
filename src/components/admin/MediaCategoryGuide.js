@@ -17,10 +17,17 @@ export default function MediaCategoryGuide({
   matchingFileCount = 0,
   mediaTypeFilter = 'any',
   mediaPerCategory = 1,
+  singleCategory = false,
 }) {
   const { t } = useRegion();
   const { tr, zh } = useQuestionEditorText();
   const per = mediaPerCategory || 1;
+  if (context === 'question' && singleCategory) {
+    return <Alert severity="info">
+      {tr('Each trial randomly chooses one selected category and draws {count} files only from it.', { count: per })}
+      {' '}{tr('Categories may repeat across trials. The existing exclude-used setting still applies.')}
+    </Alert>;
+  }
   const body = (
     <Box>
       <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>

@@ -768,6 +768,12 @@ export function registerMediaPairingProps() {
       category: 'general',
     });
     Serializer.addProperty(typeName, {
+      name: 'mediaCategoryMode',
+      default: 'all',
+      choices: ['all', 'single'],
+      category: 'general',
+    });
+    Serializer.addProperty(typeName, {
       name: 'assignedMediaSetId',
       category: 'general',
     });

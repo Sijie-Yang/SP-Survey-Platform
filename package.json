@@ -36,6 +36,7 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "cross-env": "^7.0.3",
+    "node-fetch": "^2.7.0",
     "wrangler": "^4.92.0"
   },
   "scripts": {
@@ -46,7 +47,7 @@
     "dev:safe": "concurrently \"npm run server:watch\" \"npm start\"",
     "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
-    "test:ci": "cross-env CI=true react-scripts test --watchAll=false",
+    "test:ci": "cross-env CI=true react-scripts test --watchAll=false --runInBand",
     "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs",
     "test:bench": "node --test worker-lib/bench/scoring.test.mjs",
     "test:media-pipeline": "node scripts/test-media-set-category.mjs",
