@@ -7,6 +7,8 @@ import {
   mergeMediaFolderConfigs,
 } from './mediaUtils';
 import { PREVIEW_MEDIA_PREFIX } from './previewMediaLibrary';
+import { loadPreviewMediaLibrary } from './previewMediaLibraryStorage';
+import { mergeMediaLibraryListing } from './mediaLibrarySync';
 
 /** Synthetic import source id for the platform preview media library. */
 export const PREVIEW_MEDIA_IMPORT_ID = 'skill-preview';
@@ -68,10 +70,25 @@ export async function computeR2SourceImportProgress(sourcePrefix, userId, projec
     return emptyImportProgress(listed.error || 'Failed to list source images');
   }
 
+  let sourceImages = listed.images || [];
+  let mediaFolderConfig = null;
+  if (srcPrefix === PREVIEW_MEDIA_PREFIX) {
+    try {
+      const library = await loadPreviewMediaLibrary();
+      if (library.revision > 0) {
+        sourceImages = mergeMediaLibraryListing(sourceImages, library.preloadedImages, srcPrefix);
+        mediaFolderConfig = library.imageDatasetConfig;
+      }
+    } catch (error) {
+      // Do not silently import a different folder layout when cloud metadata is unavailable.
+      return emptyImportProgress(error.message);
+    }
+  }
+
   const existingPaths = new Set(
     (existing.images || []).map((i) => mediaRelativePathFromListing(i, projectPrefix)),
   );
-  const templateImages = (listed.images || []).filter((img) => {
+  const templateImages = sourceImages.filter((img) => {
     const key = String(img.key || img.name || '');
     return !key.includes('/features/') && !key.includes('/preannotations/');
   });
@@ -92,6 +109,7 @@ export async function computeR2SourceImportProgress(sourcePrefix, userId, projec
     existingNames: existingPaths,
     existingPaths,
     sourcePrefix: srcPrefix,
+    mediaFolderConfig,
     error: null,
   };
 }
@@ -122,6 +140,14 @@ export function buildTemplateCopyTodo(templateImages, existingPaths, projectPref
       ? String(templateImages[0].key).replace(/[^/]+$/, '')
       : ''
   );
+  const destinations = new Map();
+  templateImages.forEach((img) => {
+    const relative = mediaRelativePathFromListing(img, tPrefix);
+    if (destinations.has(relative) && destinations.get(relative) !== img.key) {
+      throw new Error(`Multiple source files would be copied to "${relative}". Place them in separate folders before importing.`);
+    }
+    destinations.set(relative, img.key);
+  });
   return templateImages
     .filter((img) => !existing.has(mediaRelativePathFromListing(img, tPrefix)))
     .map((img) => {

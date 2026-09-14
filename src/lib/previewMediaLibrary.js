@@ -6,6 +6,7 @@
  * R2 prefix stays `skill-preview/` for backward compatibility with existing objects.
  */
 import { listImagesFromR2 } from './r2';
+import { loadPreviewMediaLibrary } from './previewMediaLibraryStorage';
 import { filterMediaByType, inferMediaType, normalizeMediaEntry } from './mediaUtils';
 
 /** Canonical R2 prefix (legacy name kept so existing uploads keep working). */
@@ -16,6 +17,14 @@ export const SKILL_PREVIEW_PREFIX = PREVIEW_MEDIA_PREFIX;
 
 /** List all media in the shared preview library. Returns [] on any failure. */
 export async function listPreviewMedia() {
+  try {
+    const saved = await loadPreviewMediaLibrary();
+    if (saved.revision > 0) return saved.preloadedImages
+      .map((entry) => normalizeMediaEntry(entry, PREVIEW_MEDIA_PREFIX)).filter((entry) => entry?.url);
+  } catch {
+    // Read-only previews remain available before the cloud manifest is initialized.
+    // The management UI requires cloud access and never saves this fallback listing.
+  }
   const result = await listImagesFromR2(PREVIEW_MEDIA_PREFIX);
   if (!result.success) return [];
   return (result.images || [])

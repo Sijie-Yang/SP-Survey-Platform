@@ -1030,7 +1030,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       }
 
       const finalImages = mergeCopiedIntoProjectImages(
-        existingImages,
+        mergeMediaLibraryListing(existingImages, currentProject.preloadedImages, projectPrefix),
         copiedImages,
         r2PublicUrl,
         projectPrefix,
@@ -1092,12 +1092,10 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         template.id,
         historyEntry,
       );
-      if (!fromPreview) {
-        updatedImageDatasetConfig = mergeTemplateMediaFoldersIntoProject(
-          updatedImageDatasetConfig,
-          template.imageDatasetConfig || {},
-        );
-      }
+      updatedImageDatasetConfig = mergeTemplateMediaFoldersIntoProject(
+        updatedImageDatasetConfig,
+        (fromPreview ? progress.mediaFolderConfig : template.imageDatasetConfig) || {},
+      );
 
       setTemplateProgressMap((prev) => ({
         ...prev,
