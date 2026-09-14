@@ -1,3 +1,4 @@
+import { mergeMediaLibraryListing } from '../../lib/mediaLibrarySync';
 import { useMediaLibraryText } from '../../contexts/mediaLibraryI18n';
 import { uploadMediaBatch, pickUploadMedia } from '../../lib/mediaUploadBatch';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
@@ -202,6 +203,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   const { t, language } = useRegion();
   const zh = language === 'zh';
   const { user } = useAuth();
+  const currentProjectRef = useRef(currentProject);
+  currentProjectRef.current = currentProject;
 
   // Direct upload state
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -307,16 +310,6 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     return () => { cancelled = true; };
   }, [projectPrefix, currentProject?.preloadedImages?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const normalizeR2Listing = (images = []) => {
-    const existing = new Map((currentProject?.preloadedImages || []).flatMap((m) => [getMediaId(m), m.key, m.url].filter(Boolean).map((id) => [id, m])));
-    return sortMediaByName(images.map((img) => {
-      const saved = existing.get(img.key) || existing.get(img.media_id) || existing.get(img.url);
-      // Refresh storage presence without losing original names or research metadata.
-      const merged = { ...img, ...saved, url: img.url, key: img.key, media_id: img.media_id || img.key };
-      return { ...merged, ...normalizeMediaEntry(merged, projectPrefix) };
-    }));
-  };
-
   // Strip accidental template-owned URLs/keys from project media list.
   // (Legacy bug: create-from-template copied template refs into preloadedImages.)
   useEffect(() => {
@@ -370,6 +363,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
 
   const refreshMediaFromR2 = async () => {
     if (!isR2Configured() || !projectId) return;
+    const startingProject = currentProjectRef.current;
     setRefreshingMedia(true);
     setMediaActionStatus({ loading: false, error: null, success: null });
     try {
@@ -385,7 +379,8 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
         }
         throw new Error(result.error || tx("Failed to list media from R2"));
       }
-      const images = normalizeR2Listing(result.images);
+      if (currentProjectRef.current !== startingProject) return;
+      const images = mergeMediaLibraryListing(result.images, startingProject.preloadedImages, projectPrefix);
       persistPreloadedImages(images);
       setSelectedMedia(new Set());
       setMediaPage(1);
@@ -752,6 +747,7 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
   useEffect(() => {
     if (!isR2Configured() || !currentProject?.id || !user?.id) return;
     let cancelled = false;
+    const startingProject = currentProjectRef.current;
     const userId = user.id;
     const prefix = `${userId}/${currentProject.id}/`;
 
@@ -759,11 +755,11 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
     listImagesFromR2(prefix).then((result) => {
       if (cancelled) return;
       setR2Syncing(false);
-      if (!result.success || result.images.length === 0) return;
+      if (!result.success || result.images.length === 0 || currentProjectRef.current !== startingProject) return;
       // If R2 has more images than stored locally, update the project record
       const storedCount = currentProject.preloadedImages?.length || 0;
       if (result.images.length !== storedCount) {
-        const images = normalizeR2Listing(result.images);
+        const images = mergeMediaLibraryListing(result.images, startingProject.preloadedImages, prefix);
         onProjectUpdate({
           ...currentProject,
           preloadedImages: images,
@@ -1319,18 +1315,9 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
       setPreloadStatus(prev => ({ ...prev, total: totalImages }));
 
       // Collect public URLs for already-existing images
-      const allImages = [];
-      for (const img of (existingResult.images || [])) {
-        const entry = normalizeMediaEntry(img, `${projectPrefix}/`);
-        allImages.push({
-          url: entry.url || img.url,
-          name: entry.name,
-          key: entry.key || img.key,
-          media_id: entry.media_id || entry.key || img.key,
-          folder: entry.folder || '',
-          type: entry.type || inferMediaType(entry.name),
-        });
-      }
+      const allImages = mergeMediaLibraryListing(
+        existingResult.images || [], currentProject.preloadedImages, `${projectPrefix}/`,
+      );
 
       const batchSize = 100;
       const batches = Math.ceil(totalImages / batchSize);

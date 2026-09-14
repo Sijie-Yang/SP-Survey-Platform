@@ -15,6 +15,7 @@ import {
 } from '@mui/icons-material';
 import MediaFolderBrowser from './MediaFolderBrowser';
 import MediaKeywordSelection from './MediaKeywordSelection';
+import { mergeMediaLibraryListing, serializeMediaLibraryEntry } from '../../lib/mediaLibrarySync';
 import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
 import { uploadFolderForFile, uploadObjectKey, pickUploadMedia } from '../../lib/mediaUploadBatch';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
@@ -131,6 +132,8 @@ export default function AdminScopedMediaLibrary({
     preloadedSource: owner?.preloadedSource || 'r2',
     preloadedAt: owner?.preloadedAt || null,
   }));
+  const mediaOwnerRef = useRef(mediaOwner);
+  mediaOwnerRef.current = mediaOwner;
   const [surveyConfig, setSurveyConfig] = useState(() => readSurveyConfig(owner));
   const [supplementaryFiles, setSupplementaryFiles] = useState(() => readSupplementaryFiles(owner));
   const [currentFolder, setCurrentFolder] = useState('');
@@ -159,7 +162,7 @@ export default function AdminScopedMediaLibrary({
 
   // Reset when owner identity changes
   useEffect(() => {
-    setMediaOwner({
+    const nextOwner = {
       id: owner?.id,
       preloadedImages: owner?.preloadedImages || [],
       imageDatasetConfig: {
@@ -168,7 +171,9 @@ export default function AdminScopedMediaLibrary({
       },
       preloadedSource: owner?.preloadedSource || 'r2',
       preloadedAt: owner?.preloadedAt || null,
-    });
+    };
+    mediaOwnerRef.current = nextOwner;
+    setMediaOwner(nextOwner);
     setSurveyConfig(readSurveyConfig(owner));
     setSupplementaryFiles(readSupplementaryFiles(owner));
     setCurrentFolder('');
@@ -182,8 +187,9 @@ export default function AdminScopedMediaLibrary({
     try {
       await persistRef.current?.({
         preloaded_images: (nextOwner.preloadedImages || []).map((img) => {
-          const e = normalizeMediaEntry(img, prefix);
+          const e = serializeMediaLibraryEntry(img, prefix);
           return {
+            ...e,
             url: e.url,
             name: e.name,
             type: e.type || 'image',
@@ -198,6 +204,7 @@ export default function AdminScopedMediaLibrary({
           ...sanitizeMediaFolderConfig(nextOwner.imageDatasetConfig),
         },
       });
+      mediaOwnerRef.current = nextOwner;
       setMediaOwner(nextOwner);
       onImagesChange?.(nextOwner.preloadedImages || []);
       if (!silent) setInfo('Saved.');
@@ -209,6 +216,7 @@ export default function AdminScopedMediaLibrary({
 
   const refreshFromR2 = useCallback(async ({ silent = false } = {}) => {
     if (!prefix || !isR2Configured()) return;
+    const startingOwner = mediaOwnerRef.current;
     setSyncing(true);
     if (!silent) setError('');
     try {
@@ -226,27 +234,15 @@ export default function AdminScopedMediaLibrary({
         }
         throw new Error(result.error || tx("Failed to list media"));
       }
-      const mapped = sortMediaByName(
-        (result.images || []).map((img) => normalizeMediaEntry({
-          url: img.url,
-          name: img.name,
-          type: img.type || inferMediaType(img.name),
-          key: img.key,
-          folder: img.folder,
-        }, prefix)),
-      );
-      setMediaOwner((prev) => ({
-        ...prev,
-        preloadedImages: mapped,
-        preloadedAt: new Date().toISOString(),
-        preloadedSource: 'r2',
-      }));
-      onImagesChange?.(mapped);
+      // A delayed listing must not overwrite a move/upload completed since it started.
+      if (mediaOwnerRef.current !== startingOwner) return;
+      const mapped = mergeMediaLibraryListing(result.images || [], startingOwner.preloadedImages, prefix);
       // Refresh only syncs file list — keep folder tags untouched
       await persistRef.current?.({
         preloaded_images: mapped.map((img) => {
-          const e = normalizeMediaEntry(img, prefix);
+          const e = serializeMediaLibraryEntry(img, prefix);
           return {
+            ...e,
             url: e.url,
             name: e.name,
             type: e.type || 'image',
@@ -258,6 +254,16 @@ export default function AdminScopedMediaLibrary({
         preloaded_at: new Date().toISOString(),
         preloaded_source: 'r2',
       });
+      if (mediaOwnerRef.current !== startingOwner) return;
+      const nextOwner = {
+        ...startingOwner,
+        preloadedImages: mapped,
+        preloadedAt: new Date().toISOString(),
+        preloadedSource: 'r2',
+      };
+      mediaOwnerRef.current = nextOwner;
+      setMediaOwner(nextOwner);
+      onImagesChange?.(mapped);
       if (!silent) setInfo(tx("Synced {v0} file(s) from R2.", { v0: mapped.length }));
     } catch (err) {
       if (!silent) setError(err.message || tx("Refresh failed"));
