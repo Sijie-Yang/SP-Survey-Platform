@@ -50,7 +50,7 @@ import {
   expectedCategoryImageCount,
   resolveMediaFolderTags,
 } from '../../lib/surveyMediaInjection';
-import { sortMediaByName, normalizeMediaAssignmentMode } from '../../lib/mediaUtils';
+import { sortMediaByName, normalizeMediaAssignmentMode, listAllKnownFolders } from '../../lib/mediaUtils';
 import { normalizeAllowedTools } from '../../lib/annotationTools';
 import { SkillDimensionsEditor, SkillStringListEditor } from './SkillConfigFieldEditors';
 import {
@@ -70,6 +70,7 @@ import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import QuestionParticipantPreview from './QuestionParticipantPreview';
 import MediaSlotsEditor from './MediaSlotsEditor';
+import MediaFolderScopeSelect from './MediaFolderScopeSelect';
 
 const MEDIA_STAR_EDITOR_TYPES = [
   'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
@@ -362,10 +363,12 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
     () => resolveMediaFolderTags(currentProject, { pages: [{ elements: [question] }] }),
     [currentProject, question],
   );
-  const taggedFolderOptions = React.useMemo(() => {
-    const tags = folderTags || {};
-    return Object.keys(tags).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [folderTags]);
+  const folderOptions = React.useMemo(() => {
+    if (isSet || isCategory) return Object.keys(folderTags).filter((folder) => folderTags[folder] === (isSet ? 'set' : 'category'));
+    return listAllKnownFolders(currentProject?.preloadedImages || [], folderTags, null, currentProject?.imageDatasetConfig?.mediaFolders || []);
+  }, [currentProject, folderTags, isSet, isCategory]);
+  const hasSlots = question.mediaSlots?.length > 0;
+  const isCurated = isCuratedSelectionMode(question.imageSelectionMode);
   const poolStatus = React.useMemo(() => {
     if (!currentProject?.preloadedImages?.length) {
       return {
@@ -423,30 +426,21 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
           sx={{ mt: 1 }}
         />
       )}
-      {(isSet || isCategory) && taggedFolderOptions.length > 0 && (
-        <FormControl fullWidth variant="outlined" sx={{ mt: 1 }}>
-          <InputLabel shrink sx={{ backgroundColor: 'white', px: 1 }}>{tr("Folder scope (optional)")}</InputLabel>
-          <Select inputProps={{ 'aria-label': tr("Folder scope (optional)") }}
-            multiple
-            displayEmpty
-            value={Array.isArray(question.mediaFolders) ? question.mediaFolders : []}
-            onChange={(e) => onChange('mediaFolders', e.target.value)}
-            label={tr("Folder scope (optional)")}
-            renderValue={(selected) => (selected?.length ? selected.join(', ') : tr('All tagged folders'))}
-          >
-            {taggedFolderOptions
-              .filter((f) => {
-                const tag = folderTags[f];
-                if (isSet) return tag === 'set';
-                if (isCategory) return tag === 'category';
-                return true;
-              })
-              .map((f) => (
-                <MenuItem key={f} value={f}>{f} ({tr(folderTags[f])})</MenuItem>
-              ))}
-          </Select>
-        </FormControl>
-      )}
+      {!hasSlots && !isCurated && <MediaFolderScopeSelect
+        folders={folderOptions}
+        value={question.mediaFolders || []}
+        onChange={(folders) => onChange('mediaFolders', folders)}
+        allLabel={tr(isSet ? 'All tagged sets' : isCategory ? 'All tagged categories' : 'All media (all folders)')}
+        helperText={tr(isSet
+          ? 'Select one or more set folders. Each draw uses one complete set. Clear the selection to use all sets.'
+          : isCategory
+            ? 'Select one or more category folders. Draw the specified count from each selected category, including subfolders. Clear to use all categories.'
+            : 'Select one or more folders, including their subfolders. Files are drawn from their combined pool. Clear to use all media.')}
+      />}
+      {!isSet && !isCategory && !hasSlots && !isCurated && <Alert severity={poolStatus.matchingFileCount ? 'info' : 'warning'}>
+        {tr('Available in this scope: {count} matching files.', { count: poolStatus.matchingFileCount })}
+        {question.mediaFolders?.length > 0 && !poolStatus.matchingFileCount && ` ${tr('No matching media in the selected folders. Choose other folders or upload media there.')}`}
+      </Alert>}
       {isSet && (
         <>
           {poolStatus.totalFileCount === 0 ? (
@@ -1440,6 +1434,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
                     {MEDIA_STAR_EDITOR_TYPES.includes(editedQuestion.type) && (
                       <MediaSlotsEditor
+                        currentProject={currentProject}
                         question={editedQuestion}
                         onChange={handleQuestionChange}
                         availableImages={availableImages}

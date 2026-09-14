@@ -5,8 +5,9 @@ import {
   TextField, IconButton, Collapse, Alert, Chip, Stack,
 } from '@mui/material';
 import { Add, Delete, ExpandMore, ExpandLess } from '@mui/icons-material';
+import MediaFolderScopeSelect from './MediaFolderScopeSelect';
 import { MEDIA_SLOT_PRESETS } from '../../lib/mediaSlots';
-import { sortMediaByName } from '../../lib/mediaUtils';
+import { sortMediaByName, listAllKnownFolders } from '../../lib/mediaUtils';
 
 const ROLES = ['stimulus', 'companion', 'choice', 'context'];
 const MEDIA_TYPES = ['image', 'video', 'audio', 'any'];
@@ -35,11 +36,13 @@ export default function MediaSlotsEditor({
   question,
   onChange,
   availableImages = [],
+  currentProject,
 }) {
   const { tr, zh } = useQuestionEditorText();
   const slots = Array.isArray(question.mediaSlots) ? question.mediaSlots : [];
   const [open, setOpen] = useState(slots.length > 0);
   const pool = sortMediaByName(availableImages || []);
+  const folderOptions = listAllKnownFolders(currentProject?.preloadedImages || availableImages, currentProject?.imageDatasetConfig?.mediaFolderTags || {}, null, currentProject?.imageDatasetConfig?.mediaFolders || []);
 
   const setSlots = (next) => onChange('mediaSlots', next);
   const updateSlot = (index, patch) => {
@@ -187,17 +190,12 @@ export default function MediaSlotsEditor({
                 </FormControl>
               )}
               {['random', 'set_member', 'category'].includes(slot.selection) && (
-                <TextField
-                  size="small"
-                  fullWidth
-                  sx={{ mt: 1 }}
-                  label={tr("Folder scope (comma-separated, optional)")}
-                  value={(slot.mediaFolders || []).join(', ')}
-                  onChange={(e) => {
-                    const folders = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
-                    updateSlot(index, { mediaFolders: folders });
-                  }}
-                  helperText={tr("Limit this slot’s pool to these media folders")}
+                <MediaFolderScopeSelect
+                  folders={folderOptions}
+                  value={slot.mediaFolders || []}
+                  onChange={(folders) => updateSlot(index, { mediaFolders: folders })}
+                  allLabel={tr('All media (all folders)')}
+                  helperText={tr('Limit this slot’s pool to these media folders')}
                 />
               )}
             </Box>

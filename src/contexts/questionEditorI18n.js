@@ -3,6 +3,21 @@ import { RegionContext } from './RegionContext';
 
 // Editor chrome only. Never apply translations to stored question/answer values.
 export const questionEditorZh = {
+  "Random draw scope": "随机抽取范围",
+  "All media (all folders)": "全部媒体（所有文件夹）",
+  "All tagged sets": "全部已标记分组",
+  "All tagged categories": "全部已标记分类",
+  "Search and select folders\u2026": "搜索并选择文件夹…",
+  "Choose folders": "选择文件夹",
+  "Use all folders": "恢复全部范围",
+  "Close folder list": "收起文件夹列表",
+  "No matching folders": "没有匹配的文件夹",
+  "Select one or more set folders. Each draw uses one complete set. Clear the selection to use all sets.": "可选择一个或多个分组文件夹，每次抽取一个完整分组。清除选择即恢复全部分组。",
+  "Select one or more category folders. Draw the specified count from each selected category, including subfolders. Clear to use all categories.": "可固定选择一个或多个分类，从每个选定分类中各抽指定数量，包含子文件夹。清除选择即恢复全部分类。",
+  "Select one or more folders, including their subfolders. Files are drawn from their combined pool. Clear to use all media.": "可选择一个或多个文件夹（含子文件夹），从合并范围中随机抽取。清除选择即恢复全部媒体。",
+  "Available in this scope: {count} matching files.": "当前范围内有 {count} 个符合媒体类型要求的文件。",
+  "No matching media in the selected folders. Choose other folders or upload media there.": "所选文件夹中没有匹配媒体，请更换文件夹或向其中上传媒体。",
+
   "Page Settings": "页面设置",
   "Page Title": "页面标题",
   "Page Description": "页面说明",

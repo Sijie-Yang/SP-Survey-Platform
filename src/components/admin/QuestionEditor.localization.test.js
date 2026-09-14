@@ -45,6 +45,23 @@ test('switching admin language retains edited question content and saved choice 
   expect(save.mock.calls[0][0]).toMatchObject({ name: base.name, title: 'My revised question', choices: [{ value: 'agree_original', text: 'Agree exactly as written' }] });
 });
 
+test('random folder scope can select specific folders and explicitly return to all media', () => {
+  const save = jest.fn();
+  setup({ type: 'imagepicker', randomImageSelection: true, imageSelectionMode: 'huggingface_random' }, save);
+  const scope = screen.getByRole('combobox', { name: '随机抽取范围' });
+  expect(screen.getByText('全部媒体（所有文件夹）')).toBeInTheDocument();
+  fireEvent.mouseDown(scope);
+  fireEvent.click(screen.getByRole('option', { name: 'photos', exact: true }));
+  fireEvent.keyDown(scope, { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: '保存题目' }));
+  expect(save.mock.calls[0][0]).toMatchObject({ mediaFolders: ['photos'], name: base.name, title: base.title });
+  fireEvent.mouseDown(scope);
+  fireEvent.click(screen.getByRole('option', { name: '全部媒体（所有文件夹）', exact: true }));
+  fireEvent.keyDown(scope, { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: '保存题目' }));
+  expect(save.mock.calls[1][0].mediaFolders).toEqual([]);
+});
+
 test('annotation settings and media sampling details are Chinese', () => {
   setup({ type: 'imageannotation', imageCount: 1, mediaAssignmentMode: 'category', trialCount: 2 });
   expect(screen.getByLabelText('每个分类抽取的文件数')).toBeInTheDocument();

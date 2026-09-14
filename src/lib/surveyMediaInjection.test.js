@@ -162,6 +162,32 @@ describe('surveyMediaInjection set/category picking', () => {
     expect(assignment.images.every((img) => img.folder === 'sets/s1')).toBe(true);
   });
 
+  test('folder counts and random draws agree across overlapping scopes without leaking outside them', () => {
+    const pool = makePool([
+      { name: 'a.jpg', folder: 'chosen' },
+      { name: 'b.jpg', folder: 'chosen/nested' },
+      { name: 'c.jpg', folder: 'another' },
+      { name: 'outside.jpg', folder: 'chosen-other' },
+    ]);
+    const question = { type: 'imagepicker', imageCount: 3, mediaFolders: ['chosen', 'chosen/nested', 'another'] };
+    expect(getMediaPoolStatus(pool, question).matchingFileCount).toBe(3);
+    const draw = pickRandomMediaForQuestion(pool, question, new Set(), new Set());
+    expect(draw.images.map((m) => m.name).sort()).toEqual(['a.jpg', 'b.jpg', 'c.jpg']);
+    expect(getMediaPoolStatus(pool, { ...question, mediaFolders: ['missing'] }).matchingFileCount).toBe(0);
+    expect(pickRandomMediaForQuestion(pool, { ...question, mediaFolders: ['missing'] }, new Set(), new Set()).images).toEqual([]);
+    expect(getMediaPoolStatus(pool, { ...question, mediaFolders: [] }).matchingFileCount).toBe(4);
+  });
+
+  test('a fixed category scope only draws from that category over repeated trials', () => {
+    const question = categoryQuestion({ mediaFolders: ['cats/urban'], mediaPerCategory: 1 });
+    for (let trial = 0; trial < 3; trial++) {
+      const result = pickRandomMediaForQuestion(FIXTURE_POOL, question, new Set(), new Set(), null, FIXTURE_TAGS);
+      expect(result.images).toHaveLength(1);
+      expect(result.images.every((image) => image.folder === 'cats/urban' || image.folder.startsWith('cats/urban/'))).toBe(true);
+    }
+    expect(getMediaPoolStatus(FIXTURE_POOL, question, FIXTURE_TAGS).matchingCategoryLabels).toEqual(['cats/urban']);
+  });
+
   test('copies hydrated Skill contract and HTML onto the live SurveyJS question', () => {
     const assigned = {};
     const liveQuestion = {

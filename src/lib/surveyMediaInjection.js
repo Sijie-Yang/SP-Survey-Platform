@@ -336,11 +336,32 @@ export function filterPoolForQuestion(pool, element) {
   return filterMediaByType(pool, mediaType).map(normalizeMediaEntry).filter(Boolean);
 }
 
+function scopeIndividualMediaPool(pool, element) {
+  const mode = normalizeMediaAssignmentMode(element?.mediaAssignmentMode);
+  const scopeFolders = Array.isArray(element?.mediaFolders) ? element.mediaFolders.map(normalizeFolderPath).filter(Boolean) : [];
+  let workingPool = [...(pool || [])].map((e) => normalizeMediaEntry(e)).filter(Boolean);
+  if (scopeFolders?.length && mode === 'individual') {
+    const scoped = [];
+    scopeFolders.forEach((folder) => {
+      scoped.push(...getRecursiveMedia(workingPool, folder));
+    });
+    const seen = new Set();
+    workingPool = scoped.filter((img) => {
+      const k = getImageKey(img);
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+
+  return workingPool;
+}
+
 /** Admin UI: project-wide vs question-filtered media/set/category counts. */
 export function getMediaPoolStatus(projectPool, question = null, folderTags = {}) {
   const totalFileCount = (projectPool || []).length;
   const matchingFiles = question
-    ? filterPoolForQuestion(projectPool, question)
+    ? scopeIndividualMediaPool(filterPoolForQuestion(projectPool, question), question)
     : (projectPool || []).map((e) => normalizeMediaEntry(e)).filter(Boolean);
   const matchingFileCount = matchingFiles.length;
   const mediaTypeFilter = question ? getMediaTypeFilter(question) : 'any';
@@ -620,20 +641,7 @@ export function pickRandomMediaForQuestion(
     ? element.mediaFolders.map(normalizeFolderPath).filter(Boolean)
     : null;
 
-  let workingPool = [...(pool || [])].map((e) => normalizeMediaEntry(e)).filter(Boolean);
-  if (scopeFolders?.length && mode === 'individual') {
-    const scoped = [];
-    scopeFolders.forEach((folder) => {
-      scoped.push(...getRecursiveMedia(workingPool, folder));
-    });
-    const seen = new Set();
-    workingPool = scoped.filter((img) => {
-      const k = getImageKey(img);
-      if (!k || seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  }
+  const workingPool = scopeIndividualMediaPool(pool, element);
 
   if (mode === 'category') {
     return pickOnePerCategory(workingPool, element, globallyUsedImageKeys, folderTags);

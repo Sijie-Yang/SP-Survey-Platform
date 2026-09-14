@@ -245,7 +245,7 @@ export function resolveMediaSlots(
     } else if (slot.matchBy === 'basename' && primaryStem) {
       for (let i = 0; i < count; i++) {
         const m = matchByBasename(
-          scoped.length ? scoped : normalizedPool,
+          scoped,
           primaryStem,
           mediaType,
           localExclude,
@@ -260,7 +260,7 @@ export function resolveMediaSlots(
       }
     } else {
       const items = pickRandomFromPool(
-        scoped.length ? scoped : normalizedPool,
+        scoped,
         count,
         mediaType,
         localExclude,
