@@ -65,12 +65,22 @@ import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { checkIsAdmin } from './lib/templateManager';
 import { useNavigate } from 'react-router-dom';
+import useSurveyAssistant from './hooks/useSurveyAssistant';
+import AiAssistantSidebar from './components/admin/AiAssistantSidebar';
+import {
+  AI_SIDEBAR_ID,
+  AI_SIDEBAR_WIDTH,
+  PROJECT_SIDEBAR_WIDTH,
+  readSidebarOpen,
+  writeSidebarOpen,
+} from './hooks/surveyAssistantUtils';
 
 const ImageDataset = lazy(() => import('./components/admin/ImageDataset'));
 const SurveyBuilder = lazy(() => import('./components/admin/SurveyBuilder'));
 const SurveyPreview = lazy(() => import('./components/admin/SurveyPreview'));
 const ResultsAnalysis = lazy(() => import('./components/admin/ResultsAnalysis'));
 const ResearcherPractice = lazy(() => import('./components/admin/ResearcherPractice'));
+const SiliconSamples = lazy(() => import('./components/admin/SiliconSamples'));
 
 function TabPanel({ children, value, index, keepMounted = false, ...other }) {
   const active = value === index;
@@ -101,6 +111,7 @@ function AdminWorkspaceTabs({ value, onChange }) {
       <Tab label={t.tabShare} />
       <Tab label={t.tabResults} />
       <Tab label={t.tabPractice} />
+      <Tab label={t.tabSilicon} />
     </Tabs>
   );
 }
@@ -148,6 +159,11 @@ export default function AdminApp() {
   useEffect(() => {
     if (tabValue === 5) setPracticeKeepAlive(true);
   }, [tabValue]);
+  useEffect(() => {
+    const openSilicon = () => setTabValue(6);
+    window.addEventListener('sp-open-silicon-tab', openSilicon);
+    return () => window.removeEventListener('sp-open-silicon-tab', openSilicon);
+  }, []);
   const [surveyConfig, setSurveyConfig] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -210,11 +226,32 @@ export default function AdminApp() {
   
   // Project management states
   const [sidebarOpen, setSidebarOpen] = useState(!compactToolbar);
+  const wideLayout = useMediaQuery('(min-width:1200px)');
+  const [aiSidebarOpen, setAiSidebarOpen] = useState(() => (
+    typeof window !== 'undefined' ? readSidebarOpen(window.localStorage) : false
+  ));
   useEffect(() => {
     // A persistent desktop sidebar becomes a modal drawer on phones. Close it
     // at the breakpoint so it cannot cover an already open question editor.
     if (compactToolbar) setSidebarOpen(false);
   }, [compactToolbar]);
+  useEffect(() => {
+    writeSidebarOpen(typeof window !== 'undefined' ? window.localStorage : null, aiSidebarOpen);
+  }, [aiSidebarOpen]);
+  const toggleProjectSidebar = useCallback(() => {
+    setSidebarOpen((open) => {
+      const next = !open;
+      if (next && !wideLayout) setAiSidebarOpen(false);
+      return next;
+    });
+  }, [wideLayout]);
+  const toggleAiSidebar = useCallback(() => {
+    setAiSidebarOpen((open) => {
+      const next = !open;
+      if (next && !wideLayout) setSidebarOpen(false);
+      return next;
+    });
+  }, [wideLayout]);
   const [currentProject, setCurrentProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(true);
 
@@ -734,37 +771,60 @@ export default function AdminApp() {
     console.log('🔍 Removed project state for:', projectId);
   };
 
-  const handleSurveyConfigChange = (newConfig) => {
+  const handleSurveyConfigChange = useCallback((newConfig, metadata = {}) => {
     console.log('🔍 Survey config changed, updating state...');
     console.log('🔍 New config title:', newConfig?.title);
     console.log('🔍 Pages count:', newConfig?.pages?.length);
-    
+    const persisted = metadata.persisted === true;
+    const savedCopy = persisted ? JSON.parse(JSON.stringify(newConfig)) : null;
+
     setSurveyConfig(newConfig);
-    
+    if (persisted) {
+      setLastSavedConfig(savedCopy);
+      setHasUnsavedChanges(false);
+      setSaveStatus('saved');
+      setLastSavedAt(Date.now());
+      if (metadata.draftUpdatedAt) {
+        draftUpdatedAtRef.current = metadata.draftUpdatedAt;
+        setCurrentProject((prev) => prev?.id === currentProject?.id
+          ? { ...prev, draftUpdatedAt: metadata.draftUpdatedAt }
+          : prev);
+      }
+    }
+
     // Save current project state immediately (including new configuration)
     if (currentProject) {
       console.log('🔍 Saving updated survey config to project state...');
-      // Save immediately, don't use setTimeout, pass new configuration directly
-      const newStates = { ...projectStates };
-      if (!newStates[currentProject.id]) {
-        newStates[currentProject.id] = {
+      setProjectStates((prev) => {
+        const next = {
+          ...prev,
+          [currentProject.id]: {
+            ...(prev[currentProject.id] || {}),
           surveyConfig: newConfig,
-          lastSavedConfig: lastSavedConfig,
-          hasUnsavedChanges: false,
-          tabValue: tabValue
+            tabValue,
+            ...(persisted ? {
+              lastSavedConfig: savedCopy,
+              hasUnsavedChanges: false,
+            } : {}),
+          },
         };
-      } else {
-        newStates[currentProject.id] = {
-          ...newStates[currentProject.id],
-          surveyConfig: newConfig,
-          tabValue: tabValue
-        };
-      }
-      setProjectStates(newStates);
-      saveProjectStatesToStorage(newStates);
+        saveProjectStatesToStorage(next);
+        return next;
+      });
       console.log('✅ Survey config saved to project state');
     }
-  };
+  }, [currentProject, tabValue]);
+
+  const assistant = useSurveyAssistant({
+    currentProject,
+    surveyConfig,
+    onSurveyConfigChange: handleSurveyConfigChange,
+  });
+
+  const openSiliconTab = useCallback(() => {
+    setTabValue(6);
+    if (!wideLayout) setAiSidebarOpen(false);
+  }, [wideLayout]);
 
   const handleResultsConfigSync = (nextConfig) => {
     const savedCopy = JSON.parse(JSON.stringify(nextConfig));
@@ -1040,7 +1100,9 @@ export default function AdminApp() {
           <Tooltip title={t.toggleSidebar}>
             <IconButton
               color="inherit"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={toggleProjectSidebar}
+              aria-expanded={sidebarOpen}
+              aria-controls="admin-project-sidebar"
               sx={{ mr: { xs: 0, sm: 2 } }}
             >
               <MenuIcon />
@@ -1202,12 +1264,14 @@ export default function AdminApp() {
               </IconButton>
             </Tooltip>
 
-            <Box sx={{ display: { xs: 'none', md: 'block' } }}><Tooltip title={t.aiTooltip}>
+            <Box sx={{ display: { xs: 'none', md: 'block' } }}><Tooltip title={aiSidebarOpen ? t.toggleAiSidebarOpen : t.toggleAiSidebarClosed}>
               <Button
                 color="inherit"
                 size="small"
                 startIcon={<AutoAwesome />}
-                onClick={() => navigate('/admin/integrations')}
+                onClick={toggleAiSidebar}
+                aria-expanded={aiSidebarOpen}
+                aria-controls={AI_SIDEBAR_ID}
                 sx={{
                   ml: 0.5,
                   px: 1.25,
@@ -1216,8 +1280,8 @@ export default function AdminApp() {
                   fontWeight: 700,
                   letterSpacing: 0.4,
                   border: '1px solid',
-                  borderColor: 'rgba(255, 255, 255, 0.65)',
-                  bgcolor: 'rgba(255, 255, 255, 0.12)',
+                  borderColor: aiSidebarOpen ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.65)',
+                  bgcolor: aiSidebarOpen ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.12)',
                   textTransform: 'none',
                   '&:hover': {
                     borderColor: 'rgba(255, 255, 255, 0.95)',
@@ -1293,7 +1357,7 @@ export default function AdminApp() {
         onClose={handleToolsMenuClose}
         PaperProps={{ sx: { mt: 1, minWidth: 240 } }}
       >
-        {compactToolbar && <MenuItem onClick={() => { handleToolsMenuClose(); navigate('/admin/integrations'); }}>{t.aiLabel}</MenuItem>}
+        {compactToolbar && <MenuItem onClick={() => { handleToolsMenuClose(); toggleAiSidebar(); }}>{t.aiLabel}</MenuItem>}
         {compactToolbar && <MenuItem disabled={!currentProject || !surveyConfig} onClick={() => {
           handleToolsMenuClose();
           window.open('/survey?project=' + encodeURIComponent(currentProject.id), '_blank', 'noopener,noreferrer');
@@ -1424,6 +1488,7 @@ export default function AdminApp() {
 
       {/* Project Sidebar */}
       <ProjectSidebar
+        id="admin-project-sidebar"
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onProjectSelect={handleProjectSelect}
@@ -1431,16 +1496,30 @@ export default function AdminApp() {
         currentProject={currentProject}
         surveyConfig={surveyConfig}
         projectStates={projectStates}
-        width={400}
+        width={PROJECT_SIDEBAR_WIDTH}
+      />
+
+      <AiAssistantSidebar
+        open={aiSidebarOpen}
+        onClose={() => setAiSidebarOpen(false)}
+        assistant={assistant}
+        onOpenSilicon={openSiliconTab}
+        variant={wideLayout ? 'persistent' : 'temporary'}
+        width={AI_SIDEBAR_WIDTH}
       />
 
       <Container 
         maxWidth="xl" 
         sx={{ 
           mt: 10, // Increase top spacing to accommodate fixed AppBar
-          ml: { xs: 0, md: sidebarOpen ? '400px' : 0 },
-          transition: 'margin-left 0.3s ease',
-          width: { xs: '100%', md: sidebarOpen ? 'calc(100% - 400px)' : '100%' }, minWidth: 0
+          ml: { xs: 0, md: sidebarOpen ? `${PROJECT_SIDEBAR_WIDTH}px` : 0 },
+          mr: wideLayout && aiSidebarOpen ? `${AI_SIDEBAR_WIDTH}px` : 0,
+          transition: 'margin 0.3s ease, width 0.3s ease',
+          width: {
+            xs: '100%',
+            md: `calc(100% - ${(sidebarOpen ? PROJECT_SIDEBAR_WIDTH : 0) + (wideLayout && aiSidebarOpen ? AI_SIDEBAR_WIDTH : 0)}px)`,
+          },
+          minWidth: 0
         }}
       >
         {!currentProject ? (
@@ -1450,7 +1529,10 @@ export default function AdminApp() {
             title={t.noProjectTitle}
             description={t.noProjectBody}
             actionLabel={t.openProjectSidebar}
-            onAction={() => setSidebarOpen(true)}
+            onAction={() => {
+              if (!wideLayout) setAiSidebarOpen(false);
+              setSidebarOpen(true);
+            }}
           />
         ) : (
           // Project content
@@ -1489,6 +1571,7 @@ export default function AdminApp() {
                   onChange={handleSurveyConfigChange}
                   currentProject={currentProject}
                   onNextStep={handleNextStep}
+                  hideAssistant
                 />
               ) : (
                 <Box sx={{ p: 3, textAlign: 'center' }}>
@@ -1522,6 +1605,9 @@ export default function AdminApp() {
                 onSurveyConfigChange={handleSurveyConfigChange}
                 onSessionActiveChange={handlePracticeSessionActive}
               />
+            </TabPanel>
+            <TabPanel value={tabValue} index={6}>
+              <SiliconSamples currentProject={currentProject} />
             </TabPanel>
             </Suspense>
           </Paper>

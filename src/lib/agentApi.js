@@ -91,10 +91,15 @@ export async function storeOpenAiCredential(apiKey) {
   });
 }
 
-export async function validateOpenAiCredential(apiKey) {
+export async function validateOpenAiCredential(apiKey, extras = {}) {
   return agentFetch('/api/agent/credentials/openai', {
     method: 'POST',
-    body: JSON.stringify({ apiKey, validateOnly: true }),
+    body: JSON.stringify({
+      apiKey,
+      validateOnly: true,
+      provider: extras.provider,
+      baseUrl: extras.baseUrl,
+    }),
   });
 }
 
@@ -120,6 +125,12 @@ export async function sendAgentChat({
   customPrompts,
   enableMultiAgentReview = false,
   reviewMode = '1v1',
+  projectId,
+  sessionId,
+  provider,
+  model,
+  reasoningEffort,
+  permission,
 }) {
   return agentFetch('/api/agent/chat', {
     method: 'POST',
@@ -131,8 +142,133 @@ export async function sendAgentChat({
       customPrompts,
       enableMultiAgentReview,
       reviewMode,
+      projectId,
+      sessionId,
+      provider,
+      model,
+      reasoningEffort,
+      permission,
     }),
   });
+}
+
+export async function listAiSessions(projectId, mode = 'designer') {
+  const q = new URLSearchParams({ projectId: projectId || '', mode });
+  return agentFetch(`/api/agent/sessions?${q}`);
+}
+
+export async function getAiSession(sessionId) {
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export async function storeProviderCredential({
+  apiKey,
+  provider,
+  baseUrl,
+  displayName,
+  protocol,
+  models,
+  defaultInput,
+  compat,
+  retryPolicy,
+  custom,
+}) {
+  return agentFetch('/api/agent/credentials/providers', {
+    method: 'POST',
+    body: JSON.stringify({
+      apiKey,
+      provider,
+      baseUrl,
+      displayName,
+      protocol,
+      models,
+      defaultInput,
+      compat,
+      retryPolicy,
+      custom,
+    }),
+  });
+}
+
+export async function saveProviderProfile(profile) {
+  return agentFetch('/api/agent/credentials/profiles', {
+    method: 'PUT',
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function deleteProviderCredential(provider) {
+  return agentFetch(`/api/agent/credentials/providers/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function saveAiSettings(settings) {
+  return agentFetch('/api/agent/credentials/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function listProviderCatalog() {
+  return agentFetch('/api/agent/credentials/providers');
+}
+
+export async function listProviderModels(provider) {
+  return agentFetch(`/api/agent/credentials/models?provider=${encodeURIComponent(provider)}`);
+}
+
+export async function fetchProviderModels({ provider, baseUrl, apiKey, protocol } = {}) {
+  return agentFetch('/api/agent/credentials/models', {
+    method: 'POST',
+    body: JSON.stringify({ provider, baseUrl, apiKey, protocol }),
+  });
+}
+
+export async function listSiliconPersonas(projectId) {
+  return agentFetch(`/api/agent/silicon/personas?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function saveSiliconPersona(body) {
+  return agentFetch('/api/agent/silicon/personas', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSiliconPersona(id) {
+  return agentFetch(`/api/agent/silicon/personas/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function listSiliconRuns(projectId) {
+  return agentFetch(`/api/agent/silicon/runs?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function createSiliconRun(body) {
+  return agentFetch('/api/agent/silicon/runs', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function processSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/process`, { method: 'POST' });
+}
+
+export async function cancelSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
+export async function getSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function listSiliconResponses(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/responses`);
+}
+
+export async function getSiliconCompare(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/compare`);
 }
 
 export async function approveMcpOAuth({

@@ -22,9 +22,8 @@ jobs:
       - name: Unit/integration tests
         run: npm run test:ci
 
-      - name: Design protocol + BYOK crypto tests
-        run: |
-          node --test worker-lib/crypto/byokAesGcm.test.mjs
+      - name: Agent runtime, BYOK, and Silicon tests
+        run: npm run test:agent
 
       - name: Admin results authorization tests
         run: node --test worker-lib/adminResults.test.mjs worker-lib/agent/skillContracts.test.mjs worker-lib/agent/skillHtmlValidate.test.mjs
@@ -47,6 +46,7 @@ jobs:
         run: |
           node -e "import('./worker-lib/agent/router.mjs').then((m) => { if (typeof m.handleAgentAndMcpRoutes !== 'function') process.exit(1); })"
           node -e "import('./worker-lib/mcp/server.mjs').then((m) => { if (typeof m.handleMcpRequest !== 'function') process.exit(1); })"
+          node -e "import('./worker-lib/silicon/handlers.mjs').then((m) => { if (typeof m.createSiliconRun !== 'function') process.exit(1); })"
 
       - name: Production build
         run: npm run build

@@ -2,8 +2,10 @@
 
 Two ways to design surveys with AI:
 
-1. **Connect your Codex** via OAuth-protected remote MCP
-2. **Platform Assistant** with your own OpenAI / OpenRouter key (encrypted server-side)
+1. **In-browser Assistant** — multi-provider Models directory, write-only keys, three protocols, durable sessions, and a Worker-native draft tool loop
+2. **Connect Codex / Claude / Cursor** via OAuth-protected remote MCP
+
+Silicon pretests use VLM personas and isolated `silicon_*` tables. They never write to `survey_responses`.
 
 Billing is not included. You use your own AI account in both paths.
 
@@ -16,7 +18,9 @@ Run in order:
 1. `supabase/admin_projects_rls.sql` (if not already applied)
 2. `supabase/agent_mcp_platform.sql`
 3. `supabase/survey_public_rpcs.sql`
-4. `supabase/question_skills_analysis_html.sql` (optional `analysis_html` for skill-authored Results Analysis views)
+4. `supabase/ai_runtime.sql`
+5. `supabase/silicon_samples.sql`
+6. `supabase/question_skills_analysis_html.sql` (optional legacy `analysis_html` support)
 
 ### 2. Wrangler secrets / vars
 
@@ -164,6 +168,25 @@ Do not confuse: **save = draft (managed projects)** · **`survey_publish` = part
 Visual pipeline: upload → tag folders (`survey_update_media_dataset`) → design with `mediaAssignmentMode` set/category → validate.
 
 MCP never calls the in-platform LLM (no nested-agent loops).
+
+## Models catalog and Silicon pretests
+
+The in-browser Assistant and Silicon Samples share the checked-in, versioned catalog in `worker-lib/agent/runtime/catalog.generated.mjs`.
+
+- Supported API protocols: `openai-completions`, `openai-responses`, and `anthropic-messages`
+- Provider keys are encrypted per user and write-only from the browser
+- Custom gateways require HTTPS; private, local, link-local, and redirecting endpoints are rejected
+- Native-auth providers such as Bedrock, Vertex, Azure, Codex OAuth, and Copilot OAuth are visible but marked `AUTH_UNSUPPORTED`
+- Assistant sessions pin provider, model, and reasoning effort; explicit switches are recorded as events
+- Assistant edits always load the current draft and save via optimistic `expectedDraftUpdatedAt` operations
+- Silicon only allows image-capable models, snapshots the saved draft and project media, enforces response/token limits, and stores output separately
+- Set `AGENT_RUNTIME=0` to use the legacy JSON chat handler while rolling back the new runtime
+
+Refresh the checked-in model catalog with:
+
+```bash
+node scripts/sync-harness-model-catalog.mjs
+```
 
 ## Security notes
 

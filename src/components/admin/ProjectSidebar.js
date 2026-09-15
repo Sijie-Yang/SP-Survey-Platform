@@ -105,6 +105,7 @@ import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
 
 export default function ProjectSidebar({ 
+  id,
   open, 
   onClose, 
   onProjectSelect, 
@@ -918,6 +919,7 @@ export default function ProjectSidebar({
   return (
     <>
       <Drawer
+        id={id}
         anchor="left"
         open={open}
         onClose={onClose}

@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useRegion } from '../../contexts/RegionContext';
 import {
   Box,
   Card,
-  CardContent,
   TextField,
   IconButton,
   Typography,
@@ -31,9 +31,12 @@ import {
   AccordionDetails,
   Alert,
   ButtonGroup,
-  Collapse,
   Snackbar,
   Stack,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
 } from '@mui/material';
 import { ExpandMore, Save, RestartAlt } from '@mui/icons-material';
 import ConfirmDialog from '../layout/ConfirmDialog';
@@ -58,6 +61,7 @@ import {
 import { PROMPTS } from '../../config/prompts';
 import AgentsEditor from './AgentsEditor';
 import { listMcpConnections } from '../../lib/agentApi';
+import ModelsSettings from './ModelsSettings';
 
 /**
  * ChatAssistant Component
@@ -92,12 +96,29 @@ export default function ChatAssistant({
   onClearHistory,
   onDownloadHistory,
   onPromptsChange,
+  onCredentialsChange,
   chatEndRef,
   aiUndoAvailable = false,
   onRevertAiChange,
+  modelOptions = [],
+  selectedRoute = '',
+  selectedEffort = '',
+  effortOptions = [],
+  onRouteChange,
+  onEffortChange,
+  routeUnavailable = '',
+  blockReason = '',
+  variant = 'content',
+  onOpenSilicon,
+  fillHeight = false,
+  settingsOpen: settingsOpenProp,
+  onSettingsOpenChange,
 }) {
+  const { t } = useRegion();
   const navigate = useNavigate();
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [internalSettingsOpen, setInternalSettingsOpen] = React.useState(false);
+  const settingsOpen = settingsOpenProp ?? internalSettingsOpen;
+  const setSettingsOpen = onSettingsOpenChange || setInternalSettingsOpen;
   const [activeTab, setActiveTab] = React.useState(0);
   const [codexConnected, setCodexConnected] = React.useState(false);
   const [codexStatusLoading, setCodexStatusLoading] = React.useState(Boolean(isPlatformMode));
@@ -110,7 +131,8 @@ export default function ChatAssistant({
       return undefined;
     }
     setCodexStatusLoading(true);
-    listMcpConnections()
+    Promise.resolve()
+      .then(() => (typeof listMcpConnections === 'function' ? listMcpConnections() : { connections: [] }))
       .then((result) => {
         if (cancelled) return;
         setCodexConnected(Boolean(result?.connections?.length));
@@ -158,25 +180,7 @@ export default function ChatAssistant({
   const [promptsModified, setPromptsModified] = React.useState(false);
   const [promptSnackbar, setPromptSnackbar] = React.useState({ open: false, message: '', severity: 'success' });
   const [confirmDialog, setConfirmDialog] = React.useState(null);
-
-  // The AI Assistant is a sizable panel that most users only need
-  // occasionally. We start it collapsed and let the user expand it by
-  // clicking the header. Persist the open/closed state per project so the
-  // panel stays open if they were actively chatting and switch tabs.
-  const collapsedKey = currentProject?.id
-    ? `chatAssistantCollapsed_${currentProject.id}`
-    : 'chatAssistantCollapsed_default';
-  const [collapsed, setCollapsed] = React.useState(() => {
-    if (typeof window === 'undefined') return true;
-    const stored = window.localStorage.getItem(collapsedKey);
-    if (stored === 'false') return false;
-    if (stored === 'true') return true;
-    return true; // default: collapsed
-  });
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(collapsedKey, collapsed ? 'true' : 'false');
-  }, [collapsed, collapsedKey]);
+  const sendBlocked = Boolean(blockReason || !apiKeyValid || routeUnavailable || isLoading);
 
   // States for Research Context (per project)
   const [researchContext, setResearchContext] = React.useState(() => {
@@ -338,7 +342,7 @@ export default function ChatAssistant({
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      onSendMessage();
+      if (!sendBlocked && userMessage.trim()) onSendMessage();
     }
   };
   
@@ -357,6 +361,28 @@ export default function ChatAssistant({
     }
   };
   
+  const handleClearClick = () => {
+    setConfirmDialog({
+      title: t.aiClearHistoryTitle,
+      message: t.aiClearHistoryMessage,
+      confirmLabel: t.aiClearHistoryConfirm,
+      confirmColor: 'error',
+      onConfirm: () => {
+        setConfirmDialog(null);
+        onClearHistory?.();
+      },
+    });
+  };
+
+  const composerPlaceholder = blockReason === 'no-project'
+    ? t.aiSidebarSelectProject
+    : (apiKeyValid && !routeUnavailable ? t.aiSidebarComposerPlaceholder : t.aiSidebarComposerDisabled);
+
+  const emptyTitle = t.aiSidebarEmptyTitle;
+  const emptyBody = blockReason === 'no-project'
+    ? t.aiSidebarNoProject
+    : (apiKeyValid ? t.aiSidebarEmptyReady : t.aiSidebarEmptyConnect);
+
   const handleResetPrompts = () => {
     setConfirmDialog({
       title: 'Reset prompts',
@@ -375,192 +401,16 @@ export default function ChatAssistant({
     });
   };
 
-  return (
-    <Card 
-      sx={{ 
-        mb: 2,
-        border: 2,
-        borderColor: 'primary.main',
-        borderRadius: 2,
-        overflow: 'hidden'
-      }}
-    >
-      {/* Header — click anywhere on it (outside the action icons) to
-          expand / collapse the panel. */}
+  const chatBody = (
       <Box
-        onClick={() => setCollapsed((c) => !c)}
         sx={{
-          bgcolor: 'primary.main',
-          color: 'white',
-          p: 2,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          cursor: 'pointer',
-          userSelect: 'none',
-          '&:hover': { bgcolor: 'primary.dark' },
+          flexDirection: 'column',
+          flex: fillHeight ? 1 : undefined,
+          minHeight: 0,
+          height: fillHeight ? '100%' : undefined,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-          <ExpandMore
-            sx={{
-              transition: 'transform 0.2s',
-              transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-              flexShrink: 0,
-            }}
-          />
-          <SmartToy sx={{ fontSize: 28, flexShrink: 0 }} />
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-              AI
-            </Typography>
-            <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
-              Connect ChatGPT (Codex) or AI Assistant
-            </Typography>
-          </Box>
-          {collapsed && messages.length > 0 && (
-            <Chip
-              label={`${messages.length} message${messages.length === 1 ? '' : 's'}`}
-              size="small"
-              sx={{ bgcolor: 'rgba(255,255,255,0.2)', color: 'white', flexShrink: 0 }}
-            />
-          )}
-        </Box>
-
-        <Box onClick={(e) => e.stopPropagation()}>
-          {messages.length > 0 && (
-            <>
-              <Tooltip title="Download conversation">
-                <IconButton 
-                  size="small" 
-                  onClick={onDownloadHistory}
-                  sx={{ color: 'white', mr: 1 }}
-                >
-                  <Download />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Clear history">
-                <IconButton 
-                  size="small" 
-                  onClick={onClearHistory}
-                  sx={{ color: 'white', mr: 1 }}
-                >
-                  <Clear />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
-          <Tooltip title="Settings">
-            <IconButton 
-              size="small" 
-              onClick={() => setSettingsOpen(true)}
-              sx={{ color: 'white' }}
-            >
-              <Settings />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Box>
-
-      {/* One row, two columns: ChatGPT (Codex) | AI Assistant link status */}
-      <Box
-        onClick={(e) => e.stopPropagation()}
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
-          gap: 1.5,
-          p: 1.5,
-          bgcolor: 'grey.50',
-          borderBottom: '1px solid',
-          borderColor: 'divider',
-        }}
-      >
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 1.25,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 1,
-            bgcolor: 'background.paper',
-          }}
-        >
-          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-            <Typography variant="subtitle2" fontWeight={700} noWrap>
-              ChatGPT (Codex)
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              Design via your ChatGPT app
-            </Typography>
-          </Stack>
-          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexShrink: 0 }}>
-            {codexStatusLoading ? (
-              <CircularProgress size={16} />
-            ) : (
-              <Chip
-                size="small"
-                icon={codexConnected ? <CheckCircle /> : undefined}
-                label={codexConnected ? 'Connected' : 'Not connected'}
-                color={codexConnected ? 'success' : 'default'}
-                variant={codexConnected ? 'filled' : 'outlined'}
-              />
-            )}
-            <Button
-              size="small"
-              variant={codexConnected ? 'text' : 'contained'}
-              startIcon={<AutoAwesome fontSize="small" />}
-              onClick={() => navigate('/admin/integrations')}
-            >
-              {codexConnected ? 'Manage' : 'Connect'}
-            </Button>
-          </Stack>
-        </Paper>
-
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 1.25,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 1,
-            bgcolor: 'background.paper',
-          }}
-        >
-          <Stack spacing={0.25} sx={{ minWidth: 0 }}>
-            <Typography variant="subtitle2" fontWeight={700} noWrap>
-              AI Assistant
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              Built-in chat in this panel
-            </Typography>
-          </Stack>
-          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexShrink: 0 }}>
-            <Chip
-              size="small"
-              icon={apiKeyValid ? <CheckCircle /> : undefined}
-              label={apiKeyValid ? 'Connected' : 'Not connected'}
-              color={apiKeyValid ? 'success' : 'default'}
-              variant={apiKeyValid ? 'filled' : 'outlined'}
-            />
-            <Button
-              size="small"
-              variant={apiKeyValid ? 'text' : 'contained'}
-              startIcon={<Settings fontSize="small" />}
-              onClick={() => {
-                if (isPlatformMode) navigate('/admin/integrations');
-                else setSettingsOpen(true);
-              }}
-            >
-              {apiKeyValid ? 'Manage' : 'Connect'}
-            </Button>
-          </Stack>
-        </Paper>
-      </Box>
-
-      <Collapse in={!collapsed} timeout="auto" unmountOnExit>
-      <CardContent sx={{ p: 0 }}>
         {/* Recommendations */}
         {contextEnabled && recommendations.length > 0 && (
           <Box sx={{ p: 2, bgcolor: '#e8f5e9', borderBottom: '1px solid', borderColor: 'divider' }}>
@@ -588,7 +438,9 @@ export default function ChatAssistant({
         {/* Chat History */}
         <Box 
           sx={{ 
-            height: 400, 
+            flex: 1,
+            minHeight: fillHeight ? 0 : 280,
+            height: fillHeight ? undefined : 400,
             overflowY: 'auto', 
             p: 2,
             bgcolor: '#fafafa'
@@ -605,12 +457,10 @@ export default function ChatAssistant({
             }}>
               <SmartToy sx={{ fontSize: 64, mb: 2, opacity: 0.3 }} />
               <Typography variant="h6" sx={{ mb: 1 }}>
-                Connect ChatGPT (Codex) or AI Assistant
+                {emptyTitle}
               </Typography>
               <Typography variant="body2" textAlign="center" sx={{ maxWidth: 440 }}>
-                {apiKeyValid
-                  ? "AI Assistant is ready here. Or design in ChatGPT (Codex) — both edit the same live project."
-                  : 'Use Connect above: ChatGPT (Codex) via Integrations, or AI Assistant with your API key.'}
+                {emptyBody}
               </Typography>
             </Box>
           ) : (
@@ -727,28 +577,72 @@ export default function ChatAssistant({
         </Box>
 
         {/* Input Area */}
-        <Box sx={{ p: 2, bgcolor: 'background.paper', borderTop: '1px solid', borderColor: 'divider' }}>
+        <Box sx={{ p: 2, bgcolor: 'background.paper', borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
           {aiUndoAvailable && (
             <Box sx={{ mb: 1 }}>
               <Button size="small" variant="outlined" color="warning" onClick={onRevertAiChange}>
-                ↩️ Undo last AI change
+                {t.aiSidebarUndo}
               </Button>
             </Box>
+          )}
+          {isPlatformMode && (
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.aiSidebarModel}</InputLabel>
+                <Select
+                  label={t.aiSidebarModel}
+                  value={modelOptions.some((route) => route.value === selectedRoute) ? selectedRoute : ''}
+                  onChange={(event) => onRouteChange?.(event.target.value)}
+                  disabled={isLoading}
+                >
+                  <MenuItem value="" disabled>
+                    {modelOptions.length ? t.aiSidebarSelectModel : t.aiSidebarConfigureModel}
+                  </MenuItem>
+                  {modelOptions.map((route) => (
+                    <MenuItem key={route.value} value={route.value}>
+                      {route.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {effortOptions.length > 0 && (
+                <FormControl size="small" sx={{ minWidth: 160 }}>
+                  <InputLabel>{t.aiSidebarReasoning}</InputLabel>
+                  <Select
+                    label={t.aiSidebarReasoning}
+                    value={effortOptions.includes(selectedEffort) ? selectedEffort : (effortOptions[0] || '')}
+                    onChange={(event) => onEffortChange?.(event.target.value)}
+                    disabled={isLoading}
+                  >
+                    {effortOptions.map((effort) => (
+                      <MenuItem key={effort} value={effort}>{effort}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+            </Stack>
+          )}
+          {routeUnavailable && (
+            <Alert severity="warning" sx={{ mb: 1 }}>{t.aiSidebarModelUnavailable}</Alert>
+          )}
+          {blockReason === 'no-project' && (
+            <Alert severity="info" sx={{ mb: 1 }}>{t.aiSidebarSelectProject}</Alert>
+          )}
+          {credentialHint && apiKeyValid && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              {credentialHint}
+            </Typography>
           )}
           <Box sx={{ display: 'flex', gap: 1 }}>
             <TextField
               fullWidth
               multiline
               maxRows={4}
-              placeholder={
-                apiKeyValid 
-                  ? "Type your message... (e.g., 'Create a thermal comfort survey' or 'Add an imagepicker question')"
-                  : "Please configure API key in settings first..."
-              }
+              placeholder={composerPlaceholder}
               value={userMessage}
               onChange={(e) => onMessageChange(e.target.value)}
               onKeyPress={handleKeyPress}
-              disabled={!apiKeyValid || isLoading}
+              disabled={sendBlocked}
               variant="outlined"
               InputProps={{
                 endAdornment: isLoading && (
@@ -761,7 +655,7 @@ export default function ChatAssistant({
             <IconButton
               color="primary"
               onClick={onSendMessage}
-              disabled={!apiKeyValid || !userMessage.trim() || isLoading}
+              disabled={sendBlocked || !userMessage.trim()}
               sx={{
                 bgcolor: 'primary.main',
                 color: 'white',
@@ -773,17 +667,94 @@ export default function ChatAssistant({
             </IconButton>
           </Box>
           
-          {contextEnabled && (
+          {contextEnabled && currentProject?.id && (
             <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              🧠 Contextual Engineering enabled • Project: <strong>{currentProject?.name || 'Unnamed'}</strong> ({currentProject?.id?.slice(0, 8)}...) • Memory is project-specific
+              {t.aiSidebarMemoryHint} <strong>{currentProject?.name || t.aiSidebarUnnamedProject}</strong>
             </Typography>
           )}
         </Box>
-      </CardContent>
-      </Collapse>
+      </Box>
+    );
+
+  const headerActions = (
+    <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+      {messages.length > 0 && (
+        <>
+          <Tooltip title={t.aiSidebarDownload}>
+            <IconButton size="small" onClick={onDownloadHistory} sx={{ color: 'inherit' }}>
+              <Download />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={t.aiSidebarClear}>
+            <IconButton size="small" onClick={handleClearClick} sx={{ color: 'inherit' }}>
+              <Clear />
+            </IconButton>
+          </Tooltip>
+        </>
+      )}
+      {onOpenSilicon && (
+        <Tooltip title={t.aiSidebarSilicon}>
+          <Button
+            size="small"
+            sx={{ color: 'inherit', textTransform: 'none' }}
+            onClick={onOpenSilicon}
+          >
+            Silicon
+          </Button>
+        </Tooltip>
+      )}
+      <Tooltip title={t.aiSidebarSettings}>
+        <IconButton size="small" onClick={() => setSettingsOpen(true)} sx={{ color: 'inherit' }}>
+          <Settings />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  );
+
+  return (
+    <>
+      {variant === 'embedded' ? (
+        <Card
+          sx={{
+            mb: 2,
+            border: 2,
+            borderColor: 'primary.main',
+            borderRadius: 2,
+            overflow: 'hidden',
+          }}
+        >
+          <Box
+            sx={{
+              bgcolor: 'primary.main',
+              color: 'white',
+              p: 1.5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 1,
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+              <SmartToy sx={{ fontSize: 24, flexShrink: 0 }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                  {t.aiSidebarTitle}
+                </Typography>
+                <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
+                  {t.aiSidebarSubtitle}
+                </Typography>
+              </Box>
+            </Box>
+            {headerActions}
+          </Box>
+          {chatBody}
+        </Card>
+      ) : (
+        chatBody
+      )}
 
       {/* Settings Dialog */}
-      <Dialog 
+      <Dialog
         open={settingsOpen} 
         onClose={() => setSettingsOpen(false)}
         maxWidth="lg"
@@ -823,17 +794,39 @@ export default function ChatAssistant({
                 🔑 API Key
               </Typography>
           {isPlatformMode ? (
-            <Alert severity={apiKeyValid ? 'success' : 'info'} sx={{ mb: 3 }}>
-              {apiKeyValid
-                ? `Server-stored key configured ${credentialHint || ''}. Manage it under AI & Integrations (toolbar AI button), or paste a new key below to replace it.`
-                : 'Store your OpenAI / OpenRouter key under AI & Integrations (toolbar AI button). Keys are encrypted server-side and never kept in localStorage.'}
-              <Box sx={{ mt: 1 }}>
-                <Button size="small" href="/admin/integrations" target="_self">
-                  Open AI & Integrations
+            <Box sx={{ mb: 3 }}>
+              <ModelsSettings onConfiguredChange={onCredentialsChange} />
+              <Divider sx={{ my: 2 }} />
+              <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
+                {t.aiSidebarCodexTitle}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                {t.aiSidebarCodexBody}
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center">
+                {codexStatusLoading ? (
+                  <CircularProgress size={16} />
+                ) : (
+                  <Chip
+                    size="small"
+                    icon={codexConnected ? <CheckCircle /> : undefined}
+                    label={codexConnected ? t.aiSidebarConnected : t.aiSidebarDisconnected}
+                    color={codexConnected ? 'success' : 'default'}
+                    variant={codexConnected ? 'filled' : 'outlined'}
+                  />
+                )}
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<AutoAwesome fontSize="small" />}
+                  onClick={() => navigate('/admin/integrations')}
+                >
+                  {t.aiSidebarOpenIntegrations}
                 </Button>
-              </Box>
-            </Alert>
+              </Stack>
+            </Box>
           ) : (
+          <>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Use an{' '}
             <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI</a>
@@ -841,12 +834,11 @@ export default function ChatAssistant({
             <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">OpenRouter</a>
             {' '}API key. OpenRouter keys start with <code>sk-or-</code>.
           </Typography>
-          )}
           <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
             <TextField
               fullWidth
               type="password"
-              label={isPlatformMode ? 'Replace API Key' : 'API Key'}
+              label="API Key"
               value={openaiApiKey}
               onChange={(e) => onApiKeyChange(e.target.value)}
               placeholder="sk-or-... or sk-..."
@@ -864,9 +856,11 @@ export default function ChatAssistant({
               disabled={!openaiApiKey}
               sx={{ minWidth: 100 }}
             >
-              {isPlatformMode ? 'Save' : 'Validate'}
+              Validate
             </Button>
           </Box>
+          </>
+          )}
 
           <Divider sx={{ my: 2 }} />
 
@@ -1519,7 +1513,7 @@ export default function ChatAssistant({
         onConfirm={() => confirmDialog?.onConfirm?.()}
         onCancel={() => setConfirmDialog(null)}
       />
-    </Card>
+    </>
   );
 }
 

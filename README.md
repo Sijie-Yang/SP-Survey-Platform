@@ -26,9 +26,10 @@ Design image-based questionnaires in a drag-and-drop admin panel, share a link w
 
 ## Highlights
 
-- **ChatGPT (Codex) via MCP** — design surveys, upload media, share links, and analyze results from ChatGPT using the remote `sp_survey` MCP (OAuth; no API key on this site)
+- **In-browser AI Assistant** — multi-provider Models directory, write-only BYOK keys, three protocols, durable sessions, and conflict-safe draft tools
+- **Silicon samples** — VLM personas pretest a frozen draft/media snapshot without entering human responses or quotas
+- **ChatGPT / Cursor / Claude via MCP** — optional advanced path using OAuth-protected survey tools
 - **No-code survey builder** — image choice, rating, ranking, matrix, annotation, media panels, and custom skill iframes
-- **In-browser AI assistant** — optional OpenAI / OpenRouter key for the builder chat panel
 - **Research templates** — start from peer-reviewed designs (Place Pulse, SPECS, thermal affordance, and more)
 - **Cloud media** — upload images (browser-side compression) or import Hugging Face datasets
 - **Share & analyze** — live survey links, TrueSkill / reliability metrics, CSV export with `__shown_images`

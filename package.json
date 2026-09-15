@@ -48,7 +48,7 @@
     "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
     "test:ci": "cross-env CI=true react-scripts test --watchAll=false --runInBand",
-    "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs",
+    "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs worker-lib/agent/runtime/*.test.mjs worker-lib/silicon/*.test.mjs",
     "test:bench": "node --test worker-lib/bench/scoring.test.mjs",
     "test:media-pipeline": "node scripts/test-media-set-category.mjs",
     "research:filter": "python3 scripts/filter-scopus-coarse.py --csv research/scopus/exports/2026-07-12.csv --out research/scopus/shortlists/2026-07-12_library_coarse.json --also public/research/scopus-shortlist.json",
