@@ -31,6 +31,36 @@ describe('agent run dispatcher', () => {
     assert.equal(ran, true);
   });
 
+  it('dispatches silicon jobs through the same queue contract', async () => {
+    const sent = [];
+    const result = await dispatchAgentRun({
+      AGENT_QUEUE: { send: async (job) => sent.push(job) },
+    }, null, { kind: 'silicon', runId: 'sil-1' }, {
+      executeRun: async () => assert.fail('must not run inline'),
+    });
+    assert.equal(result.dispatch, 'queue');
+    assert.equal(sent[0].kind, 'silicon');
+    assert.equal(sent[0].runId, 'sil-1');
+    assert.match(sent[0].claimedBy || '', /^queue:sil-1:/);
+  });
+
+  it('passes delaySeconds to the queue and keeps distinct worker identities', async () => {
+    const sent = [];
+    await dispatchAgentRun({
+      AGENT_QUEUE: { send: async (job, options) => sent.push({ job, options }) },
+    }, null, { kind: 'silicon', runId: 'sil-2' }, {
+      executeRun: async () => assert.fail('must not run inline'),
+      delaySeconds: 15,
+    });
+    assert.equal(sent[0].options.delaySeconds, 15);
+    await dispatchAgentRun({
+      AGENT_QUEUE: { send: async (job) => sent.push({ job }) },
+    }, null, { kind: 'silicon', runId: 'sil-2' }, {
+      executeRun: async () => assert.fail('must not run inline'),
+    });
+    assert.notEqual(sent[0].job.claimedBy, sent[1].job.claimedBy);
+  });
+
   it('acks success and retries transient queue failures', async () => {
     const outcomes = [];
     const batch = {

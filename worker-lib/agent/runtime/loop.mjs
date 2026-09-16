@@ -10,9 +10,15 @@ import {
 } from './events.mjs';
 import { chatCompletions, toOpenAiTools } from './providers.mjs';
 import { summarizeToolResult } from './tools.mjs';
+import { compactJsonForModel } from './toolArgs.mjs';
 
-const MAX_STEPS = 12;
+const MAX_STEPS = 16;
 const DEFAULT_STAGNATION_LIMIT = 3;
+const MAX_FAMILY_REPAIRS = 2;
+const DEFAULT_WRITE_TOOLS = Object.freeze([
+  'survey_apply_operations',
+  'survey_submit_generated_draft',
+]);
 
 export function forcedToolChoice(protocol, name) {
   if (!name) return 'auto';
@@ -80,13 +86,19 @@ export async function runToolLoop({
   turnId: requestedTurnId,
   checkpoint,
   stepBudget = Number.POSITIVE_INFINITY,
+  stopReasonOverride = '',
+  writeTools = DEFAULT_WRITE_TOOLS,
 }) {
+  const writeToolNames = new Set(writeTools?.length ? writeTools : DEFAULT_WRITE_TOOLS);
+  const defaultWriteTool = [...writeToolNames][0];
+  const isWriteTool = (name) => writeToolNames.has(name);
   const tools = toOpenAiTools(registry.list());
   let step = Number(checkpoint?.step || 0);
   let last = checkpoint?.last || { content: '', toolCalls: [], usage: {} };
   let latestDraft = checkpoint?.latestDraft || null;
   let editNudgeCount = Number(checkpoint?.editNudgeCount || 0);
   let attemptedDraftWrite = Boolean(checkpoint?.attemptedDraftWrite);
+  const successfulTools = Array.isArray(checkpoint?.successfulTools) ? [...checkpoint.successfulTools] : [];
   let lastDraftWriteError = checkpoint?.lastDraftWriteError || '';
   let loadedCapabilities = Boolean(checkpoint?.loadedCapabilities);
   let loadedDraft = Boolean(checkpoint?.loadedDraft);
@@ -102,6 +114,12 @@ export async function runToolLoop({
   let repeatedFingerprint = Number(checkpoint?.repeatedFingerprint || 0);
   let previousFingerprint = checkpoint?.previousFingerprint || '';
   let overflowRecoveries = Number(checkpoint?.overflowRecoveries || 0);
+  let lastRetryAction = checkpoint?.lastRetryAction || '';
+  const repairFamilies = {
+    ...(checkpoint?.repairFamilies && typeof checkpoint.repairFamilies === 'object'
+      ? checkpoint.repairFamilies
+      : {}),
+  };
   let terminalReason = 'max_steps';
   let terminal = false;
   let workSteps = 0;
@@ -143,7 +161,7 @@ export async function runToolLoop({
         toolName: resumed.name,
         content: [{
           type: 'text',
-          text: JSON.stringify(redactSecrets(resumed.result)).slice(0, 12000),
+          text: compactJsonForModel(redactSecrets(resumed.result)),
         }],
         isError: false,
         timestamp: Date.now(),
@@ -161,6 +179,7 @@ export async function runToolLoop({
             step,
             id: item.id,
             kind: item.kind || 'steer',
+            target: item.target || 'next-step',
             content,
           });
         }
@@ -196,11 +215,14 @@ export async function runToolLoop({
         }
       }
 
-      const requiredTool = requireDraftChange && !latestDraft
-        ? (!loadedCapabilities
-          ? 'survey_capabilities'
-          : (!loadedDraft ? 'survey_get_draft' : 'survey_apply_operations'))
-        : '';
+      const requiredTool = nextRequiredTool({
+        requireDraftChange,
+        latestDraft,
+        loadedCapabilities,
+        loadedDraft,
+        lastRetryAction,
+        writeTool: defaultWriteTool,
+      });
       const toolPolicy = toolRequestPolicy({
         protocol,
         requiredTool,
@@ -267,14 +289,18 @@ export async function runToolLoop({
       usage.prompt_tokens += Number(last.usage.prompt_tokens || 0);
       usage.completion_tokens += Number(last.usage.completion_tokens || 0);
 
-      const calls = normalizeToolCalls(last.toolCalls, step);
+      const calls = normalizeToolCalls(
+        last.toolCalls,
+        step,
+        stopReasonOverride || last.stopReason || last.rawStopReason,
+      );
       if (!calls.length && requireDraftChange && !latestDraft && editNudgeCount < 3 && step < maxSteps - 1) {
         working.push(last.raw || { role: 'assistant', content: last.content || '' });
         working.push({
           role: 'user',
           content: lastDraftWriteError
-            ? `The survey was not saved. The last survey_apply_operations call failed: ${lastDraftWriteError}. Call survey_get_draft again for a fresh draftUpdatedAt, correct the operation, and retry survey_apply_operations. For a new survey or complete redesign, use one replaceConfig operation.`
-            : 'The survey is not saved yet. Apply the requested change now with survey_apply_operations. For a new survey or complete redesign, use one replaceConfig operation. Do not only describe it.',
+            ? repairNudge(lastDraftWriteError, lastRetryAction)
+            : `The survey is not saved yet. Submit it now with ${defaultWriteTool}. Do not only describe it.`,
         });
         editNudgeCount += 1;
         await emit('step.end', { step, status: 'continuing', reason: 'draft_change_required' });
@@ -287,6 +313,9 @@ export async function runToolLoop({
         await emit('assistant.delta', { step, content: last.content });
       }
       if (!calls.length) {
+        if (requireDraftChange && !latestDraft) {
+          throw writeFailedError(lastDraftWriteError, attemptedDraftWrite);
+        }
         terminalReason = 'assistant';
         if (last.content) {
           await emit('assistant.message', { step, content: last.content });
@@ -305,8 +334,19 @@ export async function runToolLoop({
         tool_calls: Array.isArray(last.toolCalls) ? last.toolCalls : [],
       });
       for (const call of calls) {
-        await emit('tool.call', redactSecrets({ step, id: call.id, name: call.name, args: call.args }));
-        if (call.name === 'survey_apply_operations') attemptedDraftWrite = true;
+        await emit('tool.call', redactSecrets({
+          step,
+          id: call.id,
+          name: call.name,
+          args: call.args,
+          receivedShape: call.receivedShape,
+          rawArgsComplete: call.rawArgsComplete,
+          argumentOrigin: call.argumentOrigin,
+          byteLength: call.byteLength,
+          parseError: call.argsParseError,
+          stopReason: call.stopReason,
+        }));
+        if (isWriteTool(call.name)) attemptedDraftWrite = true;
       }
 
       const outcomes = await executeToolCalls({
@@ -316,6 +356,7 @@ export async function runToolLoop({
         signal,
         checkCancelled,
         toolExecutionMode,
+        isWriteTool,
       });
       const approvalOutcome = outcomes.find((outcome) => (
         outcome?.result?.code === 'APPROVAL_REQUIRED'
@@ -333,6 +374,7 @@ export async function runToolLoop({
           ok: outcome.ok,
           outcome: outcome.outcome,
           retrySafe: outcome.outcome !== 'unknown',
+          stage: outcome.result?.stage || stageForTool(outcome),
           summary,
           result: compactResult(outcome.result),
         }));
@@ -342,7 +384,7 @@ export async function runToolLoop({
           toolName: outcome.name,
           content: [{
             type: 'text',
-            text: JSON.stringify(redactSecrets(outcome.result)).slice(0, 12000),
+            text: compactJsonForModel(redactSecrets(outcome.result)),
           }],
           isError: !outcome.ok,
           outcome: outcome.outcome,
@@ -365,6 +407,7 @@ export async function runToolLoop({
           steps: step,
           latestDraft,
           attemptedDraftWrite,
+          successfulTools,
           lastDraftWriteError,
           awaitingApproval: true,
           checkpoint: {
@@ -382,6 +425,9 @@ export async function runToolLoop({
             repeatedFingerprint,
             previousFingerprint,
             overflowRecoveries,
+            lastRetryAction,
+            repairFamilies,
+            successfulTools,
             pendingToolCall: {
               id: approvalOutcome.id,
               name: approvalOutcome.name,
@@ -391,6 +437,22 @@ export async function runToolLoop({
         };
       }
 
+      const latestStage = outcomes.map((outcome) => outcome.result?.stage || stageForTool(outcome)).find(Boolean);
+      if (latestStage) {
+        const family = outcomes.map((outcome) => repairFamilyKey(outcome.name, outcome.result)).find(Boolean);
+        await emit('run.stage', {
+          stage: latestStage,
+          repairAttempt: family ? Number(repairFamilies[family] || 0) : 0,
+          repairLimit: MAX_FAMILY_REPAIRS,
+        });
+      }
+      const exhausted = outcomes.some((outcome) => outcome.result?.code === 'GENERATE_REPAIR_EXHAUSTED');
+      if (exhausted) {
+        throw Object.assign(
+          new Error('Questionnaire was not generated successfully. The original draft is unchanged.'),
+          { status: 422, code: 'GENERATE_REPAIR_EXHAUSTED', retryable: false },
+        );
+      }
       const fingerprint = stepFingerprint(calls, outcomes);
       repeatedFingerprint = fingerprint === previousFingerprint ? repeatedFingerprint + 1 : 1;
       previousFingerprint = fingerprint;
@@ -415,6 +477,10 @@ export async function runToolLoop({
       }
     }
 
+    if (!terminal && step >= maxSteps && requireDraftChange && !latestDraft) {
+      throw writeFailedError(lastDraftWriteError, attemptedDraftWrite);
+    }
+
     if (!terminal && step < maxSteps && workSteps >= stepBudget) {
       const nextCheckpoint = {
         turnId,
@@ -431,6 +497,9 @@ export async function runToolLoop({
         repeatedFingerprint,
         previousFingerprint,
         overflowRecoveries,
+        lastRetryAction,
+        repairFamilies,
+        successfulTools,
       };
       await emit('run.status', {
         status: 'running',
@@ -443,6 +512,7 @@ export async function runToolLoop({
         steps: step,
         latestDraft,
         attemptedDraftWrite,
+        successfulTools,
         lastDraftWriteError,
         continuation: true,
         checkpoint: nextCheckpoint,
@@ -462,6 +532,7 @@ export async function runToolLoop({
       steps: step,
       latestDraft,
       attemptedDraftWrite,
+      successfulTools,
       lastDraftWriteError,
     };
   } catch (error) {
@@ -486,19 +557,32 @@ export async function runToolLoop({
     const { name, ok, result } = outcome;
     if (ok && name === 'survey_capabilities') loadedCapabilities = true;
     if (ok && name === 'survey_get_draft') loadedDraft = true;
-    if (ok && name === 'survey_apply_operations' && result?.surveyConfig) {
+    if (ok && name) successfulTools.push(name);
+    if (ok && isWriteTool(name) && result?.surveyConfig) {
       lastDraftWriteError = '';
+      lastRetryAction = '';
       latestDraft = {
         surveyConfig: result.surveyConfig,
         draftUpdatedAt: result.draftUpdatedAt || null,
       };
-    } else if (!ok && name === 'survey_apply_operations') {
-      if (outcome.outcome === 'unknown') {
-        lastDraftWriteError = 'The save request was interrupted and its outcome is unknown. Re-read the draft before retrying.';
-      } else {
-        lastDraftWriteError = String(result?.error || 'Unknown write error').slice(0, 500);
-      }
+      return;
+    }
+    if (ok || !isWriteTool(name)) return;
+    lastRetryAction = retryActionForWriteFailure(result, outcome.outcome);
+    lastDraftWriteError = String(result?.error || 'Unknown write error').slice(0, 500);
+    if (lastRetryAction === 'reload_draft' || lastRetryAction === 'verify_draft') {
       loadedDraft = false;
+    }
+    const family = repairFamilyKey(name, result);
+    if (family && outcome.outcome !== 'not_run') {
+      repairFamilies[family] = Number(repairFamilies[family] || 0) + 1;
+      if (repairFamilies[family] >= 1 + MAX_FAMILY_REPAIRS) {
+        outcome.result = {
+          ...result,
+          code: 'GENERATE_REPAIR_EXHAUSTED',
+          error: 'Questionnaire was not generated successfully. The original draft is unchanged.',
+        };
+      }
     }
   }
 }
@@ -522,6 +606,7 @@ async function executeToolCalls({
   signal,
   checkCancelled,
   toolExecutionMode,
+  isWriteTool = (name) => DEFAULT_WRITE_TOOLS.includes(name),
 }) {
   const outcomes = new Map();
   const groups = executionGroups(calls, registry, toolExecutionMode);
@@ -548,6 +633,10 @@ async function executeToolCalls({
       stopReason = 'cancelled';
     } else if (completed.some((outcome) => outcome.outcome === 'unknown')) {
       stopReason = 'unknown';
+    } else if (completed.some((outcome) => (
+      isWriteTool(outcome.name) && !outcome.ok && outcome.outcome !== 'unknown'
+    ))) {
+      stopReason = 'repair';
     }
     if (!stopReason) {
       try {
@@ -569,10 +658,14 @@ async function executeToolCalls({
           result: {
             error: stopReason === 'cancelled'
               ? 'Cancelled before tool dispatch.'
-              : 'Not dispatched because an earlier exclusive tool has an unknown outcome.',
+              : stopReason === 'repair'
+                ? 'Not dispatched because an earlier write failed and needs repair.'
+                : 'Not dispatched because an earlier exclusive tool has an unknown outcome.',
             code: stopReason === 'cancelled'
               ? 'ABORTED_BEFORE_DISPATCH'
-              : 'BLOCKED_BY_UNKNOWN_OUTCOME',
+              : stopReason === 'repair'
+                ? 'BLOCKED_BY_REPAIR'
+                : 'BLOCKED_BY_UNKNOWN_OUTCOME',
           },
         });
       }
@@ -614,6 +707,43 @@ async function executeToolCall(call, mode, registry, ctx, signal, checkCancelled
       result: null,
     });
   }
+  if (shouldBlockIncompleteArgs(call)) {
+    const truncated = isLengthStopReason(call.stopReason);
+    const writeTool = DEFAULT_WRITE_TOOLS.includes(call.name);
+    const result = {
+      error: truncated
+        ? (writeTool
+          ? 'Write arguments were truncated. Do not save a partial survey.'
+          : 'Tool arguments were truncated. This call was not executed.')
+        : (writeTool
+          ? 'Write arguments were not valid JSON. Do not save a guessed survey.'
+          : 'Tool arguments were not valid JSON. This call was not executed.'),
+      code: truncated ? 'INCOMPLETE_TOOL_ARGS' : 'INVALID_TOOL_ARGUMENTS',
+      path: 'arguments',
+      retryAction: truncated ? 'stop_truncated' : 'repair_args',
+      repairHint: truncated
+        ? 'Retry with complete JSON. Raise this turn’s max output tokens or split the request.'
+        : 'Resend a single complete JSON object. Incomplete arguments are never treated as empty.',
+      receivedShape: {
+        ...(call.receivedShape || {}),
+        stopReason: call.stopReason || null,
+        argsParseError: call.argsParseError || call.parseError || null,
+        argumentOrigin: call.argumentOrigin || null,
+        rawArgsComplete: call.rawArgsComplete,
+        byteLength: call.byteLength,
+      },
+      stage: 'build_survey',
+    };
+    if (mode === 'exclusive') {
+      await ctx?.recordToolExecution?.({
+        id: call.id,
+        name: call.name,
+        status: 'failed',
+        result,
+      });
+    }
+    return { ...call, ok: false, outcome: 'failure', result };
+  }
   try {
     const result = await registry.execute(call.name, call.args, {
       ...ctx,
@@ -653,6 +783,11 @@ async function executeToolCall(call, mode, registry, ctx, signal, checkCancelled
         ...(error?.validation ? { validation: redactSecrets(error.validation) } : {}),
         ...(error?.details ? { details: redactSecrets(error.details) } : {}),
         ...(error?.hint ? { hint: String(error.hint) } : {}),
+        ...(error?.path ? { path: error.path } : {}),
+        ...(error?.expected ? { expected: redactSecrets(error.expected) } : {}),
+        ...(error?.receivedShape ? { receivedShape: redactSecrets(error.receivedShape) } : {}),
+        ...(error?.repairHint ? { repairHint: String(error.repairHint) } : {}),
+        ...(error?.retryAction ? { retryAction: error.retryAction } : {}),
         ...(unknown && error?.message ? { cause: String(error.message).slice(0, 300) } : {}),
       },
     };
@@ -679,21 +814,72 @@ function executionGroups(calls, registry, override) {
   return groups;
 }
 
-function normalizeToolCalls(rawCalls, step) {
+export function isLengthStopReason(reason) {
+  return /^(length|max_tokens|max_output_tokens|maxTokens)$/i.test(String(reason || ''));
+}
+
+export function shouldBlockIncompleteArgs(call = {}) {
+  if (call.rawArgsComplete === false || call.argsComplete === false) return true;
+  return DEFAULT_WRITE_TOOLS.includes(call.name) && isLengthStopReason(call.stopReason);
+}
+
+export function shouldBlockWrite(call = {}) {
+  return DEFAULT_WRITE_TOOLS.includes(call.name) && shouldBlockIncompleteArgs(call);
+}
+
+export function repairFamilyKey(name, result = {}) {
+  if (!DEFAULT_WRITE_TOOLS.includes(name)) return '';
+  return `${name}:${result.code || 'WRITE_FAILED'}:${result.path || ''}`;
+}
+
+export function normalizeToolCalls(rawCalls, step, stopReason = null) {
   return (Array.isArray(rawCalls) ? rawCalls : []).map((call, index) => {
     const name = call?.function?.name || call?.name || 'unknown_tool';
-    let args = {};
-    try {
-      const raw = call?.function?.arguments ?? call?.arguments ?? '{}';
-      args = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
-    } catch {
-      args = {};
+    const raw = call?.function?.arguments ?? call?.arguments ?? '{}';
+    const hasAdapterFlag = call?.rawArgsComplete === false || call?.rawArgsComplete === true;
+    const adapterArgs = call?.args && typeof call.args === 'object' && !Array.isArray(call.args)
+      && Object.keys(call.args).length
+      ? call.args
+      : null;
+    const preParsed = hasAdapterFlag
+      ? {
+        args: adapterArgs,
+        rawArgsComplete: call.rawArgsComplete,
+        parseError: call.parseError || null,
+        receivedShape: call.receivedShape || null,
+        argumentOrigin: call.argumentOrigin || 'adapter',
+        byteLength: call.byteLength,
+      }
+      : null;
+    let args = preParsed?.args || {};
+    let argsComplete = preParsed ? preParsed.rawArgsComplete : true;
+    let argsParseError = preParsed?.parseError || null;
+    if (!preParsed || (preParsed.rawArgsComplete && !preParsed.args)) {
+      try {
+        args = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
+        if (!args || typeof args !== 'object' || Array.isArray(args)) {
+          args = {};
+          argsComplete = false;
+          argsParseError = 'Root value must be a JSON object';
+        }
+      } catch (error) {
+        args = {};
+        argsComplete = false;
+        argsParseError = String(error?.message || 'invalid json');
+      }
     }
     return {
       raw: call,
       id: call?.id || `call_${step}_${index}_${name}`,
       name,
       args,
+      argsComplete,
+      argsParseError,
+      rawArgsComplete: preParsed ? preParsed.rawArgsComplete : argsComplete,
+      argumentOrigin: call.argumentOrigin || preParsed?.argumentOrigin || null,
+      receivedShape: call.receivedShape || preParsed?.receivedShape || null,
+      byteLength: call.byteLength || preParsed?.byteLength || (typeof raw === 'string' ? raw.length : 0),
+      stopReason,
     };
   });
 }
@@ -808,4 +994,76 @@ function compactResult(result) {
     };
   }
   return rest;
+}
+
+export function nextRequiredTool({
+  requireDraftChange,
+  latestDraft,
+  loadedCapabilities,
+  loadedDraft,
+  lastRetryAction,
+  writeTool = 'survey_apply_operations',
+}) {
+  if (!requireDraftChange || latestDraft) return '';
+  if (!loadedCapabilities) return 'survey_capabilities';
+  if (!loadedDraft || lastRetryAction === 'reload_draft' || lastRetryAction === 'verify_draft') {
+    return 'survey_get_draft';
+  }
+  if (lastRetryAction === 'repair_args') return writeTool;
+  return '';
+}
+
+function retryActionForWriteFailure(result, outcome) {
+  if (outcome === 'unknown') return 'verify_draft';
+  if (result?.retryAction) return result.retryAction;
+  if (result?.code === 'INCOMPLETE_TOOL_ARGS' || result?.code === 'OUTPUT_TRUNCATED') {
+    return 'stop_truncated';
+  }
+  if (
+    result?.code === 'GENERATE_CONTRACT'
+    || result?.code === 'GENERATE_GOAL'
+    || result?.code === 'ASSISTANT_MODE_TOOL_REJECTED'
+    || result?.code === 'ADJUST_CONTRACT'
+    || result?.code === 'INVALID_TOOL_ARGUMENTS'
+  ) {
+    return 'repair_args';
+  }
+  return 'reload_draft';
+}
+
+function writeFailedError(lastDraftWriteError, attemptedDraftWrite) {
+  const unchanged = ' Questionnaire was not generated successfully. The original draft is unchanged.';
+  return Object.assign(
+    new Error(lastDraftWriteError
+      ? `${lastDraftWriteError}${unchanged}`
+      : `The survey was not saved.${unchanged}`),
+    {
+      status: 422,
+      code: attemptedDraftWrite ? 'DRAFT_WRITE_FAILED' : 'DRAFT_NOT_CHANGED',
+      retryable: false,
+    },
+  );
+}
+
+function repairNudge(lastDraftWriteError, lastRetryAction) {
+  if (lastRetryAction === 'repair_args') {
+    return `The survey was not saved. ${lastDraftWriteError} Keep the current expectedDraftUpdatedAt and resubmit a complete surveyConfig through the generate submit tool.`;
+  }
+  if (lastRetryAction === 'verify_draft') {
+    return `The last save outcome is unknown. Call survey_get_draft and verify the current draft before writing again. Last error: ${lastDraftWriteError}`;
+  }
+  if (lastRetryAction === 'stop_truncated') {
+    return `The previous write was blocked because the model output was truncated. Do not save a partial survey. ${lastDraftWriteError}`;
+  }
+  return `The survey was not saved. The last draft write failed: ${lastDraftWriteError}. Call survey_get_draft again for a fresh draftUpdatedAt, then retry the write tool.`;
+}
+
+function stageForTool(outcome) {
+  if (outcome?.name === 'survey_capabilities' || outcome?.name === 'survey_get_draft') {
+    return 'read_requirements';
+  }
+  if (DEFAULT_WRITE_TOOLS.includes(outcome?.name) && !outcome.ok) return 'repair_config';
+  if (DEFAULT_WRITE_TOOLS.includes(outcome?.name)) return 'save';
+  if (outcome?.name === 'survey_validate') return 'build_survey';
+  return '';
 }

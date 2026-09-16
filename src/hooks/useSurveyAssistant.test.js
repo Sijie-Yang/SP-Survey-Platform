@@ -72,6 +72,16 @@ jest.mock('../lib/agentApi', () => ({
   getCredentialStatus: jest.fn(),
   listAiSessions: (...args) => mockListAiSessions(...args),
   getAiSession: (...args) => mockGetAiSession(...args),
+  listAiInbox: jest.fn(async () => ({ success: true, inbox: [] })),
+  discardAiInbox: jest.fn(async () => ({ success: true })),
+  archiveAiSession: jest.fn(),
+  cancelAiRun: jest.fn(),
+  listAiRunApprovals: jest.fn(),
+  steerAiSession: jest.fn(),
+  answerAiRunApproval: jest.fn(),
+}));
+jest.mock('../lib/projectManager', () => ({
+  loadSurveyConfigForProject: jest.fn(async () => null),
 }));
 
 const directory = [
@@ -531,6 +541,16 @@ describe('useSurveyAssistant', () => {
     await act(async () => {
       await result.current.handleSendMessage();
     });
+    expect(onPrepareWrite).not.toHaveBeenCalled();
+    expect(mockSendChatMessage).not.toHaveBeenCalled();
+    expect(result.current.writeConflict).toEqual({
+      message: 'edit this question',
+      assistantMode: 'agent',
+    });
+
+    await act(async () => {
+      await result.current.handleResolveWriteConflict('save');
+    });
     expect(onPrepareWrite).toHaveBeenCalled();
     expect(mockSendChatMessage).not.toHaveBeenCalled();
     expect(result.current.messages.some((msg) => String(msg.content).includes('Save failed'))).toBe(true);
@@ -542,7 +562,7 @@ describe('useSurveyAssistant', () => {
       intent: 'adjust',
     });
     await act(async () => {
-      await result.current.handleSendMessage();
+      await result.current.handleResolveWriteConflict('save');
     });
     expect(mockSendChatMessage.mock.calls[0][8]).toEqual(expect.objectContaining({
       editorContext: expect.objectContaining({
@@ -553,6 +573,31 @@ describe('useSurveyAssistant', () => {
         draftUpdatedAt: '2026-09-16T00:00:00.000Z',
       }),
     }));
+  });
+
+  test('holds the request when a page working copy is dirty', async () => {
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live', pages: [{ name: 'p', title: 'Page' }] },
+      onSurveyConfigChange: jest.fn(),
+      editorSelection: { pageName: 'p', pageDirty: true, pageWorkingCopy: { name: 'p', title: 'Edited page' } },
+    }));
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'],
+        directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+      });
+    });
+    act(() => result.current.setUserMessage('把这道题设为必答'));
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+    expect(mockSendChatMessage).not.toHaveBeenCalled();
+    expect(result.current.writeConflict).toEqual({
+      message: '把这道题设为必答',
+      assistantMode: 'agent',
+    });
   });
 
   test('refuses AI undo after later human edits', async () => {

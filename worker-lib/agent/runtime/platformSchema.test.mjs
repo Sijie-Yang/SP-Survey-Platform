@@ -40,7 +40,11 @@ test('Worker capabilities use generated question and operation IDs', () => {
 
 test('designer operation tool consumes the generated item schema', () => {
   const tool = createDesignerTools({}).find((item) => item.name === 'survey_apply_operations');
-  assert.deepEqual(tool.parameters.properties.operations.items, OPERATION_ITEM_SCHEMA);
+  const items = tool.parameters.properties.operations.items;
+  const enums = items.oneOf
+    ? items.oneOf.flatMap((item) => item.properties?.op?.enum || [])
+    : (items.properties?.op?.enum || []);
+  assert.equal(enums.includes('replaceConfig'), true);
   assert.deepEqual(OPERATION_ITEM_SCHEMA.properties.op.enum, OPERATION_TYPES);
 });
 

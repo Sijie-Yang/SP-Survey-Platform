@@ -51,7 +51,7 @@ function registerTool(map, tool) {
   if (BLOCKED.test(tool.name)) {
     throw new Error(`Refusing to register blocked tool: ${tool.name}`);
   }
-  map.set(tool.name, {
+  const entry = {
     name: tool.name,
     description: tool.description || '',
     parameters: tool.parameters || { type: 'object', properties: {} },
@@ -60,7 +60,12 @@ function registerTool(map, tool) {
     risk: tool.risk || null,
     executionMode: tool.executionMode || (tool.minPermission === 'ask' ? 'parallel' : 'exclusive'),
     execute: tool.execute,
-  });
+  };
+  map.set(tool.name, entry);
+  for (const alias of tool.aliases || []) {
+    if (!alias || alias === tool.name || BLOCKED.test(alias)) continue;
+    map.set(alias, { ...entry, name: alias });
+  }
 }
 
 const RANK = { ask: 0, edit_draft: 1, media: 2 };
@@ -71,6 +76,15 @@ export function permissionAllows(have, need) {
 
 export function summarizeToolResult(name, result) {
   if (!result || typeof result !== 'object') return String(result ?? '');
+  if (result.error) {
+    const detail = Array.isArray(result.validation?.errors)
+      ? result.validation.errors.slice(0, 4).map((item) => item.message || item).join('; ')
+      : '';
+    const path = result.path ? ` at ${result.path}` : '';
+    const hint = result.repairHint || result.hint || '';
+    const core = detail ? `${result.error}: ${detail}` : String(result.error);
+    return `${core}${path}${hint ? `. ${hint}` : ''}`.slice(0, 400);
+  }
   if (result.summary) return result.summary;
   if (result.message) return result.message;
   if (result.applied) return `${name}: applied ${result.applied.length} operation(s)`;

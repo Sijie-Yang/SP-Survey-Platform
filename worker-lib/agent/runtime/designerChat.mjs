@@ -6,7 +6,9 @@ import { createEvent, eventsToUiMessages, redactSecrets } from './events.mjs';
 import {
   appendEvent,
   claimRun,
+  claimAfterRunInput,
   claimSessionInput,
+  markInboxFailed,
   createRun,
   createRunCancellationCheck,
   createSession,
@@ -37,9 +39,26 @@ import {
   normalizeAssistantMode,
   requestsExplicitRedesign,
 } from './modes.mjs';
+import { parseGenerateGoals } from './generateGoals.mjs';
 import { dispatchAgentRun } from './runDispatcher.mjs';
 import { requestRunApproval } from './approvals.mjs';
 import { verifySavedDraft } from './draftVerify.mjs';
+import {
+  annotateHistoryForModel,
+  classifyUserIntent,
+  currentTaskMessage,
+  QUESTION_MODE_WRITE_REFUSED,
+  requestsContinuePriorTask,
+  summarizeWorkingCopy,
+} from './taskIntent.mjs';
+
+export {
+  classifyUserIntent,
+  currentTaskMessage,
+  QUESTION_MODE_WRITE_REFUSED,
+  requestsDraftChange,
+  requestsContinuePriorTask,
+} from './taskIntent.mjs';
 
 export const DESIGNER_SYSTEM = `You are the SP-Survey in-browser Assistant (designer mode).
 You design visual-perception surveys using tools — never invent credentials or image URLs.
@@ -47,7 +66,7 @@ You design visual-perception surveys using tools — never invent credentials or
 Workflow:
 1. Always call survey_capabilities before designing or editing.
 2. Always call survey_get_draft before any edit and retain draftUpdatedAt.
-3. You must finish a design/edit request by successfully calling survey_apply_operations. For a new survey or complete redesign, use one replaceConfig operation. For a small edit, use incremental operations.
+3. You must finish a design/edit request by successfully calling survey_apply_operations. For a new survey, regenerate, or complete redesign, use one replaceConfig operation. For a small edit, use incremental operations. Call survey_capabilities at most twice (overview, then one domain). Use skill_list, not survey_skill_list. Prefer preset_* skillId values.
 4. Call survey_validate after substantial edits.
 5. Never AI-generate images to upload. Use project / template / preview media.
 6. Respect the project's existing media selection (fixed urls, folders, or random) and Skill ids. Do not force huggingface_random or rewrite custom skillId values.
@@ -58,25 +77,36 @@ Workflow:
 11. After saving, verify the authoritative draft before reporting completion.
 12. If the user only asks what a setting means, answer without calling survey_apply_operations.
 
-If the user only asks a question, answer without tools.`;
+If the user only asks a question, answer without tools.
+History is background. Do not execute a prior rejected, cancelled, or finished write unless the current message explicitly continues that task. Page-count questions never publish or rewrite.`;
 
-export function requestsDraftChange(message) {
-  const text = String(message || '').trim();
-  if (!text || /^(?:(?:how|what|why|explain)\b|(?:怎么|如何|为什么))/i.test(text)) return false;
-  return /\b(?:create|make|build|design|generate|draft|add|remove|delete|change|modify|update|revise|reorder)\b[\s\S]{0,80}\b(?:survey|questionnaire|question|page|choice|title)\b/i.test(text)
-    || /(?:设计|创建|生成|制作|编写|构建|修改|添加|删除|调整|更新|重做|做一?个?)[\s\S]{0,40}(?:问卷|调查|题目|问题|页面|选项)/.test(text)
-    || /(?:问卷|调查|题目|问题|页面|选项)[\s\S]{0,40}(?:设计|创建|生成|制作|编写|构建|修改|添加|删除|调整|更新|重做)/.test(text);
-}
+const GENERATE_DESIGNER_SYSTEM = `You are the SP-Survey in-browser Assistant in Generate mode.
+You design visual-perception surveys using tools — never invent credentials or image URLs.
 
-export async function runDesignerChat(env, userId, body, request) {
+Workflow:
+1. Call survey_capabilities first. The overview is the generate submit contract, not the incremental operations catalog.
+2. Call survey_get_draft and retain draftUpdatedAt as expectedDraftUpdatedAt.
+3. Finish by successfully calling survey_submit_generated_draft with expectedDraftUpdatedAt and a complete surveyConfig { title, pages }. The server wraps that as one replaceConfig. Do not send operations, addPage, or replaceConfig yourself.
+4. Call survey_validate after a substantial candidate if needed. Do not claim success until the submit tool succeeds.
+5. Never AI-generate images to upload. Use project / template / preview media.
+6. Do not put skillHtml on questions. Do not include API keys.
+7. If a submit fails, keep the current expectedDraftUpdatedAt unless told to reload the draft, then resubmit a complete surveyConfig.
+8. After saving, the runtime verifies the authoritative draft before reporting completion.
+
+If the current task is only a question about the existing survey, answer with read-only tools. Do not generate or submit.
+History is background. Do not execute a prior request unless the current message explicitly continues it.`;
+
+export async function runDesignerChat(env, userId, body, request, ctx) {
   const projectId = body?.projectId || null;
   const message = String(body?.message || '').trim();
   if (!message) throw Object.assign(new Error('message is required'), { status: 400 });
   const assistantMode = normalizeAssistantMode(body?.assistantMode);
-  const draftRequestedByGoal = requestsDraftChange(message);
+  const intent = classifyUserIntent(message, assistantMode);
+  const draftRequestedByGoal = intent.draftWrite || requestsContinuePriorTask(message);
   const modePolicy = getAssistantModePolicy(assistantMode, {
     goalRequiresDraftChange: draftRequestedByGoal,
     explicitRedesign: requestsExplicitRedesign(message),
+    denyPublish: !intent.publish,
   });
 
   const settings = await loadUserAiSettings(env, userId);
@@ -186,6 +216,8 @@ export async function runDesignerChat(env, userId, body, request) {
       status: body?._prepareOnly ? 'queued' : 'running',
       assistantMode,
       requestPayload: queuedBody(body),
+      parentRunId: body?._parentRunId || null,
+      inboxId: body?._inboxId || null,
     });
 
   const emit = async (event) => {
@@ -200,7 +232,13 @@ export async function runDesignerChat(env, userId, body, request) {
 
   const priorEvents = await listEvents(env, session.id);
   if (!body?._sessionPrepared) {
-    await emit(createEvent('user.message', { content: message, assistantMode }));
+    await emit(createEvent('user.message', {
+      content: message,
+      assistantMode,
+      taskId: run.id,
+      intent: intent.goal,
+      goals: intent.goals,
+    }));
     await emit(createEvent('run.status', {
       status: body?._prepareOnly ? 'queued' : 'running',
       assistantMode,
@@ -225,6 +263,41 @@ export async function runDesignerChat(env, userId, body, request) {
     };
   }
 
+  if (assistantMode === 'question' && (intent.draftWrite || intent.publishOrDelete || intent.projectMeta)) {
+    await emit(createEvent('assistant.message', {
+      content: QUESTION_MODE_WRITE_REFUSED,
+      questionModeWriteRefused: true,
+      pendingWrite: message,
+      runId: run.id,
+    }));
+    await finishRun(env, run.id, {
+      status: 'completed',
+      result: {
+        assistantMode,
+        intent: 'question',
+        message: QUESTION_MODE_WRITE_REFUSED,
+        questionModeWriteRefused: true,
+        pendingWrite: message,
+        draftMutated: false,
+        persisted: false,
+        taskStatus: 'rejected',
+      },
+    });
+    await emit(createEvent('run.status', { status: 'completed', assistantMode, taskStatus: 'rejected' }));
+    return {
+      success: true,
+      runtime: 'sp-agent-runtime/0.2',
+      sessionId: session.id,
+      runId: run.id,
+      assistantMode,
+      intent: 'question',
+      message: QUESTION_MODE_WRITE_REFUSED,
+      questionModeWriteRefused: true,
+      pendingWrite: message,
+      events: await listEvents(env, session.id),
+    };
+  }
+
   const cred = await loadProviderCredential(env, userId, provider);
 
   let boundProjectId = projectId;
@@ -236,6 +309,8 @@ export async function runDesignerChat(env, userId, body, request) {
       request,
       writerSource: 'assistant',
       ownerUserId: body?._sessionPrepared ? userId : null,
+      assistantMode,
+      generateGoal: assistantMode === 'generate' && intent.write ? parseGenerateGoals(message) : null,
     });
   const domainTools = (assistantMode === 'agent' || assistantMode === 'question')
     ? createPlatformTools({
@@ -264,21 +339,22 @@ export async function runDesignerChat(env, userId, body, request) {
     modePolicy,
   ));
 
-  const history = eventsToUiMessages(
-    body?._sessionPrepared
-      ? priorEvents.filter((event) => event.run_id !== run.id)
-      : priorEvents,
-  )
-    .slice(-12)
-    .map((m) => ({ role: m.role, content: m.content }));
+  const history = annotateHistoryForModel(
+    eventsToUiMessages(
+      body?._sessionPrepared
+        ? priorEvents.filter((event) => event.run_id !== run.id)
+        : priorEvents,
+    ).slice(-12),
+  );
 
   const research = body?.researchContext || {};
   const researchBlock = research.topic || research.requirements
     ? `\nResearch context:\n- topic: ${research.topic || ''}\n- requirements: ${research.requirements || ''}\n- scenario: ${research.scenario || ''}`
     : '';
   const focus = body?.editorContext || {};
-  const editorBlock = focus.pageName || focus.questionName || focus.panel || focus.draftUpdatedAt
-    ? `\nEditor focus:\n- projectId: ${boundProjectId || ''}\n- pageName: ${focus.pageName || ''}\n- questionName: ${focus.questionName || ''}\n- panel: ${focus.panel || ''}\n- baselineDraftUpdatedAt: ${focus.draftUpdatedAt || ''}\n- hasUnsavedChanges: ${focus.hasUnsavedChanges ? 'yes' : 'no'}\nIf the user says "this question" or "this page", use those stable names. Do not invent DOM labels as IDs.`
+  const workingCopyBlock = summarizeWorkingCopy(focus);
+  const editorBlock = focus.pageName || focus.questionName || focus.panel || focus.draftUpdatedAt || workingCopyBlock
+    ? `\nEditor focus:\n- projectId: ${boundProjectId || ''}\n- pageName: ${focus.pageName || ''}\n- questionName: ${focus.questionName || ''}\n- panel: ${focus.panel || ''}\n- baselineDraftUpdatedAt: ${focus.draftUpdatedAt || ''}\n- hasUnsavedChanges: ${focus.hasUnsavedChanges || focus.dirty ? 'yes' : 'no'}\nIf the user says "this question" or "this page", use those stable names. Do not invent DOM labels as IDs.${workingCopyBlock}`
     : '';
   const draftRequested = modePolicy.requireDraftChange;
 
@@ -300,10 +376,10 @@ export async function runDesignerChat(env, userId, body, request) {
       messages: [
         {
           role: 'system',
-          content: `${DESIGNER_SYSTEM}\n\n${modePolicy.systemPrompt}${researchBlock}${editorBlock}`,
+          content: `${assistantMode === 'generate' ? GENERATE_DESIGNER_SYSTEM : DESIGNER_SYSTEM}\n\n${modePolicy.systemPrompt}${researchBlock}${editorBlock}`,
         },
-        ...history.filter((m) => m.content),
-        { role: 'user', content: message },
+        ...history,
+        { role: 'user', content: currentTaskMessage(message, intent) },
       ],
       registry,
       ctx: {
@@ -335,6 +411,9 @@ export async function runDesignerChat(env, userId, body, request) {
       maxTokens,
       onEvent: emit,
       requireDraftChange: draftRequested,
+      writeTools: assistantMode === 'generate'
+        ? ['survey_submit_generated_draft']
+        : ['survey_apply_operations'],
       checkCancelled: createRunCancellationCheck(env, run.id, {
         signal: request?.signal,
       }),
@@ -406,6 +485,13 @@ export async function runDesignerChat(env, userId, body, request) {
           draftUpdatedAt: verified?.draftUpdatedAt || null,
           reason: verification.reason,
           verified: verification.ok === true,
+          pageCount: result.latestDraft?.surveyConfig?.pages?.length || 0,
+          questionCount: (result.latestDraft?.surveyConfig?.pages || [])
+            .reduce((count, page) => count + (page.elements || []).length, 0),
+          types: [...new Set((result.latestDraft?.surveyConfig?.pages || [])
+            .flatMap((page) => (page.elements || []).map((element) => element.type))
+            .filter(Boolean))],
+          urls: verified?.urls || null,
         },
       }));
       if (verification.reason === 'mismatch' || (verification.reason !== 'unverified' && !verification.ok)) {
@@ -424,7 +510,10 @@ export async function runDesignerChat(env, userId, body, request) {
         };
       }
     }
-    if (draftRequested && !result.latestDraft?.surveyConfig) {
+    const succeededTools = new Set(result.successfulTools || []);
+    const projectWriteDone = succeededTools.has('survey_update_project');
+    const publishDone = succeededTools.has('survey_publish');
+    if (draftRequested && !result.latestDraft?.surveyConfig && !projectWriteDone && !publishDone) {
       const writeFailure = result.lastDraftWriteError
         ? String(redactSecrets(result.lastDraftWriteError)).slice(0, 500)
         : '';
@@ -445,7 +534,7 @@ export async function runDesignerChat(env, userId, body, request) {
       completion_tokens: result.usage.completion_tokens || 0,
       result: {
         assistantMode,
-        intent: modePolicy.responseIntent
+        intent: intent.goal || modePolicy.responseIntent
           || (result.latestDraft?.surveyConfig ? 'adjust' : 'agent'),
         message: result.content || 'Done.',
         draftUpdatedAt: result.latestDraft?.draftUpdatedAt || null,
@@ -453,12 +542,48 @@ export async function runDesignerChat(env, userId, body, request) {
         persisted: Boolean(result.latestDraft?.draftUpdatedAt),
         verified: result.draftVerified === true,
         verificationReason: result.draftVerificationReason || null,
+        projectUpdated: projectWriteDone,
+        published: publishDone,
+        taskStatus: 'completed',
       },
     });
-    await emit(createEvent('run.status', { status: 'completed' }));
+    await emit(createEvent('run.status', {
+      status: 'completed',
+      taskStatus: 'completed',
+      persisted: Boolean(result.latestDraft?.draftUpdatedAt),
+      verified: result.draftVerified === true,
+      verifyFailed: Boolean(result.latestDraft?.draftUpdatedAt) && result.draftVerified !== true,
+      draftUpdatedAt: result.latestDraft?.draftUpdatedAt || null,
+      draftMutated: Boolean(result.latestDraft?.surveyConfig),
+    }));
 
     const events = await listEvents(env, session.id);
     const latestDraft = result.latestDraft;
+    const afterRun = await claimAfterRunInput(env, session.id).catch(() => []);
+    const nextFollowup = afterRun?.[0];
+    if (nextFollowup?.content) {
+      const payload = nextFollowup.payload && typeof nextFollowup.payload === 'object'
+        ? nextFollowup.payload
+        : {};
+      const childMode = payload.assistantMode || body.assistantMode;
+      try {
+        await startDesignerRun(env, userId, {
+          ...queuedBody({
+            ...body,
+            assistantMode: childMode,
+            projectId: payload.projectId || body.projectId,
+            editorContext: payload.editorContext || body.editorContext,
+          }),
+          sessionId: session.id,
+          message: nextFollowup.content,
+          assistantMode: childMode,
+          _parentRunId: run.id,
+          _inboxId: nextFollowup.id,
+        }, request, ctx);
+      } catch (error) {
+        await markInboxFailed(env, nextFollowup.id, error.message, payload);
+      }
+    }
 
     return {
       success: true,
@@ -516,7 +641,9 @@ export async function startDesignerRun(env, userId, body, request, ctx) {
     sessionId: body?.sessionId || null,
     accessToken: body?.accessToken,
     _prepareOnly: true,
-  }, request);
+    _parentRunId: body?._parentRunId || null,
+    _inboxId: body?._inboxId || null,
+  }, request, ctx);
   const job = {
     kind: 'designer',
     userId,
@@ -548,7 +675,7 @@ export async function startDesignerRun(env, userId, body, request, ctx) {
   }
 }
 
-export async function executeQueuedDesignerRun(env, job) {
+export async function executeQueuedDesignerRun(env, job, ctx) {
   if (!job?.userId || !job?.runId || !job?.sessionId) {
     throw Object.assign(new Error('Malformed queued Agent run.'), {
       code: 'INVALID_QUEUED_RUN',
@@ -594,7 +721,7 @@ export async function executeQueuedDesignerRun(env, job) {
       _runId: job.runId,
       _sessionPrepared: true,
       _checkpoint: checkpoint,
-    }, request);
+    }, request, ctx);
   } catch (error) {
     // Provider retries and self-repair happen inside the durable loop. Once it
     // records a terminal failure, Queue-level replay would duplicate events.

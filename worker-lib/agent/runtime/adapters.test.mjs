@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelRequest } from './adapters.mjs';
+import { modelRequest, normalizeStopReason } from './adapters.mjs';
 import { resolveModelRoute } from './registry.mjs';
 
 function completionSse(content = 'OK') {
@@ -274,5 +274,12 @@ describe('pi-ai runtime adapter', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('normalizes provider length stop reasons', () => {
+    assert.equal(normalizeStopReason('length'), 'length');
+    assert.equal(normalizeStopReason('max_tokens'), 'length');
+    assert.equal(normalizeStopReason('tool_calls'), 'toolUse');
+    assert.equal(normalizeStopReason('stop'), 'stop');
   });
 });

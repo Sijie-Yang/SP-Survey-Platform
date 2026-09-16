@@ -2,7 +2,7 @@ import ChoiceOutcomeSummary from './ChoiceOutcomeSummary';
 import { readAllResponsePages, responseCursorFilter } from '../../lib/responsePagination';
 import { recordedRevisionSelection, recordedSurveyConfig } from '../../lib/recordedSurvey';
 import { responseWithinDateRange } from '../../lib/responseIdentity';
-import { sliderScale } from '../../lib/sliderScale';
+import { dimensionDisplayName, sliderScale } from '../../lib/sliderScale';
 import { allocationStatus } from '../../lib/allocationStats';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from '../../lib/mediaIdentity';
 import { fetchAdminResponsePage } from '../../lib/adminResults';
@@ -1496,7 +1496,7 @@ function SkillFieldSummary({ field, answers }) {
             <Box key={id} sx={{ mb: 1.2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
                 <Typography variant="body2">
-                  {d.label || `${d.left || ''} ↔ ${d.right || ''}`}
+                  {dimensionDisplayName(d)}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {avg !== null ? avg.toFixed(2) : '—'} / {scaleMax}
@@ -1981,7 +1981,7 @@ function ImageSliderGroupAnalysis({ question, answers }) {
   const dimDef = dims.find((d) => d.id === dimId);
   const { min: scaleMin, max: scaleMax } = sliderScale(dimDef, question);
   const dimTitle = dimDef
-    ? (dimDef.label || `${dimDef.left} ↔ ${dimDef.right}`)
+    ? dimensionDisplayName(dimDef, safeTab)
     : dimId;
 
   const { allVals, rankedItems } = useMemo(() => {
@@ -2071,11 +2071,9 @@ function ImageSliderGroupAnalysis({ question, answers }) {
           '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 13 },
         }}
       >
-        {dimKeys.map((id) => {
+        {dimKeys.map((id, index) => {
           const def = dims.find((d) => d.id === id);
-          const label = def
-            ? (def.label || `${def.left || ''} ↔ ${def.right || ''}`.trim() || id)
-            : id;
+          const label = def ? dimensionDisplayName(def, index) : id;
           return <Tab key={id} label={label} />;
         })}
       </Tabs>
@@ -2216,7 +2214,7 @@ function SliderGroupAnalysis({ question, answers }) {
               scores={s.vals}
               domainMin={s.scale.min}
               domainMax={s.scale.max}
-              title={`${s.label || s.id} distribution`}
+              title={`${dimensionDisplayName(s)} distribution`}
               padB={40}
               chartH={180}
             />

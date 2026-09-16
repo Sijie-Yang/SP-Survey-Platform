@@ -4,6 +4,7 @@
  */
 
 import { isKnownQuestionType, questionHasTrait } from '../platformSchema';
+import { dimensionIncomplete, matrixItemLabel } from '../sliderScale';
 
 function structuredIssue(issue, severity = 'error') {
   return {
@@ -154,13 +155,36 @@ export function validateSurveyConfig(surveyConfig) {
             });
           }
         }
-        if (
-          questionHasTrait(element.type, 'slider')
-          && !element.dimensions?.length
-        ) {
-          warnings.push({
-            path: elementPath,
-            message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
+        if (questionHasTrait(element.type, 'slider')) {
+          if (!element.dimensions?.length) {
+            warnings.push({
+              path: elementPath,
+              message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
+            });
+          } else {
+            element.dimensions.forEach((dimension, dimIndex) => {
+              if (dimensionIncomplete(dimension)) {
+                warnings.push({
+                  path: `${elementPath}.dimensions[${dimIndex}]`,
+                  message: `Dimension ${dimIndex + 1} is incomplete (needs a display name and both pole labels). Historical answer ids are unchanged.`,
+                });
+              }
+            });
+          }
+        }
+        for (const key of ['rows', 'columns']) {
+          if (!Array.isArray(element[key])) continue;
+          element[key].forEach((item, itemIndex) => {
+            const kind = key === 'rows' ? 'Row' : 'Column';
+            const hasText = item && typeof item === 'object'
+              ? String(item.text || '').trim()
+              : String(item || '').trim();
+            if (!hasText) {
+              warnings.push({
+                path: `${elementPath}.${key}[${itemIndex}]`,
+                message: `${kind} ${itemIndex + 1} is missing a display label (fallback: ${matrixItemLabel(item, itemIndex, kind)}).`,
+              });
+            }
           });
         }
         if (

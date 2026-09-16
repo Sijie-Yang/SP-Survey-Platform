@@ -31,6 +31,7 @@ describe('runtime events', () => {
       'context.prune',
       'context.compact',
       'tool.outcome.unknown',
+      'run.stage',
     ]) {
       assert.equal(createEvent(type).type, type);
     }
@@ -72,6 +73,51 @@ describe('runtime events', () => {
     assert.equal(messages[1].role, 'assistant');
     assert.equal(messages[1].tools[0].status, 'done');
     assert.equal(messages[1].content, 'Hello');
+  });
+
+  it('attaches generate stage and error diagnostics to UI tools', () => {
+    const messages = eventsToUiMessages([
+      { type: 'tool.call', payload: { id: '1', name: 'survey_apply_operations' } },
+      {
+        type: 'run.stage',
+        payload: { stage: 'repair_config', repairAttempt: 1, repairLimit: 2 },
+      },
+      {
+        type: 'tool.result',
+        payload: {
+          id: '1',
+          name: 'survey_apply_operations',
+          ok: false,
+          stage: 'repair_config',
+          summary: 'Generate rejects incremental operations',
+          result: {
+            code: 'GENERATE_CONTRACT',
+            path: 'operations[0].op',
+            receivedShape: { ops: [{ op: 'addPage' }] },
+          },
+        },
+      },
+    ]);
+    assert.equal(messages[0].metadata.stage, 'repair_config');
+    assert.equal(messages[0].tools[0].status, 'error');
+    assert.equal(messages[0].tools[0].code, 'GENERATE_CONTRACT');
+    assert.equal(messages[0].tools[0].diagnostics.path, 'operations[0].op');
+  });
+
+  it('pairs repeated same-name tools by id so earlier calls do not stay running', () => {
+    const messages = eventsToUiMessages([
+      { type: 'tool.call', payload: { id: 'a', name: 'survey_capabilities' } },
+      { type: 'tool.call', payload: { id: 'b', name: 'survey_capabilities' } },
+      { type: 'tool.result', payload: { id: 'b', name: 'survey_capabilities', ok: true, summary: 'Loaded questions' } },
+      { type: 'tool.result', payload: { id: 'a', name: 'survey_capabilities', ok: true, summary: 'Loaded overview' } },
+      { type: 'tool.call', payload: { id: 'c', name: 'survey_get_draft' } },
+      { type: 'run.status', payload: { status: 'completed' } },
+    ]);
+    assert.deepEqual(messages[0].tools.map((tool) => [tool.id, tool.status]), [
+      ['a', 'done'],
+      ['b', 'done'],
+      ['c', 'unknown'],
+    ]);
   });
 
   it('derives exact model call/result history from append-only events', () => {

@@ -25,6 +25,7 @@ export const EVENT_TYPES = [
   'context.prune',
   'context.compact',
   'run.status',
+  'run.stage',
   'usage',
   'error',
   'model.selection',
@@ -104,15 +105,28 @@ export function redactSecrets(value, depth = 0) {
 export function eventsToUiMessages(events = []) {
   const messages = [];
   let assistant = null;
+  const runStatus = new Map();
   for (const ev of events) {
+    const runId = ev.runId || ev.run_id || ev.payload?.runId || null;
+    if (ev.type === 'run.status' && ev.payload?.status && runId) {
+      runStatus.set(runId, ev.payload.status);
+    }
     if (ev.type === 'user.message' || ev.type === 'steering.message') {
       assistant = null;
+      const taskStatus = ev.payload?.taskStatus
+        || (ev.payload?.questionModeWriteRefused ? 'rejected' : null);
       messages.push({
         id: `event-${ev.seq ?? messages.length}`,
         role: 'user',
         content: ev.payload?.content || '',
+        runId,
         createdAt: ev.createdAt || ev.created_at,
-        ...(ev.type === 'steering.message' ? { metadata: { steering: true } } : {}),
+        metadata: {
+          ...(ev.type === 'steering.message' ? { steering: true } : {}),
+          assistantMode: ev.payload?.assistantMode,
+          taskStatus,
+          runId,
+        },
       });
     } else if (ev.type === 'assistant.delta' || ev.type === 'assistant.message') {
       if (!assistant) {
@@ -121,6 +135,7 @@ export function eventsToUiMessages(events = []) {
           role: 'assistant',
           content: '',
           tools: [],
+          runId: ev.runId || ev.run_id || null,
           createdAt: ev.createdAt || ev.created_at,
         };
         messages.push(assistant);
@@ -131,6 +146,19 @@ export function eventsToUiMessages(events = []) {
           assistant.content += content;
         }
       }
+      if (ev.payload?.questionModeWriteRefused) {
+        assistant.metadata = {
+          ...(assistant.metadata || {}),
+          questionModeWriteRefused: true,
+          pendingWrite: ev.payload.pendingWrite || '',
+        };
+        const prior = [...messages].reverse().find((item) => (
+          item.role === 'user' && (item.runId || item.metadata?.runId) === assistant.runId
+        ));
+        if (prior) {
+          prior.metadata = { ...(prior.metadata || {}), taskStatus: 'rejected' };
+        }
+      }
     } else if (ev.type === 'tool.call') {
       if (!assistant) {
         assistant = {
@@ -138,6 +166,7 @@ export function eventsToUiMessages(events = []) {
           role: 'assistant',
           content: '',
           tools: [],
+          runId: ev.runId || ev.run_id || null,
           createdAt: ev.createdAt || ev.created_at,
         };
         messages.push(assistant);
@@ -147,18 +176,92 @@ export function eventsToUiMessages(events = []) {
         args: ev.payload?.args,
         status: 'running',
         id: ev.payload?.id,
+        diagnostics: {
+          receivedShape: ev.payload?.receivedShape,
+          rawArgsComplete: ev.payload?.rawArgsComplete,
+          argumentOrigin: ev.payload?.argumentOrigin,
+          byteLength: ev.payload?.byteLength,
+          parseError: ev.payload?.parseError,
+          stopReason: ev.payload?.stopReason,
+        },
       });
+    } else if (ev.type === 'run.stage' && assistant) {
+      assistant.metadata = {
+        ...(assistant.metadata || {}),
+        stage: ev.payload?.stage || '',
+        repairAttempt: ev.payload?.repairAttempt,
+        repairLimit: ev.payload?.repairLimit,
+      };
     } else if (ev.type === 'tool.result' || ev.type === 'tool.outcome.unknown') {
-      const tool = assistant?.tools?.find((t) => t.id === ev.payload?.id || t.name === ev.payload?.name);
+      const tool = findUiTool(assistant?.tools, ev.payload);
       if (tool) {
         tool.status = ev.type === 'tool.outcome.unknown' || ev.payload?.outcome === 'unknown'
           ? 'unknown'
           : (ev.payload?.ok === false ? 'error' : 'done');
-        tool.result = ev.payload?.summary || ev.payload?.result;
+        const structured = ev.payload?.result && typeof ev.payload.result === 'object'
+          ? ev.payload.result
+          : null;
+        tool.result = structured
+          ? { ...structured, summary: ev.payload?.summary || structured.summary }
+          : (ev.payload?.summary || ev.payload?.result);
+        tool.code = ev.payload?.result?.code || ev.payload?.code;
+        tool.path = ev.payload?.result?.path;
+        tool.stage = ev.payload?.stage;
+        const result = ev.payload?.result && typeof ev.payload.result === 'object'
+          ? ev.payload.result
+          : {};
+        tool.diagnostics = {
+          ...(tool.diagnostics || {}),
+          code: result.code || ev.payload?.code,
+          path: result.path,
+          receivedShape: result.receivedShape || tool.diagnostics?.receivedShape,
+          stopReason: result.receivedShape?.stopReason || tool.diagnostics?.stopReason,
+          rawArgsComplete: result.receivedShape?.rawArgsComplete ?? tool.diagnostics?.rawArgsComplete,
+          argumentOrigin: result.receivedShape?.argumentOrigin || tool.diagnostics?.argumentOrigin,
+          byteLength: result.receivedShape?.byteLength ?? tool.diagnostics?.byteLength,
+          parseError: result.receivedShape?.argsParseError || result.receivedShape?.parseError
+            || tool.diagnostics?.parseError,
+        };
+      }
+    } else if (ev.type === 'run.status' && ['completed', 'failed', 'cancelled'].includes(ev.payload?.status)) {
+      assistant?.tools?.forEach((tool) => {
+        if (tool.status === 'running') tool.status = 'unknown';
+      });
+      if (assistant) {
+        assistant.metadata = {
+          ...(assistant.metadata || {}),
+          persisted: ev.payload?.persisted === true,
+          verified: ev.payload?.verified === true,
+          verifyFailed: ev.payload?.verifyFailed === true,
+          saveFailed: ev.payload?.status === 'failed' && ev.payload?.saveFailed === true,
+          draftUpdatedAt: ev.payload?.draftUpdatedAt || assistant.metadata?.draftUpdatedAt || null,
+        };
       }
     }
   }
+  for (const message of messages) {
+    if (message.role !== 'user') continue;
+    if (message.metadata?.questionModeWriteRefused) {
+      message.metadata.taskStatus = 'rejected';
+      continue;
+    }
+    const terminal = runStatus.get(message.runId || message.metadata?.runId);
+    if (terminal && !message.metadata?.taskStatus) {
+      message.metadata.taskStatus = terminal;
+    }
+    if (!message.metadata?.taskStatus) {
+      message.metadata = { ...(message.metadata || {}), taskStatus: 'unknown' };
+    }
+  }
   return messages;
+}
+
+function findUiTool(tools = [], payload = {}) {
+  if (payload.id) {
+    const byId = tools.find((tool) => tool.id === payload.id);
+    if (byId) return byId;
+  }
+  return tools.find((tool) => tool.name === payload.name && tool.status === 'running');
 }
 
 /**

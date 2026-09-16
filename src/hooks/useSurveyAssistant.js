@@ -9,9 +9,12 @@ import {
   answerAiRunApproval,
   archiveAiSession,
   cancelAiRun,
+  discardAiInbox,
+  listAiInbox,
   listAiRunApprovals,
   steerAiSession,
 } from '../lib/agentApi';
+import { loadSurveyConfigForProject } from '../lib/projectManager';
 import {
   buildAssistantModelOptions,
   clearPendingRun,
@@ -26,6 +29,7 @@ import {
   readPendingRun,
   readSessionId,
   readStoredRoute,
+  shouldReplaceAssistantTranscript,
   readUndoSnapshot,
   resolveAssistantRoute,
   sendBlockReason,
@@ -33,7 +37,10 @@ import {
   writeSessionId,
   writeStoredRoute,
   writeUndoSnapshot,
+  undoBlockedByNewerEdits,
+  summarizeDraftDiff,
 } from './surveyAssistantUtils';
+import { classifyUserIntent, initialLoadingStatus, shouldPrepareWrite } from './taskIntent';
 
 function loadProjectFlag(projectId, key, fallback) {
   if (!projectId || typeof window === 'undefined') return fallback;
@@ -66,6 +73,7 @@ export default function useSurveyAssistant({
   enabled = true,
   editorSelection = null,
   hasUnsavedChanges = false,
+  lastSavedConfig = null,
   onPrepareWrite = null,
 } = {}) {
   const platformMode = detectPlatformMode();
@@ -93,6 +101,10 @@ export default function useSurveyAssistant({
   ));
   const [pendingApproval, setPendingApproval] = useState(null);
   const [userMessage, setUserMessage] = useState('');
+  const [steerTarget, setSteerTarget] = useState('next-step');
+  const [writeConflict, setWriteConflict] = useState(null);
+  const [inboxItems, setInboxItems] = useState([]);
+  const [runDiffs, setRunDiffs] = useState({});
   const [aiUndoAvailable, setAiUndoAvailable] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
@@ -286,7 +298,10 @@ export default function useSurveyAssistant({
           writeSessionId(storage, projectId, sessionId);
           setAiSessionId(sessionId);
         }
-        if (Array.isArray(detail?.messages) && detail.messages.length) {
+        if (
+          Array.isArray(detail?.messages)
+          && shouldReplaceAssistantTranscript(conversationHistoryRef.current?.getAllMessages?.() || [], detail.messages)
+        ) {
           const restored = conversationHistoryRef.current?.replaceMessages
             ? conversationHistoryRef.current.replaceMessages(detail.messages)
             : detail.messages;
@@ -325,7 +340,12 @@ export default function useSurveyAssistant({
             runId: pending?.runId,
           });
           setIsLoading(true);
-          setLoadingStatus(loadingStatusFromEvents(runEvents));
+          const live = loadingStatusFromEvents(runEvents);
+          setLoadingStatus(
+            live && !/Working on your request|Looking up the current settings|Thinking/.test(live)
+              ? live
+              : 'Continuing survey generation…',
+          );
           timer = setTimeout(check, 1500);
           return;
         }
@@ -419,14 +439,6 @@ export default function useSurveyAssistant({
     setRecommendations(sessionLearningRef.current.getRecommendations(currentProject?.category || 'general'));
     return undefined;
   }, [enabled, projectId, contextEnabled, currentProject?.category]);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'nearest',
-      inline: 'nearest',
-    });
-  }, [conversationMessages]);
 
   const assistantModelOptions = useMemo(
     () => buildAssistantModelOptions(assistantDirectory),
@@ -526,11 +538,19 @@ export default function useSurveyAssistant({
     return true;
   }, []);
 
-  const handleRevertAiChange = useCallback(() => {
+  const handleRevertAiChange = useCallback(async (targetRunId = null) => {
     if (!aiUndoSnapshotRef.current) return;
     const undo = aiUndoSnapshotRef.current;
+    if (targetRunId && undo.runId && undo.runId !== targetRunId) {
+      conversationHistoryRef.current?.addMessage('assistant',
+        '⚠️ 这张结果卡属于另一项任务，不能撤销当前稿。',
+        { actionType: 'system', error: true },
+      );
+      refreshConversation();
+      return;
+    }
     const before = undo.before || undo;
-    if (undo.afterSignature && JSON.stringify(postProcessAiConfig(surveyConfigRef.current || {})) !== undo.afterSignature) {
+    if (undoBlockedByNewerEdits(undo, postProcessAiConfig(surveyConfigRef.current || {}))) {
       conversationHistoryRef.current?.addMessage('assistant',
         '⚠️ Cannot revert the last AI change because the editor has newer edits.',
         { actionType: 'system', error: true },
@@ -539,7 +559,41 @@ export default function useSurveyAssistant({
       return;
     }
     const request = { projectId: projectIdRef.current, generation: generationRef.current };
-    applySurveyConfig(JSON.parse(JSON.stringify(before)), request);
+    const restored = JSON.parse(JSON.stringify(before));
+    let persistedRestored = false;
+    if (undo.persisted && typeof onPrepareWrite === 'function') {
+      const saved = await onPrepareWrite({
+        surveyConfig: restored,
+        expectedDraftUpdatedAt: undo.draftUpdatedAt,
+      });
+      if (saved?.ok === false) {
+        conversationHistoryRef.current?.addMessage('assistant',
+          saved.message || '⚠️ 撤销未能写回已保存草稿。',
+          { actionType: 'system', error: true },
+        );
+        refreshConversation();
+        return;
+      }
+      const verified = await loadSurveyConfigForProject(projectIdRef.current).catch(() => null);
+      if (!verified || undoBlockedByNewerEdits(
+        { afterSignature: JSON.stringify(postProcessAiConfig(restored)) },
+        postProcessAiConfig(verified),
+      )) {
+        conversationHistoryRef.current?.addMessage('assistant',
+          '⚠️ 撤销后回读草稿与目标配置不一致，未标记为已保存恢复。',
+          { actionType: 'system', error: true },
+        );
+        refreshConversation();
+        return;
+      }
+      persistedRestored = true;
+      applySurveyConfig(restored, request, {
+        persisted: true,
+        draftUpdatedAt: saved?.draftUpdatedAt || undo.draftUpdatedAt,
+      });
+    } else {
+      applySurveyConfig(restored, request);
+    }
     aiUndoSnapshotRef.current = null;
     setAiUndoAvailable(false);
     clearUndoSnapshot(
@@ -547,11 +601,11 @@ export default function useSurveyAssistant({
       projectIdRef.current,
     );
     conversationHistoryRef.current?.addMessage('assistant',
-      '↩️ Reverted to the survey configuration before the last AI change.',
+      persistedRestored ? '已保存恢复' : '仅恢复到编辑器',
       { actionType: 'system' },
     );
     refreshConversation();
-  }, [applySurveyConfig, refreshConversation]);
+  }, [applySurveyConfig, onPrepareWrite, refreshConversation]);
 
   const handleClearHistory = useCallback(() => {
     if (platformMode && aiSessionId) {
@@ -579,8 +633,10 @@ export default function useSurveyAssistant({
     URL.revokeObjectURL(url);
   }, []);
 
-  const handleSendMessage = useCallback(async () => {
-    if (!userMessage.trim()) return;
+  const handleSendMessage = useCallback(async (override = {}) => {
+    const outgoing = String(override.message != null ? override.message : userMessage).trim();
+    const sendMode = override.assistantMode || assistantMode;
+    if (!outgoing) return;
     const request = {
       projectId: projectIdRef.current,
       generation: generationRef.current,
@@ -608,7 +664,22 @@ export default function useSurveyAssistant({
       return;
     }
 
-    if (typeof onPrepareWrite === 'function') {
+    const intent = classifyUserIntent(outgoing, sendMode);
+    const editorDirty = Boolean(hasUnsavedChanges || editorSelection?.dirty || editorSelection?.pageDirty);
+    if (
+      editorDirty
+      && shouldPrepareWrite({ assistantMode: sendMode, message: outgoing })
+      && !(override.skipConflict && override.workingCopyCommitted)
+    ) {
+      setWriteConflict({ message: outgoing, assistantMode: sendMode });
+      return;
+    }
+
+    if (
+      shouldPrepareWrite({ assistantMode: sendMode, message: outgoing })
+      && typeof onPrepareWrite === 'function'
+      && !override.workingCopyCommitted
+    ) {
       const prepared = await onPrepareWrite();
       if (prepared && prepared.ok === false) {
         conversationHistoryRef.current?.addMessage('assistant',
@@ -620,13 +691,30 @@ export default function useSurveyAssistant({
       }
     }
 
-    conversationHistoryRef.current?.addMessage('user', userMessage, {
+    if (override.assistantMode) handleAssistantModeChange(sendMode);
+
+    conversationHistoryRef.current?.addMessage('user', outgoing, {
       actionType: 'chat',
       timestamp: new Date().toISOString(),
     });
     refreshConversation();
 
-    const currentUserMessage = userMessage;
+    const currentUserMessage = outgoing;
+    if (intent.write) {
+      const undo = {
+        runId: null,
+        before: JSON.parse(JSON.stringify(lastSavedConfig || surveyConfigRef.current || {})),
+        afterSignature: null,
+        persisted: false,
+        draftUpdatedAt: currentProject?.draftUpdatedAt || null,
+      };
+      aiUndoSnapshotRef.current = undo;
+      writeUndoSnapshot(
+        typeof window !== 'undefined' ? window.sessionStorage : null,
+        request.projectId,
+        undo,
+      );
+    }
     const pendingStorage = typeof window !== 'undefined' ? window.sessionStorage : null;
     const pendingStartedAt = Date.now();
     writePendingRun(pendingStorage, request.projectId, {
@@ -636,13 +724,14 @@ export default function useSurveyAssistant({
     });
     setUserMessage('');
     setIsLoading(true);
-    setLoadingStatus('Thinking...');
+    setLoadingStatus(initialLoadingStatus(sendMode, intent));
 
     const stillCurrent = () => !isStaleAssistantRequest(request, {
       projectId: projectIdRef.current,
       generation: generationRef.current,
     });
 
+    let completedResult = null;
     try {
       const apiHistory = conversationHistoryRef.current?.getFormattedForOpenAI(10) || [];
       let enrichedHistory = apiHistory;
@@ -658,7 +747,7 @@ export default function useSurveyAssistant({
         ? JSON.parse(window.localStorage.getItem(`researchContext_${request.projectId}`) || '{}')
         : {};
 
-      const result = await sendChatMessage(
+      const result = completedResult = await sendChatMessage(
         currentUserMessage,
         surveyConfigRef.current,
         enrichedHistory,
@@ -673,10 +762,12 @@ export default function useSurveyAssistant({
           provider: routeProvider || null,
           model: routeModel || null,
           reasoningEffort: selectedEffort || null,
-          assistantMode,
+          assistantMode: sendMode,
           editorContext: {
             ...(editorSelection || {}),
-            hasUnsavedChanges: Boolean(hasUnsavedChanges),
+            hasUnsavedChanges: Boolean(hasUnsavedChanges || editorSelection?.dirty),
+            workingCopy: editorSelection?.workingCopy || null,
+            baseline: editorSelection?.baseline || null,
             draftUpdatedAt: currentProject?.draftUpdatedAt || null,
             projectId: request.projectId,
           },
@@ -693,8 +784,18 @@ export default function useSurveyAssistant({
           },
           onSnapshot: (snapshot) => {
             if (!stillCurrent()) return;
-            setLoadingStatus(loadingStatusFromEvents(snapshot?.events || []));
-            if (Array.isArray(snapshot?.messages) && snapshot.messages.length) {
+            if (snapshot?.currentRunId) setActiveRunId(snapshot.currentRunId);
+            setLoadingStatus(loadingStatusFromEvents(snapshot?.events || [], {
+              runId: snapshot?.currentRunId || activeRunId,
+              readOnly: !intent.write,
+            }));
+            if (
+              Array.isArray(snapshot?.messages)
+              && shouldReplaceAssistantTranscript(
+                conversationHistoryRef.current?.getAllMessages?.() || [],
+                snapshot.messages,
+              )
+            ) {
               const restored = conversationHistoryRef.current?.replaceMessages
                 ? conversationHistoryRef.current.replaceMessages(snapshot.messages)
                 : snapshot.messages;
@@ -750,7 +851,10 @@ export default function useSurveyAssistant({
         const restoredServerTranscript = platformMode
           && Array.isArray(result.messages)
           && result.messages.length > 0;
-        if (restoredServerTranscript) {
+        if (restoredServerTranscript && shouldReplaceAssistantTranscript(
+          conversationHistoryRef.current?.getAllMessages?.() || [],
+          result.messages,
+        )) {
           const restored = conversationHistoryRef.current?.replaceMessages
             ? conversationHistoryRef.current.replaceMessages(result.messages)
             : result.messages;
@@ -808,7 +912,33 @@ export default function useSurveyAssistant({
           }));
         }
 
-        if (result.draftMutated && result.persisted && !result.surveyConfig) {
+        if (result.draftMutated && result.persisted) {
+          let afterConfig = result.surveyConfig || null;
+          if (!afterConfig) {
+            afterConfig = await loadSurveyConfigForProject(request.projectId).catch(() => null);
+          }
+          const processedAfter = afterConfig ? postProcessAiConfig(afterConfig) : null;
+          const before = aiUndoSnapshotRef.current?.before || JSON.parse(JSON.stringify(surveyConfigRef.current || {}));
+          const undo = {
+            runId: result.runId,
+            before,
+            afterSignature: processedAfter ? JSON.stringify(processedAfter) : null,
+            persisted: true,
+            draftUpdatedAt: result.draftUpdatedAt || null,
+          };
+          aiUndoSnapshotRef.current = undo;
+          setAiUndoAvailable(true);
+          writeUndoSnapshot(
+            typeof window !== 'undefined' ? window.sessionStorage : null,
+            request.projectId,
+            undo,
+          );
+          if (processedAfter) {
+            setRunDiffs((current) => ({
+              ...current,
+              [result.runId]: summarizeDraftDiff(before, processedAfter),
+            }));
+          }
           window.dispatchEvent(new CustomEvent('sp-agent-run-complete', {
             detail: {
               projectId: request.projectId,
@@ -825,8 +955,10 @@ export default function useSurveyAssistant({
             : Boolean(result.draftUpdatedAt);
           if (wasPersisted) {
             const undo = {
-              before: JSON.parse(JSON.stringify(surveyConfigRef.current || {})),
+              runId: result.runId,
+              before: aiUndoSnapshotRef.current?.before || JSON.parse(JSON.stringify(surveyConfigRef.current || {})),
               afterSignature: JSON.stringify(processedConfig),
+              persisted: true,
               draftUpdatedAt: result.draftUpdatedAt || null,
             };
             aiUndoSnapshotRef.current = undo;
@@ -1026,6 +1158,10 @@ export default function useSurveyAssistant({
       );
       refreshConversation();
     }
+    if (typeof listAiInbox === 'function' && (completedResult?.sessionId || aiSessionId)) {
+      const inbox = await Promise.resolve(listAiInbox(completedResult?.sessionId || aiSessionId)).catch(() => null);
+      if (inbox?.success) setInboxItems(inbox.inbox || []);
+    }
   }, [
     aiSessionId,
     apiKeyValid,
@@ -1045,10 +1181,45 @@ export default function useSurveyAssistant({
     selectedRoute,
     currentProject,
     editorSelection,
+    handleAssistantModeChange,
     hasUnsavedChanges,
+    lastSavedConfig,
     onPrepareWrite,
     userMessage,
   ]);
+
+  const handleResolveWriteConflict = useCallback(async (action) => {
+    const pending = writeConflict;
+    if (!pending) return;
+    if (action === 'save') {
+      const prepared = typeof onPrepareWrite === 'function'
+        ? await onPrepareWrite({ commitWorkingCopy: true })
+        : { ok: true };
+      if (prepared && prepared.ok === false) {
+        conversationHistoryRef.current?.addMessage('assistant',
+          prepared.message || '⚠️ Save or reconcile the editor draft before asking the Assistant to edit.',
+          { actionType: 'system', error: true },
+        );
+        refreshConversation();
+        return;
+      }
+      setWriteConflict(null);
+      await handleSendMessage({
+        ...pending,
+        skipConflict: true,
+        workingCopyCommitted: prepared?.committedWorkingCopy !== false,
+      });
+      return;
+    }
+    setWriteConflict(null);
+  }, [handleSendMessage, onPrepareWrite, refreshConversation, writeConflict]);
+
+  const handleDiscardInbox = useCallback(async (itemId) => {
+    const result = await discardAiInbox(itemId);
+    if (result?.success) {
+      setInboxItems((current) => current.filter((item) => item.id !== itemId));
+    }
+  }, []);
 
   const handleCancelRun = useCallback(async () => {
     const storage = typeof window !== 'undefined' ? window.sessionStorage : null;
@@ -1062,7 +1233,11 @@ export default function useSurveyAssistant({
     setIsLoading(false);
     setLoadingStatus('');
     setPendingApproval(null);
-  }, [activeRunId]);
+    if (typeof listAiInbox === 'function' && aiSessionId) {
+      const inbox = await Promise.resolve(listAiInbox(aiSessionId)).catch(() => null);
+      if (inbox?.success) setInboxItems(inbox.inbox || []);
+    }
+  }, [activeRunId, aiSessionId]);
 
   const handleApprovalDecision = useCallback(async (approved) => {
     if (!pendingApproval?.id) return;
@@ -1092,12 +1267,31 @@ export default function useSurveyAssistant({
   const handleSteerMessage = useCallback(async () => {
     const content = userMessage.trim();
     if (!content || !aiSessionId || !isLoading) return;
-    const result = await steerAiSession(aiSessionId, content);
+    const result = await steerAiSession(
+      aiSessionId,
+      content,
+      steerTarget === 'after-run' ? 'after-run' : 'next-step',
+      {
+        assistantMode,
+        projectId,
+        parentRunId: activeRunId || null,
+        editorContext: {
+          questionName: editorSelection?.questionName || null,
+          pageName: editorSelection?.pageName || null,
+          dirty: Boolean(editorSelection?.dirty || editorSelection?.pageDirty),
+          hasUnsavedChanges: Boolean(hasUnsavedChanges || editorSelection?.dirty || editorSelection?.pageDirty),
+        },
+      },
+    );
     if (result?.success) {
       setUserMessage('');
-      setLoadingStatus('Steering update queued…');
+      setLoadingStatus(steerTarget === 'after-run' ? 'Queued for after this task…' : 'Steering update queued…');
+      if (typeof listAiInbox === 'function') {
+        const inbox = await Promise.resolve(listAiInbox(aiSessionId)).catch(() => null);
+        if (inbox?.success) setInboxItems(inbox.inbox || []);
+      }
     }
-  }, [aiSessionId, isLoading, userMessage]);
+  }, [activeRunId, aiSessionId, assistantMode, editorSelection, hasUnsavedChanges, isLoading, projectId, steerTarget, userMessage]);
 
   return {
     enabled,
@@ -1114,6 +1308,7 @@ export default function useSurveyAssistant({
     selectedRoute,
     selectedEffort,
     assistantMode,
+    editorSelection,
     effortOptions: assistantEffortOptions,
     routeUnavailable,
     blockReason,
@@ -1128,6 +1323,9 @@ export default function useSurveyAssistant({
     sessionLearningRef,
     chatEndRef,
     aiUndoAvailable,
+    writeConflict,
+    inboxItems,
+    runDiffs,
     currentProject,
     setUserMessage,
     setOpenaiApiKey,
@@ -1142,11 +1340,15 @@ export default function useSurveyAssistant({
     handleCancelRun,
     handleApprovalDecision,
     handleSteerMessage,
+    steerTarget,
+    setSteerTarget,
     handleValidateApiKey,
     applyCredentialStatus,
     handleAssistantRouteChange,
     handleAssistantEffortChange,
     handleRevertAiChange,
+    handleResolveWriteConflict,
+    handleDiscardInbox,
     handleRunQualityChecks,
     handleClearHistory,
     handleDownloadHistory,
@@ -1179,6 +1381,9 @@ export function chatPropsFromAssistant(assistant) {
     onCancelRun: assistant.handleCancelRun,
     onApprovalDecision: assistant.handleApprovalDecision,
     onSteerMessage: assistant.handleSteerMessage,
+    steerTarget: assistant.steerTarget,
+    onSteerTargetChange: assistant.setSteerTarget,
+    editorSelection: assistant.editorSelection,
     onApiKeyChange: assistant.setOpenaiApiKey,
     onValidateApiKey: assistant.handleValidateApiKey,
     onContextToggle: assistant.setContextEnabled,
@@ -1191,7 +1396,12 @@ export function chatPropsFromAssistant(assistant) {
     onCredentialsChange: assistant.applyCredentialStatus,
     chatEndRef: assistant.chatEndRef,
     aiUndoAvailable: assistant.aiUndoAvailable,
+    writeConflict: assistant.writeConflict,
+    inboxItems: assistant.inboxItems,
+    runDiffs: assistant.runDiffs,
     onRevertAiChange: assistant.handleRevertAiChange,
+    onResolveWriteConflict: assistant.handleResolveWriteConflict,
+    onDiscardInbox: assistant.handleDiscardInbox,
     onRunQualityChecks: assistant.handleRunQualityChecks,
     modelOptions: assistant.modelOptions,
     selectedRoute: assistant.selectedRoute,
@@ -1201,6 +1411,7 @@ export function chatPropsFromAssistant(assistant) {
     onRouteChange: assistant.handleAssistantRouteChange,
     onEffortChange: assistant.handleAssistantEffortChange,
     onAssistantModeChange: assistant.handleAssistantModeChange || assistant.setAssistantMode,
+    onClearEditorFocus: assistant.onClearEditorFocus,
     routeUnavailable: assistant.routeUnavailable,
     blockReason: assistant.blockReason,
   };

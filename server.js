@@ -46,7 +46,12 @@ const R2_COPY_CONCURRENCY = 32;
 
 // Enable CORS for React app
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3002'],
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:3002',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3002',
+  ],
   credentials: true
 }));
 
@@ -115,11 +120,27 @@ app.use(async (req, res, next) => {
       && process.env.R2_SECRET_ACCESS_KEY
       && process.env.R2_PUBLIC_URL
     );
+    const publicR2Upstream = [
+      process.env.R2_UPSTREAM_ORIGIN,
+      process.env.PUBLIC_APP_URL,
+      process.env.REACT_APP_APP_URL,
+      'https://sp-survey.org',
+    ].map((value) => {
+      try {
+        const parsed = new URL(String(value || '').trim());
+        return parsed.protocol === 'https:' ? parsed.origin : '';
+      } catch {
+        return '';
+      }
+    }).find(Boolean);
+    const remoteBase = isR2Route && !localR2Configured
+      ? (remoteAgentBase || publicR2Upstream)
+      : remoteAgentBase;
     const requiresRemoteWorker = isAgentRoute
       || (!env.SUPABASE_SERVICE_ROLE_KEY && (isBenchRoute || isAdminResultsRoute))
       || (isR2Route && !localR2Configured);
-    if (requiresRemoteWorker && remoteAgentBase) {
-      const remoteRoot = new URL(remoteAgentBase);
+    if (requiresRemoteWorker && remoteBase) {
+      const remoteRoot = new URL(remoteBase);
       if (remoteRoot.protocol !== 'https:') {
         throw new Error('REMOTE_AGENT_BASE_URL must use HTTPS.');
       }
@@ -3212,8 +3233,29 @@ app.listen(PORT, () => {
   console.log(`📁 Projects directory: ${PROJECTS_PATH}`);
   console.log(`📁 Deployments directory: ${DEPLOYMENTS_PATH}`);
   console.log(`🤖 OpenAI integration enabled`);
+  if (process.env.REMOTE_AGENT_BASE_URL) {
+    console.log(`🤖 /api/agent proxied to ${process.env.REMOTE_AGENT_BASE_URL} (local worker-lib is unused)`);
+  } else {
+    console.log('🤖 /api/agent uses local worker-lib (no REMOTE_AGENT_BASE_URL)');
+    import('./worker-lib/agent/runtime/designerTools.mjs').then(({ createDesignerTools }) => {
+      const generateTools = createDesignerTools({ assistantMode: 'generate' }).map((tool) => tool.name);
+      console.log(`🤖 generate tools: ${generateTools.join(', ')}`);
+    }).catch((error) => {
+      console.warn('🤖 generate tool probe failed:', error.message);
+    });
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.log('⚠️  SUPABASE_SERVICE_ROLE_KEY missing — Assistant sessions/tools will fail locally');
+    }
+  }
   if (isR2Configured()) {
     console.log(`☁️  Cloudflare R2 storage enabled (bucket: ${r2BucketName})`);
+  } else {
+    const upstream = process.env.REMOTE_AGENT_BASE_URL
+      || process.env.R2_UPSTREAM_ORIGIN
+      || process.env.PUBLIC_APP_URL
+      || process.env.REACT_APP_APP_URL
+      || 'https://sp-survey.org';
+    console.log(`☁️  Local R2 credentials missing — /api/r2/* proxied to ${upstream}`);
   }
   if (fs.existsSync(BUILD_PATH)) {
     console.log(`📦 Serving React production build from ${BUILD_PATH}`);

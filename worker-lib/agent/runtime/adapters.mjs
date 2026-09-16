@@ -5,6 +5,7 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import { classifyHttpError, parseRetryAfter, withRetry } from './retry.mjs';
 import { assertProviderResponseNotRedirect, assertSafeBaseUrl } from './ssrf.mjs';
+import { createRawToolArgCollector, parseRawToolArguments } from './toolArgs.mjs';
 
 const API_IMPLEMENTATIONS = {
   'anthropic-messages': anthropicMessagesApi(),
@@ -253,24 +254,55 @@ function piModel(options) {
   };
 }
 
-function resultFromMessage(message) {
+export function normalizeStopReason(value) {
+  const reason = String(value || '').trim();
+  if (!reason) return null;
+  if (/^(length|max_tokens|max_output_tokens|maxTokens)$/i.test(reason)) return 'length';
+  if (/^(toolUse|tool_calls|tool_use)$/i.test(reason)) return 'toolUse';
+  if (/^(stop|end_turn|eos)$/i.test(reason)) return 'stop';
+  return reason;
+}
+
+export function resultFromMessage(message, collector) {
   const content = (message.content || [])
     .filter((part) => part.type === 'text')
     .map((part) => part.text || '')
     .join('');
-  const toolCalls = (message.content || [])
-    .filter((part) => part.type === 'toolCall')
-    .map((part) => ({
+  const toolParts = (message.content || []).filter((part) => part.type === 'toolCall');
+  const toolCalls = toolParts.map((part, index) => {
+    const collected = collector?.lookup(part, index);
+    const raw = collected?.raw;
+    const parsed = raw
+      ? parseRawToolArguments(raw)
+      : parseRawToolArguments(part.arguments);
+    return {
       id: part.id,
       type: 'function',
       function: {
         name: part.name,
-        arguments: JSON.stringify(part.arguments || {}),
+        arguments: parsed.rawArgsComplete
+          ? JSON.stringify(parsed.args)
+          : (raw || (typeof part.arguments === 'string' ? part.arguments : '')),
       },
-    }));
+      args: parsed.rawArgsComplete ? parsed.args : {},
+      rawArguments: raw || null,
+      rawArgsComplete: parsed.rawArgsComplete,
+      parseError: parsed.parseError,
+      argumentOrigin: raw ? 'raw_stream' : parsed.argumentOrigin,
+      receivedShape: parsed.receivedShape,
+      byteLength: parsed.byteLength,
+    };
+  });
+  const rawStopReason = message.stopReason
+    || message.finishReason
+    || message.finish_reason
+    || message.response?.stopReason
+    || null;
   return {
     content,
     toolCalls,
+    stopReason: normalizeStopReason(rawStopReason),
+    rawStopReason,
     usage: {
       prompt_tokens: Number(message.usage?.input || 0)
         + Number(message.usage?.cacheRead || 0)
@@ -381,9 +413,11 @@ async function oneAttempt(options, model, implementation, context) {
     streamOptions.fetch = makeSafeProviderFetch(responseMeta, options);
   }
   streamOptions = applyJsonMode(model, options, streamOptions);
+  const collector = createRawToolArgCollector();
   const stream = implementation.streamSimple(model, context, streamOptions);
   let finalMessage = null;
   for await (const event of stream) {
+    collector.onEvent(event);
     if (event.type === 'done') finalMessage = event.message;
     if (event.type === 'error') {
       const message = event.error?.errorMessage || 'Provider request failed.';
@@ -405,7 +439,7 @@ async function oneAttempt(options, model, implementation, context) {
       code: 'EMPTY_RESPONSE',
     });
   }
-  return resultFromMessage(finalMessage);
+  return resultFromMessage(finalMessage, collector);
 }
 
 export async function modelRequest(options) {

@@ -38,15 +38,12 @@ jobs:
         run: npm run test:media-pipeline
 
       - name: Check supabase SQL idempotency guards
+        run: npm run sql:check
+
+      - name: Re-run incremental launch SQL
         run: |
-          set -e
-          for f in supabase/*.sql; do
-            if ! grep -qiE 'IF NOT EXISTS|DROP POLICY IF EXISTS|CREATE OR REPLACE' "$f"; then
-              echo "Non-idempotent SQL script: $f"
-              exit 1
-            fi
-            echo "OK $f"
-          done
+          npm install --no-save --no-audit --no-fund @electric-sql/pglite
+          node scripts/tests/incremental-sql.mjs
 
       - name: Worker module smoke import
         run: |

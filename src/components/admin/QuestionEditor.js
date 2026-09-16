@@ -35,6 +35,7 @@ import {
   Alert,
   InputAdornment,
   Tooltip,
+  Chip,
 } from '@mui/material';
 import {
   Add,
@@ -67,6 +68,7 @@ import {
   supportsTrialCount,
 } from '../../lib/questionTypeConstraints';
 import { clampTrialCount, TRIAL_COUNT_MAX } from '../../lib/trialNavigation';
+import { normalizeSliderQuestion } from '../../lib/sliderScale';
 import {
   getQuestionTypeDefinition,
   QUESTION_TYPE_IDS,
@@ -256,7 +258,7 @@ function CuratedMediaPicker({
 
 /** Random vs curated sampling — wording matches project media pool. */
 function SamplingModeSelect({ question, onQuestionPatch }) {
-  const { tr } = useQuestionEditorText();
+  const { tr, zh } = useQuestionEditorText();
   const mode = isCuratedSelectionMode(question.imageSelectionMode)
     ? 'huggingface_manual'
     : 'huggingface_random';
@@ -274,7 +276,7 @@ function SamplingModeSelect({ question, onQuestionPatch }) {
         }}
         label={tr("How stimuli are chosen")}
       >
-        <MenuItem value="huggingface_random">{tr("Random from project media pool")}</MenuItem>
+        <MenuItem value="huggingface_random">{tr(zh ? '从媒体库随机抽取' : 'Random from media library')}</MenuItem>
         <MenuItem value="huggingface_manual">{tr("Curated list (pick specific files)")}</MenuItem>
       </Select>
     </FormControl>
@@ -534,7 +536,9 @@ function MediaAssignmentFields({ question, onChange, currentProject }) {
       )}
       {!isSet && !isCategory && (
         <Typography variant="caption" color="text.secondary" display="block">
-          {zh ? `从项目媒体库随机抽取 ${count} 个文件${poolStatus.totalFileCount > 0 ? `（${poolStatus.matchingFileCount} 个匹配文件${mediaTypeHint}）。` : '，请先在媒体库上传文件。'}` : `Randomly samples ${count} file(s) from the project media pool${poolStatus.totalFileCount > 0 ? ` (${poolStatus.matchingFileCount} matching${mediaTypeHint}).` : ' — upload media in Media Dataset first.'}`}
+          {zh
+            ? `从媒体库随机抽取 ${count} 个文件。来源：${(currentProject?.preloadedImages || []).some((img) => String(img.key || '').startsWith('skill-preview/')) ? '示例预览库' : '项目媒体库'}；范围内可用 ${poolStatus.matchingFileCount || 0} / 总共 ${poolStatus.totalFileCount || 0}。优先不重复，不足时回退到该范围未过滤池。`
+            : `Random from media library (${count} file(s)). Source: ${(currentProject?.preloadedImages || []).some((img) => String(img.key || '').startsWith('skill-preview/')) ? 'preview sample library' : 'project media library'}; in-scope ${poolStatus.matchingFileCount || 0} / total ${poolStatus.totalFileCount || 0}. Prefer unused files; fall back to the unfiltered range if needed.`}
         </Typography>
       )}
     </>
@@ -575,10 +579,21 @@ function SkillJsonField({ label, value, onCommit }) {
   );
 }
 
-export default function QuestionEditor({ question, onSave, onCancel, images, currentProject, surveyConfig = null }) {
+export default function QuestionEditor({
+  question,
+  onSave,
+  onCancel,
+  images,
+  currentProject,
+  surveyConfig = null,
+  variant = 'dialog',
+  pageName = '',
+  onWorkingCopyChange,
+  onOpenAssistant,
+}) {
   const { tr } = useQuestionEditorText();
   // Convert ranking with isImageRanking back to imageranking for editing
-  const initialQuestion = { ...question };
+  const initialQuestion = normalizeSliderQuestion({ ...question });
   if (initialQuestion.type === 'ranking' && initialQuestion.isImageRanking) {
     initialQuestion.type = 'imageranking';
   }
@@ -606,6 +621,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const mobile = useMediaQuery('(max-width:600px)');
   const wide = useMediaQuery('(min-width:1000px)');
   const [editorTab, setEditorTab] = useState(0);
+  const workspace = variant === 'workspace';
   const settingsRef = useRef(null);
   const settingsErrors = validateQuestionSettings(editedQuestion);
   const closeEditor = () => guard.request(onCancel);
@@ -622,6 +638,18 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   useEffect(() => {
     listSkillsForBuilder().then(setBuilderSkills);
   }, []);
+
+  const workingCopyChangeRef = useRef(onWorkingCopyChange);
+  workingCopyChangeRef.current = onWorkingCopyChange;
+  useEffect(() => {
+    workingCopyChangeRef.current?.({
+      questionName: editedQuestion.name || question?.name || null,
+      pageName: pageName || null,
+      workingCopy: editedQuestion,
+      baseline: question,
+      dirty,
+    });
+  }, [dirty, editedQuestion, pageName, question]);
 
   useEffect(() => {
     if (editedQuestion.type === 'imageannotation') {
@@ -1115,16 +1143,40 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
     }
   };
 
+  const Root = workspace ? Box : Dialog;
+  const rootProps = workspace
+    ? {
+      sx: {
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: { xs: '70vh', md: '75vh' },
+        border: '1px solid',
+        borderColor: 'divider',
+        borderRadius: 2,
+        overflow: 'hidden',
+        bgcolor: 'background.paper',
+      },
+    }
+    : {
+      open: true,
+      onClose: closeEditor,
+      maxWidth: 'xl',
+      fullWidth: true,
+      fullScreen: mobile,
+      PaperProps: { sx: { height: mobile ? '100dvh' : '90dvh' } },
+    };
+
   return (
     <>
-    <Dialog open={true} onClose={closeEditor} maxWidth="xl" fullWidth fullScreen={mobile}
-      PaperProps={{ sx: { height: mobile ? '100dvh' : '90dvh' } }}>
+    <Root {...rootProps}>
 
-      <DialogTitle>
+      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         {zh ? '编辑题目' : 'Edit Question'}
+        {workspace && pageName ? <Chip size="small" label={pageName} /> : null}
       </DialogTitle>
       {!wide && <Tabs value={editorTab} onChange={(_, v) => setEditorTab(v)} variant="fullWidth" aria-label={tr(zh ? '题目编辑视图' : 'Question editor views')}>
         <Tab label={tr(zh ? '题目设置' : 'Settings')} /><Tab label={tr(zh ? '参与者预览' : 'Participant preview')} />
+        {workspace && mobile ? <Tab label={tr(zh ? '助手' : 'Assistant')} /> : null}
       </Tabs>}
       <DialogContent sx={{ p: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: wide ? 'minmax(0, 1fr) minmax(0, 0.9fr)' : 'minmax(0, 1fr)' }}>
         <Box ref={settingsRef} sx={{ display: wide || editorTab === 0 ? 'flex' : 'none', flexDirection: 'column', gap: 4, overflowY: 'auto', minWidth: 0, p: { xs: 2, sm: 3 } }}>
@@ -1328,7 +1380,9 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
                       onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)}
                     />
                   }
-                  label={tr("Do not reuse media already shown earlier in this survey")}
+                  label={tr(zh
+                    ? '优先不重复已展示的媒体；范围内不足时会回退到该范围未过滤池'
+                    : 'Prefer unused media; if the filtered pool is too small, fall back to the unfiltered range')}
                 />
 
                 {editedQuestion.type === 'skillquestion' ? (() => {
@@ -2373,6 +2427,16 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           <QuestionParticipantPreview question={editedQuestion} currentProject={currentProject} surveyConfig={surveyConfig} />
           <QuestionDataPreview question={editedQuestion} currentProject={currentProject} />
         </Box>
+        {workspace && mobile && editorTab === 2 ? (
+          <Box sx={{ p: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {zh ? '助手与题目设置同层，不会挡住未保存内容。' : 'The Assistant stays on the same layer so unsaved settings remain.'}
+            </Typography>
+            <Button variant="contained" onClick={() => onOpenAssistant?.()}>
+              {zh ? '打开助手' : 'Open Assistant'}
+            </Button>
+          </Box>
+        ) : null}
       </DialogContent>
       <DialogActions sx={{ flexWrap: 'wrap', px: 2, pb: 'max(12px, env(safe-area-inset-bottom))', '& .MuiButton-root': { minHeight: 44 } }}>
         {settingsErrors.length > 0 && <Alert severity="error" sx={{ width: '100%', maxHeight: 120, overflowY: 'auto' }}>
@@ -2558,12 +2622,12 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
           }
           
           if (validateQuestionSettings(questionToSave).length) return;
-          onSave(questionToSave);
+          onSave(normalizeSliderQuestion(questionToSave));
         }} variant="contained" disabled={settingsErrors.length > 0}>
           {zh ? '保存题目' : 'Save Question'}
         </Button>
       </DialogActions>
-    </Dialog>
+    </Root>
     <ConfirmDialog open={guard.open} onCancel={guard.cancel} onConfirm={guard.discard}
       title={tr(zh ? '放弃未保存的修改？' : 'Discard unsaved changes?')}
       message={zh ? '题目设置尚未保存。继续编辑可保留当前内容。' : 'Your question settings have not been saved. Keep editing to retain them.'}

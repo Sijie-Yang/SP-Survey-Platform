@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createToolRegistry, permissionAllows } from './tools.mjs';
+import { createToolRegistry, permissionAllows, summarizeToolResult } from './tools.mjs';
 
 describe('tool registry', () => {
   it('blocks shell-like names', async () => {
@@ -46,5 +46,21 @@ describe('tool registry', () => {
     });
     assert.equal(requested[0].risk, 'publish');
     assert.equal(requested[0].name, 'survey_publish');
+  });
+
+  it('registers aliases and does not summarize failures as completed', async () => {
+    const reg = createToolRegistry([{
+      name: 'skill_list',
+      aliases: ['survey_skill_list'],
+      execute: async () => ({ summary: 'ok' }),
+    }]);
+    assert.equal((await reg.execute('survey_skill_list', {})).summary, 'ok');
+    assert.match(summarizeToolResult('survey_apply_operations', {
+      error: 'Survey validation failed after operations.',
+      validation: { errors: [{ message: 'Duplicate question name' }] },
+    }), /Duplicate question name/);
+    assert.doesNotMatch(summarizeToolResult('survey_apply_operations', {
+      error: 'Survey validation failed after operations.',
+    }), /completed/);
   });
 });

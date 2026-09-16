@@ -91,6 +91,12 @@ function renderSidebar(props = {}) {
 }
 
 describe('AiAssistantSidebar', () => {
+  beforeAll(() => {
+    if (!Element.prototype.scrollIntoView) {
+      Element.prototype.scrollIntoView = function scrollIntoView() {};
+    }
+  });
+
   test('renders a persistent right drawer with a fixed composer', () => {
     renderSidebar({ variant: 'persistent' });
     const drawer = document.getElementById(AI_SIDEBAR_ID);

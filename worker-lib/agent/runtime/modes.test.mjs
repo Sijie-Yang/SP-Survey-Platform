@@ -5,6 +5,7 @@ import {
   assistantModeFromEvents,
   getAssistantModePolicy,
   normalizeAssistantMode,
+  requestsExplicitRedesign,
 } from './modes.mjs';
 
 function tools(execute = async (args) => args) {
@@ -62,13 +63,20 @@ describe('assistant mode policies', () => {
 
     await assert.rejects(
       () => apply.execute({ operations: [{ op: 'addPage', page: {} }] }),
-      /exactly one replaceConfig/,
+      (error) => error.code === 'GENERATE_CONTRACT' && /addPage|replaceConfig/.test(error.message),
     );
     await apply.execute({
       operations: [{ op: 'replaceConfig', surveyConfig: { title: 'Complete', pages: [] } }],
     });
     assert.equal(received.operations[0].surveyConfig.title, 'Complete');
-    assert.equal(policy.requireDraftChange, true);
+    assert.equal(getAssistantModePolicy('generate', { goalRequiresDraftChange: true }).requireDraftChange, true);
+    assert.equal(getAssistantModePolicy('generate', { goalRequiresDraftChange: false }).requireDraftChange, false);
+  });
+
+  it('treats regenerate phrasing as an explicit redesign', () => {
+    assert.equal(requestsExplicitRedesign('重新生成一个长一点的问卷 至少8页'), true);
+    assert.equal(requestsExplicitRedesign('Regenerate the survey with more pages'), true);
+    assert.equal(requestsExplicitRedesign('把这道题改成7分'), false);
   });
 
   it('keeps adjust incremental unless redesign is explicit', async () => {

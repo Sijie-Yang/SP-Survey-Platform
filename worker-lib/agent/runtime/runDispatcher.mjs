@@ -1,28 +1,45 @@
 const MAX_QUEUE_ATTEMPTS = 5;
 
-async function execute(job, env) {
+async function execute(job, env, ctx) {
+  if (job?.kind === 'silicon') {
+    const { executeSiliconJob } = await import('../../silicon/runner.mjs');
+    return executeSiliconJob(env, job, ctx);
+  }
   const { executeQueuedDesignerRun } = await import('./designerChat.mjs');
-  return executeQueuedDesignerRun(env, job);
+  return executeQueuedDesignerRun(env, job, ctx);
 }
 
-export async function dispatchAgentRun(env, ctx, job, { executeRun = execute } = {}) {
+export async function dispatchAgentRun(env, ctx, job, { executeRun = execute, delaySeconds = 0 } = {}) {
+  const delay = Math.max(0, Number(delaySeconds) || 0);
+  const nextJob = {
+    ...job,
+    claimedBy: job.claimedBy || (job.runId
+      ? `queue:${job.runId}:${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
+      : job.claimedBy),
+  };
+  const options = { contentType: 'json' };
+  if (delay > 0) options.delaySeconds = delay;
+
   if (env.AGENT_QUEUE?.send) {
-    await env.AGENT_QUEUE.send(job, {
-      contentType: 'json',
-    });
-    return { dispatch: 'queue' };
+    await env.AGENT_QUEUE.send(nextJob, options);
+    return { dispatch: 'queue', delaySeconds: delay, claimedBy: nextJob.claimedBy };
   }
+
+  const start = () => executeRun(nextJob, env, ctx).catch(() => null);
 
   // Local Worker/dev fallback keeps the same asynchronous HTTP contract.
   if (ctx?.waitUntil) {
-    ctx.waitUntil(executeRun(job, env).catch(() => null));
-    return { dispatch: 'waitUntil' };
+    ctx.waitUntil(delay > 0
+      ? new Promise((resolve) => { setTimeout(() => resolve(start()), delay * 1000); })
+      : start());
+    return { dispatch: 'waitUntil', delaySeconds: delay, claimedBy: nextJob.claimedBy };
   }
 
-  // Unit tests and the Node adapter do not always provide an ExecutionContext.
-  // Execute inline there, while returning the same run identifiers to callers.
-  await executeRun(job, env);
-  return { dispatch: 'inline' };
+  if (delay > 0) {
+    await new Promise((resolve) => { setTimeout(resolve, delay * 1000); });
+  }
+  await executeRun(nextJob, env, ctx);
+  return { dispatch: 'inline', delaySeconds: delay, claimedBy: nextJob.claimedBy };
 }
 
 export async function processAgentQueue(batch, env, { executeRun = execute } = {}) {

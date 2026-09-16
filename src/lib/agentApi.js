@@ -190,10 +190,18 @@ export async function cancelAiRun(runId) {
   return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
 }
 
-export async function steerAiSession(sessionId, content, target = 'next-step') {
+export async function steerAiSession(sessionId, content, target = 'next-step', extra = {}) {
   return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/steer`, {
     method: 'POST',
-    body: JSON.stringify({ content, kind: 'steer', target }),
+    body: JSON.stringify({
+      content,
+      kind: 'steer',
+      target,
+      assistantMode: extra.assistantMode || null,
+      projectId: extra.projectId || null,
+      parentRunId: extra.parentRunId || null,
+      editorContext: extra.editorContext || null,
+    }),
   });
 }
 
@@ -217,13 +225,25 @@ function runStatusFromEvents(events = [], runId) {
   return '';
 }
 
+function isDraftWriteTool(name) {
+  return name === 'survey_apply_operations' || name === 'survey_submit_generated_draft';
+}
+
 function runChangedDraft(events = [], runId) {
   return events.some((event) => (
     (!runId || !event.run_id || event.run_id === runId)
     && event.type === 'tool.result'
-    && event.payload?.name === 'survey_apply_operations'
+    && isDraftWriteTool(event.payload?.name)
     && event.payload?.ok !== false
   ));
+}
+
+export async function listAiInbox(sessionId) {
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/inbox`);
+}
+
+export async function discardAiInbox(itemId) {
+  return agentFetch(`/api/agent/inbox/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
 }
 
 export async function waitForAgentRun(sessionId, runId, {
@@ -235,6 +255,8 @@ export async function waitForAgentRun(sessionId, runId, {
   const deadline = Date.now() + timeoutMs;
   let after = 0;
   let events = [];
+  let currentRunId = runId;
+  let lastCompleted = null;
   while (Date.now() < deadline) {
     const snapshot = await getAiSession(sessionId, after);
     if (!snapshot?.success) return snapshot;
@@ -242,19 +264,19 @@ export async function waitForAgentRun(sessionId, runId, {
       events = events.concat(snapshot.events);
       after = Number(snapshot.nextCursor || snapshot.events.at(-1)?.seq || after);
     }
-    onSnapshot?.({ ...snapshot, events });
-    const run = snapshot.run?.id === runId
+    onSnapshot?.({ ...snapshot, events, currentRunId });
+    const run = snapshot.run?.id === currentRunId
       ? snapshot.run
-      : snapshot.runs?.find?.((item) => item.id === runId);
-    const status = run?.status || runStatusFromEvents(events, runId);
+      : snapshot.runs?.find?.((item) => item.id === currentRunId);
+    const status = run?.status || runStatusFromEvents(events, currentRunId);
     if (status === 'completed') {
       const result = run?.result || {};
-      const draftMutated = result.draftMutated ?? runChangedDraft(snapshot.events, runId);
-      return {
+      const draftMutated = result.draftMutated ?? runChangedDraft(events, currentRunId);
+      lastCompleted = {
         success: true,
         runtime: started.runtime,
         sessionId,
-        runId,
+        runId: currentRunId,
         provider: started.provider,
         model: started.model,
         reasoningEffort: started.reasoningEffort,
@@ -266,21 +288,39 @@ export async function waitForAgentRun(sessionId, runId, {
           || 'Done.',
         draftUpdatedAt: result.draftUpdatedAt || null,
         surveyConfig: result.surveyConfig || null,
-        draftMutated,
-        persisted: result.persisted ?? draftMutated,
+        draftMutated: Boolean(draftMutated),
+        persisted: result.persisted === true,
         verified: result.verified === true,
+        verificationReason: result.verificationReason || null,
         events: events.length ? events : (snapshot.events || []),
         messages: snapshot.messages || [],
       };
+      const next = (snapshot.runs || []).find((item) => {
+        if (item.id === currentRunId) return false;
+        if (!['queued', 'running', 'awaiting_approval'].includes(item.status)) return false;
+        const parent = item.parent_run_id
+          || item.parentRunId
+          || item.request_payload?.parentRunId
+          || item.request_payload?.parent_run_id;
+        return parent === currentRunId;
+      });
+      if (next?.id) {
+        currentRunId = next.id;
+        continue;
+      }
+      return lastCompleted;
     }
     if (status === 'failed' || status === 'cancelled') {
       const errorEvent = [...events].reverse().find((event) => (
-        (!event.run_id || event.run_id === runId) && event.type === 'error'
+        (event.run_id || event.runId) === currentRunId && event.type === 'error'
+      )) || [...events].reverse().find((event) => (
+        !event.run_id && !event.runId && event.type === 'error'
       ));
       return {
         success: false,
         sessionId,
-        runId,
+        runId: currentRunId,
+        parentRunId: run?.parent_run_id || run?.request_payload?.parentRunId || null,
         status,
         code: errorEvent?.payload?.code || (status === 'cancelled' ? 'CANCELLED' : 'AGENT_RUN_FAILED'),
         error: errorEvent?.payload?.message || run?.error_summary || `Agent run ${status}.`,
@@ -393,6 +433,23 @@ export async function processSiliconRun(runId) {
 
 export async function cancelSiliconRun(runId) {
   return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
+export async function resumeSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
+}
+
+export async function retryFailedSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/retry-failed`, { method: 'POST' });
+}
+
+export async function listSiliconTasks() {
+  return agentFetch('/api/agent/silicon/tasks');
+}
+
+export async function getSiliconProgress(runId, after = 0) {
+  const cursor = after ? `?after=${encodeURIComponent(after)}` : '';
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/progress${cursor}`);
 }
 
 export async function getSiliconRun(runId) {

@@ -3,9 +3,16 @@ import assert from 'node:assert/strict';
 import {
   classifyToolExecution,
   forcedToolChoice,
+  isLengthStopReason,
+  nextRequiredTool,
+  normalizeToolCalls,
+  repairFamilyKey,
   runToolLoop,
+  shouldBlockIncompleteArgs,
+  shouldBlockWrite,
   toolRequestPolicy,
 } from './loop.mjs';
+import { applyAssistantModeToTools, getAssistantModePolicy } from './modes.mjs';
 import { requestsDraftChange } from './designerChat.mjs';
 import { createDesignerTools } from './designerTools.mjs';
 import { resolveModelRoute } from './registry.mjs';
@@ -44,10 +51,11 @@ function sseText(content) {
 describe('runtime tool loop', () => {
   it('describes supported survey operations to tool-calling models', () => {
     const apply = createDesignerTools({}).find((tool) => tool.name === 'survey_apply_operations');
-    assert.equal(
-      apply.parameters.properties.operations.items.properties.op.enum.includes('replaceConfig'),
-      true,
-    );
+    const items = apply.parameters.properties.operations.items;
+    const enums = items.oneOf
+      ? items.oneOf.flatMap((item) => item.properties?.op?.enum || [])
+      : (items.properties?.op?.enum || []);
+    assert.equal(enums.includes('replaceConfig'), true);
     assert.match(apply.description, /complete redesign/);
   });
 
@@ -869,6 +877,256 @@ describe('runtime tool loop', () => {
       });
       assert.equal(published, 0);
       assert.equal(result.content, 'Already published.');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not force apply immediately after one capabilities read', () => {
+    assert.equal(nextRequiredTool({
+      requireDraftChange: true,
+      latestDraft: null,
+      loadedCapabilities: true,
+      loadedDraft: true,
+      lastRetryAction: '',
+    }), '');
+    assert.equal(nextRequiredTool({
+      requireDraftChange: true,
+      latestDraft: null,
+      loadedCapabilities: true,
+      loadedDraft: true,
+      lastRetryAction: 'repair_args',
+    }), 'survey_apply_operations');
+    assert.equal(nextRequiredTool({
+      requireDraftChange: true,
+      latestDraft: null,
+      loadedCapabilities: true,
+      loadedDraft: true,
+      lastRetryAction: 'reload_draft',
+    }), 'survey_get_draft');
+  });
+
+  it('stops repeating generate contract errors before max steps', async () => {
+    const originalFetch = globalThis.fetch;
+    let modelCalls = 0;
+    let saves = 0;
+    globalThis.fetch = async () => {
+      modelCalls += 1;
+      return sseToolCalls([{
+        id: `apply_${modelCalls}`,
+        name: 'survey_apply_operations',
+        args: { expectedDraftUpdatedAt: 't', operations: [{ op: 'addPage', page: { name: 'p1' } }] },
+      }]);
+    };
+    const registry = createToolRegistry(applyAssistantModeToTools([
+      { name: 'survey_capabilities', execute: async () => ({ summary: 'ok' }) },
+      { name: 'survey_get_draft', execute: async () => ({ draftUpdatedAt: 't', surveyConfig: { pages: [] } }) },
+      {
+        name: 'survey_apply_operations',
+        minPermission: 'edit_draft',
+        execute: async () => {
+          saves += 1;
+          return { surveyConfig: { pages: [] } };
+        },
+      },
+    ], getAssistantModePolicy('generate')));
+    const events = [];
+    try {
+      const route = resolveModelRoute('deepseek', 'deepseek-v4-pro');
+      await assert.rejects(
+        () => runToolLoop({
+          apiKey: 'test-key',
+          provider: 'deepseek',
+          baseUrl: route.baseUrl,
+          model: route.model.id,
+          modelRecord: route.model,
+          protocol: route.protocol,
+          compat: route.model.compat,
+          messages: [{ role: 'user', content: '重新生成一个至少 8 页的问卷' }],
+          registry,
+          ctx: { permission: 'edit_draft' },
+          requireDraftChange: true,
+          onEvent: async (event) => events.push(event),
+        }),
+        (error) => error.code === 'GENERATE_REPAIR_EXHAUSTED',
+      );
+      assert.equal(saves, 0);
+      assert.ok(modelCalls < 16);
+      assert.equal(events.some((event) => (
+        event.type === 'turn.end' && event.payload.status === 'completed'
+      )), false);
+      assert.equal(events.some((event) => (
+        event.type === 'turn.end' && event.payload.status === 'failed'
+      )), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps repair family counts across checkpoint resume', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => sseToolCalls([{
+      id: 'apply_resume',
+      name: 'survey_apply_operations',
+      args: { expectedDraftUpdatedAt: 't', operations: [{ op: 'addPage', page: { name: 'p1' } }] },
+    }]);
+    const registry = createToolRegistry(applyAssistantModeToTools([{
+      name: 'survey_apply_operations',
+      minPermission: 'edit_draft',
+      execute: async () => ({ surveyConfig: { pages: [] } }),
+    }], getAssistantModePolicy('generate')));
+    const family = repairFamilyKey('survey_apply_operations', {
+      code: 'GENERATE_CONTRACT',
+      path: 'operations[0].op',
+    });
+    try {
+      const route = resolveModelRoute('deepseek', 'deepseek-v4-pro');
+      await assert.rejects(
+        () => runToolLoop({
+          apiKey: 'test-key',
+          provider: 'deepseek',
+          baseUrl: route.baseUrl,
+          model: route.model.id,
+          modelRecord: route.model,
+          protocol: route.protocol,
+          compat: route.model.compat,
+          messages: [{ role: 'user', content: 'Generate' }],
+          registry,
+          ctx: { permission: 'edit_draft' },
+          requireDraftChange: true,
+          checkpoint: {
+            step: 4,
+            loadedCapabilities: true,
+            loadedDraft: true,
+            repairFamilies: { [family]: 3 },
+            working: [{ role: 'user', content: 'Generate' }],
+          },
+        }),
+        (error) => error.code === 'GENERATE_REPAIR_EXHAUSTED',
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not execute apply when output is truncated or JSON is incomplete', async () => {
+    const originalFetch = globalThis.fetch;
+    let saves = 0;
+    let modelCalls = 0;
+    globalThis.fetch = async () => {
+      modelCalls += 1;
+      if (modelCalls === 1) {
+        return sseToolCalls([{
+          id: 'apply_trunc',
+          name: 'survey_apply_operations',
+          args: {
+            expectedDraftUpdatedAt: 't',
+            operations: [{
+              op: 'replaceConfig',
+              surveyConfig: { title: 'Partial', pages: [{ name: 'p1', elements: [{ type: 'rating', name: 'q1' }] }] },
+            }],
+          },
+        }]);
+      }
+      return sseText('Stopped without saving.');
+    };
+    const registry = createToolRegistry([{
+      name: 'survey_apply_operations',
+      minPermission: 'edit_draft',
+      execute: async () => {
+        saves += 1;
+        return { surveyConfig: { pages: [] } };
+      },
+    }]);
+    try {
+      const route = resolveModelRoute('deepseek', 'deepseek-v4-pro');
+      const calls = normalizeToolCalls([{
+        id: 'apply_trunc',
+        function: {
+          name: 'survey_apply_operations',
+          arguments: JSON.stringify({
+            expectedDraftUpdatedAt: 't',
+            operations: [{ op: 'replaceConfig', surveyConfig: { pages: [{ name: 'p1' }] } }],
+          }),
+        },
+      }], 0, 'length');
+      assert.equal(isLengthStopReason('length'), true);
+      assert.equal(shouldBlockWrite(calls[0]), true);
+
+      const incomplete = normalizeToolCalls([{
+        id: 'bad',
+        function: { name: 'survey_apply_operations', arguments: '{"operations":[' },
+      }], 0);
+      assert.equal(incomplete[0].argsComplete, false);
+      assert.equal(shouldBlockWrite(incomplete[0]), true);
+      const incompleteValidate = normalizeToolCalls([{
+        id: 'validate_bad',
+        function: { name: 'survey_validate', arguments: '{"surveyConfig":{' },
+      }], 0);
+      assert.equal(shouldBlockIncompleteArgs(incompleteValidate[0]), true);
+      assert.equal(shouldBlockWrite(incompleteValidate[0]), false);
+
+      await runToolLoop({
+        apiKey: 'test-key',
+        provider: 'deepseek',
+        baseUrl: route.baseUrl,
+        model: route.model.id,
+        modelRecord: route.model,
+        protocol: route.protocol,
+        compat: route.model.compat,
+        messages: [{ role: 'user', content: 'Generate' }],
+        registry,
+        ctx: { permission: 'edit_draft' },
+        stopReasonOverride: 'length',
+      });
+      assert.equal(saves, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('blocks later writes in the same model response after a failed apply', async () => {
+    const originalFetch = globalThis.fetch;
+    let saves = 0;
+    globalThis.fetch = async () => sseToolCalls([
+      {
+        id: 'apply_a',
+        name: 'survey_apply_operations',
+        args: { expectedDraftUpdatedAt: 't', operations: [{ op: 'addPage', page: { name: 'p1' } }] },
+      },
+      {
+        id: 'apply_b',
+        name: 'survey_apply_operations',
+        args: { expectedDraftUpdatedAt: 't', operations: [{ op: 'replaceConfig', surveyConfig: { pages: [] } }] },
+      },
+    ]);
+    const registry = createToolRegistry(applyAssistantModeToTools([{
+      name: 'survey_apply_operations',
+      minPermission: 'edit_draft',
+      execute: async () => {
+        saves += 1;
+        return { surveyConfig: { pages: [] } };
+      },
+    }], getAssistantModePolicy('generate')));
+    const events = [];
+    try {
+      const route = resolveModelRoute('deepseek', 'deepseek-v4-pro');
+      await runToolLoop({
+        apiKey: 'test-key',
+        provider: 'deepseek',
+        baseUrl: route.baseUrl,
+        model: route.model.id,
+        modelRecord: route.model,
+        protocol: route.protocol,
+        compat: route.model.compat,
+        messages: [{ role: 'user', content: 'Generate' }],
+        registry,
+        ctx: { permission: 'edit_draft' },
+        onEvent: async (event) => events.push(event),
+      }).catch(() => null);
+      assert.equal(saves, 0);
+      assert.equal(events.some((event) => event.payload?.result?.code === 'BLOCKED_BY_REPAIR'
+        || event.payload?.code === 'BLOCKED_BY_REPAIR'), true);
     } finally {
       globalThis.fetch = originalFetch;
     }

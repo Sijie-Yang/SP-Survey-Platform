@@ -26,10 +26,12 @@ import { assistantModeFromEvents, normalizeAssistantMode } from './runtime/modes
 import {
   archiveSession,
   cancelRun,
+  discardSessionInput,
   enqueueSessionInput,
   getOwnedRun,
   getSession,
   listEvents,
+  listQueuedSessionInput,
   listSessionRuns,
   listSessions,
   renameSession,
@@ -52,11 +54,15 @@ import {
   deleteSiliconPersona,
   exportSiliconRun,
   getSiliconCompare,
+  getSiliconProgress,
   getSiliconRun,
   listSiliconPersonas,
   listSiliconResponses,
   listSiliconRuns,
+  listSiliconTasks,
   processSiliconChunk,
+  resumeSiliconRun,
+  retryFailedSiliconRun,
   updateSiliconPersona,
 } from '../silicon/handlers.mjs';
 import {
@@ -589,8 +595,31 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
         content: body.content,
         kind: body.kind || 'steer',
         target: body.target || 'next-step',
+        payload: {
+          assistantMode: normalizeAssistantMode(body.assistantMode || body.payload?.assistantMode || session.assistant_mode),
+          projectId: body.projectId || body.payload?.projectId || session.project_id || null,
+          parentRunId: body.parentRunId || body.payload?.parentRunId || null,
+          editorContext: body.editorContext || body.payload?.editorContext || null,
+        },
       });
       return jsonResponse({ success: true, input }, { status: 202 });
+    }
+    if (pathname.startsWith('/api/agent/sessions/') && pathname.endsWith('/inbox') && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length, -'/inbox'.length));
+      const session = await getSession(env, auth.userId, sessionId);
+      if (!session) return errorResponse(Object.assign(new Error('Session not found'), { status: 404 }));
+      return jsonResponse({
+        success: true,
+        inbox: await listQueuedSessionInput(env, sessionId),
+      });
+    }
+    if (pathname.startsWith('/api/agent/inbox/') && request.method === 'DELETE') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const itemId = decodeURIComponent(pathname.slice('/api/agent/inbox/'.length));
+      const item = await discardSessionInput(env, auth.userId, itemId);
+      if (!item) return errorResponse(Object.assign(new Error('Inbox item not found'), { status: 404 }));
+      return jsonResponse({ success: true, item });
     }
     if (pathname.startsWith('/api/agent/sessions/') && request.method === 'PATCH') {
       if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
@@ -676,21 +705,37 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
       const id = decodeURIComponent(pathname.slice('/api/agent/silicon/personas/'.length));
       return jsonResponse(await deleteSiliconPersona(env, auth, id));
     }
+    if (pathname === '/api/agent/silicon/tasks' && request.method === 'GET') {
+      return jsonResponse(await listSiliconTasks(env, auth, ctx));
+    }
     if (pathname === '/api/agent/silicon/runs' && request.method === 'GET') {
       const url = new URL(request.url);
       return jsonResponse(await listSiliconRuns(env, auth, url.searchParams.get('projectId')));
     }
     if (pathname === '/api/agent/silicon/runs' && request.method === 'POST') {
       const body = await request.json();
-      return jsonResponse(await createSiliconRun(env, auth, body, request));
+      return jsonResponse(await createSiliconRun(env, auth, body, request, ctx), { status: 202 });
     }
     if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/process') && request.method === 'POST') {
       const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/process'.length));
-      return jsonResponse(await processSiliconChunk(env, auth, runId));
+      return jsonResponse(await processSiliconChunk(env, auth, runId, ctx));
     }
     if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/cancel') && request.method === 'POST') {
       const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/cancel'.length));
       return jsonResponse(await cancelSiliconRun(env, auth, runId));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/resume') && request.method === 'POST') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/resume'.length));
+      return jsonResponse(await resumeSiliconRun(env, auth, runId, ctx), { status: 202 });
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/retry-failed') && request.method === 'POST') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/retry-failed'.length));
+      return jsonResponse(await retryFailedSiliconRun(env, auth, runId, ctx), { status: 202 });
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/progress') && request.method === 'GET') {
+      const url = new URL(request.url);
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/progress'.length));
+      return jsonResponse(await getSiliconProgress(env, auth, runId, url.searchParams.get('after') || 0));
     }
     if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/responses') && request.method === 'GET') {
       const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/responses'.length));

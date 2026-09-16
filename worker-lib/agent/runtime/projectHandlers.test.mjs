@@ -9,7 +9,7 @@ function response(body, status = 200) {
   });
 }
 
-test('falls back to an RLS-protected optimistic PATCH for the legacy gen_random_bytes failure', async () => {
+test('fails closed when save_project_draft is missing or still uses gen_random_bytes', async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
   globalThis.fetch = async (url, init) => {
@@ -34,7 +34,7 @@ test('falls back to an RLS-protected optimistic PATCH for the legacy gen_random_
     return response([{ id: 'project-1' }]);
   };
   try {
-    const result = await saveDraft(
+    await saveDraft(
       {
         SUPABASE_URL: 'https://example.supabase.co',
         SUPABASE_ANON_KEY: 'anon',
@@ -50,12 +50,12 @@ test('falls back to an RLS-protected optimistic PATCH for the legacy gen_random_
       },
       'assistant',
     );
-    assert.equal(result.success, true);
-    assert.equal(result.surveyConfig.title, 'Updated');
+    assert.fail('saveDraft must not silently PATCH when the RPC is stale');
+  } catch (error) {
+    assert.equal(error.code, 'DRAFT_SAVE_RPC_MISSING');
+    assert.equal(error.status, 503);
     assert.match(requests[1].url, /rpc\/save_project_draft/);
-    assert.equal(requests[2].init.method, 'PATCH');
-    assert.match(requests[2].url, /draft_updated_at=eq\./);
-    assert.equal(new Headers(requests[2].init.headers).get('authorization'), 'Bearer user-jwt');
+    assert.equal(requests.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }

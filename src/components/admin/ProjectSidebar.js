@@ -113,7 +113,8 @@ export default function ProjectSidebar({
   currentProject,
   surveyConfig,
   projectStates = {},
-  width = 400 
+  runningProjectIds = [],
+  width = 400
 }) {
   const { t } = useRegion();
   const narrow = useMediaQuery('(max-width:899px)');
@@ -1313,6 +1314,18 @@ export default function ProjectSidebar({
                                     fontSize: '0.65rem',
                                     '& .MuiChip-label': { px: 0.3 }
                                   }} 
+                                />
+                              )}
+                              {runningProjectIds.includes(project.id) && (
+                                <Box
+                                  title={t.siliconStatusRunning}
+                                  sx={{
+                                    width: 7,
+                                    height: 7,
+                                    borderRadius: '50%',
+                                    bgcolor: 'warning.main',
+                                    flexShrink: 0,
+                                  }}
                                 />
                               )}
                             </Box>

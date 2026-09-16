@@ -5,10 +5,16 @@ import {
   clearPendingRun,
   credentialConfigured,
   exclusiveSidebarOpen,
+  formatToolDiagnostics,
+  shouldShowToolDiagnostics,
   hasAppliedSurveyChange,
   isStaleAssistantRequest,
   latestRunStatus,
   loadingStatusFromEvents,
+  undoBlockedByNewerEdits,
+  assistantStageLabel,
+  collapseRepeatedToolErrors,
+  shouldReplaceAssistantTranscript,
   parseRoute,
   readPendingRun,
   readSessionId,
@@ -22,6 +28,12 @@ import {
   writeSessionId,
   writeStoredRoute,
   writeUndoSnapshot,
+  processHeadline,
+  readProcessExpanded,
+  writeProcessExpanded,
+  writeResultFromTools,
+  saveStatusFromRun,
+  summarizeDraftDiff,
 } from './surveyAssistantUtils';
 
 const directory = [
@@ -137,6 +149,28 @@ describe('surveyAssistantUtils', () => {
       { type: 'tool.result', payload: { name: 'survey_get_draft', ok: true } },
       { type: 'tool.result', payload: { name: 'survey_apply_operations', ok: true } },
     ])).toBe(true);
+    expect(hasAppliedSurveyChange([
+      { type: 'tool.result', payload: { name: 'survey_submit_generated_draft', ok: true } },
+    ])).toBe(true);
+    expect(shouldShowToolDiagnostics('survey_capabilities', {
+      receivedShape: { operationsType: 'missing', rootType: 'object' },
+    })).toBe(false);
+    expect(shouldShowToolDiagnostics('survey_submit_generated_draft', {
+      receivedShape: { operationsType: 'missing' },
+    })).toBe(false);
+    expect(shouldShowToolDiagnostics('survey_validate', {
+      rawArgsComplete: false,
+      receivedShape: { rootType: 'unparsed' },
+    })).toBe(true);
+    expect(formatToolDiagnostics({
+      code: 'INVALID_TOOL_ARGUMENTS',
+      path: 'arguments',
+      stopReason: 'toolUse',
+      rawArgsComplete: false,
+      argumentOrigin: 'raw_stream',
+      byteLength: 8,
+      receivedShape: { rootType: 'unparsed', operationsType: 'missing', keys: [] },
+    })).toContain('rawArgsComplete=false');
     clearPendingRun(api, 'p1');
     expect(readPendingRun(api, 'p1')).toBeNull();
   });
@@ -153,6 +187,36 @@ describe('surveyAssistantUtils', () => {
     expect(loadingStatusFromEvents([
       { type: 'tool.call', payload: { id: 'verify', name: 'survey_get_draft', verification: true } },
     ])).toBe('Verifying saved draft…');
+    expect(loadingStatusFromEvents([
+      { type: 'run.status', payload: { status: 'running' }, runId: 'old' },
+      { type: 'tool.call', payload: { id: 'call-old', name: 'survey_apply_operations' }, runId: 'old' },
+      { type: 'run.status', payload: { status: 'running' }, runId: 'new' },
+    ], { runId: 'new', readOnly: true })).toBe('Looking up the current settings…');
+    expect(undoBlockedByNewerEdits(
+      { afterSignature: JSON.stringify({ title: 'ai' }) },
+      { title: 'manual' },
+    )).toBe(true);
+    expect(undoBlockedByNewerEdits(
+      { afterSignature: JSON.stringify({ title: 'ai' }) },
+      { title: 'ai' },
+    )).toBe(false);
+  });
+
+  test('does not replace a longer local transcript with a partial snapshot', () => {
+    const current = [
+      { role: 'user', content: '第一问' },
+      { role: 'assistant', content: '已保存' },
+      { role: 'user', content: '重新生成' },
+    ];
+    expect(shouldReplaceAssistantTranscript(current, [
+      { role: 'assistant', content: '', tools: [{ name: 'survey_apply_operations', status: 'running' }] },
+    ])).toBe(false);
+    expect(shouldReplaceAssistantTranscript(current, [
+      { role: 'user', content: '第一问' },
+      { role: 'assistant', content: '已保存' },
+      { role: 'user', content: '重新生成' },
+      { role: 'assistant', content: '', tools: [{ name: 'survey_apply_operations', status: 'running' }] },
+    ])).toBe(true);
   });
 
   test('isolates stale assistant requests', () => {
@@ -206,9 +270,66 @@ describe('surveyAssistantUtils', () => {
     expect(exclusiveSidebarOpen({ isDesktop: true, otherIsOpen: true })).toEqual({ otherOpen: true });
   });
 
+  test('merges repeated tool errors and labels generate stages', () => {
+    expect(collapseRepeatedToolErrors([
+      { name: 'survey_apply_operations', status: 'error', code: 'GENERATE_CONTRACT', result: 'a' },
+      { name: 'survey_apply_operations', status: 'error', code: 'GENERATE_CONTRACT', result: 'b' },
+      { name: 'survey_get_draft', status: 'done' },
+    ])).toEqual([
+      {
+        name: 'survey_apply_operations',
+        status: 'error',
+        code: 'GENERATE_CONTRACT',
+        result: 'b',
+        repeatCount: 2,
+        diagnostics: undefined,
+      },
+      { name: 'survey_get_draft', status: 'done', repeatCount: 1 },
+    ]);
+    expect(assistantStageLabel('repair_config', { repairAttempt: 1, repairLimit: 2 }))
+      .toBe('Repairing configuration (1/2)');
+  });
+
   test('parses provider/model route keys', () => {
     expect(routeKey('openai', 'gpt-4o')).toBe('openai::gpt-4o');
     expect(parseRoute('openai::gpt-4o')).toEqual({ provider: 'openai', model: 'gpt-4o' });
     expect(parseRoute('')).toEqual({ provider: '', model: '' });
+  });
+
+  test('headlines process from real tool pageCount and remembers expand state', () => {
+    expect(processHeadline([
+      { name: 'survey_submit_generated_draft', status: 'done', result: { pageCount: 6, verified: true } },
+    ])).toBe('已生成 6 页问卷，保存已核对');
+    expect(processHeadline([
+      { name: 'survey_validate', status: 'done', result: { pageCount: 3 } },
+    ], { running: true })).toBe('已完成 3 页，正在检查题目设置');
+    expect(processHeadline([
+      { name: 'survey_get_draft', status: 'running' },
+    ], { running: true })).toBe('正在生成问卷');
+    expect(writeResultFromTools([
+      { name: 'survey_get_draft', status: 'done', result: { title: 'old' } },
+      { name: 'survey_submit_generated_draft', status: 'done', result: { pageCount: 2 } },
+    ])?.result).toEqual({ pageCount: 2 });
+    const storage = {
+      data: {},
+      getItem(key) { return this.data[key] || null; },
+      setItem(key, value) { this.data[key] = value; },
+    };
+    writeProcessExpanded(storage, 'run-1', true);
+    expect(readProcessExpanded(storage, 'run-1')).toBe(true);
+    writeProcessExpanded(storage, 'run-1', false);
+    expect(readProcessExpanded(storage, 'run-1')).toBe(false);
+    expect(saveStatusFromRun({ metadata: { persisted: true, verified: true } })).toBe('saved_verified');
+    expect(saveStatusFromRun({ metadata: { persisted: true } })).toBe('saved');
+    expect(saveStatusFromRun({ metadata: { saveFailed: true } }, { status: 'error' })).toBe('save_failed');
+    expect(saveStatusFromRun({ metadata: { persisted: true, verifyFailed: true } })).toBe('verify_incomplete');
+    expect(summarizeDraftDiff(
+      { title: 'A', pages: [{ elements: [{ name: 'q1', title: 'Old', type: 'rating' }] }] },
+      { title: 'B', pages: [{ elements: [{ name: 'q1', title: 'New', type: 'rating', isRequired: true }] }] },
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ target: 'survey', field: 'title', to: 'B' }),
+      expect.objectContaining({ target: 'q1', field: 'title', to: 'New' }),
+      expect.objectContaining({ target: 'q1', field: 'isRequired', to: true }),
+    ]));
   });
 });

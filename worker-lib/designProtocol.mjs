@@ -5,6 +5,7 @@
  */
 
 import { ANNOTATION_TOOLS, normalizeAllowedTools } from './annotationTools.mjs';
+import { dimensionIncomplete, matrixItemLabel, normalizeSliderQuestion } from './sliderScale.mjs';
 import {
   OPERATION_TYPES,
   PLATFORM_SCHEMA,
@@ -224,13 +225,36 @@ export function validateSurveyConfig(surveyConfig) {
             });
           }
         }
-        if (
-          questionHasTrait(element.type, 'slider')
-          && !element.dimensions?.length
-        ) {
-          warnings.push({
-            path: elementPath,
-            message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
+        if (questionHasTrait(element.type, 'slider')) {
+          if (!element.dimensions?.length) {
+            warnings.push({
+              path: elementPath,
+              message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
+            });
+          } else {
+            element.dimensions.forEach((dimension, dimIndex) => {
+              if (dimensionIncomplete(dimension)) {
+                warnings.push({
+                  path: `${elementPath}.dimensions[${dimIndex}]`,
+                  message: `Dimension ${dimIndex + 1} is incomplete (needs a display name and both pole labels). Historical answer ids are unchanged.`,
+                });
+              }
+            });
+          }
+        }
+        for (const key of ['rows', 'columns']) {
+          if (!Array.isArray(element[key])) continue;
+          element[key].forEach((item, itemIndex) => {
+            const kind = key === 'rows' ? 'Row' : 'Column';
+            const hasText = item && typeof item === 'object'
+              ? String(item.text || '').trim()
+              : String(item || '').trim();
+            if (!hasText) {
+              warnings.push({
+                path: `${elementPath}.${key}[${itemIndex}]`,
+                message: `${kind} ${itemIndex + 1} is missing a display label (fallback: ${matrixItemLabel(item, itemIndex, kind)}).`,
+              });
+            }
           });
         }
         if (
@@ -270,8 +294,9 @@ export function postProcessAiConfig(surveyConfig) {
   if (!Array.isArray(processedConfig.pages)) return processedConfig;
 
   processedConfig.pages.forEach((page) => {
-    (page.elements || []).forEach((element) => {
-      if (!MEDIA_STIMULUS_TYPES.includes(element.type)) return;
+    page.elements = (page.elements || []).map((raw) => {
+      const element = normalizeSliderQuestion(raw);
+      if (!MEDIA_STIMULUS_TYPES.includes(element.type)) return element;
       if (!element.imageSelectionMode || element.imageSelectionMode === 'random') {
         element.imageSelectionMode = 'huggingface_random';
       }
@@ -324,6 +349,7 @@ export function postProcessAiConfig(surveyConfig) {
       delete element.imageSource;
       delete element.huggingFaceConfig;
       delete element.falApiKey;
+      return element;
     });
   });
 
@@ -599,7 +625,7 @@ export const DESIGN_CAPABILITIES = {
       rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
       matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
       ranking: { fields: ['name', 'title', 'choices[]'] },
-      slidergroup: { fields: ['name', 'title', 'dimensions[{id,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
+      slidergroup: { fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
       pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
     },
     image: {
@@ -699,6 +725,15 @@ export const DESIGN_CAPABILITIES = {
       },
       imageCount: 2, ...MEDIA_SAMPLING,
     },
+  },
+  supportMatrix: {
+    projectProfile: 'read/write via survey_update_project (Agent); read-only in Generate/Ask',
+    surveyDraft: 'read/write — Generate: survey_submit_generated_draft; Adjust: survey_apply_operations; Ask: read-only',
+    questionSettings: 'read/write with the survey draft',
+    mediaLibrary: 'read via media_list; write needs media:write and approval',
+    appearanceTheme: 'read/write via updateSurvey / setTheme or Generate surveyConfig.theme',
+    publishDelete: 'approval-gated; not available in Generate or Ask',
+    unsupported: ['arbitrary website CMS', 'SQL', 'participant account admin', 'human quota changes'],
   },
   operations: OPERATION_TYPES,
   scopes: ['surveys:read', 'surveys:write', 'surveys:publish', 'media:write', 'results:read'],

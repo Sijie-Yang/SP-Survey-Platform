@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Box, Typography, Slider, TextField, Chip, Button } from '@mui/material';
-import { sliderScale } from '../lib/sliderScale';
+import { dimensionDisplayName, dimensionIncomplete, sliderScale } from '../lib/sliderScale';
 import { ImageGalleryGrid } from './MediaWidgets';
 
 /**
@@ -50,13 +50,26 @@ export function SliderGroupContent({
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-      {dimensions.map((d) => {
+      {dimensions.map((d, index) => {
         const scale = sliderScale(d, { scaleMin, scaleMax, scaleStep });
         const answered = typeof current[d.id] === 'number' && Number.isFinite(current[d.id]);
         const v = answered ? current[d.id] : scale.midpoint;
         const label = answered ? v : (zh ? '尚未评分' : 'Not rated');
+        const title = dimensionDisplayName(d, index, { locale: zh ? 'zh' : 'en' });
+        const incomplete = dimensionIncomplete(d);
         return (
           <Box key={d.id} sx={{ px: { xs: 0, sm: 1 } }}>
+            <Typography
+              variant="subtitle2"
+              sx={{ mb: 0.5, lineHeight: 1.35, overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+            >
+              {title}
+            </Typography>
+            {incomplete ? (
+              <Typography variant="caption" color="warning.main" sx={{ display: 'block', mb: 0.5 }}>
+                {zh ? '维度配置不完整：请补全显示名称和两端说明。' : 'Dimension setup is incomplete: add a display name and both pole labels.'}
+              </Typography>
+            ) : null}
             {/* Phones: labels above slider so long bipolar text does not crush mid-row */}
             <Box
               sx={{
@@ -67,7 +80,7 @@ export function SliderGroupContent({
                 mb: 0.5,
               }}
             >
-              <Typography variant="caption" color="text.secondary" sx={{ flex: 1, lineHeight: 1.3 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ flex: 1, lineHeight: 1.3, overflowWrap: 'anywhere' }}>
                 {d.left}
               </Typography>
               <Chip
@@ -79,7 +92,7 @@ export function SliderGroupContent({
               <Typography
                 variant="caption"
                 color="text.secondary"
-                sx={{ flex: 1, lineHeight: 1.3, textAlign: 'right' }}
+                sx={{ flex: 1, lineHeight: 1.3, textAlign: 'right', overflowWrap: 'anywhere' }}
               >
                 {d.right}
               </Typography>
@@ -113,7 +126,7 @@ export function SliderGroupContent({
               step={scale.step}
               marks={scale.valid && (scale.max - scale.min) / scale.step <= 20}
               disabled={readOnly || !scale.valid}
-              aria-label={`${d.left || d.id} – ${d.right || d.id}`}
+              aria-label={`${title}: ${d.left || d.id} – ${d.right || d.id}`}
               onChange={(_, val) => onChange?.({ ...current, [d.id]: val })}
               valueLabelDisplay="auto"
             />

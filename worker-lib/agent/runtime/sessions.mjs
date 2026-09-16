@@ -288,6 +288,8 @@ export async function createRun(env, {
   status = 'running',
   assistantMode = 'agent',
   requestPayload = {},
+  parentRunId = null,
+  inboxId = null,
 }) {
   const body = {
     session_id: sessionId,
@@ -297,9 +299,16 @@ export async function createRun(env, {
     provider,
     model,
     started_at: status === 'running' ? new Date().toISOString() : null,
+    mode: assistantMode,
     assistant_mode: assistantMode,
-    request_payload: requestPayload,
+    request_payload: {
+      ...requestPayload,
+      ...(parentRunId ? { parentRunId } : {}),
+      ...(inboxId ? { inboxId } : {}),
+    },
     updated_at: new Date().toISOString(),
+    ...(parentRunId ? { parent_run_id: parentRunId } : {}),
+    ...(inboxId ? { inbox_id: inboxId } : {}),
   };
   try {
     const rows = await supabaseRest(env, {
@@ -310,20 +319,26 @@ export async function createRun(env, {
       prefer: 'return=representation',
     });
     return Array.isArray(rows) ? rows[0] : rows;
-  } catch {
-    delete body.assistant_mode;
+  } catch (error) {
+    delete body.mode;
     delete body.request_payload;
     delete body.updated_at;
-    body.status = status === 'queued' ? 'queued' : 'running';
-    if (body.status === 'running' && !body.started_at) body.started_at = new Date().toISOString();
-    const rows = await supabaseRest(env, {
-      path: '/rest/v1/ai_runs',
-      method: 'POST',
-      serviceRole: true,
-      body,
-      prefer: 'return=representation',
-    });
-    return Array.isArray(rows) ? rows[0] : rows;
+    try {
+      const rows = await supabaseRest(env, {
+        path: '/rest/v1/ai_runs',
+        method: 'POST',
+        serviceRole: true,
+        body,
+        prefer: 'return=representation',
+      });
+      return Array.isArray(rows) ? rows[0] : rows;
+    } catch {
+      throw Object.assign(new Error('Assistant run columns are not applied'), {
+        status: 503,
+        code: 'ASSISTANT_RUN_SCHEMA_MISSING',
+        cause: error,
+      });
+    }
   }
 }
 
@@ -491,6 +506,23 @@ export async function cancelRun(env, userId, runId) {
       prefer: 'return=minimal',
     });
   }
+  const run = await getOwnedRun(env, userId, runId).catch(() => null);
+  if (run?.session_id) {
+    await voidQueuedSessionInput(env, run.session_id);
+  }
+  return { success: true };
+}
+
+export async function voidQueuedSessionInput(env, sessionId) {
+  if (!sessionId) return { success: true };
+  await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    method: 'PATCH',
+    serviceRole: true,
+    query: `?session_id=eq.${encodeURIComponent(sessionId)}&status=eq.queued`,
+    body: { status: 'voided', claimed_at: new Date().toISOString() },
+    prefer: 'return=minimal',
+  }).catch(() => null);
   return { success: true };
 }
 
@@ -544,6 +576,7 @@ export async function enqueueSessionInput(env, {
   content,
   kind = 'followup',
   target = 'next-step',
+  payload = {},
 }) {
   const rows = await supabaseRest(env, {
     path: '/rest/v1/ai_agent_inbox',
@@ -556,20 +589,68 @@ export async function enqueueSessionInput(env, {
       kind,
       target,
       status: 'queued',
+      payload: payload && typeof payload === 'object' ? payload : {},
     },
     prefer: 'return=representation',
+  }).catch(async (error) => {
+    if (!/payload|schema cache|column/i.test(String(error?.message || ''))) throw error;
+    return supabaseRest(env, {
+      path: '/rest/v1/ai_agent_inbox',
+      method: 'POST',
+      serviceRole: true,
+      body: {
+        session_id: sessionId,
+        user_id: userId,
+        content: String(content || '').slice(0, 12000),
+        kind,
+        target,
+        status: 'queued',
+      },
+      prefer: 'return=representation',
+    });
   });
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
-export async function claimSessionInput(env, sessionId) {
+export async function markInboxFailed(env, itemId, errorSummary = '', existingPayload = {}) {
+  if (!itemId) return;
+  const payload = {
+    ...(existingPayload && typeof existingPayload === 'object' ? existingPayload : {}),
+    error: String(errorSummary || 'dispatch failed').slice(0, 400),
+  };
+  await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    method: 'PATCH',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(itemId)}`,
+    body: { status: 'failed', payload },
+    prefer: 'return=minimal',
+  }).catch(async () => {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_agent_inbox',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(itemId)}`,
+      body: { status: 'failed' },
+      prefer: 'return=minimal',
+    }).catch(() => null);
+  });
+}
+
+function inboxTargetIsImmediate(target) {
+  return !target || target === 'next-step' || target === 'current';
+}
+
+export async function claimSessionInput(env, sessionId, { includeAfterRun = false } = {}) {
   const rows = await supabaseRest(env, {
     path: '/rest/v1/ai_agent_inbox',
     serviceRole: true,
     query: `?session_id=eq.${encodeURIComponent(sessionId)}`
       + '&status=eq.queued&select=*&order=created_at.asc&limit=20',
   });
-  const items = Array.isArray(rows) ? rows : [];
+  const items = (Array.isArray(rows) ? rows : []).filter((item) => (
+    includeAfterRun ? true : inboxTargetIsImmediate(item.target)
+  ));
   if (items.length) {
     await supabaseRest(env, {
       path: '/rest/v1/ai_agent_inbox',
@@ -581,6 +662,51 @@ export async function claimSessionInput(env, sessionId) {
     });
   }
   return items;
+}
+
+export async function claimAfterRunInput(env, sessionId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    serviceRole: true,
+    query: `?session_id=eq.${encodeURIComponent(sessionId)}`
+      + '&status=eq.queued&select=*&order=created_at.asc&limit=20',
+  });
+  const next = (Array.isArray(rows) ? rows : []).find((item) => (
+    item.target === 'after-run' || item.target === 'after'
+  ));
+  if (!next) return [];
+  await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    method: 'PATCH',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(next.id)}&status=eq.queued`,
+    body: { status: 'claimed', claimed_at: new Date().toISOString() },
+    prefer: 'return=minimal',
+  });
+  return [next];
+}
+
+export async function listQueuedSessionInput(env, sessionId) {
+  if (!sessionId) return [];
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    serviceRole: true,
+    query: `?session_id=eq.${encodeURIComponent(sessionId)}`
+      + '&status=eq.queued&select=*&order=created_at.asc&limit=50',
+  });
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function discardSessionInput(env, userId, itemId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    method: 'PATCH',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(itemId)}&user_id=eq.${encodeURIComponent(userId)}&status=eq.queued`,
+    body: { status: 'discarded', claimed_at: new Date().toISOString() },
+    prefer: 'return=representation',
+  });
+  return Array.isArray(rows) ? rows[0] || null : rows;
 }
 
 export { RUNTIME_VERSION };

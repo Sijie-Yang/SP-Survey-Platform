@@ -58,12 +58,27 @@ import {
   Chat,
   Refresh,
   AutoAwesome,
+  ContentCopy,
 } from '@mui/icons-material';
 import { PROMPTS } from '../../config/prompts';
 import AgentsEditor from './AgentsEditor';
 import { listMcpConnections } from '../../lib/agentApi';
 import ModelsSettings from './ModelsSettings';
 import AssistantSettingsDialog from './AssistantSettingsDialog';
+import {
+  assistantStageLabel,
+  collapseRepeatedToolErrors,
+  formatToolDiagnostics,
+  isDraftWriteTool,
+  processHeadline,
+  processTranscriptKey,
+  readProcessExpanded,
+  shouldShowToolDiagnostics,
+  saveStatusFromRun,
+  writeProcessExpanded,
+  writeResultFromTools,
+} from '../../hooks/surveyAssistantUtils';
+import ChatMarkdown from './ChatMarkdown';
 
 function messageTools(msg) {
   const tools = msg?.tools || msg?.metadata?.tools;
@@ -119,11 +134,17 @@ function localizeLoadingStatus(status, t) {
     'Thinking...': t.aiSidebarStatusThinking,
     'Queued…': t.aiSidebarStatusQueued,
     'Continuing survey generation…': t.aiSidebarStatusRunning,
+    'Looking up the current settings…': t.aiSidebarStatusLookup || '正在查看相关设置…',
+    'Preparing the edit…': t.aiSidebarStatusAdjust || '正在准备修改…',
+    'Designing the survey…': t.aiSidebarStatusGenerate || '正在设计问卷…',
+    'Working on your request…': t.aiSidebarStatusAgent || '正在处理请求…',
+    'Current mode is read-only…': t.aiSidebarStatusReadOnly || '当前模式只读',
     'Waiting for your approval…': t.aiSidebarStatusApproval,
     'Retrying model request…': t.aiSidebarStatusRetrying,
     'Compacting context and continuing…': t.aiSidebarStatusCompacting,
     'Verifying saved draft…': t.aiSidebarStatusVerifying,
   };
+  if (/^Repairing configuration/.test(status)) return status;
   return map[status] || status;
 }
 
@@ -169,7 +190,12 @@ export default function ChatAssistant({
   onCredentialsChange,
   chatEndRef,
   aiUndoAvailable = false,
+  writeConflict = null,
+  inboxItems = [],
+  runDiffs = {},
   onRevertAiChange,
+  onResolveWriteConflict,
+  onDiscardInbox,
   onRunQualityChecks,
   modelOptions = [],
   selectedRoute = '',
@@ -184,6 +210,10 @@ export default function ChatAssistant({
   fillHeight = false,
   settingsOpen: settingsOpenProp,
   onSettingsOpenChange,
+  editorSelection = null,
+  onClearEditorFocus,
+  steerTarget = 'next-step',
+  onSteerTargetChange,
 }) {
   const { t } = useRegion();
   const navigate = useNavigate();
@@ -295,6 +325,11 @@ export default function ChatAssistant({
     };
   });
   const [newScenario, setNewScenario] = React.useState('');
+  const [processOpen, setProcessOpen] = React.useState({});
+  const [diffOpen, setDiffOpen] = React.useState({});
+  const [hasNewMessages, setHasNewMessages] = React.useState(false);
+  const stickToBottomRef = React.useRef(true);
+  const scrollBoxRef = React.useRef(null);
   
   // Flag to prevent saving during project switch
   const isLoadingProjectData = React.useRef(false);
@@ -320,6 +355,50 @@ export default function ChatAssistant({
     return () => {
       window.removeEventListener('researchContextUpdated', handleResearchContextUpdate);
     };
+  }, []);
+
+  React.useEffect(() => {
+    const box = scrollBoxRef.current;
+    if (!box) return undefined;
+    const onScroll = () => {
+      const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+      stickToBottomRef.current = distance < 48;
+      if (stickToBottomRef.current) setHasNewMessages(false);
+    };
+    box.addEventListener('scroll', onScroll, { passive: true });
+    return () => box.removeEventListener('scroll', onScroll);
+  }, []);
+
+  React.useEffect(() => {
+    const box = scrollBoxRef.current;
+    if (!box) return;
+    if (stickToBottomRef.current) {
+      if (typeof chatEndRef?.current?.scrollIntoView === 'function') {
+        chatEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
+      setHasNewMessages(false);
+    } else {
+      setHasNewMessages(true);
+    }
+  }, [messages, isLoading, loadingStatus, chatEndRef]);
+
+  React.useEffect(() => {
+    const box = scrollBoxRef.current;
+    const viewport = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!box || !viewport) return undefined;
+    let lastHeight = viewport.height;
+    const onResize = () => {
+      const next = viewport.height;
+      if (Math.abs(next - lastHeight) < 24) return;
+      lastHeight = next;
+      if (stickToBottomRef.current) return;
+      const saved = box.scrollTop;
+      requestAnimationFrame(() => {
+        box.scrollTop = saved;
+      });
+    };
+    viewport.addEventListener('resize', onResize);
+    return () => viewport.removeEventListener('resize', onResize);
   }, []);
   
   // Notify parent when prompts change
@@ -495,7 +574,21 @@ export default function ChatAssistant({
           px: { xs: 2, sm: 2.5 },
           py: 2.5,
         }}
+        ref={scrollBoxRef}
       >
+        {editorSelection?.questionName || editorSelection?.pageName ? (
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5, flexWrap: 'wrap' }}>
+            <Chip
+              size="small"
+              label={[
+                editorSelection.pageName ? `页 ${editorSelection.pageName}` : null,
+                editorSelection.questionName ? `题 ${editorSelection.questionName}` : null,
+                editorSelection.dirty ? '尚未保存' : null,
+              ].filter(Boolean).join(' · ')}
+              onDelete={onClearEditorFocus}
+            />
+          </Stack>
+        ) : null}
         {messages.length === 0 ? (
           <Box
             sx={{
@@ -531,6 +624,36 @@ export default function ChatAssistant({
           </Box>
         ) : (
           <Stack spacing={2.5}>
+            {writeConflict ? (
+              <Box sx={{ p: 1.25, border: '1px solid', borderColor: 'warning.light', borderRadius: 1 }}>
+                <Typography variant="caption" sx={{ display: 'block', mb: 0.75 }}>
+                  {t.aiWriteConflict || 'Editor has unsaved changes. Save before executing this request, or return to the editor.'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  {writeConflict.message}
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button size="small" variant="contained" onClick={() => onResolveWriteConflict?.('save')}>
+                    {t.aiSaveThenRun || 'Save then execute'}
+                  </Button>
+                  <Button size="small" onClick={() => onResolveWriteConflict?.('dismiss')}>
+                    {t.aiReturnToEditor || 'Return to settings'}
+                  </Button>
+                </Stack>
+              </Box>
+            ) : null}
+            {inboxItems.length > 0 ? (
+              <Box sx={{ p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700 }}>{t.aiQueueTitle || 'Queued tasks'}</Typography>
+                {inboxItems.map((item) => (
+                  <Stack key={item.id} direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                    <Chip size="small" label={item.target === 'after-run' ? (t.aiQueueAfter || 'After this task') : (t.aiQueueNow || 'Steer current')} />
+                    <Typography variant="caption" sx={{ flex: 1 }} noWrap>{item.content}</Typography>
+                    <Button size="small" onClick={() => onDiscardInbox?.(item.id)}>{t.aiQueueCancel || 'Cancel'}</Button>
+                  </Stack>
+                ))}
+              </Box>
+            ) : null}
             {contextEnabled && recommendations.length > 0 && (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
                 {recommendations.slice(0, 3).map((rec, index) => (
@@ -601,61 +724,219 @@ export default function ChatAssistant({
                           borderColor: 'error.main',
                         }}
                       >
-                        {msg.content ? (
-                          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, overflowWrap: 'anywhere' }}>
-                            {msg.content}
-                          </Typography>
-                        ) : null}
-                        {!isUser && messageTools(msg).length > 0 && (
-                          <Box sx={{ mt: msg.content ? 1 : 0, display: 'grid', gap: 0.6 }}>
-                            {messageTools(msg).map((tool, toolIndex) => {
-                              const summary = toolSummary(tool);
-                              return (
-                                <Box
-                                  key={`${msg.id || index}-tool-${tool.id || tool.name || toolIndex}`}
+                        {(() => {
+                          const tools = collapseRepeatedToolErrors(messageTools(msg));
+                          const running = tools.some((tool) => tool.status === 'running') || Boolean(isLoading && index === messages.length - 1);
+                          const failed = tools.some((tool) => tool.status === 'error');
+                          const writeDone = writeResultFromTools(tools);
+                          const processKey = processTranscriptKey(msg);
+                          const storedOpen = readProcessExpanded(
+                            typeof window !== 'undefined' ? window.sessionStorage : null,
+                            processKey,
+                          );
+                          const open = processOpen[processKey] ?? storedOpen ?? running;
+                          const staleStage = !running && ['save', 'build_survey'].includes(msg.metadata?.stage);
+                          const showDiagnostics = (tool) => shouldShowToolDiagnostics(tool.name, tool.diagnostics);
+                          return (
+                            <>
+                              {!isUser && tools.length > 0 && (
+                                <Accordion
+                                  disableGutters
+                                  expanded={open}
+                                  onChange={(_, next) => {
+                                    setProcessOpen((current) => ({ ...current, [processKey]: next }));
+                                    writeProcessExpanded(
+                                      typeof window !== 'undefined' ? window.sessionStorage : null,
+                                      processKey,
+                                      next,
+                                    );
+                                  }}
                                   sx={{
-                                    px: 1,
-                                    py: 0.6,
-                                    borderRadius: 1,
+                                    mt: 0,
+                                    mb: 1,
+                                    boxShadow: 'none',
                                     border: '1px solid',
-                                    borderColor: tool.status === 'error' ? 'error.light' : 'divider',
-                                    bgcolor: tool.status === 'running' ? 'action.hover' : 'background.paper',
+                                    borderColor: failed ? 'error.light' : 'divider',
+                                    '&:before': { display: 'none' },
                                   }}
                                 >
-                                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-                                    <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
-                                      {tool.name || t.aiSidebarToolUnknown}
+                                  <AccordionSummary expandIcon={<ExpandMore />}>
+                                    <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                                      {failed && !running ? '' : (running ? '' : '✓ ')}
+                                      {processHeadline(tools, { running })}
                                     </Typography>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        color: tool.status === 'error'
-                                          ? 'error.main'
-                                          : tool.status === 'running'
-                                            ? 'primary.main'
-                                            : 'text.secondary',
-                                      }}
-                                    >
-                                      {toolStatusLabel(tool.status, t)}
-                                    </Typography>
-                                  </Box>
-                                  {summary ? (
-                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
-                                      {summary}
-                                    </Typography>
+                                  </AccordionSummary>
+                                  <AccordionDetails sx={{ pt: 0, display: 'grid', gap: 0.6 }}>
+                                    {msg.metadata?.stage && !staleStage ? (
+                                      <Typography variant="caption" color="text.secondary">
+                                        {assistantStageLabel(msg.metadata.stage, msg.metadata)}
+                                      </Typography>
+                                    ) : null}
+                                    {tools.map((tool, toolIndex) => {
+                                      const summary = toolSummary(tool);
+                                      const diagnostics = tool.diagnostics;
+                                      const current = running && tool.status === 'running';
+                                      return (
+                                        <Box
+                                          key={`${msg.id || index}-tool-${tool.id || tool.name || toolIndex}`}
+                                          sx={{
+                                            px: 1,
+                                            py: 0.6,
+                                            borderRadius: 1,
+                                            border: '1px solid',
+                                            borderColor: tool.status === 'error' ? 'error.light' : 'divider',
+                                            bgcolor: current ? 'action.hover' : 'background.paper',
+                                            opacity: running && !current && tool.status !== 'error' ? 0.7 : 1,
+                                          }}
+                                        >
+                                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                                            <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                                              {tool.name || t.aiSidebarToolUnknown}
+                                              {tool.repeatCount > 1 ? ` ×${tool.repeatCount}` : ''}
+                                            </Typography>
+                                            <Typography
+                                              variant="caption"
+                                              sx={{
+                                                color: tool.status === 'error'
+                                                  ? 'error.main'
+                                                  : tool.status === 'running'
+                                                    ? 'primary.main'
+                                                    : 'text.secondary',
+                                              }}
+                                            >
+                                              {toolStatusLabel(tool.status, t)}
+                                            </Typography>
+                                          </Box>
+                                          {summary ? (
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                                              {summary}
+                                              {tool.result?.target ? ` · ${tool.result.target}` : ''}
+                                              {tool.result?.pageCount != null ? ` · ${tool.result.pageCount} pages` : ''}
+                                            </Typography>
+                                          ) : null}
+                                          {showDiagnostics(tool) ? (
+                                            <Accordion disableGutters sx={{ boxShadow: 'none', '&:before': { display: 'none' } }}>
+                                              <AccordionSummary sx={{ minHeight: 28, px: 0 }}>
+                                                <Typography variant="caption" color="text.secondary">诊断详情</Typography>
+                                              </AccordionSummary>
+                                              <AccordionDetails sx={{ px: 0, pt: 0 }}>
+                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                                                  {formatToolDiagnostics(diagnostics)}
+                                                </Typography>
+                                                <Tooltip title={t.aiSidebarCopyDiagnostics || 'Copy diagnostics'}>
+                                                  <IconButton
+                                                    size="small"
+                                                    aria-label={t.aiSidebarCopyDiagnostics || 'Copy diagnostics'}
+                                                    onClick={() => {
+                                                      const text = formatToolDiagnostics(diagnostics);
+                                                      if (text) navigator.clipboard?.writeText(text);
+                                                    }}
+                                                  >
+                                                    <ContentCopy sx={{ fontSize: 12 }} />
+                                                  </IconButton>
+                                                </Tooltip>
+                                              </AccordionDetails>
+                                            </Accordion>
+                                          ) : null}
+                                        </Box>
+                                      );
+                                    })}
+                                  </AccordionDetails>
+                                </Accordion>
+                              )}
+                              {!isUser && msg.metadata?.questionModeWriteRefused && msg.metadata?.pendingWrite ? (
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ mb: 1 }}
+                                  onClick={() => onSendMessage?.({
+                                    message: msg.metadata.pendingWrite,
+                                    assistantMode: 'adjust',
+                                  })}
+                                >
+                                  切换到调整并执行本条
+                                </Button>
+                              ) : null}
+                              {!isUser && writeDone && !running && !msg.metadata?.questionModeWriteRefused ? (
+                                <Box sx={{ mb: 1, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+                                    {t.aiChangeCardTitle || '修改结果'}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                    {(() => {
+                                      const status = saveStatusFromRun(msg, writeDone);
+                                      if (status === 'saved_verified') return t.aiChangeVerified || '已保存并核对';
+                                      if (status === 'saved') return t.aiChangeSaved || '已保存';
+                                      if (status === 'save_failed') return t.aiChangeSaveFailed || '保存失败';
+                                      return t.aiChangeVerifyIncomplete || '核对未完成';
+                                    })()}
+                                  </Typography>
+                                  {diffOpen[msg.runId] ? (
+                                    (runDiffs[msg.runId] || []).length
+                                      ? (runDiffs[msg.runId] || []).slice(0, 16).map((change, index) => (
+                                        <Typography key={`${msg.runId}-diff-${index}`} variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                          {change.target}.{change.field}
+                                          {change.from != null ? ` ${String(change.from).slice(0, 40)} →` : ''}
+                                          {change.to != null ? ` ${String(change.to).slice(0, 40)}` : ''}
+                                        </Typography>
+                                      ))
+                                      : (
+                                        <Typography variant="caption" color="text.secondary">
+                                          {t.aiChangeNoDiff || '没有可展示的字段变化'}
+                                        </Typography>
+                                      )
                                   ) : null}
+                                <Stack direction="row" spacing={1} sx={{ mt: 0.75, flexWrap: 'wrap' }}>
+                                  <Button size="small" onClick={() => window.dispatchEvent(new CustomEvent('sp-assistant-open-preview'))}>
+                                    打开预览
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    onClick={() => {
+                                      setDiffOpen((current) => ({ ...current, [msg.runId]: !current[msg.runId] }));
+                                    }}
+                                  >
+                                    查看修改
+                                  </Button>
+                                  {aiUndoAvailable && (
+                                    <Button size="small" color="warning" onClick={() => onRevertAiChange?.(msg.runId)}>
+                                      撤销本次修改
+                                    </Button>
+                                  )}
+                                </Stack>
                                 </Box>
-                              );
-                            })}
-                          </Box>
-                        )}
+                              ) : null}
+                              {isUser ? (
+                                msg.content ? (
+                                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, overflowWrap: 'anywhere' }}>
+                                    {msg.content}
+                                  </Typography>
+                                ) : null
+                              ) : (
+                                <ChatMarkdown>{msg.content}</ChatMarkdown>
+                              )}
+                            </>
+                          );
+                        })()}
                       </Box>
                     </Box>
                   )}
                 </Box>
               );
             })}
-            {(isLoading || loadingStatus) && (
+            {hasNewMessages && (
+              <Button
+                size="small"
+                onClick={() => {
+                  stickToBottomRef.current = true;
+                  setHasNewMessages(false);
+                  chatEndRef?.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }}
+              >
+                有新消息
+              </Button>
+            )}
+            {isLoading && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CircularProgress size={14} thickness={5} />
                 <Box>
@@ -688,7 +969,7 @@ export default function ChatAssistant({
         sx={{
           flexShrink: 0,
           px: { xs: 1.5, sm: 2 },
-          pb: 1.5,
+          pb: { xs: 'max(12px, env(safe-area-inset-bottom, 0px))', sm: 1.5 },
           pt: 3,
           background: (theme) => `linear-gradient(180deg, transparent 0%, ${theme.palette.background.default} 28%)`,
         }}
@@ -875,6 +1156,19 @@ export default function ChatAssistant({
                 <Typography variant="caption" color="text.secondary" noWrap>{credentialHint}</Typography>
               )}
             </Stack>
+            {isLoading && (
+              <Select
+                variant="standard"
+                disableUnderline
+                size="small"
+                value={steerTarget}
+                onChange={(event) => onSteerTargetChange?.(event.target.value)}
+                sx={{ maxWidth: 148, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.5, pl: 0.5, pr: 2.25 } }}
+              >
+                <MenuItem value="next-step">补充当前任务</MenuItem>
+                <MenuItem value="after-run">完成后执行</MenuItem>
+              </Select>
+            )}
             {isLoading && userMessage.trim() && (
               <Button
                 size="small"
@@ -882,7 +1176,7 @@ export default function ChatAssistant({
                 onClick={onSteerMessage}
                 sx={{ minWidth: 0, borderRadius: 999, textTransform: 'none' }}
               >
-                {t.aiSidebarSteer || 'Steer'}
+                {steerTarget === 'after-run' ? '完成后执行' : (t.aiSidebarSteer || 'Steer')}
               </Button>
             )}
             <Tooltip title={isLoading ? (t.aiSidebarStop || 'Stop') : t.aiSidebarSend}>

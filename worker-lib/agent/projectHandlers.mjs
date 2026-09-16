@@ -25,6 +25,10 @@ function originFromRequest(request, env) {
     || new URL(request.url).origin;
 }
 
+function isMissingDraftSaveRpc(error) {
+  return /save_project_draft|gen_random_bytes|PGRST202|could not find the function|schema cache/i.test(String(error?.message || error || ''));
+}
+
 function generateProjectId() {
   const rand = crypto.getRandomValues(new Uint8Array(5));
   const hex = Array.from(rand, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -333,10 +337,12 @@ export async function saveDraft(
       surveyConfig: sanitizeForAgent(merged),
     };
   } catch (error) {
-    if (!ownerUserId && /gen_random_bytes\s*\(integer\)\s*does not exist/i.test(String(error.message || ''))) {
-      // Compatibility path for installations that have not yet re-run the
-      // corrected save_project_draft function. RLS still enforces ownership.
-      return saveDirect();
+    if (isMissingDraftSaveRpc(error)) {
+      throw Object.assign(new Error('save_project_draft is not applied'), {
+        status: 503,
+        code: 'DRAFT_SAVE_RPC_MISSING',
+        cause: error,
+      });
     }
     if (String(error.message || '').includes('conflict')) {
       throw Object.assign(new Error('Project draft changed. Re-read before updating.'), {
@@ -374,7 +380,14 @@ export async function applyProjectOperations(
     throw Object.assign(new Error(error.message), { status: 400 });
   }
   if (!next.validation.valid) {
-    throw Object.assign(new Error('Survey validation failed after operations.'), {
+    const detail = (next.validation.errors || []).slice(0, 6)
+      .map((item) => item.message || item.path || String(item))
+      .join('; ');
+    throw Object.assign(new Error(
+      detail
+        ? `Survey validation failed after operations: ${detail}`
+        : 'Survey validation failed after operations.',
+    ), {
       status: 400,
       validation: next.validation,
     });

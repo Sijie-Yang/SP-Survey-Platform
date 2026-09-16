@@ -115,7 +115,7 @@ export const DESIGN_CAPABILITIES = {
       rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
       matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
       ranking: { fields: ['name', 'title', 'choices[]'] },
-      slidergroup: { fields: ['name', 'title', 'dimensions[{id,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
+      slidergroup: { fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
       pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
     },
     image: {
@@ -146,7 +146,7 @@ export const DESIGN_CAPABILITIES = {
           role: 'Sliders with image',
           defaults: {
             imageCount: 1,
-            dimensions: [{ id: 'pleasant', left: 'Unpleasant', right: 'Pleasant' }],
+            dimensions: [{ id: 'pleasant', label: 'Pleasantness', left: 'Unpleasant', right: 'Pleasant' }],
             scaleMin: 0,
             scaleMax: 100,
           },
@@ -199,7 +199,7 @@ export const DESIGN_CAPABILITIES = {
           role: 'Sliders + media',
           defaults: {
             mediaType: 'image', imageCount: 1, mediaSlots: [], mediaPresentation: 'stack',
-            dimensions: [{ id: 'pleasant', left: 'Unpleasant', right: 'Pleasant' }],
+            dimensions: [{ id: 'pleasant', label: 'Pleasantness', left: 'Unpleasant', right: 'Pleasant' }],
             scaleMin: 0, scaleMax: 100,
           },
         },
@@ -314,6 +314,15 @@ export const DESIGN_CAPABILITIES = {
       imageCount: 2,
       ...MEDIA_SAMPLING,
     },
+  },
+  supportMatrix: {
+    projectProfile: 'read/write via survey_update_project (Agent); read-only in Generate/Ask',
+    surveyDraft: 'read/write — Generate: survey_submit_generated_draft; Adjust: survey_apply_operations; Ask: read-only',
+    questionSettings: 'read/write with the survey draft',
+    mediaLibrary: 'read via media_list; write needs media:write and approval',
+    appearanceTheme: 'read/write via updateSurvey / setTheme or Generate surveyConfig.theme',
+    publishDelete: 'approval-gated; not available in Generate or Ask',
+    unsupported: ['arbitrary website CMS', 'SQL', 'participant account admin', 'human quota changes'],
   },
   operations: OPERATION_TYPES,
   scopes: Object.values(AGENT_SCOPES),

@@ -5,6 +5,7 @@
 
 import { ANNOTATION_TOOLS, normalizeAllowedTools } from '../annotationTools';
 import { PLATFORM_SCHEMA } from '../platformSchema/index.js';
+import { normalizeSliderQuestion } from '../sliderScale';
 
 const MEDIA_STIMULUS_TYPES = [
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image',
@@ -53,8 +54,9 @@ export function postProcessAiConfig(surveyConfig) {
   if (!Array.isArray(processedConfig.pages)) return processedConfig;
 
   processedConfig.pages.forEach((page) => {
-    (page.elements || []).forEach((element) => {
-      if (!MEDIA_STIMULUS_TYPES.includes(element.type)) return;
+    page.elements = (page.elements || []).map((raw) => {
+      const element = normalizeSliderQuestion(raw);
+      if (!MEDIA_STIMULUS_TYPES.includes(element.type)) return element;
       if (!element.imageSelectionMode || element.imageSelectionMode === 'random') {
         element.imageSelectionMode = 'huggingface_random';
       }
@@ -109,6 +111,7 @@ export function postProcessAiConfig(surveyConfig) {
       delete element.imageSource;
       delete element.huggingFaceConfig;
       delete element.falApiKey;
+      return element;
     });
   });
 

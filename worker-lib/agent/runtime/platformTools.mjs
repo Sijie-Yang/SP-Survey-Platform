@@ -352,6 +352,7 @@ export function createPlatformTools({
     },
     {
       name: 'skill_list',
+      aliases: ['survey_skill_list'],
       description: 'List public and user-owned interactive survey Skills.',
       minPermission: 'ask',
       domain: 'skills',
@@ -361,6 +362,7 @@ export function createPlatformTools({
     },
     {
       name: 'skill_get',
+      aliases: ['survey_skill_get'],
       description: 'Read one Skill contract and source when available.',
       minPermission: 'ask',
       domain: 'skills',

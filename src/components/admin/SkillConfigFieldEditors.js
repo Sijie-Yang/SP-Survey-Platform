@@ -65,6 +65,13 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
           />
           <TextField
             size="small"
+            label={zh ? '显示名称' : 'Display name'}
+            value={d.label || d.text || d.name || ''}
+            onChange={(e) => patch(i, { label: e.target.value })}
+            placeholder={zh ? `维度 ${i + 1}` : `Dimension ${i + 1}`}
+          />
+          <TextField
+            size="small"
             label={tr("Left pole")}
             value={d.left || ''}
             onChange={(e) => patch(i, { left: e.target.value })}

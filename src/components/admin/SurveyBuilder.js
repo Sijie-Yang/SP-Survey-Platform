@@ -260,11 +260,12 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
   );
 }
 
-export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange }) {
+export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange, onOpenAssistant, editorCommitKey = 0 }) {
   const { t } = useRegion();
   const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
+  const [questionWorkspaceOpen, setQuestionWorkspaceOpen] = useState(false);
 
   const reportSelection = (next) => {
     onEditorSelectionChange?.(next);
@@ -732,6 +733,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
   return (
     <Box>
+      {!questionWorkspaceOpen && (
+      <>
       <AdminPageHeader
         icon={<Edit />}
         title={t.builderTitle}
@@ -1335,28 +1338,40 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
           )}
         </AccordionDetails>
       </Accordion>
+      </>
+      )}
 
       {/* Page Editor Dialog */}
       {selectedPage && (
         <PageEditor
+          key={`${selectedPage.index}-${editorCommitKey}`}
           page={selectedPage.page}
           pageIndex={selectedPage.index}
           onSave={(updatedPage) => {
             updatePage(selectedPage.index, updatedPage);
             setSelectedPage(null);
+            setQuestionWorkspaceOpen(false);
             reportSelection({ pageName: updatedPage?.name || selectedPage.page?.name, questionName: null, panel: 'builder' });
           }}
           onCancel={() => {
             setSelectedPage(null);
+            setQuestionWorkspaceOpen(false);
             reportSelection({ pageName: selectedPage.page?.name, questionName: null, panel: 'builder' });
           }}
           onSelectionChange={(selection) => {
             reportSelection({
-              pageName: selectedPage.page?.name,
+              pageName: selection?.pageName || selectedPage.page?.name,
               questionName: selection?.questionName || null,
+              workingCopy: selection?.workingCopy || null,
+              baseline: selection?.baseline || null,
+              dirty: Boolean(selection?.dirty || selection?.pageDirty),
+              pageWorkingCopy: selection?.pageWorkingCopy || null,
+              pageDirty: Boolean(selection?.pageDirty),
               panel: 'builder',
             });
           }}
+          onWorkspaceChange={(state) => setQuestionWorkspaceOpen(Boolean(state?.open))}
+          onOpenAssistant={onOpenAssistant}
           images={config.images || []}
           currentProject={currentProject}
           surveyConfig={config}
@@ -1364,7 +1379,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
       )}
 
       {/* Next Step Button */}
-      {onNextStep && (
+      {onNextStep && !questionWorkspaceOpen && (
         <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end' }}>
           <Button
             variant="contained"

@@ -183,11 +183,12 @@ describe('canonical operation contracts', () => {
   test('browser, Worker, and MCP share the same public operations and result families', () => {
     const workerOps = read('worker-lib/designProtocol.mjs');
     const mcp = read('worker-lib/mcp/server.mjs');
-    const workerTools = read('worker-lib/agent/runtime/designerTools.mjs');
+    const applySchema = read('scripts/platform-schema-core.mjs');
     OPERATION_TYPES.forEach((operation) => {
       expect(workerOps).toContain(`case '${operation}'`);
-      expect(workerTools).toContain(operation);
     });
+    expect(applySchema).toContain('buildApplyToolSchema');
+    expect(applySchema).toContain('publicOperationEntries');
     expect(mcp).toContain("name: 'survey_apply_operations'");
     expect(mcp).toContain("name: 'survey_capabilities'");
     const families = PLATFORM_SCHEMA.entities.skillResultField.fields.type.enum;
