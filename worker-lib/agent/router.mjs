@@ -30,7 +30,6 @@ import {
   getOwnedRun,
   getSession,
   listEvents,
-  listEventsAfter,
   listSessionRuns,
   listSessions,
   renameSession,
@@ -51,6 +50,7 @@ import {
   createSiliconPersona,
   createSiliconRun,
   deleteSiliconPersona,
+  exportSiliconRun,
   getSiliconCompare,
   getSiliconRun,
   listSiliconPersonas,
@@ -558,19 +558,20 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
       const session = await getSession(env, auth.userId, sessionId);
       if (!session) return errorResponse(Object.assign(new Error('Session not found'), { status: 404 }));
       const after = Number(new URL(request.url).searchParams.get('after') || 0);
+      const allEvents = await listEvents(env, sessionId);
       const events = after > 0
-        ? await listEventsAfter(env, sessionId, after)
-        : await listEvents(env, sessionId);
+        ? allEvents.filter((event) => Number(event.seq || 0) > after)
+        : allEvents;
       const runs = await listSessionRuns(env, auth.userId, sessionId);
       return jsonResponse({
         success: true,
         session,
         run: runs[0] || null,
         runs,
-        assistantMode: session.assistant_mode || assistantModeFromEvents(events),
+        assistantMode: session.assistant_mode || assistantModeFromEvents(allEvents),
         events,
-        messages: eventsToUiMessages(events),
-        nextCursor: events.at(-1)?.seq || after,
+        messages: eventsToUiMessages(allEvents),
+        nextCursor: allEvents.at(-1)?.seq || after,
       });
     }
     if (pathname.startsWith('/api/agent/sessions/') && pathname.endsWith('/steer') && request.method === 'POST') {
@@ -698,6 +699,10 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
     if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/compare') && request.method === 'GET') {
       const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/compare'.length));
       return jsonResponse(await getSiliconCompare(env, auth, runId));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/export') && request.method === 'GET') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/export'.length));
+      return jsonResponse(await exportSiliconRun(env, auth, runId));
     }
     if (pathname.startsWith('/api/agent/silicon/runs/') && request.method === 'GET') {
       const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length));

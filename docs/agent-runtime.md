@@ -89,3 +89,38 @@ npx wrangler deploy --dry-run
 
 Keep `BYOK_ENCRYPTION_KEY`, Supabase keys, and R2 credentials in Worker secrets.
 Never place them in queue payloads, events, stored provider profiles, or logs.
+
+## Feature flags
+
+Assistant and Silicon are independent. Browser toggles live in Assistant
+settings (`sp-assistant-enabled`, `sp-silicon-experimental`). Silicon stays
+an experimental pretest tab; it never writes `survey_responses`.
+
+On-demand design checks (research design / participant flow / analysis export)
+are local and read-only. They do not rewrite the draft and do not call a model.
+
+## Supported provider routes
+
+The Worker runtime only promises routes that `resolveModelRoute` marks
+supported and that the catalog/tests cover (OpenAI-compatible completions,
+Responses, and Anthropic messages, including the Qwen token-plan and DeepSeek
+catalog entries). Untested custom endpoints may still be stored, but the UI
+must not treat them as guaranteed.
+
+The browser polls `GET /api/agent/sessions/:id?after=<seq>` and accumulates
+events. Assistant text is batched by bytes/time (`createTextBatcher`); the
+runtime does not persist one row per token.
+
+## Silicon pretest contract
+
+A Silicon run freezes the saved draft, project media/dataset folders, personas,
+model route, and runtime version. Media assignment follows participant folder /
+fixed-url rules. Unsupported question types, conditionals, and multi-trial set
+assignment are rejected before the run starts. Answers are claimed atomically
+per persona/repeat. Cancelled runs cannot be written back to `running`. Budget
+exhaustion finishes as `partial`. Export JSON/CSV is independent of human
+results.
+
+SQL in `supabase/ai_runtime.sql` and `supabase/silicon_samples.sql` is
+additive and is not applied by this change set. Queue binding remains
+`AGENT_QUEUE` / `sp-agent-runs` in `wrangler.jsonc`.

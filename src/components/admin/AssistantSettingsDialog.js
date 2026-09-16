@@ -35,6 +35,12 @@ import {
 } from '@mui/icons-material';
 import AgentsEditor from './AgentsEditor';
 import ModelsSettings from './ModelsSettings';
+import {
+  isAssistantEnabled,
+  isSiliconExperimentalEnabled,
+  setAssistantEnabled,
+  setSiliconExperimentalEnabled,
+} from '../../lib/featureFlags';
 
 export default function AssistantSettingsDialog({
   open,
@@ -77,6 +83,8 @@ export default function AssistantSettingsDialog({
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
   const [section, setSection] = React.useState(0);
+  const [assistantFlag, setAssistantFlag] = React.useState(() => isAssistantEnabled());
+  const [siliconFlag, setSiliconFlag] = React.useState(() => isSiliconExperimentalEnabled());
 
   React.useEffect(() => {
     if (!open) setSection(0);
@@ -343,6 +351,39 @@ export default function AssistantSettingsDialog({
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
                 {t.aiSettingsAdvancedIntro}
               </Typography>
+
+              <Box sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'divider', borderRadius: 3 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>{t.featureAssistant}</Typography>
+                <FormControlLabel
+                  control={(
+                    <Switch
+                      checked={assistantFlag}
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setAssistantFlag(enabled);
+                        setAssistantEnabled(enabled);
+                        window.dispatchEvent(new Event('sp-feature-flags'));
+                      }}
+                    />
+                  )}
+                  label={<Typography variant="body2" color="text.secondary">{t.featureAssistantHint}</Typography>}
+                />
+                <Typography variant="subtitle2" sx={{ mt: 1.5, mb: 1 }}>{t.featureSilicon}</Typography>
+                <FormControlLabel
+                  control={(
+                    <Switch
+                      checked={siliconFlag}
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setSiliconFlag(enabled);
+                        setSiliconExperimentalEnabled(enabled);
+                        window.dispatchEvent(new Event('sp-feature-flags'));
+                      }}
+                    />
+                  )}
+                  label={<Typography variant="body2" color="text.secondary">{t.featureSiliconHint}</Typography>}
+                />
+              </Box>
 
               <Box sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'divider', borderRadius: 3 }}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>

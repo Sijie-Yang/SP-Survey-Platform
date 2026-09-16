@@ -44,6 +44,41 @@ export function createEvent(type, payload = {}, extras = {}) {
   };
 }
 
+export function createTextBatcher({
+  flush,
+  maxWaitMs = 250,
+  maxBytes = 800,
+} = {}) {
+  let buffer = '';
+  let timer = null;
+  const emit = async () => {
+    if (!buffer) return null;
+    const content = buffer;
+    buffer = '';
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    return flush?.(content);
+  };
+  return {
+    push(text) {
+      buffer += String(text || '');
+      if (buffer.length >= maxBytes) return emit();
+      if (!timer) {
+        timer = setTimeout(() => {
+          emit();
+        }, maxWaitMs);
+      }
+      return null;
+    },
+    flush: emit,
+    get pending() {
+      return buffer;
+    },
+  };
+}
+
 export function redactSecrets(value, depth = 0) {
   if (depth > 8 || value == null) return value;
   if (typeof value === 'string') {

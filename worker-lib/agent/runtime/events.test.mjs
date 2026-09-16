@@ -6,6 +6,7 @@ import {
   estimateModelTokens,
   eventsToModelMessages,
   eventsToUiMessages,
+  createTextBatcher,
   redactSecrets,
 } from './events.mjs';
 
@@ -33,6 +34,22 @@ describe('runtime events', () => {
     ]) {
       assert.equal(createEvent(type).type, type);
     }
+  });
+
+  it('batches assistant text by bytes instead of emitting every token', async () => {
+    const flushed = [];
+    const batcher = createTextBatcher({
+      flush: async (content) => flushed.push(content),
+      maxWaitMs: 10_000,
+      maxBytes: 8,
+    });
+    await batcher.push('abcd');
+    assert.equal(flushed.length, 0);
+    await batcher.push('efgh');
+    assert.deepEqual(flushed, ['abcdefgh']);
+    await batcher.push('xy');
+    await batcher.flush();
+    assert.deepEqual(flushed, ['abcdefgh', 'xy']);
   });
 
   it('redacts keys', () => {

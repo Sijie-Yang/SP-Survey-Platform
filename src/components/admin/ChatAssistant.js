@@ -170,6 +170,7 @@ export default function ChatAssistant({
   chatEndRef,
   aiUndoAvailable = false,
   onRevertAiChange,
+  onRunQualityChecks,
   modelOptions = [],
   selectedRoute = '',
   selectedEffort = '',
@@ -733,16 +734,30 @@ export default function ChatAssistant({
             )}
           </Alert>
         )}
-        {aiUndoAvailable && (
-          <Button
-            size="small"
-            variant="text"
-            color="warning"
-            onClick={onRevertAiChange}
-            sx={{ mb: 0.75, borderRadius: 999, textTransform: 'none' }}
-          >
-            {t.aiSidebarUndo}
-          </Button>
+        {(aiUndoAvailable || onRunQualityChecks) && (
+          <Stack direction="row" spacing={1} sx={{ mb: 0.75 }}>
+            {aiUndoAvailable && (
+              <Button
+                size="small"
+                variant="text"
+                color="warning"
+                onClick={onRevertAiChange}
+                sx={{ borderRadius: 999, textTransform: 'none' }}
+              >
+                {t.aiSidebarUndo}
+              </Button>
+            )}
+            {onRunQualityChecks && (
+              <Button
+                size="small"
+                variant="text"
+                onClick={onRunQualityChecks}
+                sx={{ borderRadius: 999, textTransform: 'none' }}
+              >
+                {t.qualityChecks}
+              </Button>
+            )}
+          </Stack>
         )}
         <Box
           sx={{
