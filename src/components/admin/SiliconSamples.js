@@ -25,6 +25,7 @@ import {
   getSiliconCompare,
   listSiliconPersonas,
   listSiliconRuns,
+  exportSiliconRun,
   processSiliconRun,
   saveSiliconPersona,
 } from '../../lib/agentApi';
@@ -120,6 +121,18 @@ export default function SiliconSamples({ currentProject }) {
     setSelectedIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   };
 
+  const pumpRun = async (runId, requestProjectId = projectId) => {
+    const maxSteps = 102;
+    for (let i = 0; i < maxSteps; i += 1) {
+      const step = await processSiliconRun(runId);
+      if (projectIdRef.current !== requestProjectId) return step;
+      if (!step.success) return step;
+      await refresh();
+      if (step.finished) return step;
+    }
+    return { success: false, error: 'Run did not finish' };
+  };
+
   const startRun = async () => {
     if (!selectedIds.length) {
       setError(t.siliconPickPersona);
@@ -149,27 +162,53 @@ export default function SiliconSamples({ currentProject }) {
     }
     if (projectIdRef.current !== requestProjectId) return;
     const runId = created.run?.id;
-    const maxSteps = Math.min(102, Number(created.run?.progress_total || 100) + 2);
-    for (let i = 0; i < maxSteps; i += 1) {
-      const step = await processSiliconRun(runId);
-      if (projectIdRef.current !== requestProjectId) return;
-      if (!step.success) {
-        setError(step.error || 'Run failed');
-        break;
-      }
-      await refresh();
-      if (step.finished) {
-        if (step.status === 'completed') {
-          const cmp = await getSiliconCompare(runId);
-          if (cmp.success) setCompare(cmp);
-        } else {
-          setError(step.error || step.code || `Run ${step.status || 'failed'}`);
-        }
-        break;
-      }
+    const step = await pumpRun(runId, requestProjectId);
+    if (step?.success && step.status === 'completed') {
+      const cmp = await getSiliconCompare(runId);
+      if (cmp.success) setCompare(cmp);
+    } else if (step && !step.success) {
+      setError(step.error || step.code || `Run ${step.status || 'failed'}`);
     }
     setBusy(false);
     refresh();
+  };
+
+  const resumeRun = async (runId) => {
+    setBusy(true);
+    setError('');
+    const step = await pumpRun(runId);
+    if (step?.success && step.status === 'completed') {
+      const cmp = await getSiliconCompare(runId);
+      if (cmp.success) setCompare(cmp);
+    } else if (step && !step.success) {
+      setError(step.error || step.code || `Run ${step.status || 'failed'}`);
+    }
+    setBusy(false);
+    refresh();
+  };
+
+  const downloadExport = async (runId) => {
+    const payload = await exportSiliconRun(runId);
+    if (!payload?.success) {
+      setError(payload?.error || 'Export failed');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `silicon-run-${runId}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    if (payload.csv) {
+      const csvBlob = new Blob([payload.csv], { type: 'text/csv;charset=utf-8' });
+      const csvUrl = URL.createObjectURL(csvBlob);
+      const csvLink = document.createElement('a');
+      csvLink.href = csvUrl;
+      csvLink.download = `silicon-run-${runId}.csv`;
+      csvLink.click();
+      URL.revokeObjectURL(csvUrl);
+    }
   };
 
   if (!projectId) {
@@ -288,11 +327,15 @@ export default function SiliconSamples({ currentProject }) {
                 </Typography>
               )}
               {['queued', 'running'].includes(run.status) && (
-                <Button size="small" onClick={() => cancelSiliconRun(run.id).then(refresh)}>{t.siliconCancel}</Button>
+                <>
+                  <Button size="small" onClick={() => resumeRun(run.id)} disabled={busy}>{t.siliconResume || 'Resume'}</Button>
+                  <Button size="small" onClick={() => cancelSiliconRun(run.id).then(refresh)}>{t.siliconCancel}</Button>
+                </>
               )}
               <Button size="small" onClick={() => getSiliconCompare(run.id).then((c) => c.success && setCompare(c))}>
                 {t.siliconCompare}
               </Button>
+              <Button size="small" onClick={() => downloadExport(run.id)}>{t.siliconExport}</Button>
             </Stack>
           ))}
           {compare && (

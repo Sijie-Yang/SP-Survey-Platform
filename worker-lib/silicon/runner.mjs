@@ -16,25 +16,57 @@ async function getRun(env, runId) {
   return Array.isArray(rows) ? rows[0] : null;
 }
 
-async function patchRun(env, runId, patch) {
-  await supabaseRest(env, {
+const ACTIVE_RUN_STATUSES = ['queued', 'draft', 'running'];
+
+export function siliconProgressStatuses() {
+  return ACTIVE_RUN_STATUSES;
+}
+
+async function patchRun(env, runId, patch, { requireActive = true } = {}) {
+  const statusFilter = requireActive
+    ? `&status=in.(${ACTIVE_RUN_STATUSES.join(',')})`
+    : '';
+  const rows = await supabaseRest(env, {
     path: '/rest/v1/silicon_runs',
     method: 'PATCH',
     serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(runId)}`,
+    query: `?id=eq.${encodeURIComponent(runId)}${statusFilter}`,
     body: { ...patch, updated_at: new Date().toISOString() },
-    prefer: 'return=minimal',
+    prefer: 'return=representation',
   });
+  return Array.isArray(rows) ? rows[0] : rows;
+}
+
+async function claimSiliconRun(env, runId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/silicon_runs',
+    method: 'PATCH',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(runId)}&status=in.(queued,draft)`,
+    body: {
+      status: 'running',
+      started_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    prefer: 'return=representation',
+  });
+  return Array.isArray(rows) ? rows[0] : rows;
 }
 
 export async function processSiliconRunChunk(env, runId) {
   const run = await getRun(env, runId);
   if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
-  if (['completed', 'cancelled', 'failed'].includes(run.status)) {
+  if (['completed', 'cancelled', 'failed', 'partial'].includes(run.status)) {
     return { done: 0, finished: true, status: run.status };
   }
   if (run.status === 'queued' || run.status === 'draft') {
-    await patchRun(env, runId, { status: 'running', started_at: run.started_at || new Date().toISOString() });
+    const claimed = await claimSiliconRun(env, runId);
+    if (!claimed) {
+      const latest = await getRun(env, runId);
+      if (!latest || ['completed', 'cancelled', 'failed', 'partial'].includes(latest.status)) {
+        return { done: 0, finished: true, status: latest?.status || 'cancelled' };
+      }
+    }
   }
   if (run.budget_tokens && Number(run.tokens_used || 0) >= Number(run.budget_tokens)) {
     await patchRun(env, runId, {
@@ -48,9 +80,11 @@ export async function processSiliconRunChunk(env, runId) {
   const existing = await supabaseRest(env, {
     path: '/rest/v1/silicon_responses',
     serviceRole: true,
-    query: `?run_id=eq.${encodeURIComponent(runId)}&select=persona_id,repeat_index`,
+    query: `?run_id=eq.${encodeURIComponent(runId)}&select=id,persona_id,repeat_index,status`,
   });
-  const doneKeys = new Set((existing || []).map((r) => `${r.persona_id}:${r.repeat_index}`));
+  const doneKeys = new Set((existing || [])
+    .filter((row) => row.status !== 'claimed')
+    .map((r) => `${r.persona_id}:${r.repeat_index}`));
   const personaIds = run.persona_ids || [];
   const repeats = Math.max(1, run.repeats || 1);
   const pending = [];
@@ -83,13 +117,27 @@ export async function processSiliconRunChunk(env, runId) {
       if (latest?.status === 'cancelled') return { done: completed, finished: true, status: 'cancelled' };
       const remainingBudget = Math.max(0,
         Number(latest?.budget_tokens || run.budget_tokens || 0) - Number(latest?.tokens_used || 0));
-      const answered = await answerOnePersona(env, run, cred, item, remainingBudget);
+      const claimed = await claimSiliconAnswer(env, { ...run, ...latest }, item);
+      if (!claimed) continue;
+      const answered = await answerOnePersona(env, { ...run, ...latest }, cred, item, remainingBudget, claimed);
       completed += 1;
+      const afterItem = await getRun(env, runId);
+      if (afterItem?.status === 'cancelled') {
+        return { done: completed, finished: true, status: 'cancelled' };
+      }
+      const nextStatus = answered.budgetExhausted ? 'partial' : 'running';
       await patchRun(env, runId, {
         progress_done: (latest?.progress_done || 0) + 1,
         tokens_used: Number(latest?.tokens_used || 0) + Number(answered.tokensUsed || 0),
-        status: 'running',
+        status: nextStatus,
+        ...(answered.budgetExhausted ? {
+          error_summary: 'Token budget exhausted; run is partially complete.',
+          finished_at: new Date().toISOString(),
+        } : {}),
       });
+      if (answered.budgetExhausted) {
+        return { done: completed, finished: true, status: 'partial' };
+      }
     }
   } catch (error) {
     await patchRun(env, runId, {
@@ -107,28 +155,70 @@ export async function processSiliconRunChunk(env, runId) {
   return { done: completed, finished, status: finished ? 'completed' : 'running' };
 }
 
-async function answerOnePersona(env, run, cred, { personaId, repeat }, initialBudget) {
-  const personas = await supabaseRest(env, {
+function mediaPool(run) {
+  const snapshot = run.media_snapshot;
+  if (Array.isArray(snapshot)) return snapshot;
+  return snapshot?.images || [];
+}
+
+function mediaDataset(run) {
+  const snapshot = run.media_snapshot;
+  if (snapshot && !Array.isArray(snapshot)) return snapshot.dataset || {};
+  return {};
+}
+
+async function claimSiliconAnswer(env, run, { personaId, repeat }) {
+  const participantId = `silicon_${String(personaId).slice(0, 8)}_${repeat}`;
+  const inserted = await supabaseRest(env, {
+    path: '/rest/v1/silicon_responses',
+    method: 'POST',
+    serviceRole: true,
+    body: {
+      run_id: run.id,
+      project_id: run.project_id,
+      persona_id: personaId,
+      repeat_index: repeat,
+      participant_id: participantId,
+      responses: {},
+      displayed_images: {},
+      survey_metadata: { claimed: true, response_source: 'silicon' },
+      status: 'claimed',
+    },
+    prefer: 'return=representation,resolution=ignore-duplicates',
+  });
+  return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+async function answerOnePersona(env, run, cred, { personaId, repeat }, initialBudget, claimedRow) {
+  const frozen = Array.isArray(run.persona_snapshot)
+    ? run.persona_snapshot.find((row) => row.id === personaId)
+    : null;
+  const personas = frozen ? [frozen] : await supabaseRest(env, {
     path: '/rest/v1/silicon_personas',
     serviceRole: true,
     query: `?id=eq.${encodeURIComponent(personaId)}&select=*`,
   });
-  const persona = Array.isArray(personas) ? personas[0] : null;
+  const persona = Array.isArray(personas) ? personas[0] : frozen;
   const survey = run.survey_snapshot || {};
-  const pool = run.media_snapshot || [];
+  const pool = mediaPool(run);
+  const dataset = mediaDataset(run);
   const seed = `${run.seed}:${personaId}:${repeat}`;
   const questions = collectQuestions(survey, run.question_names);
   const displayed = assignMediaForSurvey({
     surveyConfig: survey,
     pool,
     seed,
+    dataset,
     questionNames: questions.map((q) => q.name),
   });
   const responses = {};
   const events = [];
   let tokensUsed = 0;
+  let budgetExhausted = false;
 
   for (const question of questions) {
+    const latest = await getRun(env, run.id);
+    if (latest?.status === 'cancelled') break;
     const kind = classifyQuestion(question);
     if (!kind.supported) {
       events.push({
@@ -140,6 +230,7 @@ async function answerOnePersona(env, run, cred, { personaId, repeat }, initialBu
     }
     const remainingBudget = Math.max(0, Number(initialBudget || 0) - tokensUsed);
     if (run.budget_tokens && remainingBudget < 64) {
+      budgetExhausted = true;
       events.push({
         question_name: question.name,
         type: 'skip',
@@ -148,6 +239,7 @@ async function answerOnePersona(env, run, cred, { personaId, repeat }, initialBu
       break;
     }
     const images = displayed[question.name] || [];
+    displayed[question.name] = images;
     try {
       const raw = await askVlm(cred, run, persona, question, images, remainingBudget);
       tokensUsed += Number(raw.tokensUsed || 0);
@@ -172,40 +264,53 @@ async function answerOnePersona(env, run, cred, { personaId, repeat }, initialBu
     }
   }
 
-  const participantId = `silicon_${String(personaId).slice(0, 8)}_${repeat}`;
-  const inserted = await supabaseRest(env, {
-    path: '/rest/v1/silicon_responses',
-    method: 'POST',
-    serviceRole: true,
-    body: {
-      run_id: run.id,
-      project_id: run.project_id,
+  const participantId = claimedRow?.participant_id
+    || `silicon_${String(personaId).slice(0, 8)}_${repeat}`;
+  const payload = {
+    responses,
+    displayed_images: displayed,
+    survey_metadata: {
+      response_source: 'silicon',
+      silicon_run_id: run.id,
       persona_id: personaId,
-      repeat_index: repeat,
-      participant_id: participantId,
-      responses,
-      displayed_images: displayed,
-      survey_metadata: {
-        response_source: 'silicon',
-        silicon_run_id: run.id,
-        persona_id: personaId,
-        persona_name: persona?.name,
-        model: run.model,
-        provider: run.provider,
-        seed,
-        source_kind: run.source_kind || 'draft',
-        draft_updated_at: run.draft_updated_at || null,
-        runtime_version: run.runtime_version || null,
-        profile_revision: run.profile_revision || null,
-        practice_mode: false,
-      },
-      status: Object.keys(responses).length
-        ? (events.some((event) => event.type === 'error') ? 'partial' : 'ok')
-        : (events.every((event) => event.type === 'skip') ? 'skipped' : 'partial'),
+      persona_name: persona?.name,
+      model: run.model,
+      provider: run.provider,
+      seed,
+      source_kind: run.source_kind || 'draft',
+      draft_updated_at: run.draft_updated_at || null,
+      runtime_version: run.runtime_version || null,
+      profile_revision: run.profile_revision || null,
+      practice_mode: false,
     },
-    prefer: 'return=representation',
-  });
-  const row = Array.isArray(inserted) ? inserted[0] : inserted;
+    status: budgetExhausted || events.some((event) => event.type === 'error' || event.type === 'skip')
+      ? (Object.keys(responses).length ? 'partial' : 'skipped')
+      : 'ok',
+  };
+  const updated = claimedRow?.id
+    ? await supabaseRest(env, {
+      path: '/rest/v1/silicon_responses',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(claimedRow.id)}`,
+      body: payload,
+      prefer: 'return=representation',
+    })
+    : await supabaseRest(env, {
+      path: '/rest/v1/silicon_responses',
+      method: 'POST',
+      serviceRole: true,
+      body: {
+        run_id: run.id,
+        project_id: run.project_id,
+        persona_id: personaId,
+        repeat_index: repeat,
+        participant_id: participantId,
+        ...payload,
+      },
+      prefer: 'return=representation,resolution=ignore-duplicates',
+    });
+  const row = Array.isArray(updated) ? updated[0] : updated;
   for (const ev of events) {
     await supabaseRest(env, {
       path: '/rest/v1/silicon_answer_events',
@@ -221,7 +326,7 @@ async function answerOnePersona(env, run, cred, { personaId, repeat }, initialBu
       prefer: 'return=minimal',
     });
   }
-  return { tokensUsed };
+  return { tokensUsed, budgetExhausted };
 }
 
 async function askVlm(cred, run, persona, question, images, remainingBudget) {
@@ -234,9 +339,10 @@ Attributes: ${JSON.stringify(persona?.attributes || {})}
 Answer as this person. Return JSON {"answer":...,"rationale":"one sentence"}.
 Question type: ${question.type}
 Title: ${question.title || question.name}
-Choices: ${JSON.stringify(question.choices || question.rateValues || null)}`,
+Choices: ${JSON.stringify(question.choices || question.rateValues || null)}
+Range: ${JSON.stringify({ min: question.rateMin ?? question.min, max: question.rateMax ?? question.max })}`,
     },
-    ...images.slice(0, 6).map((url) => ({ type: 'image_url', image_url: { url } })),
+    ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
   ];
   const profile = run._profile || {};
   const resolved = resolveProvider(run.provider, profile);

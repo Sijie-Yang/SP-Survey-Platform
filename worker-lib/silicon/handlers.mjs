@@ -6,6 +6,7 @@ import { availableModelId } from '../agent/runtime/registry.mjs';
 import { assertRoute } from '../agent/runtime/validators.mjs';
 import { processSiliconRunChunk } from './runner.mjs';
 import { RUNTIME_VERSION } from '../agent/runtime/events.mjs';
+import { unsupportedQuestionReport } from './answerValidate.mjs';
 
 const MAX_PERSONAS_PER_RUN = 20;
 const MAX_RESPONSES_PER_RUN = 100;
@@ -20,7 +21,7 @@ async function getOwnedProjectMedia(env, auth, projectId) {
   const rows = await supabaseRest(env, {
     path: '/rest/v1/projects',
     accessToken: auth.accessToken,
-    query: `?id=eq.${encodeURIComponent(projectId)}&select=id,preloaded_images,draft_updated_at`,
+    query: `?id=eq.${encodeURIComponent(projectId)}&select=id,preloaded_images,draft_updated_at,image_dataset_config`,
   });
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) {
@@ -138,13 +139,19 @@ export async function createSiliconRun(env, auth, body, request) {
   });
   const draft = await getDraft(env, auth.accessToken, body.projectId, request);
   const projectMedia = await getOwnedProjectMedia(env, auth, body.projectId);
+  const unsupported = unsupportedQuestionReport(draft.surveyConfig || {}, body.questionNames || null);
+  if (unsupported.length) {
+    throw Object.assign(new Error(
+      `Silicon cannot run these questions: ${unsupported.map((item) => `${item.name} (${item.reason})`).join('; ')}`,
+    ), { status: 400, code: 'SILICON_UNSUPPORTED_QUESTIONS', details: unsupported });
+  }
   const personaIds = [...new Set(Array.isArray(body.personaIds) ? body.personaIds : [])]
     .slice(0, MAX_PERSONAS_PER_RUN);
   if (!personaIds.length) throw Object.assign(new Error('Select at least one persona'), { status: 400 });
   const ownedPersonas = await supabaseRest(env, {
     path: '/rest/v1/silicon_personas',
     accessToken: auth.accessToken,
-    query: `?project_id=eq.${encodeURIComponent(body.projectId)}&select=id`,
+    query: `?project_id=eq.${encodeURIComponent(body.projectId)}&select=*`,
   });
   const ownedPersonaIds = new Set((ownedPersonas || []).map((row) => row.id));
   if (personaIds.some((id) => !ownedPersonaIds.has(id))) {
@@ -153,6 +160,7 @@ export async function createSiliconRun(env, auth, body, request) {
       code: 'INVALID_PERSONA',
     });
   }
+  const frozenPersonas = (ownedPersonas || []).filter((row) => personaIds.includes(row.id));
   const repeats = Math.max(1, Math.min(20, Number(body.repeats || 1)));
   const total = personaIds.length * repeats;
   if (total > MAX_RESPONSES_PER_RUN) {
@@ -181,7 +189,11 @@ export async function createSiliconRun(env, auth, body, request) {
     source_kind: 'draft',
     draft_updated_at: draft.draftUpdatedAt || projectMedia.draft_updated_at || null,
     survey_snapshot: draft.surveyConfig || {},
-    media_snapshot: Array.isArray(projectMedia.preloaded_images) ? projectMedia.preloaded_images : [],
+    media_snapshot: {
+      images: Array.isArray(projectMedia.preloaded_images) ? projectMedia.preloaded_images : [],
+      dataset: projectMedia.image_dataset_config || {},
+    },
+    persona_snapshot: frozenPersonas,
     runtime_version: RUNTIME_VERSION,
     prompt_version: 'silicon-v1',
     tokens_used: 0,
@@ -210,7 +222,7 @@ export async function cancelSiliconRun(env, auth, runId) {
     path: '/rest/v1/silicon_runs',
     method: 'PATCH',
     serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(runId)}&user_id=eq.${encodeURIComponent(auth.userId)}`,
+    query: `?id=eq.${encodeURIComponent(runId)}&user_id=eq.${encodeURIComponent(auth.userId)}&status=in.(queued,draft,running)`,
     body: { status: 'cancelled', updated_at: new Date().toISOString(), finished_at: new Date().toISOString() },
     prefer: 'return=minimal',
   });
@@ -259,6 +271,63 @@ export async function getSiliconCompare(env, auth, runId) {
     disclaimer: 'Silicon samples are for instrument pretest and hypothesis sketch. They do not replace human respondents.',
     response_source: 'silicon',
   };
+}
+
+export async function exportSiliconRun(env, auth, runId) {
+  const { run } = await getSiliconRun(env, auth, runId);
+  const { responses } = await listSiliconResponses(env, auth, runId);
+  const events = await supabaseRest(env, {
+    path: '/rest/v1/silicon_answer_events',
+    accessToken: auth.accessToken,
+    query: `?run_id=eq.${encodeURIComponent(runId)}&select=*&order=id.asc`,
+  }).catch(() => []);
+  return {
+    success: true,
+    format: 'silicon-pretest-v1',
+    response_source: 'silicon',
+    run: {
+      id: run.id,
+      projectId: run.project_id,
+      status: run.status,
+      provider: run.provider,
+      model: run.model,
+      seed: run.seed,
+      draftUpdatedAt: run.draft_updated_at,
+      runtimeVersion: run.runtime_version,
+      personaSnapshot: run.persona_snapshot || [],
+      mediaDataset: run.media_snapshot?.dataset || null,
+    },
+    responses,
+    events: events || [],
+    csv: siliconResponsesToCsv(responses),
+    disclaimer: 'Synthetic pretest export. Do not mix with survey_responses.',
+  };
+}
+
+export function siliconResponsesToCsv(responses = []) {
+  const rows = [['participant_id', 'persona_id', 'repeat_index', 'status', 'question', 'answer']];
+  for (const row of responses) {
+    const answers = Object.keys(row.responses || {}).length
+      ? Object.entries(row.responses)
+      : [['', '']];
+    for (const [question, value] of answers) {
+      rows.push([
+        row.participant_id || '',
+        row.persona_id || '',
+        row.repeat_index ?? '',
+        row.status || '',
+        question,
+        value == null ? '' : (typeof value === 'object' ? JSON.stringify(value) : String(value)),
+      ]);
+    }
+  }
+  return rows.map((cols) => cols.map(csvCell).join(',')).join('\n');
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
 }
 
 export { personaPrompt };

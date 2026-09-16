@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS public.silicon_responses (
   responses JSONB NOT NULL DEFAULT '{}'::jsonb,
   displayed_images JSONB,
   survey_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'partial', 'error', 'skipped')),
+  status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'partial', 'error', 'skipped', 'claimed')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -177,6 +177,23 @@ CREATE POLICY "Owners read silicon answer events" ON public.silicon_answer_event
       WHERE r.id = run_id AND p.user_id = auth.uid()
     )
   );
+
+ALTER TABLE public.silicon_runs
+  ADD COLUMN IF NOT EXISTS persona_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE public.silicon_runs
+  DROP CONSTRAINT IF EXISTS silicon_runs_status_check;
+
+ALTER TABLE public.silicon_runs
+  ADD CONSTRAINT silicon_runs_status_check
+  CHECK (status IN ('draft', 'queued', 'running', 'completed', 'cancelled', 'failed', 'partial'));
+
+ALTER TABLE public.silicon_responses
+  DROP CONSTRAINT IF EXISTS silicon_responses_status_check;
+
+ALTER TABLE public.silicon_responses
+  ADD CONSTRAINT silicon_responses_status_check
+  CHECK (status IN ('ok', 'partial', 'error', 'skipped', 'claimed'));
 
 COMMENT ON TABLE public.silicon_responses IS
   'Synthetic VLM answers. Never mix with survey_responses quota or default Results.';
