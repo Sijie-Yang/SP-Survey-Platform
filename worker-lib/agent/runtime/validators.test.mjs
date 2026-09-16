@@ -15,14 +15,14 @@ describe('shared route validators', () => {
   it('requires a vision model for Silicon', () => {
     assert.doesNotThrow(() => assertRoute({
       provider: 'deepseek',
-      model: 'deepseek-vl',
+      model: 'deepseek-v4-flash-vision-exp',
       requireVision: true,
       credential: { key_hint: 'sk-***abcd' },
       requireConfigured: true,
     }));
     assert.throws(() => assertRoute({
       provider: 'deepseek',
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-pro',
       requireVision: true,
     }), /vision-language/);
   });
@@ -30,8 +30,16 @@ describe('shared route validators', () => {
   it('requires a stored key when configured is mandatory', () => {
     assert.throws(() => assertRoute({
       provider: 'deepseek',
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-pro',
       requireConfigured: true,
     }), /API key/);
+  });
+
+  it('lets pi-ai clamp a stored reasoning level for the selected model', () => {
+    assert.doesNotThrow(() => assertRoute({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      effort: 'medium',
+    }));
   });
 });

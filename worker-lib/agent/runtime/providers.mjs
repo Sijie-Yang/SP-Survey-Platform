@@ -10,9 +10,10 @@ import {
   catalogProvider,
   extraHeaders,
   isProviderId,
+  normalizeModelRecord,
 } from './catalog.mjs';
 import { modelAcceptsImage, resolveModel, resolveProvider } from './registry.mjs';
-import { assertSafeBaseUrl } from './ssrf.mjs';
+import { assertProviderResponseNotRedirect, assertSafeBaseUrl } from './ssrf.mjs';
 
 export {
   PROVIDER_ID_RE,
@@ -28,13 +29,7 @@ export const PROVIDERS = Object.fromEntries(CATALOG_PROVIDERS.map((provider) => 
   defaultBaseUrl: provider.defaultBaseUrl,
   recommended: !!provider.recommended,
   defaultModels: provider.defaultModels,
-  catalog: (provider.models || []).map((model) => ({
-    id: model.id,
-    label: model.name,
-    vision: (model.input || []).includes('image'),
-    tools: true,
-    reasoning: Boolean(model.reasoningEfforts),
-  })),
+  catalog: (provider.models || []).map((model) => normalizeModelRecord(model)),
   auth: provider.auth,
   protocol: provider.protocol,
 }]));
@@ -98,8 +93,11 @@ export function assertVisionModel(provider, modelId, profile = {}) {
 }
 
 export async function listProviderModels(apiKey, provider, baseUrl, { protocol } = {}) {
-  const endpoint = resolveEndpoint(provider, baseUrl);
   const catalog = providerMeta(provider).catalog || [];
+  if (catalogProvider(provider)) {
+    return { success: true, models: catalog, fetched: false, source: 'catalog' };
+  }
+  const endpoint = resolveEndpoint(provider, baseUrl);
   if (!endpoint) return { success: true, models: catalog, fetched: false };
   if (protocol && protocol !== 'openai-completions' && protocol !== 'openai-responses') {
     return { success: false, models: catalog, fetched: false, code: 'DISCOVERY_UNSUPPORTED', error: 'This protocol does not support model discovery.' };
@@ -109,8 +107,9 @@ export async function listProviderModels(apiKey, provider, baseUrl, { protocol }
       Authorization: `Bearer ${apiKey}`,
       ...extraHeaders(provider),
     },
-    redirect: 'error',
+    redirect: 'manual',
   });
+  assertProviderResponseNotRedirect(res);
   if (res.status === 401) {
     return { success: false, models: catalog, fetched: false, code: 'MISSING_CREDENTIAL', error: 'Fetching available models returned 401.' };
   }

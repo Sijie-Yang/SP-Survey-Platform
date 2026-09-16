@@ -3,12 +3,19 @@
  * Pure module — no I/O.
  */
 
-const IMAGE_TYPES = new Set([
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'imagematrix', 'image',
-  'imageannotation', 'skillquestion', 'imageslidergroup', 'imagepointallocation',
-  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
-  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-]);
+import { isKnownQuestionType, questionHasTrait } from '../platformSchema';
+
+function structuredIssue(issue, severity = 'error') {
+  return {
+    code: issue.code || (severity === 'error' ? 'INVALID_SURVEY_FIELD' : 'SURVEY_WARNING'),
+    path: issue.path || 'surveyConfig',
+    message: issue.message || 'Invalid survey configuration.',
+    retryable: severity === 'error',
+    hint: issue.hint || (severity === 'error'
+      ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
+      : 'Review this warning before publishing.'),
+  };
+}
 
 /** Native settings shared by the Builder and Agent API. Undefined means use the native default. */
 export function validateQuestionSettings(q) {
@@ -29,6 +36,17 @@ export function validateQuestionSettings(q) {
   bounds({ ...q, maxAnnotations: q.maxAnnotations === 0 ? undefined : (q.maxAnnotations ?? 50) }, 'minAnnotations', 'maxAnnotations');
   for (const key of ['minAnnotations', 'maxAnnotations', 'minSelectedChoices', 'maxSelectedChoices']) {
     if (q[key] != null && (!Number.isInteger(q[key]) || q[key] < 0)) add(key, `${key} must be a non-negative integer.`);
+  }
+  if (q.annotationLabels != null) {
+    if (!Array.isArray(q.annotationLabels)) {
+      add('annotationLabels', 'annotationLabels must be an array of strings.');
+    } else {
+      q.annotationLabels.forEach((label, i) => {
+        if (typeof label !== 'string' || !label.trim()) {
+          add(`annotationLabels[${i}]`, `annotationLabels[${i}] must be a non-empty string.`);
+        }
+      });
+    }
   }
   if (['slidergroup', 'imageslidergroup', 'mediaslidergroup'].includes(q.type)
     && (q.scaleMin ?? 1) >= (q.scaleMax ?? 7)) add('scaleMin', 'Scale minimum must be less than its maximum.');
@@ -65,7 +83,7 @@ export function validateSurveyConfig(surveyConfig) {
   if (!surveyConfig || typeof surveyConfig !== 'object' || Array.isArray(surveyConfig)) {
     return {
       valid: false,
-      errors: [{ path: 'surveyConfig', message: 'surveyConfig must be an object.' }],
+      errors: [structuredIssue({ path: 'surveyConfig', message: 'surveyConfig must be an object.' })],
       warnings,
       pageCount: 0,
       questionCount,
@@ -101,6 +119,12 @@ export function validateSurveyConfig(surveyConfig) {
           return;
         }
         if (!element.type) errors.push({ path: `${elementPath}.type`, message: 'Question type is required.' });
+        else if (!isKnownQuestionType(element.type)) {
+          warnings.push({
+            path: `${elementPath}.type`,
+            message: `Question type "${element.type}" is not in the canonical platform schema.`,
+          });
+        }
         if (!element.name) {
           errors.push({ path: `${elementPath}.name`, message: 'Question name is required.' });
         } else if (names.has(element.name)) {
@@ -116,7 +140,7 @@ export function validateSurveyConfig(surveyConfig) {
           path: `${elementPath}.${error.path}`, message: `${element.name || 'Question'}: ${error.message}`,
         }));
 
-        if (IMAGE_TYPES.has(element.type) && element.type !== 'skillquestion') {
+        if (questionHasTrait(element.type, 'stimulus') && element.type !== 'skillquestion') {
           const hasManual = element.selectedImageUrls?.length
             || element.choices?.length
             || element.imageLinks?.length
@@ -131,7 +155,7 @@ export function validateSurveyConfig(surveyConfig) {
           }
         }
         if (
-          (element.type === 'slidergroup' || element.type === 'imageslidergroup' || element.type === 'mediaslidergroup')
+          questionHasTrait(element.type, 'slider')
           && !element.dimensions?.length
         ) {
           warnings.push({
@@ -140,9 +164,7 @@ export function validateSurveyConfig(surveyConfig) {
           });
         }
         if (
-          (element.type === 'pointallocation'
-            || element.type === 'imagepointallocation'
-            || element.type === 'mediapointallocation')
+          questionHasTrait(element.type, 'allocation')
           && !element.choices?.length
         ) {
           warnings.push({
@@ -156,8 +178,8 @@ export function validateSurveyConfig(surveyConfig) {
 
   return {
     valid: errors.length === 0,
-    errors,
-    warnings,
+    errors: errors.map((issue) => structuredIssue(issue)),
+    warnings: warnings.map((issue) => structuredIssue(issue, 'warning')),
     pageCount: Array.isArray(surveyConfig.pages) ? surveyConfig.pages.length : 0,
     questionCount,
   };

@@ -1,14 +1,15 @@
 /* global globalThis */
-// Store only the response contract, never integration credentials or dataset secrets.
-const CONTRACT_KEYS = ['name', 'type', 'title', 'description', 'choices', 'rows', 'columns', 'dimensions', 'budget', 'rateMin', 'rateMax', 'scaleMin', 'scaleMax', 'scaleStep', 'rateStep', 'inputType', 'min', 'max', 'step', 'annotationLabels', 'allowedTools', 'minAnnotations', 'maxAnnotations', 'minSelectedChoices', 'maxSelectedChoices', 'isAttentionCheck', 'expectedAnswer', 'labelTrue', 'labelFalse', 'minRateDescription', 'maxRateDescription', 'multiSelect', 'allowTie', 'tieLabel', 'trialCount', 'imageCount', 'skillId', 'skillRevision', 'skillResultSchema', 'skillContractVersion', 'isRequired', 'visibleIf', 'enableIf', 'requiredIf', 'mediaType', 'mediaAssignmentMode', 'mediaFolders', 'mediaPerCategory', 'mediaCategoryMode', 'excludePreviouslyUsedImages', 'imageSelectionMode', 'randomImageSelection', 'pairingMode', 'selectedImageUrls', 'mediaSlots', 'mediaPresentation', 'displayMode', 'exposureSeconds', 'imageFit', 'numericMeasure', 'maxLength'];
+import { PLATFORM_SCHEMA } from './platformSchema/index.js';
 
-const SKILL_CONFIG_KEYS = ['min', 'max', 'step', 'rateMin', 'rateMax', 'scaleMin', 'scaleMax', 'scaleStep', 'choices', 'options', 'rows', 'columns', 'dimensions', 'budget', 'labels', 'mediaType', 'mediaCount'];
-const STATIC_MEDIA_KEYS = ['imageLink', 'imageLinks', 'mediaUrl', 'mediaUrls', 'mediaItems', 'beforeLabel', 'afterLabel'];
+// Store only the response contract, never integration credentials or dataset secrets.
+const CONTRACT_KEYS = PLATFORM_SCHEMA.responseContract.questionKeys;
+const SKILL_CONFIG_KEYS = PLATFORM_SCHEMA.responseContract.skillConfigKeys;
+const STATIC_MEDIA_KEYS = PLATFORM_SCHEMA.responseContract.staticMediaKeys;
 
 export function surveyResponseContract(config, resolvedConfig = null) {
   const resolved = new Map((resolvedConfig?.pages || []).flatMap((p) => p.elements || []).map((q) => [q.name, q]));
   const contract = {
-    version: 2,
+    version: PLATFORM_SCHEMA.responseContract.version,
     title: config?.title || '',
     locale: config?.locale || 'en',
     questions: (config?.pages || []).flatMap((p) => p.elements || []).map((q) => {

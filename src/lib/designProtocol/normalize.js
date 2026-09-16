@@ -4,6 +4,7 @@
  */
 
 import { ANNOTATION_TOOLS, normalizeAllowedTools } from '../annotationTools';
+import { PLATFORM_SCHEMA } from '../platformSchema/index.js';
 
 const MEDIA_STIMULUS_TYPES = [
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image',
@@ -73,6 +74,15 @@ export function postProcessAiConfig(surveyConfig) {
       }
       if (element.type === 'imageannotation') {
         element.allowedTools = normalizeAllowedTools(element.allowedTools, ANNOTATION_TOOLS);
+        element.annotationLabels = (Array.isArray(element.annotationLabels) ? element.annotationLabels : [])
+          .map((label) => {
+            if (typeof label === 'string' || typeof label === 'number') return String(label).trim();
+            if (label && typeof label === 'object') {
+              return String(label.text ?? label.label ?? label.value ?? '').trim();
+            }
+            return '';
+          })
+          .filter(Boolean);
       }
       if (MEDIA_STAR_TYPES.includes(element.type)) {
         if (!element.mediaType) element.mediaType = 'any';
@@ -106,27 +116,8 @@ export function postProcessAiConfig(surveyConfig) {
 }
 
 export function createDefaultSurveyConfig(name, description = '') {
-  return {
-    title: name,
-    description: description || 'This survey helps us understand user preferences and opinions.',
-    logo: '',
-    logoPosition: 'right',
-    showQuestionNumbers: 'off',
-    showProgressBar: 'top',
-    locale: 'en',
-    progressBarType: 'questions',
-    autoGrowComment: true,
-    showPreviewBeforeComplete: 'showAllQuestions',
-    includeResearcherPractice: true,
-    excludeFlaggedFromAnalysis: false,
-    pages: [
-      {
-        name: 'page1',
-        title: 'Survey Questions',
-        description: 'Please answer the following questions.',
-        elements: [],
-      },
-    ],
-    completedHtml: '<h3>Thank you for completing the survey.</h3>',
-  };
+  const defaults = JSON.parse(JSON.stringify(PLATFORM_SCHEMA.defaultSurveyConfig));
+  defaults.title = name;
+  if (description) defaults.description = description;
+  return defaults;
 }

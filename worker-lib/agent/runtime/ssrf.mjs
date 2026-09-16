@@ -53,3 +53,13 @@ export function assertSafeBaseUrl(raw) {
 export function normalizeEndpoint(baseUrl) {
   return String(baseUrl || '').replace(/\/$/, '');
 }
+
+export function assertProviderResponseNotRedirect(response) {
+  if (response?.status >= 300 && response.status < 400) {
+    throw Object.assign(new Error('Provider redirects are blocked.'), {
+      status: 502,
+      code: 'PROVIDER_REDIRECT_BLOCKED',
+    });
+  }
+  return response;
+}

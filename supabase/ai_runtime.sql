@@ -154,6 +154,130 @@ ALTER TABLE public.ai_sessions
 ALTER TABLE public.ai_sessions
   ADD COLUMN IF NOT EXISTS selection_locked BOOLEAN NOT NULL DEFAULT false;
 
+-- ── Durable Harness-style runs (additive; safe to re-run) ────────────────────
+
+ALTER TABLE public.ai_sessions
+  ADD COLUMN IF NOT EXISTS assistant_mode TEXT NOT NULL DEFAULT 'agent';
+
+ALTER TABLE public.ai_sessions
+  DROP CONSTRAINT IF EXISTS ai_sessions_assistant_mode_check;
+
+ALTER TABLE public.ai_sessions
+  ADD CONSTRAINT ai_sessions_assistant_mode_check
+  CHECK (assistant_mode IN ('agent', 'generate', 'adjust', 'question'));
+
+ALTER TABLE public.ai_runs
+  DROP CONSTRAINT IF EXISTS ai_runs_status_check;
+
+ALTER TABLE public.ai_runs
+  ADD CONSTRAINT ai_runs_status_check
+  CHECK (status IN ('queued', 'running', 'awaiting_approval', 'completed', 'cancelled', 'failed'));
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS assistant_mode TEXT NOT NULL DEFAULT 'agent';
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS request_payload JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS checkpoint JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS result JSONB;
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS approval_request JSONB;
+
+CREATE INDEX IF NOT EXISTS ai_runs_user_project_status_idx
+  ON public.ai_runs (user_id, project_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.ai_agent_inbox (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES public.ai_sessions(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  target TEXT NOT NULL CHECK (target IN ('next-turn', 'next-step')),
+  kind TEXT NOT NULL DEFAULT 'followup' CHECK (kind IN ('followup', 'steer', 'inject')),
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'claimed', 'discarded')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  claimed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS ai_agent_inbox_session_status_idx
+  ON public.ai_agent_inbox (session_id, status, created_at);
+
+ALTER TABLE public.ai_agent_inbox ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Owners read own ai agent inbox" ON public.ai_agent_inbox;
+CREATE POLICY "Owners read own ai agent inbox" ON public.ai_agent_inbox
+  FOR SELECT TO authenticated
+  USING (user_id = auth.uid());
+
+CREATE TABLE IF NOT EXISTS public.ai_run_approvals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id UUID NOT NULL REFERENCES public.ai_runs(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL REFERENCES public.ai_sessions(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  tool_call_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  risk TEXT NOT NULL CHECK (risk IN ('publish', 'delete', 'upload')),
+  arguments_preview JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  decided_at TIMESTAMPTZ,
+  UNIQUE (run_id, tool_call_id)
+);
+
+ALTER TABLE public.ai_run_approvals ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Owners manage own ai run approvals" ON public.ai_run_approvals;
+CREATE POLICY "Owners manage own ai run approvals" ON public.ai_run_approvals
+  FOR ALL TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- Serialize sequence allocation so concurrent parallel tool results cannot
+-- produce duplicate (session_id, seq) values.
+CREATE OR REPLACE FUNCTION public.append_ai_session_event(
+  p_session_id UUID,
+  p_run_id UUID,
+  p_type TEXT,
+  p_payload JSONB DEFAULT '{}'::jsonb
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_seq INTEGER;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext(p_session_id::text));
+  SELECT COALESCE(MAX(seq), 0) + 1
+    INTO v_seq
+    FROM public.ai_session_events
+    WHERE session_id = p_session_id;
+
+  INSERT INTO public.ai_session_events (session_id, run_id, seq, type, payload)
+  VALUES (p_session_id, p_run_id, v_seq, p_type, COALESCE(p_payload, '{}'::jsonb));
+
+  UPDATE public.ai_sessions
+    SET updated_at = now()
+    WHERE id = p_session_id;
+
+  RETURN v_seq;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.append_ai_session_event(UUID, UUID, TEXT, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.append_ai_session_event(UUID, UUID, TEXT, JSONB) TO service_role;
+
 -- Provider configuration is separate from write-only credentials.
 CREATE TABLE IF NOT EXISTS public.user_ai_provider_profiles (
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,

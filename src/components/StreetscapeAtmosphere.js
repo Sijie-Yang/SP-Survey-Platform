@@ -145,7 +145,6 @@ export default function StreetscapeAtmosphere({
           className="sp-hero-atmosphere-video"
           src={HERO_VIDEO_SRC}
           muted
-          defaultMuted
           playsInline
           autoPlay
           loop

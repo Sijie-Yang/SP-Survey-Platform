@@ -31,14 +31,17 @@ function generateProjectId() {
   return `proj_${Date.now()}_${hex}`;
 }
 
-async function loadOwnedProject(env, accessToken, projectId) {
+async function loadOwnedProject(env, accessToken, projectId, ownerUserId = null) {
   if (!isSafeProjectId(projectId)) {
     throw Object.assign(new Error('Invalid project id'), { status: 400, code: 'INVALID_PROJECT_ID' });
   }
   const rows = await supabaseRest(env, {
     path: '/rest/v1/projects',
     accessToken,
-    query: `?id=eq.${encodeURIComponent(projectId)}&select=*`,
+    serviceRole: Boolean(ownerUserId),
+    query: `?id=eq.${encodeURIComponent(projectId)}`
+      + (ownerUserId ? `&user_id=eq.${encodeURIComponent(ownerUserId)}` : '')
+      + '&select=*',
   });
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) {
@@ -158,6 +161,7 @@ export async function createProject(env, accessToken, userId, body, request) {
     path: '/rest/v1/projects',
     method: 'POST',
     accessToken,
+    serviceRole: Boolean(userId && !accessToken),
     body: row,
     prefer: 'return=representation',
   });
@@ -172,8 +176,8 @@ export async function createProject(env, accessToken, userId, body, request) {
   };
 }
 
-export async function getDraft(env, accessToken, projectId, request) {
-  const row = await loadOwnedProject(env, accessToken, projectId);
+export async function getDraft(env, accessToken, projectId, request, ownerUserId = null) {
+  const row = await loadOwnedProject(env, accessToken, projectId, ownerUserId);
   const surveyConfig = draftConfig(row);
   return {
     success: true,
@@ -190,7 +194,7 @@ export async function getDraft(env, accessToken, projectId, request) {
 
 /** Update owned project name/description/metadata. */
 export async function updateProjectMeta(env, accessToken, projectId, body, userId = null) {
-  const existing = await loadOwnedProject(env, accessToken, projectId);
+  const existing = await loadOwnedProject(env, accessToken, projectId, userId);
   const patch = {};
   if (body?.name != null) {
     const name = String(body.name || '').trim().slice(0, 160);
@@ -213,7 +217,10 @@ export async function updateProjectMeta(env, accessToken, projectId, body, userI
     path: '/rest/v1/projects',
     method: 'PATCH',
     accessToken,
-    query: `?id=eq.${encodeURIComponent(projectId)}`,
+    serviceRole: Boolean(userId),
+    query: userId
+      ? `?id=eq.${encodeURIComponent(projectId)}&user_id=eq.${encodeURIComponent(userId)}`
+      : `?id=eq.${encodeURIComponent(projectId)}`,
     body: patch,
     prefer: 'return=representation',
   });
@@ -233,7 +240,14 @@ export async function deleteProject(env, accessToken, projectId, userId = null) 
   }, projectId);
 }
 
-export async function saveDraft(env, accessToken, projectId, body, writerSource = 'codex') {
+export async function saveDraft(
+  env,
+  accessToken,
+  projectId,
+  body,
+  writerSource = 'codex',
+  ownerUserId = null,
+) {
   const secretFields = findSecretFields(body?.surveyConfig);
   if (secretFields.length) {
     throw Object.assign(new Error('Do not send credentials through the agent API.'), {
@@ -247,7 +261,7 @@ export async function saveDraft(env, accessToken, projectId, body, writerSource 
       code: 'MISSING_EXPECTED_DRAFT_UPDATED_AT',
     });
   }
-  const row = await loadOwnedProject(env, accessToken, projectId);
+  const row = await loadOwnedProject(env, accessToken, projectId, ownerUserId);
   const surveyConfig = await hydrateSkillContracts(
     env,
     postProcessAiConfig(body?.surveyConfig),
@@ -259,8 +273,50 @@ export async function saveDraft(env, accessToken, projectId, body, writerSource 
   }
 
   const merged = restoreStoredSecrets(surveyConfig, draftConfig(row));
+  const saveDirect = async ({ serviceRole = false, ownerId = null } = {}) => {
+    const now = new Date().toISOString();
+    const revisionId = body?.clientMutationId || `rev_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+    const expected = body.expectedDraftUpdatedAt;
+    const rows = await supabaseRest(env, {
+      path: '/rest/v1/projects',
+      method: 'PATCH',
+      accessToken,
+      serviceRole,
+      query: `?id=eq.${encodeURIComponent(projectId)}`
+        + (ownerId ? `&user_id=eq.${encodeURIComponent(ownerId)}` : '')
+        + `&draft_updated_at=eq.${encodeURIComponent(expected)}`
+        + '&select=id',
+      body: {
+        survey_config: merged,
+        survey_config_draft: merged,
+        draft_updated_at: now,
+        updated_at: now,
+        revision_id: revisionId,
+        last_writer: { source: writerSource, ...(body?.writer || {}), at: now },
+      },
+      prefer: 'return=representation',
+    });
+    if (!Array.isArray(rows) || !rows.length) {
+      throw Object.assign(new Error('Project draft changed. Re-read before updating.'), {
+        status: 409,
+        code: 'CONFLICT',
+        draftUpdatedAt: row.draft_updated_at,
+      });
+    }
+    return {
+      success: true,
+      projectId,
+      draftUpdatedAt: now,
+      revisionId,
+      validation,
+      surveyConfig: sanitizeForAgent(merged),
+    };
+  };
 
   try {
+    if (ownerUserId) {
+      return saveDirect({ serviceRole: true, ownerId: ownerUserId });
+    }
     const result = await rpc(env, 'save_project_draft', {
       p_project_id: projectId,
       p_survey_config: merged,
@@ -277,6 +333,11 @@ export async function saveDraft(env, accessToken, projectId, body, writerSource 
       surveyConfig: sanitizeForAgent(merged),
     };
   } catch (error) {
+    if (!ownerUserId && /gen_random_bytes\s*\(integer\)\s*does not exist/i.test(String(error.message || ''))) {
+      // Compatibility path for installations that have not yet re-run the
+      // corrected save_project_draft function. RLS still enforces ownership.
+      return saveDirect();
+    }
     if (String(error.message || '').includes('conflict')) {
       throw Object.assign(new Error('Project draft changed. Re-read before updating.'), {
         status: 409,
@@ -288,14 +349,21 @@ export async function saveDraft(env, accessToken, projectId, body, writerSource 
   }
 }
 
-export async function applyProjectOperations(env, accessToken, projectId, body, writerSource = 'codex') {
+export async function applyProjectOperations(
+  env,
+  accessToken,
+  projectId,
+  body,
+  writerSource = 'codex',
+  ownerUserId = null,
+) {
   if (!body?.expectedDraftUpdatedAt) {
     throw Object.assign(new Error('expectedDraftUpdatedAt is required. Call survey_get_draft first.'), {
       status: 400,
       code: 'MISSING_EXPECTED_DRAFT_UPDATED_AT',
     });
   }
-  const row = await loadOwnedProject(env, accessToken, projectId);
+  const row = await loadOwnedProject(env, accessToken, projectId, ownerUserId);
   const current = draftConfig(row);
   let next;
   try {
@@ -316,7 +384,7 @@ export async function applyProjectOperations(env, accessToken, projectId, body, 
     expectedDraftUpdatedAt: body.expectedDraftUpdatedAt,
     clientMutationId: body?.clientMutationId,
     writer: body?.writer,
-  }, writerSource);
+  }, writerSource, ownerUserId);
   return {
     ...saved,
     applied: next.applied,
@@ -325,26 +393,28 @@ export async function applyProjectOperations(env, accessToken, projectId, body, 
   };
 }
 
-export async function publishProject(env, accessToken, projectId, body) {
+export async function publishProject(env, accessToken, projectId, body, ownerUserId = null) {
   const result = await rpc(env, 'release_project_version', {
     p_project_id: projectId,
     p_expected_draft_updated_at: body?.expectedDraftUpdatedAt || null,
     p_summary: body?.summary || null,
-  }, accessToken);
+    p_owner: ownerUserId,
+  }, accessToken, { serviceRole: Boolean(ownerUserId) });
   return { success: true, projectId, ...result };
 }
 
-export async function listVersions(env, accessToken, projectId) {
-  await loadOwnedProject(env, accessToken, projectId);
+export async function listVersions(env, accessToken, projectId, ownerUserId = null) {
+  await loadOwnedProject(env, accessToken, projectId, ownerUserId);
   const rows = await supabaseRest(env, {
     path: '/rest/v1/project_config_versions',
     accessToken,
+    serviceRole: Boolean(ownerUserId),
     query: `?project_id=eq.${encodeURIComponent(projectId)}&select=version,published_at,change_summary,published_by&order=version.desc`,
   });
   return { success: true, versions: rows || [] };
 }
 
-export async function rollbackProject(env, accessToken, projectId, body) {
+export async function rollbackProject(env, accessToken, projectId, body, ownerUserId = null) {
   const version = Number(body?.version);
   if (!Number.isInteger(version)) {
     throw Object.assign(new Error('version is required'), { status: 400 });
@@ -353,7 +423,8 @@ export async function rollbackProject(env, accessToken, projectId, body) {
     p_project_id: projectId,
     p_expected_draft_updated_at: body?.expectedDraftUpdatedAt || null,
     p_restore_version: version,
-  }, accessToken);
+    p_owner: ownerUserId,
+  }, accessToken, { serviceRole: Boolean(ownerUserId) });
   return { success: true, projectId, ...result };
 }
 

@@ -4,18 +4,62 @@ import {
   getDraft,
 } from '../projectHandlers.mjs';
 import { validateSurveyConfig } from '../../designProtocol.mjs';
+import {
+  OPERATION_ITEM_SCHEMA,
+  PLATFORM_SCHEMA,
+  PLATFORM_SCHEMA_HASH,
+} from '../../platformSchema.generated.mjs';
 
-export function createDesignerTools({ env, accessToken, projectId, request, writerSource = 'assistant' }) {
+export function createDesignerTools({
+  env,
+  accessToken,
+  projectId,
+  request,
+  writerSource = 'assistant',
+  ownerUserId = null,
+}) {
   return [
     {
       name: 'survey_capabilities',
       description: 'Read SP-Survey question types, media assignment, and Skill rules. Call first when designing.',
       minPermission: 'ask',
-      parameters: { type: 'object', properties: {} },
-      async execute() {
+      parameters: {
+        type: 'object',
+        properties: {
+          domain: {
+            type: 'string',
+            enum: ['overview', 'survey', 'questions', 'media', 'skills', 'project', 'operations'],
+          },
+        },
+      },
+      async execute(args) {
+        const domain = args?.domain || 'overview';
+        const domainSchema = {
+          survey: {
+            survey: PLATFORM_SCHEMA.entities?.survey,
+            page: PLATFORM_SCHEMA.entities?.page,
+            theme: PLATFORM_SCHEMA.entities?.theme,
+          },
+          questions: {
+            commonFields: PLATFORM_SCHEMA.commonQuestionFields,
+            questionTypes: PLATFORM_SCHEMA.questionTypes,
+          },
+          media: {
+            mediaItem: PLATFORM_SCHEMA.entities?.mediaItem,
+            mediaDataset: PLATFORM_SCHEMA.entities?.mediaDataset,
+          },
+          skills: {
+            skill: PLATFORM_SCHEMA.entities?.skill,
+            skillResultFamilies: PLATFORM_SCHEMA.skillResultFamilies,
+          },
+          project: PLATFORM_SCHEMA.entities?.project,
+          operations: PLATFORM_SCHEMA.operations,
+        }[domain];
         return {
-          summary: 'Loaded design capabilities',
-          capabilities: DESIGN_CAPABILITIES,
+          summary: `Loaded ${domain} capabilities`,
+          capabilities: domain === 'overview' ? DESIGN_CAPABILITIES : undefined,
+          schema: domainSchema,
+          platformSchemaHash: PLATFORM_SCHEMA_HASH,
         };
       },
     },
@@ -26,7 +70,7 @@ export function createDesignerTools({ env, accessToken, projectId, request, writ
       parameters: { type: 'object', properties: {} },
       async execute() {
         if (!projectId) throw new Error('projectId is required');
-        const draft = await getDraft(env, accessToken, projectId, request);
+        const draft = await getDraft(env, accessToken, projectId, request, ownerUserId);
         return {
           summary: `Draft "${draft.surveyConfig?.title || projectId}" loaded`,
           projectId,
@@ -48,7 +92,7 @@ export function createDesignerTools({ env, accessToken, projectId, request, writ
       async execute(args) {
         const config = args.surveyConfig;
         if (!config) {
-          const draft = await getDraft(env, accessToken, projectId, request);
+          const draft = await getDraft(env, accessToken, projectId, request, ownerUserId);
           const validation = validateSurveyConfig(draft.surveyConfig);
           return { summary: validation.valid ? 'Draft is valid' : 'Draft has errors', validation };
         }
@@ -58,13 +102,16 @@ export function createDesignerTools({ env, accessToken, projectId, request, writ
     },
     {
       name: 'survey_apply_operations',
-      description: 'Apply incremental operations and save the live draft. Requires expectedDraftUpdatedAt from survey_get_draft.',
+      description: 'Apply operations and save the draft. For a new or complete redesign, use one replaceConfig operation: {"op":"replaceConfig","surveyConfig":{...}}. For small edits use addPage, removePage, addQuestion, updateQuestion, removeQuestion, or setAllRatingScales. Requires the latest expectedDraftUpdatedAt from survey_get_draft.',
       minPermission: 'edit_draft',
       parameters: {
         type: 'object',
         properties: {
           expectedDraftUpdatedAt: { type: 'string' },
-          operations: { type: 'array', items: { type: 'object' } },
+          operations: {
+            type: 'array',
+            items: OPERATION_ITEM_SCHEMA,
+          },
         },
         required: ['expectedDraftUpdatedAt', 'operations'],
       },
@@ -73,7 +120,7 @@ export function createDesignerTools({ env, accessToken, projectId, request, writ
         const result = await applyProjectOperations(env, accessToken, projectId, {
           expectedDraftUpdatedAt: args.expectedDraftUpdatedAt,
           operations: args.operations,
-        }, writerSource);
+        }, writerSource, ownerUserId);
         return {
           summary: `Applied ${result.applied?.length || 0} operation(s) and saved`,
           draftUpdatedAt: result.draftUpdatedAt,
@@ -90,7 +137,7 @@ export function createDesignerTools({ env, accessToken, projectId, request, writ
       minPermission: 'ask',
       parameters: { type: 'object', properties: {} },
       async execute() {
-        const draft = await getDraft(env, accessToken, projectId, request);
+        const draft = await getDraft(env, accessToken, projectId, request, ownerUserId);
         return { summary: 'Preview URLs ready', urls: draft.urls };
       },
     },

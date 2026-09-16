@@ -440,14 +440,21 @@ export default function AdminApp() {
     const onFocusOrVisible = () => {
       if (document.visibilityState === 'visible') syncRemoteDraft();
     };
+    const onAgentRunComplete = (event) => {
+      if (event?.detail?.projectId !== currentProjectIdRef.current) return;
+      setTabValue(2);
+      syncRemoteDraft();
+    };
 
     window.addEventListener('focus', onFocusOrVisible);
+    window.addEventListener('sp-agent-run-complete', onAgentRunComplete);
     document.addEventListener('visibilitychange', onFocusOrVisible);
     const intervalId = window.setInterval(syncRemoteDraft, 4000);
     syncRemoteDraft();
 
     return () => {
       window.removeEventListener('focus', onFocusOrVisible);
+      window.removeEventListener('sp-agent-run-complete', onAgentRunComplete);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
       window.clearInterval(intervalId);
     };
@@ -777,8 +784,10 @@ export default function AdminApp() {
     console.log('🔍 Pages count:', newConfig?.pages?.length);
     const persisted = metadata.persisted === true;
     const savedCopy = persisted ? JSON.parse(JSON.stringify(newConfig)) : null;
+    const nextTabValue = metadata.source === 'assistant' ? 2 : tabValue;
 
     setSurveyConfig(newConfig);
+    if (metadata.source === 'assistant') setTabValue(2);
     if (persisted) {
       setLastSavedConfig(savedCopy);
       setHasUnsavedChanges(false);
@@ -801,7 +810,7 @@ export default function AdminApp() {
           [currentProject.id]: {
             ...(prev[currentProject.id] || {}),
           surveyConfig: newConfig,
-            tabValue,
+            tabValue: nextTabValue,
             ...(persisted ? {
               lastSavedConfig: savedCopy,
               hasUnsavedChanges: false,

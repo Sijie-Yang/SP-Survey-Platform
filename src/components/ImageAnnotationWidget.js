@@ -300,7 +300,7 @@ export default function ImageAnnotationCanvas({
   value,
   onChange,
   allowedTools = ['point', 'line', 'polygon', 'bbox'],
-  annotationLabels = [],
+  annotationLabels: annotationLabelsProp = [],
   /** Optional { [labelName]: '#rrggbb' } for chip/shape colors */
   labelColors = null,
   readOnly = false,
@@ -316,6 +316,17 @@ export default function ImageAnnotationCanvas({
   const language = languageProp || region?.language || 'en';
   const zh = language === 'zh';
   const tx = (text) => workflowText(text, language);
+  const annotationLabels = React.useMemo(() => (
+    (Array.isArray(annotationLabelsProp) ? annotationLabelsProp : [])
+      .map((label) => {
+        if (typeof label === 'string' || typeof label === 'number') return String(label).trim();
+        if (label && typeof label === 'object') {
+          return String(label.text ?? label.label ?? label.value ?? '').trim();
+        }
+        return '';
+      })
+      .filter(Boolean)
+  ), [annotationLabelsProp]);
   const historyRef = useRef(createAnnotationHistory());
   const emittedShapesRef = useRef(null);
   const [zoom, setZoom] = useState(1);

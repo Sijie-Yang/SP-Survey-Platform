@@ -41,6 +41,7 @@ export function jsonResponse(data, init = {}) {
     ...init,
     headers: {
       'content-type': 'application/json',
+      'cache-control': 'private, no-store',
       ...(init.headers || {}),
     },
   });

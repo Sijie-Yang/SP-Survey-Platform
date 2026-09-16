@@ -5,17 +5,30 @@ import { getSessionLearning } from '../lib/sessionLearning';
 import { sendChatMessage, validateChatApiKey, triggerMultiAgentReviewStream } from '../lib/chatApi';
 import { postProcessAiConfig } from '../lib/designProtocol';
 import {
+  answerAiRunApproval,
+  archiveAiSession,
+  cancelAiRun,
+  listAiRunApprovals,
+  steerAiSession,
+} from '../lib/agentApi';
+import {
   buildAssistantModelOptions,
+  clearPendingRun,
   clearUndoSnapshot,
   credentialConfigured,
+  hasAppliedSurveyChange,
   isPlatformMode as detectPlatformMode,
   isStaleAssistantRequest,
+  latestRunStatus,
+  loadingStatusFromEvents,
   parseRoute,
+  readPendingRun,
   readSessionId,
   readStoredRoute,
   readUndoSnapshot,
   resolveAssistantRoute,
   sendBlockReason,
+  writePendingRun,
   writeSessionId,
   writeStoredRoute,
   writeUndoSnapshot,
@@ -39,6 +52,12 @@ function loadProjectNumber(projectId, key, fallback) {
   return stored ? parseInt(stored, 10) : fallback;
 }
 
+const ASSISTANT_MODES = new Set(['agent', 'generate', 'adjust', 'question']);
+
+function normalizeAssistantMode(value) {
+  return ASSISTANT_MODES.has(value) ? value : 'agent';
+}
+
 export default function useSurveyAssistant({
   currentProject,
   surveyConfig,
@@ -58,10 +77,17 @@ export default function useSurveyAssistant({
   const [assistantDirectory, setAssistantDirectory] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState('');
   const [selectedEffort, setSelectedEffort] = useState('');
+  const [assistantMode, setAssistantMode] = useState(() => normalizeAssistantMode(
+    loadProjectString(projectId, 'assistantMode', 'agent'),
+  ));
   const [aiSessionId, setAiSessionId] = useState(() => readSessionId(
     typeof window !== 'undefined' ? window.sessionStorage : null,
     projectId,
   ));
+  const [activeRunId, setActiveRunId] = useState(() => (
+    readPendingRun(typeof window !== 'undefined' ? window.sessionStorage : null, projectId)?.runId || ''
+  ));
+  const [pendingApproval, setPendingApproval] = useState(null);
   const [userMessage, setUserMessage] = useState('');
   const [aiUndoAvailable, setAiUndoAvailable] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -88,6 +114,14 @@ export default function useSurveyAssistant({
   const surveyConfigRef = useRef(surveyConfig);
   const onChangeRef = useRef(onSurveyConfigChange);
   const enabledRef = useRef(enabled);
+
+  const handleAssistantModeChange = useCallback((value) => {
+    const nextMode = normalizeAssistantMode(value);
+    setAssistantMode(nextMode);
+    if (typeof window !== 'undefined' && projectIdRef.current) {
+      window.localStorage.setItem(`assistantMode_${projectIdRef.current}`, nextMode);
+    }
+  }, []);
 
   if (projectIdRef.current !== projectId || enabledRef.current !== enabled) {
     if (projectIdRef.current !== projectId || !enabled) {
@@ -193,11 +227,132 @@ export default function useSurveyAssistant({
 
     const storage = typeof window !== 'undefined' ? window.sessionStorage : null;
     setAiSessionId(readSessionId(storage, projectId));
+    setActiveRunId(readPendingRun(storage, projectId)?.runId || '');
     const undo = readUndoSnapshot(storage, projectId);
     aiUndoSnapshotRef.current = undo;
     setAiUndoAvailable(Boolean(undo));
     applyResolvedRoute(lastStatusRef.current, projectId);
   }, [enabled, projectId, applyResolvedRoute]);
+
+  useEffect(() => {
+    if (!enabled || !platformMode || !projectId || typeof window === 'undefined') return undefined;
+    const storage = window.sessionStorage;
+    const pending = readPendingRun(storage, projectId);
+
+    let cancelled = false;
+    let timer = null;
+    let recoveringRun = pending?.status === 'running';
+    const startedAt = Number(pending?.startedAt) || Date.now();
+    const maxWaitMs = 20 * 60 * 1000;
+    if (pending?.status === 'running') {
+      setIsLoading(true);
+      setLoadingStatus('Continuing survey generation…');
+    }
+
+    const check = async () => {
+      try {
+        const { getAiSession, listAiSessions } = await import('../lib/agentApi');
+        const storedSessionId = readSessionId(storage, projectId);
+        let sessionId = pending?.sessionId || storedSessionId;
+        if (!sessionId) {
+          const listed = await listAiSessions(projectId);
+          sessionId = listed?.sessions?.[0]?.id || '';
+        }
+        if (!sessionId) {
+          if (pending?.status !== 'running') {
+            if (pending) {
+              clearPendingRun(storage, projectId);
+              setIsLoading(false);
+              setLoadingStatus('');
+            }
+            return;
+          }
+          if (!cancelled && Date.now() - startedAt < maxWaitMs) {
+            timer = setTimeout(check, 1500);
+          }
+          return;
+        }
+
+        const detail = await getAiSession(sessionId);
+        if (cancelled) return;
+        if (detail?.assistantMode) {
+          handleAssistantModeChange(detail.assistantMode);
+        }
+        if (sessionId !== storedSessionId) {
+          writeSessionId(storage, projectId, sessionId);
+          setAiSessionId(sessionId);
+        }
+        if (Array.isArray(detail?.messages) && detail.messages.length) {
+          const restored = conversationHistoryRef.current?.replaceMessages
+            ? conversationHistoryRef.current.replaceMessages(detail.messages)
+            : detail.messages;
+          setConversationMessages(restored);
+        }
+        const runEvents = pending?.runId
+          ? (detail?.events || []).filter((event) => !event.run_id || event.run_id === pending.runId)
+          : detail?.events;
+        const runRecord = pending?.runId
+          ? detail?.runs?.find?.((run) => run.id === pending.runId)
+          : detail?.run;
+        const status = runRecord?.status || latestRunStatus(runEvents);
+        if (status === 'awaiting_approval' && Date.now() - startedAt < maxWaitMs) {
+          recoveringRun = true;
+          const approvalResult = await listAiRunApprovals(runRecord?.id || pending?.runId);
+          if (cancelled) return;
+          setPendingApproval(approvalResult?.approvals?.[0] || null);
+          writePendingRun(storage, projectId, {
+            status: 'running',
+            startedAt,
+            sessionId,
+            runId: runRecord?.id || pending?.runId,
+          });
+          setIsLoading(true);
+          setLoadingStatus('Waiting for your approval…');
+          timer = setTimeout(check, 1500);
+          return;
+        }
+        if ((status === 'running' || (!status && pending?.status === 'running'))
+          && Date.now() - startedAt < maxWaitMs) {
+          recoveringRun = true;
+          writePendingRun(storage, projectId, {
+            status: 'running',
+            startedAt,
+            sessionId,
+            runId: pending?.runId,
+          });
+          setIsLoading(true);
+          setLoadingStatus(loadingStatusFromEvents(runEvents));
+          timer = setTimeout(check, 1500);
+          return;
+        }
+        if (pending && status === 'completed' && hasAppliedSurveyChange(runEvents)) {
+          window.dispatchEvent(new CustomEvent('sp-agent-run-complete', {
+            detail: { projectId, sessionId, runId: pending?.runId },
+          }));
+        }
+        clearPendingRun(storage, projectId);
+        if (pending?.runId) setActiveRunId('');
+        if (recoveringRun) {
+          setIsLoading(false);
+          setLoadingStatus('');
+        }
+      } catch (error) {
+        if (!cancelled && (pending || recoveringRun) && Date.now() - startedAt < maxWaitMs) {
+          timer = setTimeout(check, 2000);
+        } else if (!cancelled && (pending || recoveringRun)) {
+          clearPendingRun(storage, projectId);
+          setIsLoading(false);
+          setLoadingStatus('');
+        }
+      }
+    };
+
+    check();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled, platformMode, projectId, handleAssistantModeChange]);
 
   useEffect(() => {
     if (!enabled || !projectId) return undefined;
@@ -206,6 +361,7 @@ export default function useSurveyAssistant({
     setMultiAgentReviewEnabled(loadProjectFlag(projectId, 'multiAgentReviewEnabled', false));
     setReviewMode(loadProjectString(projectId, 'reviewMode', '1v1'));
     setMaxReviewRounds(loadProjectNumber(projectId, 'maxReviewRounds', 3));
+    setAssistantMode(normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', 'agent')));
     const timer = setTimeout(() => {
       isLoadingProjectSettings.current = false;
     }, 100);
@@ -233,7 +389,12 @@ export default function useSurveyAssistant({
   }, [enabled, maxReviewRounds, projectId]);
 
   useEffect(() => {
-    if (!enabled || !projectId || !contextEnabled) {
+    if (!enabled || !projectId || isLoadingProjectSettings.current) return;
+    window.localStorage.setItem(`assistantMode_${projectId}`, assistantMode);
+  }, [assistantMode, enabled, projectId]);
+
+  useEffect(() => {
+    if (!enabled || !projectId) {
       conversationHistoryRef.current = null;
       workingMemoryRef.current = null;
       sessionLearningRef.current = null;
@@ -242,9 +403,15 @@ export default function useSurveyAssistant({
       return undefined;
     }
     conversationHistoryRef.current = getConversationHistory(projectId);
+    setConversationMessages(conversationHistoryRef.current.getAllMessages());
+    if (!contextEnabled) {
+      workingMemoryRef.current = null;
+      sessionLearningRef.current = null;
+      setRecommendations([]);
+      return undefined;
+    }
     workingMemoryRef.current = getWorkingMemory(projectId);
     sessionLearningRef.current = getSessionLearning();
-    setConversationMessages(conversationHistoryRef.current.getAllMessages());
     setRecommendations(sessionLearningRef.current.getRecommendations(currentProject?.category || 'general'));
     return undefined;
   }, [enabled, projectId, contextEnabled, currentProject?.category]);
@@ -373,9 +540,18 @@ export default function useSurveyAssistant({
   }, [applySurveyConfig, refreshConversation]);
 
   const handleClearHistory = useCallback(() => {
+    if (platformMode && aiSessionId) {
+      archiveAiSession(aiSessionId).catch(() => null);
+      writeSessionId(
+        typeof window !== 'undefined' ? window.sessionStorage : null,
+        projectIdRef.current,
+        '',
+      );
+      setAiSessionId('');
+    }
     conversationHistoryRef.current?.clear();
     setConversationMessages([]);
-  }, []);
+  }, [aiSessionId, platformMode]);
 
   const handleDownloadHistory = useCallback(() => {
     const data = conversationHistoryRef.current?.export();
@@ -425,6 +601,13 @@ export default function useSurveyAssistant({
     refreshConversation();
 
     const currentUserMessage = userMessage;
+    const pendingStorage = typeof window !== 'undefined' ? window.sessionStorage : null;
+    const pendingStartedAt = Date.now();
+    writePendingRun(pendingStorage, request.projectId, {
+      status: 'running',
+      startedAt: pendingStartedAt,
+      sessionId: aiSessionId || '',
+    });
     setUserMessage('');
     setIsLoading(true);
     setLoadingStatus('Thinking...');
@@ -454,7 +637,7 @@ export default function useSurveyAssistant({
         surveyConfigRef.current,
         enrichedHistory,
         openaiApiKey,
-        multiAgentReviewEnabled,
+        platformMode ? false : multiAgentReviewEnabled,
         reviewMode,
         customPrompts,
         researchContext,
@@ -464,19 +647,58 @@ export default function useSurveyAssistant({
           provider: routeProvider || null,
           model: routeModel || null,
           reasoningEffort: selectedEffort || null,
+          assistantMode,
+          onStarted: (started) => {
+            writeSessionId(pendingStorage, request.projectId, started.sessionId);
+            writePendingRun(pendingStorage, request.projectId, {
+              status: 'running',
+              startedAt: pendingStartedAt,
+              sessionId: started.sessionId,
+              runId: started.runId,
+            });
+            if (stillCurrent()) setAiSessionId(started.sessionId);
+            if (stillCurrent()) setActiveRunId(started.runId);
+          },
+          onSnapshot: (snapshot) => {
+            if (!stillCurrent()) return;
+            setLoadingStatus(loadingStatusFromEvents(snapshot?.events || []));
+            if (Array.isArray(snapshot?.messages) && snapshot.messages.length) {
+              const restored = conversationHistoryRef.current?.replaceMessages
+                ? conversationHistoryRef.current.replaceMessages(snapshot.messages)
+                : snapshot.messages;
+              setConversationMessages(restored);
+            }
+            const run = snapshot?.run;
+            if (run?.status === 'awaiting_approval') {
+              listAiRunApprovals(run.id).then((result) => {
+                if (stillCurrent()) setPendingApproval(result?.approvals?.[0] || null);
+              });
+            } else {
+              setPendingApproval(null);
+            }
+          },
         },
       );
 
-      if (!stillCurrent()) return;
-
       if (result.sessionId) {
-        setAiSessionId(result.sessionId);
         writeSessionId(
           typeof window !== 'undefined' ? window.sessionStorage : null,
           request.projectId,
           result.sessionId,
         );
       }
+      if (!stillCurrent()) {
+        writePendingRun(pendingStorage, request.projectId, {
+          status: result.success ? 'completed' : 'failed',
+          startedAt: pendingStartedAt,
+          sessionId: result.sessionId || aiSessionId || '',
+          runId: result.runId || activeRunId || undefined,
+        });
+        return;
+      }
+      clearPendingRun(pendingStorage, request.projectId);
+      setActiveRunId('');
+      if (result.sessionId) setAiSessionId(result.sessionId);
 
       if (result.intent === 'generate') {
         setLoadingStatus('Generating survey...');
@@ -493,7 +715,16 @@ export default function useSurveyAssistant({
       setLoadingStatus('');
 
       if (result.success) {
-        if (result.chainOfThoughts && conversationHistoryRef.current) {
+        const restoredServerTranscript = platformMode
+          && Array.isArray(result.messages)
+          && result.messages.length > 0;
+        if (restoredServerTranscript) {
+          const restored = conversationHistoryRef.current?.replaceMessages
+            ? conversationHistoryRef.current.replaceMessages(result.messages)
+            : result.messages;
+          setConversationMessages(restored);
+        }
+        if (!restoredServerTranscript && result.chainOfThoughts && conversationHistoryRef.current) {
           const step1Key = result.chainOfThoughts.step1_research || result.chainOfThoughts.step1_understanding;
           if (step1Key) {
             conversationHistoryRef.current.addMessage('assistant',
@@ -517,12 +748,14 @@ export default function useSurveyAssistant({
           }
         }
 
-        conversationHistoryRef.current?.addMessage('assistant', result.message, {
-          actionType: result.intent,
-          timestamp: new Date().toISOString(),
-        });
+        if (!restoredServerTranscript) {
+          conversationHistoryRef.current?.addMessage('assistant', result.message, {
+            actionType: result.intent,
+            timestamp: new Date().toISOString(),
+          });
+        }
 
-        if (result.multiAgentReview?.conversationMessages) {
+        if (!restoredServerTranscript && result.multiAgentReview?.conversationMessages) {
           result.multiAgentReview.conversationMessages.forEach((msg) => {
             if (conversationHistoryRef.current && msg.content) {
               conversationHistoryRef.current.addMessage(msg.role || 'assistant', msg.content, {
@@ -534,12 +767,22 @@ export default function useSurveyAssistant({
           });
         }
 
-        refreshConversation();
+        if (!restoredServerTranscript) refreshConversation();
 
         if (result.researchContext && request.projectId) {
           window.localStorage.setItem(`researchContext_${request.projectId}`, JSON.stringify(result.researchContext));
           window.dispatchEvent(new CustomEvent('researchContextUpdated', {
             detail: result.researchContext,
+          }));
+        }
+
+        if (result.draftMutated && result.persisted && !result.surveyConfig) {
+          window.dispatchEvent(new CustomEvent('sp-agent-run-complete', {
+            detail: {
+              projectId: request.projectId,
+              sessionId: result.sessionId,
+              runId: result.runId,
+            },
           }));
         }
 
@@ -553,7 +796,10 @@ export default function useSurveyAssistant({
             snapshot,
           );
           const processedConfig = postProcessAiConfig(result.surveyConfig);
-          const persistence = result.draftUpdatedAt
+          const wasPersisted = result.runtime
+            ? result.persisted === true && result.draftMutated === true
+            : Boolean(result.draftUpdatedAt);
+          const persistence = wasPersisted
             ? { persisted: true, draftUpdatedAt: result.draftUpdatedAt, source: 'assistant' }
             : {};
           if (!applySurveyConfig(processedConfig, request, persistence)) return;
@@ -575,7 +821,7 @@ export default function useSurveyAssistant({
             );
           }
 
-          if (multiAgentReviewEnabled && (result.intent === 'generate' || result.intent === 'adjust')) {
+          if (!platformMode && multiAgentReviewEnabled && (result.intent === 'generate' || result.intent === 'adjust')) {
             setLoadingStatus('Starting Multi-Agent Review...');
             try {
               const customAgents = request.projectId && window.localStorage.getItem(`customAgents_${request.projectId}`)
@@ -723,7 +969,17 @@ export default function useSurveyAssistant({
         refreshConversation();
       }
     } catch (error) {
-      if (!stillCurrent()) return;
+      if (!stillCurrent()) {
+        writePendingRun(pendingStorage, request.projectId, {
+          status: 'failed',
+          startedAt: pendingStartedAt,
+          sessionId: aiSessionId || '',
+          runId: activeRunId || undefined,
+        });
+        return;
+      }
+      clearPendingRun(pendingStorage, request.projectId);
+      setActiveRunId('');
       setIsLoading(false);
       setLoadingStatus('');
       conversationHistoryRef.current?.addMessage('assistant',
@@ -736,6 +992,7 @@ export default function useSurveyAssistant({
     aiSessionId,
     apiKeyValid,
     applySurveyConfig,
+    assistantMode,
     assistantDirectory,
     contextEnabled,
     currentProject?.category,
@@ -751,6 +1008,41 @@ export default function useSurveyAssistant({
     userMessage,
   ]);
 
+  const handleCancelRun = useCallback(async () => {
+    const storage = typeof window !== 'undefined' ? window.sessionStorage : null;
+    const pending = readPendingRun(storage, projectIdRef.current);
+    const runId = activeRunId || pending?.runId;
+    if (!runId) return;
+    setLoadingStatus('Cancelling…');
+    await cancelAiRun(runId);
+    clearPendingRun(storage, projectIdRef.current);
+    setActiveRunId('');
+    setIsLoading(false);
+    setLoadingStatus('');
+    setPendingApproval(null);
+  }, [activeRunId]);
+
+  const handleApprovalDecision = useCallback(async (approved) => {
+    if (!pendingApproval?.id) return;
+    setLoadingStatus(approved ? 'Resuming approved action…' : 'Cancelling denied action…');
+    const result = await answerAiRunApproval(pendingApproval.id, approved);
+    if (!result?.success || !approved) {
+      setIsLoading(false);
+      setLoadingStatus('');
+    }
+    setPendingApproval(null);
+  }, [pendingApproval]);
+
+  const handleSteerMessage = useCallback(async () => {
+    const content = userMessage.trim();
+    if (!content || !aiSessionId || !isLoading) return;
+    const result = await steerAiSession(aiSessionId, content);
+    if (result?.success) {
+      setUserMessage('');
+      setLoadingStatus('Steering update queued…');
+    }
+  }, [aiSessionId, isLoading, userMessage]);
+
   return {
     enabled,
     isPlatformMode: platformMode,
@@ -758,12 +1050,14 @@ export default function useSurveyAssistant({
     userMessage,
     isLoading,
     loadingStatus,
+    pendingApproval,
     apiKeyValid,
     openaiApiKey,
     credentialHint,
     modelOptions: assistantModelOptions,
     selectedRoute,
     selectedEffort,
+    assistantMode,
     effortOptions: assistantEffortOptions,
     routeUnavailable,
     blockReason,
@@ -786,7 +1080,12 @@ export default function useSurveyAssistant({
     setReviewMode,
     setMaxReviewRounds,
     setCustomPrompts,
+    setAssistantMode,
+    handleAssistantModeChange,
     handleSendMessage,
+    handleCancelRun,
+    handleApprovalDecision,
+    handleSteerMessage,
     handleValidateApiKey,
     applyCredentialStatus,
     handleAssistantRouteChange,
@@ -804,6 +1103,7 @@ export function chatPropsFromAssistant(assistant) {
     userMessage: assistant.userMessage,
     isLoading: assistant.isLoading,
     loadingStatus: assistant.loadingStatus,
+    pendingApproval: assistant.pendingApproval,
     apiKeyValid: assistant.apiKeyValid,
     openaiApiKey: assistant.openaiApiKey,
     credentialHint: assistant.credentialHint,
@@ -819,6 +1119,9 @@ export function chatPropsFromAssistant(assistant) {
     sessionLearningRef: assistant.sessionLearningRef,
     onMessageChange: assistant.setUserMessage,
     onSendMessage: assistant.handleSendMessage,
+    onCancelRun: assistant.handleCancelRun,
+    onApprovalDecision: assistant.handleApprovalDecision,
+    onSteerMessage: assistant.handleSteerMessage,
     onApiKeyChange: assistant.setOpenaiApiKey,
     onValidateApiKey: assistant.handleValidateApiKey,
     onContextToggle: assistant.setContextEnabled,
@@ -835,9 +1138,11 @@ export function chatPropsFromAssistant(assistant) {
     modelOptions: assistant.modelOptions,
     selectedRoute: assistant.selectedRoute,
     selectedEffort: assistant.selectedEffort,
+    assistantMode: assistant.assistantMode,
     effortOptions: assistant.effortOptions,
     onRouteChange: assistant.handleAssistantRouteChange,
     onEffortChange: assistant.handleAssistantEffortChange,
+    onAssistantModeChange: assistant.handleAssistantModeChange || assistant.setAssistantMode,
     routeUnavailable: assistant.routeUnavailable,
     blockReason: assistant.blockReason,
   };

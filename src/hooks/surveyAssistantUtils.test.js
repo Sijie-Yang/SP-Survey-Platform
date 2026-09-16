@@ -2,10 +2,15 @@ import {
   AI_SIDEBAR_WIDTH,
   PROJECT_SIDEBAR_WIDTH,
   buildAssistantModelOptions,
+  clearPendingRun,
   credentialConfigured,
   exclusiveSidebarOpen,
+  hasAppliedSurveyChange,
   isStaleAssistantRequest,
+  latestRunStatus,
+  loadingStatusFromEvents,
   parseRoute,
+  readPendingRun,
   readSessionId,
   readStoredRoute,
   readUndoSnapshot,
@@ -13,6 +18,7 @@ import {
   routeKey,
   sendBlockReason,
   workspaceChromeWidths,
+  writePendingRun,
   writeSessionId,
   writeStoredRoute,
   writeUndoSnapshot,
@@ -80,6 +86,12 @@ describe('surveyAssistantUtils', () => {
 
     expect(resolveAssistantRoute({
       directory,
+      storedRoute: 'deepseek::reasoner',
+      storedEffort: 'medium',
+    })).toMatchObject({ route: 'deepseek::reasoner', effort: 'high' });
+
+    expect(resolveAssistantRoute({
+      directory,
       storedRoute: 'gone::model',
       status: { defaultRoute: { provider: 'openai', model: 'gpt-4o', reasoningEffort: '' } },
     })).toMatchObject({ route: 'openai::gpt-4o' });
@@ -101,6 +113,46 @@ describe('surveyAssistantUtils', () => {
     expect(readUndoSnapshot(api, 'p1')).toEqual({ title: 'Before' });
     expect(readSessionId(api, 'p2')).toBe('');
     expect(readUndoSnapshot(api, 'p2')).toBeNull();
+  });
+
+  test('persists pending runs per project and reads the latest run status', () => {
+    const storage = new Map();
+    const api = {
+      getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
+    };
+    writePendingRun(api, 'p1', { status: 'running', startedAt: 123, sessionId: 'sess-1' });
+    expect(readPendingRun(api, 'p1')).toEqual({
+      status: 'running',
+      startedAt: 123,
+      sessionId: 'sess-1',
+    });
+    expect(latestRunStatus([
+      { type: 'run.status', payload: { status: 'running' } },
+      { type: 'assistant.message', payload: { content: 'Done' } },
+      { type: 'run.status', payload: { status: 'completed' } },
+    ])).toBe('completed');
+    expect(hasAppliedSurveyChange([
+      { type: 'tool.result', payload: { name: 'survey_get_draft', ok: true } },
+      { type: 'tool.result', payload: { name: 'survey_apply_operations', ok: true } },
+    ])).toBe(true);
+    clearPendingRun(api, 'p1');
+    expect(readPendingRun(api, 'p1')).toBeNull();
+  });
+
+  test('derives visible run progress from lifecycle events', () => {
+    expect(loadingStatusFromEvents([
+      { type: 'run.status', payload: { status: 'running' } },
+      { type: 'step.start', payload: { step: 1 } },
+      { type: 'tool.call', payload: { id: 'call-1', name: 'survey_validate' } },
+    ])).toBe('Using survey_validate…');
+    expect(loadingStatusFromEvents([
+      { type: 'run.status', payload: { status: 'awaiting_approval' } },
+    ])).toBe('Waiting for your approval…');
+    expect(loadingStatusFromEvents([
+      { type: 'tool.call', payload: { id: 'verify', name: 'survey_get_draft', verification: true } },
+    ])).toBe('Verifying saved draft…');
   });
 
   test('isolates stale assistant requests', () => {

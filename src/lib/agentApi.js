@@ -4,15 +4,17 @@
 
 import { supabase } from './supabase';
 
-const API_BASE =
-  process.env.REACT_APP_SERVER_URL
-  || process.env.REACT_APP_API_URL
-  || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
+// Keep browser requests same-origin in local development. CRA's setupProxy
+// forwards /api to Express on :3001, avoiding Safari-specific CORS/preflight
+// failures. Production also defaults to the deployed Worker origin.
+const API_BASE = process.env.NODE_ENV === 'production'
+  ? (process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_URL || '')
+  : '';
 
 async function getAccessToken() {
   if (!supabase) return null;
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || null;
+  const result = await supabase.auth.getSession();
+  return result?.data?.session?.access_token || null;
 }
 
 async function agentFetch(path, options = {}) {
@@ -24,6 +26,7 @@ async function agentFetch(path, options = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
     ...options,
     headers,
   });
@@ -131,8 +134,11 @@ export async function sendAgentChat({
   model,
   reasoningEffort,
   permission,
+  assistantMode = 'agent',
+  onStarted,
+  onSnapshot,
 }) {
-  return agentFetch('/api/agent/chat', {
+  const started = await agentFetch('/api/agent/chat', {
     method: 'POST',
     body: JSON.stringify({
       message,
@@ -148,8 +154,14 @@ export async function sendAgentChat({
       model,
       reasoningEffort,
       permission,
+      assistantMode,
     }),
   });
+  if (!started?.success || !started?.queued || !started?.sessionId || !started?.runId) {
+    return started;
+  }
+  onStarted?.(started);
+  return waitForAgentRun(started.sessionId, started.runId, { started, onSnapshot });
 }
 
 export async function listAiSessions(projectId, mode = 'designer') {
@@ -157,8 +169,122 @@ export async function listAiSessions(projectId, mode = 'designer') {
   return agentFetch(`/api/agent/sessions?${q}`);
 }
 
-export async function getAiSession(sessionId) {
-  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`);
+export async function getAiSession(sessionId, after = 0) {
+  const query = after > 0 ? `?after=${encodeURIComponent(after)}` : '';
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}${query}`);
+}
+
+export async function archiveAiSession(sessionId) {
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getAiRun(runId) {
+  return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function cancelAiRun(runId) {
+  return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
+export async function steerAiSession(sessionId, content, target = 'next-step') {
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/steer`, {
+    method: 'POST',
+    body: JSON.stringify({ content, kind: 'steer', target }),
+  });
+}
+
+export async function listAiRunApprovals(runId) {
+  return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}/approvals`);
+}
+
+export async function answerAiRunApproval(approvalId, approved) {
+  return agentFetch(`/api/agent/approvals/${encodeURIComponent(approvalId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ approved: Boolean(approved) }),
+  });
+}
+
+function runStatusFromEvents(events = [], runId) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (runId && event.run_id && event.run_id !== runId) continue;
+    if (event.type === 'run.status' && event.payload?.status) return event.payload.status;
+  }
+  return '';
+}
+
+function runChangedDraft(events = [], runId) {
+  return events.some((event) => (
+    (!runId || !event.run_id || event.run_id === runId)
+    && event.type === 'tool.result'
+    && event.payload?.name === 'survey_apply_operations'
+    && event.payload?.ok !== false
+  ));
+}
+
+export async function waitForAgentRun(sessionId, runId, {
+  started = {},
+  intervalMs = 750,
+  timeoutMs = 20 * 60 * 1000,
+  onSnapshot,
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const snapshot = await getAiSession(sessionId);
+    if (!snapshot?.success) return snapshot;
+    onSnapshot?.(snapshot);
+    const run = snapshot.run?.id === runId
+      ? snapshot.run
+      : snapshot.runs?.find?.((item) => item.id === runId);
+    const status = run?.status || runStatusFromEvents(snapshot.events, runId);
+    if (status === 'completed') {
+      const result = run?.result || {};
+      const draftMutated = result.draftMutated ?? runChangedDraft(snapshot.events, runId);
+      return {
+        success: true,
+        runtime: started.runtime,
+        sessionId,
+        runId,
+        provider: started.provider,
+        model: started.model,
+        reasoningEffort: started.reasoningEffort,
+        assistantMode: result.assistantMode || started.assistantMode,
+        intent: result.intent
+          || (draftMutated ? 'adjust' : (started.assistantMode === 'agent' ? 'agent' : 'question')),
+        message: result.message
+          || [...(snapshot.messages || [])].reverse().find((item) => item.role === 'assistant')?.content
+          || 'Done.',
+        draftUpdatedAt: result.draftUpdatedAt || null,
+        draftMutated,
+        persisted: result.persisted ?? draftMutated,
+        events: snapshot.events || [],
+        messages: snapshot.messages || [],
+      };
+    }
+    if (status === 'failed' || status === 'cancelled') {
+      const errorEvent = [...(snapshot.events || [])].reverse().find((event) => (
+        (!event.run_id || event.run_id === runId) && event.type === 'error'
+      ));
+      return {
+        success: false,
+        sessionId,
+        runId,
+        status,
+        code: errorEvent?.payload?.code || (status === 'cancelled' ? 'CANCELLED' : 'AGENT_RUN_FAILED'),
+        error: errorEvent?.payload?.message || run?.error_summary || `Agent run ${status}.`,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return {
+    success: false,
+    sessionId,
+    runId,
+    code: 'AGENT_RUN_TIMEOUT',
+    error: 'The Agent is still running. Reopen this project to reconnect.',
+  };
 }
 
 export async function storeProviderCredential({

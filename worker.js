@@ -26,6 +26,7 @@ import {
   attachSurveyDesignFiles,
 } from './worker-lib/surveyDesignRequest.mjs';
 import { handleAgentAndMcpRoutes } from './worker-lib/agent/router.mjs';
+import { processAgentQueue } from './worker-lib/agent/runtime/runDispatcher.mjs';
 import { getUserFromBearer } from './worker-lib/auth/supabaseJwt.mjs';
 import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
 import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
@@ -783,7 +784,7 @@ export default {
       if (adminResultsResponse) return adminResultsResponse;
 
       // Agent / OAuth / MCP (returns Response or null if not matched)
-      const agentResponse = await handleAgentAndMcpRoutes(request, env);
+      const agentResponse = await handleAgentAndMcpRoutes(request, env, ctx);
       if (agentResponse) return agentResponse;
 
       // SP-Bench admin + public APIs
@@ -932,8 +933,11 @@ export default {
     }
   },
 
-  // Optional: bind SP_BENCH_QUEUE producer/consumer in wrangler.jsonc
   async queue(batch, env) {
+    if (batch.queue === 'sp-agent-runs') {
+      await processAgentQueue(batch, env);
+      return;
+    }
     await handleBenchQueueBatch(batch, env);
   },
 };

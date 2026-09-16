@@ -2,7 +2,7 @@ import { supabaseRest } from '../supabaseUserClient.mjs';
 import { getDraft } from '../agent/projectHandlers.mjs';
 import { listProviderCredentials, listProviderProfiles, loadUserAiSettings } from '../agent/credentials.mjs';
 import { CATALOG_VERSION } from '../agent/runtime/catalog.mjs';
-import { resolveProvider } from '../agent/runtime/registry.mjs';
+import { availableModelId } from '../agent/runtime/registry.mjs';
 import { assertRoute } from '../agent/runtime/validators.mjs';
 import { processSiliconRunChunk } from './runner.mjs';
 import { RUNTIME_VERSION } from '../agent/runtime/events.mjs';
@@ -121,9 +121,12 @@ export async function createSiliconRun(env, auth, body, request) {
   const profiles = await listProviderProfiles(env, auth.userId);
   const credentials = await listProviderCredentials(env, auth.userId);
   const provider = body.provider || settings.silicon_provider || settings.default_provider || 'deepseek';
-  const model = body.model || settings.silicon_model || resolveProvider(provider).defaultModels.silicon;
-  const effort = body.reasoningEffort || body.reasoning_effort || settings.silicon_reasoning_effort || null;
   const profile = profiles.find((row) => row.provider === provider);
+  const model = availableModelId(provider, body.model || settings.silicon_model, {
+    profile,
+    vision: true,
+  });
+  const effort = body.reasoningEffort || body.reasoning_effort || settings.silicon_reasoning_effort || null;
   assertRoute({
     provider,
     model,

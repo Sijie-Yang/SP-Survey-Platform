@@ -48,6 +48,7 @@ yarn-error.log*
 
 # wrangler files
 .wrangler
+.wrangler-dry-run/
 .dev.vars*
 !.dev.vars.example
 !.env.example

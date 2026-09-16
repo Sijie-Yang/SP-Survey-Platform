@@ -59,6 +59,21 @@ describe('designProtocol validate', () => {
     const report = validateSurveyConfig(createDefaultSurveyConfig('Demo'));
     expect(report.valid).toBe(true);
   });
+
+  test('rejects structured annotation labels because the runtime contract stores strings', () => {
+    const report = validateSurveyConfig({
+      pages: [{
+        name: 'p1',
+        elements: [{
+          type: 'imageannotation',
+          name: 'hazards',
+          annotationLabels: [{ text: 'Danger', value: 'danger' }],
+        }],
+      }],
+    });
+    expect(report.valid).toBe(false);
+    expect(report.errors.some((e) => e.path.endsWith('annotationLabels[0]'))).toBe(true);
+  });
 });
 
 describe('designProtocol normalize + operations', () => {
@@ -85,6 +100,20 @@ describe('designProtocol normalize + operations', () => {
       expect.objectContaining({ value: 'tag_a' }),
     ]));
     expect(out.pages[0].elements[1].allowedTools).toEqual(['line', 'point', 'polygon']);
+  });
+
+  test('postProcessAiConfig repairs structured annotation labels from model output', () => {
+    const out = postProcessAiConfig({
+      pages: [{
+        name: 'p1',
+        elements: [{
+          type: 'imageannotation',
+          name: 'ann1',
+          annotationLabels: [{ text: '危险点', value: 'danger' }, '遮挡'],
+        }],
+      }],
+    });
+    expect(out.pages[0].elements[0].annotationLabels).toEqual(['危险点', '遮挡']);
   });
 
   test('postProcessAiConfig sets image defaults', () => {

@@ -21,15 +21,25 @@ import {
 } from './credentials.mjs';
 import { handleAgentChat } from './chatHandler.mjs';
 import { useAgentRuntime } from './runtime/flags.mjs';
-import { runDesignerChat } from './runtime/designerChat.mjs';
+import { startDesignerRun } from './runtime/designerChat.mjs';
+import { assistantModeFromEvents, normalizeAssistantMode } from './runtime/modes.mjs';
 import {
   archiveSession,
   cancelRun,
+  enqueueSessionInput,
+  getOwnedRun,
   getSession,
   listEvents,
+  listEventsAfter,
+  listSessionRuns,
   listSessions,
   renameSession,
 } from './runtime/sessions.mjs';
+import {
+  answerRunApproval,
+  listPendingApprovals,
+} from './runtime/approvals.mjs';
+import { dispatchAgentRun } from './runtime/runDispatcher.mjs';
 import { eventsToUiMessages, PROVIDERS } from './runtime/index.mjs';
 import { PROTOCOLS, CATALOG_VERSION } from './runtime/catalog.mjs';
 import { publicCatalog } from './runtime/registry.mjs';
@@ -185,7 +195,7 @@ function requireAgentScope(auth, scope) {
   }
 }
 
-export async function handleAgentAndMcpRoutes(request, env) {
+export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
   const url = new URL(request.url);
   const { pathname } = url;
 
@@ -361,16 +371,24 @@ export async function handleAgentAndMcpRoutes(request, env) {
         const validated = await validateApiKeyWithProvider(body.apiKey, {
           provider: body.provider,
           baseUrl: body.baseUrl,
+          protocol: body.protocol,
+          models: body.models,
         });
         return jsonResponse(validated);
       }
       if (!body?.apiKey) {
         return errorResponse(Object.assign(new Error('apiKey required'), { status: 400 }));
       }
-      await validateApiKeyWithProvider(body.apiKey, { provider: body.provider, baseUrl: body.baseUrl });
+      const validation = await validateApiKeyWithProvider(body.apiKey, {
+        provider: body.provider,
+        baseUrl: body.baseUrl,
+        protocol: body.protocol,
+        models: body.models,
+      });
       return jsonResponse(await storeCredential(env, auth.userId, body.apiKey, {
         provider: body.provider,
         baseUrl: body.baseUrl,
+        validated: validation.validated,
       }));
     }
     if (pathname === '/api/agent/credentials/openai' && request.method === 'DELETE') {
@@ -380,11 +398,15 @@ export async function handleAgentAndMcpRoutes(request, env) {
       return jsonResponse(await deleteCredential(env, auth.userId));
     }
     if (pathname === '/api/agent/credentials/providers' && request.method === 'GET') {
+      const providerId = new URL(request.url).searchParams.get('provider');
       return jsonResponse({
         success: true,
         catalogVersion: CATALOG_VERSION,
         protocols: PROTOCOLS,
-        providers: publicCatalog(),
+        providers: publicCatalog({
+          providerId,
+          summariesOnly: !providerId,
+        }),
       });
     }
     if (pathname === '/api/agent/credentials/profiles' && request.method === 'PUT') {
@@ -414,12 +436,25 @@ export async function handleAgentAndMcpRoutes(request, env) {
         retryPolicy: body.retryPolicy,
       };
       if (body?.apiKey) {
-        await validateApiKeyWithProvider(body.apiKey, { provider: body.provider, baseUrl: body.baseUrl });
-        return jsonResponse(await storeCredential(env, auth.userId, body.apiKey, profile));
+        const validation = await validateApiKeyWithProvider(body.apiKey, {
+          provider: body.provider,
+          baseUrl: body.baseUrl,
+          protocol: body.protocol,
+          models: body.models,
+        });
+        return jsonResponse(await storeCredential(env, auth.userId, body.apiKey, {
+          ...profile,
+          validated: validation.validated,
+        }));
       }
       const existing = await loadProviderCredential(env, auth.userId, body.provider).catch(() => null);
       if (existing?.apiKey) {
-        return jsonResponse(await storeCredential(env, auth.userId, existing.apiKey, profile));
+        await saveProviderProfile(env, auth.userId, profile);
+        return jsonResponse({
+          success: true,
+          provider: body.provider,
+          hint: existing.hint,
+        });
       }
       return jsonResponse(await saveProviderProfile(env, auth.userId, profile));
     }
@@ -495,22 +530,17 @@ export async function handleAgentAndMcpRoutes(request, env) {
       if (body?.apiKey) {
         return errorResponse(Object.assign(new Error('Do not send apiKey in body. Store it via /api/agent/credentials/openai'), { status: 400 }));
       }
+      const assistantMode = normalizeAssistantMode(body?.assistantMode);
       if (useAgentRuntime(env) && !body?.legacy) {
-        try {
-          return jsonResponse(await runDesignerChat(env, auth.userId, {
-            ...body,
-            accessToken: auth.accessToken,
-          }, request));
-        } catch (error) {
-          if (error.code === 'CREDENTIALS_MISSING' || error.status === 400) throw error;
-          // Tables missing or model/tool failure — fall back to legacy JSON chat.
-          if (/schema cache|does not exist|ai_sessions/i.test(String(error.message || ''))) {
-            return jsonResponse(await handleAgentChat(env, auth.userId, body));
-          }
-          throw error;
-        }
+        const run = await startDesignerRun(env, auth.userId, {
+          ...body,
+          assistantMode,
+          accessToken: auth.accessToken,
+        }, request, ctx);
+        return jsonResponse(run, { status: 202 });
       }
-      return jsonResponse(await handleAgentChat(env, auth.userId, body));
+      const result = await handleAgentChat(env, auth.userId, { ...body, assistantMode });
+      return jsonResponse({ ...result, assistantMode });
     }
 
     if (pathname === '/api/agent/sessions' && request.method === 'GET') {
@@ -527,13 +557,39 @@ export async function handleAgentAndMcpRoutes(request, env) {
       const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length).split('/')[0]);
       const session = await getSession(env, auth.userId, sessionId);
       if (!session) return errorResponse(Object.assign(new Error('Session not found'), { status: 404 }));
-      const events = await listEvents(env, sessionId);
+      const after = Number(new URL(request.url).searchParams.get('after') || 0);
+      const events = after > 0
+        ? await listEventsAfter(env, sessionId, after)
+        : await listEvents(env, sessionId);
+      const runs = await listSessionRuns(env, auth.userId, sessionId);
       return jsonResponse({
         success: true,
         session,
+        run: runs[0] || null,
+        runs,
+        assistantMode: session.assistant_mode || assistantModeFromEvents(events),
         events,
         messages: eventsToUiMessages(events),
+        nextCursor: events.at(-1)?.seq || after,
       });
+    }
+    if (pathname.startsWith('/api/agent/sessions/') && pathname.endsWith('/steer') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length, -'/steer'.length));
+      const session = await getSession(env, auth.userId, sessionId);
+      if (!session) return errorResponse(Object.assign(new Error('Session not found'), { status: 404 }));
+      const body = await request.json();
+      if (!String(body?.content || '').trim()) {
+        return errorResponse(Object.assign(new Error('content is required'), { status: 400 }));
+      }
+      const input = await enqueueSessionInput(env, {
+        sessionId,
+        userId: auth.userId,
+        content: body.content,
+        kind: body.kind || 'steer',
+        target: body.target || 'next-step',
+      });
+      return jsonResponse({ success: true, input }, { status: 202 });
     }
     if (pathname.startsWith('/api/agent/sessions/') && request.method === 'PATCH') {
       if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
@@ -550,6 +606,53 @@ export async function handleAgentAndMcpRoutes(request, env) {
       if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
       const runId = decodeURIComponent(pathname.slice('/api/agent/runs/'.length, -'/cancel'.length));
       return jsonResponse(await cancelRun(env, auth.userId, runId));
+    }
+    if (pathname.startsWith('/api/agent/runs/') && pathname.endsWith('/approvals') && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const runId = decodeURIComponent(pathname.slice('/api/agent/runs/'.length, -'/approvals'.length));
+      if (!await getOwnedRun(env, auth.userId, runId)) {
+        return errorResponse(Object.assign(new Error('Run not found'), { status: 404 }));
+      }
+      return jsonResponse({
+        success: true,
+        approvals: await listPendingApprovals(env, auth.userId, runId),
+      });
+    }
+    if (pathname.startsWith('/api/agent/approvals/') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const approvalId = decodeURIComponent(pathname.slice('/api/agent/approvals/'.length));
+      const body = await request.json();
+      const decision = await answerRunApproval(env, auth.userId, approvalId, body?.approved === true);
+      if (decision.resume) {
+        const run = await getOwnedRun(env, auth.userId, decision.approval.run_id);
+        if (run) {
+          const checkpoint = {
+            ...(run.checkpoint || {}),
+            approvedToolCalls: [
+              ...new Set([
+                ...(run.checkpoint?.approvedToolCalls || []),
+                decision.approval.tool_call_id,
+              ]),
+            ],
+          };
+          await dispatchAgentRun(env, ctx, {
+            kind: 'designer',
+            userId: auth.userId,
+            sessionId: run.session_id,
+            runId: run.id,
+            body: run.request_payload || {},
+            checkpoint,
+          });
+        }
+      }
+      return jsonResponse({ success: true, ...decision }, { status: decision.resume ? 202 : 200 });
+    }
+    if (pathname.startsWith('/api/agent/runs/') && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const runId = decodeURIComponent(pathname.slice('/api/agent/runs/'.length));
+      const run = await getOwnedRun(env, auth.userId, runId);
+      if (!run) return errorResponse(Object.assign(new Error('Run not found'), { status: 404 }));
+      return jsonResponse({ success: true, run });
     }
 
     if (pathname.startsWith('/api/agent/silicon/') && auth.kind !== 'supabase') {

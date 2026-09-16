@@ -4,6 +4,9 @@
  */
 
 import { validateSurveyConfig } from './validate';
+import { OPERATION_TYPES } from '../platformSchema';
+
+export { OPERATION_TYPES };
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -156,13 +159,3 @@ export function applyOperations(surveyConfig, operations = []) {
   const validation = validateSurveyConfig(config);
   return { surveyConfig: config, applied, inverse, validation };
 }
-
-export const OPERATION_TYPES = [
-  'addPage',
-  'removePage',
-  'addQuestion',
-  'updateQuestion',
-  'removeQuestion',
-  'setAllRatingScales',
-  'replaceConfig',
-];

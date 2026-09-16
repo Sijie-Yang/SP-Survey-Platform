@@ -19,6 +19,10 @@ jest.mock('../lib/conversationHistory', () => {
           });
         },
         getAllMessages: () => [...history],
+        replaceMessages: (messages) => {
+          history.splice(0, history.length, ...messages);
+          return [...history];
+        },
         getFormattedForOpenAI: () => history.map((msg) => ({ role: msg.role, content: msg.content })),
         clear: () => { history.length = 0; },
         export: () => [...history],
@@ -49,10 +53,11 @@ jest.mock('../lib/sessionLearning', () => ({
 }));
 
 const mockSendChatMessage = jest.fn();
+const mockTriggerMultiAgentReviewStream = jest.fn();
 jest.mock('../lib/chatApi', () => ({
   sendChatMessage: (...args) => mockSendChatMessage(...args),
   validateChatApiKey: jest.fn(),
-  triggerMultiAgentReviewStream: jest.fn(),
+  triggerMultiAgentReviewStream: (...args) => mockTriggerMultiAgentReviewStream(...args),
 }));
 
 jest.mock('../lib/designProtocol', () => ({
@@ -60,9 +65,13 @@ jest.mock('../lib/designProtocol', () => ({
 }));
 
 const mockSaveAiSettings = jest.fn();
+const mockListAiSessions = jest.fn();
+const mockGetAiSession = jest.fn();
 jest.mock('../lib/agentApi', () => ({
   saveAiSettings: (...args) => mockSaveAiSettings(...args),
   getCredentialStatus: jest.fn(),
+  listAiSessions: (...args) => mockListAiSessions(...args),
+  getAiSession: (...args) => mockGetAiSession(...args),
 }));
 
 const directory = [
@@ -88,7 +97,10 @@ describe('useSurveyAssistant', () => {
   beforeEach(() => {
     conversationHistory.__resetHistory();
     mockSendChatMessage.mockReset();
+    mockTriggerMultiAgentReviewStream.mockReset();
     mockSaveAiSettings.mockReset();
+    mockListAiSessions.mockReset();
+    mockGetAiSession.mockReset();
     sessionStorage.clear();
     localStorage.clear();
     process.env.REACT_APP_SUPABASE_URL = 'https://example.supabase.co';
@@ -195,6 +207,189 @@ describe('useSurveyAssistant', () => {
     jest.useRealTimers();
   });
 
+  test('restores a running indicator and messages after refresh', async () => {
+    jest.useFakeTimers();
+    sessionStorage.setItem('ai_pending_run_p1', JSON.stringify({
+      status: 'running',
+      startedAt: Date.now(),
+      sessionId: 'sess-p1',
+    }));
+    mockGetAiSession
+      .mockResolvedValueOnce({
+        events: [{ type: 'run.status', payload: { status: 'running' } }],
+        messages: [{ role: 'assistant', content: 'Working…' }],
+      })
+      .mockResolvedValueOnce({
+        events: [{ type: 'run.status', payload: { status: 'completed' } }],
+        messages: [{ role: 'assistant', content: 'Done.' }],
+      });
+
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+
+    await act(async () => {});
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.loadingStatus).toMatch(/Continuing/);
+
+    await act(async () => {
+      jest.advanceTimersByTime(1600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.messages).toEqual([{ role: 'assistant', content: 'Done.' }]);
+    expect(sessionStorage.getItem('ai_pending_run_p1')).toBeNull();
+    jest.useRealTimers();
+  });
+
+  test('restores the latest hosted conversation after a completed-page refresh', async () => {
+    sessionStorage.setItem('ai_session_p1', 'sess-p1');
+    mockGetAiSession.mockResolvedValue({
+      events: [{ type: 'run.status', payload: { status: 'completed' } }],
+      messages: [
+        { id: 'event-1', role: 'user', content: 'Design a survey' },
+        { id: 'event-2', role: 'assistant', content: 'Survey saved.' },
+      ],
+    });
+
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+
+    await waitFor(() => {
+      expect(result.current.messages).toEqual([
+        { id: 'event-1', role: 'user', content: 'Design a survey' },
+        { id: 'event-2', role: 'assistant', content: 'Survey saved.' },
+      ]);
+    });
+    expect(mockGetAiSession).toHaveBeenCalledWith('sess-p1');
+  });
+
+  test('streams hosted snapshots into the conversation while a run is in progress', async () => {
+    let extras;
+    mockSendChatMessage.mockImplementation((...args) => {
+      extras = args[8];
+      return new Promise(() => {});
+    });
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'],
+        directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+      });
+    });
+    act(() => result.current.setUserMessage('Generate a safety survey'));
+    await act(async () => {
+      result.current.handleSendMessage();
+    });
+    await act(async () => {
+      extras.onSnapshot({
+        events: [
+          { type: 'run.status', payload: { status: 'running' } },
+          { type: 'tool.call', payload: { id: '1', name: 'survey_apply_operations' } },
+        ],
+        messages: [
+          { id: 'u1', role: 'user', content: 'Generate a safety survey' },
+          {
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            tools: [{ id: '1', name: 'survey_apply_operations', status: 'running' }],
+          },
+        ],
+        run: { id: 'run-1', status: 'running' },
+      });
+    });
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.loadingStatus).toBe('Using survey_apply_operations…');
+    expect(result.current.messages[1].tools[0]).toEqual({
+      id: '1',
+      name: 'survey_apply_operations',
+      status: 'running',
+    });
+  });
+
+  test('keeps conversation display persistence when context enrichment is disabled', async () => {
+    localStorage.setItem('contextEnabled_p1', 'false');
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'],
+        directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+      });
+    });
+    act(() => result.current.setUserMessage('remember this message'));
+    mockSendChatMessage.mockResolvedValue({
+      success: true,
+      message: 'Remembered.',
+      intent: 'question',
+      sessionId: 'sess-p1',
+    });
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+    expect(result.current.messages.map((message) => message.content)).toEqual([
+      'remember this message',
+      'Remembered.',
+    ]);
+  });
+
+  test('persists the project mode and sends it to the hosted assistant', async () => {
+    localStorage.setItem('assistantMode_p1', 'generate');
+    mockSendChatMessage.mockResolvedValue({
+      success: true,
+      message: 'Answer only.',
+      intent: 'question',
+      assistantMode: 'question',
+      sessionId: 'sess-p1',
+    });
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+
+    expect(result.current.assistantMode).toBe('generate');
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'],
+        directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+      });
+    });
+    act(() => {
+      result.current.handleAssistantModeChange('question');
+      result.current.setUserMessage('Explain the current survey');
+    });
+    await waitFor(() => {
+      expect(localStorage.getItem('assistantMode_p1')).toBe('question');
+    });
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+
+    expect(mockSendChatMessage.mock.calls[0][8]).toEqual(expect.objectContaining({
+      projectId: 'p1',
+      assistantMode: 'question',
+    }));
+  });
+
   test('updates survey config after a successful send', async () => {
     mockSendChatMessage.mockResolvedValue({
       success: true,
@@ -277,6 +472,39 @@ describe('useSurveyAssistant', () => {
       route: 'deepseek::reasoner',
       effort: 'high',
     });
+  });
+
+  test('does not expose the legacy multi-agent path to the hosted runtime', async () => {
+    mockSendChatMessage.mockResolvedValue({
+      success: true,
+      message: 'Updated',
+      intent: 'adjust',
+      sessionId: 'sess-new',
+      surveyConfig: { title: 'After AI' },
+    });
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Before AI' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'],
+        directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+      });
+    });
+    act(() => {
+      result.current.setMultiAgentReviewEnabled(true);
+      result.current.setUserMessage('review this survey');
+    });
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+
+    expect(mockSendChatMessage.mock.calls[0][4]).toBe(false);
+    expect(mockTriggerMultiAgentReviewStream).not.toHaveBeenCalled();
   });
 
   test('does not send when no project is selected', async () => {

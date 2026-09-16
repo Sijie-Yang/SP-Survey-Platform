@@ -85,7 +85,8 @@ app.use(async (req, res, next) => {
     || pathName.startsWith('/.well-known/');
   const isBenchRoute = pathName === '/api/bench' || pathName.startsWith('/api/bench/');
   const isAdminResultsRoute = pathName === '/api/admin/project-responses';
-  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute) return next();
+  const isR2Route = pathName === '/api/r2' || pathName.startsWith('/api/r2/');
+  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute && !isR2Route) return next();
 
   try {
     const url = `http://localhost:${PORT}${req.originalUrl}`;
@@ -98,7 +99,6 @@ app.use(async (req, res, next) => {
     const init = { method: req.method, headers };
     const body = buildBridgeBody(req, headers);
     if (body !== undefined) init.body = body;
-    const request = new Request(url, init);
     const env = {
       ...process.env,
       APP_URL: process.env.APP_URL || 'http://localhost:3000',
@@ -108,20 +108,56 @@ app.use(async (req, res, next) => {
       BYOK_ENCRYPTION_KEY: process.env.BYOK_ENCRYPTION_KEY,
     };
     let response = null;
-    if (isAdminResultsRoute) {
-      const { handleAdminResultsRoutes } = await import('./worker-lib/adminResults.mjs');
-      response = await handleAdminResultsRoutes(request, env);
-    } else if (isBenchRoute) {
-      const { handleBenchRoutes } = await import('./worker-lib/bench/handlers.mjs');
-      response = await handleBenchRoutes(request, env, null);
+    const remoteAgentBase = process.env.REMOTE_AGENT_BASE_URL;
+    const localR2Configured = Boolean(
+      process.env.R2_ACCOUNT_ID
+      && process.env.R2_ACCESS_KEY_ID
+      && process.env.R2_SECRET_ACCESS_KEY
+      && process.env.R2_PUBLIC_URL
+    );
+    const requiresRemoteWorker = isAgentRoute
+      || (!env.SUPABASE_SERVICE_ROLE_KEY && (isBenchRoute || isAdminResultsRoute))
+      || (isR2Route && !localR2Configured);
+    if (requiresRemoteWorker && remoteAgentBase) {
+      const remoteRoot = new URL(remoteAgentBase);
+      if (remoteRoot.protocol !== 'https:') {
+        throw new Error('REMOTE_AGENT_BASE_URL must use HTTPS.');
+      }
+      headers.delete('host');
+      headers.delete('connection');
+      // Do not relay browser compression negotiation through this decoding
+      // proxy. Cloudflare may choose zstd, which Node fetch does not decode
+      // consistently and Safari cannot consume after a second hop.
+      headers.set('accept-encoding', 'identity');
+      response = await fetch(new URL(req.originalUrl, remoteRoot), init);
+    } else if (isR2Route) {
+      return next();
     } else {
-      const { handleAgentAndMcpRoutes } = await import('./worker-lib/agent/router.mjs');
-      response = await handleAgentAndMcpRoutes(request, env);
+      const request = new Request(url, init);
+      if (isAdminResultsRoute) {
+        const { handleAdminResultsRoutes } = await import('./worker-lib/adminResults.mjs');
+        response = await handleAdminResultsRoutes(request, env);
+      } else if (isBenchRoute) {
+        const { handleBenchRoutes } = await import('./worker-lib/bench/handlers.mjs');
+        response = await handleBenchRoutes(request, env, null);
+      } else {
+        const { handleAgentAndMcpRoutes } = await import('./worker-lib/agent/router.mjs');
+        response = await handleAgentAndMcpRoutes(request, env, {
+          waitUntil(promise) {
+            Promise.resolve(promise).catch((error) => {
+              console.error('[agent background run]', error);
+            });
+          },
+        });
+      }
     }
     if (!response) return next();
     res.status(response.status);
     response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === 'transfer-encoding') return;
+      // Node fetch transparently decompresses upstream bodies but retains the
+      // original encoding/length headers. Forwarding those stale headers makes
+      // Safari try to decode the already-decoded bytes again.
+      if (['transfer-encoding', 'content-encoding', 'content-length'].includes(key.toLowerCase())) return;
       res.setHeader(key, value);
     });
     if (response.status === 204 || response.status === 302) {

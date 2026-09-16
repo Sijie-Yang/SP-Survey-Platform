@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Collapse,
   Dialog,
   DialogActions,
@@ -22,13 +25,13 @@ import {
   Typography,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
   deleteProviderCredential,
   fetchProviderModels,
   getCredentialStatus,
+  listProviderModels,
   saveAiSettings,
   storeProviderCredential,
 } from '../../lib/agentApi';
@@ -73,23 +76,14 @@ function discoveryError(t, result) {
   return result?.error || t.modelsDiscoveryNetwork;
 }
 
-function statusChip(t, provider) {
-  if (provider.authUnsupported) {
-    return { color: 'warning', label: t.modelsAuthUnsupported };
-  }
-  if (provider.configured) {
-    return { color: 'success', label: t.modelsCredentialConfigured, icon: <CheckCircleIcon /> };
-  }
-  return { color: 'default', label: t.modelsCredentialMissing };
-}
-
-function routeOptions(directory, { visionOnly = false, configuredOnly = true } = {}) {
+export function routeOptions(directory, { visionOnly = false, configuredOnly = true } = {}) {
   const options = [];
   (directory || []).forEach((provider) => {
     if (configuredOnly && !provider.configured) return;
     if (provider.authUnsupported) return;
     (provider.models || []).forEach((model) => {
       if (!model.id) return;
+      if (model.runtimeSupported === false) return;
       const vision = !!(model.vision || (model.input || []).includes('image'));
       if (visionOnly && !vision) return;
       options.push({
@@ -111,12 +105,11 @@ function groupDirectory(directory) {
     recommended: [],
     configured: [],
     catalog: [],
-    unsupported: [],
     custom: [],
   };
   (directory || []).forEach((provider) => {
-    if (provider.authUnsupported) groups.unsupported.push(provider);
-    else if (provider.custom || provider.group === 'custom') groups.custom.push(provider);
+    if (provider.authUnsupported) return;
+    if (provider.custom || provider.group === 'custom') groups.custom.push(provider);
     else if (provider.recommended) groups.recommended.push(provider);
     else if (provider.configured) groups.configured.push(provider);
     else groups.catalog.push(provider);
@@ -124,17 +117,173 @@ function groupDirectory(directory) {
   return groups;
 }
 
+function modelSearchText(model) {
+  return `${model?.label || model?.name || ''} ${model?.id || ''}`.toLowerCase();
+}
+
+function CatalogModelBrowser({ models, loading, t }) {
+  const [query, setQuery] = useState('');
+  const parentRef = useRef(null);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return models || [];
+    return (models || []).filter((model) => modelSearchText(model).includes(needle));
+  }, [models, query]);
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 58,
+    overscan: 8,
+  });
+
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+        <Typography variant="subtitle2">
+          {t.modelsModels} ({models?.length || 0})
+        </Typography>
+        {loading && <CircularProgress size={16} />}
+      </Stack>
+      <TextField
+        fullWidth
+        size="small"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        label={t.modelsSearchModels}
+        placeholder={t.modelsSearchModelsHint}
+        sx={{ mb: 1 }}
+      />
+      <Box
+        ref={parentRef}
+        sx={{
+          height: Math.min(320, Math.max(72, filtered.length * 58)),
+          overflow: 'auto',
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 2,
+        }}
+      >
+        {filtered.length <= 100 ? filtered.map((model) => (
+          <Stack
+            key={model.id}
+            direction="row"
+            spacing={1}
+            alignItems="center"
+            sx={{ minHeight: 58, px: 1.25, borderBottom: '1px solid', borderColor: 'divider' }}
+          >
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="body2" noWrap>{model.label || model.name || model.id}</Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>{model.id}</Typography>
+            </Box>
+            {(model.vision || model.input?.includes('image')) && (
+              <Chip size="small" variant="outlined" label={t.modelsInputImage} />
+            )}
+            {(model.reasoning || model.reasoningEfforts) && (
+              <Chip size="small" variant="outlined" label={t.modelsReasoning} />
+            )}
+            <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+              {Number(model.contextWindow || 0).toLocaleString()}
+            </Typography>
+          </Stack>
+        )) : (
+          <Box sx={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const model = filtered[item.index];
+              return (
+                <Stack
+                  key={model.id}
+                  direction="row"
+                  spacing={1}
+                  alignItems="center"
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: item.size,
+                    transform: `translateY(${item.start}px)`,
+                    px: 1.25,
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography variant="body2" noWrap>{model.label || model.name || model.id}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>{model.id}</Typography>
+                </Box>
+                {(model.vision || model.input?.includes('image')) && (
+                  <Chip size="small" variant="outlined" label={t.modelsInputImage} />
+                )}
+                {(model.reasoning || model.reasoningEfforts) && (
+                  <Chip size="small" variant="outlined" label={t.modelsReasoning} />
+                )}
+                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                  {Number(model.contextWindow || 0).toLocaleString()}
+                </Typography>
+                </Stack>
+              );
+            })}
+          </Box>
+        )}
+      </Box>
+      {!loading && !filtered.length && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+          {t.modelsNoMatchingModels}
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
+function RouteAutocomplete({ label, options, value, onChange, placeholder, t }) {
+  const selected = options.find((option) => option.value === value) || null;
+  return (
+    <Autocomplete
+      fullWidth
+      size="small"
+      options={options}
+      value={selected}
+      onChange={(_event, next) => next && onChange(next.value)}
+      getOptionLabel={(option) => option.label || ''}
+      isOptionEqualToValue={(option, current) => option.value === current.value}
+      filterOptions={(items, state) => {
+        const needle = state.inputValue.trim().toLowerCase();
+        const matches = needle
+          ? items.filter((item) => `${item.label} ${item.model}`.toLowerCase().includes(needle))
+          : items;
+        return matches.slice(0, 100);
+      }}
+      renderOption={(props, option) => (
+        <Box component="li" {...props} key={option.value}>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="body2" noWrap>{option.label}</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>{option.model}</Typography>
+          </Box>
+          {option.vision && <Chip size="small" variant="outlined" label={t.modelsInputImage} />}
+          {option.reasoningEfforts && <Chip size="small" variant="outlined" label={t.modelsReasoning} />}
+        </Box>
+      )}
+      renderInput={(params) => (
+        <TextField {...params} label={label} placeholder={placeholder} />
+      )}
+    />
+  );
+}
+
 function ProviderEditor({ t, provider, requiredKey, onClose, onSaved }) {
+  const catalogEndpointOverride = ['cloudflare-ai-gateway', 'cloudflare-workers-ai'].includes(provider.id);
   const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState(provider.baseUrl || provider.defaultBaseUrl || '');
+  const [baseUrl, setBaseUrl] = useState(catalogEndpointOverride ? (provider.baseUrl || '') : (provider.baseUrl || provider.defaultBaseUrl || ''));
   const [displayName, setDisplayName] = useState(provider.displayName || '');
   const [protocol, setProtocol] = useState(provider.protocol || 'openai-completions');
-  const [models, setModels] = useState(provider.models?.length ? provider.models.map((model) => ({
+  const [models, setModels] = useState(!provider.catalog && provider.models?.length ? provider.models.map((model) => ({
     ...emptyModel(),
     ...model,
     name: model.name || model.label || model.id,
     input: model.input || (model.vision ? ['text', 'image'] : ['text']),
   })) : [emptyModel()]);
+  const [catalogModels, setCatalogModels] = useState(provider.catalog ? (provider.models || []) : []);
+  const [catalogLoading, setCatalogLoading] = useState(Boolean(provider.catalog && !provider.models?.length));
   const [customized, setCustomized] = useState(!provider.catalog);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -142,6 +291,23 @@ function ProviderEditor({ t, provider, requiredKey, onClose, onSaved }) {
   const [fetched, setFetched] = useState([]);
   const [picked, setPicked] = useState([]);
   const [retryMax, setRetryMax] = useState(provider.retryPolicy?.maxRetries ?? 5);
+
+  useEffect(() => {
+    let active = true;
+    if (!provider.catalog || provider.models?.length) return undefined;
+    setCatalogLoading(true);
+    listProviderModels(provider.id)
+      .then((result) => {
+        if (active && result?.success !== false) setCatalogModels(result.models || []);
+      })
+      .catch((loadError) => {
+        if (active) setError(loadError?.message || t.modelsLoadFailed);
+      })
+      .finally(() => {
+        if (active) setCatalogLoading(false);
+      });
+    return () => { active = false; };
+  }, [provider.catalog, provider.id, provider.models, t.modelsLoadFailed]);
 
   const updateModel = (index, patch) => {
     const next = [...models];
@@ -183,10 +349,10 @@ function ProviderEditor({ t, provider, requiredKey, onClose, onSaved }) {
       const stored = await storeProviderCredential({
         apiKey: apiKey.trim() || undefined,
         provider: provider.id,
-        baseUrl: baseUrl.trim() || undefined,
-        displayName: displayName.trim() || undefined,
-        protocol,
-        models: payloadModels(),
+        baseUrl: (!provider.catalog || catalogEndpointOverride) ? (baseUrl.trim() || undefined) : undefined,
+        displayName: provider.catalog ? undefined : (displayName.trim() || undefined),
+        protocol: provider.catalog ? undefined : protocol,
+        models: provider.catalog ? undefined : payloadModels(),
         retryPolicy: { maxRetries: Number(retryMax) || 5 },
         custom: !provider.catalog,
       });
@@ -244,7 +410,7 @@ function ProviderEditor({ t, provider, requiredKey, onClose, onSaved }) {
   };
 
   return (
-    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+    <Box sx={{ p: 2, borderRadius: 3, bgcolor: 'action.hover' }}>
       <Typography fontWeight={700} sx={{ mb: 0.25 }}>{provider.displayName}</Typography>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
         {provider.id} · {provider.protocol || 'openai-completions'}
@@ -260,29 +426,38 @@ function ProviderEditor({ t, provider, requiredKey, onClose, onSaved }) {
         autoFocus
         sx={{ mb: 1.5 }}
       />
-      <Button size="small" onClick={() => setCustomized((cur) => !cur)} endIcon={<ExpandMoreIcon />}>
-        {t.modelsCustomized}
-      </Button>
-      <Collapse in={customized}>
+      {provider.catalog && (
+        <CatalogModelBrowser models={catalogModels} loading={catalogLoading} t={t} />
+      )}
+      {(!provider.catalog || catalogEndpointOverride) && (
+        <Button size="small" onClick={() => setCustomized((cur) => !cur)} endIcon={<ExpandMoreIcon />}>
+          {t.modelsCustomized}
+        </Button>
+      )}
+      <Collapse in={customized && (!provider.catalog || catalogEndpointOverride)}>
         <Stack spacing={1.5} sx={{ mt: 1.5 }}>
-          <TextField
-            size="small"
-            label={t.modelsCustomDisplayName}
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-          />
-          <FormControl size="small">
-            <InputLabel>{t.modelsCustomApi}</InputLabel>
-            <Select
-              label={t.modelsCustomApi}
-              value={protocol}
-              onChange={(event) => setProtocol(event.target.value)}
-            >
-              {PROTOCOLS.map((id) => (
-                <MenuItem key={id} value={id}>{id}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          {!provider.catalog && (
+            <>
+              <TextField
+                size="small"
+                label={t.modelsCustomDisplayName}
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+              />
+              <FormControl size="small">
+                <InputLabel>{t.modelsCustomApi}</InputLabel>
+                <Select
+                  label={t.modelsCustomApi}
+                  value={protocol}
+                  onChange={(event) => setProtocol(event.target.value)}
+                >
+                  {PROTOCOLS.map((id) => (
+                    <MenuItem key={id} value={id}>{id}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </>
+          )}
           <TextField
             size="small"
             label={t.modelsBaseUrl}
@@ -297,14 +472,16 @@ function ProviderEditor({ t, provider, requiredKey, onClose, onSaved }) {
             value={retryMax}
             onChange={(event) => setRetryMax(event.target.value)}
           />
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Typography variant="subtitle2">{t.modelsModels}</Typography>
-            <Button size="small" onClick={fetchModels} disabled={busy}>
-              {busy ? t.modelsFetching : t.modelsFetchModels}
-            </Button>
-          </Stack>
-          {models.map((model, index) => (
-            <Box key={`${model.id}-${index}`} sx={{ p: 1.25, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
+          {!provider.catalog && (
+            <>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="subtitle2">{t.modelsModels}</Typography>
+                <Button size="small" onClick={fetchModels} disabled={busy}>
+                  {busy ? t.modelsFetching : t.modelsFetchModels}
+                </Button>
+              </Stack>
+              {models.map((model, index) => (
+                <Box key={`${model.id}-${index}`} sx={{ p: 1.25, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
                 <TextField
                   size="small"
@@ -390,11 +567,13 @@ function ProviderEditor({ t, provider, requiredKey, onClose, onSaved }) {
                   label={t.modelsReasoning}
                 />
               </Stack>
-            </Box>
-          ))}
-          <Button size="small" startIcon={<AddIcon />} onClick={() => setModels([...models, emptyModel()])}>
-            {t.modelsAddModel}
-          </Button>
+                </Box>
+              ))}
+              <Button size="small" startIcon={<AddIcon />} onClick={() => setModels([...models, emptyModel()])}>
+                {t.modelsAddModel}
+              </Button>
+            </>
+          )}
         </Stack>
       </Collapse>
       {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
@@ -447,19 +626,32 @@ export default function ModelsSettings({ onConfiguredChange }) {
   const [custom, setCustom] = useState(emptyCustom());
   const [message, setMessage] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [addedIds, setAddedIds] = useState([]);
 
   const onConfiguredChangeRef = useRef(onConfiguredChange);
   onConfiguredChangeRef.current = onConfiguredChange;
 
   const refresh = useCallback(async () => {
-    const status = await getCredentialStatus();
-    if (status.success !== false) {
+    setLoading(true);
+    try {
+      const status = await getCredentialStatus();
+      if (status.success === false) {
+        setMessage({ severity: 'error', text: status.error || t.modelsLoadFailed });
+        return;
+      }
+      if (!Array.isArray(status.directory)) {
+        setMessage({ severity: 'error', text: t.modelsLoadFailed });
+        return;
+      }
       setDirectory(status.directory || []);
       setSettings(status.settings || {});
+      setMessage((current) => (current?.severity === 'error' ? null : current));
       onConfiguredChangeRef.current?.(status);
-    } else {
-      setMessage({ severity: 'error', text: status.error || t.modelsLoadFailed });
+    } catch (error) {
+      setMessage({ severity: 'error', text: error?.message || t.modelsLoadFailed });
+    } finally {
+      setLoading(false);
     }
   }, [t.modelsLoadFailed]);
 
@@ -468,12 +660,13 @@ export default function ModelsSettings({ onConfiguredChange }) {
   const visible = useMemo(() => {
     const configured = new Set((directory || []).filter((item) => item.configured || item.custom).map((item) => item.id));
     return (directory || []).filter((item) => (
-      item.recommended
+      !item.authUnsupported && (
+        item.recommended
       || item.configured
       || item.custom
-      || item.authUnsupported
       || addedIds.includes(item.id)
       || configured.has(item.id)
+      )
     ));
   }, [directory, addedIds]);
   const unusedCatalog = (directory || []).filter((item) => (
@@ -586,44 +779,67 @@ export default function ModelsSettings({ onConfiguredChange }) {
     if (!items.length) return null;
     return (
       <Box sx={{ mb: 2 }}>
-        <Typography variant="overline" color="text.secondary">{title}</Typography>
-        <Stack spacing={1.25} sx={{ mt: 0.5 }}>
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>{title}</Typography>
+        <Stack spacing={1} sx={{ mt: 1 }}>
           {items.map((provider) => {
-            const chip = statusChip(t, provider);
             return (
               <Box
                 key={provider.id}
-                sx={{ border: '1px solid', borderColor: provider.recommended ? 'primary.main' : 'divider', borderRadius: 1, p: 1.5 }}
+                sx={{
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 3,
+                  px: 1.75,
+                  py: 1.5,
+                  transition: 'border-color 120ms ease, background-color 120ms ease',
+                  '&:hover': {
+                    borderColor: 'text.disabled',
+                    bgcolor: 'action.hover',
+                  },
+                }}
               >
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} justifyContent="space-between">
                   <Box>
                     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <Typography fontWeight={700}>{provider.displayName}</Typography>
-                      {provider.recommended && <Chip size="small" color="primary" label={t.integRecommended} />}
-                      {provider.custom && <Chip size="small" label={t.modelsCustomTag} />}
+                      <Box
+                        role="img"
+                        aria-label={provider.configured ? t.modelsCredentialConfigured : t.modelsCredentialMissing}
+                        title={provider.configured ? t.modelsCredentialConfigured : t.modelsCredentialMissing}
+                        sx={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          bgcolor: provider.configured ? 'success.main' : 'text.disabled',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <Typography fontWeight={600}>{provider.displayName}</Typography>
+                      {provider.recommended && <Chip size="small" variant="outlined" label={t.integRecommended} />}
+                      {provider.custom && <Chip size="small" variant="outlined" label={t.modelsCustomTag} />}
                     </Stack>
-                    <Typography variant="caption" color="text.secondary">{provider.id}</Typography>
-                    {provider.authUnsupported && (
-                      <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
-                        {provider.authHint || t.modelsAuthUnsupported}
+                    {(provider.custom || provider.configured) && (
+                      <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
+                        {provider.id}
                       </Typography>
                     )}
                   </Box>
                   <Stack direction="row" spacing={1} alignItems="center">
-                    <Chip size="small" icon={chip.icon} color={chip.color} label={chip.label} />
-                    {!provider.authUnsupported && (
-                      <Button size="small" onClick={() => setEditing(editing === provider.id ? null : provider.id)}>
-                        {t.modelsEdit}
-                      </Button>
-                    )}
-                    {provider.id !== 'deepseek' && !provider.authUnsupported && (
+                    <Button
+                      size="small"
+                      variant={provider.configured ? 'text' : 'outlined'}
+                      onClick={() => setEditing(editing === provider.id ? null : provider.id)}
+                      sx={{ borderRadius: 999, textTransform: 'none' }}
+                    >
+                      {t.modelsEdit}
+                    </Button>
+                    {provider.id !== 'deepseek' && (
                       <IconButton size="small" color="error" onClick={() => removeProvider(provider.id)} disabled={busy}>
                         <DeleteOutlineIcon fontSize="small" />
                       </IconButton>
                     )}
                   </Stack>
                 </Stack>
-                {editing === provider.id && !provider.authUnsupported && (
+                {editing === provider.id && (
                   <Box sx={{ mt: 1.5 }}>
                     <ProviderEditor
                       t={t}
@@ -649,69 +865,69 @@ export default function ModelsSettings({ onConfiguredChange }) {
 
   return (
     <Box>
-      <Typography variant="h6" sx={{ mb: 0.5 }}>{t.modelsTitle}</Typography>
+      <Typography variant="h6" sx={{ mb: 0.5, fontWeight: 600 }}>{t.modelsTitle}</Typography>
       <Typography color="text.secondary" sx={{ mb: 2 }}>{t.modelsIntro}</Typography>
 
       {message && (
-        <Alert severity={message.severity} onClose={() => setMessage(null)} sx={{ mb: 2 }}>
+        <Alert
+          severity={message.severity}
+          onClose={() => setMessage(null)}
+          action={message.severity === 'error' ? (
+            <Button color="inherit" size="small" onClick={refresh} disabled={loading}>
+              {t.modelsReload}
+            </Button>
+          ) : undefined}
+          sx={{ mb: 2 }}
+        >
           {message.text}
         </Alert>
       )}
 
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mb: 2.5 }}>
-        <FormControl size="small" fullWidth>
-          <InputLabel id="assistant-model-label" shrink>{t.integAssistantModel}</InputLabel>
-          <Select
-            labelId="assistant-model-label"
-            label={t.integAssistantModel}
-            notched
-            displayEmpty
-            value={configuredRoutes.some((route) => route.value === assistantValue) ? assistantValue : ''}
-            onChange={(event) => persistRoute('assistant', event.target.value)}
-            renderValue={(value) => {
-              const hit = configuredRoutes.find((route) => route.value === value);
-              return hit?.label || (configuredRoutes.length ? t.modelsSelectModel : t.modelsOnboardingTitle);
-            }}
-          >
-            <MenuItem value="" disabled>{configuredRoutes.length ? t.modelsSelectModel : t.modelsOnboardingTitle}</MenuItem>
-            {configuredRoutes.map((route) => (
-              <MenuItem key={route.value} value={route.value}>{route.label}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" fullWidth>
-          <InputLabel id="silicon-model-label" shrink>{t.integSiliconModel}</InputLabel>
-          <Select
-            labelId="silicon-model-label"
-            label={t.integSiliconModel}
-            notched
-            displayEmpty
-            value={visionRoutes.some((route) => route.value === siliconValue) ? siliconValue : ''}
-            onChange={(event) => persistRoute('silicon', event.target.value)}
-            renderValue={(value) => {
-              const hit = visionRoutes.find((route) => route.value === value);
-              return hit?.label || t.modelsSelectVision;
-            }}
-          >
-            <MenuItem value="" disabled>{t.modelsSelectVision}</MenuItem>
-            {visionRoutes.map((route) => (
-              <MenuItem key={route.value} value={route.value}>{route.label}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Stack>
+      {configuredRoutes.length > 0 && (
+        <Box sx={{ p: 1.5, mb: 2.5, borderRadius: 3, bgcolor: 'action.hover' }}>
+          <Typography variant="subtitle2" sx={{ mb: 1.25 }}>{t.modelsDefaults}</Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+            <RouteAutocomplete
+              label={t.integAssistantModel}
+              options={configuredRoutes}
+              value={assistantValue}
+              onChange={(value) => persistRoute('assistant', value)}
+              placeholder={t.modelsSelectModel}
+              t={t}
+            />
+            <RouteAutocomplete
+              label={t.integSiliconModel}
+              options={visionRoutes}
+              value={siliconValue}
+              onChange={(value) => persistRoute('silicon', value)}
+              placeholder={t.modelsSelectVision}
+              t={t}
+            />
+          </Stack>
+        </Box>
+      )}
 
       {renderGroup(t.modelsGroupRecommended, groups.recommended)}
       {renderGroup(t.modelsGroupConfigured, groups.configured)}
       {renderGroup(t.modelsGroupCatalog, groups.catalog)}
       {renderGroup(t.modelsGroupCustom, groups.custom)}
-      {renderGroup(t.modelsGroupUnsupported, groups.unsupported)}
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
-        <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setAddOpen(true)} disabled={!unusedCatalog.length}>
+        <Button
+          variant="outlined"
+          startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <AddIcon />}
+          onClick={() => setAddOpen(true)}
+          disabled={loading || !unusedCatalog.length}
+          sx={{ borderRadius: 999, textTransform: 'none' }}
+        >
           {t.modelsAdd}
         </Button>
-        <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setCustomOpen(true)}>
+        <Button
+          variant="outlined"
+          startIcon={<AddIcon />}
+          onClick={() => setCustomOpen(true)}
+          sx={{ borderRadius: 999, textTransform: 'none' }}
+        >
           {t.modelsCustomAdd}
         </Button>
       </Stack>
@@ -728,8 +944,9 @@ export default function ModelsSettings({ onConfiguredChange }) {
         <DialogTitle>{t.modelsAdd}</DialogTitle>
         <DialogContent sx={{ pt: 1, minWidth: 320 }}>
           <FormControl fullWidth size="small" sx={{ mt: 1 }}>
-            <InputLabel>{t.modelsProvider}</InputLabel>
+            <InputLabel id="add-provider-label">{t.modelsProvider}</InputLabel>
             <Select
+              labelId="add-provider-label"
               label={t.modelsProvider}
               value={unusedCatalog.some((item) => item.id === addProvider) ? addProvider : (unusedCatalog[0]?.id || '')}
               onChange={(event) => setAddProvider(event.target.value)}

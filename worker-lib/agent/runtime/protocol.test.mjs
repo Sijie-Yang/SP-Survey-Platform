@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { applyReasoning, mergeCompat, setMaxTokens, systemRole } from './compat.mjs';
 import { classifyHttpError, retryDelayMs, withRetry } from './retry.mjs';
-import { assertSafeBaseUrl } from './ssrf.mjs';
+import { assertProviderResponseNotRedirect, assertSafeBaseUrl } from './ssrf.mjs';
 import { toOpenAiTools } from './adapters.mjs';
 
 describe('protocol compat and retry', () => {
@@ -51,6 +51,16 @@ describe('protocol compat and retry', () => {
     assert.throws(() => assertSafeBaseUrl('https://10.0.0.8/v1'), /Private/);
     assert.throws(() => assertSafeBaseUrl('https://100.64.0.1/v1'), /Private/);
     assert.equal(assertSafeBaseUrl('https://api.deepseek.com/v1'), 'https://api.deepseek.com/v1');
+  });
+
+  it('blocks manual provider redirects at the edge', () => {
+    assert.throws(
+      () => assertProviderResponseNotRedirect(new Response(null, { status: 302 })),
+      (error) => error.code === 'PROVIDER_REDIRECT_BLOCKED',
+    );
+    assert.doesNotThrow(
+      () => assertProviderResponseNotRedirect(new Response('{}', { status: 200 })),
+    );
   });
 
   it('converts tool defs to OpenAI function tools', () => {

@@ -1349,6 +1349,7 @@ export default function ProjectSidebar({
                               </Typography>
                             </Box>
                           }
+                          secondaryTypographyProps={{ component: 'div' }}
                           sx={{ my: 0 }}
                         />
                         <Box sx={{ display: 'flex', gap: 0.25, ml: 'auto' }}>

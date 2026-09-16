@@ -1,5 +1,10 @@
 import { authUnsupported, isProviderId, PROTOCOLS } from './catalog.mjs';
-import { effortOptions, modelAcceptsImage, resolveModel, resolveProvider } from './registry.mjs';
+import {
+  modelAcceptsImage,
+  resolveModel,
+  resolveModelRoute,
+  resolveProvider,
+} from './registry.mjs';
 import { assertSafeBaseUrl } from './ssrf.mjs';
 
 export function assertProviderId(id) {
@@ -32,7 +37,6 @@ export function assertRoute({
   model,
   profile,
   requireVision = false,
-  effort,
   requireConfigured = false,
   credential,
 } = {}) {
@@ -45,17 +49,18 @@ export function assertRoute({
     });
   }
   const resolved = resolveProvider(provider, profile);
-  if (!resolved.baseUrl && !resolved.defaultBaseUrl) {
-    throw Object.assign(new Error('Provider endpoint is not configured.'), {
-      status: 400,
-      code: 'UNKNOWN_MODEL',
-    });
-  }
   const record = resolveModel(provider, model, profile);
   if (!record?.id) {
     throw Object.assign(new Error('Select a configured model.'), {
       status: 400,
       code: 'UNKNOWN_MODEL',
+    });
+  }
+  const route = resolveModelRoute(provider, model, profile);
+  if (!route?.supported) {
+    throw Object.assign(new Error('This model protocol or endpoint is not available in the Web runtime.'), {
+      status: 400,
+      code: 'PROTOCOL_UNSUPPORTED',
     });
   }
   if (requireVision && !modelAcceptsImage(provider, model, profile)) {
@@ -64,19 +69,10 @@ export function assertRoute({
       code: 'VISION_MODEL_REQUIRED',
     });
   }
-  if (effort && effort !== 'off') {
-    const allowed = effortOptions(provider, model, profile);
-    if (allowed.length && !allowed.includes(effort)) {
-      throw Object.assign(new Error(`Unsupported reasoning effort: ${effort}`), {
-        status: 400,
-        code: 'UNSUPPORTED_REASONING_EFFORT',
-      });
-    }
-  }
   if (resolved.custom || !resolved.catalog) {
     if (profile?.base_url || profile?.baseUrl) assertSafeBaseUrl(profile.base_url || profile.baseUrl);
   }
-  return { provider: resolved, model: record };
+  return { provider: resolved, model: record, route };
 }
 
 export function assertCustomProviderDraft(draft) {

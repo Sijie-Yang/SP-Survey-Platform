@@ -1,7 +1,7 @@
 import { supabaseRest } from '../supabaseUserClient.mjs';
 import { chatCompletions, assertVisionModel } from '../agent/runtime/providers.mjs';
 import { listProviderProfiles, loadProviderCredential } from '../agent/credentials.mjs';
-import { resolveModel, resolveProvider } from '../agent/runtime/registry.mjs';
+import { resolveModel, resolveModelRoute, resolveProvider } from '../agent/runtime/registry.mjs';
 import { assignMediaForSurvey } from './mediaAssign.mjs';
 import { classifyQuestion, collectQuestions, validateSiliconAnswer } from './answerValidate.mjs';
 
@@ -241,13 +241,24 @@ Choices: ${JSON.stringify(question.choices || question.rateValues || null)}`,
   const profile = run._profile || {};
   const resolved = resolveProvider(run.provider, profile);
   const modelRecord = resolveModel(run.provider, run.model, profile);
+  const route = resolveModelRoute(run.provider, run.model, profile);
+  if (!route?.supported) {
+    throw Object.assign(new Error('This model is not available in the Web runtime.'), {
+      status: 400,
+      code: 'PROTOCOL_UNSUPPORTED',
+    });
+  }
   const result = await chatCompletions({
     apiKey: cred.apiKey,
     provider: cred.provider,
-    baseUrl: cred.baseUrl || resolved.baseUrl,
+    baseUrl: route.baseUrl,
     model: run.model,
-    protocol: resolved.protocol,
-    compat: { ...resolved.compat, ...(modelRecord?.compat || {}) },
+    modelRecord,
+    protocol: route.protocol,
+    compat: resolved.catalog
+      ? (modelRecord?.compat || {})
+      : { ...resolved.compat, ...(modelRecord?.compat || {}) },
+    extra: route.headers,
     retryPolicy: resolved.retryPolicy,
     effort: run.reasoning_effort,
     efforts: modelRecord?.reasoningEfforts || false,

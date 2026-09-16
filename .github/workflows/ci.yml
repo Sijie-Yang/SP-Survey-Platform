@@ -19,6 +19,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify pinned Harness model catalog
+        run: npm run catalog:check
+
+      - name: Verify generated platform schema
+        run: npm run schema:check
+
       - name: Unit/integration tests
         run: npm run test:ci
 

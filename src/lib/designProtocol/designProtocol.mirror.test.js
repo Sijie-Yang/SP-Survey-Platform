@@ -29,16 +29,17 @@ function extractQuotedArray(source, marker) {
   }
   if (end < 0) throw new Error(`Array end not found after ${marker}`);
   const body = source.slice(start, end + 1);
-  return [...body.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  return [...body.matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
 }
 
 describe('designProtocol browser ↔ worker mirror', () => {
   const workerDesign = readWorker('worker-lib/designProtocol.mjs');
+  const workerSchema = readWorker('worker-lib/platformSchema.generated.mjs');
   const workerSkillTypes = readWorker('worker-lib/agent/skillResultTypes.mjs');
 
   test('questionTypes sets match', () => {
     const browserTypes = [...DESIGN_CAPABILITIES.questionTypes].sort();
-    const workerTypes = extractQuotedArray(workerDesign, 'questionTypes:').sort();
+    const workerTypes = extractQuotedArray(workerSchema, 'export const QUESTION_TYPE_IDS =').sort();
     expect(workerTypes).toEqual(browserTypes);
   });
 

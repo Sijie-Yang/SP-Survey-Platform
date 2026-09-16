@@ -3,6 +3,7 @@
  * Tools call Agent project handlers — never nested LLM orchestration.
  */
 
+import { OPERATION_ITEM_SCHEMA } from '../platformSchema.generated.mjs';
 import {
   acquireLease,
   applyProjectOperations,
@@ -499,7 +500,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         projectId: { type: 'string' },
-        operations: { type: 'array' },
+        operations: { type: 'array', items: OPERATION_ITEM_SCHEMA },
         expectedDraftUpdatedAt: { type: 'string', description: 'Required optimistic concurrency token from survey_get_draft.draftUpdatedAt' },
         clientMutationId: { type: 'string' },
       },

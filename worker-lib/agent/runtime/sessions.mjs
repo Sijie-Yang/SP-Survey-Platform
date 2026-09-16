@@ -1,5 +1,5 @@
-import { supabaseRest } from '../../supabaseUserClient.mjs';
-import { RUNTIME_VERSION } from './events.mjs';
+import { rpc, supabaseRest } from '../../supabaseUserClient.mjs';
+import { eventsToModelMessages, RUNTIME_VERSION } from './events.mjs';
 
 export function nextSessionSelection(session, requested = {}) {
   const incoming = {
@@ -40,7 +40,16 @@ export function nextSessionSelection(session, requested = {}) {
   return { ...current, pin: false, changed: false, reason: 'pinned' };
 }
 
-export async function createSession(env, { userId, projectId, mode = 'designer', title, provider, model, reasoningEffort }) {
+export async function createSession(env, {
+  userId,
+  projectId,
+  mode = 'designer',
+  assistantMode = 'agent',
+  title,
+  provider,
+  model,
+  reasoningEffort,
+}) {
   const now = new Date().toISOString();
   const body = {
     user_id: userId,
@@ -52,6 +61,7 @@ export async function createSession(env, { userId, projectId, mode = 'designer',
     model: model || null,
     created_at: now,
     updated_at: now,
+    assistant_mode: assistantMode,
   };
   if (reasoningEffort != null) body.reasoning_effort = reasoningEffort;
   try {
@@ -65,6 +75,7 @@ export async function createSession(env, { userId, projectId, mode = 'designer',
     return Array.isArray(rows) ? rows[0] : rows;
   } catch {
     delete body.reasoning_effort;
+    delete body.assistant_mode;
     const rows = await supabaseRest(env, {
       path: '/rest/v1/ai_sessions',
       method: 'POST',
@@ -109,6 +120,24 @@ export async function updateSessionSelection(env, sessionId, { provider, model, 
   }
 }
 
+export async function updateSessionAssistantMode(env, sessionId, assistantMode) {
+  try {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_sessions',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(sessionId)}`,
+      body: {
+        assistant_mode: assistantMode,
+        updated_at: new Date().toISOString(),
+      },
+      prefer: 'return=minimal',
+    });
+  } catch {
+    // Older schemas derive the current mode from append-only events.
+  }
+}
+
 export async function listSessions(env, userId, { projectId, mode } = {}) {
   const build = (select) => {
     let query = `?user_id=eq.${encodeURIComponent(userId)}&status=eq.active&select=${select}&order=updated_at.desc&limit=40`;
@@ -120,7 +149,7 @@ export async function listSessions(env, userId, { projectId, mode } = {}) {
     const rows = await supabaseRest(env, {
       path: '/rest/v1/ai_sessions',
       serviceRole: true,
-      query: build('id,project_id,mode,title,provider,model,reasoning_effort,selection_locked,updated_at,created_at'),
+      query: build('id,project_id,mode,assistant_mode,title,provider,model,reasoning_effort,selection_locked,updated_at,created_at'),
     });
     return Array.isArray(rows) ? rows : [];
   } catch {
@@ -175,6 +204,32 @@ export async function listEvents(env, sessionId) {
   return Array.isArray(rows) ? rows : [];
 }
 
+export async function listEventsAfter(env, sessionId, after = 0, limit = 500) {
+  const safeAfter = Math.max(0, Number(after) || 0);
+  const safeLimit = Math.max(1, Math.min(1000, Number(limit) || 500));
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_session_events',
+    serviceRole: true,
+    query: `?session_id=eq.${encodeURIComponent(sessionId)}`
+      + `&seq=gt.${safeAfter}`
+      + '&select=seq,type,payload,run_id,created_at'
+      + `&order=seq.asc&limit=${safeLimit}`,
+  });
+  return Array.isArray(rows) ? rows : [];
+}
+
+/**
+ * The append-only event stream is authoritative. This projection is used by
+ * resumed/background runs instead of a separately maintained chat history.
+ */
+export function deriveModelHistory(events, options) {
+  return eventsToModelMessages(events, options);
+}
+
+export async function loadModelHistory(env, sessionId, options) {
+  return deriveModelHistory(await listEvents(env, sessionId), options);
+}
+
 export async function nextSeq(env, sessionId) {
   const rows = await supabaseRest(env, {
     path: '/rest/v1/ai_session_events',
@@ -186,6 +241,19 @@ export async function nextSeq(env, sessionId) {
 }
 
 export async function appendEvent(env, { sessionId, runId, type, payload }) {
+  try {
+    return await rpc(env, 'append_ai_session_event', {
+      p_session_id: sessionId,
+      p_run_id: runId || null,
+      p_type: type,
+      p_payload: payload || {},
+    }, null, { serviceRole: true });
+  } catch (error) {
+    // Backward-compatible until the additive ai_runtime.sql migration is run.
+    if (!/function|schema cache|append_ai_session_event/i.test(String(error?.message || ''))) {
+      throw error;
+    }
+  }
   const seq = await nextSeq(env, sessionId);
   await supabaseRest(env, {
     path: '/rest/v1/ai_session_events',
@@ -211,49 +279,251 @@ export async function appendEvent(env, { sessionId, runId, type, payload }) {
   return seq;
 }
 
-export async function createRun(env, { sessionId, userId, projectId, provider, model }) {
-  const rows = await supabaseRest(env, {
-    path: '/rest/v1/ai_runs',
-    method: 'POST',
-    serviceRole: true,
-    body: {
-      session_id: sessionId,
-      user_id: userId,
-      project_id: projectId || null,
-      status: 'running',
-      provider,
-      model,
-      started_at: new Date().toISOString(),
-    },
-    prefer: 'return=representation',
-  });
-  return Array.isArray(rows) ? rows[0] : rows;
+export async function createRun(env, {
+  sessionId,
+  userId,
+  projectId,
+  provider,
+  model,
+  status = 'running',
+  assistantMode = 'agent',
+  requestPayload = {},
+}) {
+  const body = {
+    session_id: sessionId,
+    user_id: userId,
+    project_id: projectId || null,
+    status,
+    provider,
+    model,
+    started_at: status === 'running' ? new Date().toISOString() : null,
+    assistant_mode: assistantMode,
+    request_payload: requestPayload,
+    updated_at: new Date().toISOString(),
+  };
+  try {
+    const rows = await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'POST',
+      serviceRole: true,
+      body,
+      prefer: 'return=representation',
+    });
+    return Array.isArray(rows) ? rows[0] : rows;
+  } catch {
+    delete body.assistant_mode;
+    delete body.request_payload;
+    delete body.updated_at;
+    body.status = status === 'queued' ? 'queued' : 'running';
+    if (body.status === 'running' && !body.started_at) body.started_at = new Date().toISOString();
+    const rows = await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'POST',
+      serviceRole: true,
+      body,
+      prefer: 'return=representation',
+    });
+    return Array.isArray(rows) ? rows[0] : rows;
+  }
 }
 
 export async function finishRun(env, runId, patch) {
+  const body = {
+    ...patch,
+    updated_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+  };
+  try {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(runId)}`,
+      body,
+      prefer: 'return=minimal',
+    });
+  } catch {
+    delete body.updated_at;
+    delete body.result;
+    delete body.checkpoint;
+    delete body.approval_request;
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(runId)}`,
+      body,
+      prefer: 'return=minimal',
+    });
+  }
+}
+
+export async function markRunRunning(env, runId) {
+  const now = new Date().toISOString();
+  try {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(runId)}&status=in.(queued,running)`,
+      body: { status: 'running', started_at: now, updated_at: now },
+      prefer: 'return=minimal',
+    });
+  } catch {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(runId)}&status=in.(queued,running)`,
+      body: { status: 'running', started_at: now },
+      prefer: 'return=minimal',
+    });
+  }
+}
+
+export async function getRunStatus(env, runId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_runs',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(runId)}&select=*&limit=1`,
+  });
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+export async function isRunCancellationRequested(env, runId) {
+  const run = await getRunStatus(env, runId);
+  return run?.status === 'cancelled' || run?.cancel_requested === true;
+}
+
+/**
+ * Cheap cooperative cancellation probe for the model/tool loop. The returned
+ * callback is intentionally compatible with runToolLoop({ checkCancelled }).
+ */
+export function createRunCancellationCheck(env, runId, {
+  signal,
+  cacheMs = 250,
+  now = () => Date.now(),
+} = {}) {
+  let checkedAt = Number.NEGATIVE_INFINITY;
+  let cancelled = false;
+  return async () => {
+    if (signal?.aborted || cancelled) return true;
+    const current = now();
+    if (current - checkedAt < cacheMs) return false;
+    checkedAt = current;
+    cancelled = await isRunCancellationRequested(env, runId);
+    return cancelled || Boolean(signal?.aborted);
+  };
+}
+
+export async function cancelRun(env, userId, runId) {
+  const query = `?id=eq.${encodeURIComponent(runId)}&user_id=eq.${encodeURIComponent(userId)}`;
+  try {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'PATCH',
+      serviceRole: true,
+      query,
+      body: {
+        status: 'cancelled',
+        cancel_requested: true,
+        updated_at: new Date().toISOString(),
+        finished_at: new Date().toISOString(),
+      },
+      prefer: 'return=minimal',
+    });
+  } catch {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      method: 'PATCH',
+      serviceRole: true,
+      query,
+      body: { status: 'cancelled', finished_at: new Date().toISOString() },
+      prefer: 'return=minimal',
+    });
+  }
+  return { success: true };
+}
+
+export async function getOwnedRun(env, userId, runId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_runs',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(runId)}`
+      + `&user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`,
+  });
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+export async function listSessionRuns(env, userId, sessionId, limit = 20) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_runs',
+    serviceRole: true,
+    query: `?session_id=eq.${encodeURIComponent(sessionId)}`
+      + `&user_id=eq.${encodeURIComponent(userId)}`
+      + `&select=*&order=created_at.desc&limit=${Math.max(1, Math.min(100, Number(limit) || 20))}`,
+  });
+  return Array.isArray(rows) ? rows : [];
+}
+
+export async function updateRunCheckpoint(env, runId, checkpoint, status = 'running') {
   await supabaseRest(env, {
     path: '/rest/v1/ai_runs',
     method: 'PATCH',
     serviceRole: true,
     query: `?id=eq.${encodeURIComponent(runId)}`,
     body: {
-      ...patch,
-      finished_at: new Date().toISOString(),
+      checkpoint: checkpoint || {},
+      status,
+      updated_at: new Date().toISOString(),
     },
     prefer: 'return=minimal',
   });
 }
 
-export async function cancelRun(env, userId, runId) {
-  await supabaseRest(env, {
-    path: '/rest/v1/ai_runs',
-    method: 'PATCH',
+export async function enqueueSessionInput(env, {
+  sessionId,
+  userId,
+  content,
+  kind = 'followup',
+  target = 'next-step',
+}) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    method: 'POST',
     serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(runId)}&user_id=eq.${encodeURIComponent(userId)}`,
-    body: { status: 'cancelled', finished_at: new Date().toISOString() },
-    prefer: 'return=minimal',
+    body: {
+      session_id: sessionId,
+      user_id: userId,
+      content: String(content || '').slice(0, 12000),
+      kind,
+      target,
+      status: 'queued',
+    },
+    prefer: 'return=representation',
   });
-  return { success: true };
+  return Array.isArray(rows) ? rows[0] : rows;
+}
+
+export async function claimSessionInput(env, sessionId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_agent_inbox',
+    serviceRole: true,
+    query: `?session_id=eq.${encodeURIComponent(sessionId)}`
+      + '&status=eq.queued&select=*&order=created_at.asc&limit=20',
+  });
+  const items = Array.isArray(rows) ? rows : [];
+  if (items.length) {
+    await supabaseRest(env, {
+      path: '/rest/v1/ai_agent_inbox',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=in.(${items.map((item) => item.id).join(',')})`,
+      body: { status: 'claimed', claimed_at: new Date().toISOString() },
+      prefer: 'return=minimal',
+    });
+  }
+  return items;
 }
 
 export { RUNTIME_VERSION };

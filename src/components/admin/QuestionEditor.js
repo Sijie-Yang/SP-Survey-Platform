@@ -67,6 +67,10 @@ import {
   supportsTrialCount,
 } from '../../lib/questionTypeConstraints';
 import { clampTrialCount, TRIAL_COUNT_MAX } from '../../lib/trialNavigation';
+import {
+  getQuestionTypeDefinition,
+  QUESTION_TYPE_IDS,
+} from '../../lib/platformSchema';
 import MediaPairingGuide from './MediaPairingGuide';
 import MediaCategoryGuide from './MediaCategoryGuide';
 import QuestionParticipantPreview from './QuestionParticipantPreview';
@@ -83,6 +87,16 @@ const CURATED_STIMULUS_TYPES = [
   'image', 'imageslidergroup', 'imagepointallocation',
   ...MEDIA_STAR_EDITOR_TYPES, 'imageannotation',
 ];
+
+function annotationLabelText(label) {
+  if (typeof label === 'string' || typeof label === 'number') return String(label).trim();
+  if (label && typeof label === 'object') return String(label.text ?? label.label ?? label.value ?? '').trim();
+  return '';
+}
+
+function formatAnnotationLabels(labels) {
+  return (Array.isArray(labels) ? labels : []).map(annotationLabelText).filter(Boolean).join(', ');
+}
 
 function SettingsSection({ step, title, hint, children }) {
   return (
@@ -574,7 +588,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const [newChoice, setNewChoice] = useState('');
   // Draft string so trailing commas stay while typing (array join would strip them).
   const [annotationLabelsText, setAnnotationLabelsText] = useState(
-    () => (initialQuestion.annotationLabels || []).join(', '),
+    () => formatAnnotationLabels(initialQuestion.annotationLabels),
   );
   
   // Image selection states
@@ -585,7 +599,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
   const [builderSkills, setBuilderSkills] = useState([]);
   const initialSnapshot = useRef(JSON.stringify(initialQuestion));
   const dirty = JSON.stringify(editedQuestion) !== initialSnapshot.current || !!newChoice.trim()
-    || annotationLabelsText !== (initialQuestion.annotationLabels || []).join(', ');
+    || annotationLabelsText !== formatAnnotationLabels(initialQuestion.annotationLabels);
   const guard = useUnsavedChanges(dirty);
   const { language } = useRegion();
   const zh = language === 'zh';
@@ -611,7 +625,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
   useEffect(() => {
     if (editedQuestion.type === 'imageannotation') {
-      setAnnotationLabelsText((editedQuestion.annotationLabels || []).join(', '));
+      setAnnotationLabelsText(formatAnnotationLabels(editedQuestion.annotationLabels));
     }
   }, [editedQuestion.type]);
 
@@ -673,7 +687,7 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
       group: 'advanced',
     },
     ...libraryTypeOptions,
-  ];
+  ].filter(({ value }) => QUESTION_TYPE_IDS.includes(value) || String(value).startsWith('skill:'));
 
   const taskFamily = (type) => {
     if (/ranking/.test(type) || type === 'ranking') return 'ranking';
@@ -734,6 +748,14 @@ export default function QuestionEditor({ question, onSave, onCancel, images, cur
 
     // Set default properties when question type changes to image type
     if (field === 'type') {
+      const schemaDefinition = getQuestionTypeDefinition(value);
+      if (schemaDefinition?.defaults) {
+        Object.assign(
+          updates,
+          JSON.parse(JSON.stringify(schemaDefinition.defaults)),
+          { type: value },
+        );
+      }
       if (String(value).startsWith('skill:')) {
         const skillId = String(value).slice(6);
         const skill = resolveBuilderSkill(skillId, builderSkills);

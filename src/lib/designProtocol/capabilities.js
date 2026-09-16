@@ -2,6 +2,12 @@
  * Survey design capabilities / rules exposed to Codex via MCP.
  */
 
+import {
+  OPERATION_TYPES,
+  PLATFORM_SCHEMA_HASH,
+  QUESTION_TYPE_IDS,
+} from '../platformSchema';
+
 export const AGENT_SCOPES = {
   READ: 'surveys:read',
   WRITE_DRAFT: 'surveys:write',
@@ -21,16 +27,8 @@ const MEDIA_SAMPLING = {
 export const DESIGN_CAPABILITIES = {
   name: 'SP-Survey Design Protocol',
   version: '1.1.0',
-  questionTypes: [
-    'text', 'comment', 'number', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
-    'matrix', 'ranking', 'slidergroup', 'pointallocation', 'consent',
-    'expression',
-    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
-    'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
-    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
-    'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-    'skillquestion',
-  ],
+  platformSchemaHash: PLATFORM_SCHEMA_HASH,
+  questionTypes: QUESTION_TYPE_IDS,
   rules: [
     'Question names must be unique across the survey.',
     'Binary imagepicker/mediapicker and the built-in Forced-Choice A/B task support allowTie (default false) and tieLabel (empty follows survey language). Requires two options and single selection. No preference is stored separately; TrueSkill uses decisive outcomes only.',
@@ -317,10 +315,7 @@ export const DESIGN_CAPABILITIES = {
       ...MEDIA_SAMPLING,
     },
   },
-  operations: [
-    'addPage', 'removePage', 'addQuestion', 'updateQuestion', 'removeQuestion',
-    'setAllRatingScales', 'replaceConfig',
-  ],
+  operations: OPERATION_TYPES,
   scopes: Object.values(AGENT_SCOPES),
 };
 

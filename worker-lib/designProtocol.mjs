@@ -5,6 +5,12 @@
  */
 
 import { ANNOTATION_TOOLS, normalizeAllowedTools } from './annotationTools.mjs';
+import {
+  OPERATION_TYPES,
+  PLATFORM_SCHEMA,
+  PLATFORM_SCHEMA_HASH,
+  QUESTION_TYPE_IDS,
+} from './platformSchema.generated.mjs';
 
 const SECRET_FIELDS = new Set([
   'supabaseconfig', 'supabasekey', 'supabaseanonkey', 'servicerolekey', 'anonkey',
@@ -53,12 +59,8 @@ export const restoreStoredSecrets = (incoming, stored) => {
   return restored;
 };
 
-const IMAGE_TYPES = new Set([
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'imagematrix', 'image',
-  'imageannotation', 'skillquestion', 'imageslidergroup', 'imagepointallocation',
-  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
-  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-]);
+const isKnownQuestionType = (type) => Object.prototype.hasOwnProperty.call(PLATFORM_SCHEMA.questionTypes, type);
+const questionHasTrait = (type, trait) => PLATFORM_SCHEMA.questionTypes[type]?.traits?.includes(trait) || false;
 
 const MEDIA_STIMULUS_TYPES = [
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image',
@@ -72,6 +74,18 @@ const MEDIA_STAR_TYPES = [
   'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
 ];
+
+function structuredIssue(issue, severity = 'error') {
+  return {
+    code: issue.code || (severity === 'error' ? 'INVALID_SURVEY_FIELD' : 'SURVEY_WARNING'),
+    path: issue.path || 'surveyConfig',
+    message: issue.message || 'Invalid survey configuration.',
+    retryable: severity === 'error',
+    hint: issue.hint || (severity === 'error'
+      ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
+      : 'Review this warning before publishing.'),
+  };
+}
 
 /** Native settings shared by the Builder and Agent API. Undefined means use the native default. */
 export function validateQuestionSettings(q) {
@@ -92,6 +106,17 @@ export function validateQuestionSettings(q) {
   bounds({ ...q, maxAnnotations: q.maxAnnotations === 0 ? undefined : (q.maxAnnotations ?? 50) }, 'minAnnotations', 'maxAnnotations');
   for (const key of ['minAnnotations', 'maxAnnotations', 'minSelectedChoices', 'maxSelectedChoices']) {
     if (q[key] != null && (!Number.isInteger(q[key]) || q[key] < 0)) add(key, `${key} must be a non-negative integer.`);
+  }
+  if (q.annotationLabels != null) {
+    if (!Array.isArray(q.annotationLabels)) {
+      add('annotationLabels', 'annotationLabels must be an array of strings.');
+    } else {
+      q.annotationLabels.forEach((label, i) => {
+        if (typeof label !== 'string' || !label.trim()) {
+          add(`annotationLabels[${i}]`, `annotationLabels[${i}] must be a non-empty string.`);
+        }
+      });
+    }
   }
   if (['slidergroup', 'imageslidergroup', 'mediaslidergroup'].includes(q.type)
     && (q.scaleMin ?? 1) >= (q.scaleMax ?? 7)) add('scaleMin', 'Scale minimum must be less than its maximum.');
@@ -128,7 +153,7 @@ export function validateSurveyConfig(surveyConfig) {
   if (!surveyConfig || typeof surveyConfig !== 'object' || Array.isArray(surveyConfig)) {
     return {
       valid: false,
-      errors: [{ path: 'surveyConfig', message: 'surveyConfig must be an object.' }],
+      errors: [structuredIssue({ path: 'surveyConfig', message: 'surveyConfig must be an object.' })],
       warnings,
       pageCount: 0,
       questionCount,
@@ -164,6 +189,12 @@ export function validateSurveyConfig(surveyConfig) {
           return;
         }
         if (!element.type) errors.push({ path: `${elementPath}.type`, message: 'Question type is required.' });
+        else if (!isKnownQuestionType(element.type)) {
+          warnings.push({
+            path: `${elementPath}.type`,
+            message: `Question type "${element.type}" is not in the canonical platform schema.`,
+          });
+        }
         if (!element.name) {
           errors.push({ path: `${elementPath}.name`, message: 'Question name is required.' });
         } else if (names.has(element.name)) {
@@ -179,7 +210,7 @@ export function validateSurveyConfig(surveyConfig) {
           path: `${elementPath}.${error.path}`, message: `${element.name || 'Question'}: ${error.message}`,
         }));
 
-        if (IMAGE_TYPES.has(element.type) && element.type !== 'skillquestion') {
+        if (questionHasTrait(element.type, 'stimulus') && element.type !== 'skillquestion') {
           const hasManual = element.selectedImageUrls?.length
             || element.choices?.length
             || element.imageLinks?.length
@@ -194,7 +225,7 @@ export function validateSurveyConfig(surveyConfig) {
           }
         }
         if (
-          (element.type === 'slidergroup' || element.type === 'imageslidergroup' || element.type === 'mediaslidergroup')
+          questionHasTrait(element.type, 'slider')
           && !element.dimensions?.length
         ) {
           warnings.push({
@@ -203,9 +234,7 @@ export function validateSurveyConfig(surveyConfig) {
           });
         }
         if (
-          (element.type === 'pointallocation'
-            || element.type === 'imagepointallocation'
-            || element.type === 'mediapointallocation')
+          questionHasTrait(element.type, 'allocation')
           && !element.choices?.length
         ) {
           warnings.push({
@@ -219,8 +248,8 @@ export function validateSurveyConfig(surveyConfig) {
 
   return {
     valid: errors.length === 0,
-    errors,
-    warnings,
+    errors: errors.map((issue) => structuredIssue(issue)),
+    warnings: warnings.map((issue) => structuredIssue(issue, 'warning')),
     pageCount: Array.isArray(surveyConfig.pages) ? surveyConfig.pages.length : 0,
     questionCount,
   };
@@ -262,6 +291,15 @@ export function postProcessAiConfig(surveyConfig) {
       }
       if (element.type === 'imageannotation') {
         element.allowedTools = normalizeAllowedTools(element.allowedTools, ANNOTATION_TOOLS);
+        element.annotationLabels = (Array.isArray(element.annotationLabels) ? element.annotationLabels : [])
+          .map((label) => {
+            if (typeof label === 'string' || typeof label === 'number') return String(label).trim();
+            if (label && typeof label === 'object') {
+              return String(label.text ?? label.label ?? label.value ?? '').trim();
+            }
+            return '';
+          })
+          .filter(Boolean);
       }
       if (MEDIA_STAR_TYPES.includes(element.type)) {
         if (!element.mediaType) element.mediaType = 'any';
@@ -421,15 +459,10 @@ export function applyOperations(surveyConfig, operations = []) {
 }
 
 export function createDefaultSurveyConfig(name, description = '') {
-  return {
-    title: name,
-    description: description || 'This survey helps us understand user preferences and opinions.',
-    pages: [{ name: 'page1', title: 'Survey Questions', elements: [] }],
-    showQuestionNumbers: 'off',
-    showProgressBar: 'top',
-    locale: 'en',
-    completedHtml: '<h3>Thank you for completing the survey.</h3>',
-  };
+  const defaults = JSON.parse(JSON.stringify(PLATFORM_SCHEMA.defaultSurveyConfig));
+  defaults.title = name;
+  if (description) defaults.description = description;
+  return defaults;
 }
 
 export function buildProjectUrls(projectId, clientOrigin) {
@@ -456,16 +489,8 @@ const MEDIA_SAMPLING = {
 export const DESIGN_CAPABILITIES = {
   name: 'SP-Survey Design Protocol',
   version: '1.1.0',
-  questionTypes: [
-    'text', 'comment', 'number', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
-    'matrix', 'ranking', 'slidergroup', 'pointallocation', 'consent',
-    'expression',
-    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
-    'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
-    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
-    'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-    'skillquestion',
-  ],
+  platformSchemaHash: PLATFORM_SCHEMA_HASH,
+  questionTypes: QUESTION_TYPE_IDS,
   rules: [
     'Question names must be unique across the survey.',
     'Binary imagepicker/mediapicker and the built-in Forced-Choice A/B task support allowTie (default false) and tieLabel (empty follows survey language). Requires two options and single selection. No preference is stored separately; TrueSkill uses decisive outcomes only.',
@@ -616,9 +641,6 @@ export const DESIGN_CAPABILITIES = {
       imageCount: 2, ...MEDIA_SAMPLING,
     },
   },
-  operations: [
-    'addPage', 'removePage', 'addQuestion', 'updateQuestion', 'removeQuestion',
-    'setAllRatingScales', 'replaceConfig',
-  ],
+  operations: OPERATION_TYPES,
   scopes: ['surveys:read', 'surveys:write', 'surveys:publish', 'media:write', 'results:read'],
 };

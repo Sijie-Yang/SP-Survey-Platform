@@ -39,10 +39,15 @@
     "APP_URL": "https://sp-survey.org",
     "MCP_RESOURCE": "https://sp-survey.org/mcp",
     "SUPABASE_URL": "https://wskhzjfrhjueiqauhpmb.supabase.co"
+  },
+  "queues": {
+    "producers": [
+      { "binding": "AGENT_QUEUE", "queue": "sp-agent-runs" }
+    ],
+    "consumers": [
+      { "queue": "sp-agent-runs", "max_batch_size": 1, "max_retries": 5 }
+    ]
   }
-  // Optional SP-Bench Queue (uncomment after: wrangler queues create sp-bench-jobs)
-  // "queues": {
-  //   "producers": [{ "binding": "SP_BENCH_QUEUE", "queue": "sp-bench-jobs" }],
-  //   "consumers": [{ "queue": "sp-bench-jobs", "max_batch_size": 1, "max_retries": 5 }]
-  // }
+  // To enable the optional SP-Bench queue, add its producer and consumer to
+  // the arrays above after running: wrangler queues create sp-bench-jobs.
 }

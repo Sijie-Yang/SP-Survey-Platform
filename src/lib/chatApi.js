@@ -45,6 +45,9 @@ export async function sendChatMessage(
         provider: extras?.provider || null,
         model: extras?.model || null,
         reasoningEffort: extras?.reasoningEffort || extras?.reasoning_effort || null,
+        assistantMode: extras?.assistantMode || 'agent',
+        onStarted: extras?.onStarted,
+        onSnapshot: extras?.onSnapshot,
       });
     }
 
@@ -60,6 +63,7 @@ export async function sendChatMessage(
         reviewMode,
         customPrompts,
         researchContext,
+        assistantMode: extras?.assistantMode || 'agent',
       }),
     });
     return await response.json();

@@ -11,10 +11,17 @@ import {
   keyHint,
 } from '../crypto/byokAesGcm.mjs';
 import { supabaseRest } from '../supabaseUserClient.mjs';
-import { CATALOG_VERSION, isProviderId } from './runtime/catalog.mjs';
-import { buildDirectory, publicCatalog, resolveModel, resolveProvider } from './runtime/registry.mjs';
+import { CATALOG_VERSION, catalogProvider, isProviderId } from './runtime/catalog.mjs';
+import { modelRequest } from './runtime/adapters.mjs';
+import {
+  availableModelId,
+  buildDirectory,
+  publicCatalog,
+  resolveModel,
+  resolveModelRoute,
+  resolveProvider,
+} from './runtime/registry.mjs';
 import { assertConfigurable, assertProviderId, assertRoute } from './runtime/validators.mjs';
-import { assertSafeBaseUrl } from './runtime/ssrf.mjs';
 
 function toByteaHex(bytes) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -87,6 +94,8 @@ export async function listProviderProfiles(env, userId) {
 export async function saveProviderProfile(env, userId, profile) {
   assertProviderId(profile.provider);
   assertConfigurable(profile.provider);
+  const installed = catalogProvider(profile.provider);
+  const catalogEndpointOverride = ['cloudflare-ai-gateway', 'cloudflare-workers-ai'].includes(profile.provider);
   const existing = (await listProviderProfiles(env, userId))
     .find((row) => row.provider === profile.provider) || {};
   const now = new Date().toISOString();
@@ -94,12 +103,14 @@ export async function saveProviderProfile(env, userId, profile) {
     user_id: userId,
     provider: profile.provider,
     display_name: profile.displayName ?? profile.display_name ?? existing.display_name ?? null,
-    protocol: profile.protocol || existing.protocol || 'openai-completions',
-    base_url: profile.baseUrl ?? profile.base_url ?? existing.base_url ?? null,
+    protocol: installed?.protocol || profile.protocol || existing.protocol || 'openai-completions',
+    base_url: installed
+      ? (catalogEndpointOverride ? (profile.baseUrl ?? profile.base_url ?? existing.base_url ?? null) : null)
+      : (profile.baseUrl ?? profile.base_url ?? existing.base_url ?? null),
     default_input: profile.defaultInput || profile.default_input || existing.default_input || ['text'],
     compat: profile.compat || existing.compat || {},
     retry_policy: profile.retryPolicy || profile.retry_policy || existing.retry_policy || {},
-    models: profile.models !== undefined ? profile.models : (existing.models || []),
+    models: installed ? [] : (profile.models !== undefined ? profile.models : (existing.models || [])),
     enabled: profile.enabled !== undefined ? profile.enabled !== false : existing.enabled !== false,
     updated_at: now,
   };
@@ -248,27 +259,36 @@ export async function getCredentialStatus(env, userId) {
   const configuredProviders = directory.filter((item) => item.configured);
   const assistantProvider = settings.assistant_provider || settings.default_provider || 'deepseek';
   const siliconProvider = settings.silicon_provider || settings.default_provider || 'deepseek';
+  const assistantProfile = profiles.find((row) => row.provider === assistantProvider);
+  const siliconProfile = profiles.find((row) => row.provider === siliconProvider);
   const defaultRoute = {
     provider: assistantProvider,
-    model: settings.assistant_model || resolveProvider(assistantProvider).defaultModels.assistant,
+    model: availableModelId(assistantProvider, settings.assistant_model, { profile: assistantProfile }),
     reasoningEffort: settings.assistant_reasoning_effort || settings.reasoning_effort || null,
   };
   const siliconRoute = {
     provider: siliconProvider,
-    model: settings.silicon_model || resolveProvider(siliconProvider).defaultModels.silicon,
+    model: availableModelId(siliconProvider, settings.silicon_model, {
+      profile: siliconProfile,
+      vision: true,
+    }),
     reasoningEffort: settings.silicon_reasoning_effort || null,
   };
   const primary = configuredProviders.find((p) => p.id === assistantProvider) || configuredProviders[0] || null;
   return {
     success: true,
     catalogVersion: CATALOG_VERSION,
-    catalog: publicCatalog(),
+    catalog: publicCatalog({ summariesOnly: true }),
     directory,
-    configuredProviders,
+    configuredProviders: configuredProviders.map((provider) => provider.id),
     defaultRoute,
     siliconRoute,
     providers: credentials,
-    settings,
+    settings: {
+      ...settings,
+      assistant_model: defaultRoute.model,
+      silicon_model: siliconRoute.model,
+    },
     openai: primary
       ? {
         configured: true,
@@ -298,7 +318,7 @@ export async function storeCredential(env, userId, apiKey, options = {}) {
     key_nonce: toByteaHex(encrypted.nonce),
     key_version: encrypted.keyVersion,
     key_hint: encrypted.hint,
-    validated_at: now,
+    validated_at: options.validated === false ? null : now,
     updated_at: now,
     base_url: options.baseUrl || null,
   };
@@ -431,32 +451,85 @@ export async function validateApiKeyWithProvider(apiKey, options = {}) {
   const trimmed = String(apiKey || '').trim();
   const provider = options.provider || detectProvider(trimmed, { baseUrl: options.baseUrl });
   assertConfigurable(provider);
-  const resolved = resolveProvider(provider, { baseUrl: options.baseUrl });
-  const base = assertSafeBaseUrl(options.baseUrl || resolved.baseUrl || resolved.defaultBaseUrl);
-  const headers = { Authorization: `Bearer ${trimmed}` };
-  if (provider === 'anthropic') {
-    headers['x-api-key'] = trimmed;
-    headers['anthropic-version'] = '2023-06-01';
-    delete headers.Authorization;
+  const installed = catalogProvider(provider);
+  if (installed) {
+    const profile = options.baseUrl ? { baseUrl: options.baseUrl } : {};
+    const model = availableModelId(provider, null, { profile });
+    const route = resolveModelRoute(provider, model, profile);
+    if (!model || !route?.supported) {
+      throw Object.assign(new Error('Provider endpoint is not fully configured.'), {
+        status: 400,
+        code: 'PROVIDER_ENDPOINT_REQUIRED',
+      });
+    }
+    await modelRequest({
+      apiKey: trimmed,
+      provider,
+      baseUrl: route.baseUrl,
+      model,
+      modelRecord: route.model,
+      protocol: route.protocol,
+      compat: route.model.compat,
+      extra: route.headers,
+      messages: [{ role: 'user', content: 'Reply OK.' }],
+      temperature: 0,
+      maxTokens: 1,
+      retryPolicy: { maxRetries: 0 },
+    });
+    return {
+      success: true,
+      provider,
+      model,
+      hint: keyHint(trimmed),
+      validated: true,
+      source: 'model-request',
+    };
   }
-  const res = await fetch(`${String(base).replace(/\/$/, '')}${provider === 'anthropic' ? '/v1/models' : '/models'}`, {
-    headers,
-    redirect: 'error',
+  const profile = {
+    baseUrl: options.baseUrl,
+    protocol: options.protocol || 'openai-completions',
+    models: options.models || [],
+  };
+  const model = profile.models.find((item) => item?.id)?.id;
+  const route = resolveModelRoute(provider, model, profile);
+  if (!model || !route?.supported) {
+    throw Object.assign(new Error('Custom provider validation requires a model ID and HTTPS endpoint.'), {
+      status: 400,
+      code: 'PROVIDER_ENDPOINT_REQUIRED',
+    });
+  }
+  await modelRequest({
+    apiKey: trimmed,
+    provider,
+    baseUrl: route.baseUrl,
+    model,
+    modelRecord: route.model,
+    protocol: route.protocol,
+    compat: route.model.compat,
+    extra: route.headers,
+    messages: [{ role: 'user', content: 'Reply OK.' }],
+    temperature: 0,
+    maxTokens: 1,
+    retryPolicy: { maxRetries: 0 },
   });
-  if (!res.ok) {
-    throw Object.assign(new Error('API key validation failed.'), { status: 400, code: 'MISSING_CREDENTIAL' });
-  }
-  return { success: true, provider, hint: keyHint(trimmed) };
+  return {
+    success: true,
+    provider,
+    model,
+    hint: keyHint(trimmed),
+    validated: true,
+    source: 'model-request',
+  };
 }
 
 export function describeRoute(settings = {}, kind = 'assistant') {
   if (kind === 'silicon') {
     const provider = settings.silicon_provider || settings.default_provider || 'deepseek';
-    const model = settings.silicon_model || resolveProvider(provider).defaultModels.silicon;
+    const model = availableModelId(provider, settings.silicon_model, { vision: true });
     return { provider, model, reasoningEffort: settings.silicon_reasoning_effort || null };
   }
   const provider = settings.assistant_provider || settings.default_provider || 'deepseek';
-  const model = settings.assistant_model || resolveProvider(provider).defaultModels.assistant;
+  const model = availableModelId(provider, settings.assistant_model);
   return {
     provider,
     model,

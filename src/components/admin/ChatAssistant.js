@@ -7,7 +7,6 @@ import {
   TextField,
   IconButton,
   Typography,
-  Avatar,
   Paper,
   CircularProgress,
   Button,
@@ -33,18 +32,20 @@ import {
   ButtonGroup,
   Snackbar,
   Stack,
-  FormControl,
-  InputLabel,
   MenuItem,
   Select,
 } from '@mui/material';
-import { ExpandMore, Save, RestartAlt } from '@mui/icons-material';
 import ConfirmDialog from '../layout/ConfirmDialog';
 import {
+  ExpandMore,
+  Save,
+  RestartAlt,
+} from '@mui/icons-material';
+import {
   Send,
+  StopCircle,
   Settings,
   SmartToy,
-  PersonOutline,
   Clear,
   Download,
   CheckCircle,
@@ -62,6 +63,47 @@ import { PROMPTS } from '../../config/prompts';
 import AgentsEditor from './AgentsEditor';
 import { listMcpConnections } from '../../lib/agentApi';
 import ModelsSettings from './ModelsSettings';
+import AssistantSettingsDialog from './AssistantSettingsDialog';
+
+function messageTools(msg) {
+  const tools = msg?.tools || msg?.metadata?.tools;
+  return Array.isArray(tools) ? tools : [];
+}
+
+function toolStatusLabel(status, t) {
+  if (status === 'running') return t.aiSidebarToolRunning || 'running';
+  if (status === 'error') return t.aiSidebarToolError || 'failed';
+  if (status === 'unknown') return t.aiSidebarToolUnknown || 'unknown';
+  return t.aiSidebarToolDone || 'done';
+}
+
+function toolSummary(tool) {
+  const result = tool?.result;
+  if (typeof result === 'string' && result.trim()) return result.trim();
+  if (result && typeof result === 'object' && typeof result.summary === 'string') {
+    return result.summary;
+  }
+  return '';
+}
+
+function localizeLoadingStatus(status, t) {
+  if (!status) return '';
+  const using = String(status).match(/^Using (.+)[.…]$/);
+  if (using) return (t.aiSidebarStatusUsingTool || 'Using {tool}…').replace('{tool}', using[1]);
+  const step = String(status).match(/^Working on step (\d+)[.…]$/);
+  if (step) return (t.aiSidebarStatusStep || 'Working on step {step}…').replace('{step}', step[1]);
+  const map = {
+    'Thinking…': t.aiSidebarStatusThinking,
+    'Thinking...': t.aiSidebarStatusThinking,
+    'Queued…': t.aiSidebarStatusQueued,
+    'Continuing survey generation…': t.aiSidebarStatusRunning,
+    'Waiting for your approval…': t.aiSidebarStatusApproval,
+    'Retrying model request…': t.aiSidebarStatusRetrying,
+    'Compacting context and continuing…': t.aiSidebarStatusCompacting,
+    'Verifying saved draft…': t.aiSidebarStatusVerifying,
+  };
+  return map[status] || status;
+}
 
 /**
  * ChatAssistant Component
@@ -72,10 +114,13 @@ export default function ChatAssistant({
   userMessage,
   isLoading,
   loadingStatus = '',
+  pendingApproval = null,
   apiKeyValid,
   openaiApiKey,
   credentialHint = '',
   isPlatformMode = false,
+  assistantMode = 'agent',
+  onAssistantModeChange,
   contextEnabled,
   multiAgentReviewEnabled = false,
   reviewMode = '1v1',
@@ -87,6 +132,9 @@ export default function ChatAssistant({
   sessionLearningRef,
   onMessageChange,
   onSendMessage,
+  onCancelRun,
+  onApprovalDecision,
+  onSteerMessage,
   onApiKeyChange,
   onValidateApiKey,
   onContextToggle,
@@ -122,6 +170,9 @@ export default function ChatAssistant({
   const [activeTab, setActiveTab] = React.useState(0);
   const [codexConnected, setCodexConnected] = React.useState(false);
   const [codexStatusLoading, setCodexStatusLoading] = React.useState(Boolean(isPlatformMode));
+  const [conversationData, setConversationData] = React.useState(null);
+  const [workingMemoryData, setWorkingMemoryData] = React.useState(null);
+  const [sessionLearningData, setSessionLearningData] = React.useState(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -145,11 +196,6 @@ export default function ChatAssistant({
       });
     return () => { cancelled = true; };
   }, [isPlatformMode, apiKeyValid]);
-  
-  // States for viewing/editing data
-  const [conversationData, setConversationData] = React.useState(null);
-  const [workingMemoryData, setWorkingMemoryData] = React.useState(null);
-  const [sessionLearningData, setSessionLearningData] = React.useState(null);
   
   // States for managing prompts (per project)
   const [prompts, setPrompts] = React.useState(() => {
@@ -181,6 +227,19 @@ export default function ChatAssistant({
   const [promptSnackbar, setPromptSnackbar] = React.useState({ open: false, message: '', severity: 'success' });
   const [confirmDialog, setConfirmDialog] = React.useState(null);
   const sendBlocked = Boolean(blockReason || !apiKeyValid || routeUnavailable || isLoading);
+  const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!isLoading) {
+      setElapsedSeconds(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.max(1, Math.round((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isLoading]);
 
   // States for Research Context (per project)
   const [researchContext, setResearchContext] = React.useState(() => {
@@ -317,32 +376,11 @@ export default function ChatAssistant({
     }
   }, [currentProject?.id]);
   
-  // Load data when settings dialog opens
-  React.useEffect(() => {
-    if (settingsOpen) {
-      // Load conversation history
-      if (conversationHistoryRef?.current) {
-        setConversationData(conversationHistoryRef.current.getAllMessages());
-      }
-      
-      // Load working memory
-      if (workingMemoryRef?.current) {
-        const wmData = workingMemoryRef.current.export ? workingMemoryRef.current.export() : null;
-        setWorkingMemoryData(wmData);
-      }
-      
-      // Load session learning
-      if (sessionLearningRef?.current) {
-        const slData = sessionLearningRef.current.export ? sessionLearningRef.current.export() : null;
-        setSessionLearningData(slData);
-      }
-    }
-  }, [settingsOpen, conversationHistoryRef, workingMemoryRef, sessionLearningRef]);
-
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!sendBlocked && userMessage.trim()) onSendMessage();
+      if (isLoading && userMessage.trim()) onSteerMessage?.();
+      else if (!sendBlocked && userMessage.trim()) onSendMessage();
     }
   };
   
@@ -374,7 +412,9 @@ export default function ChatAssistant({
     });
   };
 
-  const composerPlaceholder = blockReason === 'no-project'
+  const composerPlaceholder = isLoading
+    ? (t.aiSidebarSteerPlaceholder || 'Add an instruction to the running Agent…')
+    : blockReason === 'no-project'
     ? t.aiSidebarSelectProject
     : (apiKeyValid && !routeUnavailable ? t.aiSidebarComposerPlaceholder : t.aiSidebarComposerDisabled);
 
@@ -401,279 +441,420 @@ export default function ChatAssistant({
     });
   };
 
+  const addCustomScenario = () => {
+    const scenario = newScenario.trim().toLowerCase();
+    if (!scenario || [...predefinedScenarios, ...researchContext.customScenarios].includes(scenario)) return;
+    setResearchContext({
+      ...researchContext,
+      scenario,
+      customScenarios: [...researchContext.customScenarios, scenario],
+    });
+    setNewScenario('');
+  };
+
   const chatBody = (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: fillHeight ? 1 : undefined,
+        minHeight: 0,
+        height: fillHeight ? '100%' : undefined,
+        bgcolor: 'background.default',
+      }}
+    >
       <Box
         sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          flex: fillHeight ? 1 : undefined,
-          minHeight: 0,
-          height: fillHeight ? '100%' : undefined,
+          flex: 1,
+          minHeight: fillHeight ? 0 : 280,
+          height: fillHeight ? undefined : 400,
+          overflowY: 'auto',
+          px: { xs: 2, sm: 2.5 },
+          py: 2.5,
         }}
       >
-        {/* Recommendations */}
-        {contextEnabled && recommendations.length > 0 && (
-          <Box sx={{ p: 2, bgcolor: '#e8f5e9', borderBottom: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-              <TipsAndUpdates sx={{ color: '#4caf50', fontSize: 20 }} />
-              <strong>Smart Recommendations</strong>
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-              {recommendations.slice(0, 3).map((rec, index) => (
-                <Chip
-                  key={index}
-                  label={rec.message}
-                  size="small"
-                  color={
-                    rec.priority === 'high' ? 'error' :
-                    rec.priority === 'medium' ? 'warning' : 'info'
-                  }
-                  variant="outlined"
-                />
-              ))}
-            </Box>
-          </Box>
-        )}
-
-        {/* Chat History */}
-        <Box 
-          sx={{ 
-            flex: 1,
-            minHeight: fillHeight ? 0 : 280,
-            height: fillHeight ? undefined : 400,
-            overflowY: 'auto', 
-            p: 2,
-            bgcolor: '#fafafa'
-          }}
-        >
-          {messages.length === 0 ? (
-            <Box sx={{ 
-              display: 'flex', 
+        {messages.length === 0 ? (
+          <Box
+            sx={{
+              display: 'flex',
               flexDirection: 'column',
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              height: '100%',
-              color: 'text.secondary'
-            }}>
-              <SmartToy sx={{ fontSize: 64, mb: 2, opacity: 0.3 }} />
-              <Typography variant="h6" sx={{ mb: 1 }}>
-                {emptyTitle}
-              </Typography>
-              <Typography variant="body2" textAlign="center" sx={{ maxWidth: 440 }}>
-                {emptyBody}
-              </Typography>
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '100%',
+              px: 2,
+              textAlign: 'center',
+            }}
+          >
+            <Box
+              sx={{
+                display: 'grid',
+                placeItems: 'center',
+                width: 44,
+                height: 44,
+                mb: 2,
+                borderRadius: 3,
+                color: 'primary.main',
+                bgcolor: 'action.hover',
+              }}
+            >
+              <SmartToy sx={{ fontSize: 24 }} />
             </Box>
-          ) : (
-            <>
-              {messages.map((msg) => (
-                <Box 
+            <Typography variant="subtitle1" sx={{ mb: 0.75, fontWeight: 600 }}>
+              {emptyTitle}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 340, lineHeight: 1.6 }}>
+              {emptyBody}
+            </Typography>
+          </Box>
+        ) : (
+          <Stack spacing={2.5}>
+            {contextEnabled && recommendations.length > 0 && (
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75 }}>
+                {recommendations.slice(0, 3).map((rec, index) => (
+                  <Chip
+                    key={index}
+                    label={rec.message}
+                    size="small"
+                    variant="outlined"
+                    icon={<TipsAndUpdates sx={{ fontSize: 14 }} />}
+                    sx={{ maxWidth: '100%', borderRadius: 2 }}
+                  />
+                ))}
+              </Box>
+            )}
+            {messages.map((msg, index) => {
+              const isUser = msg.role === 'user';
+              const isSystem = msg.role === 'system';
+              return (
+                <Box
                   key={msg.id}
-                  sx={{ 
-                    mb: 2,
+                  sx={{
                     display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 1.5
+                    justifyContent: isUser ? 'flex-end' : 'flex-start',
                   }}
                 >
-                  <Avatar 
-                    sx={{ 
-                      width: 32, 
-                      height: 32,
-                      bgcolor: msg.role === 'user' ? 'primary.main' : 'secondary.main',
-                    }}
-                  >
-                    {msg.role === 'user' ? <PersonOutline /> : <SmartToy />}
-                  </Avatar>
-                  
-                  <Box sx={{ flex: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Typography variant="caption" fontWeight="bold">
-                        {msg.role === 'user' ? 'You' : 'AI Assistant'}
-                      </Typography>
-                      {msg.metadata?.actionType && (
-                        <Chip 
-                          label={msg.metadata.actionType} 
-                          size="small"
-                          sx={{ height: 18, fontSize: '0.7rem' }}
-                        />
-                      )}
-                      <Typography variant="caption" color="text.secondary">
-                        {new Date(msg.timestamp).toLocaleTimeString()}
-                      </Typography>
-                    </Box>
-                    
-                    <Paper 
-                      variant="outlined"
-                      sx={{ 
-                        p: 1.5,
-                        bgcolor: msg.role === 'user' ? 'action.hover' : 'background.default',
-                        borderColor: msg.metadata?.error ? 'error.main' : 'divider',
+                  {isSystem ? (
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 1,
+                        width: '100%',
+                        px: 1.25,
+                        py: 1,
+                        borderRadius: 2,
+                        bgcolor: msg.metadata?.error ? 'rgba(211, 47, 47, 0.08)' : 'action.hover',
+                        color: msg.metadata?.error ? 'error.main' : 'text.secondary',
                       }}
                     >
-                      <Typography 
-                        variant="body2" 
-                        sx={{ whiteSpace: 'pre-wrap' }}
-                      >
+                      <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                         {msg.content}
                       </Typography>
-                    </Paper>
-                  </Box>
+                    </Box>
+                  ) : (
+                    <Box sx={{ maxWidth: isUser ? '88%' : '100%', minWidth: 0 }}>
+                      {!isUser && (
+                        <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.75 }}>
+                          <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
+                            {t.aiSidebarAssistantName}
+                          </Typography>
+                          {msg.metadata?.actionType && (
+                            <Chip
+                              label={msg.metadata.actionType}
+                              size="small"
+                              variant="outlined"
+                              sx={{ height: 20, fontSize: '0.68rem' }}
+                            />
+                          )}
+                        </Stack>
+                      )}
+                      <Box
+                        sx={{
+                          px: isUser ? 1.5 : 0,
+                          py: isUser ? 1.1 : 0,
+                          borderRadius: 3,
+                          bgcolor: isUser ? 'action.selected' : 'transparent',
+                          border: msg.metadata?.error ? '1px solid' : 0,
+                          borderColor: 'error.main',
+                        }}
+                      >
+                        {msg.content ? (
+                          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7, overflowWrap: 'anywhere' }}>
+                            {msg.content}
+                          </Typography>
+                        ) : null}
+                        {!isUser && messageTools(msg).length > 0 && (
+                          <Box sx={{ mt: msg.content ? 1 : 0, display: 'grid', gap: 0.6 }}>
+                            {messageTools(msg).map((tool, toolIndex) => {
+                              const summary = toolSummary(tool);
+                              return (
+                                <Box
+                                  key={`${msg.id || index}-tool-${tool.id || tool.name || toolIndex}`}
+                                  sx={{
+                                    px: 1,
+                                    py: 0.6,
+                                    borderRadius: 1,
+                                    border: '1px solid',
+                                    borderColor: tool.status === 'error' ? 'error.light' : 'divider',
+                                    bgcolor: tool.status === 'running' ? 'action.hover' : 'background.paper',
+                                  }}
+                                >
+                                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                                    <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                                      {tool.name || t.aiSidebarToolUnknown}
+                                    </Typography>
+                                    <Typography
+                                      variant="caption"
+                                      sx={{
+                                        color: tool.status === 'error'
+                                          ? 'error.main'
+                                          : tool.status === 'running'
+                                            ? 'primary.main'
+                                            : 'text.secondary',
+                                      }}
+                                    >
+                                      {toolStatusLabel(tool.status, t)}
+                                    </Typography>
+                                  </Box>
+                                  {summary ? (
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                                      {summary}
+                                    </Typography>
+                                  ) : null}
+                                </Box>
+                              );
+                            })}
+                          </Box>
+                        )}
+                      </Box>
+                    </Box>
+                  )}
                 </Box>
-              ))}
-              
-              {/* Loading Status (like ChatGPT) */}
-              {loadingStatus && (
-                <Box 
-                  sx={{ 
-                    mb: 2,
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 1.5
-                  }}
-                >
-                  <Avatar 
-                    sx={{ 
-                      width: 32, 
-                      height: 32,
-                      bgcolor: 'secondary.main',
+              );
+            })}
+            {(isLoading || loadingStatus) && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CircularProgress size={14} thickness={5} />
+                <Box>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontWeight: 500,
+                      background: 'linear-gradient(90deg, currentColor 20%, primary.light 50%, currentColor 80%)',
+                      backgroundSize: '200% 100%',
+                      backgroundClip: 'text',
+                      color: 'transparent',
                     }}
                   >
-                    <SmartToy />
-                  </Avatar>
-                  
-                  <Box sx={{ flex: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Typography variant="caption" fontWeight="bold">
-                        AI Assistant
-                      </Typography>
-                    </Box>
-                    
-                    <Paper 
-                      variant="outlined"
-                      sx={{ 
-                        p: 1.5,
-                        bgcolor: 'background.default',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1
-                      }}
-                    >
-                      <CircularProgress size={16} />
-                      <Typography 
-                        variant="body2" 
-                        color="text.secondary"
-                        sx={{ fontStyle: 'italic' }}
-                      >
-                        {loadingStatus}
-                      </Typography>
-                    </Paper>
-                  </Box>
+                    {localizeLoadingStatus(loadingStatus, t) || t.aiSidebarStatusThinking || loadingStatus}
+                  </Typography>
+                  {isLoading && elapsedSeconds > 0 && (
+                    <Typography variant="caption" color="text.disabled">
+                      {(t.aiSidebarElapsed || '{seconds}s').replace('{seconds}', String(elapsedSeconds))}
+                    </Typography>
+                  )}
                 </Box>
-              )}
-              
-              <div ref={chatEndRef} />
-            </>
-          )}
-        </Box>
+              </Box>
+            )}
+            <div ref={chatEndRef} />
+          </Stack>
+        )}
+      </Box>
 
-        {/* Input Area */}
-        <Box sx={{ p: 2, bgcolor: 'background.paper', borderTop: '1px solid', borderColor: 'divider', flexShrink: 0 }}>
-          {aiUndoAvailable && (
-            <Box sx={{ mb: 1 }}>
-              <Button size="small" variant="outlined" color="warning" onClick={onRevertAiChange}>
-                {t.aiSidebarUndo}
-              </Button>
-            </Box>
-          )}
-          {isPlatformMode && (
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 1 }}>
-              <FormControl size="small" fullWidth>
-                <InputLabel>{t.aiSidebarModel}</InputLabel>
+      <Box
+        sx={{
+          flexShrink: 0,
+          px: { xs: 1.5, sm: 2 },
+          pb: 1.5,
+          pt: 3,
+          background: (theme) => `linear-gradient(180deg, transparent 0%, ${theme.palette.background.default} 28%)`,
+        }}
+      >
+        {routeUnavailable && (
+          <Alert severity="warning" sx={{ mb: 1, borderRadius: 2 }}>{t.aiSidebarModelUnavailable}</Alert>
+        )}
+        {blockReason === 'no-project' && (
+          <Alert severity="info" sx={{ mb: 1, borderRadius: 2 }}>{t.aiSidebarSelectProject}</Alert>
+        )}
+        {pendingApproval && (
+          <Alert
+            severity="warning"
+            sx={{ mb: 1, borderRadius: 2 }}
+            action={(
+              <ButtonGroup size="small">
+                <Button color="inherit" onClick={() => onApprovalDecision?.(false)}>
+                  {t.aiSidebarApprovalDeny || 'Deny'}
+                </Button>
+                <Button color="warning" variant="contained" onClick={() => onApprovalDecision?.(true)}>
+                  {t.aiSidebarApprovalApprove || 'Approve'}
+                </Button>
+              </ButtonGroup>
+            )}
+          >
+            {t.aiSidebarApprovalPrompt || 'Approval required'}: {pendingApproval.tool_name}
+          </Alert>
+        )}
+        {aiUndoAvailable && (
+          <Button
+            size="small"
+            variant="text"
+            color="warning"
+            onClick={onRevertAiChange}
+            sx={{ mb: 0.75, borderRadius: 999, textTransform: 'none' }}
+          >
+            {t.aiSidebarUndo}
+          </Button>
+        )}
+        <Box
+          sx={{
+            overflow: 'hidden',
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 3.5,
+            bgcolor: 'background.paper',
+            boxShadow: '0 8px 28px rgba(15, 23, 42, 0.08)',
+            transition: 'border-color 120ms ease, box-shadow 120ms ease',
+            '&:focus-within': {
+              borderColor: 'primary.main',
+              boxShadow: '0 10px 32px rgba(37, 99, 235, 0.12)',
+            },
+          }}
+        >
+          <TextField
+            fullWidth
+            multiline
+            minRows={2}
+            maxRows={8}
+            placeholder={composerPlaceholder}
+            value={userMessage}
+            onChange={(e) => onMessageChange(e.target.value)}
+            onKeyDown={handleKeyPress}
+            disabled={Boolean(blockReason || !apiKeyValid || routeUnavailable)}
+            variant="standard"
+            InputProps={{
+              disableUnderline: true,
+              sx: {
+                px: 1.5,
+                pt: 1.25,
+                pb: 0.5,
+                alignItems: 'flex-start',
+                fontSize: '0.9rem',
+                lineHeight: 1.6,
+              },
+            }}
+          />
+          <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ px: 1, pb: 0.75 }}>
+            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0, overflow: 'hidden' }}>
+              {isPlatformMode && (
                 <Select
-                  label={t.aiSidebarModel}
+                  variant="standard"
+                  disableUnderline
+                  size="small"
+                  value={assistantMode}
+                  onChange={(event) => onAssistantModeChange?.(event.target.value)}
+                  disabled={isLoading}
+                  inputProps={{ 'aria-label': t.aiSidebarMode }}
+                  sx={{
+                    maxWidth: 104,
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    '& .MuiSelect-select': { py: 0.5, pl: 0.75, pr: 2.5 },
+                  }}
+                >
+                  <MenuItem value="agent">{t.aiSidebarModeAgent}</MenuItem>
+                  <MenuItem value="generate">{t.aiSidebarModeGenerate}</MenuItem>
+                  <MenuItem value="adjust">{t.aiSidebarModeAdjust}</MenuItem>
+                  <MenuItem value="question">{t.aiSidebarModeQuestion}</MenuItem>
+                </Select>
+              )}
+              {isPlatformMode && modelOptions.length > 0 ? (
+                <Select
+                  variant="standard"
+                  disableUnderline
+                  size="small"
                   value={modelOptions.some((route) => route.value === selectedRoute) ? selectedRoute : ''}
                   onChange={(event) => onRouteChange?.(event.target.value)}
                   disabled={isLoading}
+                  aria-label={t.aiSidebarModel}
+                  sx={{
+                    maxWidth: effortOptions.length > 0 ? 205 : 260,
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    '& .MuiSelect-select': { py: 0.5, pl: 0.75, pr: 2.5 },
+                  }}
                 >
-                  <MenuItem value="" disabled>
-                    {modelOptions.length ? t.aiSidebarSelectModel : t.aiSidebarConfigureModel}
-                  </MenuItem>
                   {modelOptions.map((route) => (
-                    <MenuItem key={route.value} value={route.value}>
-                      {route.label}
-                    </MenuItem>
+                    <MenuItem key={route.value} value={route.value}>{route.label}</MenuItem>
                   ))}
                 </Select>
-              </FormControl>
+              ) : isPlatformMode ? (
+                <Button
+                  size="small"
+                  onClick={() => setSettingsOpen(true)}
+                  sx={{ borderRadius: 999, textTransform: 'none', fontSize: '0.75rem' }}
+                >
+                  {t.aiSidebarConfigureModel}
+                </Button>
+              ) : null}
               {effortOptions.length > 0 && (
-                <FormControl size="small" sx={{ minWidth: 160 }}>
-                  <InputLabel>{t.aiSidebarReasoning}</InputLabel>
-                  <Select
-                    label={t.aiSidebarReasoning}
-                    value={effortOptions.includes(selectedEffort) ? selectedEffort : (effortOptions[0] || '')}
-                    onChange={(event) => onEffortChange?.(event.target.value)}
-                    disabled={isLoading}
-                  >
-                    {effortOptions.map((effort) => (
-                      <MenuItem key={effort} value={effort}>{effort}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <Select
+                  variant="standard"
+                  disableUnderline
+                  size="small"
+                  value={effortOptions.includes(selectedEffort) ? selectedEffort : (effortOptions[0] || '')}
+                  onChange={(event) => onEffortChange?.(event.target.value)}
+                  disabled={isLoading}
+                  aria-label={t.aiSidebarReasoning}
+                  sx={{
+                    maxWidth: 92,
+                    fontSize: '0.75rem',
+                    color: 'text.secondary',
+                    '& .MuiSelect-select': { py: 0.5, pl: 0.5, pr: 2.25 },
+                  }}
+                >
+                  {effortOptions.map((effort) => (
+                    <MenuItem key={effort} value={effort}>{effort}</MenuItem>
+                  ))}
+                </Select>
+              )}
+              {credentialHint && apiKeyValid && !isPlatformMode && (
+                <Typography variant="caption" color="text.secondary" noWrap>{credentialHint}</Typography>
               )}
             </Stack>
-          )}
-          {routeUnavailable && (
-            <Alert severity="warning" sx={{ mb: 1 }}>{t.aiSidebarModelUnavailable}</Alert>
-          )}
-          {blockReason === 'no-project' && (
-            <Alert severity="info" sx={{ mb: 1 }}>{t.aiSidebarSelectProject}</Alert>
-          )}
-          {credentialHint && apiKeyValid && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              {credentialHint}
-            </Typography>
-          )}
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <TextField
-              fullWidth
-              multiline
-              maxRows={4}
-              placeholder={composerPlaceholder}
-              value={userMessage}
-              onChange={(e) => onMessageChange(e.target.value)}
-              onKeyPress={handleKeyPress}
-              disabled={sendBlocked}
-              variant="outlined"
-              InputProps={{
-                endAdornment: isLoading && (
-                  <InputAdornment position="end">
-                    <CircularProgress size={20} />
-                  </InputAdornment>
-                )
-              }}
-            />
-            <IconButton
-              color="primary"
-              onClick={onSendMessage}
-              disabled={sendBlocked || !userMessage.trim()}
-              sx={{
-                bgcolor: 'primary.main',
-                color: 'white',
-                '&:hover': { bgcolor: 'primary.dark' },
-                '&.Mui-disabled': { bgcolor: 'action.disabledBackground' }
-              }}
-            >
-              <Send />
-            </IconButton>
-          </Box>
-          
-          {contextEnabled && currentProject?.id && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              {t.aiSidebarMemoryHint} <strong>{currentProject?.name || t.aiSidebarUnnamedProject}</strong>
-            </Typography>
-          )}
+            {isLoading && userMessage.trim() && (
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={onSteerMessage}
+                sx={{ minWidth: 0, borderRadius: 999, textTransform: 'none' }}
+              >
+                {t.aiSidebarSteer || 'Steer'}
+              </Button>
+            )}
+            <Tooltip title={isLoading ? (t.aiSidebarStop || 'Stop') : t.aiSidebarSend}>
+              <span>
+                <IconButton
+                  color={isLoading ? 'error' : 'primary'}
+                  onClick={isLoading ? onCancelRun : onSendMessage}
+                  disabled={isLoading ? !onCancelRun : (sendBlocked || !userMessage.trim())}
+                  aria-label={isLoading ? (t.aiSidebarStop || 'Stop') : t.aiSidebarSend}
+                  sx={{
+                    width: 36,
+                    height: 36,
+                    bgcolor: 'primary.main',
+                    color: 'primary.contrastText',
+                    '&:hover': { bgcolor: 'primary.dark' },
+                    '&.Mui-disabled': { bgcolor: 'action.disabledBackground' },
+                  }}
+                >
+                  {isLoading ? <StopCircle sx={{ fontSize: 19 }} /> : <Send sx={{ fontSize: 18 }} />}
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
         </Box>
       </Box>
+    </Box>
     );
 
   const headerActions = (
@@ -753,9 +934,48 @@ export default function ChatAssistant({
         chatBody
       )}
 
-      {/* Settings Dialog */}
+      <AssistantSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        t={t}
+        isPlatformMode={isPlatformMode}
+        assistantMode={assistantMode}
+        onAssistantModeChange={onAssistantModeChange}
+        onCredentialsChange={onCredentialsChange}
+        codexConnected={codexConnected}
+        codexStatusLoading={codexStatusLoading}
+        onOpenIntegrations={() => navigate('/admin/integrations')}
+        apiKeyValid={apiKeyValid}
+        openaiApiKey={openaiApiKey}
+        onApiKeyChange={onApiKeyChange}
+        onValidateApiKey={onValidateApiKey}
+        contextEnabled={contextEnabled}
+        onContextToggle={onContextToggle}
+        researchContext={researchContext}
+        setResearchContext={setResearchContext}
+        predefinedScenarios={predefinedScenarios}
+        newScenario={newScenario}
+        setNewScenario={setNewScenario}
+        onAddCustomScenario={addCustomScenario}
+        multiAgentReviewEnabled={multiAgentReviewEnabled}
+        onMultiAgentReviewToggle={onMultiAgentReviewToggle}
+        reviewMode={reviewMode}
+        onReviewModeChange={onReviewModeChange}
+        maxReviewRounds={maxReviewRounds}
+        onMaxReviewRoundsChange={onMaxReviewRoundsChange}
+        currentProject={currentProject}
+        prompts={prompts}
+        promptsModified={promptsModified}
+        onPromptChange={handlePromptChange}
+        onSavePrompts={handleSavePrompts}
+        onResetPrompts={handleResetPrompts}
+        onDownloadHistory={onDownloadHistory}
+        onClearHistory={handleClearClick}
+      />
+
+      {/* Legacy settings markup is retained temporarily for local-data compatibility. */}
       <Dialog
-        open={settingsOpen} 
+        open={false}
         onClose={() => setSettingsOpen(false)}
         maxWidth="lg"
         fullWidth

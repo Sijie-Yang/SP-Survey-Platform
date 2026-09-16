@@ -10,7 +10,7 @@ export function createToolRegistry(initial = []) {
   for (const tool of initial) registerTool(tools, tool);
   return {
     register: (tool) => registerTool(tools, tool),
-    list: () => [...tools.values()].map(({ execute, ...def }) => def),
+    list: () => [...tools.values()].map(({ execute, risk, executionMode, domain, ...def }) => def),
     get: (name) => tools.get(name) || null,
     names: () => [...tools.keys()],
     async execute(name, args, ctx) {
@@ -26,6 +26,18 @@ export function createToolRegistry(initial = []) {
             code: 'INSUFFICIENT_PERMISSION',
           });
         }
+      }
+      if (
+        tool.risk
+        && typeof ctx?.approvalGate === 'function'
+        && !ctx?.approvedToolCalls?.has?.(ctx.toolCallId)
+      ) {
+        await ctx.approvalGate({
+          toolCallId: ctx.toolCallId,
+          name,
+          risk: tool.risk,
+          args: args || {},
+        });
       }
       return tool.execute(args || {}, ctx);
     },
@@ -44,6 +56,9 @@ function registerTool(map, tool) {
     description: tool.description || '',
     parameters: tool.parameters || { type: 'object', properties: {} },
     minPermission: tool.minPermission || 'ask',
+    domain: tool.domain || 'survey',
+    risk: tool.risk || null,
+    executionMode: tool.executionMode || (tool.minPermission === 'ask' ? 'parallel' : 'exclusive'),
     execute: tool.execute,
   });
 }

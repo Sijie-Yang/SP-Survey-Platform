@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { RegionProvider } from '../../contexts/RegionContext';
 import AiAssistantSidebar from './AiAssistantSidebar';
@@ -33,7 +33,7 @@ function assistantFixture(overrides = {}) {
     apiKeyValid: true,
     openaiApiKey: '',
     credentialHint: 'openai',
-    isPlatformMode: true,
+    isPlatformMode: false,
     contextEnabled: true,
     multiAgentReviewEnabled: false,
     reviewMode: '1v1',
@@ -61,9 +61,12 @@ function assistantFixture(overrides = {}) {
     modelOptions: [{ value: 'openai::gpt-4o', label: 'OpenAI / GPT-4o' }],
     selectedRoute: 'openai::gpt-4o',
     selectedEffort: '',
+    assistantMode: 'agent',
     effortOptions: [],
     handleAssistantRouteChange: jest.fn(),
     handleAssistantEffortChange: jest.fn(),
+    setAssistantMode: jest.fn(),
+    handleAssistantModeChange: jest.fn(),
     routeUnavailable: '',
     blockReason: '',
     ...overrides,
@@ -104,6 +107,21 @@ describe('AiAssistantSidebar', () => {
     expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
+  test('selects an explicit hosted assistant mode', async () => {
+    const setAssistantMode = jest.fn();
+    renderSidebar({
+      assistant: assistantFixture({
+        isPlatformMode: true,
+        assistantMode: 'agent',
+        handleAssistantModeChange: setAssistantMode,
+      }),
+    });
+
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Assistant mode' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Question' }));
+    expect(setAssistantMode).toHaveBeenCalledWith('question');
+  });
+
   test('disables sending when no project is selected', () => {
     renderSidebar({
       assistant: assistantFixture({
@@ -116,6 +134,31 @@ describe('AiAssistantSidebar', () => {
     expect(screen.getByRole('textbox')).toBeDisabled();
   });
 
+  test('shows live tool steps instead of only a spinner', () => {
+    renderSidebar({
+      assistant: assistantFixture({
+        isLoading: true,
+        loadingStatus: 'Using survey_apply_operations…',
+        messages: [
+          { id: 'u1', role: 'user', content: 'Generate a street-safety survey' },
+          {
+            id: 'a1',
+            role: 'assistant',
+            content: '',
+            tools: [
+              { id: '1', name: 'survey_get_draft', status: 'done', result: 'Draft loaded' },
+              { id: '2', name: 'survey_apply_operations', status: 'running' },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(screen.getByText('survey_get_draft')).toBeInTheDocument();
+    expect(screen.getByText('survey_apply_operations')).toBeInTheDocument();
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getByText('Using survey_apply_operations…')).toBeInTheDocument();
+  });
+
   test('keeps composer at the bottom of the sidebar', () => {
     renderSidebar();
     const input = screen.getByRole('textbox');
@@ -123,6 +166,23 @@ describe('AiAssistantSidebar', () => {
     expect(composer).toBeTruthy();
     const sidebar = document.getElementById(AI_SIDEBAR_ID);
     expect(sidebar.contains(input)).toBe(true);
+  });
+
+  test('uses three simple settings sections and explains hosted multi-agent availability', async () => {
+    renderSidebar({ assistant: assistantFixture({ isPlatformMode: true }) });
+    fireEvent.click(screen.getByLabelText('Assistant settings'));
+
+    expect(await screen.findByRole('tab', { name: 'Models' })).toBeInTheDocument();
+    expect(await screen.findByText('Models settings')).toBeInTheDocument();
+    expect(await screen.findByText('Not connected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Context' }));
+    expect(screen.getByText(/continuity is handled automatically/i)).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
+
+    expect(screen.getByText('Multi-agent review')).toBeInTheDocument();
+    expect(screen.getByText(/current hosted Agent Runtime does not support/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Advanced: Agents')).not.toBeInTheDocument());
   });
 });
 

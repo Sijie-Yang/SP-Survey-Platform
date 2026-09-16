@@ -1,4 +1,9 @@
-import { CATALOG_PROVIDERS, CATALOG_VERSION } from './catalog.generated.mjs';
+import {
+  CATALOG_PAYLOAD_SHA256,
+  CATALOG_PROVIDERS,
+  CATALOG_SOURCE,
+  CATALOG_VERSION,
+} from './catalog.generated.mjs';
 
 export const PROVIDER_ID_RE = /^[a-z][a-z0-9_-]{0,47}$/;
 export const PROTOCOLS = [
@@ -7,6 +12,7 @@ export const PROTOCOLS = [
   { id: 'anthropic-messages', label: 'anthropic-messages' },
 ];
 export const NATIVE_AUTH = new Set(['aws', 'adc', 'azure', 'oauth']);
+const PI_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 export function isProviderId(id) {
   return PROVIDER_ID_RE.test(String(id || ''));
@@ -46,8 +52,35 @@ export function normalizeModelRecord(model, fallback = {}) {
   const input = Array.isArray(model.input) && model.input.length
     ? model.input
     : (fallback.input || ['text']);
+  const thinkingLevelMap = model.thinkingLevelMap
+    || fallback.thinkingLevelMap
+    || false;
+  const reasoning = Boolean(model.reasoning || thinkingLevelMap);
+  const supportedThinkingLevels = reasoning
+    ? PI_THINKING_LEVELS.filter((level) => {
+      const mapped = thinkingLevelMap?.[level];
+      if (mapped === null) return false;
+      if ((level === 'xhigh' || level === 'max') && typeof mapped !== 'string') return false;
+      return true;
+    })
+    : [];
+  const reasoningEfforts = reasoning
+    ? Object.fromEntries(supportedThinkingLevels.map((level) => [
+      level,
+      thinkingLevelMap?.[level] ?? level,
+    ]))
+    : false;
+  const configuredEfforts = model.reasoningEfforts
+    || model.thinkingLevelMap
+    || fallback.reasoningEfforts
+    || fallback.thinkingLevelMap
+    || false;
+  const defaultEffort = model.defaultEffort
+    || fallback.defaultEffort
+    || (configuredEfforts && Object.hasOwn(configuredEfforts, 'high') ? 'high' : null);
   return {
     id: model.id,
+    provider: model.provider || fallback.provider || null,
     name: model.name || model.label || model.id,
     label: model.label || model.name || model.id,
     contextWindow: Number(model.contextWindow || fallback.contextWindow || 128000),
@@ -55,9 +88,31 @@ export function normalizeModelRecord(model, fallback = {}) {
     input,
     vision: input.includes('image'),
     tools: model.tools !== false,
-    reasoningEfforts: model.reasoningEfforts || fallback.reasoningEfforts || false,
-    defaultEffort: model.defaultEffort || fallback.defaultEffort || null,
-    compat: model.compat && typeof model.compat === 'object' ? model.compat : {},
+    reasoning,
+    reasoningEfforts,
+    thinkingLevelMap,
+    defaultEffort,
+    api: model.api || fallback.api || null,
+    baseUrl: model.baseUrl || fallback.baseUrl || '',
+    runtimeApi: model.runtimeApi || fallback.runtimeApi || null,
+    runtimeBaseUrl: model.runtimeBaseUrl || fallback.runtimeBaseUrl || '',
+    cost: model.cost || fallback.cost || null,
+    samplingParams: {
+      ...((fallback.samplingParams && typeof fallback.samplingParams === 'object')
+        ? fallback.samplingParams
+        : {}),
+      ...((model.samplingParams && typeof model.samplingParams === 'object')
+        ? model.samplingParams
+        : {}),
+    },
+    compat: {
+      ...((fallback.compat && typeof fallback.compat === 'object') ? fallback.compat : {}),
+      ...((model.compat && typeof model.compat === 'object') ? model.compat : {}),
+    },
+    headers: {
+      ...((fallback.headers && typeof fallback.headers === 'object') ? fallback.headers : {}),
+      ...((model.headers && typeof model.headers === 'object') ? model.headers : {}),
+    },
   };
 }
 
@@ -71,4 +126,9 @@ export function extraHeaders(providerId) {
   return {};
 }
 
-export { CATALOG_VERSION, CATALOG_PROVIDERS };
+export {
+  CATALOG_PAYLOAD_SHA256,
+  CATALOG_PROVIDERS,
+  CATALOG_SOURCE,
+  CATALOG_VERSION,
+};
