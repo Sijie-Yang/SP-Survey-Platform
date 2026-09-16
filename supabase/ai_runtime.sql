@@ -334,3 +334,123 @@ BEGIN
 EXCEPTION
   WHEN undefined_table THEN NULL;
 END $$;
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS claimed_by TEXT;
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+
+ALTER TABLE public.ai_runs
+  ADD COLUMN IF NOT EXISTS checkpoint_seq INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS public.ai_tool_executions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id UUID NOT NULL REFERENCES public.ai_runs(id) ON DELETE CASCADE,
+  tool_call_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'unknown')),
+  result JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (run_id, tool_call_id)
+);
+
+CREATE INDEX IF NOT EXISTS ai_tool_executions_run_idx
+  ON public.ai_tool_executions (run_id, tool_call_id);
+
+ALTER TABLE public.ai_tool_executions ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Owners read own ai tool executions" ON public.ai_tool_executions;
+CREATE POLICY "Owners read own ai tool executions" ON public.ai_tool_executions
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.ai_runs r
+      WHERE r.id = ai_tool_executions.run_id AND r.user_id = auth.uid()
+    )
+  );
+
+CREATE OR REPLACE FUNCTION public.claim_ai_run(
+  p_run_id UUID,
+  p_claimed_by TEXT,
+  p_lease_seconds INTEGER DEFAULT 90
+)
+RETURNS SETOF public.ai_runs
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+  UPDATE public.ai_runs
+    SET claimed_by = p_claimed_by,
+        lease_expires_at = now() + make_interval(secs => GREATEST(15, LEAST(p_lease_seconds, 600))),
+        status = 'running',
+        started_at = COALESCE(started_at, now()),
+        updated_at = now()
+    WHERE id = p_run_id
+      AND status IN ('queued', 'running')
+      AND (
+        claimed_by IS NULL
+        OR lease_expires_at IS NULL
+        OR lease_expires_at < now()
+        OR claimed_by = p_claimed_by
+      )
+    RETURNING *;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.claim_ai_run(UUID, TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.claim_ai_run(UUID, TEXT, INTEGER) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.record_ai_tool_execution(
+  p_run_id UUID,
+  p_tool_call_id TEXT,
+  p_tool_name TEXT,
+  p_idempotency_key TEXT,
+  p_status TEXT,
+  p_result JSONB DEFAULT NULL
+)
+RETURNS public.ai_tool_executions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_row public.ai_tool_executions;
+BEGIN
+  SELECT * INTO v_row
+    FROM public.ai_tool_executions
+    WHERE run_id = p_run_id AND tool_call_id = p_tool_call_id
+    FOR UPDATE;
+
+  IF FOUND AND v_row.status = 'succeeded' THEN
+    RETURN v_row;
+  END IF;
+
+  IF FOUND THEN
+    UPDATE public.ai_tool_executions
+      SET tool_name = COALESCE(p_tool_name, tool_name),
+          idempotency_key = COALESCE(p_idempotency_key, idempotency_key),
+          status = p_status,
+          result = COALESCE(p_result, result),
+          updated_at = now()
+      WHERE run_id = p_run_id AND tool_call_id = p_tool_call_id
+      RETURNING * INTO v_row;
+    RETURN v_row;
+  END IF;
+
+  INSERT INTO public.ai_tool_executions (
+    run_id, tool_call_id, tool_name, idempotency_key, status, result
+  ) VALUES (
+    p_run_id, p_tool_call_id, p_tool_name, COALESCE(p_idempotency_key, p_tool_call_id), p_status, p_result
+  )
+  RETURNING * INTO v_row;
+  RETURN v_row;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.record_ai_tool_execution(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.record_ai_tool_execution(UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;

@@ -1,3 +1,7 @@
+import { postProcessAiConfig, sanitizeForAgent } from '../../designProtocol.mjs';
+
+export const IGNORABLE_EMPTY_TOP_LEVEL = Object.freeze(['logo']);
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return value.map(canonicalJson);
   if (value && typeof value === 'object') {
@@ -14,12 +18,17 @@ export function normalizeDraftTimestamp(value) {
   return Number.isFinite(ms) ? ms : String(value);
 }
 
-export function surveySignature(config) {
-  const pages = Array.isArray(config?.pages) ? config.pages : [];
-  return pages.map((page) => ({
-    name: page?.name || '',
-    questions: (page?.elements || []).map((element) => `${element?.name || ''}:${element?.type || ''}`),
-  }));
+function stripIgnorable(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return config;
+  const next = { ...config };
+  for (const key of IGNORABLE_EMPTY_TOP_LEVEL) {
+    if (next[key] == null || next[key] === '') delete next[key];
+  }
+  return next;
+}
+
+export function normalizeSurveyForCompare(config) {
+  return canonicalJson(stripIgnorable(sanitizeForAgent(postProcessAiConfig(config || {}))));
 }
 
 export function draftsMatch(intended, verified) {
@@ -29,18 +38,19 @@ export function draftsMatch(intended, verified) {
   const verifiedNotOlder = intendedTime == null
     || verifiedTime == null
     || (typeof intendedTime === 'number' && typeof verifiedTime === 'number' && verifiedTime >= intendedTime);
-  const exact = JSON.stringify(canonicalJson(intended?.surveyConfig || null))
-    === JSON.stringify(canonicalJson(verified?.surveyConfig || null));
-  const structural = JSON.stringify(surveySignature(intended?.surveyConfig))
-    === JSON.stringify(surveySignature(verified?.surveyConfig));
+  const intendedRevision = intended?.revisionId || intended?.revision_id || null;
+  const verifiedRevision = verified?.revisionId || verified?.revision_id || null;
+  const revisionOk = !intendedRevision || !verifiedRevision || intendedRevision === verifiedRevision;
+  const exact = JSON.stringify(normalizeSurveyForCompare(intended?.surveyConfig))
+    === JSON.stringify(normalizeSurveyForCompare(verified?.surveyConfig));
   const verifiedHasSurvey = (verified?.surveyConfig?.pages || []).length > 0;
   const intendedHasSurvey = (intended?.surveyConfig?.pages || []).length > 0;
 
-  if (exact && (timeEqual || verifiedNotOlder)) return { ok: true, reason: 'exact' };
-  if (structural && verifiedHasSurvey && (timeEqual || verifiedNotOlder)) return { ok: true, reason: 'structural' };
+  if (exact && revisionOk && (timeEqual || verifiedNotOlder)) return { ok: true, reason: 'exact' };
   if (intendedHasSurvey && !verifiedHasSurvey) return { ok: false, reason: 'missing' };
-  if (structural && !verifiedNotOlder) return { ok: false, reason: 'stale' };
-  return { ok: false, reason: 'mismatch' };
+  if (exact && (!verifiedNotOlder || !revisionOk)) return { ok: false, reason: 'stale' };
+  if (!exact && verifiedHasSurvey) return { ok: false, reason: 'mismatch' };
+  return { ok: false, reason: 'missing' };
 }
 
 export async function verifySavedDraft({
@@ -55,13 +65,16 @@ export async function verifySavedDraft({
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     last = await readDraft();
     const match = draftsMatch(intended, last);
-    if (match.ok) return { ok: true, draft: last, reason: match.reason };
+    if (match.ok) return { ok: true, draft: last, reason: match.reason, verified: true };
+    if (match.reason === 'mismatch') {
+      return { ok: false, draft: last, reason: 'mismatch', verified: false };
+    }
     if (attempt < retries) await sleep(delayMs * (attempt + 1));
   }
   const match = draftsMatch(intended, last);
-  if (match.reason === 'stale' && JSON.stringify(surveySignature(intended.surveyConfig))
-    === JSON.stringify(surveySignature(last?.surveyConfig))) {
-    return { ok: true, draft: last, reason: 'structural-stale' };
+  if (match.ok) return { ok: true, draft: last, reason: match.reason, verified: true };
+  if (match.reason === 'mismatch') {
+    return { ok: false, draft: last, reason: 'mismatch', verified: false };
   }
-  return { ok: false, draft: last, reason: match.reason };
+  return { ok: false, draft: last, reason: 'unverified', verified: false };
 }

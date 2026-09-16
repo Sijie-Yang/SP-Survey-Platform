@@ -134,6 +134,22 @@ describe('AiAssistantSidebar', () => {
     expect(screen.getByRole('textbox')).toBeDisabled();
   });
 
+  test('shows approval target and parameter summary', () => {
+    renderSidebar({
+      assistant: assistantFixture({
+        pendingApproval: {
+          tool_name: 'survey_publish',
+          risk: 'publish',
+          arguments_preview: { projectId: 'proj_1', confirm: true, versionLabel: 'v3' },
+        },
+      }),
+    });
+    expect(screen.getByText(/survey_publish/)).toBeInTheDocument();
+    expect(screen.getByText(/Risk: publish/)).toBeInTheDocument();
+    expect(screen.getByText(/Project: proj_1/)).toBeInTheDocument();
+    expect(screen.getByText(/versionLabel=v3/)).toBeInTheDocument();
+  });
+
   test('shows live tool steps instead of only a spinner', () => {
     renderSidebar({
       assistant: assistantFixture({

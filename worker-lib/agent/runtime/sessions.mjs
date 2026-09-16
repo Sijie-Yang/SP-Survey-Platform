@@ -327,57 +327,106 @@ export async function createRun(env, {
   }
 }
 
+export const TERMINAL_RUN_STATUSES = new Set(['completed', 'cancelled', 'failed']);
+export const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'awaiting_approval']);
+
+function firstRow(rows) {
+  if (Array.isArray(rows)) return rows[0] || null;
+  return rows || null;
+}
+
+async function patchRun(env, runId, body, extraQuery = '', { required = false } = {}) {
+  const query = `?id=eq.${encodeURIComponent(runId)}${extraQuery}`;
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/ai_runs',
+    method: 'PATCH',
+    serviceRole: true,
+    query,
+    body,
+    prefer: 'return=representation',
+  });
+  const row = firstRow(rows);
+  if (required && !row) {
+    throw Object.assign(new Error('Run was not updated.'), {
+      code: 'RUN_NOT_UPDATED',
+      retryable: false,
+    });
+  }
+  return row;
+}
+
 export async function finishRun(env, runId, patch) {
   const body = {
     ...patch,
+    claimed_by: null,
+    lease_expires_at: null,
     updated_at: new Date().toISOString(),
     finished_at: new Date().toISOString(),
   };
   try {
-    await supabaseRest(env, {
-      path: '/rest/v1/ai_runs',
-      method: 'PATCH',
-      serviceRole: true,
-      query: `?id=eq.${encodeURIComponent(runId)}`,
+    return await patchRun(
+      env,
+      runId,
       body,
-      prefer: 'return=minimal',
-    });
+      '&status=in.(queued,running,awaiting_approval)',
+    );
   } catch {
     delete body.updated_at;
     delete body.result;
     delete body.checkpoint;
     delete body.approval_request;
-    await supabaseRest(env, {
-      path: '/rest/v1/ai_runs',
-      method: 'PATCH',
-      serviceRole: true,
-      query: `?id=eq.${encodeURIComponent(runId)}`,
-      body,
-      prefer: 'return=minimal',
-    });
+    delete body.claimed_by;
+    delete body.lease_expires_at;
+    return patchRun(env, runId, body, '&status=in.(queued,running,awaiting_approval)');
   }
 }
 
 export async function markRunRunning(env, runId) {
   const now = new Date().toISOString();
+  const row = await patchRun(
+    env,
+    runId,
+    { status: 'running', started_at: now, updated_at: now },
+    '&status=in.(queued,running)',
+    { required: true },
+  );
+  return row;
+}
+
+export async function claimRun(env, runId, claimedBy, { leaseSeconds = 90 } = {}) {
+  const current = await getRunStatus(env, runId);
+  if (!current) {
+    throw Object.assign(new Error('Run not found.'), { code: 'RUN_NOT_FOUND', retryable: false });
+  }
+  if (TERMINAL_RUN_STATUSES.has(current.status)) {
+    return null;
+  }
   try {
-    await supabaseRest(env, {
-      path: '/rest/v1/ai_runs',
-      method: 'PATCH',
-      serviceRole: true,
-      query: `?id=eq.${encodeURIComponent(runId)}&status=in.(queued,running)`,
-      body: { status: 'running', started_at: now, updated_at: now },
-      prefer: 'return=minimal',
-    });
+    const claimed = await rpc(env, 'claim_ai_run', {
+      p_run_id: runId,
+      p_claimed_by: claimedBy,
+      p_lease_seconds: leaseSeconds,
+    }, null, { serviceRole: true });
+    return firstRow(claimed);
   } catch {
-    await supabaseRest(env, {
-      path: '/rest/v1/ai_runs',
-      method: 'PATCH',
-      serviceRole: true,
-      query: `?id=eq.${encodeURIComponent(runId)}&status=in.(queued,running)`,
-      body: { status: 'running', started_at: now },
-      prefer: 'return=minimal',
-    });
+    const now = new Date();
+    const leaseValid = current.claimed_by
+      && current.claimed_by !== claimedBy
+      && current.lease_expires_at
+      && Date.parse(current.lease_expires_at) > now.getTime();
+    if (leaseValid) return null;
+    try {
+      return await patchRun(env, runId, {
+        status: 'running',
+        claimed_by: claimedBy,
+        lease_expires_at: new Date(now.getTime() + leaseSeconds * 1000).toISOString(),
+        started_at: current.started_at || now.toISOString(),
+        updated_at: now.toISOString(),
+      }, '&status=in.(queued,running)', { required: true });
+    } catch (error) {
+      if (error?.code === 'RUN_NOT_UPDATED') return null;
+      throw error;
+    }
   }
 }
 
@@ -467,18 +516,26 @@ export async function listSessionRuns(env, userId, sessionId, limit = 20) {
 }
 
 export async function updateRunCheckpoint(env, runId, checkpoint, status = 'running') {
-  await supabaseRest(env, {
-    path: '/rest/v1/ai_runs',
-    method: 'PATCH',
-    serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(runId)}`,
-    body: {
-      checkpoint: checkpoint || {},
-      status,
-      updated_at: new Date().toISOString(),
-    },
-    prefer: 'return=minimal',
-  });
+  const current = await getRunStatus(env, runId);
+  if (!current || TERMINAL_RUN_STATUSES.has(current.status)) {
+    throw Object.assign(new Error('Checkpoint was not saved onto an active run.'), {
+      code: 'CHECKPOINT_NOT_SAVED',
+      retryable: false,
+    });
+  }
+  const row = await patchRun(env, runId, {
+    checkpoint: checkpoint || {},
+    status,
+    checkpoint_seq: Number(current.checkpoint_seq || 0) + 1,
+    updated_at: new Date().toISOString(),
+  }, '&status=in.(queued,running,awaiting_approval)', { required: true });
+  if (!row) {
+    throw Object.assign(new Error('Checkpoint was not saved.'), {
+      code: 'CHECKPOINT_NOT_SAVED',
+      retryable: false,
+    });
+  }
+  return row;
 }
 
 export async function enqueueSessionInput(env, {

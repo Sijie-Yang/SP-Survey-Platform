@@ -86,6 +86,28 @@ function toolSummary(tool) {
   return '';
 }
 
+function approvalPreview(approval) {
+  return approval?.arguments_preview || approval?.argumentsPreview || approval?.args || {};
+}
+
+function approvalTargetText(approval, t) {
+  const preview = approvalPreview(approval);
+  const projectId = preview.projectId || preview.project_id || approval?.projectId;
+  if (!projectId) return '';
+  return (t.aiSidebarApprovalProject || 'Project: {project}').replace('{project}', projectId);
+}
+
+function approvalPreviewText(approval) {
+  const preview = approvalPreview(approval);
+  const keys = ['confirm', 'versionLabel', 'publishedVersion', 'name', 'skillId', 'path'];
+  const parts = keys
+    .filter((key) => preview[key] != null && preview[key] !== '')
+    .map((key) => `${key}=${typeof preview[key] === 'object' ? JSON.stringify(preview[key]) : preview[key]}`);
+  const count = Array.isArray(preview.ids) ? preview.ids.length : (preview.count ?? preview.deleteCount);
+  if (count != null && count !== '') parts.push(`count=${count}`);
+  return parts.join(' · ');
+}
+
 function localizeLoadingStatus(status, t) {
   if (!status) return '';
   const using = String(status).match(/^Using (.+)[.…]$/);
@@ -691,7 +713,24 @@ export default function ChatAssistant({
               </ButtonGroup>
             )}
           >
-            {t.aiSidebarApprovalPrompt || 'Approval required'}: {pendingApproval.tool_name}
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {t.aiSidebarApprovalPrompt || 'Approval required'}: {pendingApproval.tool_name || pendingApproval.toolName}
+            </Typography>
+            {pendingApproval.risk && (
+              <Typography variant="caption" display="block">
+                {(t.aiSidebarApprovalRisk || 'Risk: {risk}').replace('{risk}', pendingApproval.risk)}
+              </Typography>
+            )}
+            {approvalTargetText(pendingApproval, t) && (
+              <Typography variant="caption" display="block">
+                {approvalTargetText(pendingApproval, t)}
+              </Typography>
+            )}
+            {approvalPreviewText(pendingApproval) && (
+              <Typography variant="caption" display="block" sx={{ whiteSpace: 'pre-wrap' }}>
+                {approvalPreviewText(pendingApproval)}
+              </Typography>
+            )}
           </Alert>
         )}
         {aiUndoAvailable && (

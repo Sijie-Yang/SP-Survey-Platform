@@ -797,4 +797,80 @@ describe('runtime tool loop', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('does not start an approved exclusive write after cancellation', async () => {
+    let published = 0;
+    const registry = createToolRegistry([{
+      name: 'survey_publish',
+      minPermission: 'edit_draft',
+      executionMode: 'exclusive',
+      risk: 'publish',
+      execute: async () => {
+        published += 1;
+        return { publishedVersion: 2 };
+      },
+    }]);
+    const route = resolveModelRoute('deepseek', 'deepseek-v4-pro');
+    await assert.rejects(runToolLoop({
+      apiKey: 'test-key',
+      provider: 'deepseek',
+      baseUrl: route.baseUrl,
+      model: route.model.id,
+      modelRecord: route.model,
+      protocol: route.protocol,
+      compat: route.model.compat,
+      registry,
+      checkpoint: {
+        pendingToolCall: { id: 'publish-1', name: 'survey_publish', args: { confirm: true } },
+        approvedToolCalls: ['publish-1'],
+        working: [{ role: 'user', content: 'Publish' }],
+      },
+      ctx: { permission: 'edit_draft', approvedToolCalls: new Set(['publish-1']) },
+      checkCancelled: async () => true,
+    }), (error) => error.code === 'CANCELLED');
+    assert.equal(published, 0);
+  });
+
+  it('replays a succeeded exclusive tool instead of executing it again', async () => {
+    let published = 0;
+    const registry = createToolRegistry([{
+      name: 'survey_publish',
+      minPermission: 'edit_draft',
+      executionMode: 'exclusive',
+      risk: 'publish',
+      execute: async () => {
+        published += 1;
+        return { publishedVersion: 9 };
+      },
+    }]);
+    const route = resolveModelRoute('deepseek', 'deepseek-v4-pro');
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => sseText('Already published.');
+    try {
+      const result = await runToolLoop({
+        apiKey: 'test-key',
+        provider: 'deepseek',
+        baseUrl: route.baseUrl,
+        model: route.model.id,
+        modelRecord: route.model,
+        protocol: route.protocol,
+        compat: route.model.compat,
+        registry,
+        checkpoint: {
+          pendingToolCall: { id: 'publish-1', name: 'survey_publish', args: { confirm: true } },
+          approvedToolCalls: ['publish-1'],
+          working: [{ role: 'user', content: 'Publish' }],
+        },
+        ctx: {
+          permission: 'edit_draft',
+          approvedToolCalls: new Set(['publish-1']),
+          lookupToolExecution: async () => ({ status: 'succeeded', result: { publishedVersion: 2 } }),
+        },
+      });
+      assert.equal(published, 0);
+      assert.equal(result.content, 'Already published.');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

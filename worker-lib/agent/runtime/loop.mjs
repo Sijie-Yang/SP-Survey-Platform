@@ -113,8 +113,14 @@ export async function runToolLoop({
   if (!checkpoint) await emit('turn.start', { maxSteps });
   try {
     if (checkpoint?.pendingToolCall && checkpoint?.approvedToolCalls?.includes(checkpoint.pendingToolCall.id)) {
+      await assertNotCancelled(signal, checkCancelled);
       const call = checkpoint.pendingToolCall;
-      const resumed = await executeToolCall(call, 'exclusive', registry, ctx, signal);
+      const resumed = await executeToolCall(call, 'exclusive', registry, ctx, signal, checkCancelled);
+      if (resumed.cancelled) {
+        throw Object.assign(new Error(resumed.result?.error || 'Cancelled before approved tool dispatch.'), {
+          code: 'CANCELLED',
+        });
+      }
       if (!resumed.ok) {
         throw Object.assign(new Error(resumed.result?.error || 'Approved tool failed.'), {
           code: resumed.result?.code || 'APPROVED_TOOL_FAILED',
@@ -535,6 +541,7 @@ async function executeToolCalls({
       registry,
       ctx,
       signal,
+      checkCancelled,
     )));
     for (const outcome of completed) outcomes.set(outcome.id, outcome);
     if (completed.some((outcome) => outcome.cancelled)) {
@@ -574,17 +581,65 @@ async function executeToolCalls({
   return calls.map((call) => outcomes.get(call.id)).filter(Boolean);
 }
 
-async function executeToolCall(call, mode, registry, ctx, signal) {
+async function executeToolCall(call, mode, registry, ctx, signal, checkCancelled) {
+  if (mode === 'exclusive') {
+    try {
+      await assertNotCancelled(signal, checkCancelled);
+    } catch (error) {
+      if (isCancellation(error)) {
+        return {
+          ...call,
+          ok: false,
+          outcome: 'not_run',
+          cancelled: true,
+          result: { error: 'Cancelled before tool dispatch.', code: 'CANCELLED' },
+        };
+      }
+      throw error;
+    }
+    const existing = await ctx?.lookupToolExecution?.(call.id);
+    if (existing?.status === 'succeeded') {
+      return {
+        ...call,
+        ok: true,
+        outcome: 'success',
+        replayed: true,
+        result: existing.result,
+      };
+    }
+    await ctx?.recordToolExecution?.({
+      id: call.id,
+      name: call.name,
+      status: 'started',
+      result: null,
+    });
+  }
   try {
     const result = await registry.execute(call.name, call.args, {
       ...ctx,
       signal,
       toolCallId: call.id,
     });
+    if (mode === 'exclusive') {
+      await ctx?.recordToolExecution?.({
+        id: call.id,
+        name: call.name,
+        status: 'succeeded',
+        result,
+      });
+    }
     return { ...call, ok: true, outcome: 'success', result };
   } catch (error) {
     const cancelled = isCancellation(error) || signal?.aborted;
     const unknown = mode === 'exclusive' && isUncertainOutcome(error, cancelled);
+    if (mode === 'exclusive') {
+      await ctx?.recordToolExecution?.({
+        id: call.id,
+        name: call.name,
+        status: unknown ? 'unknown' : 'failed',
+        result: { error: String(error?.message || 'Tool failed') },
+      });
+    }
     return {
       ...call,
       ok: false,

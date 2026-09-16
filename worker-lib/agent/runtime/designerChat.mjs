@@ -5,19 +5,23 @@ import { runToolLoop } from './loop.mjs';
 import { createEvent, eventsToUiMessages, redactSecrets } from './events.mjs';
 import {
   appendEvent,
+  claimRun,
   claimSessionInput,
   createRun,
   createRunCancellationCheck,
   createSession,
   finishRun,
+  getRunStatus,
   getSession,
   listEvents,
   markRunRunning,
   nextSessionSelection,
+  TERMINAL_RUN_STATUSES,
   updateSessionAssistantMode,
   updateSessionSelection,
   updateRunCheckpoint,
 } from './sessions.mjs';
+import { createToolExecutionHooks } from './executions.mjs';
 import {
   listProviderCredentials,
   listProviderProfiles,
@@ -287,6 +291,7 @@ export async function runDesignerChat(env, userId, body, request) {
         userId,
         projectId,
         assistantMode,
+        ...createToolExecutionHooks(env, run.id),
         approvedToolCalls: new Set(body?._checkpoint?.approvedToolCalls || []),
         approvalGate: async ({ toolCallId, name, risk, args }) => {
           const approval = await requestRunApproval(env, {
@@ -329,7 +334,7 @@ export async function runDesignerChat(env, userId, body, request) {
       };
     }
     if (result.continuation) {
-      await updateRunCheckpoint(env, run.id, result.checkpoint, 'running').catch(() => null);
+      await updateRunCheckpoint(env, run.id, result.checkpoint, 'running');
       await dispatchAgentRun(env, null, {
         kind: 'designer',
         userId,
@@ -365,6 +370,8 @@ export async function runDesignerChat(env, userId, body, request) {
         }),
       });
       const verified = verification.draft;
+      result.draftVerified = verification.ok === true;
+      result.draftVerificationReason = verification.reason;
       await emit(createEvent('tool.result', {
         id: verificationId,
         name: 'survey_get_draft',
@@ -372,13 +379,16 @@ export async function runDesignerChat(env, userId, body, request) {
         verification: true,
         summary: verification.ok
           ? 'Saved draft verified'
-          : 'Saved draft does not match the intended result',
+          : (verification.reason === 'unverified'
+            ? 'Save submitted; verification did not complete'
+            : 'Saved draft does not match the intended result'),
         result: {
           draftUpdatedAt: verified?.draftUpdatedAt || null,
           reason: verification.reason,
+          verified: verification.ok === true,
         },
       }));
-      if (!verification.ok) {
+      if (verification.reason === 'mismatch' || (verification.reason !== 'unverified' && !verification.ok)) {
         throw Object.assign(new Error(
           'The saved draft could not be verified against the intended survey configuration.',
         ), {
@@ -387,10 +397,12 @@ export async function runDesignerChat(env, userId, body, request) {
           retryable: true,
         });
       }
-      result.latestDraft = {
-        surveyConfig: verified?.surveyConfig || result.latestDraft.surveyConfig,
-        draftUpdatedAt: verified?.draftUpdatedAt || result.latestDraft.draftUpdatedAt,
-      };
+      if (verification.ok) {
+        result.latestDraft = {
+          surveyConfig: verified?.surveyConfig || result.latestDraft.surveyConfig,
+          draftUpdatedAt: verified?.draftUpdatedAt || result.latestDraft.draftUpdatedAt,
+        };
+      }
     }
     if (draftRequested && !result.latestDraft?.surveyConfig) {
       const writeFailure = result.lastDraftWriteError
@@ -419,6 +431,8 @@ export async function runDesignerChat(env, userId, body, request) {
         draftUpdatedAt: result.latestDraft?.draftUpdatedAt || null,
         draftMutated: Boolean(result.latestDraft?.surveyConfig),
         persisted: Boolean(result.latestDraft?.draftUpdatedAt),
+        verified: result.draftVerified === true,
+        verificationReason: result.draftVerificationReason || null,
       },
     });
     await emit(createEvent('run.status', { status: 'completed' }));
@@ -442,6 +456,8 @@ export async function runDesignerChat(env, userId, body, request) {
       draftUpdatedAt: latestDraft?.draftUpdatedAt || null,
       draftMutated: Boolean(latestDraft?.surveyConfig),
       persisted: Boolean(latestDraft?.draftUpdatedAt),
+      verified: result.draftVerified === true,
+      verificationReason: result.draftVerificationReason || null,
       usage: result.usage,
       events: events.slice(-40),
       messages: eventsToUiMessages(events),
@@ -518,6 +534,35 @@ export async function executeQueuedDesignerRun(env, job) {
       retryable: false,
     });
   }
+  const authoritative = await getRunStatus(env, job.runId);
+  if (!authoritative) {
+    throw Object.assign(new Error('Queued Agent run was not found.'), {
+      code: 'RUN_NOT_FOUND',
+      retryable: false,
+    });
+  }
+  if (TERMINAL_RUN_STATUSES.has(authoritative.status)) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'terminal',
+      sessionId: job.sessionId,
+      runId: job.runId,
+    };
+  }
+  const claimed = await claimRun(env, job.runId, job.claimedBy || `queue:${job.runId}`);
+  if (!claimed) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'not-claimable',
+      sessionId: job.sessionId,
+      runId: job.runId,
+    };
+  }
+  const checkpoint = claimed.checkpoint && Object.keys(claimed.checkpoint).length
+    ? claimed.checkpoint
+    : (job.checkpoint || null);
   const request = new Request(`${env.APP_URL || 'https://sp-survey.org'}/api/agent/chat`, {
     method: 'POST',
   });
@@ -527,7 +572,7 @@ export async function executeQueuedDesignerRun(env, job) {
       sessionId: job.sessionId,
       _runId: job.runId,
       _sessionPrepared: true,
-      _checkpoint: job.checkpoint || null,
+      _checkpoint: checkpoint,
     }, request);
   } catch (error) {
     // Provider retries and self-repair happen inside the durable loop. Once it
