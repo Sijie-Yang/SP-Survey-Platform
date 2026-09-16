@@ -96,24 +96,26 @@ describe('Agent API asynchronous runs', () => {
         success: true,
         run: { id: 'run-1', status: 'running' },
         events: [
-          { type: 'run.status', payload: { status: 'running' } },
-          { type: 'tool.call', payload: { id: '1', name: 'survey_get_draft' } },
+          { seq: 1, type: 'run.status', payload: { status: 'running' } },
+          { seq: 2, type: 'tool.call', payload: { id: '1', name: 'survey_get_draft' } },
         ],
         messages: [{
           role: 'assistant',
           content: '',
           tools: [{ id: '1', name: 'survey_get_draft', status: 'running' }],
         }],
+        nextCursor: 2,
       }))
       .mockImplementationOnce(() => jsonResponse({
         success: true,
         run: {
           id: 'run-1',
           status: 'completed',
-          result: { message: 'Saved.', draftMutated: true, persisted: true },
+          result: { message: 'Saved.', draftMutated: true, persisted: true, surveyConfig: { title: 'Saved' } },
         },
-        events: [],
+        events: [{ seq: 3, type: 'run.status', payload: { status: 'completed' } }],
         messages: [{ role: 'assistant', content: 'Saved.' }],
+        nextCursor: 3,
       }));
     const onSnapshot = jest.fn();
 
@@ -126,6 +128,8 @@ describe('Agent API asynchronous runs', () => {
     expect(onSnapshot).toHaveBeenCalled();
     expect(onSnapshot.mock.calls[0][0].messages[0].tools[0].name).toBe('survey_get_draft');
     expect(result.success).toBe(true);
+    expect(result.surveyConfig).toEqual({ title: 'Saved' });
+    expect(global.fetch.mock.calls[2][0]).toContain('/api/agent/sessions/session-1?after=2');
   });
 
   test('exposes cancellation and steering endpoints', async () => {

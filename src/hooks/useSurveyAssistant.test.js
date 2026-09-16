@@ -428,7 +428,10 @@ describe('useSurveyAssistant', () => {
     );
     expect(sessionStorage.getItem('ai_session_p1')).toBe('sess-new');
     expect(result.current.aiUndoAvailable).toBe(true);
-    expect(JSON.parse(sessionStorage.getItem('ai_undo_p1'))).toEqual({ title: 'Before AI' });
+    expect(JSON.parse(sessionStorage.getItem('ai_undo_p1'))).toEqual(expect.objectContaining({
+      before: { title: 'Before AI' },
+      afterSignature: JSON.stringify({ title: 'After AI' }),
+    }));
     expect(mockSendChatMessage).toHaveBeenCalledWith(
       'make it shorter',
       { title: 'Before AI' },
@@ -505,6 +508,93 @@ describe('useSurveyAssistant', () => {
 
     expect(mockSendChatMessage.mock.calls[0][4]).toBe(false);
     expect(mockTriggerMultiAgentReviewStream).not.toHaveBeenCalled();
+  });
+
+  test('sends editor focus and refuses to send when the dirty draft cannot be saved', async () => {
+    const onPrepareWrite = jest.fn(async () => ({ ok: false, message: 'Save failed' }));
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: { ...project('p1'), draftUpdatedAt: '2026-09-16T00:00:00.000Z' },
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+      editorSelection: { pageName: 'page1', questionName: 'q1', panel: 'builder' },
+      hasUnsavedChanges: true,
+      onPrepareWrite,
+    }));
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'],
+        directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+      });
+    });
+    act(() => result.current.setUserMessage('edit this question'));
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+    expect(onPrepareWrite).toHaveBeenCalled();
+    expect(mockSendChatMessage).not.toHaveBeenCalled();
+    expect(result.current.messages.some((msg) => String(msg.content).includes('Save failed'))).toBe(true);
+
+    onPrepareWrite.mockResolvedValue({ ok: true });
+    mockSendChatMessage.mockResolvedValue({
+      success: true,
+      message: 'Edited.',
+      intent: 'adjust',
+    });
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+    expect(mockSendChatMessage.mock.calls[0][8]).toEqual(expect.objectContaining({
+      editorContext: expect.objectContaining({
+        pageName: 'page1',
+        questionName: 'q1',
+        panel: 'builder',
+        projectId: 'p1',
+        draftUpdatedAt: '2026-09-16T00:00:00.000Z',
+      }),
+    }));
+  });
+
+  test('refuses AI undo after later human edits', async () => {
+    sessionStorage.setItem('ai_undo_p1', JSON.stringify({
+      before: { title: 'Before AI' },
+      afterSignature: JSON.stringify({ title: 'After AI' }),
+    }));
+    const onChange = jest.fn();
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Human edit' },
+      onSurveyConfigChange: onChange,
+    }));
+    await waitFor(() => {
+      expect(result.current.aiUndoAvailable).toBe(true);
+    });
+    act(() => {
+      result.current.handleRevertAiChange();
+    });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(result.current.messages.some((msg) => String(msg.content).includes('newer edits'))).toBe(true);
+  });
+
+  test('treats a queued pending run as in progress', async () => {
+    sessionStorage.setItem('ai_pending_run_p1', JSON.stringify({
+      status: 'queued',
+      startedAt: Date.now(),
+      sessionId: 'sess-p1',
+    }));
+    mockGetAiSession.mockResolvedValue({
+      events: [{ type: 'run.status', payload: { status: 'queued' } }],
+      run: { id: 'run-1', status: 'queued' },
+      messages: [],
+    });
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await act(async () => {});
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.loadingStatus).toMatch(/Queued/);
   });
 
   test('does not send when no project is selected', async () => {

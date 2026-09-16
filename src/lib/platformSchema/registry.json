@@ -435,6 +435,48 @@
         "surveyConfig": { "$ref": "#/entities/survey" }
       }
     },
+    "updateSurvey": {
+      "public": true,
+      "required": ["op", "patch"],
+      "properties": {
+        "op": { "const": "updateSurvey" },
+        "patch": { "type": "object" }
+      }
+    },
+    "updatePage": {
+      "public": true,
+      "required": ["op", "pageName", "patch"],
+      "properties": {
+        "op": { "const": "updatePage" },
+        "pageName": { "type": "string" },
+        "patch": { "type": "object" }
+      }
+    },
+    "setTheme": {
+      "public": true,
+      "required": ["op", "theme"],
+      "properties": {
+        "op": { "const": "setTheme" },
+        "theme": { "type": "object" }
+      }
+    },
+    "reorderPages": {
+      "public": true,
+      "required": ["op", "pageNames"],
+      "properties": {
+        "op": { "const": "reorderPages" },
+        "pageNames": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "reorderQuestions": {
+      "public": true,
+      "required": ["op", "pageName", "questionNames"],
+      "properties": {
+        "op": { "const": "reorderQuestions" },
+        "pageName": { "type": "string" },
+        "questionNames": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "restoreRatingScales": {
       "public": false,
       "required": ["op", "previous"],

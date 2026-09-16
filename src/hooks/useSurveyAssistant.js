@@ -4,6 +4,7 @@ import { getWorkingMemory } from '../lib/workingMemory';
 import { getSessionLearning } from '../lib/sessionLearning';
 import { sendChatMessage, validateChatApiKey, triggerMultiAgentReviewStream } from '../lib/chatApi';
 import { postProcessAiConfig } from '../lib/designProtocol';
+import { runSurveyQualityChecks } from '../lib/surveyQualityChecks';
 import {
   answerAiRunApproval,
   archiveAiSession,
@@ -63,6 +64,9 @@ export default function useSurveyAssistant({
   surveyConfig,
   onSurveyConfigChange,
   enabled = true,
+  editorSelection = null,
+  hasUnsavedChanges = false,
+  onPrepareWrite = null,
 } = {}) {
   const platformMode = detectPlatformMode();
   const projectId = currentProject?.id || null;
@@ -241,12 +245,12 @@ export default function useSurveyAssistant({
 
     let cancelled = false;
     let timer = null;
-    let recoveringRun = pending?.status === 'running';
+    let recoveringRun = pending?.status === 'running' || pending?.status === 'queued';
     const startedAt = Number(pending?.startedAt) || Date.now();
     const maxWaitMs = 20 * 60 * 1000;
-    if (pending?.status === 'running') {
+    if (pending?.status === 'running' || pending?.status === 'queued') {
       setIsLoading(true);
-      setLoadingStatus('Continuing survey generation…');
+      setLoadingStatus(pending?.status === 'queued' ? 'Queued…' : 'Continuing survey generation…');
     }
 
     const check = async () => {
@@ -311,7 +315,7 @@ export default function useSurveyAssistant({
           timer = setTimeout(check, 1500);
           return;
         }
-        if ((status === 'running' || (!status && pending?.status === 'running'))
+        if ((status === 'queued' || status === 'running' || (!status && (pending?.status === 'running' || pending?.status === 'queued')))
           && Date.now() - startedAt < maxWaitMs) {
           recoveringRun = true;
           writePendingRun(storage, projectId, {
@@ -524,8 +528,18 @@ export default function useSurveyAssistant({
 
   const handleRevertAiChange = useCallback(() => {
     if (!aiUndoSnapshotRef.current) return;
+    const undo = aiUndoSnapshotRef.current;
+    const before = undo.before || undo;
+    if (undo.afterSignature && JSON.stringify(postProcessAiConfig(surveyConfigRef.current || {})) !== undo.afterSignature) {
+      conversationHistoryRef.current?.addMessage('assistant',
+        '⚠️ Cannot revert the last AI change because the editor has newer edits.',
+        { actionType: 'system', error: true },
+      );
+      refreshConversation();
+      return;
+    }
     const request = { projectId: projectIdRef.current, generation: generationRef.current };
-    applySurveyConfig(JSON.parse(JSON.stringify(aiUndoSnapshotRef.current)), request);
+    applySurveyConfig(JSON.parse(JSON.stringify(before)), request);
     aiUndoSnapshotRef.current = null;
     setAiUndoAvailable(false);
     clearUndoSnapshot(
@@ -594,6 +608,18 @@ export default function useSurveyAssistant({
       return;
     }
 
+    if (typeof onPrepareWrite === 'function') {
+      const prepared = await onPrepareWrite();
+      if (prepared && prepared.ok === false) {
+        conversationHistoryRef.current?.addMessage('assistant',
+          prepared.message || '⚠️ Save or reconcile the editor draft before asking the Assistant to edit.',
+          { actionType: 'system', error: true },
+        );
+        refreshConversation();
+        return;
+      }
+    }
+
     conversationHistoryRef.current?.addMessage('user', userMessage, {
       actionType: 'chat',
       timestamp: new Date().toISOString(),
@@ -648,6 +674,12 @@ export default function useSurveyAssistant({
           model: routeModel || null,
           reasoningEffort: selectedEffort || null,
           assistantMode,
+          editorContext: {
+            ...(editorSelection || {}),
+            hasUnsavedChanges: Boolean(hasUnsavedChanges),
+            draftUpdatedAt: currentProject?.draftUpdatedAt || null,
+            projectId: request.projectId,
+          },
           onStarted: (started) => {
             writeSessionId(pendingStorage, request.projectId, started.sessionId);
             writePendingRun(pendingStorage, request.projectId, {
@@ -787,18 +819,24 @@ export default function useSurveyAssistant({
         }
 
         if (result.surveyConfig) {
-          const snapshot = JSON.parse(JSON.stringify(surveyConfigRef.current || {}));
-          aiUndoSnapshotRef.current = snapshot;
-          setAiUndoAvailable(true);
-          writeUndoSnapshot(
-            typeof window !== 'undefined' ? window.sessionStorage : null,
-            request.projectId,
-            snapshot,
-          );
           const processedConfig = postProcessAiConfig(result.surveyConfig);
           const wasPersisted = result.runtime
             ? result.persisted === true && result.draftMutated === true
             : Boolean(result.draftUpdatedAt);
+          if (wasPersisted) {
+            const undo = {
+              before: JSON.parse(JSON.stringify(surveyConfigRef.current || {})),
+              afterSignature: JSON.stringify(processedConfig),
+              draftUpdatedAt: result.draftUpdatedAt || null,
+            };
+            aiUndoSnapshotRef.current = undo;
+            setAiUndoAvailable(true);
+            writeUndoSnapshot(
+              typeof window !== 'undefined' ? window.sessionStorage : null,
+              request.projectId,
+              undo,
+            );
+          }
           const persistence = wasPersisted
             ? { persisted: true, draftUpdatedAt: result.draftUpdatedAt, source: 'assistant' }
             : {};
@@ -1005,6 +1043,10 @@ export default function useSurveyAssistant({
     reviewMode,
     selectedEffort,
     selectedRoute,
+    currentProject,
+    editorSelection,
+    hasUnsavedChanges,
+    onPrepareWrite,
     userMessage,
   ]);
 
@@ -1032,6 +1074,20 @@ export default function useSurveyAssistant({
     }
     setPendingApproval(null);
   }, [pendingApproval]);
+
+  const handleRunQualityChecks = useCallback(() => {
+    const reports = runSurveyQualityChecks(surveyConfigRef.current);
+    const lines = reports.flatMap((report) => (
+      (report.findings || []).map((item) => `- [${report.id}] ${item.issue} (${item.questionName || item.pageName || 'survey'}): ${item.suggestion}`)
+    ));
+    conversationHistoryRef.current?.addMessage('assistant',
+      lines.length
+        ? `On-demand design checks (read-only, no draft changes):\n${lines.join('\n')}`
+        : 'On-demand design checks found no issues. The draft was not changed.',
+      { actionType: 'quality-check' },
+    );
+    refreshConversation();
+  }, [refreshConversation]);
 
   const handleSteerMessage = useCallback(async () => {
     const content = userMessage.trim();
@@ -1091,6 +1147,7 @@ export default function useSurveyAssistant({
     handleAssistantRouteChange,
     handleAssistantEffortChange,
     handleRevertAiChange,
+    handleRunQualityChecks,
     handleClearHistory,
     handleDownloadHistory,
   };
@@ -1135,6 +1192,7 @@ export function chatPropsFromAssistant(assistant) {
     chatEndRef: assistant.chatEndRef,
     aiUndoAvailable: assistant.aiUndoAvailable,
     onRevertAiChange: assistant.handleRevertAiChange,
+    onRunQualityChecks: assistant.handleRunQualityChecks,
     modelOptions: assistant.modelOptions,
     selectedRoute: assistant.selectedRoute,
     selectedEffort: assistant.selectedEffort,

@@ -67,6 +67,7 @@ import { checkIsAdmin } from './lib/templateManager';
 import { useNavigate } from 'react-router-dom';
 import useSurveyAssistant from './hooks/useSurveyAssistant';
 import AiAssistantSidebar from './components/admin/AiAssistantSidebar';
+import { isAssistantEnabled, isSiliconExperimentalEnabled } from './lib/featureFlags';
 import {
   AI_SIDEBAR_ID,
   AI_SIDEBAR_WIDTH,
@@ -101,7 +102,7 @@ function TabPanel({ children, value, index, keepMounted = false, ...other }) {
   );
 }
 
-function AdminWorkspaceTabs({ value, onChange }) {
+function AdminWorkspaceTabs({ value, onChange, siliconEnabled = true }) {
   const { t } = useRegion();
   return (
     <Tabs value={value} onChange={onChange} aria-label="admin tabs" variant="scrollable" scrollButtons="auto">
@@ -111,7 +112,7 @@ function AdminWorkspaceTabs({ value, onChange }) {
       <Tab label={t.tabShare} />
       <Tab label={t.tabResults} />
       <Tab label={t.tabPractice} />
-      <Tab label={t.tabSilicon} />
+      {siliconEnabled && <Tab label={t.tabSilicon} />}
     </Tabs>
   );
 }
@@ -150,6 +151,8 @@ export default function AdminApp() {
   const theme = createCustomTheme(currentTheme);
   
   const [tabValue, setTabValue] = useState(0);
+  const [assistantEnabled, setAssistantEnabled] = useState(() => isAssistantEnabled());
+  const [siliconEnabled, setSiliconEnabled] = useState(() => isSiliconExperimentalEnabled());
   const [analysisMediaFocus, setAnalysisMediaFocus] = useState(null);
   // Keep Practice mounted after first visit so free-pick selection + list scroll survive tab switches.
   const [practiceKeepAlive, setPracticeKeepAlive] = useState(false);
@@ -160,9 +163,22 @@ export default function AdminApp() {
     if (tabValue === 5) setPracticeKeepAlive(true);
   }, [tabValue]);
   useEffect(() => {
-    const openSilicon = () => setTabValue(6);
+    const openSilicon = () => {
+      if (isSiliconExperimentalEnabled()) setTabValue(6);
+    };
     window.addEventListener('sp-open-silicon-tab', openSilicon);
     return () => window.removeEventListener('sp-open-silicon-tab', openSilicon);
+  }, []);
+  useEffect(() => {
+    if (!siliconEnabled && tabValue === 6) setTabValue(0);
+  }, [siliconEnabled, tabValue]);
+  useEffect(() => {
+    const syncFlags = () => {
+      setAssistantEnabled(isAssistantEnabled());
+      setSiliconEnabled(isSiliconExperimentalEnabled());
+    };
+    window.addEventListener('sp-feature-flags', syncFlags);
+    return () => window.removeEventListener('sp-feature-flags', syncFlags);
   }, []);
   const [surveyConfig, setSurveyConfig] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -360,6 +376,8 @@ export default function AdminApp() {
   const remoteConflictWarnedAtRef = useRef(null);
   const draftUpdatedAtRef = useRef(null);
   const hasUnsavedChangesRef = useRef(false);
+  const performSaveRef = useRef(null);
+  const [editorSelection, setEditorSelection] = useState(null);
   const currentProjectIdRef = useRef(null);
 
   useEffect(() => {
@@ -828,12 +846,26 @@ export default function AdminApp() {
     currentProject,
     surveyConfig,
     onSurveyConfigChange: handleSurveyConfigChange,
+    editorSelection: {
+      ...(editorSelection || {}),
+      panel: tabValue,
+    },
+    hasUnsavedChanges,
+    onPrepareWrite: async () => {
+      if (!hasUnsavedChangesRef.current) return { ok: true };
+      const result = await performSaveRef.current?.({ silent: true });
+      if (result && result.success === false) {
+        return { ok: false, message: result.error || 'The editor draft could not be saved before the Assistant edit.' };
+      }
+      return { ok: true };
+    },
   });
 
   const openSiliconTab = useCallback(() => {
+    if (!siliconEnabled) return;
     setTabValue(6);
     if (!wideLayout) setAiSidebarOpen(false);
-  }, [wideLayout]);
+  }, [siliconEnabled, wideLayout]);
 
   const handleResultsConfigSync = (nextConfig) => {
     const savedCopy = JSON.parse(JSON.stringify(nextConfig));
@@ -1051,6 +1083,8 @@ export default function AdminApp() {
       saveInFlightRef.current = false;
     }
   }, [currentProject, projectStates, surveyConfig, latestImageDatasetConfig]);
+
+  performSaveRef.current = performSave;
 
   const handleManualSave = async () => {
     await performSave({ silent: false });
@@ -1273,7 +1307,7 @@ export default function AdminApp() {
               </IconButton>
             </Tooltip>
 
-            <Box sx={{ display: { xs: 'none', md: 'block' } }}><Tooltip title={aiSidebarOpen ? t.toggleAiSidebarOpen : t.toggleAiSidebarClosed}>
+            {assistantEnabled && <Box sx={{ display: { xs: 'none', md: 'block' } }}><Tooltip title={aiSidebarOpen ? t.toggleAiSidebarOpen : t.toggleAiSidebarClosed}>
               <Button
                 color="inherit"
                 size="small"
@@ -1508,14 +1542,16 @@ export default function AdminApp() {
         width={PROJECT_SIDEBAR_WIDTH}
       />
 
-      <AiAssistantSidebar
-        open={aiSidebarOpen}
-        onClose={() => setAiSidebarOpen(false)}
-        assistant={assistant}
-        onOpenSilicon={openSiliconTab}
-        variant={wideLayout ? 'persistent' : 'temporary'}
-        width={AI_SIDEBAR_WIDTH}
-      />
+      {assistantEnabled && (
+        <AiAssistantSidebar
+          open={aiSidebarOpen}
+          onClose={() => setAiSidebarOpen(false)}
+          assistant={assistant}
+          onOpenSilicon={siliconEnabled ? openSiliconTab : undefined}
+          variant={wideLayout ? 'persistent' : 'temporary'}
+          width={AI_SIDEBAR_WIDTH}
+        />
+      )}
 
       <Container 
         maxWidth="xl" 
@@ -1547,7 +1583,7 @@ export default function AdminApp() {
           // Project content
           <Paper sx={{ width: '100%' }}>
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <AdminWorkspaceTabs value={tabValue} onChange={handleTabChange} />
+              <AdminWorkspaceTabs value={tabValue} onChange={handleTabChange} siliconEnabled={siliconEnabled} />
             </Box>
 
             <Suspense fallback={<AdminLoadingState label={t.loadingWorkspace} />}>
@@ -1581,6 +1617,7 @@ export default function AdminApp() {
                   currentProject={currentProject}
                   onNextStep={handleNextStep}
                   hideAssistant
+                  onEditorSelectionChange={setEditorSelection}
                 />
               ) : (
                 <Box sx={{ p: 3, textAlign: 'center' }}>
@@ -1615,9 +1652,11 @@ export default function AdminApp() {
                 onSessionActiveChange={handlePracticeSessionActive}
               />
             </TabPanel>
-            <TabPanel value={tabValue} index={6}>
-              <SiliconSamples currentProject={currentProject} />
-            </TabPanel>
+            {siliconEnabled && (
+              <TabPanel value={tabValue} index={6}>
+                <SiliconSamples currentProject={currentProject} />
+              </TabPanel>
+            )}
             </Suspense>
           </Paper>
         )}

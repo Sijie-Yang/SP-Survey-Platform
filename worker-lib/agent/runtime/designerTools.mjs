@@ -14,10 +14,12 @@ export function createDesignerTools({
   env,
   accessToken,
   projectId,
+  getProjectId,
   request,
   writerSource = 'assistant',
   ownerUserId = null,
 }) {
+  const currentProjectId = () => getProjectId?.() || projectId;
   return [
     {
       name: 'survey_capabilities',
@@ -69,11 +71,12 @@ export function createDesignerTools({
       minPermission: 'ask',
       parameters: { type: 'object', properties: {} },
       async execute() {
-        if (!projectId) throw new Error('projectId is required');
-        const draft = await getDraft(env, accessToken, projectId, request, ownerUserId);
+        const scopedId = currentProjectId();
+        if (!scopedId) throw new Error('projectId is required');
+        const draft = await getDraft(env, accessToken, scopedId, request, ownerUserId);
         return {
-          summary: `Draft "${draft.surveyConfig?.title || projectId}" loaded`,
-          projectId,
+          summary: `Draft "${draft.surveyConfig?.title || scopedId}" loaded`,
+          projectId: scopedId,
           draftUpdatedAt: draft.draftUpdatedAt,
           surveyConfig: draft.surveyConfig,
           validation: draft.validation,
@@ -92,7 +95,9 @@ export function createDesignerTools({
       async execute(args) {
         const config = args.surveyConfig;
         if (!config) {
-          const draft = await getDraft(env, accessToken, projectId, request, ownerUserId);
+          const scopedId = currentProjectId();
+          if (!scopedId) throw new Error('projectId is required');
+          const draft = await getDraft(env, accessToken, scopedId, request, ownerUserId);
           const validation = validateSurveyConfig(draft.surveyConfig);
           return { summary: validation.valid ? 'Draft is valid' : 'Draft has errors', validation };
         }
@@ -102,7 +107,7 @@ export function createDesignerTools({
     },
     {
       name: 'survey_apply_operations',
-      description: 'Apply operations and save the draft. For a new or complete redesign, use one replaceConfig operation: {"op":"replaceConfig","surveyConfig":{...}}. For small edits use addPage, removePage, addQuestion, updateQuestion, removeQuestion, or setAllRatingScales. Requires the latest expectedDraftUpdatedAt from survey_get_draft.',
+      description: 'Apply operations and save the draft. For a new or complete redesign, use one replaceConfig operation. For small edits use addPage, removePage, addQuestion, updateQuestion, removeQuestion, setAllRatingScales, updateSurvey, updatePage, setTheme, reorderPages, or reorderQuestions. Requires the latest expectedDraftUpdatedAt from survey_get_draft.',
       minPermission: 'edit_draft',
       parameters: {
         type: 'object',
@@ -116,8 +121,9 @@ export function createDesignerTools({
         required: ['expectedDraftUpdatedAt', 'operations'],
       },
       async execute(args) {
-        if (!projectId) throw new Error('projectId is required');
-        const result = await applyProjectOperations(env, accessToken, projectId, {
+        const scopedId = currentProjectId();
+        if (!scopedId) throw new Error('projectId is required');
+        const result = await applyProjectOperations(env, accessToken, scopedId, {
           expectedDraftUpdatedAt: args.expectedDraftUpdatedAt,
           operations: args.operations,
         }, writerSource, ownerUserId);
@@ -137,7 +143,9 @@ export function createDesignerTools({
       minPermission: 'ask',
       parameters: { type: 'object', properties: {} },
       async execute() {
-        const draft = await getDraft(env, accessToken, projectId, request, ownerUserId);
+        const scopedId = currentProjectId();
+        if (!scopedId) throw new Error('projectId is required');
+        const draft = await getDraft(env, accessToken, scopedId, request, ownerUserId);
         return { summary: 'Preview URLs ready', urls: draft.urls };
       },
     },

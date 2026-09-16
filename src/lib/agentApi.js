@@ -137,6 +137,7 @@ export async function sendAgentChat({
   assistantMode = 'agent',
   onStarted,
   onSnapshot,
+  editorContext = null,
 }) {
   const started = await agentFetch('/api/agent/chat', {
     method: 'POST',
@@ -155,6 +156,7 @@ export async function sendAgentChat({
       reasoningEffort,
       permission,
       assistantMode,
+      editorContext,
     }),
   });
   if (!started?.success || !started?.queued || !started?.sessionId || !started?.runId) {
@@ -231,14 +233,20 @@ export async function waitForAgentRun(sessionId, runId, {
   onSnapshot,
 } = {}) {
   const deadline = Date.now() + timeoutMs;
+  let after = 0;
+  let events = [];
   while (Date.now() < deadline) {
-    const snapshot = await getAiSession(sessionId);
+    const snapshot = await getAiSession(sessionId, after);
     if (!snapshot?.success) return snapshot;
-    onSnapshot?.(snapshot);
+    if (Array.isArray(snapshot.events) && snapshot.events.length) {
+      events = events.concat(snapshot.events);
+      after = Number(snapshot.nextCursor || snapshot.events.at(-1)?.seq || after);
+    }
+    onSnapshot?.({ ...snapshot, events });
     const run = snapshot.run?.id === runId
       ? snapshot.run
       : snapshot.runs?.find?.((item) => item.id === runId);
-    const status = run?.status || runStatusFromEvents(snapshot.events, runId);
+    const status = run?.status || runStatusFromEvents(events, runId);
     if (status === 'completed') {
       const result = run?.result || {};
       const draftMutated = result.draftMutated ?? runChangedDraft(snapshot.events, runId);
@@ -257,14 +265,16 @@ export async function waitForAgentRun(sessionId, runId, {
           || [...(snapshot.messages || [])].reverse().find((item) => item.role === 'assistant')?.content
           || 'Done.',
         draftUpdatedAt: result.draftUpdatedAt || null,
+        surveyConfig: result.surveyConfig || null,
         draftMutated,
         persisted: result.persisted ?? draftMutated,
-        events: snapshot.events || [],
+        verified: result.verified === true,
+        events: events.length ? events : (snapshot.events || []),
         messages: snapshot.messages || [],
       };
     }
     if (status === 'failed' || status === 'cancelled') {
-      const errorEvent = [...(snapshot.events || [])].reverse().find((event) => (
+      const errorEvent = [...events].reverse().find((event) => (
         (!event.run_id || event.run_id === runId) && event.type === 'error'
       ));
       return {
@@ -395,6 +405,10 @@ export async function listSiliconResponses(runId) {
 
 export async function getSiliconCompare(runId) {
   return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/compare`);
+}
+
+export async function exportSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/export`);
 }
 
 export async function approveMcpOAuth({

@@ -179,6 +179,41 @@ describe('designProtocol normalize + operations', () => {
     expect(undone.surveyConfig.pages[0].elements).toHaveLength(0);
   });
 
+  test('applyOperations updates survey, theme, and order without replaceConfig', () => {
+    const base = createDefaultSurveyConfig('Demo');
+    base.pages.push({ name: 'page2', title: 'Second', elements: [] });
+    const result = applyOperations(base, [
+      { op: 'updateSurvey', patch: { title: '中文问卷', locale: 'zh' } },
+      { op: 'updatePage', pageName: 'page1', patch: { title: '第一页' } },
+      { op: 'setTheme', theme: { primaryColor: '#123456' } },
+      { op: 'reorderPages', pageNames: ['page2', 'page1'] },
+    ]);
+    expect(result.surveyConfig.title).toBe('中文问卷');
+    expect(result.surveyConfig.locale).toBe('zh');
+    expect(result.surveyConfig.pages[0].name).toBe('page2');
+    expect(result.surveyConfig.pages[1].title).toBe('第一页');
+    expect(result.surveyConfig.theme.primaryColor).toBe('#123456');
+    const undone = applyOperations(result.surveyConfig, result.inverse);
+    expect(undone.surveyConfig.title).toBe('Demo');
+    expect(undone.surveyConfig.pages[0].name).toBe('page1');
+  });
+
+  test('applyOperations reorders questions and inverts the change', () => {
+    const base = createDefaultSurveyConfig('Demo');
+    base.pages[0].elements = [
+      { type: 'text', name: 'a', title: 'A' },
+      { type: 'text', name: 'b', title: 'B' },
+    ];
+    const result = applyOperations(base, [{
+      op: 'reorderQuestions',
+      pageName: 'page1',
+      questionNames: ['b', 'a'],
+    }]);
+    expect(result.surveyConfig.pages[0].elements.map((el) => el.name)).toEqual(['b', 'a']);
+    const undone = applyOperations(result.surveyConfig, result.inverse);
+    expect(undone.surveyConfig.pages[0].elements.map((el) => el.name)).toEqual(['a', 'b']);
+  });
+
   test('isSafeProjectId', () => {
     expect(isSafeProjectId('proj_123_abc')).toBe(true);
     expect(isSafeProjectId('../evil')).toBe(false);

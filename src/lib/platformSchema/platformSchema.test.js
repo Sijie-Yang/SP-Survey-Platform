@@ -156,10 +156,11 @@ describe('canonical platform schema', () => {
 });
 
 describe('canonical operation contracts', () => {
-  test('preserve the seven public operation names and expose strict contracts', () => {
+  test('preserve the public operation names and expose strict contracts', () => {
     expect(OPERATION_TYPES).toEqual([
       'addPage', 'removePage', 'addQuestion', 'updateQuestion',
       'removeQuestion', 'setAllRatingScales', 'replaceConfig',
+      'updateSurvey', 'updatePage', 'setTheme', 'reorderPages', 'reorderQuestions',
     ]);
     expect(OPERATION_ITEM_SCHEMA.properties.op.enum).toEqual(OPERATION_TYPES);
     expect(JSON.stringify(OPERATION_ITEM_SCHEMA)).not.toContain('"$ref"');
@@ -177,5 +178,25 @@ describe('canonical operation contracts', () => {
     expect(getOperationContract('restoreRatingScales')).toEqual(
       expect.objectContaining({ public: false }),
     );
+  });
+
+  test('browser, Worker, and MCP share the same public operations and result families', () => {
+    const workerOps = read('worker-lib/designProtocol.mjs');
+    const mcp = read('worker-lib/mcp/server.mjs');
+    const workerTools = read('worker-lib/agent/runtime/designerTools.mjs');
+    OPERATION_TYPES.forEach((operation) => {
+      expect(workerOps).toContain(`case '${operation}'`);
+      expect(workerTools).toContain(operation);
+    });
+    expect(mcp).toContain("name: 'survey_apply_operations'");
+    expect(mcp).toContain("name: 'survey_capabilities'");
+    const families = PLATFORM_SCHEMA.entities.skillResultField.fields.type.enum;
+    expect(families).toEqual(expect.arrayContaining([
+      'rating', 'number', 'points', 'path', 'polygon', 'bbox',
+      'multiChoice', 'matrix', 'rankedList', 'compositeBlocks',
+    ]));
+    QUESTION_TYPE_IDS.forEach((type) => {
+      expect(isKnownQuestionType(type)).toBe(true);
+    });
   });
 });

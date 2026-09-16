@@ -50,12 +50,13 @@ Workflow:
 3. You must finish a design/edit request by successfully calling survey_apply_operations. For a new survey or complete redesign, use one replaceConfig operation. For a small edit, use incremental operations.
 4. Call survey_validate after substantial edits.
 5. Never AI-generate images to upload. Use project / template / preview media.
-6. image*/media*/skillquestion: imageSelectionMode huggingface_random, empty choices (except imagecheckbox tags), preset_* skillId only.
+6. Respect the project's existing media selection (fixed urls, folders, or random) and Skill ids. Do not force huggingface_random or rewrite custom skillId values.
 7. Do not put skillHtml on questions. Do not include API keys.
 8. When asked to create, design, or change the survey, never stop after describing it. If a write fails, read the fresh draft again, correct the operation, and retry.
 9. survey_capabilities accepts a domain. Load exact question/media/skill/operation schema lazily when needed.
 10. In Agent mode you may inspect projects, templates, media, Skills, and results. Publishing, deletion, and Skill/source upload pause for explicit user approval.
 11. After saving, verify the authoritative draft before reporting completion.
+12. If the user only asks what a setting means, answer without calling survey_apply_operations.
 
 If the user only asks a question, answer without tools.`;
 
@@ -226,10 +227,12 @@ export async function runDesignerChat(env, userId, body, request) {
 
   const cred = await loadProviderCredential(env, userId, provider);
 
+  let boundProjectId = projectId;
   const coreTools = createDesignerTools({
       env,
       accessToken: body?.accessToken,
       projectId,
+      getProjectId: () => boundProjectId,
       request,
       writerSource: 'assistant',
       ownerUserId: body?._sessionPrepared ? userId : null,
@@ -241,6 +244,19 @@ export async function runDesignerChat(env, userId, body, request) {
       accessToken: body?._sessionPrepared ? null : body?.accessToken,
       projectId,
       request,
+    }).map((tool) => {
+      if (tool.name !== 'survey_create_project' && tool.name !== 'survey_create_from_template') {
+        return tool;
+      }
+      return {
+        ...tool,
+        async execute(args, ctx) {
+          const created = await tool.execute(args, ctx);
+          const nextId = created?.projectId || created?.project?.id || created?.id;
+          if (nextId) boundProjectId = nextId;
+          return created;
+        },
+      };
     })
     : [];
   const registry = createToolRegistry(applyAssistantModeToTools(
@@ -259,6 +275,10 @@ export async function runDesignerChat(env, userId, body, request) {
   const research = body?.researchContext || {};
   const researchBlock = research.topic || research.requirements
     ? `\nResearch context:\n- topic: ${research.topic || ''}\n- requirements: ${research.requirements || ''}\n- scenario: ${research.scenario || ''}`
+    : '';
+  const focus = body?.editorContext || {};
+  const editorBlock = focus.pageName || focus.questionName || focus.panel || focus.draftUpdatedAt
+    ? `\nEditor focus:\n- projectId: ${boundProjectId || ''}\n- pageName: ${focus.pageName || ''}\n- questionName: ${focus.questionName || ''}\n- panel: ${focus.panel || ''}\n- baselineDraftUpdatedAt: ${focus.draftUpdatedAt || ''}\n- hasUnsavedChanges: ${focus.hasUnsavedChanges ? 'yes' : 'no'}\nIf the user says "this question" or "this page", use those stable names. Do not invent DOM labels as IDs.`
     : '';
   const draftRequested = modePolicy.requireDraftChange;
 
@@ -280,7 +300,7 @@ export async function runDesignerChat(env, userId, body, request) {
       messages: [
         {
           role: 'system',
-          content: `${DESIGNER_SYSTEM}\n\n${modePolicy.systemPrompt}${researchBlock}`,
+          content: `${DESIGNER_SYSTEM}\n\n${modePolicy.systemPrompt}${researchBlock}${editorBlock}`,
         },
         ...history.filter((m) => m.content),
         { role: 'user', content: message },
@@ -486,6 +506,7 @@ function queuedBody(body = {}) {
     temperature: body.temperature,
     max_tokens: body.max_tokens,
     researchContext: body.researchContext || {},
+    editorContext: body.editorContext || null,
   };
 }
 

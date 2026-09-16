@@ -1,5 +1,5 @@
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -237,10 +237,17 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
   );
 }
 
-export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig }) {
+export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig, onSelectionChange }) {
   const { tr } = useQuestionEditorText();
   const [editedPage, setEditedPage] = useState({ ...page });
   const [selectedQuestion, setSelectedQuestion] = useState(null);
+
+  useEffect(() => {
+    onSelectionChange?.({
+      pageName: editedPage?.name || page?.name,
+      questionName: selectedQuestion?.question?.name || null,
+    });
+  }, [editedPage?.name, page?.name, selectedQuestion, onSelectionChange]);
   const initialPage = useRef(JSON.stringify(page));
   const guard = useUnsavedChanges(JSON.stringify(editedPage) !== initialPage.current);
   const closeEditor = () => guard.request(onCancel);

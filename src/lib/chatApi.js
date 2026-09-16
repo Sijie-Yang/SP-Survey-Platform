@@ -48,6 +48,7 @@ export async function sendChatMessage(
         assistantMode: extras?.assistantMode || 'agent',
         onStarted: extras?.onStarted,
         onSnapshot: extras?.onSnapshot,
+        editorContext: extras?.editorContext || null,
       });
     }
 

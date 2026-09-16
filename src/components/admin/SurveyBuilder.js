@@ -260,11 +260,15 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
   );
 }
 
-export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false }) {
+export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange }) {
   const { t } = useRegion();
   const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
+
+  const reportSelection = (next) => {
+    onEditorSelectionChange?.(next);
+  };
 
   // Collapsed-state for the rarely-used sub-sections of the Survey Settings
   // panel. We default both to collapsed and persist the user's choice per
@@ -1311,7 +1315,10 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                       key={`page-${pageIndex}`}
                       page={page}
                       pageIndex={pageIndex}
-                      onEdit={setSelectedPage}
+                      onEdit={(next) => {
+                        setSelectedPage(next);
+                        reportSelection({ pageName: next?.page?.name, questionName: null, panel: 'builder' });
+                      }}
                       onDuplicate={duplicatePage}
                       onDelete={deletePage}
                     />
@@ -1337,8 +1344,19 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
           onSave={(updatedPage) => {
             updatePage(selectedPage.index, updatedPage);
             setSelectedPage(null);
+            reportSelection({ pageName: updatedPage?.name || selectedPage.page?.name, questionName: null, panel: 'builder' });
           }}
-          onCancel={() => setSelectedPage(null)}
+          onCancel={() => {
+            setSelectedPage(null);
+            reportSelection({ pageName: selectedPage.page?.name, questionName: null, panel: 'builder' });
+          }}
+          onSelectionChange={(selection) => {
+            reportSelection({
+              pageName: selectedPage.page?.name,
+              questionName: selection?.questionName || null,
+              panel: 'builder',
+            });
+          }}
           images={config.images || []}
           currentProject={currentProject}
           surveyConfig={config}
