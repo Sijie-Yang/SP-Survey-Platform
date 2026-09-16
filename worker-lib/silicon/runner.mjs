@@ -932,6 +932,7 @@ export async function executeSiliconJob(env, job = {}, ctx = null) {
       await dispatchSiliconRun(env, ctx, {
         runId,
         userId: run.user_id,
+        claimedBy,
         delaySeconds: 15,
       });
     }
@@ -990,7 +991,7 @@ export async function executeSiliconJob(env, job = {}, ctx = null) {
     return { success: true, ...(await finalizeRun(env, after || run)) };
   }
   if (!job.disableRedispatch) {
-    await dispatchSiliconRun(env, ctx, { runId, userId: run.user_id });
+    await dispatchSiliconRun(env, ctx, { runId, userId: run.user_id, claimedBy });
   }
   return {
     success: true,

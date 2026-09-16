@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, signIn, signUp, signOut } from '../lib/supabase';
+import { parsePreviewSessionMessage } from '../lib/previewSession';
 
 const AuthContext = createContext(null);
 
@@ -32,7 +33,17 @@ export function AuthProvider({ children }) {
       setUser(session?.user ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    const onPreviewSession = (event) => {
+      const tokens = parsePreviewSessionMessage(event, window.location.hostname);
+      if (!tokens) return;
+      supabase.auth.setSession(tokens).catch(() => {});
+    };
+    window.addEventListener('message', onPreviewSession);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('message', onPreviewSession);
+    };
   }, []);
 
   const login = async (email, password) => {

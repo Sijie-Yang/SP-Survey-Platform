@@ -46,6 +46,37 @@ const json = (data, init = {}) =>
     headers: { 'content-type': 'application/json', ...(init.headers || {}) },
   });
 
+function previewCorsOrigin(request) {
+  const origin = request.headers.get('Origin') || '';
+  if (!origin) return null;
+  try {
+    const { protocol, hostname } = new URL(origin);
+    const local = (hostname === 'localhost' || hostname === '127.0.0.1')
+      && (protocol === 'http:' || protocol === 'https:');
+    const preview = hostname.endsWith('.workers.dev') && protocol === 'https:';
+    return (local || preview) ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function withPreviewCors(request, response) {
+  if (!response) return response;
+  const origin = previewCorsOrigin(request);
+  if (!origin) return response;
+  const headers = new Headers(response.headers);
+  headers.set('Access-Control-Allow-Origin', origin);
+  headers.set('Access-Control-Allow-Credentials', 'true');
+  headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  headers.set('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  headers.set('Vary', 'Origin');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 function base64ToArrayBuffer(b64) {
   const binary = atob(b64);
   const len = binary.length;
@@ -780,12 +811,20 @@ export default {
       const url = new URL(request.url);
       const { pathname } = url;
 
+      if (
+        request.method === 'OPTIONS'
+        && (pathname.startsWith('/api/') || pathname === '/mcp' || pathname.startsWith('/mcp/'))
+      ) {
+        const origin = previewCorsOrigin(request);
+        if (origin) return withPreviewCors(request, new Response(null, { status: 204 }));
+      }
+
       const adminResultsResponse = await handleAdminResultsRoutes(request, env);
-      if (adminResultsResponse) return adminResultsResponse;
+      if (adminResultsResponse) return withPreviewCors(request, adminResultsResponse);
 
       // Agent / OAuth / MCP (returns Response or null if not matched)
       const agentResponse = await handleAgentAndMcpRoutes(request, env, ctx);
-      if (agentResponse) return agentResponse;
+      if (agentResponse) return withPreviewCors(request, agentResponse);
 
       // SP-Bench admin + public APIs
       const benchResponse = await handleBenchRoutes(request, env, ctx);
