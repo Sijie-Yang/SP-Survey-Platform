@@ -454,6 +454,8 @@ export default function AdminApp() {
   const performSaveRef = useRef(null);
   const [editorSelection, setEditorSelection] = useState(null);
   const editorSelectionRef = useRef(null);
+  const [resultsScope, setResultsScope] = useState(null);
+  const [resultsAnalyzeBusy, setResultsAnalyzeBusy] = useState(false);
   const [editorCommitKey, setEditorCommitKey] = useState(0);
   const currentProjectIdRef = useRef(null);
 
@@ -927,6 +929,7 @@ export default function AdminApp() {
     editorSelection: {
       ...(editorSelection || {}),
       panel: tabValue,
+      resultsScope: tabValue === 4 ? resultsScope : null,
     },
     hasUnsavedChanges,
     lastSavedConfig,
@@ -1823,6 +1826,52 @@ export default function AdminApp() {
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
                 onSurveyConfigChange={handleResultsConfigSync}
+                analysisBusy={resultsAnalyzeBusy}
+                onScopeChange={(scope) => setResultsScope(scope)}
+                onAnalyzeCurrent={async ({ scope, overview, onSaved }) => {
+                  setResultsScope(scope);
+                  setResultsAnalyzeBusy(true);
+                  openAiSidebar('assistant');
+                  try {
+                    await assistant.handleSendMessage({
+                      assistantMode: 'question',
+                      message: [
+                        'Analyze the current Results scope. Call survey_results_summary with view=overview using the provided analysisScope.',
+                        'Then read any comparison or slider questions with view=question.',
+                        'Write a short report: data included/excluded, quality, main findings with evidence, methods and limits.',
+                        'Do not invent statistics, significance, or causal claims. Do not save or delete anything.',
+                        `Scope JSON: ${JSON.stringify(scope)}`,
+                        overview?.counts ? `Known counts: ${JSON.stringify(overview.counts)}` : '',
+                      ].filter(Boolean).join('\n'),
+                    });
+                    const last = [...(assistant.messages || [])].reverse().find((row) => row.role === 'assistant');
+                    onSaved?.({
+                      scope,
+                      overview,
+                      narrative: last?.content || '',
+                      findings: [],
+                      provider: assistant.selectedRoute,
+                      model: assistant.selectedRoute,
+                      status: 'completed',
+                    });
+                  } finally {
+                    setResultsAnalyzeBusy(false);
+                  }
+                }}
+                onExplainQuestion={async ({ scope, question }) => {
+                  setResultsScope(scope);
+                  openAiSidebar('assistant');
+                  await assistant.handleSendMessage({
+                    assistantMode: 'question',
+                    message: [
+                      `Explain question ${question?.name || scope.questionName} in the current Results scope.`,
+                      'Call survey_results_summary view=question with this questionName.',
+                      'If the method is TrueSkill, explain μ, σ, ties, coverage, and why rank is not significance.',
+                      'If it is a slider, explain each dimension separately.',
+                      `Scope JSON: ${JSON.stringify(scope)}`,
+                    ].join('\n'),
+                  });
+                }}
               />
             </TabPanel>
 

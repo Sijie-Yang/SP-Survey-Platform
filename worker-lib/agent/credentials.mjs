@@ -448,24 +448,85 @@ export async function loadProviderCredential(env, userId, provider) {
   });
 }
 
+export function selectAssistantBinding({
+  userCred = null,
+  subsidy = null,
+  provider,
+  model,
+  receiverProfile = {},
+  donorProfile = {},
+} = {}) {
+  const shared = subsidyAllowsRoute(subsidy, provider, model || '');
+  if (userCred) {
+    return {
+      source: 'user',
+      credential: { ...userCred, source: 'user' },
+      profile: receiverProfile || {},
+    };
+  }
+  if (!shared) {
+    return {
+      source: 'missing',
+      credential: null,
+      profile: receiverProfile || {},
+    };
+  }
+  return {
+    source: 'subsidy',
+    credential: { source: 'subsidy' },
+    profile: donorProfile || {},
+  };
+}
+
 export async function resolveAssistantCredential(env, userId, provider, { model = null } = {}) {
+  const binding = await resolveAssistantBinding(env, userId, provider, model);
+  return binding.credential;
+}
+
+export async function resolveAssistantBinding(env, userId, provider, model, { receiverProfiles = [] } = {}) {
+  const subsidy = await loadActiveSubsidy(env);
+  const shared = subsidyAllowsRoute(subsidy, provider, model || '');
+  let userCred = null;
   try {
-    const cred = await loadProviderCredential(env, userId, provider);
-    return { ...cred, source: 'user' };
+    userCred = await loadProviderCredential(env, userId, provider);
   } catch (error) {
     if (error?.code !== 'CREDENTIALS_MISSING') throw error;
-    const subsidy = await loadActiveSubsidy(env);
-    if (!subsidyAllowsRoute(subsidy, provider, model || '')) throw error;
-    try {
-      const cred = await loadProviderCredential(env, subsidy.donor_user_id, provider);
-      return { ...cred, source: 'subsidy', donorUserId: subsidy.donor_user_id };
-    } catch (donorError) {
-      if (donorError?.code !== 'CREDENTIALS_MISSING') throw donorError;
-      throw Object.assign(new Error('The free Assistant model is temporarily unavailable.'), {
-        status: 503,
-        code: 'SUBSIDY_UNAVAILABLE',
-      });
-    }
+  }
+  if (userCred && !shared) {
+    return {
+      source: 'user',
+      credential: { ...userCred, source: 'user' },
+      profile: receiverProfiles.find((row) => row.provider === provider) || {},
+    };
+  }
+  if (userCred && shared) {
+    return {
+      source: 'user',
+      credential: { ...userCred, source: 'user' },
+      profile: receiverProfiles.find((row) => row.provider === provider) || {},
+    };
+  }
+  if (!shared) {
+    throw Object.assign(new Error('No API key configured. Add one in AI & Integrations.'), {
+      status: 400,
+      code: 'CREDENTIALS_MISSING',
+    });
+  }
+  try {
+    const cred = await loadProviderCredential(env, subsidy.donor_user_id, provider);
+    const donorProfiles = await listProviderProfiles(env, subsidy.donor_user_id);
+    const donorProfile = donorProfiles.find((row) => row.provider === provider) || {};
+    return {
+      source: 'subsidy',
+      credential: { ...cred, source: 'subsidy', donorUserId: subsidy.donor_user_id },
+      profile: donorProfile,
+    };
+  } catch (donorError) {
+    if (donorError?.code !== 'CREDENTIALS_MISSING') throw donorError;
+    throw Object.assign(new Error('The free Assistant model is temporarily unavailable.'), {
+      status: 503,
+      code: 'SUBSIDY_UNAVAILABLE',
+    });
   }
 }
 

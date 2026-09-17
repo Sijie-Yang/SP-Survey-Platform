@@ -1,4 +1,5 @@
 import { describeToolArgShape } from '../../../scripts/platform-schema-core.mjs';
+import { compactResultsForModel } from '../../../src/lib/resultsWorkbench.js';
 
 export { describeToolArgShape };
 
@@ -160,6 +161,8 @@ function continueRead(value) {
 }
 
 export function compactJsonForModel(value, { maxChars = 8000 } = {}) {
+  const results = compactResultsForModel(value, { maxChars });
+  if (results) return results;
   const text = JSON.stringify(value);
   if (text.length <= maxChars) return text;
   if (!value || typeof value !== 'object') {

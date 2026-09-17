@@ -28,7 +28,7 @@ import { createToolExecutionHooks } from './executions.mjs';
 import {
   listProviderCredentials,
   listProviderProfiles,
-  resolveAssistantCredential,
+  resolveAssistantBinding,
   loadUserAiSettings,
   saveUserAiSettings,
 } from '../credentials.mjs';
@@ -150,15 +150,16 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
   const provider = selection.provider || defaultProvider;
   const model = selection.model || defaultModel;
   const effort = selection.effort || null;
-  const profile = profiles.find((row) => row.provider === provider);
-  const cred = await resolveAssistantCredential(env, userId, provider, { model });
+  const binding = await resolveAssistantBinding(env, userId, provider, model, { receiverProfiles: profiles });
+  const cred = binding.credential;
+  const profile = binding.profile;
   const checkedRoute = assertRoute({
     provider,
     model,
     profile,
     effort,
     requireConfigured: true,
-    credential: credentials.find((row) => row.provider === provider) || (cred ? { configured: true } : null),
+    credential: cred,
   });
   const resolved = checkedRoute.provider;
   const modelRecord = resolveModel(provider, model, profile);
@@ -372,8 +373,12 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
     : '';
   const focus = body?.editorContext || {};
   const workingCopyBlock = summarizeWorkingCopy(focus);
-  const editorBlock = focus.pageName || focus.questionName || focus.panel || focus.draftUpdatedAt || workingCopyBlock
+  const editorBlock = focus.pageName || focus.questionName || focus.panel || focus.draftUpdatedAt || workingCopyBlock || focus.resultsScope
     ? `\nEditor focus:\n- projectId: ${boundProjectId || ''}\n- pageName: ${focus.pageName || ''}\n- questionName: ${focus.questionName || ''}\n- panel: ${focus.panel || ''}\n- baselineDraftUpdatedAt: ${focus.draftUpdatedAt || ''}\n- hasUnsavedChanges: ${focus.hasUnsavedChanges || focus.dirty ? 'yes' : 'no'}\nIf the user says "this question" or "this page", use those stable names. Do not invent DOM labels as IDs.${workingCopyBlock}`
+    : '';
+  const resultsScope = focus.resultsScope || null;
+  const resultsBlock = resultsScope
+    ? `\nResults analysisScope (authoritative; do not silently change it):\n${JSON.stringify(resultsScope)}\nCall survey_results_summary with this scope. Platform computes statistics including TrueSkill. Explain numbers; never invent methods, significance, or causal claims. Results tasks are read-only: do not save, publish, or delete. survey_export_responses returns a downloadable file, not CSV text to quote.`
     : '';
   const draftRequested = modePolicy.requireDraftChange;
 
@@ -395,14 +400,14 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       messages: [
         {
           role: 'system',
-          content: `${assistantMode === 'generate' ? GENERATE_DESIGNER_SYSTEM : DESIGNER_SYSTEM}\n\n${modePolicy.systemPrompt}${researchBlock}${editorBlock}`,
+          content: `${assistantMode === 'generate' ? GENERATE_DESIGNER_SYSTEM : DESIGNER_SYSTEM}\n\n${modePolicy.systemPrompt}${researchBlock}${editorBlock}${resultsBlock}`,
         },
         ...history,
         { role: 'user', content: currentTaskMessage(message, intent) },
       ],
       registry,
       ctx: {
-        permission: modePolicy.readOnly ? 'ask' : (assistantMode === 'agent' ? 'media' : permission),
+        permission: (modePolicy.readOnly || resultsScope) ? 'ask' : (assistantMode === 'agent' ? 'media' : permission),
         userId,
         projectId,
         assistantMode,

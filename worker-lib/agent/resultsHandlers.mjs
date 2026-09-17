@@ -12,8 +12,12 @@ import {
   buildManifest,
   buildQuestionLongCsv,
   buildQuestionSummaryCsv,
-  buildQuestionSummaryRows,
 } from '../../src/lib/questionSummaryExport.js';
+import { createAnalysisScope, toToolFilters } from '../../src/lib/analysisScope.js';
+import {
+  computeResultsOverview,
+  computeResultsQuestion,
+} from '../../src/lib/resultsWorkbench.js';
 
 const LIST_DEFAULT_LIMIT = 100;
 const EXPORT_MAX = 5000;
@@ -29,18 +33,21 @@ function requireKnownRevision(rows, revision) {
   }
 }
 
-function parseFilters(raw = {}) {
+export function parseResultsQuery(raw = {}) {
+  const scope = createAnalysisScope(raw);
   return {
-    includePractice: Boolean(raw.includePractice),
-    dateFrom: raw.dateFrom ? String(raw.dateFrom) : null,
-    dateTo: raw.dateTo ? String(raw.dateTo) : null,
-    sessionId: raw.sessionId ? String(raw.sessionId) : null,
-    surveyRevision: raw.surveyRevision ? String(raw.surveyRevision) : null,
+    ...toToolFilters(scope),
+    view: ['overview', 'question'].includes(raw.view) ? raw.view : (raw.questionName ? 'question' : 'overview'),
+    catalogOffset: Math.max(Number(raw.catalogOffset) || 0, 0),
+    catalogLimit: Math.min(Math.max(Number(raw.catalogLimit) || 12, 1), 50),
     includeAnswers: Boolean(raw.includeAnswers),
     limit: Math.min(Math.max(Number(raw.limit) || LIST_DEFAULT_LIMIT, 1), EXPORT_MAX),
     offset: Math.max(Number(raw.offset) || 0, 0),
-    excludeFlagged: Boolean(raw.excludeFlagged),
   };
+}
+
+function parseFilters(raw = {}) {
+  return parseResultsQuery(raw);
 }
 
 function rowTimestamp(row) {
@@ -48,26 +55,34 @@ function rowTimestamp(row) {
 }
 
 function filterRows(rows, filters, surveyConfig) {
+  const scope = createAnalysisScope({
+    ...filters,
+    includePractice: filters.dataSource === 'practice' ? true : filters.includePractice,
+  });
   let out = Array.isArray(rows) ? [...rows] : [];
-  if (filters.surveyRevision) out = out.filter((r) => (r.survey_metadata?.survey_revision || 'historical_unknown') === filters.surveyRevision);
-  if (!filters.includePractice) {
+  if (filters.surveyRevision) {
+    out = out.filter((r) => (r.survey_metadata?.survey_revision || 'historical_unknown') === filters.surveyRevision);
+  }
+  if (scope.dataSource === 'practice') {
+    out = out.filter((r) => r.survey_metadata?.practice_mode);
+  } else if (!scope.includePractice) {
     out = out.filter((r) => !r.survey_metadata?.practice_mode);
   }
   if (filters.sessionId) {
     out = out.filter((r) => r.survey_metadata?.session_id === filters.sessionId);
   }
-  if (filters.dateFrom) {
-    const start = new Date(`${filters.dateFrom}T00:00:00`);
+  if (filters.dateFrom || filters.dateTo) {
     out = out.filter((r) => {
       const ts = rowTimestamp(r);
-      return !ts || new Date(ts) >= start;
-    });
-  }
-  if (filters.dateTo) {
-    const end = new Date(`${filters.dateTo}T23:59:59`);
-    out = out.filter((r) => {
-      const ts = rowTimestamp(r);
-      return !ts || new Date(ts) <= end;
+      if (!ts) return scope.untimedPolicy === 'include';
+      const start = filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00`).getTime() : -Infinity;
+      let end = Infinity;
+      if (filters.dateTo) {
+        const nextDay = new Date(`${filters.dateTo}T00:00:00`);
+        nextDay.setDate(nextDay.getDate() + 1);
+        end = nextDay.getTime();
+      }
+      return new Date(ts).getTime() >= start && new Date(ts).getTime() < end;
     });
   }
   if (filters.excludeFlagged && surveyConfig) {
@@ -119,6 +134,44 @@ async function fetchAllResponses(env, projectId) {
   }));
 }
 
+async function fetchSiliconResponses(env, projectId, runId) {
+  if (!runId) {
+    throw Object.assign(new Error('siliconRunId is required when dataSource is silicon.'), {
+      status: 400,
+      code: 'SILICON_RUN_REQUIRED',
+    });
+  }
+  const runs = await supabaseRest(env, {
+    path: '/rest/v1/silicon_runs',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(runId)}&project_id=eq.${encodeURIComponent(projectId)}&select=id,project_id&limit=1`,
+  });
+  if (!Array.isArray(runs) || !runs.length) {
+    throw Object.assign(new Error('Silicon run was not found for this project.'), {
+      status: 404,
+      code: 'SILICON_RUN_NOT_FOUND',
+    });
+  }
+  const rows = await readAllResponsePages((offset, after) => supabaseRest(env, {
+    path: '/rest/v1/silicon_responses',
+    serviceRole: true,
+    query: `?run_id=eq.${encodeURIComponent(runId)}&project_id=eq.${encodeURIComponent(projectId)}&select=*&order=created_at.desc.nullslast,id.desc&limit=1000${after ? `&or=${encodeURIComponent(`(${responseCursorFilter(after)})`)}` : ''}`,
+  }));
+  return (rows || []).map((row) => ({
+    ...row,
+    source: 'silicon',
+    survey_metadata: {
+      ...(row.survey_metadata || {}),
+      silicon_run_id: runId,
+    },
+  }));
+}
+
+async function loadScopedResponses(env, projectId, opts) {
+  if (opts.dataSource === 'silicon') return fetchSiliconResponses(env, projectId, opts.siliconRunId);
+  return fetchAllResponses(env, projectId);
+}
+
 function toFullRow(row) {
   return {
     id: row.id,
@@ -138,7 +191,7 @@ export async function listResponses(env, ctx, projectId, filters = {}) {
   const project = await loadOwned(env, { ...ctx, projectId });
   const opts = parseFilters(filters);
   const surveyConfig = draftConfig(project);
-  const all = await fetchAllResponses(env, projectId);
+  const all = await loadScopedResponses(env, projectId, opts);
   requireKnownRevision(all, opts.surveyRevision);
   const filtered = filterRows(all, opts, surveyConfig);
   const slice = filtered.slice(opts.offset, opts.offset + opts.limit);
@@ -150,13 +203,7 @@ export async function listResponses(env, ctx, projectId, filters = {}) {
     offset: opts.offset,
     limit: opts.limit,
     hasMore: opts.offset + slice.length < filtered.length,
-    filters: {
-      includePractice: opts.includePractice,
-      dateFrom: opts.dateFrom,
-      dateTo: opts.dateTo,
-      sessionId: opts.sessionId,
-      includeAnswers: opts.includeAnswers,
-    },
+    filters: toToolFilters(opts),
     responses: slice.map((row) => {
       const base = {
         id: row.id,
@@ -189,7 +236,7 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
     throw Object.assign(new Error('format must be json, wide_csv, both, long_csv, summary_csv, or analysis_bundle'), { status: 400 });
   }
 
-  const all = await fetchAllResponses(env, projectId);
+  const all = await loadScopedResponses(env, projectId, opts);
   requireKnownRevision(all, opts.surveyRevision);
   opts.surveyRevision = format === 'json' ? opts.surveyRevision : recordedRevisionSelection(all, opts.surveyRevision);
   const surveyConfig = recordedSurveyConfig(all, draftConfig(project), opts.surveyRevision);
@@ -210,13 +257,20 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
     throw Object.assign(new Error(`Question not found: ${filters.questionName}`), { status: 404 });
   }
   const result = {
+    kind: 'results',
     success: true,
     projectId,
     format,
     n: filtered.length,
+    scope: toToolFilters({ ...opts, projectId, surveyRevision: opts.surveyRevision }),
     surveyRevision: opts.surveyRevision || null,
     availableRevisions: [...new Set(all.map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))],
-    note: 'Typed Skill exports use the frozen question contract; every Skill trial also retains answer_json.',
+    download: {
+      format,
+      available: true,
+      filename: null,
+    },
+    note: 'Typed Skill exports use the frozen question contract. File bodies are for download, not for model context.',
   };
 
   if (format === 'json' || format === 'both') {
@@ -283,88 +337,49 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
  */
 export async function summarizeResponses(env, ctx, projectId, filters = {}) {
   const project = await loadOwned(env, { ...ctx, projectId });
-  const opts = parseFilters({ ...filters, limit: EXPORT_MAX });
-  const all = await fetchAllResponses(env, projectId);
+  const opts = parseFilters({ ...filters, projectId, limit: EXPORT_MAX });
+  const all = await loadScopedResponses(env, projectId, opts);
   requireKnownRevision(all, opts.surveyRevision);
   opts.surveyRevision = recordedRevisionSelection(all, opts.surveyRevision);
   const surveyConfig = recordedSurveyConfig(all, draftConfig(project), opts.surveyRevision);
-  const nPractice = all.filter((r) => r.survey_metadata?.practice_mode).length;
-  const filtered = filterRows(all, { ...opts, excludeFlagged: false }, surveyConfig);
-  if (filtered.length > EXPORT_MAX) {
+  if (all.length > EXPORT_MAX) {
     throw Object.assign(
-      new Error(`Too many responses (${filtered.length}). Narrow by date or questionName (max ${EXPORT_MAX}); statistics were not truncated.`),
+      new Error(`Too many responses (${all.length}). Narrow by date or questionName (max ${EXPORT_MAX}); statistics were not truncated or sampled.`),
       { status: 400, code: 'RESULTS_TOO_LARGE' },
     );
   }
 
-  let flagged = 0;
-  const flagCounts = {};
-  filtered.forEach((row) => {
-    const flags = qualityFlags(row, surveyConfig, filtered);
-    if (flags.length) {
-      flagged += 1;
-      flags.forEach((f) => {
-        flagCounts[f] = (flagCounts[f] || 0) + 1;
-      });
-    }
-  });
-
-  const forAnalysis = opts.excludeFlagged
-    ? filtered.filter((r) => qualityFlags(r, surveyConfig, filtered).length === 0)
-    : filtered;
-
-  const timestamps = forAnalysis.map(rowTimestamp).filter(Boolean).map((t) => new Date(t).getTime());
-  let questions = flattenQuestions(surveyConfig)
-    .filter((q) => q?.name && !DISPLAY_ONLY_TYPES.has(q.type));
-  if (filters.questionName) questions = questions.filter((q) => q.name === filters.questionName);
-
-  const perQuestion = questions.map((q) => {
-    const summaryRows = buildQuestionSummaryRows(q, forAnalysis) || [];
-    const manifestQuestion = buildManifest({
-      project,
-      questions: [q],
-      responses: forAnalysis,
-      filters: {},
-      questionFiles: [],
-    }).questions[0];
-    return {
-      name: q.name,
-      type: q.type || 'unknown',
-      n_answered: forAnalysis.filter((row) => hasAnswer(row.responses?.[q.name])).length,
-      contract: q.type === 'skillquestion' ? {
-        skill_id: q.skillId || null,
-        revision: q.skillRevision || null,
-        contract_version: q.skillContractVersion || null,
-        result_schema: q.skillResultSchema || [],
-      } : null,
-      summary_rows: summaryRows,
-      warnings: manifestQuestion?.warnings || [],
-    };
-  });
-
-  return {
-    success: true,
-    projectId,
-    surveyRevision: opts.surveyRevision || null,
-    availableRevisions: [...new Set(all.map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))],
-    projectName: project.name,
-    n_total: all.length,
-    n_practice: nPractice,
-    n_in_export: forAnalysis.length,
-    n_flagged: flagged,
-    flag_counts: flagCounts,
-    date_from: timestamps.length ? new Date(Math.min(...timestamps)).toISOString() : null,
-    date_to: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null,
-    questions: perQuestion,
-    filters: {
-      includePractice: opts.includePractice,
-      dateFrom: opts.dateFrom,
-      dateTo: opts.dateTo,
-      sessionId: opts.sessionId,
-      excludeFlagged: opts.excludeFlagged,
-    },
-    note: 'Typed summary rows use the same frozen Skill contract as long/analysis exports.',
-  };
+  const payload = opts.view === 'question' || opts.questionName
+    ? computeResultsQuestion({
+      scope: { ...opts, projectId, surveyRevision: opts.surveyRevision },
+      rows: all,
+      surveyConfig,
+    })
+    : computeResultsOverview({
+      scope: { ...opts, projectId, surveyRevision: opts.surveyRevision },
+      rows: all,
+      surveyConfig,
+    });
+  payload.catalogOffset = opts.catalogOffset;
+  payload.catalogLimit = opts.catalogLimit;
+  payload.projectName = project.name;
+  payload.availableRevisions = [...new Set(all.map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))];
+  payload.n_total = all.length;
+  payload.n_practice = payload.counts?.nPractice ?? 0;
+  payload.n_in_export = payload.counts?.nIncluded ?? 0;
+  payload.n_flagged = payload.counts?.nFlagged ?? 0;
+  payload.flag_counts = payload.quality?.flagCounts || {};
+  payload.filters = toToolFilters(payload.scope || opts);
+  payload.questions = (payload.catalog || []).map((item) => ({
+    name: item.name,
+    type: item.type,
+    n_answered: item.nAnswered,
+    method: item.method,
+    family: item.family,
+    summary_rows: payload.question?.questionName === item.name ? (payload.question.metrics || []) : undefined,
+  }));
+  payload.note = 'Platform-computed metrics. Do not invent statistics. Use view=question for full rows.';
+  return payload;
 }
 
 /**

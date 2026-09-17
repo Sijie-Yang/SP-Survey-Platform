@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { selectAssistantBinding } from './credentials.mjs';
 import {
   applySubsidyToDirectory,
   isSubsidyActive,
@@ -89,5 +90,51 @@ describe('assistant subsidy policy', () => {
     assert.equal(deepseek.shared, undefined);
     assert.deepEqual(subsidizedRoutes, [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2', shared: true }]);
     assert.deepEqual(publicSubsidyView(subsidy, now).routes, [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }]);
+  });
+
+  it('binds subsidy credentials to the donor route, not the receiver override', () => {
+    const subsidy = {
+      enabled: true,
+      donor_user_id: 'admin-1',
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+    };
+    const donor = { provider: 'qwen-dashscope', base_url: 'https://donor.example/v1', protocol: 'openai-completions' };
+    const receiver = { provider: 'qwen-dashscope', base_url: 'https://receiver.example/v1', protocol: 'openai-responses' };
+    const shared = selectAssistantBinding({
+      userCred: null,
+      subsidy,
+      provider: 'qwen-dashscope',
+      model: 'deepseek-v3.2',
+      receiverProfile: receiver,
+      donorProfile: donor,
+    });
+    assert.equal(shared.source, 'subsidy');
+    assert.equal(shared.profile.base_url, 'https://donor.example/v1');
+    assert.equal(shared.profile.protocol, 'openai-completions');
+
+    const personal = selectAssistantBinding({
+      userCred: { apiKey: 'sk-user', provider: 'qwen-dashscope' },
+      subsidy,
+      provider: 'qwen-dashscope',
+      model: 'deepseek-v3.2',
+      receiverProfile: receiver,
+      donorProfile: donor,
+    });
+    assert.equal(personal.source, 'user');
+    assert.equal(personal.profile.base_url, 'https://receiver.example/v1');
+
+    const custom = selectAssistantBinding({
+      userCred: null,
+      subsidy: {
+        ...subsidy,
+        allowed_routes: [{ provider: 'my-proxy', model: 'local-model' }],
+      },
+      provider: 'my-proxy',
+      model: 'local-model',
+      receiverProfile: { provider: 'my-proxy', base_url: 'https://evil.example' },
+      donorProfile: { provider: 'my-proxy', base_url: 'https://approved.example' },
+    });
+    assert.equal(custom.source, 'subsidy');
+    assert.equal(custom.profile.base_url, 'https://approved.example');
   });
 });

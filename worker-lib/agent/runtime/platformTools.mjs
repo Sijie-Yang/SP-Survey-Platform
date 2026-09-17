@@ -15,7 +15,7 @@ import {
   saveAsTemplate,
   updateMediaDataset,
 } from '../projectLifecycle.mjs';
-import { listResponses, summarizeResponses } from '../resultsHandlers.mjs';
+import { exportResponses, listResponses, summarizeResponses } from '../resultsHandlers.mjs';
 import { getSkill, listSkills, saveSkill } from '../skillHandlers.mjs';
 import {
   createProject,
@@ -401,7 +401,7 @@ export function createPlatformTools({
     },
     {
       name: 'survey_list_responses',
-      description: 'List response summaries for an owned project.',
+      description: 'List response summaries for an owned project using the same analysisScope as Results.',
       minPermission: 'ask',
       domain: 'results',
       executionMode: 'parallel',
@@ -409,9 +409,18 @@ export function createPlatformTools({
         type: 'object',
         properties: {
           projectId: { type: 'string' },
-          limit: { type: 'integer', minimum: 1, maximum: 500 },
+          dataSource: { type: 'string', enum: ['human', 'practice', 'silicon'] },
+          siliconRunId: { type: 'string' },
+          includePractice: { type: 'boolean' },
           includeAnswers: { type: 'boolean' },
           excludeFlagged: { type: 'boolean' },
+          dateFrom: { type: 'string' },
+          dateTo: { type: 'string' },
+          timezone: { type: 'string' },
+          sessionId: { type: 'string' },
+          surveyRevision: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 500 },
+          offset: { type: 'integer', minimum: 0 },
         },
       },
       execute: (args) => listResponses(
@@ -423,12 +432,57 @@ export function createPlatformTools({
     },
     {
       name: 'survey_results_summary',
-      description: 'Compute typed per-question result summaries for an owned project.',
+      description: 'Compute platform statistics for the current analysisScope. Use view=overview or view=question. Do not invent metrics.',
       minPermission: 'ask',
       domain: 'results',
       executionMode: 'parallel',
-      parameters: PROJECT_ID,
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string' },
+          view: { type: 'string', enum: ['overview', 'question'] },
+          dataSource: { type: 'string', enum: ['human', 'practice', 'silicon'] },
+          siliconRunId: { type: 'string' },
+          includePractice: { type: 'boolean' },
+          excludeFlagged: { type: 'boolean' },
+          dateFrom: { type: 'string' },
+          dateTo: { type: 'string' },
+          timezone: { type: 'string' },
+          sessionId: { type: 'string' },
+          surveyRevision: { type: 'string' },
+          questionName: { type: 'string' },
+          dimensionId: { type: 'string' },
+          mediaKey: { type: 'string' },
+          catalogOffset: { type: 'integer', minimum: 0 },
+          catalogLimit: { type: 'integer', minimum: 1, maximum: 50 },
+        },
+      },
       execute: (args) => summarizeResponses(env, ctx, scopedProject(args, currentProjectId), args),
+    },
+    {
+      name: 'survey_export_responses',
+      description: 'Prepare a downloadable export for the current analysisScope. Returns file metadata, not a CSV for the model to read.',
+      minPermission: 'ask',
+      domain: 'results',
+      executionMode: 'parallel',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string' },
+          format: { type: 'string', enum: ['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle'] },
+          dataSource: { type: 'string', enum: ['human', 'practice', 'silicon'] },
+          siliconRunId: { type: 'string' },
+          includePractice: { type: 'boolean' },
+          excludeFlagged: { type: 'boolean' },
+          dateFrom: { type: 'string' },
+          dateTo: { type: 'string' },
+          timezone: { type: 'string' },
+          sessionId: { type: 'string' },
+          surveyRevision: { type: 'string' },
+          questionName: { type: 'string' },
+        },
+      },
+      execute: (args) => exportResponses(env, ctx, scopedProject(args, currentProjectId), args),
     },
     {
       name: 'survey_list_versions',

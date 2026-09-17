@@ -42,6 +42,7 @@ import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 import { applyAdminThemeToSurveyModel } from '../../lib/surveyStorage';
 import { saveSurveyResponse, supabase } from '../../lib/supabase';
 import { createPracticeSubmission } from '../../lib/practiceSubmission';
+import { surveyRevision } from '../../lib/surveyRevision';
 import { useAuth } from '../../contexts/AuthContext';
 import { buildResponseMediaUrlMap } from '../../lib/skillMediaUtils';
 import { ImageResolverContext } from './imageResolverContext';
@@ -731,6 +732,7 @@ export default function ResearcherPractice({
     const sess = sessionRef.current;
     const participantId = sess?.participantId
       || `researcher_${user?.id || 'anon'}_free_${Date.now().toString(36)}`;
+    const revision = await surveyRevision(surveyConfig);
 
     const completeData = {
       project_id: currentProject?.id || null,
@@ -754,6 +756,9 @@ export default function ResearcherPractice({
         attempt_in_question: sess?.attemptInQuestion ?? null,
         user_id: user?.id || null,
         user_email: user?.email || null,
+        survey_revision: revision.id,
+        survey_response_contract: revision.contract,
+        survey_draft_updated_at: currentProject?.draftUpdatedAt || null,
       },
     };
 

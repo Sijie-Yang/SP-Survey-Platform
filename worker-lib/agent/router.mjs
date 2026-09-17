@@ -940,9 +940,14 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
         const filters = {
           includePractice: url.searchParams.get('includePractice') === 'true',
           includeAnswers: url.searchParams.get('includeAnswers') === 'true',
+          dataSource: url.searchParams.get('dataSource') || undefined,
+          siliconRunId: url.searchParams.get('siliconRunId') || undefined,
+          excludeFlagged: url.searchParams.get('excludeFlagged') === 'true',
           dateFrom: url.searchParams.get('dateFrom') || undefined,
           dateTo: url.searchParams.get('dateTo') || undefined,
+          timezone: url.searchParams.get('timezone') || undefined,
           sessionId: url.searchParams.get('sessionId') || undefined,
+          surveyRevision: url.searchParams.get('surveyRevision') || undefined,
           limit: url.searchParams.get('limit') || undefined,
           offset: url.searchParams.get('offset') || undefined,
         };
@@ -955,9 +960,14 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
           format: url.searchParams.get('format') || 'json',
           includePractice: url.searchParams.get('includePractice') === 'true',
           excludeFlagged: url.searchParams.get('excludeFlagged') === 'true',
+          dataSource: url.searchParams.get('dataSource') || undefined,
+          siliconRunId: url.searchParams.get('siliconRunId') || undefined,
           dateFrom: url.searchParams.get('dateFrom') || undefined,
           dateTo: url.searchParams.get('dateTo') || undefined,
+          timezone: url.searchParams.get('timezone') || undefined,
           sessionId: url.searchParams.get('sessionId') || undefined,
+          surveyRevision: url.searchParams.get('surveyRevision') || undefined,
+          questionName: url.searchParams.get('questionName') || undefined,
         };
         return jsonResponse(await exportResponses(env, jwtCtx, projectId, filters));
       }
@@ -965,11 +975,21 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
         requireAgentScope(auth, 'results:read');
         const url = new URL(request.url);
         const filters = {
+          view: url.searchParams.get('view') || undefined,
           includePractice: url.searchParams.get('includePractice') === 'true',
           excludeFlagged: url.searchParams.get('excludeFlagged') === 'true',
+          dataSource: url.searchParams.get('dataSource') || undefined,
+          siliconRunId: url.searchParams.get('siliconRunId') || undefined,
           dateFrom: url.searchParams.get('dateFrom') || undefined,
           dateTo: url.searchParams.get('dateTo') || undefined,
+          timezone: url.searchParams.get('timezone') || undefined,
           sessionId: url.searchParams.get('sessionId') || undefined,
+          surveyRevision: url.searchParams.get('surveyRevision') || undefined,
+          questionName: url.searchParams.get('questionName') || undefined,
+          dimensionId: url.searchParams.get('dimensionId') || undefined,
+          mediaKey: url.searchParams.get('mediaKey') || undefined,
+          catalogOffset: url.searchParams.get('catalogOffset') || undefined,
+          catalogLimit: url.searchParams.get('catalogLimit') || undefined,
         };
         return jsonResponse(await summarizeResponses(env, jwtCtx, projectId, filters));
       }

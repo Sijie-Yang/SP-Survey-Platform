@@ -14,6 +14,10 @@ function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+export function answerIsPresent(answer) {
+  return hasAnswer(answer);
+}
+
 function hasAnswer(answer) {
   if (answer === null || answer === undefined || answer === '') return false;
   if (Array.isArray(answer) && answer.length === 0) return false;

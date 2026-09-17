@@ -88,6 +88,18 @@ import { average, pct, wilsonCI } from '../../lib/stats';
 import { computeBordaScores, kendallW, interpretKendallW } from '../../lib/rankingStats';
 import { wordFrequency, textLengthStats } from '../../lib/textStats';
 import { generateMethodsText, downloadTextFile } from '../../lib/methodsExport';
+import { createAnalysisScope, defaultAnalysisTimezone } from '../../lib/analysisScope';
+import { computeResultsOverview } from '../../lib/resultsWorkbench';
+import { createResultsReport, readResultsReport, reportStaleness, writeResultsReport } from '../../lib/resultsReportStore';
+import {
+  ResultsFilterForm,
+  ResultsFilterShell,
+  ResultsReportCard,
+  ResultsScopeChips,
+  ResultsToolbar,
+  ResultsViewTabs,
+} from './ResultsWorkbenchChrome';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { buildResponsesWideCsv, downloadResponsesWideCsv } from '../../lib/responsesWideExport';
 import {
   downloadQuestionExportZip,
@@ -2272,9 +2284,9 @@ function PointAllocationAnalysis({ question, answers }) {
 
 // ─── Question Card ────────────────────────────────────────────────────────────
 
-export function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses, surveyConfig, exportResponses }) {
+export function QuestionCard({ question, answers, totalResponses, questionNumber, allResponses, surveyConfig, exportResponses, onExplain, defaultExpanded = false }) {
   const { t } = useRegion();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [exportError, setExportError] = useState('');
   const [exporting, setExporting] = useState(false);
   const exportLock = React.useRef(false);
@@ -2372,6 +2384,20 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
           </Box>
         </Box>
 
+        {onExplain && (
+          <Button
+            size="small"
+            variant="outlined"
+            sx={{ mr: 1, flexShrink: 0 }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onExplain(question);
+            }}
+          >
+            {t.resultsExplainQuestion}
+          </Button>
+        )}
+
         {canExport && (
           <Button
             size="small"
@@ -2432,17 +2458,26 @@ function readExcludeFlaggedFromConfig(surveyConfig) {
 function readIncludePracticeFromConfig(surveyConfig) {
   return typeof surveyConfig?.includeResearcherPractice === 'boolean'
     ? surveyConfig.includeResearcherPractice
-    : true; // default ON for new projects
+    : false;
 }
 
-export default function ResultsAnalysis({ currentProject, surveyConfig: currentSurveyConfig, adminMode = false, onOpenMedia }) {
+export default function ResultsAnalysis({
+  currentProject,
+  surveyConfig: currentSurveyConfig,
+  adminMode = false,
+  onOpenMedia,
+  onScopeChange,
+  onAnalyzeCurrent,
+  onExplainQuestion,
+  analysisBusy = false,
+}) {
   const { t, language } = useRegion();
   const [responses, setResponses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState(null);
   const fetchSequence = React.useRef(0);
   const [error, setError] = useState(null);
-  const [dataSource, setDataSource] = useState(null);
+  const [loadSource, setLoadSource] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -2458,6 +2493,15 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
+  const [view, setView] = useState('overview');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectedQuestionName, setSelectedQuestionName] = useState('');
+  const [perceptionOpen, setPerceptionOpen] = useState(false);
+  const [dataSource, setDataSource] = useState('human');
+  const [siliconRunId, setSiliconRunId] = useState('');
+  const [savedReport, setSavedReport] = useState(null);
+  const compactLayout = useMediaQuery('(max-width:600px)');
+  const timezone = defaultAnalysisTimezone();
 
   useEffect(() => {
     let prefs = {};
@@ -2465,6 +2509,12 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
     setExcludeFlagged(prefs.excludeFlagged ?? readExcludeFlaggedFromConfig(surveyConfig));
     setIncludePractice(prefs.includePractice ?? readIncludePracticeFromConfig(surveyConfig));
     setDateFrom(''); setDateTo(''); setSessionFilter(''); setRevisionFilter(''); setSearchText(''); setRecordPage(0);
+    setView('overview');
+    setSelectedQuestionName('');
+    setPerceptionOpen(false);
+    setDataSource('human');
+    setSiliconRunId('');
+    setSavedReport(readResultsReport(currentProject?.id));
   }, [currentProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveAnalysisPreference = (key, value) => {
@@ -2524,7 +2574,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
         }, { cancelled: () => sequence !== fetchSequence.current,
           onProgress: (loaded) => setLoadProgress({ loaded, page: Math.ceil(loaded / 1000) }) });
         setResponses(all);
-        setDataSource('supabase');
+        setLoadSource('supabase');
       } else {
         // Self-hosted fallback: local file server
         const resp = await fetch('http://localhost:3001/api/responses');
@@ -2532,10 +2582,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
           const json = await resp.json();
           if (sequence !== fetchSequence.current) return;
           setResponses(json.responses || []);
-          setDataSource('file');
+          setLoadSource('file');
         } else {
           setError('No data source available. Configure Supabase environment variables.');
-          setDataSource(null);
+          setLoadSource(null);
         }
       }
     } catch (err) {
@@ -2550,6 +2600,26 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
     if (currentProject?.id) fetchResponses();
     return () => { fetchSequence.current += 1; };
   }, [currentProject?.id, fetchResponses]);
+
+  useEffect(() => {
+    if (dataSource !== 'silicon' || !siliconRunId || !platformSupabase || !currentProject?.id || adminMode) return undefined;
+    let cancelled = false;
+    (async () => {
+      const { data, error: sbError } = await platformSupabase
+        .from('silicon_responses')
+        .select('*')
+        .eq('project_id', currentProject.id)
+        .eq('run_id', siliconRunId)
+        .order('created_at', { ascending: false });
+      if (cancelled || sbError) return;
+      setResponses((data || []).map((row) => ({
+        ...row,
+        source: 'silicon',
+        survey_metadata: { ...(row.survey_metadata || {}), silicon_run_id: siliconRunId },
+      })));
+    })();
+    return () => { cancelled = true; };
+  }, [adminMode, currentProject?.id, dataSource, siliconRunId]);
 
   // Flatten all questions from survey pages
   const allQuestions = useMemo(() => {
@@ -2582,10 +2652,15 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
       if (!responseWithinDateRange(row, dateFrom, dateTo)) return false;
       if (revisionFilter && (row.survey_metadata?.survey_revision || 'historical_unknown') !== revisionFilter) return false;
       if (sessionFilter && row.survey_metadata?.session_id !== sessionFilter) return false;
-      if (!includePractice && row.survey_metadata?.practice_mode) return false;
+      if (dataSource === 'practice') {
+        if (!row.survey_metadata?.practice_mode) return false;
+      } else if (dataSource === 'silicon') {
+        if (row.source !== 'silicon' && !row.survey_metadata?.silicon_run_id) return false;
+      } else if (!includePractice && row.survey_metadata?.practice_mode) return false;
+      if (dataSource !== 'silicon' && (row.source === 'silicon' || row.survey_metadata?.silicon_run_id)) return false;
       return true;
     });
-  }, [responses, currentProject?.id, dateFrom, dateTo, sessionFilter, revisionFilter, includePractice]);
+  }, [responses, currentProject?.id, dataSource, dateFrom, dateTo, sessionFilter, revisionFilter, includePractice]);
 
   const handleDeleteResponse = async () => {
     if (adminMode || !deleteTarget) return;
@@ -2710,6 +2785,59 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
     return map;
   }, [currentProject?.preloadedImages, filteredResponses]);
 
+  const analysisScope = useMemo(() => createAnalysisScope({
+    projectId: currentProject?.id,
+    dataSource,
+    siliconRunId,
+    surveyRevision: revisionFilter || null,
+    dateFrom,
+    dateTo,
+    timezone,
+    sessionId: sessionFilter || null,
+    includePractice: dataSource === 'practice' ? true : includePractice,
+    excludeFlagged,
+  }), [currentProject?.id, dataSource, siliconRunId, revisionFilter, dateFrom, dateTo, timezone, sessionFilter, includePractice, excludeFlagged]);
+
+  const workbenchOverview = useMemo(() => computeResultsOverview({
+    scope: analysisScope,
+    rows: filteredResponses,
+    surveyConfig,
+    qualitySummary,
+  }), [analysisScope, filteredResponses, surveyConfig, qualitySummary]);
+
+  useEffect(() => {
+    onScopeChange?.(analysisScope, workbenchOverview);
+  }, [analysisScope, workbenchOverview, onScopeChange]);
+
+  const reportState = reportStaleness(savedReport, analysisScope, workbenchOverview.scope?.snapshotId);
+
+  const handleAnalyze = () => {
+    onAnalyzeCurrent?.({
+      scope: workbenchOverview.scope || analysisScope,
+      overview: workbenchOverview,
+      onSaved: (report) => {
+        const next = writeResultsReport(currentProject?.id, createResultsReport({
+          scope: workbenchOverview.scope,
+          overview: workbenchOverview,
+          ...(report || {}),
+        }));
+        setSavedReport(next);
+      },
+    });
+  };
+
+  const handleExplainQuestion = (question) => {
+    setSelectedQuestionName(question?.name || '');
+    setView('questions');
+    onExplainQuestion?.({
+      scope: { ...analysisScope, questionName: question?.name || selectedQuestionName },
+      question,
+      overview: workbenchOverview,
+    });
+  };
+
+  const selectedQuestion = allQuestions.find((q) => q.name === selectedQuestionName) || filteredQuestions[0] || null;
+
   return (
     <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
@@ -2729,83 +2857,129 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
               <Refresh />
             </IconButton>
           </Tooltip>
-          <Button
-            variant="outlined"
-            startIcon={<Download />}
-            disabled={exporting || loading || !filteredResponses.length}
-            onClick={() => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))}
-            size="small"
-          >
-            {t.resultsExportCsv}
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<Download />}
-            disabled={exporting || loading || !filteredResponses.length || !surveyConfig}
-            onClick={() => runExport(() => {
-              const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
-              downloadResultsExportZip({
-                project: currentProject,
-                surveyConfig,
-                questions: allQuestions,
-                filteredResponses,
-                dateFilteredResponses,
-                excludeFlagged,
-                wideCsv,
-                filters: {
-                  date_from: dateFrom || null,
-                  date_to: dateTo || null,
-                  session_id: sessionFilter || null,
-                  survey_revision: revisionFilter || null,
-                  include_practice: includePractice,
-                  exclude_flagged: excludeFlagged,
-                },
-              });
-            })}
-            size="small"
-          >
-            {t.resultsExportAll}
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<Description />}
-            disabled={exporting || loading || !filteredResponses.length || !surveyConfig}
-            onClick={() => runExport(() => {
-              const { methodsText, bibtex } = generateMethodsText({
-                project: currentProject,
-                surveyConfig,
-                responses: dateFilteredResponses,
-                templateMeta: currentProject?.templateMeta || null,
-                excludeFlagged,
-              });
-              downloadTextFile(methodsText, `methods_${currentProject?.id || 'survey'}.txt`);
-              if (bibtex) {
-                downloadTextFile(bibtex, `references_${currentProject?.id || 'survey'}.bib`);
-              }
-            })}
-            size="small"
-          >
-            {t.resultsExportMethods}
-          </Button>
+          <ResultsToolbar
+            t={t}
+            onOpenFilters={() => setFiltersOpen(true)}
+            onAnalyze={handleAnalyze}
+            analyzeDisabled={analysisBusy || loading || !filteredResponses.length}
+            analyzeBusy={analysisBusy}
+            exportItems={[
+              {
+                id: 'report',
+                label: t.resultsExportReport,
+                disabled: !savedReport,
+                onClick: () => downloadTextFile(JSON.stringify(savedReport, null, 2), `results_report_${currentProject?.id || 'survey'}.json`),
+              },
+              {
+                id: 'summary',
+                label: t.resultsExportSummary,
+                disabled: exporting || loading || !filteredResponses.length,
+                onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)),
+              },
+              {
+                id: 'raw',
+                label: t.resultsExportRaw,
+                disabled: exporting || loading || !filteredResponses.length,
+                onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)),
+              },
+              {
+                id: 'bundle',
+                label: t.resultsExportBundle,
+                disabled: exporting || loading || !filteredResponses.length || !surveyConfig,
+                onClick: () => runExport(() => {
+                  const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
+                  downloadResultsExportZip({
+                    project: currentProject,
+                    surveyConfig,
+                    questions: allQuestions,
+                    filteredResponses,
+                    dateFilteredResponses,
+                    excludeFlagged,
+                    wideCsv,
+                    filters: {
+                      date_from: dateFrom || null,
+                      date_to: dateTo || null,
+                      session_id: sessionFilter || null,
+                      survey_revision: revisionFilter || null,
+                      include_practice: includePractice,
+                      exclude_flagged: excludeFlagged,
+                      data_source: dataSource,
+                    },
+                  });
+                }),
+              },
+              {
+                id: 'methods',
+                label: t.resultsExportMethods,
+                disabled: exporting || loading || !filteredResponses.length || !surveyConfig,
+                onClick: () => runExport(() => {
+                  const { methodsText, bibtex } = generateMethodsText({
+                    project: currentProject,
+                    surveyConfig,
+                    responses: dateFilteredResponses,
+                    templateMeta: currentProject?.templateMeta || null,
+                    excludeFlagged,
+                  });
+                  downloadTextFile(methodsText, `methods_${currentProject?.id || 'survey'}.txt`);
+                  if (bibtex) downloadTextFile(bibtex, `references_${currentProject?.id || 'survey'}.bib`);
+                }),
+              },
+            ]}
+          />
           </>
         )}
       />
 
+      <ResultsFilterShell
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        t={t}
+        onReset={resetFilters}
+      >
+        <ResultsFilterForm
+          t={t}
+          tf={tf}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          timezone={timezone}
+          sessionFilter={sessionFilter}
+          sessionOptions={sessionOptions}
+          revisionFilter={revisionFilter}
+          revisionOptions={revisionOptions}
+          includePractice={includePractice}
+          excludeFlagged={excludeFlagged}
+          practiceCount={practiceCount}
+          dataSource={dataSource}
+          siliconRunId={siliconRunId}
+          onChange={(patch) => {
+            if (patch.dateFrom != null) setDateFrom(patch.dateFrom);
+            if (patch.dateTo != null) setDateTo(patch.dateTo);
+            if (patch.sessionFilter != null) setSessionFilter(patch.sessionFilter);
+            if (patch.revisionFilter != null) setRevisionFilter(patch.revisionFilter);
+            if (patch.includePractice != null) handleIncludePracticeChange(patch.includePractice);
+            if (patch.excludeFlagged != null) handleExcludeFlaggedChange(patch.excludeFlagged);
+            if (patch.dataSource != null) setDataSource(patch.dataSource);
+            if (patch.siliconRunId != null) setSiliconRunId(patch.siliconRunId);
+          }}
+        />
+      </ResultsFilterShell>
+
       {exporting && <Alert severity="info" sx={{ mb: 2 }} icon={<CircularProgress size={18} />}>{t.resultsPreparingExport}</Alert>}
       {exportError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setExportError('')}>{exportError}</Alert>}
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        {tf(t.resultsScopeHint, { shown: filteredResponses.length, total: responses.length })}
-      </Typography>
+      <Box sx={{ mb: 2 }}>
+        <ResultsScopeChips scope={analysisScope} counts={{ nIncluded: filteredResponses.length, nLoaded: responses.length }} t={t} tf={tf} />
+      </Box>
+      <ResultsViewTabs t={t} value={view} onChange={setView} />
       {revisionOptions.length > 1 && <Alert severity="info" sx={{ mb: 2 }}>{t.resultsMixedRevisions}</Alert>}
       {dateFilteredResponses.some((r) => !r.survey_metadata?.survey_response_contract?.questions) && <Alert severity="warning" sx={{ mb: 2 }}>{language === 'zh' ? '部分历史答卷没有保存题目定义，无法还原当时的全部设置。当前分析可能使用现有题目作为参考，请结合原始 JSON 复核。' : 'Some historical responses have no recorded question definitions. Their original settings cannot be fully restored; analysis may use current settings as a reference. Verify against raw JSON.'}</Alert>}
       {dateFrom && dateTo && dateFrom > dateTo && <Alert severity="warning" sx={{ mb: 2 }}>Start date must be on or before end date.</Alert>}
       {/* Data source badge */}
-      {dataSource && (
+      {loadSource && (
         <Box sx={{ mb: 2 }}>
           <Chip
-            icon={dataSource === 'supabase' ? <Cloud /> : <Storage />}
-            label={dataSource === 'supabase' ? t.resultsConnectedSupabase : t.resultsLocalFiles}
-            color={dataSource === 'supabase' ? 'success' : 'info'}
+            icon={loadSource === 'supabase' ? <Cloud /> : <Storage />}
+            label={loadSource === 'supabase' ? t.resultsConnectedSupabase : t.resultsLocalFiles}
+            color={loadSource === 'supabase' ? 'success' : 'info'}
             variant="outlined"
             size="small"
           />
@@ -2818,76 +2992,29 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
         </Alert>
       )}
 
-      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
-        <TextField
-          type="date"
-          label="From"
-          size="small"
-          InputLabelProps={{ shrink: true }}
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-        />
-        <TextField
-          type="date"
-          label="To"
-          size="small"
-          InputLabelProps={{ shrink: true }}
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-        />
-        {sessionOptions.length > 0 && (
-          <TextField
-            select
-            label="Session"
-            size="small"
-            value={sessionFilter}
-            onChange={(e) => setSessionFilter(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-            SelectProps={{ native: true }}
-            sx={{ minWidth: 180 }}
-          >
-            <option value="">All sessions</option>
-            {sessionOptions.map((sid) => (
-              <option key={sid} value={sid}>{sid.slice(-8)}</option>
-            ))}
-          </TextField>
-        )}
-        <FormControlLabel
-          control={
-            <Switch
-              checked={includePractice}
-              onChange={(e) => handleIncludePracticeChange(e.target.checked)}
-
-              size="small"
-            />
-          }
-          label={
-            practiceCount > 0
-              ? `Include researcher practice (${practiceCount})`
-              : 'Include researcher practice'
-          }
-        />
-      </Box>
-
-      <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 1 }}>
-        Dates use your local timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Records without a valid timestamp are excluded when a date filter is active.
-      </Typography>
-      {revisionOptions.some((id) => id !== 'historical_unknown') && <TextField select size="small" label={t.resultsRevision} value={revisionFilter} onChange={(e) => setRevisionFilter(e.target.value)} SelectProps={{ native: true }} InputLabelProps={{ shrink: true }} sx={{ mr: 1, mb: 1 }}>
-        {revisionOptions.length <= 1 && <option value="">{t.resultsAllRevisions}</option>}
-        {revisionOptions.map((id) => <option key={id} value={id}>{id === 'historical_unknown' ? t.resultsHistoricalRevision : id.slice(-12)}</option>)}
-      </TextField>}
-      <Button size="small" onClick={resetFilters}>{t.resultsResetFilters}</Button>
-      <Typography variant="caption" display="block" color="text.secondary" sx={{ mb: 2 }}>
-        {t.resultsBrowserPrefs}
-      </Typography>
-      {sessionStats.length > 0 && (
+      {sessionStats.length > 0 && view === 'overview' && (
         <Alert severity="info" sx={{ mb: 2 }}>
           Research sessions: {sessionStats.length} ({sessionStats.map(([sid, s]) => `${sid.slice(-6)}: ${s.count} rounds`).join(', ')})
         </Alert>
       )}
 
+      {view === 'overview' && (
+        <Box sx={{ mb: 3 }}>
+          <ResultsReportCard
+            t={t}
+            report={savedReport}
+            staleness={reportState}
+            onUpdate={handleAnalyze}
+            onViewEvidence={(finding) => {
+              setSelectedQuestionName(finding.questionName || finding.evidence?.questionName || '');
+              setView('questions');
+            }}
+          />
+        </Box>
+      )}
+
       {/* Data quality panel */}
-      {!loading && dateFilteredResponses.length > 0 && surveyConfig && (
+      {view === 'data' && !loading && dateFilteredResponses.length > 0 && surveyConfig && (
         <Accordion defaultExpanded={false} sx={{ mb: 2 }}>
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', width: '100%', pr: 1 }}>
@@ -2970,7 +3097,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
       )}
 
       {/* Overview cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
+      {view === 'overview' && <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 4 }}>
           <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
             <People sx={{ fontSize: 32, color: 'primary.main', mb: 0.5 }} />
@@ -2978,11 +3105,12 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
               {loading ? '–' : totalResponses}
             </Typography>
             <Typography variant="body2" color="text.secondary">{t.resultsTotalResponses}</Typography>
-            {dateRange && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                {dateRange}
-              </Typography>
-            )}
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              {workbenchOverview.counts?.nParticipants || 0} {t.resultsParticipants}
+              {' · '}
+              {workbenchOverview.counts?.nTrials || 0} {t.resultsTrials}
+              {dateRange ? ` · ${dateRange}` : ''}
+            </Typography>
           </Paper>
         </Grid>
         <Grid size={{ xs: 12, sm: 4 }}>
@@ -3014,10 +3142,10 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
             </Typography>
           </Paper>
         </Grid>
-      </Grid>
+      </Grid>}
 
       {/* Response records — view & delete */}
-      {!loading && dateFilteredResponses.length > 0 && (
+      {view === 'data' && !loading && dateFilteredResponses.length > 0 && (
         <Accordion defaultExpanded={false} sx={{ mb: 3 }}>
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -3149,24 +3277,48 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
       )}
 
       {/* Per-question analysis */}
-      {!loading && surveyConfig && allQuestions.length > 0 && (
+      {view === 'questions' && !loading && surveyConfig && allQuestions.length > 0 && (
         <>
-          <ImagePerceptionPanel
-            onOpenMedia={onOpenMedia}
-            currentProject={currentProject}
-            responses={filteredResponses}
-            questions={allQuestions}
-          />
+          <Box sx={{ mb: 2 }}>
+            <Button size="small" variant="outlined" onClick={() => setPerceptionOpen((open) => !open)}>
+              {perceptionOpen ? t.resultsDeepPerception : t.resultsOpenPerception}
+            </Button>
+          </Box>
+          {perceptionOpen && (
+            <ImagePerceptionPanel
+              onOpenMedia={onOpenMedia}
+              currentProject={currentProject}
+              responses={filteredResponses}
+              questions={allQuestions}
+            />
+          )}
 
-          {/* Search */}
+          {compactLayout ? (
+            <TextField
+              select
+              size="small"
+              label={t.resultsSelectQuestion}
+              value={selectedQuestion?.name || ''}
+              onChange={(e) => setSelectedQuestionName(e.target.value)}
+              SelectProps={{ native: true }}
+              sx={{ mb: 2, width: '100%' }}
+            >
+              {filteredQuestions.map((q) => (
+                <option key={q.name} value={q.name}>
+                  {(answerableNumberByName.get(q.name) ? `${answerableNumberByName.get(q.name)}. ` : '') + (q.title || q.name)}
+                </option>
+              ))}
+            </TextField>
+          ) : (
           <TextField
             size="small"
-            placeholder="Search questions..."
+            placeholder={t.resultsQuestionSearch}
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
             InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> }}
             sx={{ mb: 2, width: '100%', maxWidth: 320 }}
           />
+          )}
 
           {filteredQuestions.length === 0 && (
             <Typography variant="body2" color="text.secondary">No questions match your search.</Typography>
@@ -3175,6 +3327,7 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
           {surveyConfig.pages?.map(page => {
             const pageQuestions = filteredQuestions.filter(q =>
               (page.elements || []).some(e => e.name === q.name)
+              && (!compactLayout || !selectedQuestion || q.name === selectedQuestion.name)
             );
             if (!pageQuestions.length) return null;
             return (
@@ -3189,6 +3342,8 @@ export default function ResultsAnalysis({ currentProject, surveyConfig: currentS
                 {pageQuestions.map((question) => (
                   <QuestionCard
                     key={question.name}
+                    defaultExpanded={compactLayout || question.name === selectedQuestionName}
+                    onExplain={handleExplainQuestion}
                     {...buildQuestionCardProps(question, filteredResponses, {
                       questionNumber: answerableNumberByName.get(question.name) ?? null,
                       surveyConfig,
