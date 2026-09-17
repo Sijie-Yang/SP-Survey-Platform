@@ -2,8 +2,10 @@
 
 Two ways to design surveys with AI:
 
-1. **Connect your Codex** via OAuth-protected remote MCP
-2. **Platform Assistant** with your own OpenAI / OpenRouter key (encrypted server-side)
+1. **In-browser Assistant** — Harness/pi-ai provider runtime, write-only keys, durable sessions, and a Worker-native draft tool loop
+2. **Connect Codex / Claude / Cursor** via OAuth-protected remote MCP
+
+Silicon pretests use VLM personas and isolated `silicon_*` tables. They never write to `survey_responses`.
 
 Billing is not included. You use your own AI account in both paths.
 
@@ -16,7 +18,9 @@ Run in order:
 1. `supabase/admin_projects_rls.sql` (if not already applied)
 2. `supabase/agent_mcp_platform.sql`
 3. `supabase/survey_public_rpcs.sql`
-4. `supabase/question_skills_analysis_html.sql` (optional `analysis_html` for skill-authored Results Analysis views)
+4. `supabase/ai_runtime.sql`
+5. `supabase/silicon_samples.sql`
+6. `supabase/question_skills_analysis_html.sql` (optional legacy `analysis_html` support)
 
 ### 2. Wrangler secrets / vars
 
@@ -89,8 +93,14 @@ claude mcp add --transport http sp_survey "https://<host>/mcp" --scope user
 ### Platform Assistant
 
 1. Open **AI & Integrations**
-2. Paste OpenAI (`sk-…`) or OpenRouter (`sk-or-…`) key → **Save securely**
-3. Use the builder chat panel (no localStorage key storage in platform mode)
+2. Add any supported Web/BYOK provider and save its key securely
+3. Choose **Agent**, **Generate**, **Adjust**, or **Question**
+4. Use the builder chat panel. Hosted runs execute through Cloudflare Queue and
+   reconnect from append-only server events after refresh/project switching.
+   Publish, destructive deletion, and Skill/source upload require approval.
+
+The platform schema, lifecycle, control endpoints, and deployment workflow are
+documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 ## Save vs Publish to Main Page
 
@@ -164,6 +174,32 @@ Do not confuse: **save = draft (managed projects)** · **`survey_publish` = part
 Visual pipeline: upload → tag folders (`survey_update_media_dataset`) → design with `mediaAssignmentMode` set/category → validate.
 
 MCP never calls the in-platform LLM (no nested-agent loops).
+
+## Models catalog and Silicon pretests
+
+The in-browser Assistant and Silicon Samples share the checked-in, versioned catalog in `worker-lib/agent/runtime/catalog.generated.mjs`. It is generated from the exact `@earendil-works/pi-ai` npm artifact used by the pinned DeepSeek Harness release: 39 upstream providers and 1,354 models, plus the SP `Qwen DashScope` endpoint derived from Qwen Token Plan's complete 18-model inventory (40 providers and 1,372 routed models in total).
+
+- Web/API-key models use the pinned `pi-ai` implementations directly: `openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, and `mistral-conversations`
+- Provider protocol, endpoint, compatibility flags, reasoning controls, headers, and streaming event parsing are resolved per model from the same artifact as DeepSeek Harness
+- Tool turns replay pi-ai's original assistant messages (including reasoning/signatures); pi-ai retries are disabled so the SP runtime owns visible retries and cancellation
+- Provider keys are encrypted per user and write-only from the browser
+- Custom gateways require HTTPS; private, local, link-local, and redirecting endpoints are rejected
+- Native-auth providers such as Bedrock, Vertex, Azure, Codex OAuth, and Copilot OAuth remain synchronized internally but are hidden and blocked as `AUTH_UNSUPPORTED`
+- Assistant sessions pin provider, model, and reasoning effort; explicit switches are recorded as events
+- Assistant edits always load the current draft and save via optimistic `expectedDraftUpdatedAt` operations
+- Hosted Assistant requests return `202 {sessionId,runId}` and run through `sp-agent-runs`; checkpoints, steering, cancellation, approvals, and transcripts are server-backed
+- The canonical platform contract is generated from `src/lib/platformSchema/registry.json`; run `npm run schema:check` to prevent browser/Worker drift
+- Silicon only allows image-capable models, snapshots the saved draft and project media, enforces response/token limits, and stores output separately
+- Set `AGENT_RUNTIME=0` to use the legacy JSON chat handler while rolling back the new runtime
+
+Refresh and verify the checked-in model catalog with:
+
+```bash
+npm run catalog:sync
+npm run catalog:check
+```
+
+The sync is deterministic and records the Harness/pi-ai versions, commits, npm integrity, source manifest hash, and generated payload hash. Review model removals, protocol changes, default changes, and capability reductions before committing an updated snapshot. Attribution is recorded in `THIRD_PARTY_NOTICES.md`.
 
 ## Security notes
 

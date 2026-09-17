@@ -43,7 +43,7 @@ test('admin access is scoped to the requested project and bounded page', async (
   const db = mockDatabase(t);
   const result = await handleAdminResultsRoutes(request('?project=project-a&offset=1000'), env);
   assert.equal(result.status, 200);
-  assert.equal(result.headers.get('cache-control'), 'no-store');
+  assert.match(result.headers.get('cache-control') || '', /no-store/);
   assert.equal((await result.json()).responses.length, 1);
   const url = new URL(db.mock.calls.at(-1).arguments[0]);
   assert.equal(url.searchParams.get('project_id'), 'eq.project-a');

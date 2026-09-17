@@ -7,6 +7,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@earendil-works/pi-ai": "0.85.1",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.1",
@@ -27,8 +28,11 @@
     "react": "^18.2.0",
     "react-beautiful-dnd": "^13.1.1",
     "react-dom": "^18.2.0",
+    "react-markdown": "^9.1.0",
     "react-router-dom": "^7.8.0",
     "react-scripts": "5.0.1",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
     "survey-react": "^1.9.105",
     "survey-react-ui": "^1.9.105",
     "web-vitals": "^2.1.4"
@@ -48,9 +52,14 @@
     "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
     "test:ci": "cross-env CI=true react-scripts test --watchAll=false --runInBand",
-    "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs",
+    "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs worker-lib/agent/runtime/*.test.mjs worker-lib/agent/subsidy.test.mjs worker-lib/silicon/*.test.mjs",
+    "catalog:sync": "node scripts/sync-harness-model-catalog.mjs",
+    "catalog:check": "node scripts/sync-harness-model-catalog.mjs --check",
+    "schema:sync": "node scripts/sync-platform-schema.mjs",
+    "schema:check": "node scripts/sync-platform-schema.mjs --check",
     "test:bench": "node --test worker-lib/bench/scoring.test.mjs",
     "test:media-pipeline": "node scripts/test-media-set-category.mjs",
+    "sql:check": "node scripts/check-sql-idempotency.mjs",
     "research:filter": "python3 scripts/filter-scopus-coarse.py --csv research/scopus/exports/2026-07-12.csv --out research/scopus/shortlists/2026-07-12_library_coarse.json --also public/research/scopus-shortlist.json",
     "research:enrich": "node scripts/enrich-research-library.mjs --also public/research/scopus-shortlist.json",
     "research:audit": "node scripts/audit-research-taxonomy.mjs",
@@ -58,6 +67,20 @@
     "eject": "react-scripts eject",
     "deploy": "npm run build && wrangler deploy",
     "preview": "npm run build && wrangler dev"
+  },
+  "jest": {
+    "transformIgnorePatterns": [
+      "node_modules/(?!(react-markdown|remark-gfm|rehype-sanitize|devlop|unified|bail|trough|vfile|vfile-message|unist-util-.*|mdast-util-.*|hast-util-.*|micromark|micromark-.*|decode-named-character-reference|character-entities|property-information|space-separated-tokens|comma-separated-tokens|zwitch|longest-streak|markdown-table|ccount|escape-string-regexp|trim-lines|is-plain-obj|extend|remark-parse|remark-rehype|html-url-attributes|style-to-object|inline-style-parser|estree-util-is-identifier-name|parse-entities|stringify-entities|character-reference-invalid|is-decimal|is-hexadecimal|is-alphabetical|is-alphanumerical|html-void-elements)/)"
+    ],
+    "moduleNameMapper": {
+      "^unist-util-visit-parents/do-not-use-color$": "<rootDir>/node_modules/unist-util-visit-parents/lib/color.js",
+      "^#minpath$": "<rootDir>/node_modules/vfile/lib/minpath.browser.js",
+      "^#minproc$": "<rootDir>/node_modules/vfile/lib/minproc.browser.js",
+      "^#minurl$": "<rootDir>/node_modules/vfile/lib/minurl.browser.js",
+      "^.+\\.module\\.(css|sass|scss)$": "identity-obj-proxy",
+      "^.+\\.(css|sass|scss)$": "<rootDir>/node_modules/react-scripts/config/jest/cssTransform.js",
+      "^.+\\.(jpg|jpeg|png|gif|eot|otf|webp|svg|ttf|woff|woff2|mp4|webm|wav|mp3|m4a|aac|oga)$": "<rootDir>/node_modules/react-scripts/config/jest/fileTransform.js"
+    }
   },
   "eslintConfig": {
     "extends": [

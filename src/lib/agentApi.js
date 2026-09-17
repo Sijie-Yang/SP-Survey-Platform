@@ -4,15 +4,17 @@
 
 import { supabase } from './supabase';
 
-const API_BASE =
-  process.env.REACT_APP_SERVER_URL
-  || process.env.REACT_APP_API_URL
-  || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
+// Keep browser requests same-origin in local development. CRA's setupProxy
+// forwards /api to Express on :3001, avoiding Safari-specific CORS/preflight
+// failures. Production also defaults to the deployed Worker origin.
+const API_BASE = process.env.NODE_ENV === 'production'
+  ? (process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_URL || '')
+  : '';
 
 async function getAccessToken() {
   if (!supabase) return null;
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || null;
+  const result = await supabase.auth.getSession();
+  return result?.data?.session?.access_token || null;
 }
 
 async function agentFetch(path, options = {}) {
@@ -24,6 +26,7 @@ async function agentFetch(path, options = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
     ...options,
     headers,
   });
@@ -91,10 +94,15 @@ export async function storeOpenAiCredential(apiKey) {
   });
 }
 
-export async function validateOpenAiCredential(apiKey) {
+export async function validateOpenAiCredential(apiKey, extras = {}) {
   return agentFetch('/api/agent/credentials/openai', {
     method: 'POST',
-    body: JSON.stringify({ apiKey, validateOnly: true }),
+    body: JSON.stringify({
+      apiKey,
+      validateOnly: true,
+      provider: extras.provider,
+      baseUrl: extras.baseUrl,
+    }),
   });
 }
 
@@ -120,8 +128,18 @@ export async function sendAgentChat({
   customPrompts,
   enableMultiAgentReview = false,
   reviewMode = '1v1',
+  projectId,
+  sessionId,
+  provider,
+  model,
+  reasoningEffort,
+  permission,
+  assistantMode = 'agent',
+  onStarted,
+  onSnapshot,
+  editorContext = null,
 }) {
-  return agentFetch('/api/agent/chat', {
+  const started = await agentFetch('/api/agent/chat', {
     method: 'POST',
     body: JSON.stringify({
       message,
@@ -131,8 +149,324 @@ export async function sendAgentChat({
       customPrompts,
       enableMultiAgentReview,
       reviewMode,
+      projectId,
+      sessionId,
+      provider,
+      model,
+      reasoningEffort,
+      permission,
+      assistantMode,
+      editorContext,
     }),
   });
+  if (!started?.success || !started?.queued || !started?.sessionId || !started?.runId) {
+    return started;
+  }
+  onStarted?.(started);
+  return waitForAgentRun(started.sessionId, started.runId, { started, onSnapshot });
+}
+
+export async function listAiSessions(projectId, mode = 'designer') {
+  const q = new URLSearchParams({ projectId: projectId || '', mode });
+  return agentFetch(`/api/agent/sessions?${q}`);
+}
+
+export async function getAiSession(sessionId, after = 0) {
+  const query = after > 0 ? `?after=${encodeURIComponent(after)}` : '';
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}${query}`);
+}
+
+export async function archiveAiSession(sessionId) {
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getAiRun(runId) {
+  return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function cancelAiRun(runId) {
+  return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
+export async function steerAiSession(sessionId, content, target = 'next-step', extra = {}) {
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/steer`, {
+    method: 'POST',
+    body: JSON.stringify({
+      content,
+      kind: 'steer',
+      target,
+      assistantMode: extra.assistantMode || null,
+      projectId: extra.projectId || null,
+      parentRunId: extra.parentRunId || null,
+      editorContext: extra.editorContext || null,
+    }),
+  });
+}
+
+export async function listAiRunApprovals(runId) {
+  return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}/approvals`);
+}
+
+export async function answerAiRunApproval(approvalId, approved) {
+  return agentFetch(`/api/agent/approvals/${encodeURIComponent(approvalId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ approved: Boolean(approved) }),
+  });
+}
+
+function runStatusFromEvents(events = [], runId) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (runId && event.run_id && event.run_id !== runId) continue;
+    if (event.type === 'run.status' && event.payload?.status) return event.payload.status;
+  }
+  return '';
+}
+
+function isDraftWriteTool(name) {
+  return name === 'survey_apply_operations' || name === 'survey_submit_generated_draft';
+}
+
+function runChangedDraft(events = [], runId) {
+  return events.some((event) => (
+    (!runId || !event.run_id || event.run_id === runId)
+    && event.type === 'tool.result'
+    && isDraftWriteTool(event.payload?.name)
+    && event.payload?.ok !== false
+  ));
+}
+
+export async function listAiInbox(sessionId) {
+  return agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/inbox`);
+}
+
+export async function discardAiInbox(itemId) {
+  return agentFetch(`/api/agent/inbox/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+}
+
+export async function waitForAgentRun(sessionId, runId, {
+  started = {},
+  intervalMs = 750,
+  timeoutMs = 20 * 60 * 1000,
+  onSnapshot,
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let after = 0;
+  let events = [];
+  let currentRunId = runId;
+  let lastCompleted = null;
+  while (Date.now() < deadline) {
+    const snapshot = await getAiSession(sessionId, after);
+    if (!snapshot?.success) return snapshot;
+    if (Array.isArray(snapshot.events) && snapshot.events.length) {
+      events = events.concat(snapshot.events);
+      after = Number(snapshot.nextCursor || snapshot.events.at(-1)?.seq || after);
+    }
+    onSnapshot?.({ ...snapshot, events, currentRunId });
+    const run = snapshot.run?.id === currentRunId
+      ? snapshot.run
+      : snapshot.runs?.find?.((item) => item.id === currentRunId);
+    const status = run?.status || runStatusFromEvents(events, currentRunId);
+    if (status === 'completed') {
+      const result = run?.result || {};
+      const draftMutated = result.draftMutated ?? runChangedDraft(events, currentRunId);
+      lastCompleted = {
+        success: true,
+        runtime: started.runtime,
+        sessionId,
+        runId: currentRunId,
+        provider: started.provider,
+        model: started.model,
+        reasoningEffort: started.reasoningEffort,
+        assistantMode: result.assistantMode || started.assistantMode,
+        intent: result.intent
+          || (draftMutated ? 'adjust' : (started.assistantMode === 'agent' ? 'agent' : 'question')),
+        message: result.message
+          || [...(snapshot.messages || [])].reverse().find((item) => item.role === 'assistant')?.content
+          || 'Done.',
+        draftUpdatedAt: result.draftUpdatedAt || null,
+        surveyConfig: result.surveyConfig || null,
+        draftMutated: Boolean(draftMutated),
+        persisted: result.persisted === true,
+        verified: result.verified === true,
+        verificationReason: result.verificationReason || null,
+        events: events.length ? events : (snapshot.events || []),
+        messages: snapshot.messages || [],
+      };
+      const next = (snapshot.runs || []).find((item) => {
+        if (item.id === currentRunId) return false;
+        if (!['queued', 'running', 'awaiting_approval'].includes(item.status)) return false;
+        const parent = item.parent_run_id
+          || item.parentRunId
+          || item.request_payload?.parentRunId
+          || item.request_payload?.parent_run_id;
+        return parent === currentRunId;
+      });
+      if (next?.id) {
+        currentRunId = next.id;
+        continue;
+      }
+      return lastCompleted;
+    }
+    if (status === 'failed' || status === 'cancelled') {
+      const errorEvent = [...events].reverse().find((event) => (
+        (event.run_id || event.runId) === currentRunId && event.type === 'error'
+      )) || [...events].reverse().find((event) => (
+        !event.run_id && !event.runId && event.type === 'error'
+      ));
+      return {
+        success: false,
+        sessionId,
+        runId: currentRunId,
+        parentRunId: run?.parent_run_id || run?.request_payload?.parentRunId || null,
+        status,
+        code: errorEvent?.payload?.code || (status === 'cancelled' ? 'CANCELLED' : 'AGENT_RUN_FAILED'),
+        error: errorEvent?.payload?.message || run?.error_summary || `Agent run ${status}.`,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  await cancelAiRun(currentRunId).catch(() => null);
+  return {
+    success: false,
+    sessionId,
+    runId: currentRunId,
+    code: 'AGENT_RUN_TIMEOUT',
+    error: 'The Agent timed out and was stopped so it would not keep writing the draft.',
+  };
+}
+
+export async function storeProviderCredential({
+  apiKey,
+  provider,
+  baseUrl,
+  displayName,
+  protocol,
+  models,
+  defaultInput,
+  compat,
+  retryPolicy,
+  custom,
+}) {
+  return agentFetch('/api/agent/credentials/providers', {
+    method: 'POST',
+    body: JSON.stringify({
+      apiKey,
+      provider,
+      baseUrl,
+      displayName,
+      protocol,
+      models,
+      defaultInput,
+      compat,
+      retryPolicy,
+      custom,
+    }),
+  });
+}
+
+export async function saveProviderProfile(profile) {
+  return agentFetch('/api/agent/credentials/profiles', {
+    method: 'PUT',
+    body: JSON.stringify(profile),
+  });
+}
+
+export async function deleteProviderCredential(provider) {
+  return agentFetch(`/api/agent/credentials/providers/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function saveAiSettings(settings) {
+  return agentFetch('/api/agent/credentials/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function listProviderCatalog() {
+  return agentFetch('/api/agent/credentials/providers');
+}
+
+export async function listProviderModels(provider) {
+  return agentFetch(`/api/agent/credentials/models?provider=${encodeURIComponent(provider)}`);
+}
+
+export async function fetchProviderModels({ provider, baseUrl, apiKey, protocol } = {}) {
+  return agentFetch('/api/agent/credentials/models', {
+    method: 'POST',
+    body: JSON.stringify({ provider, baseUrl, apiKey, protocol }),
+  });
+}
+
+export async function listSiliconPersonas(projectId) {
+  return agentFetch(`/api/agent/silicon/personas?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function saveSiliconPersona(body) {
+  return agentFetch('/api/agent/silicon/personas', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSiliconPersona(id) {
+  return agentFetch(`/api/agent/silicon/personas/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function listSiliconRuns(projectId) {
+  return agentFetch(`/api/agent/silicon/runs?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function createSiliconRun(body) {
+  return agentFetch('/api/agent/silicon/runs', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function processSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/process`, { method: 'POST' });
+}
+
+export async function cancelSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' });
+}
+
+export async function resumeSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/resume`, { method: 'POST' });
+}
+
+export async function retryFailedSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/retry-failed`, { method: 'POST' });
+}
+
+export async function listSiliconTasks() {
+  return agentFetch('/api/agent/silicon/tasks');
+}
+
+export async function getSiliconProgress(runId, after = 0) {
+  const cursor = after ? `?after=${encodeURIComponent(after)}` : '';
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/progress${cursor}`);
+}
+
+export async function getSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function listSiliconResponses(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/responses`);
+}
+
+export async function getSiliconCompare(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/compare`);
+}
+
+export async function exportSiliconRun(runId) {
+  return agentFetch(`/api/agent/silicon/runs/${encodeURIComponent(runId)}/export`);
 }
 
 export async function approveMcpOAuth({

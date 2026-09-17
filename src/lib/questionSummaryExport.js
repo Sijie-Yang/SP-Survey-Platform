@@ -23,6 +23,7 @@ import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitL
  *   metric, value, n
  */
 
+import { dimensionDisplayName } from './sliderScale.js';
 import { average, descriptiveStats } from './stats.js';
 import { computeBordaScores, kendallW } from './rankingStats.js';
 import {
@@ -421,7 +422,7 @@ function pushCompositeBlocksSummary(out, question, eligible) {
     (answer?.ratings || []).forEach((d) => {
       const dim = d.id || d.label || `${d.left}/${d.right}` || 'dim';
       const key = `${img}||${dim}`;
-      if (!byUnit[key]) byUnit[key] = { img, dim, label: d.label || dim, nums: [] };
+      if (!byUnit[key]) byUnit[key] = { img, dim, label: dimensionDisplayName(d), nums: [] };
       const n = Number(d.value);
       if (!Number.isNaN(n)) byUnit[key].nums.push(n);
     });
@@ -1183,7 +1184,7 @@ function buildLongObjects(question, responses, surveyConfig) {
             shown_images: shownPipe || base.shown_images,
             ...extra,
             dimension_id: d.id || '',
-            dimension_label: d.label || `${d.left || ''} ↔ ${d.right || ''}` || d.id || '',
+            dimension_label: dimensionDisplayName(d),
             value: d.value ?? '',
             choice,
             words,
@@ -1199,7 +1200,7 @@ function buildLongObjects(question, responses, surveyConfig) {
           ...base,
           ...extra,
           dimension_id: d.id,
-          dimension_label: d.label || `${d.left || ''} ↔ ${d.right || ''}` || d.id,
+          dimension_label: dimensionDisplayName(d),
           value: obj[d.id] ?? '',
         });
       });

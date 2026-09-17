@@ -41,6 +41,12 @@ import {
 import { resolveQuestionImageChoices } from '../lib/questionImageChoices';
 import { normalizeAllowedTools } from '../lib/annotationTools';
 
+function annotationLabelText(label) {
+  if (label == null) return '';
+  if (typeof label === 'string' || typeof label === 'number') return String(label).trim();
+  return String(label.text ?? label.label ?? label.value ?? '').trim();
+}
+
 /** Restore multi-trial drafts without leaving {trials} on question.value (breaks widgets). */
 function ingestTrialsValue(question, newValue, toFlat) {
   if (!isTrialsAnswer(newValue)) return false;
@@ -1272,7 +1278,7 @@ export function registerImageAnnotationWidget() {
       imageUrl: url,
       value: q.value,
       allowedTools: normalizeAllowedTools(q.allowedTools || ['point', 'line', 'polygon', 'bbox']),
-      annotationLabels: q.annotationLabels || [],
+      annotationLabels: (q.annotationLabels || []).map(annotationLabelText).filter(Boolean),
       minAnnotations: q.minAnnotations || 0,
       maxAnnotations: q.maxAnnotations ?? 50,
       enableSamAssist: false, // never expose SAM in live / practice surveys

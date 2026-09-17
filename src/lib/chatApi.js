@@ -26,6 +26,7 @@ export async function sendChatMessage(
   reviewMode = '1v1',
   customPrompts = null,
   researchContext = null,
+  extras = null,
 ) {
   try {
     if (isPlatformMode()) {
@@ -39,6 +40,15 @@ export async function sendChatMessage(
         customPrompts,
         enableMultiAgentReview,
         reviewMode,
+        projectId: extras?.projectId || null,
+        sessionId: extras?.sessionId || null,
+        provider: extras?.provider || null,
+        model: extras?.model || null,
+        reasoningEffort: extras?.reasoningEffort || extras?.reasoning_effort || null,
+        assistantMode: extras?.assistantMode || 'agent',
+        onStarted: extras?.onStarted,
+        onSnapshot: extras?.onSnapshot,
+        editorContext: extras?.editorContext || null,
       });
     }
 
@@ -54,6 +64,7 @@ export async function sendChatMessage(
         reviewMode,
         customPrompts,
         researchContext,
+        assistantMode: extras?.assistantMode || 'agent',
       }),
     });
     return await response.json();

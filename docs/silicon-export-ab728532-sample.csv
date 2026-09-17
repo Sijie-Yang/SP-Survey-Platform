@@ -1,0 +1,9 @@
+participant_id,persona_id,repeat_index,status,question,answer
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_age,32
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_walk_freq,几乎每天
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_feel_sliders,"{""relax"":4,""stress"":5,""aesthetic"":6}"
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_need_ranking,"[""安全"",""便捷"",""舒适"",""安静"",""美观""]"
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_dependent_walk,true
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_comfort_factors,"[""绿化与遮阴"",""人行道宽度与平整度"",""交通噪音"",""空气与清洁状况"",""人流拥挤程度"",""安全感（照明、视线通透）"",""沿街商业与活力""]"
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_residence_years,10 年以上
+silicon_87502e88_1,87502e88-aafc-4e0e-88a8-30f0ddc1e10b,1,ok,q_city_comfort_rating,7

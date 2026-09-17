@@ -21,6 +21,15 @@ test('saving different images writes independent source files, never shared CSV'
   expect(listImagesFromR2).not.toHaveBeenCalled();
 });
 
+test('R2 list 503 does not pause feature load; SAM overlay is empty', async () => {
+  listImagesFromR2.mockResolvedValue({
+    success: false,
+    error: 'R2 list failed (HTTP 503): Cloudflare R2 is not configured on the server.',
+  });
+  global.fetch = jest.fn().mockResolvedValue({ status: 404, ok: false });
+  await expect(loadFeatureCsv('u/p/', SAM_PREANNOT_MODEL)).resolves.toEqual([]);
+});
+
 test('network and corrupt document errors remain errors, not empty annotations', async () => {
   global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
   await expect(loadPreannotation('u/fail/', { media_id: 'x', url: 'x' })).rejects.toThrow('offline');

@@ -5,6 +5,14 @@
  */
 
 import { ANNOTATION_TOOLS, normalizeAllowedTools } from './annotationTools.mjs';
+import { describeDimensionIncomplete, matrixItemLabel, normalizeSliderQuestion } from './sliderScale.mjs';
+import { evaluateSurveyContract } from './answerability.mjs';
+import {
+  OPERATION_TYPES,
+  PLATFORM_SCHEMA,
+  PLATFORM_SCHEMA_HASH,
+  QUESTION_TYPE_IDS,
+} from './platformSchema.generated.mjs';
 
 const SECRET_FIELDS = new Set([
   'supabaseconfig', 'supabasekey', 'supabaseanonkey', 'servicerolekey', 'anonkey',
@@ -53,12 +61,8 @@ export const restoreStoredSecrets = (incoming, stored) => {
   return restored;
 };
 
-const IMAGE_TYPES = new Set([
-  'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'imagematrix', 'image',
-  'imageannotation', 'skillquestion', 'imageslidergroup', 'imagepointallocation',
-  'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
-  'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-]);
+const isKnownQuestionType = (type) => Object.prototype.hasOwnProperty.call(PLATFORM_SCHEMA.questionTypes, type);
+const questionHasTrait = (type, trait) => PLATFORM_SCHEMA.questionTypes[type]?.traits?.includes(trait) || false;
 
 const MEDIA_STIMULUS_TYPES = [
   'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox', 'image',
@@ -72,6 +76,23 @@ const MEDIA_STAR_TYPES = [
   'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
   'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
 ];
+
+function structuredIssue(issue, severity = 'error') {
+  return {
+    code: issue.code || (severity === 'error' ? 'INVALID_SURVEY_FIELD' : 'SURVEY_WARNING'),
+    path: issue.path || 'surveyConfig',
+    question: issue.question || '',
+    message: issue.message || 'Invalid survey configuration.',
+    reason: issue.reason || issue.message || 'Invalid survey configuration.',
+    retryable: severity === 'error',
+    repairHint: issue.repairHint || issue.hint || (severity === 'error'
+      ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
+      : 'Review this warning before publishing.'),
+    hint: issue.hint || issue.repairHint || (severity === 'error'
+      ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
+      : 'Review this warning before publishing.'),
+  };
+}
 
 /** Native settings shared by the Builder and Agent API. Undefined means use the native default. */
 export function validateQuestionSettings(q) {
@@ -92,6 +113,17 @@ export function validateQuestionSettings(q) {
   bounds({ ...q, maxAnnotations: q.maxAnnotations === 0 ? undefined : (q.maxAnnotations ?? 50) }, 'minAnnotations', 'maxAnnotations');
   for (const key of ['minAnnotations', 'maxAnnotations', 'minSelectedChoices', 'maxSelectedChoices']) {
     if (q[key] != null && (!Number.isInteger(q[key]) || q[key] < 0)) add(key, `${key} must be a non-negative integer.`);
+  }
+  if (q.annotationLabels != null) {
+    if (!Array.isArray(q.annotationLabels)) {
+      add('annotationLabels', 'annotationLabels must be an array of strings.');
+    } else {
+      q.annotationLabels.forEach((label, i) => {
+        if (typeof label !== 'string' || !label.trim()) {
+          add(`annotationLabels[${i}]`, `annotationLabels[${i}] must be a non-empty string.`);
+        }
+      });
+    }
   }
   if (['slidergroup', 'imageslidergroup', 'mediaslidergroup'].includes(q.type)
     && (q.scaleMin ?? 1) >= (q.scaleMax ?? 7)) add('scaleMin', 'Scale minimum must be less than its maximum.');
@@ -120,7 +152,7 @@ export function validateQuestionSettings(q) {
   return errors;
 }
 
-export function validateSurveyConfig(surveyConfig) {
+export function validateSurveyConfig(surveyConfig, options = {}) {
   const errors = [];
   const warnings = [];
   let questionCount = 0;
@@ -128,7 +160,7 @@ export function validateSurveyConfig(surveyConfig) {
   if (!surveyConfig || typeof surveyConfig !== 'object' || Array.isArray(surveyConfig)) {
     return {
       valid: false,
-      errors: [{ path: 'surveyConfig', message: 'surveyConfig must be an object.' }],
+      errors: [structuredIssue({ path: 'surveyConfig', message: 'surveyConfig must be an object.' })],
       warnings,
       pageCount: 0,
       questionCount,
@@ -164,6 +196,12 @@ export function validateSurveyConfig(surveyConfig) {
           return;
         }
         if (!element.type) errors.push({ path: `${elementPath}.type`, message: 'Question type is required.' });
+        else if (!isKnownQuestionType(element.type)) {
+          warnings.push({
+            path: `${elementPath}.type`,
+            message: `Question type "${element.type}" is not in the canonical platform schema.`,
+          });
+        }
         if (!element.name) {
           errors.push({ path: `${elementPath}.name`, message: 'Question name is required.' });
         } else if (names.has(element.name)) {
@@ -179,7 +217,7 @@ export function validateSurveyConfig(surveyConfig) {
           path: `${elementPath}.${error.path}`, message: `${element.name || 'Question'}: ${error.message}`,
         }));
 
-        if (IMAGE_TYPES.has(element.type) && element.type !== 'skillquestion') {
+        if (questionHasTrait(element.type, 'stimulus') && element.type !== 'skillquestion') {
           const hasManual = element.selectedImageUrls?.length
             || element.choices?.length
             || element.imageLinks?.length
@@ -193,19 +231,55 @@ export function validateSurveyConfig(surveyConfig) {
             });
           }
         }
-        if (
-          (element.type === 'slidergroup' || element.type === 'imageslidergroup' || element.type === 'mediaslidergroup')
-          && !element.dimensions?.length
-        ) {
-          warnings.push({
-            path: elementPath,
-            message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
+        if (questionHasTrait(element.type, 'slider')) {
+          if (element.dimensions != null && !Array.isArray(element.dimensions)) {
+            errors.push({
+              path: `${elementPath}.dimensions`,
+              message: `Slider group "${element.title || element.name}" dimensions must be an array.`,
+            });
+          } else if (!element.dimensions?.length) {
+            warnings.push({
+              path: elementPath,
+              message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
+            });
+          } else {
+            element.dimensions.forEach((dimension, dimIndex) => {
+              if (dimension == null || typeof dimension !== 'object' || Array.isArray(dimension)) {
+                errors.push({
+                  path: `${elementPath}.dimensions[${dimIndex}]`,
+                  message: `Dimension ${dimIndex + 1} must be an object {id, label, left, right}.`,
+                });
+                return;
+              }
+              const detail = describeDimensionIncomplete(dimension, dimIndex);
+              if (detail) {
+                const question = element.name || 'unnamed question';
+                const title = element.title ? ` (${element.title})` : '';
+                warnings.push({
+                  path: `${elementPath}.dimensions[${dimIndex}]`,
+                  message: `Question "${question}"${title}: ${detail}`,
+                });
+              }
+            });
+          }
+        }
+        for (const key of ['rows', 'columns']) {
+          if (!Array.isArray(element[key])) continue;
+          element[key].forEach((item, itemIndex) => {
+            const kind = key === 'rows' ? 'Row' : 'Column';
+            const hasText = item && typeof item === 'object'
+              ? String(item.text || '').trim()
+              : String(item || '').trim();
+            if (!hasText) {
+              warnings.push({
+                path: `${elementPath}.${key}[${itemIndex}]`,
+                message: `${kind} ${itemIndex + 1} is missing a display label (fallback: ${matrixItemLabel(item, itemIndex, kind)}).`,
+              });
+            }
           });
         }
         if (
-          (element.type === 'pointallocation'
-            || element.type === 'imagepointallocation'
-            || element.type === 'mediapointallocation')
+          questionHasTrait(element.type, 'allocation')
           && !element.choices?.length
         ) {
           warnings.push({
@@ -217,12 +291,44 @@ export function validateSurveyConfig(surveyConfig) {
     });
   }
 
+  const contract = evaluateSurveyContract(surveyConfig, options);
+  contract.errors.forEach((item) => {
+    errors.push({
+      path: item.path,
+      message: item.reason || item.message,
+      code: item.code,
+      question: item.question,
+      repairHint: item.repairHint,
+    });
+  });
+  contract.warnings.forEach((item) => {
+    warnings.push({
+      path: item.path,
+      message: item.reason || item.message,
+      code: item.code,
+      question: item.question,
+      repairHint: item.repairHint,
+    });
+  });
+  const uniqueByPath = (list) => {
+    const seen = new Set();
+    return list.filter((item) => {
+      const key = `${item.path}|${item.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   return {
-    valid: errors.length === 0,
-    errors,
-    warnings,
+    valid: uniqueByPath(errors).length === 0,
+    errors: uniqueByPath(errors).map((issue) => structuredIssue(issue)),
+    warnings: uniqueByPath(warnings).map((issue) => structuredIssue(issue, 'warning')),
     pageCount: Array.isArray(surveyConfig.pages) ? surveyConfig.pages.length : 0,
     questionCount,
+    transforms: contract.transforms,
+    coveredTypes: contract.coveredTypes,
+    generationContractVersion: contract.generationContractVersion,
   };
 }
 
@@ -241,8 +347,9 @@ export function postProcessAiConfig(surveyConfig) {
   if (!Array.isArray(processedConfig.pages)) return processedConfig;
 
   processedConfig.pages.forEach((page) => {
-    (page.elements || []).forEach((element) => {
-      if (!MEDIA_STIMULUS_TYPES.includes(element.type)) return;
+    page.elements = (page.elements || []).map((raw) => {
+      const element = normalizeSliderQuestion(raw);
+      if (!MEDIA_STIMULUS_TYPES.includes(element.type)) return element;
       if (!element.imageSelectionMode || element.imageSelectionMode === 'random') {
         element.imageSelectionMode = 'huggingface_random';
       }
@@ -262,6 +369,15 @@ export function postProcessAiConfig(surveyConfig) {
       }
       if (element.type === 'imageannotation') {
         element.allowedTools = normalizeAllowedTools(element.allowedTools, ANNOTATION_TOOLS);
+        element.annotationLabels = (Array.isArray(element.annotationLabels) ? element.annotationLabels : [])
+          .map((label) => {
+            if (typeof label === 'string' || typeof label === 'number') return String(label).trim();
+            if (label && typeof label === 'object') {
+              return String(label.text ?? label.label ?? label.value ?? '').trim();
+            }
+            return '';
+          })
+          .filter(Boolean);
       }
       if (MEDIA_STAR_TYPES.includes(element.type)) {
         if (!element.mediaType) element.mediaType = 'any';
@@ -286,6 +402,7 @@ export function postProcessAiConfig(surveyConfig) {
       delete element.imageSource;
       delete element.huggingFaceConfig;
       delete element.falApiKey;
+      return element;
     });
   });
 
@@ -296,13 +413,40 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+export function normalizeOperationsArg(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== 'object') return null;
+  if (Array.isArray(raw.operations)) return raw.operations;
+  if (typeof raw.op === 'string') return [raw];
+  if (raw.surveyConfig && typeof raw.surveyConfig === 'object' && Array.isArray(raw.surveyConfig.pages)) {
+    return [{ op: 'replaceConfig', surveyConfig: raw.surveyConfig }];
+  }
+  if (Array.isArray(raw.pages)) {
+    return [{ op: 'replaceConfig', surveyConfig: raw }];
+  }
+  if (raw.replaceConfig && typeof raw.replaceConfig === 'object') {
+    const payload = raw.replaceConfig.surveyConfig || raw.replaceConfig;
+    return [{ op: 'replaceConfig', surveyConfig: payload }];
+  }
+  const values = Object.keys(raw)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => raw[key])
+    .filter((item) => item && typeof item === 'object' && typeof item.op === 'string');
+  return values.length ? values : null;
+}
+
 export function applyOperations(surveyConfig, operations = []) {
+  const list = normalizeOperationsArg(operations);
+  if (!Array.isArray(list)) {
+    throw new Error('operations must be an array of {op, ...}. A single replaceConfig object is also accepted.');
+  }
   let config = clone(surveyConfig || { pages: [] });
   if (!Array.isArray(config.pages)) config.pages = [];
   const applied = [];
   const inverse = [];
 
-  operations.forEach((op, opIndex) => {
+  list.forEach((op, opIndex) => {
     if (!op?.op) throw new Error(`operations[${opIndex}] is missing op`);
     switch (op.op) {
       case 'addPage': {
@@ -407,6 +551,68 @@ export function applyOperations(surveyConfig, operations = []) {
         inverse.unshift({ op: 'replaceConfig', surveyConfig: previous });
         break;
       }
+      case 'updateSurvey': {
+        const previous = {};
+        const patch = op.patch && typeof op.patch === 'object' ? op.patch : {};
+        Object.keys(patch).forEach((key) => {
+          if (key === 'pages') return;
+          previous[key] = clone(config[key]);
+          config[key] = clone(patch[key]);
+        });
+        applied.push(op);
+        inverse.unshift({ op: 'updateSurvey', patch: previous });
+        break;
+      }
+      case 'updatePage': {
+        const idx = config.pages.findIndex((p) => p.name === op.pageName);
+        if (idx < 0) throw new Error(`Page not found: ${op.pageName}`);
+        const previous = clone(config.pages[idx]);
+        const patch = op.patch && typeof op.patch === 'object' ? op.patch : {};
+        config.pages[idx] = {
+          ...previous,
+          ...clone(patch),
+          name: previous.name,
+          elements: Object.prototype.hasOwnProperty.call(patch, 'elements')
+            ? clone(patch.elements)
+            : previous.elements,
+        };
+        applied.push(op);
+        inverse.unshift({ op: 'updatePage', pageName: op.pageName, patch: previous });
+        break;
+      }
+      case 'setTheme': {
+        const previous = clone(config.theme || {});
+        const patch = clone(op.theme || {});
+        config.theme = op.replace === true
+          ? patch
+          : { ...previous, ...patch };
+        applied.push(op);
+        inverse.unshift({ op: 'setTheme', theme: previous, replace: true });
+        break;
+      }
+      case 'reorderPages': {
+        const names = Array.isArray(op.pageNames) ? op.pageNames : [];
+        const previous = config.pages.map((page) => page.name);
+        const next = names.map((name) => config.pages.find((page) => page.name === name)).filter(Boolean);
+        const leftover = config.pages.filter((page) => !names.includes(page.name));
+        config.pages = [...next, ...leftover];
+        applied.push(op);
+        inverse.unshift({ op: 'reorderPages', pageNames: previous });
+        break;
+      }
+      case 'reorderQuestions': {
+        const pageIdx = config.pages.findIndex((p) => p.name === op.pageName);
+        if (pageIdx < 0) throw new Error(`Page not found: ${op.pageName}`);
+        const page = config.pages[pageIdx];
+        const names = Array.isArray(op.questionNames) ? op.questionNames : [];
+        const previous = (page.elements || []).map((element) => element.name);
+        const next = names.map((name) => (page.elements || []).find((element) => element.name === name)).filter(Boolean);
+        const leftover = (page.elements || []).filter((element) => !names.includes(element.name));
+        page.elements = [...next, ...leftover];
+        applied.push(op);
+        inverse.unshift({ op: 'reorderQuestions', pageName: op.pageName, questionNames: previous });
+        break;
+      }
       default:
         throw new Error(`Unknown operation: ${op.op}`);
     }
@@ -421,15 +627,10 @@ export function applyOperations(surveyConfig, operations = []) {
 }
 
 export function createDefaultSurveyConfig(name, description = '') {
-  return {
-    title: name,
-    description: description || 'This survey helps us understand user preferences and opinions.',
-    pages: [{ name: 'page1', title: 'Survey Questions', elements: [] }],
-    showQuestionNumbers: 'off',
-    showProgressBar: 'top',
-    locale: 'en',
-    completedHtml: '<h3>Thank you for completing the survey.</h3>',
-  };
+  const defaults = JSON.parse(JSON.stringify(PLATFORM_SCHEMA.defaultSurveyConfig));
+  defaults.title = name;
+  if (description) defaults.description = description;
+  return defaults;
 }
 
 export function buildProjectUrls(projectId, clientOrigin) {
@@ -456,16 +657,8 @@ const MEDIA_SAMPLING = {
 export const DESIGN_CAPABILITIES = {
   name: 'SP-Survey Design Protocol',
   version: '1.1.0',
-  questionTypes: [
-    'text', 'comment', 'number', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
-    'matrix', 'ranking', 'slidergroup', 'pointallocation', 'consent',
-    'expression',
-    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
-    'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
-    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
-    'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-    'skillquestion',
-  ],
+  platformSchemaHash: PLATFORM_SCHEMA_HASH,
+  questionTypes: QUESTION_TYPE_IDS,
   rules: [
     'Question names must be unique across the survey.',
     'Binary imagepicker/mediapicker and the built-in Forced-Choice A/B task support allowTie (default false) and tieLabel (empty follows survey language). Requires two options and single selection. No preference is stored separately; TrueSkill uses decisive outcomes only.',
@@ -515,7 +708,17 @@ export const DESIGN_CAPABILITIES = {
       rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
       matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
       ranking: { fields: ['name', 'title', 'choices[]'] },
-      slidergroup: { fields: ['name', 'title', 'dimensions[{id,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
+      slidergroup: {
+        fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'],
+        defaults: {
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
     },
     image: {
@@ -524,6 +727,18 @@ export const DESIGN_CAPABILITIES = {
         'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
         'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
       ],
+      imageslidergroup: {
+        role: 'Sliders with image. dimensions is required and must include label.',
+        defaults: {
+          imageCount: 1,
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       imagecheckbox: {
         role: 'Multi-select text tags about an image (which apply to this scene)',
         defaults: {
@@ -547,6 +762,21 @@ export const DESIGN_CAPABILITIES = {
         'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
         'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
       ],
+      mediaslidergroup: {
+        role: 'Sliders + media. dimensions is required and must include label.',
+        defaults: {
+          mediaType: 'image',
+          imageCount: 1,
+          mediaSlots: [],
+          mediaPresentation: 'stack',
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       mediacheckbox: {
         role: 'Multi-select text tags about media (which apply to this scene)',
         defaults: {
@@ -598,6 +828,15 @@ export const DESIGN_CAPABILITIES = {
     },
   },
   examples: {
+    imageslidergroup: {
+      type: 'imageslidergroup', name: 'scene_sliders', title: '请评价这张街景',
+      imageCount: 1, scaleMin: 0, scaleMax: 100,
+      dimensions: [
+        { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+        { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+      ],
+      ...MEDIA_SAMPLING,
+    },
     imagerating: {
       type: 'imagerating', name: 'scene_rating', title: 'How pleasant is this scene?',
       imageCount: 1, rateMin: 1, rateMax: 7, ...MEDIA_SAMPLING,
@@ -616,9 +855,15 @@ export const DESIGN_CAPABILITIES = {
       imageCount: 2, ...MEDIA_SAMPLING,
     },
   },
-  operations: [
-    'addPage', 'removePage', 'addQuestion', 'updateQuestion', 'removeQuestion',
-    'setAllRatingScales', 'replaceConfig',
-  ],
+  supportMatrix: {
+    projectProfile: 'read/write via survey_update_project (Agent); read-only in Generate/Ask',
+    surveyDraft: 'read/write — Generate: survey_submit_generated_draft; Adjust: survey_apply_operations; Ask: read-only',
+    questionSettings: 'read/write with the survey draft',
+    mediaLibrary: 'read via media_list; write needs media:write and approval',
+    appearanceTheme: 'read/write via updateSurvey / setTheme or Generate surveyConfig.theme',
+    publishDelete: 'approval-gated; not available in Generate or Ask',
+    unsupported: ['arbitrary website CMS', 'SQL', 'participant account admin', 'human quota changes'],
+  },
+  operations: OPERATION_TYPES,
   scopes: ['surveys:read', 'surveys:write', 'surveys:publish', 'media:write', 'results:read'],
 };

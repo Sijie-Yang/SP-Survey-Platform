@@ -1,4 +1,5 @@
 import { stimulusUnitKey, resolveMediaAnswerKey } from './mediaIdentity.js';
+import { dimensionDisplayName } from './sliderScale.js';
 /** Inter-rater reliability: Krippendorff's alpha and agreement rate. */
 
 import { expandQuestionAnswerUnits } from './responseAnswerUnits.js';
@@ -138,7 +139,7 @@ export function computeQuestionIrr(responses, question) {
   };
   if (['slidergroup', 'imageslidergroup', 'mediaslidergroup'].includes(question.type)) {
     return { alpha: null, agreement: null, level, dimensions: (question.dimensions || []).map((d) => ({
-      id: d.id, label: d.label || d.id, ...calculate(d.id),
+      id: d.id, label: dimensionDisplayName(d), ...calculate(d.id),
     })) };
   }
   return calculate();

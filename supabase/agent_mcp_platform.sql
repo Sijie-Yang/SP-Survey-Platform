@@ -389,7 +389,14 @@ BEGIN
       USING ERRCODE = '40001';
   END IF;
 
-  v_revision := coalesce(p_client_mutation_id, 'rev_' || encode(gen_random_bytes(8), 'hex'));
+  -- gen_random_bytes() is commonly installed in Supabase's `extensions`
+  -- schema and is therefore invisible to this SECURITY DEFINER function's
+  -- `SET search_path = public`. gen_random_uuid() is available in modern
+  -- PostgreSQL/Supabase without relying on that extension search path.
+  v_revision := coalesce(
+    p_client_mutation_id,
+    'rev_' || left(replace(gen_random_uuid()::text, '-', ''), 16)
+  );
 
   -- Dual-write: save is live. Share / preview always follow the latest config.
   UPDATE public.projects SET

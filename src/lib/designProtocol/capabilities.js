@@ -2,6 +2,12 @@
  * Survey design capabilities / rules exposed to Codex via MCP.
  */
 
+import {
+  OPERATION_TYPES,
+  PLATFORM_SCHEMA_HASH,
+  QUESTION_TYPE_IDS,
+} from '../platformSchema';
+
 export const AGENT_SCOPES = {
   READ: 'surveys:read',
   WRITE_DRAFT: 'surveys:write',
@@ -21,16 +27,8 @@ const MEDIA_SAMPLING = {
 export const DESIGN_CAPABILITIES = {
   name: 'SP-Survey Design Protocol',
   version: '1.1.0',
-  questionTypes: [
-    'text', 'comment', 'number', 'radiogroup', 'checkbox', 'dropdown', 'boolean', 'rating',
-    'matrix', 'ranking', 'slidergroup', 'pointallocation', 'consent',
-    'expression',
-    'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
-    'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
-    'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
-    'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
-    'skillquestion',
-  ],
+  platformSchemaHash: PLATFORM_SCHEMA_HASH,
+  questionTypes: QUESTION_TYPE_IDS,
   rules: [
     'Question names must be unique across the survey.',
     'Binary imagepicker/mediapicker and the built-in Forced-Choice A/B task support allowTie (default false) and tieLabel (empty follows survey language). Requires two options and single selection. No preference is stored separately; TrueSkill uses decisive outcomes only.',
@@ -117,7 +115,17 @@ export const DESIGN_CAPABILITIES = {
       rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
       matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
       ranking: { fields: ['name', 'title', 'choices[]'] },
-      slidergroup: { fields: ['name', 'title', 'dimensions[{id,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
+      slidergroup: {
+        fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'],
+        defaults: {
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
     },
     image: {
@@ -145,10 +153,13 @@ export const DESIGN_CAPABILITIES = {
         },
         imagematrix: { role: 'Matrix under image(s)', defaults: { imageCount: 1, rows: [], columns: [], imageLinks: [] } },
         imageslidergroup: {
-          role: 'Sliders with image',
+          role: 'Sliders with image. dimensions is required and must include label.',
           defaults: {
             imageCount: 1,
-            dimensions: [{ id: 'pleasant', left: 'Unpleasant', right: 'Pleasant' }],
+            dimensions: [
+              { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+              { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+            ],
             scaleMin: 0,
             scaleMax: 100,
           },
@@ -198,10 +209,13 @@ export const DESIGN_CAPABILITIES = {
         },
         mediamatrix: { role: 'Matrix + media', defaults: { mediaType: 'image', imageCount: 1, rows: [], columns: [], mediaSlots: [] } },
         mediaslidergroup: {
-          role: 'Sliders + media',
+          role: 'Sliders + media. dimensions is required and must include label.',
           defaults: {
             mediaType: 'image', imageCount: 1, mediaSlots: [], mediaPresentation: 'stack',
-            dimensions: [{ id: 'pleasant', left: 'Unpleasant', right: 'Pleasant' }],
+            dimensions: [
+              { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+              { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+            ],
             scaleMin: 0, scaleMax: 100,
           },
         },
@@ -279,6 +293,19 @@ export const DESIGN_CAPABILITIES = {
     },
   },
   examples: {
+    imageslidergroup: {
+      type: 'imageslidergroup',
+      name: 'scene_sliders',
+      title: '请评价这张街景',
+      imageCount: 1,
+      scaleMin: 0,
+      scaleMax: 100,
+      dimensions: [
+        { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+        { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+      ],
+      ...MEDIA_SAMPLING,
+    },
     imagerating: {
       type: 'imagerating',
       name: 'scene_rating',
@@ -317,10 +344,16 @@ export const DESIGN_CAPABILITIES = {
       ...MEDIA_SAMPLING,
     },
   },
-  operations: [
-    'addPage', 'removePage', 'addQuestion', 'updateQuestion', 'removeQuestion',
-    'setAllRatingScales', 'replaceConfig',
-  ],
+  supportMatrix: {
+    projectProfile: 'read/write via survey_update_project (Agent); read-only in Generate/Ask',
+    surveyDraft: 'read/write — Generate: survey_submit_generated_draft; Adjust: survey_apply_operations; Ask: read-only',
+    questionSettings: 'read/write with the survey draft',
+    mediaLibrary: 'read via media_list; write needs media:write and approval',
+    appearanceTheme: 'read/write via updateSurvey / setTheme or Generate surveyConfig.theme',
+    publishDelete: 'approval-gated; not available in Generate or Ask',
+    unsupported: ['arbitrary website CMS', 'SQL', 'participant account admin', 'human quota changes'],
+  },
+  operations: OPERATION_TYPES,
   scopes: Object.values(AGENT_SCOPES),
 };
 

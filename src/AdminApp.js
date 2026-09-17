@@ -59,18 +59,61 @@ import {
   migrateExistingConfig,
   getActiveProject,
   setActiveProject,
+  saveProjectDraftOptimistic,
   saveProjectFull,
 } from './lib/projectManager';
 import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { checkIsAdmin } from './lib/templateManager';
 import { useNavigate } from 'react-router-dom';
+import useSurveyAssistant from './hooks/useSurveyAssistant';
+import { useSiliconTasks } from './hooks/useSiliconTasks';
+import AiAssistantSidebar from './components/admin/AiAssistantSidebar';
+import { isAssistantEnabled, isSiliconExperimentalEnabled } from './lib/featureFlags';
+import { persistSliderAliases } from './lib/sliderScale';
+import {
+  AI_SIDEBAR_ID,
+  AI_SIDEBAR_WIDTH,
+  PROJECT_SIDEBAR_WIDTH,
+  readSidebarOpen,
+  writeSidebarOpen,
+} from './hooks/surveyAssistantUtils';
 
 const ImageDataset = lazy(() => import('./components/admin/ImageDataset'));
 const SurveyBuilder = lazy(() => import('./components/admin/SurveyBuilder'));
 const SurveyPreview = lazy(() => import('./components/admin/SurveyPreview'));
 const ResultsAnalysis = lazy(() => import('./components/admin/ResultsAnalysis'));
 const ResearcherPractice = lazy(() => import('./components/admin/ResearcherPractice'));
+const SiliconSamples = lazy(() => import('./components/admin/SiliconSamples'));
+
+function mergeEditorWorkingCopy(surveyConfig = {}, selection = {}) {
+  const pages = (surveyConfig.pages || []).map((page) => ({
+    ...page,
+    elements: [...(page.elements || [])],
+  }));
+  const pageName = selection.pageName;
+  let pageIndex = pages.findIndex((page) => page.name === pageName);
+  let page = pageIndex >= 0
+    ? { ...pages[pageIndex], elements: [...(pages[pageIndex].elements || [])] }
+    : null;
+  if (selection.pageDirty && selection.pageWorkingCopy) {
+    page = {
+      ...selection.pageWorkingCopy,
+      elements: [...(selection.pageWorkingCopy.elements || [])],
+    };
+    if (pageIndex < 0) {
+      pages.push(page);
+      pageIndex = pages.length - 1;
+    }
+  }
+  if (page && selection.workingCopy && selection.questionName) {
+    const questionIndex = (page.elements || []).findIndex((item) => item.name === selection.questionName);
+    if (questionIndex >= 0) page.elements[questionIndex] = selection.workingCopy;
+    else page.elements = [...(page.elements || []), selection.workingCopy];
+  }
+  if (page && pageIndex >= 0) pages[pageIndex] = page;
+  return { ...surveyConfig, pages };
+}
 
 function TabPanel({ children, value, index, keepMounted = false, ...other }) {
   const active = value === index;
@@ -91,17 +134,45 @@ function TabPanel({ children, value, index, keepMounted = false, ...other }) {
   );
 }
 
-function AdminWorkspaceTabs({ value, onChange }) {
+function AdminWorkspaceTabs({ value, onChange, siliconEnabled = true }) {
   const { t } = useRegion();
+  const tabsRef = useRef(null);
+  useEffect(() => {
+    const selected = tabsRef.current?.querySelector('.Mui-selected');
+    selected?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [value]);
+  const tabSx = {
+    minHeight: 40,
+    minWidth: 0,
+    px: 1.25,
+    py: 0.5,
+    whiteSpace: 'nowrap',
+    fontSize: '0.875rem',
+  };
   return (
-    <Tabs value={value} onChange={onChange} aria-label="admin tabs" variant="scrollable" scrollButtons="auto">
+    <Box ref={tabsRef} sx={{ minWidth: 0 }}>
+    <Tabs
+      value={value}
+      onChange={onChange}
+      aria-label="admin tabs"
+      variant="scrollable"
+      scrollButtons="auto"
+      allowScrollButtonsMobile
+      sx={{
+        minHeight: 40,
+        '& .MuiTabs-flexContainer': { gap: 0.25 },
+        '& .MuiTab-root': tabSx,
+      }}
+    >
       <Tab label={t.tabIntro} />
       <Tab label={t.tabMedia} />
       <Tab label={t.tabBuilder} />
       <Tab label={t.tabShare} />
       <Tab label={t.tabResults} />
       <Tab label={t.tabPractice} />
+      {siliconEnabled && <Tab label={t.tabSilicon} />}
     </Tabs>
+    </Box>
   );
 }
 
@@ -139,15 +210,44 @@ export default function AdminApp() {
   const theme = createCustomTheme(currentTheme);
   
   const [tabValue, setTabValue] = useState(0);
+  const [assistantEnabled, setAssistantEnabled] = useState(() => isAssistantEnabled());
+  const [siliconEnabled, setSiliconEnabled] = useState(() => isSiliconExperimentalEnabled());
   const [analysisMediaFocus, setAnalysisMediaFocus] = useState(null);
   // Keep Practice mounted after first visit so free-pick selection + list scroll survive tab switches.
   const [practiceKeepAlive, setPracticeKeepAlive] = useState(false);
+  const [builderKeepAlive, setBuilderKeepAlive] = useState(false);
+  const [siliconKeepAlive, setSiliconKeepAlive] = useState(false);
   const handlePracticeSessionActive = useCallback((active) => {
     if (active) setPracticeKeepAlive(true);
   }, []);
   useEffect(() => {
+    if (tabValue === 2) setBuilderKeepAlive(true);
     if (tabValue === 5) setPracticeKeepAlive(true);
+    if (tabValue === 6) setSiliconKeepAlive(true);
   }, [tabValue]);
+  useEffect(() => {
+    const openSilicon = () => {
+      if (isSiliconExperimentalEnabled()) setTabValue(6);
+    };
+    window.addEventListener('sp-open-silicon-tab', openSilicon);
+    return () => window.removeEventListener('sp-open-silicon-tab', openSilicon);
+  }, []);
+  useEffect(() => {
+    if (!siliconEnabled && tabValue === 6) setTabValue(0);
+  }, [siliconEnabled, tabValue]);
+  useEffect(() => {
+    const syncFlags = () => {
+      setAssistantEnabled(isAssistantEnabled());
+      setSiliconEnabled(isSiliconExperimentalEnabled());
+    };
+    window.addEventListener('sp-feature-flags', syncFlags);
+    return () => window.removeEventListener('sp-feature-flags', syncFlags);
+  }, []);
+  useEffect(() => {
+    const openPreview = () => setPreviewOpen(true);
+    window.addEventListener('sp-assistant-open-preview', openPreview);
+    return () => window.removeEventListener('sp-assistant-open-preview', openPreview);
+  }, []);
   const [surveyConfig, setSurveyConfig] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -210,11 +310,39 @@ export default function AdminApp() {
   
   // Project management states
   const [sidebarOpen, setSidebarOpen] = useState(!compactToolbar);
+  const wideLayout = useMediaQuery('(min-width:1200px)');
+  const [aiSidebarOpen, setAiSidebarOpen] = useState(() => (
+    typeof window !== 'undefined' ? readSidebarOpen(window.localStorage) : false
+  ));
+  const [aiSidebarPanel, setAiSidebarPanel] = useState('assistant');
   useEffect(() => {
     // A persistent desktop sidebar becomes a modal drawer on phones. Close it
     // at the breakpoint so it cannot cover an already open question editor.
     if (compactToolbar) setSidebarOpen(false);
   }, [compactToolbar]);
+  useEffect(() => {
+    writeSidebarOpen(typeof window !== 'undefined' ? window.localStorage : null, aiSidebarOpen);
+  }, [aiSidebarOpen]);
+  const toggleProjectSidebar = useCallback(() => {
+    setSidebarOpen((open) => {
+      const next = !open;
+      if (next && !wideLayout) setAiSidebarOpen(false);
+      return next;
+    });
+  }, [wideLayout]);
+  const toggleAiSidebar = useCallback((panel) => {
+    setAiSidebarOpen((open) => {
+      const next = !open;
+      if (next && !wideLayout) setSidebarOpen(false);
+      return next;
+    });
+    if (panel === 'tasks' || panel === 'assistant') setAiSidebarPanel(panel);
+  }, [wideLayout]);
+  const openAiSidebar = useCallback((panel = 'assistant') => {
+    if (panel === 'tasks' || panel === 'assistant') setAiSidebarPanel(panel);
+    setAiSidebarOpen(true);
+    if (!wideLayout) setSidebarOpen(false);
+  }, [wideLayout]);
   const [currentProject, setCurrentProject] = useState(null);
   const [projectLoading, setProjectLoading] = useState(true);
 
@@ -323,13 +451,18 @@ export default function AdminApp() {
   const remoteConflictWarnedAtRef = useRef(null);
   const draftUpdatedAtRef = useRef(null);
   const hasUnsavedChangesRef = useRef(false);
+  const performSaveRef = useRef(null);
+  const [editorSelection, setEditorSelection] = useState(null);
+  const editorSelectionRef = useRef(null);
+  const [editorCommitKey, setEditorCommitKey] = useState(0);
   const currentProjectIdRef = useRef(null);
 
   useEffect(() => {
     draftUpdatedAtRef.current = currentProject?.draftUpdatedAt || null;
     hasUnsavedChangesRef.current = hasUnsavedChanges;
     currentProjectIdRef.current = currentProject?.id || null;
-  }, [currentProject?.draftUpdatedAt, currentProject?.id, hasUnsavedChanges]);
+    editorSelectionRef.current = editorSelection;
+  }, [currentProject?.draftUpdatedAt, currentProject?.id, hasUnsavedChanges, editorSelection]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !currentProject?.id) return undefined;
@@ -403,14 +536,21 @@ export default function AdminApp() {
     const onFocusOrVisible = () => {
       if (document.visibilityState === 'visible') syncRemoteDraft();
     };
+    const onAgentRunComplete = (event) => {
+      if (event?.detail?.projectId !== currentProjectIdRef.current) return;
+      setTabValue(2);
+      syncRemoteDraft();
+    };
 
     window.addEventListener('focus', onFocusOrVisible);
+    window.addEventListener('sp-agent-run-complete', onAgentRunComplete);
     document.addEventListener('visibilitychange', onFocusOrVisible);
     const intervalId = window.setInterval(syncRemoteDraft, 4000);
     syncRemoteDraft();
 
     return () => {
       window.removeEventListener('focus', onFocusOrVisible);
+      window.removeEventListener('sp-agent-run-complete', onAgentRunComplete);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
       window.clearInterval(intervalId);
     };
@@ -734,37 +874,123 @@ export default function AdminApp() {
     console.log('🔍 Removed project state for:', projectId);
   };
 
-  const handleSurveyConfigChange = (newConfig) => {
+  const handleSurveyConfigChange = useCallback((newConfig, metadata = {}) => {
     console.log('🔍 Survey config changed, updating state...');
     console.log('🔍 New config title:', newConfig?.title);
     console.log('🔍 Pages count:', newConfig?.pages?.length);
-    
+    const persisted = metadata.persisted === true;
+    const savedCopy = persisted ? JSON.parse(JSON.stringify(newConfig)) : null;
+    const nextTabValue = metadata.source === 'assistant' ? 2 : tabValue;
+
     setSurveyConfig(newConfig);
-    
+    if (metadata.source === 'assistant') setTabValue(2);
+    if (persisted) {
+      setLastSavedConfig(savedCopy);
+      setHasUnsavedChanges(false);
+      setSaveStatus('saved');
+      setLastSavedAt(Date.now());
+      if (metadata.draftUpdatedAt) {
+        draftUpdatedAtRef.current = metadata.draftUpdatedAt;
+        setCurrentProject((prev) => prev?.id === currentProject?.id
+          ? { ...prev, draftUpdatedAt: metadata.draftUpdatedAt }
+          : prev);
+      }
+    }
+
     // Save current project state immediately (including new configuration)
     if (currentProject) {
       console.log('🔍 Saving updated survey config to project state...');
-      // Save immediately, don't use setTimeout, pass new configuration directly
-      const newStates = { ...projectStates };
-      if (!newStates[currentProject.id]) {
-        newStates[currentProject.id] = {
+      setProjectStates((prev) => {
+        const next = {
+          ...prev,
+          [currentProject.id]: {
+            ...(prev[currentProject.id] || {}),
           surveyConfig: newConfig,
-          lastSavedConfig: lastSavedConfig,
-          hasUnsavedChanges: false,
-          tabValue: tabValue
+            tabValue: nextTabValue,
+            ...(persisted ? {
+              lastSavedConfig: savedCopy,
+              hasUnsavedChanges: false,
+            } : {}),
+          },
         };
-      } else {
-        newStates[currentProject.id] = {
-          ...newStates[currentProject.id],
-          surveyConfig: newConfig,
-          tabValue: tabValue
-        };
-      }
-      setProjectStates(newStates);
-      saveProjectStatesToStorage(newStates);
+        saveProjectStatesToStorage(next);
+        return next;
+      });
       console.log('✅ Survey config saved to project state');
     }
-  };
+  }, [currentProject, tabValue]);
+
+  const assistant = useSurveyAssistant({
+    currentProject,
+    surveyConfig,
+    onSurveyConfigChange: handleSurveyConfigChange,
+    editorSelection: {
+      ...(editorSelection || {}),
+      panel: tabValue,
+    },
+    hasUnsavedChanges,
+    lastSavedConfig,
+    onPrepareWrite: async (opts = {}) => {
+      if (opts.surveyConfig) {
+        const result = await performSaveRef.current?.({
+          silent: true,
+          surveyConfig: opts.surveyConfig,
+          expectedDraftUpdatedAt: opts.expectedDraftUpdatedAt,
+        });
+        if (result && result.success === false) {
+          return { ok: false, message: result.error || 'The editor draft could not be saved before the Assistant edit.' };
+        }
+        return { ok: true, draftUpdatedAt: result?.draftUpdatedAt };
+      }
+      const selection = editorSelectionRef.current || {};
+      if (opts.commitWorkingCopy || selection.dirty || selection.pageDirty) {
+        const merged = mergeEditorWorkingCopy(surveyConfig, selection);
+        const result = await performSaveRef.current?.({
+          silent: true,
+          surveyConfig: merged,
+        });
+        if (result && result.success === false) {
+          return { ok: false, message: result.error || 'The editor working copy could not be saved.' };
+        }
+        setEditorCommitKey((current) => current + 1);
+        setEditorSelection((current) => current ? { ...current, dirty: false, pageDirty: false } : current);
+        return { ok: true, draftUpdatedAt: result?.draftUpdatedAt, committedWorkingCopy: true };
+      }
+      if (!hasUnsavedChangesRef.current) return { ok: true };
+      const result = await performSaveRef.current?.({ silent: true });
+      if (result && result.success === false) {
+        return { ok: false, message: result.error || 'The editor draft could not be saved before the Assistant edit.' };
+      }
+      return { ok: true, draftUpdatedAt: result?.draftUpdatedAt };
+    },
+  });
+
+  const openSiliconTab = useCallback(() => {
+    if (!siliconEnabled) return;
+    setTabValue(6);
+    if (!wideLayout) setAiSidebarOpen(false);
+  }, [siliconEnabled, wideLayout]);
+
+  const siliconTasks = useSiliconTasks({
+    enabled: siliconEnabled,
+    onTerminal: (run) => {
+      setSnackbar({
+        open: true,
+        severity: run.status === 'completed' ? 'success' : 'info',
+        message: tf(t.siliconTaskFinished, {
+          project: run.project_name || run.project_id || '',
+          status: run.status,
+        }),
+      });
+    },
+  });
+
+  const openTaskProject = useCallback(async (projectId) => {
+    if (!projectId) return;
+    const { getProjectById } = await import('./lib/projectManager');
+    const project = await getProjectById(projectId);
+    if (project) handleProjectSelect(project);
+  }, []);
 
   const handleResultsConfigSync = (nextConfig) => {
     const savedCopy = JSON.parse(JSON.stringify(nextConfig));
@@ -899,11 +1125,11 @@ export default function AdminApp() {
     });
   };
 
-  const performSave = useCallback(async ({ silent = false } = {}) => {
+  const performSave = useCallback(async ({ silent = false, surveyConfig: overrideConfig, expectedDraftUpdatedAt } = {}) => {
     if (!currentProject || saveInFlightRef.current) return { success: false };
 
     const savedState = projectStates[currentProject.id];
-    const latestSurveyConfig = savedState?.surveyConfig || surveyConfig;
+    const latestSurveyConfig = persistSliderAliases(overrideConfig || savedState?.surveyConfig || surveyConfig);
 
     if (!latestSurveyConfig) return { success: false };
 
@@ -916,7 +1142,12 @@ export default function AdminApp() {
         imageDatasetConfig: latestImageDatasetConfig || currentProject.imageDatasetConfig,
       };
 
-      const result = await saveProjectFull(projectToSave, latestSurveyConfig);
+      const result = overrideConfig
+        ? await saveProjectDraftOptimistic(currentProject.id, latestSurveyConfig, {
+          expectedDraftUpdatedAt: expectedDraftUpdatedAt || currentProject.draftUpdatedAt || null,
+          writer: { source: 'assistant-undo' },
+        })
+        : await saveProjectFull(projectToSave, latestSurveyConfig);
 
       if (result.success) {
         setActiveProject(currentProject.id);
@@ -955,18 +1186,21 @@ export default function AdminApp() {
             severity: 'success',
           });
         }
-        return { success: true };
+        return { success: true, draftUpdatedAt: savedProject.draftUpdatedAt };
       }
 
       setSaveStatus('error');
       if (!silent) {
+        const saveMessage = result.code === 'DRAFT_SAVE_RPC_MISSING'
+          ? t.draftSaveRpcMissing
+          : ('Save failed: ' + (result.error || 'Unknown error'));
         setSnackbar({
           open: true,
-          message: 'Save failed: ' + (result.error || 'Unknown error'),
+          message: saveMessage,
           severity: 'error',
         });
       }
-      return { success: false, error: result.error };
+      return { success: false, error: result.error, code: result.code };
     } catch (error) {
       console.error('❌ Save failed:', error);
       setSaveStatus('error');
@@ -982,6 +1216,8 @@ export default function AdminApp() {
       saveInFlightRef.current = false;
     }
   }, [currentProject, projectStates, surveyConfig, latestImageDatasetConfig]);
+
+  performSaveRef.current = performSave;
 
   const handleManualSave = async () => {
     await performSave({ silent: false });
@@ -1040,7 +1276,9 @@ export default function AdminApp() {
           <Tooltip title={t.toggleSidebar}>
             <IconButton
               color="inherit"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={toggleProjectSidebar}
+              aria-expanded={sidebarOpen}
+              aria-controls="admin-project-sidebar"
               sx={{ mr: { xs: 0, sm: 2 } }}
             >
               <MenuIcon />
@@ -1202,34 +1440,65 @@ export default function AdminApp() {
               </IconButton>
             </Tooltip>
 
-            <Box sx={{ display: { xs: 'none', md: 'block' } }}><Tooltip title={t.aiTooltip}>
-              <Button
-                color="inherit"
-                size="small"
-                startIcon={<AutoAwesome />}
-                onClick={() => navigate('/admin/integrations')}
-                sx={{
-                  ml: 0.5,
-                  px: 1.25,
-                  py: 0.35,
-                  minWidth: 0,
-                  fontWeight: 700,
-                  letterSpacing: 0.4,
-                  border: '1px solid',
-                  borderColor: 'rgba(255, 255, 255, 0.65)',
-                  bgcolor: 'rgba(255, 255, 255, 0.12)',
-                  textTransform: 'none',
-                  '&:hover': {
-                    borderColor: 'rgba(255, 255, 255, 0.95)',
-                    bgcolor: 'rgba(255, 255, 255, 0.22)',
-                  },
-                }}
-              >
-                {t.aiLabel}
-              </Button>
-            </Tooltip>
-
-            </Box><Box sx={{ display: { xs: 'none', md: 'block' } }}><RegionSwitcher /></Box>
+            {assistantEnabled && (
+              <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+                <Tooltip title={aiSidebarOpen ? t.toggleAiSidebarOpen : t.toggleAiSidebarClosed}>
+                  <Button
+                    color="inherit"
+                    size="small"
+                    startIcon={<AutoAwesome />}
+                    onClick={toggleAiSidebar}
+                    aria-expanded={aiSidebarOpen}
+                    aria-controls={AI_SIDEBAR_ID}
+                    sx={{
+                      ml: 0.5,
+                      px: 1.25,
+                      py: 0.35,
+                      minWidth: 0,
+                      fontWeight: 700,
+                      letterSpacing: 0.4,
+                      border: '1px solid',
+                      borderColor: aiSidebarOpen ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.65)',
+                      bgcolor: aiSidebarOpen ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.12)',
+                      textTransform: 'none',
+                      '&:hover': {
+                        borderColor: 'rgba(255, 255, 255, 0.95)',
+                        bgcolor: 'rgba(255, 255, 255, 0.22)',
+                      },
+                    }}
+                  >
+                    {t.aiLabel}
+                  </Button>
+                </Tooltip>
+              </Box>
+            )}
+            {siliconEnabled && (
+              <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+                <Tooltip title={t.siliconTasksTitle}>
+                  <Button
+                    color="inherit"
+                    size="small"
+                    onClick={() => openAiSidebar('tasks')}
+                    sx={{
+                      ml: 0.5,
+                      px: 1.25,
+                      py: 0.35,
+                      minWidth: 0,
+                      fontWeight: 700,
+                      textTransform: 'none',
+                      border: '1px solid',
+                      borderColor: 'rgba(255, 255, 255, 0.65)',
+                      bgcolor: 'rgba(255, 255, 255, 0.12)',
+                    }}
+                  >
+                    {tf(t.siliconTasksBadge, { count: siliconTasks.activeCount })}
+                  </Button>
+                </Tooltip>
+              </Box>
+            )}
+            <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+              <RegionSwitcher />
+            </Box>
           </Box>
           
           <Button
@@ -1293,7 +1562,12 @@ export default function AdminApp() {
         onClose={handleToolsMenuClose}
         PaperProps={{ sx: { mt: 1, minWidth: 240 } }}
       >
-        {compactToolbar && <MenuItem onClick={() => { handleToolsMenuClose(); navigate('/admin/integrations'); }}>{t.aiLabel}</MenuItem>}
+        {compactToolbar && assistantEnabled && <MenuItem onClick={() => { handleToolsMenuClose(); openAiSidebar('assistant'); }}>{t.aiLabel}</MenuItem>}
+        {compactToolbar && siliconEnabled && (
+          <MenuItem onClick={() => { handleToolsMenuClose(); openAiSidebar('tasks'); }}>
+            {tf(t.siliconTasksBadge, { count: siliconTasks.activeCount })}
+          </MenuItem>
+        )}
         {compactToolbar && <MenuItem disabled={!currentProject || !surveyConfig} onClick={() => {
           handleToolsMenuClose();
           window.open('/survey?project=' + encodeURIComponent(currentProject.id), '_blank', 'noopener,noreferrer');
@@ -1424,6 +1698,7 @@ export default function AdminApp() {
 
       {/* Project Sidebar */}
       <ProjectSidebar
+        id="admin-project-sidebar"
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onProjectSelect={handleProjectSelect}
@@ -1431,16 +1706,45 @@ export default function AdminApp() {
         currentProject={currentProject}
         surveyConfig={surveyConfig}
         projectStates={projectStates}
-        width={400}
+        runningProjectIds={siliconTasks.active.map((run) => run.project_id).filter(Boolean)}
+        width={PROJECT_SIDEBAR_WIDTH}
       />
+
+      {(assistantEnabled || siliconEnabled) && (
+        <AiAssistantSidebar
+          open={aiSidebarOpen}
+          onClose={() => setAiSidebarOpen(false)}
+          assistant={{
+            ...assistant,
+            onClearEditorFocus: () => setEditorSelection((prev) => (
+              prev ? { ...prev, pageName: null, questionName: null } : null
+            )),
+          }}
+          onOpenSilicon={siliconEnabled ? openSiliconTab : undefined}
+          variant={wideLayout ? 'persistent' : 'temporary'}
+          width={AI_SIDEBAR_WIDTH}
+          panel={aiSidebarPanel}
+          onPanelChange={setAiSidebarPanel}
+          siliconTasks={siliconEnabled ? siliconTasks : null}
+          siliconEnabled={siliconEnabled}
+          hideAssistant={!assistantEnabled}
+          currentProjectId={currentProject?.id}
+          onOpenTaskProject={openTaskProject}
+        />
+      )}
 
       <Container 
         maxWidth="xl" 
         sx={{ 
           mt: 10, // Increase top spacing to accommodate fixed AppBar
-          ml: { xs: 0, md: sidebarOpen ? '400px' : 0 },
-          transition: 'margin-left 0.3s ease',
-          width: { xs: '100%', md: sidebarOpen ? 'calc(100% - 400px)' : '100%' }, minWidth: 0
+          ml: { xs: 0, md: sidebarOpen ? `${PROJECT_SIDEBAR_WIDTH}px` : 0 },
+          mr: wideLayout && aiSidebarOpen ? `${AI_SIDEBAR_WIDTH}px` : 0,
+          transition: 'margin 0.3s ease, width 0.3s ease',
+          width: {
+            xs: '100%',
+            md: `calc(100% - ${(sidebarOpen ? PROJECT_SIDEBAR_WIDTH : 0) + (wideLayout && aiSidebarOpen ? AI_SIDEBAR_WIDTH : 0)}px)`,
+          },
+          minWidth: 0
         }}
       >
         {!currentProject ? (
@@ -1450,13 +1754,16 @@ export default function AdminApp() {
             title={t.noProjectTitle}
             description={t.noProjectBody}
             actionLabel={t.openProjectSidebar}
-            onAction={() => setSidebarOpen(true)}
+            onAction={() => {
+              if (!wideLayout) setAiSidebarOpen(false);
+              setSidebarOpen(true);
+            }}
           />
         ) : (
           // Project content
           <Paper sx={{ width: '100%' }}>
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <AdminWorkspaceTabs value={tabValue} onChange={handleTabChange} />
+              <AdminWorkspaceTabs value={tabValue} onChange={handleTabChange} siliconEnabled={siliconEnabled} />
             </Box>
 
             <Suspense fallback={<AdminLoadingState label={t.loadingWorkspace} />}>
@@ -1481,7 +1788,7 @@ export default function AdminApp() {
               />
             </TabPanel>
 
-            <TabPanel value={tabValue} index={2}>
+            <TabPanel value={tabValue} index={2} keepMounted={builderKeepAlive}>
               {surveyConfig ? (
                 <SurveyBuilder 
                   key={currentProject?.id || 'no-project'}
@@ -1489,6 +1796,10 @@ export default function AdminApp() {
                   onChange={handleSurveyConfigChange}
                   currentProject={currentProject}
                   onNextStep={handleNextStep}
+                  hideAssistant
+                  onEditorSelectionChange={setEditorSelection}
+                  onOpenAssistant={() => setAiSidebarOpen(true)}
+                  editorCommitKey={editorCommitKey}
                 />
               ) : (
                 <Box sx={{ p: 3, textAlign: 'center' }}>
@@ -1523,6 +1834,11 @@ export default function AdminApp() {
                 onSessionActiveChange={handlePracticeSessionActive}
               />
             </TabPanel>
+            {siliconEnabled && (
+              <TabPanel value={tabValue} index={6} keepMounted={siliconKeepAlive}>
+                <SiliconSamples currentProject={currentProject} surveyConfig={surveyConfig} />
+              </TabPanel>
+            )}
             </Suspense>
           </Paper>
         )}
@@ -1551,7 +1867,10 @@ export default function AdminApp() {
       {/* Snackbar for notifications */}
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={6000}
+        autoHideDuration={4000}
+        disableAutoFocus
+        disableEnforceFocus
+        disableRestoreFocus
         onClose={() => setSnackbar({ ...snackbar, open: false })}
       >
         <Alert 

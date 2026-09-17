@@ -356,10 +356,21 @@ export async function listAnnotationDocuments(r2Prefix, { fresh = false } = {}) 
   catch (err) { if (annotationDocumentCache.get(r2Prefix) === record) annotationDocumentCache.delete(r2Prefix); throw err; }
 }
 
+function isR2ListUnavailable(result) {
+  const msg = String(result?.error || '');
+  return Boolean(
+    result?.unreachable
+    || /not configured|HTTP 503/i.test(msg)
+  );
+}
+
 async function fetchAnnotationDocuments(r2Prefix) {
   const prefix = `${normalizeR2Prefix(r2Prefix)}preannotations/`;
   const result = await listImagesFromR2(prefix, { annotations: true });
-  if (!result.success) throw new Error(result.error || 'Could not load annotation index');
+  if (!result.success) {
+    if (isR2ListUnavailable(result)) return [];
+    throw new Error(result.error || 'Could not load annotation index');
+  }
   return mapWithConcurrency(result.images || [], 8, async (file) => {
     const doc = await fetchJsonUrl(file.url);
     return doc ? { ...doc, storage_key: file.key } : null;

@@ -36,11 +36,17 @@ export function keyHint(plaintext) {
   return value.length <= 4 ? '****' : `...${value.slice(-4)}`;
 }
 
-export function detectProvider(plaintext) {
-  return String(plaintext || '').trim().startsWith('sk-or-') ? 'openrouter' : 'openai';
+export function detectProvider(plaintext, { baseUrl } = {}) {
+  const key = String(plaintext || '').trim();
+  const url = String(baseUrl || '').toLowerCase();
+  if (url.includes('deepseek')) return 'deepseek';
+  if (url.includes('openrouter')) return 'openrouter';
+  if (key.startsWith('sk-or-')) return 'openrouter';
+  if (key.startsWith('sk-ds-')) return 'deepseek';
+  return 'openai';
 }
 
-export async function encryptApiKey(env, plaintext) {
+export async function encryptApiKey(env, plaintext, options = {}) {
   const key = await importKey(env);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(String(plaintext));
@@ -50,7 +56,7 @@ export async function encryptApiKey(env, plaintext) {
     nonce,
     keyVersion: Number(env.BYOK_ENCRYPTION_KEY_ID || 1),
     hint: keyHint(plaintext),
-    provider: detectProvider(plaintext),
+    provider: options.provider || detectProvider(plaintext, { baseUrl: options.baseUrl }),
   };
 }
 

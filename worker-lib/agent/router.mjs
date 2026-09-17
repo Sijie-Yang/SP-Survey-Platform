@@ -11,11 +11,60 @@ import {
 import { supabaseRest } from '../supabaseUserClient.mjs';
 import {
   deleteCredential,
+  deleteProviderCredential,
   getCredentialStatus,
+  listProviderProfiles,
+  saveProviderProfile,
+  saveUserAiSettings,
   storeCredential,
   validateApiKeyWithProvider,
 } from './credentials.mjs';
 import { handleAgentChat } from './chatHandler.mjs';
+import { useAgentRuntime } from './runtime/flags.mjs';
+import { startDesignerRun } from './runtime/designerChat.mjs';
+import { assistantModeFromEvents, normalizeAssistantMode } from './runtime/modes.mjs';
+import {
+  archiveSession,
+  cancelRun,
+  discardSessionInput,
+  enqueueSessionInput,
+  getOwnedRun,
+  getSession,
+  listEvents,
+  listQueuedSessionInput,
+  listSessionRuns,
+  listSessions,
+  renameSession,
+} from './runtime/sessions.mjs';
+import {
+  answerRunApproval,
+  listPendingApprovals,
+} from './runtime/approvals.mjs';
+import { dispatchAgentRun } from './runtime/runDispatcher.mjs';
+import { eventsToUiMessages, PROVIDERS } from './runtime/index.mjs';
+import { PROTOCOLS, CATALOG_VERSION } from './runtime/catalog.mjs';
+import { publicCatalog } from './runtime/registry.mjs';
+import { listProviderModels } from './runtime/providers.mjs';
+import { assertCustomProviderDraft, assertProtocol } from './runtime/validators.mjs';
+import { loadProviderCredential } from './credentials.mjs';
+import {
+  cancelSiliconRun,
+  createSiliconPersona,
+  createSiliconRun,
+  deleteSiliconPersona,
+  exportSiliconRun,
+  getSiliconCompare,
+  getSiliconProgress,
+  getSiliconRun,
+  listSiliconPersonas,
+  listSiliconResponses,
+  listSiliconRuns,
+  listSiliconTasks,
+  processSiliconChunk,
+  resumeSiliconRun,
+  retryFailedSiliconRun,
+  updateSiliconPersona,
+} from '../silicon/handlers.mjs';
 import {
   acquireLease,
   applyProjectOperations,
@@ -152,7 +201,7 @@ function requireAgentScope(auth, scope) {
   }
 }
 
-export async function handleAgentAndMcpRoutes(request, env) {
+export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
   const url = new URL(request.url);
   const { pathname } = url;
 
@@ -325,20 +374,142 @@ export async function handleAgentAndMcpRoutes(request, env) {
       }
       const body = await request.json();
       if (body?.validateOnly && body?.apiKey) {
-        const validated = await validateApiKeyWithProvider(body.apiKey);
+        const validated = await validateApiKeyWithProvider(body.apiKey, {
+          provider: body.provider,
+          baseUrl: body.baseUrl,
+          protocol: body.protocol,
+          models: body.models,
+        });
         return jsonResponse(validated);
       }
       if (!body?.apiKey) {
         return errorResponse(Object.assign(new Error('apiKey required'), { status: 400 }));
       }
-      await validateApiKeyWithProvider(body.apiKey);
-      return jsonResponse(await storeCredential(env, auth.userId, body.apiKey));
+      const validation = await validateApiKeyWithProvider(body.apiKey, {
+        provider: body.provider,
+        baseUrl: body.baseUrl,
+        protocol: body.protocol,
+        models: body.models,
+      });
+      return jsonResponse(await storeCredential(env, auth.userId, body.apiKey, {
+        provider: body.provider,
+        baseUrl: body.baseUrl,
+        validated: validation.validated,
+      }));
     }
     if (pathname === '/api/agent/credentials/openai' && request.method === 'DELETE') {
       if (auth.kind !== 'supabase') {
         return errorResponse(Object.assign(new Error('Revoke credentials via browser session'), { status: 403 }));
       }
       return jsonResponse(await deleteCredential(env, auth.userId));
+    }
+    if (pathname === '/api/agent/credentials/providers' && request.method === 'GET') {
+      const providerId = new URL(request.url).searchParams.get('provider');
+      return jsonResponse({
+        success: true,
+        catalogVersion: CATALOG_VERSION,
+        protocols: PROTOCOLS,
+        providers: publicCatalog({
+          providerId,
+          summariesOnly: !providerId,
+        }),
+      });
+    }
+    if (pathname === '/api/agent/credentials/profiles' && request.method === 'PUT') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Store credentials via browser session'), { status: 403 }));
+      }
+      const body = await request.json();
+      if (body.protocol) assertProtocol(body.protocol);
+      if (body.custom) assertCustomProviderDraft(body);
+      return jsonResponse(await saveProviderProfile(env, auth.userId, body || {}));
+    }
+    if (pathname === '/api/agent/credentials/providers' && request.method === 'POST') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Store credentials via browser session'), { status: 403 }));
+      }
+      const body = await request.json();
+      if (body.protocol) assertProtocol(body.protocol);
+      if (body.custom) assertCustomProviderDraft(body);
+      const profile = {
+        provider: body.provider,
+        baseUrl: body.baseUrl,
+        displayName: body.displayName,
+        protocol: body.protocol,
+        models: body.models,
+        defaultInput: body.defaultInput,
+        compat: body.compat,
+        retryPolicy: body.retryPolicy,
+      };
+      if (body?.apiKey) {
+        const validation = await validateApiKeyWithProvider(body.apiKey, {
+          provider: body.provider,
+          baseUrl: body.baseUrl,
+          protocol: body.protocol,
+          models: body.models,
+        });
+        return jsonResponse(await storeCredential(env, auth.userId, body.apiKey, {
+          ...profile,
+          validated: validation.validated,
+        }));
+      }
+      const existing = await loadProviderCredential(env, auth.userId, body.provider).catch(() => null);
+      if (existing?.apiKey) {
+        await saveProviderProfile(env, auth.userId, profile);
+        return jsonResponse({
+          success: true,
+          provider: body.provider,
+          hint: existing.hint,
+        });
+      }
+      return jsonResponse(await saveProviderProfile(env, auth.userId, profile));
+    }
+    if (pathname.startsWith('/api/agent/credentials/providers/') && request.method === 'DELETE') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Revoke credentials via browser session'), { status: 403 }));
+      }
+      const provider = decodeURIComponent(pathname.slice('/api/agent/credentials/providers/'.length));
+      return jsonResponse(await deleteProviderCredential(env, auth.userId, provider));
+    }
+    if (pathname === '/api/agent/credentials/settings' && request.method === 'PUT') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      }
+      const body = await request.json();
+      return jsonResponse(await saveUserAiSettings(env, auth.userId, body || {}));
+    }
+    if (pathname === '/api/agent/credentials/models' && request.method === 'GET') {
+      const url = new URL(request.url);
+      const provider = url.searchParams.get('provider') || 'deepseek';
+      const profiles = await listProviderProfiles(env, auth.userId);
+      const profile = profiles.find((row) => row.provider === provider);
+      try {
+        const cred = await loadProviderCredential(env, auth.userId, provider);
+        return jsonResponse(await listProviderModels(cred.apiKey, provider, cred.baseUrl || profile?.base_url, {
+          protocol: profile?.protocol,
+        }));
+      } catch {
+        return jsonResponse({ success: true, models: PROVIDERS[provider]?.catalog || [], fetched: false });
+      }
+    }
+    if (pathname === '/api/agent/credentials/models' && request.method === 'POST') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      }
+      const body = await request.json();
+      const provider = body.provider || 'custom';
+      let apiKey = String(body.apiKey || '').trim();
+      let baseUrl = body.baseUrl || '';
+      const protocol = body.protocol;
+      if (!apiKey) {
+        const cred = await loadProviderCredential(env, auth.userId, provider).catch(() => null);
+        apiKey = cred?.apiKey || '';
+        baseUrl = baseUrl || cred?.baseUrl || '';
+      }
+      if (!apiKey) {
+        return errorResponse(Object.assign(new Error('API key required to fetch models'), { status: 400, code: 'MISSING_CREDENTIAL' }));
+      }
+      return jsonResponse(await listProviderModels(apiKey, provider, baseUrl, { protocol }));
     }
 
     // Connections (Integrations UI)
@@ -362,11 +533,225 @@ export async function handleAgentAndMcpRoutes(request, env) {
         return errorResponse(Object.assign(new Error('Chat requires browser session'), { status: 403 }));
       }
       const body = await request.json();
-      // Reject apiKey in body for production path
       if (body?.apiKey) {
         return errorResponse(Object.assign(new Error('Do not send apiKey in body. Store it via /api/agent/credentials/openai'), { status: 400 }));
       }
-      return jsonResponse(await handleAgentChat(env, auth.userId, body));
+      const assistantMode = normalizeAssistantMode(body?.assistantMode);
+      if (useAgentRuntime(env) && !body?.legacy) {
+        const run = await startDesignerRun(env, auth.userId, {
+          ...body,
+          assistantMode,
+          accessToken: auth.accessToken,
+        }, request, ctx);
+        return jsonResponse(run, { status: 202 });
+      }
+      const result = await handleAgentChat(env, auth.userId, { ...body, assistantMode });
+      return jsonResponse({ ...result, assistantMode });
+    }
+
+    if (pathname === '/api/agent/sessions' && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const url = new URL(request.url);
+      const sessions = await listSessions(env, auth.userId, {
+        projectId: url.searchParams.get('projectId'),
+        mode: url.searchParams.get('mode') || 'designer',
+      });
+      return jsonResponse({ success: true, sessions });
+    }
+    if (pathname.startsWith('/api/agent/sessions/') && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length).split('/')[0]);
+      const session = await getSession(env, auth.userId, sessionId);
+      if (!session) return errorResponse(Object.assign(new Error('Session not found'), { status: 404 }));
+      const after = Number(new URL(request.url).searchParams.get('after') || 0);
+      const allEvents = await listEvents(env, sessionId);
+      const events = after > 0
+        ? allEvents.filter((event) => Number(event.seq || 0) > after)
+        : allEvents;
+      const runs = await listSessionRuns(env, auth.userId, sessionId);
+      return jsonResponse({
+        success: true,
+        session,
+        run: runs[0] || null,
+        runs,
+        assistantMode: session.assistant_mode || assistantModeFromEvents(allEvents),
+        events,
+        messages: eventsToUiMessages(allEvents),
+        nextCursor: allEvents.at(-1)?.seq || after,
+      });
+    }
+    if (pathname.startsWith('/api/agent/sessions/') && pathname.endsWith('/steer') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length, -'/steer'.length));
+      const session = await getSession(env, auth.userId, sessionId);
+      if (!session) return errorResponse(Object.assign(new Error('Session not found'), { status: 404 }));
+      const body = await request.json();
+      if (!String(body?.content || '').trim()) {
+        return errorResponse(Object.assign(new Error('content is required'), { status: 400 }));
+      }
+      const input = await enqueueSessionInput(env, {
+        sessionId,
+        userId: auth.userId,
+        content: body.content,
+        kind: body.kind || 'steer',
+        target: body.target || 'next-step',
+        payload: {
+          assistantMode: normalizeAssistantMode(body.assistantMode || body.payload?.assistantMode || session.assistant_mode),
+          projectId: body.projectId || body.payload?.projectId || session.project_id || null,
+          parentRunId: body.parentRunId || body.payload?.parentRunId || null,
+          editorContext: body.editorContext || body.payload?.editorContext || null,
+        },
+      });
+      return jsonResponse({ success: true, input }, { status: 202 });
+    }
+    if (pathname.startsWith('/api/agent/sessions/') && pathname.endsWith('/inbox') && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length, -'/inbox'.length));
+      const session = await getSession(env, auth.userId, sessionId);
+      if (!session) return errorResponse(Object.assign(new Error('Session not found'), { status: 404 }));
+      return jsonResponse({
+        success: true,
+        inbox: await listQueuedSessionInput(env, sessionId),
+      });
+    }
+    if (pathname.startsWith('/api/agent/inbox/') && request.method === 'DELETE') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const itemId = decodeURIComponent(pathname.slice('/api/agent/inbox/'.length));
+      const item = await discardSessionInput(env, auth.userId, itemId);
+      if (!item) return errorResponse(Object.assign(new Error('Inbox item not found'), { status: 404 }));
+      return jsonResponse({ success: true, item });
+    }
+    if (pathname.startsWith('/api/agent/sessions/') && request.method === 'PATCH') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length));
+      const body = await request.json();
+      return jsonResponse({ success: true, session: await renameSession(env, auth.userId, sessionId, body?.title) });
+    }
+    if (pathname.startsWith('/api/agent/sessions/') && request.method === 'DELETE') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length));
+      return jsonResponse(await archiveSession(env, auth.userId, sessionId));
+    }
+    if (pathname.startsWith('/api/agent/runs/') && pathname.endsWith('/cancel') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const runId = decodeURIComponent(pathname.slice('/api/agent/runs/'.length, -'/cancel'.length));
+      return jsonResponse(await cancelRun(env, auth.userId, runId));
+    }
+    if (pathname.startsWith('/api/agent/runs/') && pathname.endsWith('/approvals') && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const runId = decodeURIComponent(pathname.slice('/api/agent/runs/'.length, -'/approvals'.length));
+      if (!await getOwnedRun(env, auth.userId, runId)) {
+        return errorResponse(Object.assign(new Error('Run not found'), { status: 404 }));
+      }
+      return jsonResponse({
+        success: true,
+        approvals: await listPendingApprovals(env, auth.userId, runId),
+      });
+    }
+    if (pathname.startsWith('/api/agent/approvals/') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const approvalId = decodeURIComponent(pathname.slice('/api/agent/approvals/'.length));
+      const body = await request.json();
+      const decision = await answerRunApproval(env, auth.userId, approvalId, body?.approved === true);
+      if (decision.resume) {
+        const run = await getOwnedRun(env, auth.userId, decision.approval.run_id);
+        if (run) {
+          const checkpoint = {
+            ...(run.checkpoint || {}),
+            approvedToolCalls: [
+              ...new Set([
+                ...(run.checkpoint?.approvedToolCalls || []),
+                decision.approval.tool_call_id,
+              ]),
+            ],
+          };
+          await dispatchAgentRun(env, ctx, {
+            kind: 'designer',
+            userId: auth.userId,
+            sessionId: run.session_id,
+            runId: run.id,
+            body: run.request_payload || {},
+            checkpoint,
+          });
+        }
+      }
+      return jsonResponse({ success: true, ...decision }, { status: decision.resume ? 202 : 200 });
+    }
+    if (pathname.startsWith('/api/agent/runs/') && request.method === 'GET') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const runId = decodeURIComponent(pathname.slice('/api/agent/runs/'.length));
+      const run = await getOwnedRun(env, auth.userId, runId);
+      if (!run) return errorResponse(Object.assign(new Error('Run not found'), { status: 404 }));
+      return jsonResponse({ success: true, run });
+    }
+
+    if (pathname.startsWith('/api/agent/silicon/') && auth.kind !== 'supabase') {
+      return errorResponse(Object.assign(new Error('Silicon samples require a browser session'), { status: 403 }));
+    }
+    if (pathname === '/api/agent/silicon/personas' && request.method === 'GET') {
+      const url = new URL(request.url);
+      return jsonResponse(await listSiliconPersonas(env, auth, url.searchParams.get('projectId')));
+    }
+    if (pathname === '/api/agent/silicon/personas' && request.method === 'POST') {
+      const body = await request.json();
+      return jsonResponse(await createSiliconPersona(env, auth, body));
+    }
+    if (pathname.startsWith('/api/agent/silicon/personas/') && request.method === 'PATCH') {
+      const id = decodeURIComponent(pathname.slice('/api/agent/silicon/personas/'.length));
+      const body = await request.json();
+      return jsonResponse(await updateSiliconPersona(env, auth, id, body));
+    }
+    if (pathname.startsWith('/api/agent/silicon/personas/') && request.method === 'DELETE') {
+      const id = decodeURIComponent(pathname.slice('/api/agent/silicon/personas/'.length));
+      return jsonResponse(await deleteSiliconPersona(env, auth, id));
+    }
+    if (pathname === '/api/agent/silicon/tasks' && request.method === 'GET') {
+      return jsonResponse(await listSiliconTasks(env, auth, ctx));
+    }
+    if (pathname === '/api/agent/silicon/runs' && request.method === 'GET') {
+      const url = new URL(request.url);
+      return jsonResponse(await listSiliconRuns(env, auth, url.searchParams.get('projectId')));
+    }
+    if (pathname === '/api/agent/silicon/runs' && request.method === 'POST') {
+      const body = await request.json();
+      return jsonResponse(await createSiliconRun(env, auth, body, request, ctx), { status: 202 });
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/process') && request.method === 'POST') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/process'.length));
+      return jsonResponse(await processSiliconChunk(env, auth, runId, ctx));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/cancel') && request.method === 'POST') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/cancel'.length));
+      return jsonResponse(await cancelSiliconRun(env, auth, runId));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/resume') && request.method === 'POST') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/resume'.length));
+      return jsonResponse(await resumeSiliconRun(env, auth, runId, ctx), { status: 202 });
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/retry-failed') && request.method === 'POST') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/retry-failed'.length));
+      return jsonResponse(await retryFailedSiliconRun(env, auth, runId, ctx), { status: 202 });
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/progress') && request.method === 'GET') {
+      const url = new URL(request.url);
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/progress'.length));
+      return jsonResponse(await getSiliconProgress(env, auth, runId, url.searchParams.get('after') || 0));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/responses') && request.method === 'GET') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/responses'.length));
+      return jsonResponse(await listSiliconResponses(env, auth, runId));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/compare') && request.method === 'GET') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/compare'.length));
+      return jsonResponse(await getSiliconCompare(env, auth, runId));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && pathname.endsWith('/export') && request.method === 'GET') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length, -'/export'.length));
+      return jsonResponse(await exportSiliconRun(env, auth, runId));
+    }
+    if (pathname.startsWith('/api/agent/silicon/runs/') && request.method === 'GET') {
+      const runId = decodeURIComponent(pathname.slice('/api/agent/silicon/runs/'.length));
+      return jsonResponse(await getSiliconRun(env, auth, runId));
     }
 
     // Projects

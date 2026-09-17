@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { postProcessAiConfig, validateSurveyConfig } from './designProtocol.mjs';
+import { applyOperations, normalizeOperationsArg, postProcessAiConfig, validateSurveyConfig } from './designProtocol.mjs';
 
 test('postProcessAiConfig fills imagecheckbox tags and strips skillHtml/falApiKey', () => {
   const out = postProcessAiConfig({
@@ -50,11 +50,29 @@ test('validateSurveyConfig warns on empty mediaslidergroup / mediapointallocatio
       name: 'p1',
       elements: [
         { type: 'mediaslidergroup', name: 's1', title: 'Sliders', randomImageSelection: true },
-        { type: 'mediapointallocation', name: 'p1', title: 'Points', randomImageSelection: true },
+        { type: 'mediapointallocation', name: 'alloc1', title: 'Points', randomImageSelection: true },
       ],
     }],
   });
   assert.equal(report.valid, true);
   assert.ok(report.warnings.some((w) => /dimensions/i.test(w.message)));
   assert.ok(report.warnings.some((w) => /choices/i.test(w.message)));
+});
+
+test('applyOperations accepts a single replaceConfig object instead of crashing forEach', () => {
+  const result = applyOperations({ title: 'Demo', pages: [] }, {
+    op: 'replaceConfig',
+    surveyConfig: {
+      title: '街景视觉感知',
+      pages: [{ name: 'p1', elements: [{ type: 'text', name: 'q1', title: 'Q' }] }],
+    },
+  });
+  assert.equal(result.surveyConfig.title, '街景视觉感知');
+  assert.deepEqual(normalizeOperationsArg({ 0: { op: 'addPage', page: { name: 'p2' } } }), [
+    { op: 'addPage', page: { name: 'p2' } },
+  ]);
+  assert.throws(
+    () => applyOperations({ pages: [] }, 'not-ops'),
+    /operations must be an array/,
+  );
 });

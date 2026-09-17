@@ -5,8 +5,11 @@
 import { supabase } from './supabase';
 
 const SERVER_URL =
-  process.env.REACT_APP_SERVER_URL ||
-  (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3001');
+  process.env.REACT_APP_SERVER_URL || '';
+const R2_PUBLIC_BASE = (
+  process.env.REACT_APP_R2_PUBLIC_URL
+  || 'https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev'
+).replace(/\/$/, '');
 
 async function authHeaders(extra = {}) {
   const headers = { ...extra };
@@ -22,8 +25,8 @@ async function authHeaders(extra = {}) {
   return headers;
 }
 
-// Returns true when the R2 public URL env var is set (synchronous, safe to call anywhere)
-export const isR2Configured = () => !!process.env.REACT_APP_R2_PUBLIC_URL;
+// The public URL is non-secret. Upload/list/delete credentials remain server-side.
+export const isR2Configured = () => Boolean(R2_PUBLIC_BASE);
 
 export function getR2ServerUrl() {
   return SERVER_URL;
@@ -63,7 +66,7 @@ export function noteR2ProxyFailure(err, label) {
 }
 
 export function getR2PublicBase() {
-  return (process.env.REACT_APP_R2_PUBLIC_URL || '').replace(/\/$/, '');
+  return R2_PUBLIC_BASE;
 }
 
 export function projectR2Prefix(userId, projectId) {

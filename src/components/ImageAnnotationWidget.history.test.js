@@ -32,3 +32,15 @@ test('browse mode and tool collapse do not change annotations', () => {
   expect(screen.getByRole('button', { name: 'Resume drawing', exact: true })).toBeTruthy();
   expect(onChange).not.toHaveBeenCalled();
 });
+
+test('renders legacy structured annotation labels as text', () => {
+  render(
+    <ImageAnnotationCanvas
+      imageUrl="https://example.test/a.jpg"
+      value={{ shapes: [] }}
+      onChange={() => {}}
+      annotationLabels={[{ text: '危险点', value: 'danger' }]}
+    />,
+  );
+  expect(screen.getAllByText('危险点')).toHaveLength(2);
+});

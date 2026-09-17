@@ -8,9 +8,7 @@ import {
   Chip,
   Divider,
   IconButton,
-  Link,
   Stack,
-  TextField,
   Typography,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -19,16 +17,14 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { useNavigate } from 'react-router-dom';
 import {
-  deleteOpenAiCredential,
   getCredentialStatus,
   getMcpEndpoint,
   getSameOriginMcpEndpoint,
   listMcpConnections,
   revokeMcpConnection,
-  storeOpenAiCredential,
-  validateOpenAiCredential,
 } from '../lib/agentApi';
 import { useRegion } from '../contexts/RegionContext';
+import ModelsSettings from '../components/admin/ModelsSettings';
 
 function SetupStep({ number, title, children }) {
   return (
@@ -94,7 +90,6 @@ export default function IntegrationsPage() {
   const navigate = useNavigate();
   const [credential, setCredential] = useState(null);
   const [connections, setConnections] = useState([]);
-  const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
   const mcpEndpoint = getMcpEndpoint();
@@ -121,43 +116,6 @@ export default function IntegrationsPage() {
   const copy = async (value) => {
     await navigator.clipboard.writeText(value);
     setMessage({ severity: 'info', text: 'Copied.' });
-  };
-
-  const handleSaveKey = async () => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const validated = await validateOpenAiCredential(apiKey);
-      if (!validated.success) {
-        setMessage({ severity: 'error', text: validated.error || 'This API key is not valid.' });
-        return;
-      }
-      const stored = await storeOpenAiCredential(apiKey);
-      if (!stored.success) {
-        setMessage({ severity: 'error', text: stored.error || 'Could not save the API key.' });
-        return;
-      }
-      setApiKey('');
-      localStorage.removeItem('openaiApiKey');
-      localStorage.removeItem('apiKeyValid');
-      setMessage({ severity: 'success', text: 'API key saved. The Survey Builder assistant is ready.' });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDeleteKey = async () => {
-    setBusy(true);
-    try {
-      await deleteOpenAiCredential();
-      localStorage.removeItem('openaiApiKey');
-      localStorage.removeItem('apiKeyValid');
-      setMessage({ severity: 'success', text: 'API key removed.' });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
   };
 
   const handleRevoke = async (tokenHash) => {
@@ -240,8 +198,31 @@ MEDIA RULES (must follow):
         <Card variant="outlined" sx={{ borderColor: 'primary.main', borderWidth: 2 }}>
           <CardContent>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-              <Typography variant="h6">{t.integConnectTitle}</Typography>
+              <Typography variant="h6">{t.integAssistantTitle}</Typography>
               <Chip label={t.integRecommended} color="primary" size="small" />
+              {credential?.configured && (
+                <Chip icon={<CheckCircleIcon />} label={t.integReady} color="success" size="small" />
+              )}
+            </Stack>
+            <Typography color="text.secondary" sx={{ mb: 2 }}>
+              {t.integAssistantFirstBody}
+            </Typography>
+            <ModelsSettings
+              onConfiguredChange={(status) => {
+                setCredential(status?.openai || { configured: false });
+              }}
+            />
+            <Button variant="outlined" onClick={() => navigate('/admin')} sx={{ mt: 2 }}>
+              {t.openSurveyBuilder}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card variant="outlined">
+          <CardContent>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+              <Typography variant="h6">{t.integConnectTitle}</Typography>
+              <Chip label={t.integAdvanced} size="small" />
               {connections.length > 0 && (
                 <Chip icon={<CheckCircleIcon />} label={t.integConnected} color="success" size="small" />
               )}
@@ -405,60 +386,7 @@ MEDIA RULES (must follow):
 
         <Card variant="outlined">
           <CardContent>
-            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-              <Typography variant="h6">{t.integAssistantTitle}</Typography>
-              {credential?.configured && (
-                <Chip icon={<CheckCircleIcon />} label={t.integReady} color="success" size="small" />
-              )}
-            </Stack>
-            <Typography color="text.secondary" sx={{ mb: 2 }}>
-              {t.integAssistantBody}
-            </Typography>
-
-            <Typography variant="body2" sx={{ mb: 1 }}>
-              {t.integGetKey}{' '}
-              <Link href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">
-                OpenAI
-              </Link>
-              {' / '}
-              <Link href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">
-                OpenRouter
-              </Link>
-            </Typography>
-
-            {credential?.configured && (
-              <Alert severity="success" sx={{ mb: 2 }}>
-                Key saved: {credential.provider} {credential.hint}. Paste a new key only to replace it.
-              </Alert>
-            )}
-
-            <TextField
-              fullWidth
-              type="password"
-              label={t.integApiKeyLabel}
-              placeholder="sk-... or sk-or-..."
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              sx={{ mb: 1.5 }}
-            />
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" disabled={busy || !apiKey.trim()} onClick={handleSaveKey}>
-                {t.integSaveKey}
-              </Button>
-              {credential?.configured && (
-                <Button color="error" disabled={busy} onClick={handleDeleteKey}>
-                  {t.integRemoveKey}
-                </Button>
-              )}
-            </Stack>
-
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="body2" color="text.secondary">
-              {t.integAfterSave}
-            </Typography>
-            <Button variant="outlined" onClick={() => navigate('/admin')} sx={{ mt: 1.5 }}>
-              {t.openSurveyBuilder}
-            </Button>
+            <Typography variant="body2" color="text.secondary">{t.integAfterSave}</Typography>
           </CardContent>
         </Card>
       </Stack>

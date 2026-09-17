@@ -46,7 +46,12 @@ const R2_COPY_CONCURRENCY = 32;
 
 // Enable CORS for React app
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3002'],
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:3002',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3002',
+  ],
   credentials: true
 }));
 
@@ -85,7 +90,9 @@ app.use(async (req, res, next) => {
     || pathName.startsWith('/.well-known/');
   const isBenchRoute = pathName === '/api/bench' || pathName.startsWith('/api/bench/');
   const isAdminResultsRoute = pathName === '/api/admin/project-responses';
-  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute) return next();
+  const isSubsidyRoute = pathName === '/api/admin/assistant-subsidy';
+  const isR2Route = pathName === '/api/r2' || pathName.startsWith('/api/r2/');
+  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute && !isSubsidyRoute && !isR2Route) return next();
 
   try {
     const url = `http://localhost:${PORT}${req.originalUrl}`;
@@ -98,7 +105,6 @@ app.use(async (req, res, next) => {
     const init = { method: req.method, headers };
     const body = buildBridgeBody(req, headers);
     if (body !== undefined) init.body = body;
-    const request = new Request(url, init);
     const env = {
       ...process.env,
       APP_URL: process.env.APP_URL || 'http://localhost:3000',
@@ -108,20 +114,75 @@ app.use(async (req, res, next) => {
       BYOK_ENCRYPTION_KEY: process.env.BYOK_ENCRYPTION_KEY,
     };
     let response = null;
-    if (isAdminResultsRoute) {
-      const { handleAdminResultsRoutes } = await import('./worker-lib/adminResults.mjs');
-      response = await handleAdminResultsRoutes(request, env);
-    } else if (isBenchRoute) {
-      const { handleBenchRoutes } = await import('./worker-lib/bench/handlers.mjs');
-      response = await handleBenchRoutes(request, env, null);
+    const remoteAgentBase = process.env.REMOTE_AGENT_BASE_URL;
+    const localR2Configured = Boolean(
+      process.env.R2_ACCOUNT_ID
+      && process.env.R2_ACCESS_KEY_ID
+      && process.env.R2_SECRET_ACCESS_KEY
+      && process.env.R2_PUBLIC_URL
+    );
+    const publicR2Upstream = [
+      process.env.R2_UPSTREAM_ORIGIN,
+      process.env.PUBLIC_APP_URL,
+      process.env.REACT_APP_APP_URL,
+      'https://sp-survey.org',
+    ].map((value) => {
+      try {
+        const parsed = new URL(String(value || '').trim());
+        return parsed.protocol === 'https:' ? parsed.origin : '';
+      } catch {
+        return '';
+      }
+    }).find(Boolean);
+    const remoteBase = isR2Route && !localR2Configured
+      ? (remoteAgentBase || publicR2Upstream)
+      : remoteAgentBase;
+    const requiresRemoteWorker = isAgentRoute
+      || (!env.SUPABASE_SERVICE_ROLE_KEY && (isBenchRoute || isAdminResultsRoute || isSubsidyRoute))
+      || (isR2Route && !localR2Configured);
+    if (requiresRemoteWorker && remoteBase) {
+      const remoteRoot = new URL(remoteBase);
+      if (remoteRoot.protocol !== 'https:') {
+        throw new Error('REMOTE_AGENT_BASE_URL must use HTTPS.');
+      }
+      headers.delete('host');
+      headers.delete('connection');
+      // Do not relay browser compression negotiation through this decoding
+      // proxy. Cloudflare may choose zstd, which Node fetch does not decode
+      // consistently and Safari cannot consume after a second hop.
+      headers.set('accept-encoding', 'identity');
+      response = await fetch(new URL(req.originalUrl, remoteRoot), init);
+    } else if (isR2Route) {
+      return next();
     } else {
-      const { handleAgentAndMcpRoutes } = await import('./worker-lib/agent/router.mjs');
-      response = await handleAgentAndMcpRoutes(request, env);
+      const request = new Request(url, init);
+      if (isAdminResultsRoute) {
+        const { handleAdminResultsRoutes } = await import('./worker-lib/adminResults.mjs');
+        response = await handleAdminResultsRoutes(request, env);
+      } else if (isSubsidyRoute) {
+        const { handleAssistantSubsidyRoutes } = await import('./worker-lib/admin/subsidyHandlers.mjs');
+        response = await handleAssistantSubsidyRoutes(request, env);
+      } else if (isBenchRoute) {
+        const { handleBenchRoutes } = await import('./worker-lib/bench/handlers.mjs');
+        response = await handleBenchRoutes(request, env, null);
+      } else {
+        const { handleAgentAndMcpRoutes } = await import('./worker-lib/agent/router.mjs');
+        response = await handleAgentAndMcpRoutes(request, env, {
+          waitUntil(promise) {
+            Promise.resolve(promise).catch((error) => {
+              console.error('[agent background run]', error);
+            });
+          },
+        });
+      }
     }
     if (!response) return next();
     res.status(response.status);
     response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === 'transfer-encoding') return;
+      // Node fetch transparently decompresses upstream bodies but retains the
+      // original encoding/length headers. Forwarding those stale headers makes
+      // Safari try to decode the already-decoded bytes again.
+      if (['transfer-encoding', 'content-encoding', 'content-length'].includes(key.toLowerCase())) return;
       res.setHeader(key, value);
     });
     if (response.status === 204 || response.status === 302) {
@@ -3176,8 +3237,29 @@ app.listen(PORT, () => {
   console.log(`📁 Projects directory: ${PROJECTS_PATH}`);
   console.log(`📁 Deployments directory: ${DEPLOYMENTS_PATH}`);
   console.log(`🤖 OpenAI integration enabled`);
+  if (process.env.REMOTE_AGENT_BASE_URL) {
+    console.log(`🤖 /api/agent proxied to ${process.env.REMOTE_AGENT_BASE_URL} (local worker-lib is unused)`);
+  } else {
+    console.log('🤖 /api/agent uses local worker-lib (no REMOTE_AGENT_BASE_URL)');
+    import('./worker-lib/agent/runtime/designerTools.mjs').then(({ createDesignerTools }) => {
+      const generateTools = createDesignerTools({ assistantMode: 'generate' }).map((tool) => tool.name);
+      console.log(`🤖 generate tools: ${generateTools.join(', ')}`);
+    }).catch((error) => {
+      console.warn('🤖 generate tool probe failed:', error.message);
+    });
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.log('⚠️  SUPABASE_SERVICE_ROLE_KEY missing — Assistant sessions/tools will fail locally');
+    }
+  }
   if (isR2Configured()) {
     console.log(`☁️  Cloudflare R2 storage enabled (bucket: ${r2BucketName})`);
+  } else {
+    const upstream = process.env.REMOTE_AGENT_BASE_URL
+      || process.env.R2_UPSTREAM_ORIGIN
+      || process.env.PUBLIC_APP_URL
+      || process.env.REACT_APP_APP_URL
+      || 'https://sp-survey.org';
+    console.log(`☁️  Local R2 credentials missing — /api/r2/* proxied to ${upstream}`);
   }
   if (fs.existsSync(BUILD_PATH)) {
     console.log(`📦 Serving React production build from ${BUILD_PATH}`);

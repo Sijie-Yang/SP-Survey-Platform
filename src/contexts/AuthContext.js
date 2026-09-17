@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, signIn, signUp, signOut } from '../lib/supabase';
+import { parsePreviewSessionMessage } from '../lib/previewSession';
 
 const AuthContext = createContext(null);
 
@@ -32,18 +33,38 @@ export function AuthProvider({ children }) {
       setUser(session?.user ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    const onPreviewSession = (event) => {
+      const tokens = parsePreviewSessionMessage(event, window.location.hostname);
+      if (!tokens) return;
+      supabase.auth.setSession(tokens).catch(() => {});
+    };
+    window.addEventListener('message', onPreviewSession);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('message', onPreviewSession);
+    };
   }, []);
 
   const login = async (email, password) => {
-    const { data, error } = await signIn(email, password);
+    if (!supabase) {
+      throw new Error('Supabase is not configured for this local build. Restart the development server after restoring REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY.');
+    }
+    const result = await signIn(email, password);
+    const { data, error } = result || {};
     if (error) throw error;
+    if (!data) throw new Error('The login service returned no response.');
     return data;
   };
 
   const register = async (email, password) => {
-    const { data, error } = await signUp(email, password);
+    if (!supabase) {
+      throw new Error('Supabase is not configured for this local build. Restart the development server after restoring REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY.');
+    }
+    const result = await signUp(email, password);
+    const { data, error } = result || {};
     if (error) throw error;
+    if (!data) throw new Error('The registration service returned no response.');
     return data;
   };
 

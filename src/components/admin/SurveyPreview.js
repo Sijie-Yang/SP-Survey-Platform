@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
@@ -23,11 +23,52 @@ import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
 import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 
+function previewSourceKey(config, currentProject) {
+  const images = currentProject?.preloadedImages || [];
+  return JSON.stringify({
+    config: config || null,
+    imageKeys: images.map((img) => img.key || img.url || img.name || ''),
+  });
+}
+
+export function createSurveyPreviewModel(processedConfig) {
+  const configToUse = JSON.parse(JSON.stringify(processedConfig || {}));
+  if (typeof configToUse.showQuestionNumbers === 'boolean') {
+    configToUse.showQuestionNumbers = configToUse.showQuestionNumbers ? 'on' : 'off';
+  }
+  if (typeof configToUse.showProgressBar === 'boolean') {
+    configToUse.showProgressBar = configToUse.showProgressBar ? 'top' : 'off';
+  }
+  const normalizedPreviewJson = normalizeBuilderSurveyJson(configToUse);
+  const model = new Model(normalizedPreviewJson);
+  applySurveyLocale(model, normalizedPreviewJson);
+  syncInjectedMediaOntoSurveyModel(model, normalizedPreviewJson);
+  try {
+    if (configToUse.theme) {
+      const customTheme = generateCustomTheme(configToUse);
+      if (customTheme) model.applyTheme(customTheme);
+    } else if (themeJson) {
+      model.applyTheme(themeJson);
+    }
+  } catch {
+    // SurveyJS default styling
+  }
+  model.mode = 'display';
+  try {
+    model.showProgressBar = 'off';
+  } catch { /* ignore */ }
+  return model;
+}
+
 export default function SurveyPreview({ config, currentProject, showMediaAssignment = true }) {
   const [processedConfig, setProcessedConfig] = useState(null);
   const [mediaAssignments, setMediaAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
+  const sourceKey = useMemo(
+    () => previewSourceKey(config, currentProject),
+    [config, currentProject?.preloadedImages],
+  );
 
   useEffect(() => {
     const processConfig = async () => {
@@ -358,7 +399,16 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
     };
 
     processConfig();
-  }, [config, currentProject?.preloadedImages]);
+  }, [sourceKey]);
+
+  const model = useMemo(
+    () => (processedConfig && !loading ? createSurveyPreviewModel(processedConfig) : null),
+    [processedConfig, loading],
+  );
+
+  useEffect(() => () => {
+    model?.dispose?.();
+  }, [model]);
 
   if (!config) {
     return (
@@ -368,7 +418,7 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
     );
   }
 
-  if (loading) {
+  if (loading || !model) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
         <CircularProgress />
@@ -377,56 +427,8 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
   }
 
   try {
-    // Fix config before creating model
     const configToUse = processedConfig || config;
-    
-    // Ensure showQuestionNumbers and showProgressBar are strings, not booleans
-    if (typeof configToUse.showQuestionNumbers === 'boolean') {
-      configToUse.showQuestionNumbers = configToUse.showQuestionNumbers ? 'on' : 'off';
-      console.log('🔧 Preview: Fixed showQuestionNumbers boolean to string');
-    }
-    if (typeof configToUse.showProgressBar === 'boolean') {
-      configToUse.showProgressBar = configToUse.showProgressBar ? 'top' : 'off';
-      console.log('🔧 Preview: Fixed showProgressBar boolean to string');
-    }
-    
-    // Directly use processed configuration (already in standard SurveyJS format)
-    const normalizedPreviewJson = normalizeBuilderSurveyJson(configToUse);
-    const model = new Model(normalizedPreviewJson);
-    applySurveyLocale(model, normalizedPreviewJson);
-    syncInjectedMediaOntoSurveyModel(model, normalizedPreviewJson);
-    
-    // Apply theme (same as Live Survey) - with error handling
-    try {
-      if (config.theme) {
-        // Use custom theme from admin config
-        const customTheme = generateCustomTheme(config);
-        if (customTheme) {
-          console.log('Preview: Applying custom theme...');
-          model.applyTheme(customTheme);
-          console.log('✅ Preview applied custom theme successfully');
-        }
-      } else if (themeJson) {
-        // Use default theme
-        console.log('Preview: Applying default theme...');
-        model.applyTheme(themeJson);
-      }
-    } catch (themeError) {
-      console.error('⚠️ Error applying theme in preview, using default styling:', themeError);
-      // Continue without theme - SurveyJS will use default styling
-    }
-    
-    // Configuration already applied directly to model (via new Model(config))
-    // No additional setup needed
-    
-    // Disable survey completion for preview
-    model.mode = "display";
-
     const progressEnabled = isProgressEnabled(configToUse);
-    try {
-      // Match live SurveyApp: ProgressChrome replaces the native SurveyJS bar
-      model.showProgressBar = 'off';
-    } catch { /* ignore */ }
     
     console.log('Preview using standard SurveyJS config:', {
       title: model.title,

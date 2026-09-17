@@ -19,12 +19,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify pinned Harness model catalog
+        run: npm run catalog:check
+
+      - name: Verify generated platform schema
+        run: npm run schema:check
+
       - name: Unit/integration tests
         run: npm run test:ci
 
-      - name: Design protocol + BYOK crypto tests
-        run: |
-          node --test worker-lib/crypto/byokAesGcm.test.mjs
+      - name: Agent runtime, BYOK, and Silicon tests
+        run: npm run test:agent
 
       - name: Admin results authorization tests
         run: node --test worker-lib/adminResults.test.mjs worker-lib/agent/skillContracts.test.mjs worker-lib/agent/skillHtmlValidate.test.mjs
@@ -33,20 +38,18 @@ jobs:
         run: npm run test:media-pipeline
 
       - name: Check supabase SQL idempotency guards
+        run: npm run sql:check
+
+      - name: Re-run incremental launch SQL
         run: |
-          set -e
-          for f in supabase/*.sql; do
-            if ! grep -qiE 'IF NOT EXISTS|DROP POLICY IF EXISTS|CREATE OR REPLACE' "$f"; then
-              echo "Non-idempotent SQL script: $f"
-              exit 1
-            fi
-            echo "OK $f"
-          done
+          npm install --no-save --no-audit --no-fund @electric-sql/pglite
+          node scripts/tests/incremental-sql.mjs
 
       - name: Worker module smoke import
         run: |
           node -e "import('./worker-lib/agent/router.mjs').then((m) => { if (typeof m.handleAgentAndMcpRoutes !== 'function') process.exit(1); })"
           node -e "import('./worker-lib/mcp/server.mjs').then((m) => { if (typeof m.handleMcpRequest !== 'function') process.exit(1); })"
+          node -e "import('./worker-lib/silicon/handlers.mjs').then((m) => { if (typeof m.createSiliconRun !== 'function') process.exit(1); })"
 
       - name: Production build
         run: npm run build

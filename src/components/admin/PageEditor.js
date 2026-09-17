@@ -1,5 +1,5 @@
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -237,12 +237,28 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
   );
 }
 
-export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig }) {
+export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig, onSelectionChange, onWorkspaceChange, onOpenAssistant }) {
   const { tr } = useQuestionEditorText();
   const [editedPage, setEditedPage] = useState({ ...page });
   const [selectedQuestion, setSelectedQuestion] = useState(null);
+
   const initialPage = useRef(JSON.stringify(page));
-  const guard = useUnsavedChanges(JSON.stringify(editedPage) !== initialPage.current);
+  const pageDirty = JSON.stringify(editedPage) !== initialPage.current;
+  useEffect(() => {
+    const selection = {
+      pageName: editedPage?.name || page?.name,
+      questionName: selectedQuestion?.question?.name || null,
+      pageWorkingCopy: editedPage,
+      pageDirty,
+      dirty: pageDirty,
+    };
+    onSelectionChange?.(selection);
+    onWorkspaceChange?.({
+      open: Boolean(selectedQuestion),
+      ...selection,
+    });
+  }, [editedPage, page?.name, pageDirty, selectedQuestion, onSelectionChange, onWorkspaceChange]);
+  const guard = useUnsavedChanges(pageDirty);
   const closeEditor = () => guard.request(onCancel);
   const [confirmDialog, setConfirmDialog] = useState(null);
 
@@ -361,7 +377,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
 
   return (
     <>
-      <Dialog open={true} onClose={closeEditor} maxWidth="lg" fullWidth>
+      <Dialog open={!selectedQuestion} onClose={closeEditor} maxWidth="lg" fullWidth>
         <DialogTitle>
           {tr('Edit Page: {title}', { title: page.title || tr('Page {number}', { number: pageIndex + 1 }) })}
         </DialogTitle>
@@ -457,12 +473,26 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
       {/* Question Editor */}
       {selectedQuestion && (
         <QuestionEditor
+          variant="workspace"
+          pageName={editedPage?.name || page?.name}
           question={selectedQuestion.question}
           onSave={(updatedQuestion) => {
             updateQuestion(selectedQuestion.index, updatedQuestion);
             setSelectedQuestion(null);
           }}
           onCancel={() => setSelectedQuestion(null)}
+          onWorkingCopyChange={(info) => {
+            onSelectionChange?.({
+              pageName: editedPage?.name || page?.name,
+              questionName: info?.questionName || selectedQuestion.question?.name,
+              workingCopy: info?.workingCopy,
+              baseline: info?.baseline,
+              dirty: Boolean(info?.dirty || pageDirty),
+              pageWorkingCopy: editedPage,
+              pageDirty,
+            });
+          }}
+          onOpenAssistant={onOpenAssistant}
           images={images}
           currentProject={currentProject}
           surveyConfig={surveyConfig}

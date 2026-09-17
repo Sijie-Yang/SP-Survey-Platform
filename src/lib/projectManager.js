@@ -529,6 +529,13 @@ export const saveProjectDraftOptimistic = async (
       if (String(error.message || '').includes('conflict')) {
         return { success: false, conflict: true, error: error.message };
       }
+      if (/save_project_draft|gen_random_bytes|PGRST202|could not find the function|schema cache/i.test(String(error.message || ''))) {
+        return {
+          success: false,
+          code: 'DRAFT_SAVE_RPC_MISSING',
+          error: 'save_project_draft is not applied',
+        };
+      }
       throw error;
     }
     return { success: true, ...(data || {}) };
@@ -537,6 +544,34 @@ export const saveProjectDraftOptimistic = async (
     return { success: false, error: error.message };
   }
 };
+
+async function saveProjectDraftDirect(projectId, surveyConfig, {
+  expectedDraftUpdatedAt = null,
+  writer = { source: 'human' },
+  clientMutationId = null,
+} = {}) {
+  const now = new Date().toISOString();
+  const revisionId = clientMutationId || `rev_${now.replace(/[^0-9]/g, '').slice(-16)}`;
+  let query = supabase.from('projects')
+    .update({
+      survey_config: surveyConfig,
+      survey_config_draft: surveyConfig,
+      draft_updated_at: now,
+      updated_at: now,
+      revision_id: revisionId,
+      last_writer: { ...(writer || {}), at: now },
+    })
+    .eq('id', projectId);
+  if (expectedDraftUpdatedAt) {
+    query = query.eq('draft_updated_at', expectedDraftUpdatedAt);
+  }
+  const { data, error } = await query.select('id,draft_updated_at');
+  if (error) return { success: false, error: error.message };
+  if (!Array.isArray(data) || !data.length) {
+    return { success: false, conflict: true, error: 'conflict: draft changed' };
+  }
+  return { success: true, draftUpdatedAt: data[0].draft_updated_at || now, revisionId };
+}
 
 export const loadSurveyConfigForProject = async (projectId) => {
   try {
