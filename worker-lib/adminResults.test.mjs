@@ -6,13 +6,16 @@ const env = { SUPABASE_URL: 'https://database.example', SUPABASE_ANON_KEY: 'test
 const request = (query = '?project=project-a', method = 'GET', authenticated = true) => new Request(`https://app.example/api/admin/project-responses${query}`, {
   method, headers: authenticated ? { Authorization: 'Bearer test-user' } : {},
 });
-function mockDatabase(t, { admin = true, project = true, failAdmin = false, validUser = true } = {}) {
+function mockDatabase(t, { admin = true, project = true, failAdmin = false, failResponses = false, validUser = true } = {}) {
   return t.mock.method(globalThis, 'fetch', async (url) => {
     const path = new URL(url).pathname;
     if (path === '/auth/v1/user') return Response.json(validUser ? { id: 'admin-user' } : {}, { status: validUser ? 200 : 401 });
     if (path === '/rest/v1/admins') return Response.json(failAdmin ? { message: 'private database failure' } : admin ? [{ user_id: 'admin-user' }] : [], { status: failAdmin ? 500 : 200 });
     if (path === '/rest/v1/projects') return Response.json(project ? [{ id: 'project-a' }] : []);
-    if (path === '/rest/v1/survey_responses') return Response.json([{ id: 'response-a', project_id: 'project-a' }]);
+    if (path === '/rest/v1/survey_responses') {
+      if (failResponses) return Response.json({ message: 'secret row body' }, { status: 500 });
+      return Response.json([{ id: 'response-a', project_id: 'project-a' }]);
+    }
     throw new Error(`Unexpected path ${path}`);
   });
 }
@@ -34,8 +37,12 @@ test('a non-admin session is denied before projects or responses are queried', a
 test('admin lookup failures fail closed and do not expose database errors', async (t) => {
   const db = mockDatabase(t, { failAdmin: true });
   const result = await handleAdminResultsRoutes(request(), env);
+  const body = await result.json();
   assert.equal(result.status, 500);
-  assert.doesNotMatch(await result.text(), /private database failure|test-server/);
+  assert.equal(body.stage, 'admin');
+  assert.equal(body.code, 'ADMIN_RESULTS_ADMIN_QUERY');
+  assert.match(body.requestId, /./);
+  assert.doesNotMatch(JSON.stringify(body), /private database failure|test-server|Bearer|eyJ/);
   assert.equal(db.mock.calls.length, 2);
 });
 
@@ -54,7 +61,11 @@ test('admin access is scoped to the requested project and bounded page', async (
 
 test('missing projects produce a clear not-found result', async (t) => {
   const db = mockDatabase(t, { project: false });
-  assert.equal((await handleAdminResultsRoutes(request(), env)).status, 404);
+  const result = await handleAdminResultsRoutes(request(), env);
+  const body = await result.json();
+  assert.equal(result.status, 404);
+  assert.equal(body.stage, 'project');
+  assert.match(body.requestId, /./);
   assert.equal(db.mock.calls.length, 3);
 });
 
@@ -72,6 +83,17 @@ test('the endpoint offers no mutation operation', async (t) => {
     assert.equal((await handleAdminResultsRoutes(request('', method), env)).status, 405);
   }
   assert.equal(db.mock.calls.length, 0);
+});
+
+test('response query failures keep a stage and request id without leaking row bodies', async (t) => {
+  mockDatabase(t, { failResponses: true });
+  const result = await handleAdminResultsRoutes(request(), env);
+  const body = await result.json();
+  assert.equal(result.status, 500);
+  assert.equal(body.stage, 'responses');
+  assert.equal(body.code, 'ADMIN_RESULTS_RESPONSE_QUERY');
+  assert.match(body.requestId, /./);
+  assert.doesNotMatch(JSON.stringify(body), /secret row body/);
 });
 
 test('unrelated routes remain available to other handlers', async () => {

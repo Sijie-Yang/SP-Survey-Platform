@@ -1,4 +1,4 @@
-import { listPreviewMedia } from './previewMediaLibrary';
+import { listPreviewMedia, resolvePreviewMediaContext } from './previewMediaLibrary';
 import { loadPreviewMediaLibrary } from './previewMediaLibraryStorage';
 import { listImagesFromR2 } from './r2';
 import { computePreviewMediaImportProgress, buildTemplateCopyTodo } from './templateImageImport';
@@ -9,6 +9,13 @@ const entry = { key: 'skill-preview/a.jpg', name: 'a.jpg', url: 'https://media.t
 beforeEach(() => {
   jest.resetAllMocks();
   loadPreviewMediaLibrary.mockResolvedValue({ revision: 2, preloadedImages: [entry], imageDatasetConfig: { mediaFolderTags: { study: 'category' }, mediaFolders: ['study/nested'] } });
+});
+
+test('empty projects load preview-library images together with category tags', async () => {
+  const context = await resolvePreviewMediaContext({ preloadedImages: [], imageDatasetConfig: {} });
+  expect(context.fromPreviewLibrary).toBe(true);
+  expect(context.images[0].folder).toBe('study/nested');
+  expect(context.imageDatasetConfig.mediaFolderTags).toEqual({ study: 'category' });
 });
 
 test('read-only previews use cloud organization and respect a deliberately empty library', async () => {

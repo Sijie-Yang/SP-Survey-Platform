@@ -2,6 +2,7 @@ import {
   getMediaPoolStatus,
   pickRandomMediaForQuestion,
   expectedCategoryImageCount,
+  describeMediaAssignmentFailure,
   buildMediaAssignmentLogEntry,
   trackMediaAssignment,
   getMediaPerCategory,
@@ -243,5 +244,17 @@ describe('surveyMediaInjection set/category picking', () => {
       skillContractVersion: 1,
       skillResultSchema: [{ key: 'score', type: 'number' }],
     });
+  });
+
+  test('describeMediaAssignmentFailure names the question and missing category', () => {
+    const message = describeMediaAssignmentFailure(
+      categoryQuestion({ name: 'q_street', title: 'Street scenes', mediaFolders: ['missing_cat'], mediaPerCategory: 2 }),
+      FIXTURE_POOL,
+      FIXTURE_TAGS,
+      { images: [] },
+    );
+    expect(message).toMatch(/q_street/);
+    expect(message).toMatch(/missing_cat/);
+    expect(message).not.toMatch(/random|demo/i);
   });
 });

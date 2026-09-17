@@ -6,7 +6,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 import { getTrialCount } from '../../lib/trialNavigation';
 import { isCuratedMediaMode, isRandomMediaQuestion, resolveMediaFolderTags, resolveSkillQuestions } from '../../lib/surveyMediaInjection';
-import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
+import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
 import { useRegion } from '../../contexts/RegionContext';
 import { isPreviewMessage, previewAppearance, PREVIEW_DEVICES, PREVIEW_FAILED, PREVIEW_READY, PREVIEW_RENDERED, PREVIEW_UPDATE, QUESTION_PREVIEW_PATH } from '../../lib/questionPreviewProtocol';
 
@@ -27,7 +27,10 @@ export default function QuestionParticipantPreview({ question, currentProject, s
   const sequence = useRef(0);
   // Watch the full draft so new settings (including allowTie/tieLabel) cannot be omitted.
   const questionKey = JSON.stringify(question || {});
-  const folderTagsKey = JSON.stringify(resolveMediaFolderTags(currentProject, { pages: [{ elements: [question] }] }));
+  const mediaSourceKey = JSON.stringify({
+    images: (currentProject?.preloadedImages || []).map((img) => img.key || img.url || img.logicalFolder || img.folder || ''),
+    tags: currentProject?.imageDatasetConfig || {},
+  });
   const appearanceKey = JSON.stringify(previewAppearance(surveyConfig || currentProject?.config, currentProject?.theme));
   const appearance = useMemo(() => JSON.parse(appearanceKey), [appearanceKey]);
 
@@ -38,16 +41,19 @@ export default function QuestionParticipantPreview({ question, currentProject, s
       try {
         const draft = JSON.parse(questionKey);
         if (!draft.type) return;
-        const projectImages = currentProject?.preloadedImages || [];
-        const mediaPool = await resolveMediaPoolForPreview(projectImages);
+        const media = await resolvePreviewMediaContext(currentProject || {});
         if (cancelled) return;
         const questionConfig = { pages: [{ elements: [draft] }] };
         await resolveSkillQuestions(questionConfig);
         if (cancelled) return;
+        const folderHost = media.fromPreviewLibrary
+          ? { imageDatasetConfig: media.imageDatasetConfig }
+          : currentProject;
+        const folderTags = resolveMediaFolderTags(folderHost, { pages: [{ elements: [draft] }] });
         const { surveyJson, shownImages, shownImagesByTrial } = buildSingleQuestionSurvey({
-          question: questionConfig.pages[0].elements[0], projectImages: mediaPool,
+          question: questionConfig.pages[0].elements[0], projectImages: media.images,
           randomMedia: true, showNavigationButtons: false,
-          folderTags: JSON.parse(folderTagsKey),
+          folderTags,
         });
         if (isRandomMediaQuestion(draft) && !isCuratedMediaMode(draft)
           && (!shownImages.length || shownImagesByTrial?.some((items) => !items.length))) {
@@ -55,7 +61,7 @@ export default function QuestionParticipantPreview({ question, currentProject, s
             ? '当前抽图规则没有足够的匹配媒体完成所有轮次，请检查文件夹、分组、分类或去重设置。'
             : 'Not enough matching media for all trials. Check folders, sets, categories and reuse settings.');
         }
-        setUsingPreviewLibrary(!projectImages.length && mediaPool.length > 0);
+        setUsingPreviewLibrary(media.fromPreviewLibrary);
         setSnapshot({ payload: { surveyJson, appearance }, revision: ++sequence.current });
         setError('');
       } catch (err) {
@@ -63,7 +69,7 @@ export default function QuestionParticipantPreview({ question, currentProject, s
       }
     }, 0);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [questionKey, folderTagsKey, currentProject?.preloadedImages, appearance, zh, resetCount]);
+  }, [questionKey, mediaSourceKey, currentProject, appearance, zh, resetCount]);
 
   const sendSnapshot = useCallback(() => {
     if (snapshot) iframeRef.current?.contentWindow?.postMessage({ type: PREVIEW_UPDATE, ...snapshot }, window.location.origin);
