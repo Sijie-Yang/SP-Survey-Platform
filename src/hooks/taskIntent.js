@@ -129,6 +129,13 @@ export function summarizeWorkingCopy(focus = {}) {
   const fields = ['name', 'title', 'type', 'isRequired', 'description']
     .map((key) => (copy?.[key] != null && copy[key] !== '' ? `question.${key}=${String(copy[key]).slice(0, 120)}` : ''))
     .filter(Boolean);
+  const complex = ['dimensions', 'choices', 'rows', 'columns', 'scaleMin', 'scaleMax', 'scaleStep', 'rateMin', 'rateMax', 'imageCount', 'imageSelectionMode', 'mediaAssignmentMode', 'mediaFolders', 'trialCount', 'budget'];
+  complex.forEach((key) => {
+    if (copy?.[key] == null) return;
+    const raw = typeof copy[key] === 'object' ? JSON.stringify(copy[key]) : String(copy[key]);
+    if (raw && raw !== '[]' && raw !== '{}') fields.push(`question.${key}=${raw.slice(0, 400)}`);
+    else fields.push(`question.${key}=${raw}`);
+  });
   if (page?.title) fields.push(`page.title=${String(page.title).slice(0, 120)}`);
   if (page?.description) fields.push(`page.description=${String(page.description).slice(0, 120)}`);
   if (page?.name) fields.push(`page.name=${String(page.name).slice(0, 80)}`);

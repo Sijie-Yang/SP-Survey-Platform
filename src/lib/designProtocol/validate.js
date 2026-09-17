@@ -5,14 +5,20 @@
 
 import { isKnownQuestionType, questionHasTrait } from '../platformSchema';
 import { describeDimensionIncomplete, matrixItemLabel } from '../sliderScale';
+import { evaluateSurveyContract } from './answerability.js';
 
 function structuredIssue(issue, severity = 'error') {
   return {
     code: issue.code || (severity === 'error' ? 'INVALID_SURVEY_FIELD' : 'SURVEY_WARNING'),
     path: issue.path || 'surveyConfig',
+    question: issue.question || '',
     message: issue.message || 'Invalid survey configuration.',
+    reason: issue.reason || issue.message || 'Invalid survey configuration.',
     retryable: severity === 'error',
-    hint: issue.hint || (severity === 'error'
+    repairHint: issue.repairHint || issue.hint || (severity === 'error'
+      ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
+      : 'Review this warning before publishing.'),
+    hint: issue.hint || issue.repairHint || (severity === 'error'
       ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
       : 'Review this warning before publishing.'),
   };
@@ -76,7 +82,7 @@ export function validateQuestionSettings(q) {
   return errors;
 }
 
-export function validateSurveyConfig(surveyConfig) {
+export function validateSurveyConfig(surveyConfig, options = {}) {
   const errors = [];
   const warnings = [];
   let questionCount = 0;
@@ -156,13 +162,25 @@ export function validateSurveyConfig(surveyConfig) {
           }
         }
         if (questionHasTrait(element.type, 'slider')) {
-          if (!element.dimensions?.length) {
+          if (element.dimensions != null && !Array.isArray(element.dimensions)) {
+            errors.push({
+              path: `${elementPath}.dimensions`,
+              message: `Slider group "${element.title || element.name}" dimensions must be an array.`,
+            });
+          } else if (!element.dimensions?.length) {
             warnings.push({
               path: elementPath,
               message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
             });
           } else {
             element.dimensions.forEach((dimension, dimIndex) => {
+              if (dimension == null || typeof dimension !== 'object' || Array.isArray(dimension)) {
+                errors.push({
+                  path: `${elementPath}.dimensions[${dimIndex}]`,
+                  message: `Dimension ${dimIndex + 1} must be an object {id, label, left, right}.`,
+                });
+                return;
+              }
               const detail = describeDimensionIncomplete(dimension, dimIndex);
               if (detail) {
                 const question = element.name || 'unnamed question';
@@ -203,12 +221,45 @@ export function validateSurveyConfig(surveyConfig) {
     });
   }
 
+  const contract = evaluateSurveyContract(surveyConfig, options);
+  contract.errors.forEach((item) => {
+    errors.push({
+      path: item.path,
+      message: item.reason || item.message,
+      code: item.code,
+      question: item.question,
+      repairHint: item.repairHint,
+    });
+  });
+  contract.warnings.forEach((item) => {
+    warnings.push({
+      path: item.path,
+      message: item.reason || item.message,
+      code: item.code,
+      question: item.question,
+      repairHint: item.repairHint,
+    });
+  });
+
+  const uniqueByPath = (list) => {
+    const seen = new Set();
+    return list.filter((item) => {
+      const key = `${item.path}|${item.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   return {
-    valid: errors.length === 0,
-    errors: errors.map((issue) => structuredIssue(issue)),
-    warnings: warnings.map((issue) => structuredIssue(issue, 'warning')),
+    valid: uniqueByPath(errors).length === 0,
+    errors: uniqueByPath(errors).map((entry) => structuredIssue(entry)),
+    warnings: uniqueByPath(warnings).map((entry) => structuredIssue(entry, 'warning')),
     pageCount: Array.isArray(surveyConfig.pages) ? surveyConfig.pages.length : 0,
     questionCount,
+    transforms: contract.transforms,
+    coveredTypes: contract.coveredTypes,
+    generationContractVersion: contract.generationContractVersion,
   };
 }
 

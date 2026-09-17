@@ -5,6 +5,7 @@ import {
   validateSurveyConfig,
   postProcessAiConfig,
   applyOperations,
+  normalizeOperationsArg,
   createDefaultSurveyConfig,
   isSafeProjectId,
   DESIGN_CAPABILITIES,
@@ -213,6 +214,16 @@ describe('designProtocol normalize + operations', () => {
     expect(result.surveyConfig.pages[0].name).toBe('page2');
     expect(result.surveyConfig.pages[1].title).toBe('第一页');
     expect(result.surveyConfig.theme.primaryColor).toBe('#123456');
+    expect(result.surveyConfig.theme.secondaryColor).toBeUndefined();
+    const themed = applyOperations({
+      ...result.surveyConfig,
+      theme: { primaryColor: '#111111', secondaryColor: '#222222', accentColor: '#333333' },
+    }, [{ op: 'setTheme', theme: { primaryColor: '#abcdef' } }]);
+    expect(themed.surveyConfig.theme).toEqual({
+      primaryColor: '#abcdef',
+      secondaryColor: '#222222',
+      accentColor: '#333333',
+    });
     const undone = applyOperations(result.surveyConfig, result.inverse);
     expect(undone.surveyConfig.title).toBe('Demo');
     expect(undone.surveyConfig.pages[0].name).toBe('page1');
@@ -232,6 +243,19 @@ describe('designProtocol normalize + operations', () => {
     expect(result.surveyConfig.pages[0].elements.map((el) => el.name)).toEqual(['b', 'a']);
     const undone = applyOperations(result.surveyConfig, result.inverse);
     expect(undone.surveyConfig.pages[0].elements.map((el) => el.name)).toEqual(['a', 'b']);
+  });
+
+  test('applyOperations accepts a single replaceConfig object from weaker models', () => {
+    const base = createDefaultSurveyConfig('Demo');
+    const result = applyOperations(base, {
+      op: 'replaceConfig',
+      surveyConfig: { title: '街景视觉感知', pages: [{ name: 'p1', elements: [{ type: 'text', name: 'q1' }] }] },
+    });
+    expect(result.surveyConfig.title).toBe('街景视觉感知');
+    expect(normalizeOperationsArg({ 0: { op: 'addPage', page: { name: 'p2' } } })).toEqual([
+      { op: 'addPage', page: { name: 'p2' } },
+    ]);
+    expect(() => applyOperations(base, 'not-ops')).toThrow(/operations must be an array/);
   });
 
   test('isSafeProjectId', () => {

@@ -87,6 +87,7 @@ const incremental = [
   'supabase/ai_agent_inbox_payload.sql',
   'supabase/save_project_draft_revision_id.sql',
   'supabase/silicon_background_runs.sql',
+  'supabase/platform_assistant_subsidy.sql',
 ];
 
 for (let repeat = 0; repeat < 2; repeat += 1) {
@@ -117,6 +118,9 @@ assert.equal(siliconCols.rows.some((row) => row.column_name === 'execution_plan'
 
 const units = await db.query(`SELECT to_regclass('public.silicon_answer_units') AS name`);
 assert.equal(units.rows[0].name, 'silicon_answer_units');
+
+const subsidy = await db.query(`SELECT to_regclass('public.platform_assistant_subsidy') AS name`);
+assert.equal(subsidy.rows[0].name, 'platform_assistant_subsidy');
 
 const fns = await db.query(`
   SELECT proname FROM pg_proc

@@ -52,7 +52,7 @@
     "build": "cross-env CI=false react-scripts build",
     "test": "react-scripts test",
     "test:ci": "cross-env CI=true react-scripts test --watchAll=false --runInBand",
-    "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs worker-lib/agent/runtime/*.test.mjs worker-lib/silicon/*.test.mjs",
+    "test:agent": "node --test worker-lib/crypto/byokAesGcm.test.mjs worker-lib/agent/runtime/*.test.mjs worker-lib/agent/subsidy.test.mjs worker-lib/silicon/*.test.mjs",
     "catalog:sync": "node scripts/sync-harness-model-catalog.mjs",
     "catalog:check": "node scripts/sync-harness-model-catalog.mjs --check",
     "schema:sync": "node scripts/sync-platform-schema.mjs",

@@ -28,7 +28,7 @@ import { createToolExecutionHooks } from './executions.mjs';
 import {
   listProviderCredentials,
   listProviderProfiles,
-  loadProviderCredential,
+  resolveAssistantCredential,
   loadUserAiSettings,
   saveUserAiSettings,
 } from '../credentials.mjs';
@@ -62,18 +62,20 @@ export {
 } from './taskIntent.mjs';
 
 export const DESIGNER_SYSTEM = `You are the SP-Survey in-browser Assistant (designer mode).
-You design visual-perception surveys using tools — never invent credentials or image URLs.
+You design street-scene / urban visual-perception surveys using tools — never invent credentials or image URLs.
+
+Default topic: 街景与步行环境的视觉感知（安全感、步行适宜性、绿化、热闹程度、界面品质）. If the user does not name another topic, continue the current draft's title/media when they already describe a visual/street-scene study; if the draft is empty, generic, or only a placeholder such as "Five-Page Survey", design a street-scene image survey. Mix several visual families (image rating, image slider groups, ranking/picker, checkbox tags, comparison Skills) that use project / template / preview media. Do not invent a text-only demographics or generic comfort form unless the user asks for that. slidergroup / imageslidergroup / mediaslidergroup MUST include a non-empty dimensions array of {id, label, left, right}; label is the name shown in settings. Never submit dimensions: [].
 
 Workflow:
 1. Always call survey_capabilities before designing or editing.
 2. Always call survey_get_draft before any edit and retain draftUpdatedAt.
-3. You must finish a design/edit request by successfully calling survey_apply_operations. For a new survey, regenerate, or complete redesign, use one replaceConfig operation. For a small edit, use incremental operations. Call survey_capabilities at most twice (overview, then one domain). Use skill_list, not survey_skill_list. Prefer preset_* skillId values.
+3. You must finish a design/edit request by successfully calling survey_apply_operations. For a new survey, regenerate, or complete redesign, use one replaceConfig operation: operations must be a JSON array, e.g. [{"op":"replaceConfig","surveyConfig":{title,pages}}]. For a small edit, use incremental operations. Query survey_capabilities as needed (overview, then questionType / fieldGroup / skillId). Same-version repeats are cached. Use skill_list, not survey_skill_list. Prefer preset_* skillId values. setTheme merges unless replace=true.
 4. Call survey_validate after substantial edits.
 5. Never AI-generate images to upload. Use project / template / preview media.
 6. Respect the project's existing media selection (fixed urls, folders, or random) and Skill ids. Do not force huggingface_random or rewrite custom skillId values.
 7. Do not put skillHtml on questions. Do not include API keys.
-8. When asked to create, design, or change the survey, never stop after describing it. If a write fails, read the fresh draft again, correct the operation, and retry.
-9. survey_capabilities accepts a domain. Load exact question/media/skill/operation schema lazily when needed.
+8. When asked to create, design, or change the survey, never stop after describing it. Never paste the questionnaire as a markdown/JSON code block and claim it is saved. If a write fails, read the fresh draft again, correct the operation, and retry.
+9. survey_capabilities accepts domain plus questionType, fieldGroup, or skillId. Load exact contracts lazily. Read survey_get_draft view=catalog/page/question/workingCopy instead of dumping a huge draft.
 10. In Agent mode you may inspect projects, templates, media, Skills, and results. Publishing, deletion, and Skill/source upload pause for explicit user approval.
 11. After saving, verify the authoritative draft before reporting completion.
 12. If the user only asks what a setting means, answer without calling survey_apply_operations.
@@ -82,12 +84,14 @@ If the user only asks a question, answer without tools.
 History is background. Do not execute a prior rejected, cancelled, or finished write unless the current message explicitly continues that task. Page-count questions never publish or rewrite.`;
 
 const GENERATE_DESIGNER_SYSTEM = `You are the SP-Survey in-browser Assistant in Generate mode.
-You design visual-perception surveys using tools — never invent credentials or image URLs.
+You design street-scene / urban visual-perception surveys using tools — never invent credentials or image URLs.
+
+Default topic: 街景与步行环境的视觉感知. If the user does not name another topic, continue the current draft when it is already a visual/street-scene study; if the draft is empty or a generic placeholder, generate a street-scene image survey. Mix several visual families (image rating, image slider groups, ranking/picker, checkbox tags, comparison Skills) that use project / template / preview media. Do not invent a text-only demographics or generic comfort form unless asked. slidergroup / imageslidergroup / mediaslidergroup MUST include a non-empty dimensions array of {id, label, left, right}; label is the name shown in settings. Never submit dimensions: [].
 
 Workflow:
 1. Call survey_capabilities first. The overview is the generate submit contract, not the incremental operations catalog.
 2. Call survey_get_draft and retain draftUpdatedAt as expectedDraftUpdatedAt.
-3. Finish by successfully calling survey_submit_generated_draft with expectedDraftUpdatedAt and a complete surveyConfig { title, pages }. The server wraps that as one replaceConfig. Do not send operations, addPage, or replaceConfig yourself.
+3. Plan pages and distinct complete question families from the research goal first, then fill each question from its generation contract. Finish by successfully calling survey_submit_generated_draft with expectedDraftUpdatedAt and a complete surveyConfig { title, pages }. The server wraps that as one replaceConfig. Do not send operations, addPage, or replaceConfig yourself. Do not paste the questionnaire as a markdown/JSON code block. Incomplete sliders/matrices/rankings do not count as coverage.
 4. Call survey_validate after a substantial candidate if needed. Do not claim success until the submit tool succeeds.
 5. Never AI-generate images to upload. Use project / template / preview media.
 6. Do not put skillHtml on questions. Do not include API keys.
@@ -147,19 +151,26 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
   const model = selection.model || defaultModel;
   const effort = selection.effort || null;
   const profile = profiles.find((row) => row.provider === provider);
+  const cred = await resolveAssistantCredential(env, userId, provider, { model });
   const checkedRoute = assertRoute({
     provider,
     model,
     profile,
     effort,
     requireConfigured: true,
-    credential: credentials.find((row) => row.provider === provider),
+    credential: credentials.find((row) => row.provider === provider) || (cred ? { configured: true } : null),
   });
   const resolved = checkedRoute.provider;
   const modelRecord = resolveModel(provider, model, profile);
   const route = checkedRoute.route;
   const temperature = body?.temperature ?? settings.temperature ?? 0.4;
-  const maxTokens = body?.max_tokens ?? settings.max_tokens ?? modelRecord?.maxTokens ?? 4096;
+  const catalogMax = Number(modelRecord?.maxTokens) || 8192;
+  const requestedTokens = body?.max_tokens != null ? Number(body.max_tokens) : null;
+  const pageHint = Number((String(message).match(/(?:至少|at\s+least)?\s*(\d+)\s*(?:页|pages?)/i) || [])[1] || 0);
+  const generateBudget = assistantMode === 'generate'
+    ? Math.min(catalogMax, Math.max(8192, (pageHint || 3) * 1800))
+    : Math.min(catalogMax, 8192);
+  const maxTokens = Math.min(catalogMax, requestedTokens || generateBudget);
 
   if (!session) {
     session = await createSession(env, {
@@ -181,6 +192,9 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
         model,
         reasoningEffort: effort,
         assistantMode,
+        maxTokens,
+        outputBudget: maxTokens,
+        catalogMaxTokens: catalogMax,
       },
     });
     await updateSessionSelection(env, session.id, { provider, model, effort });
@@ -304,8 +318,6 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
     };
   }
 
-  const cred = await loadProviderCredential(env, userId, provider);
-
   let boundProjectId = projectId;
   const coreTools = createDesignerTools({
       env,
@@ -317,6 +329,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       ownerUserId: body?._sessionPrepared ? userId : null,
       assistantMode,
       generateGoal: assistantMode === 'generate' && intent.write ? parseGenerateGoals(message) : null,
+      editorContext: body?.editorContext || null,
     });
   const domainTools = (assistantMode === 'agent' || assistantMode === 'question')
     ? createPlatformTools({

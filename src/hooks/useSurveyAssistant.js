@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { getConversationHistory } from '../lib/conversationHistory';
 import { getWorkingMemory } from '../lib/workingMemory';
 import { getSessionLearning } from '../lib/sessionLearning';
@@ -41,6 +41,7 @@ import {
   summarizeDraftDiff,
 } from './surveyAssistantUtils';
 import { classifyUserIntent, initialLoadingStatus, shouldPrepareWrite } from './taskIntent';
+import { RegionContext } from '../contexts/RegionContext';
 
 function loadProjectFlag(projectId, key, fallback) {
   if (!projectId || typeof window === 'undefined') return fallback;
@@ -77,6 +78,7 @@ export default function useSurveyAssistant({
   onPrepareWrite = null,
 } = {}) {
   const platformMode = detectPlatformMode();
+  const language = useContext(RegionContext)?.language || 'en';
   const projectId = currentProject?.id || null;
 
   const [openaiApiKey, setOpenaiApiKey] = useState(() => (
@@ -169,12 +171,13 @@ export default function useSurveyAssistant({
       status: status || lastStatusRef.current,
       storedRoute: stored.route,
       storedEffort: stored.effort,
+      language,
     });
     if (status?.directory) setAssistantDirectory(status.directory);
     setSelectedRoute(resolved.route);
     setSelectedEffort(resolved.effort);
     return resolved;
-  }, []);
+  }, [language]);
 
   const applyCredentialStatus = useCallback((status) => {
     if (!status) return;
@@ -444,8 +447,8 @@ export default function useSurveyAssistant({
   }, [enabled, projectId, contextEnabled, currentProject?.category]);
 
   const assistantModelOptions = useMemo(
-    () => buildAssistantModelOptions(assistantDirectory),
-    [assistantDirectory],
+    () => buildAssistantModelOptions(assistantDirectory, { language }),
+    [assistantDirectory, language],
   );
   const selectedModelOption = assistantModelOptions.find((route) => route.value === selectedRoute);
   const assistantEffortOptions = selectedModelOption?.reasoningEfforts

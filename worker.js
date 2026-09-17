@@ -32,6 +32,7 @@ import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
 import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
 import { supabaseRest } from './worker-lib/supabaseUserClient.mjs';
 import { handleAdminResultsRoutes } from './worker-lib/adminResults.mjs';
+import { handleAssistantSubsidyRoutes } from './worker-lib/admin/subsidyHandlers.mjs';
 import {
   handleInferenceTest,
   handleInferenceSam3,
@@ -821,6 +822,9 @@ export default {
 
       const adminResultsResponse = await handleAdminResultsRoutes(request, env);
       if (adminResultsResponse) return withPreviewCors(request, adminResultsResponse);
+
+      const subsidyResponse = await handleAssistantSubsidyRoutes(request, env);
+      if (subsidyResponse) return withPreviewCors(request, subsidyResponse);
 
       // Agent / OAuth / MCP (returns Response or null if not matched)
       const agentResponse = await handleAgentAndMcpRoutes(request, env, ctx);

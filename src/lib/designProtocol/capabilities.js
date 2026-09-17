@@ -115,7 +115,17 @@ export const DESIGN_CAPABILITIES = {
       rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
       matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
       ranking: { fields: ['name', 'title', 'choices[]'] },
-      slidergroup: { fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
+      slidergroup: {
+        fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'],
+        defaults: {
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
     },
     image: {
@@ -143,10 +153,13 @@ export const DESIGN_CAPABILITIES = {
         },
         imagematrix: { role: 'Matrix under image(s)', defaults: { imageCount: 1, rows: [], columns: [], imageLinks: [] } },
         imageslidergroup: {
-          role: 'Sliders with image',
+          role: 'Sliders with image. dimensions is required and must include label.',
           defaults: {
             imageCount: 1,
-            dimensions: [{ id: 'pleasant', label: 'Pleasantness', left: 'Unpleasant', right: 'Pleasant' }],
+            dimensions: [
+              { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+              { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+            ],
             scaleMin: 0,
             scaleMax: 100,
           },
@@ -196,10 +209,13 @@ export const DESIGN_CAPABILITIES = {
         },
         mediamatrix: { role: 'Matrix + media', defaults: { mediaType: 'image', imageCount: 1, rows: [], columns: [], mediaSlots: [] } },
         mediaslidergroup: {
-          role: 'Sliders + media',
+          role: 'Sliders + media. dimensions is required and must include label.',
           defaults: {
             mediaType: 'image', imageCount: 1, mediaSlots: [], mediaPresentation: 'stack',
-            dimensions: [{ id: 'pleasant', label: 'Pleasantness', left: 'Unpleasant', right: 'Pleasant' }],
+            dimensions: [
+              { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+              { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+            ],
             scaleMin: 0, scaleMax: 100,
           },
         },
@@ -277,6 +293,19 @@ export const DESIGN_CAPABILITIES = {
     },
   },
   examples: {
+    imageslidergroup: {
+      type: 'imageslidergroup',
+      name: 'scene_sliders',
+      title: '请评价这张街景',
+      imageCount: 1,
+      scaleMin: 0,
+      scaleMax: 100,
+      dimensions: [
+        { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+        { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+      ],
+      ...MEDIA_SAMPLING,
+    },
     imagerating: {
       type: 'imagerating',
       name: 'scene_rating',

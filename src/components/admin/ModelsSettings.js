@@ -76,10 +76,11 @@ function discoveryError(t, result) {
   return result?.error || t.modelsDiscoveryNetwork;
 }
 
-export function routeOptions(directory, { visionOnly = false, configuredOnly = true } = {}) {
+export function routeOptions(directory, { visionOnly = false, configuredOnly = true, userOwnedOnly = false } = {}) {
   const options = [];
   (directory || []).forEach((provider) => {
     if (configuredOnly && !provider.configured) return;
+    if (userOwnedOnly && provider.userConfigured === false) return;
     if (provider.authUnsupported) return;
     (provider.models || []).forEach((model) => {
       if (!model.id) return;
@@ -674,7 +675,7 @@ export default function ModelsSettings({ onConfiguredChange }) {
   ));
   const groups = groupDirectory(visible);
   const configuredRoutes = routeOptions(directory, { configuredOnly: true });
-  const visionRoutes = routeOptions(directory, { configuredOnly: true, visionOnly: true });
+  const visionRoutes = routeOptions(directory, { configuredOnly: true, visionOnly: true, userOwnedOnly: true });
   const assistantValue = settings.assistant_provider && settings.assistant_model
     ? `${settings.assistant_provider}::${settings.assistant_model}`
     : '';

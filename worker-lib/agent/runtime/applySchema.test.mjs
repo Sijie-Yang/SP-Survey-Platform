@@ -28,6 +28,12 @@ describe('generate apply contract', () => {
     assert.ok(questions.schema.types.rating);
     assert.equal(questions.schema.questionFields, undefined);
     assert.equal(questions.schema.commonFields, undefined);
+    assert.ok(questions.schema.sliderDimensions.requiredItemFields.includes('label'));
+    assert.equal(questions.schema.types.imageslidergroup.editorBlankDefaults.dimensions.length, 0);
+    assert.equal(questions.schema.types.imageslidergroup.answerOptions, 'researcher_defined');
+    const slider = await tool.execute({ domain: 'questions', questionType: 'imageslidergroup' });
+    assert.equal(slider.schema.minimumExample.dimensions[0].id, 'attr_a');
+    assert.equal(slider.schema.illustrations.streetScene.dimensions[0].id, 'safety');
 
     const skills = roundTrip(await tool.execute({ domain: 'skills' }));
     assert.ok(Array.isArray(skills.schema.resultSchemaTypes));
@@ -109,6 +115,9 @@ describe('generate apply contract', () => {
     assert.equal(/Prefer deterministic operations/i.test(text), false);
     assert.equal(/survey_apply_operations/.test(text), false);
     assert.ok(overview.generateApply.surveyConfig.required.includes('pages'));
+    assert.ok(overview.generateApply.surveyConfig.properties.pages.items.properties.elements.items.properties.dimensions);
+    assert.equal(overview.capabilities.sliderDimensions.requiredItemFields.includes('label'), true);
+    assert.ok(overview.capabilities.generationContractVersion);
     assert.equal(overview.capabilities.supportMatrix.surveyDraft.includes('survey_submit_generated_draft'), true);
     assert.equal(overview.capabilities.supportMatrix.mediaLibrary.includes('read'), true);
   });

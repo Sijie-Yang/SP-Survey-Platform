@@ -90,8 +90,9 @@ app.use(async (req, res, next) => {
     || pathName.startsWith('/.well-known/');
   const isBenchRoute = pathName === '/api/bench' || pathName.startsWith('/api/bench/');
   const isAdminResultsRoute = pathName === '/api/admin/project-responses';
+  const isSubsidyRoute = pathName === '/api/admin/assistant-subsidy';
   const isR2Route = pathName === '/api/r2' || pathName.startsWith('/api/r2/');
-  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute && !isR2Route) return next();
+  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute && !isSubsidyRoute && !isR2Route) return next();
 
   try {
     const url = `http://localhost:${PORT}${req.originalUrl}`;
@@ -137,7 +138,7 @@ app.use(async (req, res, next) => {
       ? (remoteAgentBase || publicR2Upstream)
       : remoteAgentBase;
     const requiresRemoteWorker = isAgentRoute
-      || (!env.SUPABASE_SERVICE_ROLE_KEY && (isBenchRoute || isAdminResultsRoute))
+      || (!env.SUPABASE_SERVICE_ROLE_KEY && (isBenchRoute || isAdminResultsRoute || isSubsidyRoute))
       || (isR2Route && !localR2Configured);
     if (requiresRemoteWorker && remoteBase) {
       const remoteRoot = new URL(remoteBase);
@@ -158,6 +159,9 @@ app.use(async (req, res, next) => {
       if (isAdminResultsRoute) {
         const { handleAdminResultsRoutes } = await import('./worker-lib/adminResults.mjs');
         response = await handleAdminResultsRoutes(request, env);
+      } else if (isSubsidyRoute) {
+        const { handleAssistantSubsidyRoutes } = await import('./worker-lib/admin/subsidyHandlers.mjs');
+        response = await handleAssistantSubsidyRoutes(request, env);
       } else if (isBenchRoute) {
         const { handleBenchRoutes } = await import('./worker-lib/bench/handlers.mjs');
         response = await handleBenchRoutes(request, env, null);

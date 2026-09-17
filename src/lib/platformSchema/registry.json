@@ -197,7 +197,26 @@
     "min": { "type": "number" },
     "max": { "type": "number" },
     "step": { "type": "number", "exclusiveMinimum": 0 },
-    "rows": { "type": ["integer", "array"] },
+    "rows": {
+      "type": ["integer", "array"],
+      "description": "comment: integer textarea height. matrix/imagematrix/mediamatrix: array of {value,text}. Never mix the two."
+    },
+    "dimensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "left", "right"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "left": { "type": "string", "minLength": 1 },
+          "right": { "type": "string", "minLength": 1 },
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "step": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
     "columns": { "type": "array" },
     "choices": { "type": "array", "items": { "$ref": "#/scalarTypes/choice" } },
     "labelTrue": { "type": "string" },
@@ -207,7 +226,6 @@
     "rateStep": { "type": "number", "exclusiveMinimum": 0 },
     "minRateDescription": { "type": "string" },
     "maxRateDescription": { "type": "string" },
-    "dimensions": { "type": "array", "items": { "type": "object" } },
     "scaleMin": { "type": "number" },
     "scaleMax": { "type": "number" },
     "scaleStep": { "type": "number", "exclusiveMinimum": 0 },

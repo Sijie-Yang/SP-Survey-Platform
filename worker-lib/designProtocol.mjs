@@ -6,6 +6,7 @@
 
 import { ANNOTATION_TOOLS, normalizeAllowedTools } from './annotationTools.mjs';
 import { describeDimensionIncomplete, matrixItemLabel, normalizeSliderQuestion } from './sliderScale.mjs';
+import { evaluateSurveyContract } from './answerability.mjs';
 import {
   OPERATION_TYPES,
   PLATFORM_SCHEMA,
@@ -80,9 +81,14 @@ function structuredIssue(issue, severity = 'error') {
   return {
     code: issue.code || (severity === 'error' ? 'INVALID_SURVEY_FIELD' : 'SURVEY_WARNING'),
     path: issue.path || 'surveyConfig',
+    question: issue.question || '',
     message: issue.message || 'Invalid survey configuration.',
+    reason: issue.reason || issue.message || 'Invalid survey configuration.',
     retryable: severity === 'error',
-    hint: issue.hint || (severity === 'error'
+    repairHint: issue.repairHint || issue.hint || (severity === 'error'
+      ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
+      : 'Review this warning before publishing.'),
+    hint: issue.hint || issue.repairHint || (severity === 'error'
       ? `Correct ${issue.path || 'the survey configuration'} and validate again.`
       : 'Review this warning before publishing.'),
   };
@@ -146,7 +152,7 @@ export function validateQuestionSettings(q) {
   return errors;
 }
 
-export function validateSurveyConfig(surveyConfig) {
+export function validateSurveyConfig(surveyConfig, options = {}) {
   const errors = [];
   const warnings = [];
   let questionCount = 0;
@@ -226,13 +232,25 @@ export function validateSurveyConfig(surveyConfig) {
           }
         }
         if (questionHasTrait(element.type, 'slider')) {
-          if (!element.dimensions?.length) {
+          if (element.dimensions != null && !Array.isArray(element.dimensions)) {
+            errors.push({
+              path: `${elementPath}.dimensions`,
+              message: `Slider group "${element.title || element.name}" dimensions must be an array.`,
+            });
+          } else if (!element.dimensions?.length) {
             warnings.push({
               path: elementPath,
               message: `Slider group "${element.title || element.name}" has no dimensions configured.`,
             });
           } else {
             element.dimensions.forEach((dimension, dimIndex) => {
+              if (dimension == null || typeof dimension !== 'object' || Array.isArray(dimension)) {
+                errors.push({
+                  path: `${elementPath}.dimensions[${dimIndex}]`,
+                  message: `Dimension ${dimIndex + 1} must be an object {id, label, left, right}.`,
+                });
+                return;
+              }
               const detail = describeDimensionIncomplete(dimension, dimIndex);
               if (detail) {
                 const question = element.name || 'unnamed question';
@@ -273,12 +291,44 @@ export function validateSurveyConfig(surveyConfig) {
     });
   }
 
+  const contract = evaluateSurveyContract(surveyConfig, options);
+  contract.errors.forEach((item) => {
+    errors.push({
+      path: item.path,
+      message: item.reason || item.message,
+      code: item.code,
+      question: item.question,
+      repairHint: item.repairHint,
+    });
+  });
+  contract.warnings.forEach((item) => {
+    warnings.push({
+      path: item.path,
+      message: item.reason || item.message,
+      code: item.code,
+      question: item.question,
+      repairHint: item.repairHint,
+    });
+  });
+  const uniqueByPath = (list) => {
+    const seen = new Set();
+    return list.filter((item) => {
+      const key = `${item.path}|${item.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   return {
-    valid: errors.length === 0,
-    errors: errors.map((issue) => structuredIssue(issue)),
-    warnings: warnings.map((issue) => structuredIssue(issue, 'warning')),
+    valid: uniqueByPath(errors).length === 0,
+    errors: uniqueByPath(errors).map((issue) => structuredIssue(issue)),
+    warnings: uniqueByPath(warnings).map((issue) => structuredIssue(issue, 'warning')),
     pageCount: Array.isArray(surveyConfig.pages) ? surveyConfig.pages.length : 0,
     questionCount,
+    transforms: contract.transforms,
+    coveredTypes: contract.coveredTypes,
+    generationContractVersion: contract.generationContractVersion,
   };
 }
 
@@ -363,13 +413,40 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+export function normalizeOperationsArg(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== 'object') return null;
+  if (Array.isArray(raw.operations)) return raw.operations;
+  if (typeof raw.op === 'string') return [raw];
+  if (raw.surveyConfig && typeof raw.surveyConfig === 'object' && Array.isArray(raw.surveyConfig.pages)) {
+    return [{ op: 'replaceConfig', surveyConfig: raw.surveyConfig }];
+  }
+  if (Array.isArray(raw.pages)) {
+    return [{ op: 'replaceConfig', surveyConfig: raw }];
+  }
+  if (raw.replaceConfig && typeof raw.replaceConfig === 'object') {
+    const payload = raw.replaceConfig.surveyConfig || raw.replaceConfig;
+    return [{ op: 'replaceConfig', surveyConfig: payload }];
+  }
+  const values = Object.keys(raw)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => raw[key])
+    .filter((item) => item && typeof item === 'object' && typeof item.op === 'string');
+  return values.length ? values : null;
+}
+
 export function applyOperations(surveyConfig, operations = []) {
+  const list = normalizeOperationsArg(operations);
+  if (!Array.isArray(list)) {
+    throw new Error('operations must be an array of {op, ...}. A single replaceConfig object is also accepted.');
+  }
   let config = clone(surveyConfig || { pages: [] });
   if (!Array.isArray(config.pages)) config.pages = [];
   const applied = [];
   const inverse = [];
 
-  operations.forEach((op, opIndex) => {
+  list.forEach((op, opIndex) => {
     if (!op?.op) throw new Error(`operations[${opIndex}] is missing op`);
     switch (op.op) {
       case 'addPage': {
@@ -505,9 +582,12 @@ export function applyOperations(surveyConfig, operations = []) {
       }
       case 'setTheme': {
         const previous = clone(config.theme || {});
-        config.theme = clone(op.theme || {});
+        const patch = clone(op.theme || {});
+        config.theme = op.replace === true
+          ? patch
+          : { ...previous, ...patch };
         applied.push(op);
-        inverse.unshift({ op: 'setTheme', theme: previous });
+        inverse.unshift({ op: 'setTheme', theme: previous, replace: true });
         break;
       }
       case 'reorderPages': {
@@ -628,7 +708,17 @@ export const DESIGN_CAPABILITIES = {
       rating: { fields: ['name', 'title', 'rateMin', 'rateMax', 'minRateDescription?', 'maxRateDescription?'] },
       matrix: { fields: ['name', 'title', 'rows[]', 'columns[]'] },
       ranking: { fields: ['name', 'title', 'choices[]'] },
-      slidergroup: { fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'] },
+      slidergroup: {
+        fields: ['name', 'title', 'dimensions[{id,label,left,right,min?,max?,step?}]', 'scaleMin', 'scaleMax', 'scaleStep'],
+        defaults: {
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       pointallocation: { fields: ['name', 'title', 'choices[]', 'budget'] },
     },
     image: {
@@ -637,6 +727,18 @@ export const DESIGN_CAPABILITIES = {
         'image', 'imagepicker', 'imageranking', 'imagerating', 'imageboolean', 'imagecheckbox',
         'imagematrix', 'imageslidergroup', 'imagepointallocation', 'imageannotation',
       ],
+      imageslidergroup: {
+        role: 'Sliders with image. dimensions is required and must include label.',
+        defaults: {
+          imageCount: 1,
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       imagecheckbox: {
         role: 'Multi-select text tags about an image (which apply to this scene)',
         defaults: {
@@ -660,6 +762,21 @@ export const DESIGN_CAPABILITIES = {
         'mediadisplay', 'mediapicker', 'mediaranking', 'mediarating', 'mediaboolean', 'mediacheckbox',
         'mediamatrix', 'mediaslidergroup', 'mediapointallocation',
       ],
+      mediaslidergroup: {
+        role: 'Sliders + media. dimensions is required and must include label.',
+        defaults: {
+          mediaType: 'image',
+          imageCount: 1,
+          mediaSlots: [],
+          mediaPresentation: 'stack',
+          dimensions: [
+            { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+            { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+          ],
+          scaleMin: 0,
+          scaleMax: 100,
+        },
+      },
       mediacheckbox: {
         role: 'Multi-select text tags about media (which apply to this scene)',
         defaults: {
@@ -711,6 +828,15 @@ export const DESIGN_CAPABILITIES = {
     },
   },
   examples: {
+    imageslidergroup: {
+      type: 'imageslidergroup', name: 'scene_sliders', title: '请评价这张街景',
+      imageCount: 1, scaleMin: 0, scaleMax: 100,
+      dimensions: [
+        { id: 'safety', label: '安全感', left: '很不安全', right: '很安全' },
+        { id: 'walkability', label: '步行适宜性', left: '很不适宜', right: '很适宜' },
+      ],
+      ...MEDIA_SAMPLING,
+    },
     imagerating: {
       type: 'imagerating', name: 'scene_rating', title: 'How pleasant is this scene?',
       imageCount: 1, rateMin: 1, rateMax: 7, ...MEDIA_SAMPLING,

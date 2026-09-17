@@ -115,29 +115,101 @@ export function createRawToolArgCollector() {
   };
 }
 
+function draftCatalog(surveyConfig) {
+  const pages = Array.isArray(surveyConfig?.pages) ? surveyConfig.pages : [];
+  return pages.map((page) => ({
+    pageName: page?.name || '',
+    title: page?.title || '',
+    questions: (page?.elements || []).map((element) => ({
+      name: element?.name || '',
+      type: element?.type || '',
+      title: element?.title || '',
+    })),
+  }));
+}
+
+function pickQuestion(surveyConfig, pageName, questionName) {
+  for (const page of surveyConfig?.pages || []) {
+    if (pageName && page?.name !== pageName) continue;
+    const found = (page?.elements || []).find((element) => element?.name === questionName);
+    if (found) return { pageName: page.name, question: found };
+  }
+  return null;
+}
+
+function continueRead(value) {
+  if (value?.schema?.questionTypeIds || value?.capabilities?.questionTypes) {
+    return {
+      tool: 'survey_capabilities',
+      args: { domain: 'questions', questionType: '<typeId>' },
+      note: 'Load one question type or fieldGroup or skillId at a time for the full contract.',
+    };
+  }
+  if (value?.surveyConfig || value?.catalog) {
+    return {
+      tool: 'survey_get_draft',
+      args: { view: 'question', pageName: '<pageName>', questionName: '<questionName>' },
+      note: 'Catalog is complete. Read one page or question for full fields. draftUpdatedAt is unchanged.',
+    };
+  }
+  return {
+    tool: 'survey_capabilities',
+    args: { domain: value?.domain || 'overview' },
+    note: 'Re-query a narrower slice. Same platformSchemaHash means the contract version is unchanged.',
+  };
+}
+
 export function compactJsonForModel(value, { maxChars = 8000 } = {}) {
   const text = JSON.stringify(value);
   if (text.length <= maxChars) return text;
-  if (!value || typeof value !== 'object') return JSON.stringify({ summary: String(value).slice(0, 280), truncated: true });
+  if (!value || typeof value !== 'object') {
+    return JSON.stringify({ summary: String(value).slice(0, 280), truncated: true, complete: false });
+  }
+  const catalog = value.catalog || draftCatalog(value.surveyConfig);
   const compact = {
-    summary: value.summary || 'Result was compacted so the JSON stays complete.',
+    summary: value.summary || 'Result was compacted. Use next.read to load the missing slice. Necessary ids and examples below were kept.',
     truncated: true,
+    complete: false,
     platformSchemaHash: value.platformSchemaHash,
+    generationContractVersion: value.generationContractVersion || value.schema?.generationContractVersion,
+    draftUpdatedAt: value.draftUpdatedAt,
     target: value.target,
     pageCount: value.pageCount,
     questionCount: value.questionCount,
     types: value.types,
-    draftUpdatedAt: value.draftUpdatedAt,
     error: value.error,
     code: value.code,
     path: value.path,
+    question: value.question,
     repairHint: value.repairHint,
     receivedShape: value.receivedShape,
-    submit: value.generateApply || value.submit,
+    submit: (value.generateApply?.tool || value.submit?.tool || value.schema?.submit || value.capabilities?.submit?.tool)
+      ? {
+        tool: value.generateApply?.tool || value.submit?.tool || value.schema?.submit || value.capabilities?.submit?.tool,
+        required: value.generateApply?.required || value.submit?.required || value.schema?.required,
+      }
+      : undefined,
+    sliderDimensions: value.schema?.sliderDimensions || value.capabilities?.sliderDimensions
+      || value.sliderDimensions,
     questionTypeIds: value.schema?.questionTypeIds || value.capabilities?.questionTypes,
-    hint: 'Ask a narrower domain if you need more schema detail.',
+    examples: value.schema?.example || value.capabilities?.examples || value.examples,
+    catalog,
+    next: { read: continueRead(value) },
   };
-  return JSON.stringify(Object.fromEntries(
-    Object.entries(compact).filter(([, item]) => item !== undefined),
-  ));
+  const kept = Object.fromEntries(Object.entries(compact).filter(([, item]) => item !== undefined));
+  let out = JSON.stringify(kept);
+  if (out.length > maxChars && kept.examples) {
+    delete kept.examples;
+    out = JSON.stringify(kept);
+  }
+  if (out.length > maxChars && Array.isArray(kept.catalog)) {
+    kept.catalog = kept.catalog.map((page) => ({
+      pageName: page.pageName,
+      questions: (page.questions || []).map((question) => question.name),
+    }));
+    out = JSON.stringify(kept);
+  }
+  return out;
 }
+
+export { draftCatalog, pickQuestion };

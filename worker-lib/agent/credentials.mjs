@@ -22,6 +22,12 @@ import {
   resolveProvider,
 } from './runtime/registry.mjs';
 import { assertConfigurable, assertProviderId, assertRoute } from './runtime/validators.mjs';
+import {
+  applySubsidyToDirectory,
+  loadActiveSubsidy,
+  publicSubsidyView,
+  subsidyAllowsRoute,
+} from './subsidy.mjs';
 
 function toByteaHex(bytes) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -182,15 +188,17 @@ export async function saveUserAiSettings(env, userId, patch = {}) {
   const profiles = await listProviderProfiles(env, userId);
   const profile = profiles.find((row) => row.provider === (body.assistant_provider || current.assistant_provider || body.default_provider));
   const credentials = await listProviderCredentials(env, userId);
+  const subsidy = await loadActiveSubsidy(env);
   if (body.assistant_model && (body.assistant_provider || current.assistant_provider || body.default_provider)) {
     const providerId = body.assistant_provider || current.assistant_provider || body.default_provider;
+    const viaSubsidy = subsidyAllowsRoute(subsidy, providerId, body.assistant_model);
     assertRoute({
       provider: providerId,
       model: body.assistant_model,
       profile,
       effort: body.assistant_reasoning_effort || body.reasoning_effort,
       requireConfigured: true,
-      credential: credentials.find((row) => row.provider === providerId),
+      credential: credentials.find((row) => row.provider === providerId) || (viaSubsidy ? { configured: true } : null),
     });
   }
   if (body.silicon_model && (body.silicon_provider || current.silicon_provider || body.default_provider)) {
@@ -255,17 +263,36 @@ export async function getCredentialStatus(env, userId) {
   } catch {
     // legacy table optional
   }
-  const directory = buildDirectory({ profiles, credentials });
-  const configuredProviders = directory.filter((item) => item.configured);
+  const directory = buildDirectory({ profiles, credentials }).map((provider) => ({
+    ...provider,
+    userConfigured: Boolean(provider.configured),
+  }));
+  const subsidy = await loadActiveSubsidy(env);
+  let donorProfiles = [];
+  if (subsidy?.donor_user_id) {
+    donorProfiles = await listProviderProfiles(env, subsidy.donor_user_id).catch(() => []);
+  }
+  const merged = applySubsidyToDirectory(directory, subsidy, { donorProfiles });
+  const configuredProviders = merged.directory.filter((item) => item.configured && item.userConfigured);
+  const assistantReady = configuredProviders.length > 0 || merged.subsidizedRoutes.length > 0;
   const assistantProvider = settings.assistant_provider || settings.default_provider || 'deepseek';
   const siliconProvider = settings.silicon_provider || settings.default_provider || 'deepseek';
   const assistantProfile = profiles.find((row) => row.provider === assistantProvider);
   const siliconProfile = profiles.find((row) => row.provider === siliconProvider);
-  const defaultRoute = {
-    provider: assistantProvider,
-    model: availableModelId(assistantProvider, settings.assistant_model, { profile: assistantProfile }),
-    reasoningEffort: settings.assistant_reasoning_effort || settings.reasoning_effort || null,
-  };
+  const subsidizedDefault = merged.subsidizedRoutes[0] || null;
+  const userOwnsAssistant = configuredProviders.some((item) => item.id === assistantProvider);
+  const defaultRoute = userOwnsAssistant || !subsidizedDefault
+    ? {
+      provider: assistantProvider,
+      model: availableModelId(assistantProvider, settings.assistant_model, { profile: assistantProfile }),
+      reasoningEffort: settings.assistant_reasoning_effort || settings.reasoning_effort || null,
+    }
+    : {
+      provider: subsidizedDefault.provider,
+      model: subsidizedDefault.model,
+      reasoningEffort: null,
+      shared: true,
+    };
   const siliconRoute = {
     provider: siliconProvider,
     model: availableModelId(siliconProvider, settings.silicon_model, {
@@ -279,8 +306,11 @@ export async function getCredentialStatus(env, userId) {
     success: true,
     catalogVersion: CATALOG_VERSION,
     catalog: publicCatalog({ summariesOnly: true }),
-    directory,
+    directory: merged.directory,
     configuredProviders: configuredProviders.map((provider) => provider.id),
+    subsidizedRoutes: merged.subsidizedRoutes,
+    subsidy: publicSubsidyView(subsidy),
+    assistantConfigured: assistantReady,
     defaultRoute,
     siliconRoute,
     providers: credentials,
@@ -289,11 +319,12 @@ export async function getCredentialStatus(env, userId) {
       assistant_model: defaultRoute.model,
       silicon_model: siliconRoute.model,
     },
-    openai: primary
+    openai: assistantReady
       ? {
         configured: true,
-        provider: primary.id,
-        hint: primary.hint,
+        provider: primary?.id || defaultRoute.provider,
+        hint: primary?.hint || null,
+        shared: !primary,
       }
       : { configured: false },
   };
@@ -415,6 +446,27 @@ export async function loadProviderCredential(env, userId, provider) {
     status: 400,
     code: 'CREDENTIALS_MISSING',
   });
+}
+
+export async function resolveAssistantCredential(env, userId, provider, { model = null } = {}) {
+  try {
+    const cred = await loadProviderCredential(env, userId, provider);
+    return { ...cred, source: 'user' };
+  } catch (error) {
+    if (error?.code !== 'CREDENTIALS_MISSING') throw error;
+    const subsidy = await loadActiveSubsidy(env);
+    if (!subsidyAllowsRoute(subsidy, provider, model || '')) throw error;
+    try {
+      const cred = await loadProviderCredential(env, subsidy.donor_user_id, provider);
+      return { ...cred, source: 'subsidy', donorUserId: subsidy.donor_user_id };
+    } catch (donorError) {
+      if (donorError?.code !== 'CREDENTIALS_MISSING') throw donorError;
+      throw Object.assign(new Error('The free Assistant model is temporarily unavailable.'), {
+        status: 503,
+        code: 'SUBSIDY_UNAVAILABLE',
+      });
+    }
+  }
 }
 
 export async function deleteCredential(env, userId) {

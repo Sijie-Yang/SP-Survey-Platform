@@ -1,16 +1,28 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createDesignerTools } from './designerTools.mjs';
+import { getGenerationContract } from '../../generationContracts.mjs';
 import {
   evaluateGenerateGoals,
   parseGenerateGoals,
   summarizeSurveyConfig,
 } from './generateGoals.mjs';
 
+function sliderDimensions() {
+  return [
+    { id: 'pleasant', label: 'Pleasantness', left: 'Unpleasant', right: 'Pleasant' },
+  ];
+}
+
+function elementForType(type, name) {
+  const example = getGenerationContract(type).minimumExample || { type, name };
+  return { ...example, name };
+}
+
 function page(name, type = 'rating') {
   return {
     name,
-    elements: [{ type, name: `${name}_q` }],
+    elements: [elementForType(type, `${name}_q`)],
   };
 }
 
@@ -41,17 +53,44 @@ describe('generate goal acceptance', () => {
     const types = goals.answerTypes.slice(0, goals.coverMostTypes ? Math.ceil(goals.answerTypes.length / 2) : 8);
     const pages = types.map((type, index) => ({
       name: `p${index + 1}`,
-      elements: [{ type, name: `q${index + 1}` }],
+      elements: [elementForType(type, `q${index + 1}`)],
     }));
     while (pages.length < 8) {
       pages.push({
         name: `extra${pages.length}`,
-        elements: [{ type: types[0], name: `extra_q${pages.length}` }],
+        elements: [elementForType(types[0], `extra_q${pages.length}`)],
       });
     }
     const result = evaluateGenerateGoals({ title: 'Coverage', pages }, goals);
     assert.equal(result.ok, true);
     assert.ok(result.pageCount >= 8);
+  });
+
+  it('rejects slider groups that omit dimension labels', () => {
+    const goals = parseGenerateGoals('生成一个街景问卷');
+    const empty = evaluateGenerateGoals({
+      pages: [{
+        name: 'p1',
+        elements: [{ type: 'imageslidergroup', name: 'q1', dimensions: [] }],
+      }],
+    }, goals);
+    assert.equal(empty.ok, false);
+    assert.ok(empty.errors.some((item) => /dimensions|effective pages/i.test(item.message)));
+    const incomplete = evaluateGenerateGoals({
+      pages: [{
+        name: 'p1',
+        elements: [{
+          type: 'imageslidergroup',
+          name: 'q1',
+          dimensions: [{ id: 'dim_1', left: 'Low' }],
+        }],
+      }],
+    }, goals);
+    assert.equal(incomplete.ok, false);
+    const ok = evaluateGenerateGoals({
+      pages: [page('p1', 'imageslidergroup')],
+    }, goals);
+    assert.equal(ok.ok, true);
   });
 
   it('blocks generate saves that miss the requested page coverage', async () => {

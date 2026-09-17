@@ -25,10 +25,35 @@ function findQuestionIndex(page, questionName) {
  * @param {Array<object>} operations
  * @returns {{ surveyConfig, applied, inverse, validation }}
  */
-export function applyOperations(surveyConfig, operations = []) {
-  if (!Array.isArray(operations)) {
-    throw new Error('operations must be an array');
+export function normalizeOperationsArg(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== 'object') return null;
+  if (Array.isArray(raw.operations)) return raw.operations;
+  if (typeof raw.op === 'string') return [raw];
+  if (raw.surveyConfig && typeof raw.surveyConfig === 'object' && Array.isArray(raw.surveyConfig.pages)) {
+    return [{ op: 'replaceConfig', surveyConfig: raw.surveyConfig }];
   }
+  if (Array.isArray(raw.pages)) {
+    return [{ op: 'replaceConfig', surveyConfig: raw }];
+  }
+  if (raw.replaceConfig && typeof raw.replaceConfig === 'object') {
+    const payload = raw.replaceConfig.surveyConfig || raw.replaceConfig;
+    return [{ op: 'replaceConfig', surveyConfig: payload }];
+  }
+  const values = Object.keys(raw)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((key) => raw[key])
+    .filter((item) => item && typeof item === 'object' && typeof item.op === 'string');
+  return values.length ? values : null;
+}
+
+export function applyOperations(surveyConfig, operations = []) {
+  const list = normalizeOperationsArg(operations);
+  if (!Array.isArray(list)) {
+    throw new Error('operations must be an array of {op, ...}. A single replaceConfig object is also accepted.');
+  }
+  operations = list;
 
   let config = clone(surveyConfig || { pages: [] });
   if (!Array.isArray(config.pages)) config.pages = [];
@@ -182,9 +207,12 @@ export function applyOperations(surveyConfig, operations = []) {
       }
       case 'setTheme': {
         const previous = clone(config.theme || {});
-        config.theme = clone(op.theme || {});
+        const patch = clone(op.theme || {});
+        config.theme = op.replace === true
+          ? patch
+          : { ...previous, ...patch };
         applied.push(op);
-        inverse.unshift({ op: 'setTheme', theme: previous });
+        inverse.unshift({ op: 'setTheme', theme: previous, replace: true });
         break;
       }
       case 'reorderPages': {

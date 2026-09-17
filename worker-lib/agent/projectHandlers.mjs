@@ -375,7 +375,11 @@ export async function applyProjectOperations(
   try {
     next = applyOperations(current, body?.operations || []);
     next.surveyConfig = postProcessAiConfig(next.surveyConfig);
-    next.validation = validateSurveyConfig(next.surveyConfig);
+    next.validation = validateSurveyConfig(next.surveyConfig, {
+      baseline: current,
+      mode: body?.assistantMode || 'agent',
+      generateGoal: body?.generateGoal || null,
+    });
   } catch (error) {
     throw Object.assign(new Error(error.message), { status: 400 });
   }

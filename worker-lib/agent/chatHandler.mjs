@@ -3,7 +3,7 @@
  * Simplified CoT orchestration ported for Worker.
  */
 
-import { loadDecryptedApiKey } from './credentials.mjs';
+import { loadUserAiSettings, resolveAssistantCredential } from './credentials.mjs';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 const OPENAI_BASE = 'https://api.openai.com/v1';
@@ -119,7 +119,10 @@ You may add image*/media*/skillquestion types using the same sampling defaults a
 Do not include API keys or credentials.`;
 
 export async function handleAgentChat(env, userId, body) {
-  const { apiKey } = await loadDecryptedApiKey(env, userId);
+  const settings = await loadUserAiSettings(env, userId);
+  const provider = body?.provider || settings.assistant_provider || settings.default_provider;
+  const model = body?.model || settings.assistant_model;
+  const { apiKey } = await resolveAssistantCredential(env, userId, provider, { model });
   const message = String(body?.message || '').trim();
   if (!message) {
     throw Object.assign(new Error('message is required'), { status: 400 });

@@ -741,7 +741,7 @@ async function executeToolCall(call, mode, registry, ctx, signal, checkCancelled
       path: 'arguments',
       retryAction: truncated ? 'stop_truncated' : 'repair_args',
       repairHint: truncated
-        ? 'Retry with complete JSON. Raise this turn’s max output tokens or split the request.'
+        ? `Output was truncated at ${call.maxTokens || 'the current'} tokens. Do not retry the same budget, and do not save a partial survey. Split the survey or raise max output tokens.`
         : 'Resend a single complete JSON object. Incomplete arguments are never treated as empty.',
       receivedShape: {
         ...(call.receivedShape || {}),

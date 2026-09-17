@@ -133,4 +133,17 @@ describe('ModelsSettings', () => {
       'deepseek-v4-flash-vision-exp',
     ]);
   });
+
+  test('keeps shared free models out of the Silicon picker', () => {
+    const directory = [{
+      id: 'qwen-dashscope',
+      displayName: 'Qwen DashScope',
+      configured: true,
+      shared: true,
+      userConfigured: false,
+      models: [{ id: 'deepseek-v3.2', label: 'DeepSeek V3.2', input: ['text', 'image'], vision: true, shared: true }],
+    }];
+    expect(routeOptions(directory, { visionOnly: true, userOwnedOnly: true })).toEqual([]);
+    expect(routeOptions(directory, { visionOnly: true }).map((route) => route.model)).toEqual(['deepseek-v3.2']);
+  });
 });

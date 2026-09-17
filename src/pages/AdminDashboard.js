@@ -66,6 +66,7 @@ import ResearchDeepSearch from '../components/admin/ResearchDeepSearch';
 import SurveyDesignRequestManagement from '../components/admin/SurveyDesignRequestManagement';
 import SpBenchManagement from '../components/admin/SpBenchManagement';
 import NewsManagement from '../components/admin/NewsManagement';
+import SharedAssistantSubsidy from '../components/admin/SharedAssistantSubsidy';
 import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDialog';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
@@ -2561,6 +2562,7 @@ export default function AdminDashboard() {
           <Tab label="Survey Design" />
           <Tab label="SP-Bench" />
           <Tab label="News" />
+          <Tab label="免费模型" />
         </Tabs>
       </Box>
       {tab === 0 && <TemplateManagement />}
@@ -2572,6 +2574,7 @@ export default function AdminDashboard() {
       {tab === 6 && <SurveyDesignRequestManagement />}
       {tab === 7 && <SpBenchManagement />}
       {tab === 8 && <NewsManagement />}
+      {tab === 9 && <SharedAssistantSubsidy />}
     </AdminShell>
   );
 }

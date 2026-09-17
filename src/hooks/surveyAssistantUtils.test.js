@@ -75,6 +75,7 @@ describe('surveyAssistantUtils', () => {
         provider: 'openai',
         model: 'gpt-4o',
         label: 'OpenAI / GPT-4o',
+        shared: false,
         reasoningEfforts: false,
         defaultEffort: '',
       },
@@ -83,6 +84,7 @@ describe('surveyAssistantUtils', () => {
         provider: 'deepseek',
         model: 'reasoner',
         label: 'DeepSeek / Reasoner',
+        shared: false,
         reasoningEfforts: { low: {}, high: {} },
         defaultEffort: 'high',
       },
@@ -254,7 +256,35 @@ describe('surveyAssistantUtils', () => {
   test('treats directory/providers as configured credentials', () => {
     expect(credentialConfigured({ configuredProviders: ['openai'] })).toBe(true);
     expect(credentialConfigured({ providers: [{ key_hint: 'sk-…abcd' }] })).toBe(true);
+    expect(credentialConfigured({ subsidizedRoutes: [{ provider: 'qwen-dashscope', model: 'qwen-plus' }] })).toBe(true);
+    expect(credentialConfigured({ assistantConfigured: true })).toBe(true);
     expect(credentialConfigured({})).toBe(false);
+  });
+
+  test('labels shared Assistant models as free without exposing a key', () => {
+    const options = buildAssistantModelOptions([
+      {
+        id: 'qwen-dashscope',
+        displayName: 'Qwen DashScope',
+        configured: true,
+        shared: true,
+        userConfigured: false,
+        models: [{ id: 'deepseek-v3.2', label: 'DeepSeek V3.2', shared: true }],
+      },
+    ]);
+    expect(options[0].shared).toBe(true);
+    expect(options[0].label).toContain('Free');
+    expect(options[0].label).not.toContain('免费');
+    expect(buildAssistantModelOptions([
+      {
+        id: 'qwen-dashscope',
+        displayName: 'Qwen DashScope',
+        configured: true,
+        shared: true,
+        userConfigured: false,
+        models: [{ id: 'deepseek-v3.2', label: 'DeepSeek V3.2', shared: true }],
+      },
+    ], { language: 'zh' })[0].label).toContain('免费');
   });
 
   test('desktop workspace reserves both sidebars; mobile AI overlays', () => {

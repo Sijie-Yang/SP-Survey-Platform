@@ -1,4 +1,9 @@
 import { PLATFORM_SCHEMA } from '../../platformSchema.generated.mjs';
+import { evaluateSurveyContract, isAnswerableKnownType } from '../../answerability.mjs';
+
+function isKnownQuestionType(type, schema = PLATFORM_SCHEMA) {
+  return Object.prototype.hasOwnProperty.call(schema.questionTypes || {}, type);
+}
 
 const DISPLAY_TYPES = new Set(
   Object.entries(PLATFORM_SCHEMA.questionTypes || {})
@@ -48,18 +53,13 @@ function looksInventedUrl(value) {
 }
 
 function isAnswerElement(element) {
-  const type = String(element?.type || '');
-  if (!type || DISPLAY_TYPES.has(type)) return false;
-  if (type === 'skillquestion') {
-    return /^preset_/.test(String(element.skillId || ''));
-  }
+  if (looksInventedUrl(element?.imageLink)) return false;
   const urls = [
-    element?.imageLink,
     ...(Array.isArray(element?.imageLinks) ? element.imageLinks : []),
     ...(Array.isArray(element?.choices) ? element.choices.map((choice) => choice?.imageLink || choice?.url) : []),
   ];
   if (urls.some(looksInventedUrl)) return false;
-  return true;
+  return isAnswerableKnownType(element);
 }
 
 function isEffectivePage(page) {
@@ -101,7 +101,8 @@ export function evaluateGenerateGoals(surveyConfig, goals, schema = PLATFORM_SCH
     });
   }
 
-  const answerTypes = parsed.answerTypes || answerQuestionTypes(schema);
+  const answerTypes = (parsed.answerTypes || answerQuestionTypes(schema))
+    .filter((type) => isKnownQuestionType(type));
   const requiredCoverage = parsed.coverMostTypes
     ? Math.ceil(answerTypes.length / 2)
     : 0;
@@ -111,6 +112,19 @@ export function evaluateGenerateGoals(surveyConfig, goals, schema = PLATFORM_SCH
       message: `Need ${requiredCoverage} distinct answer types (denominator ${answerTypes.length}); covered ${covered.size}. Repeated or display-only types do not count.`,
     });
   }
+  const contract = evaluateSurveyContract(surveyConfig, {
+    mode: 'generate',
+    generateGoal: parsed,
+    strictAll: true,
+  });
+  contract.errors.forEach((item) => {
+    errors.push({
+      path: item.path,
+      message: item.reason || item.message,
+      question: item.question,
+      repairHint: item.repairHint,
+    });
+  });
 
   return {
     ok: errors.length === 0,

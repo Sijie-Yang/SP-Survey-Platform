@@ -159,6 +159,7 @@ export default function SiliconSamples({ currentProject, surveyConfig = null }) 
       const options = [];
       (status.directory || []).forEach((provider) => {
         if (!provider.configured || provider.authUnsupported) return;
+        if (provider.shared && !provider.userConfigured) return;
         (provider.models || []).forEach((model) => {
           const vision = !!(model.vision || (model.input || []).includes('image'));
           if (!vision || !model.id) return;
