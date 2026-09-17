@@ -7,26 +7,61 @@ function text(value) {
 
 export function dimensionPoles(dimension = {}) {
   return {
-    left: text(dimension.left ?? dimension.low),
-    right: text(dimension.right ?? dimension.high),
+    left: text(
+      dimension.left
+      ?? dimension.low
+      ?? dimension.leftLabel
+      ?? dimension.left_label
+      ?? dimension.minLabel
+      ?? dimension.min_label,
+    ),
+    right: text(
+      dimension.right
+      ?? dimension.high
+      ?? dimension.rightLabel
+      ?? dimension.right_label
+      ?? dimension.maxLabel
+      ?? dimension.max_label,
+    ),
   };
 }
 
+function explicitDisplayName(dimension = {}) {
+  return text(dimension.label || dimension.text || dimension.name || dimension.title);
+}
+
+function idAsDisplayName(dimension = {}) {
+  const id = text(dimension.id);
+  return id && !GENERIC_DIMENSION_ID.test(id) ? id : '';
+}
+
 export function dimensionDisplayName(dimension = {}, index = 0, { locale } = {}) {
-  const label = text(dimension.label || dimension.text || dimension.name || dimension.title);
+  const label = explicitDisplayName(dimension) || idAsDisplayName(dimension);
   if (label) return label;
   const { left, right } = dimensionPoles(dimension);
   if (left && right) return `${left} ↔ ${right}`;
   if (left || right) return left || right;
-  const id = text(dimension.id);
-  if (id && !GENERIC_DIMENSION_ID.test(id)) return id;
   return locale === 'zh' ? `维度 ${index + 1}` : `Dimension ${index + 1}`;
 }
 
-export function dimensionIncomplete(dimension = {}) {
-  const label = text(dimension.label || dimension.text || dimension.name || dimension.title);
+export function dimensionIncompleteFields(dimension = {}) {
+  const missing = [];
+  if (!explicitDisplayName(dimension) && !idAsDisplayName(dimension)) missing.push('display name (label)');
   const { left, right } = dimensionPoles(dimension);
-  return !label || !left || !right;
+  if (!left) missing.push('left pole');
+  if (!right) missing.push('right pole');
+  return missing;
+}
+
+export function dimensionIncomplete(dimension = {}) {
+  return dimensionIncompleteFields(dimension).length > 0;
+}
+
+export function describeDimensionIncomplete(dimension = {}, index = 0) {
+  const missing = dimensionIncompleteFields(dimension);
+  if (!missing.length) return null;
+  const id = text(dimension.id);
+  return `Dimension ${index + 1}${id ? ` "${id}"` : ''} is incomplete (missing ${missing.join(', ')}). Expected {id, label, left, right}. Historical answer ids are unchanged.`;
 }
 
 export function normalizeSliderDimension(dimension, index = 0) {
@@ -34,8 +69,11 @@ export function normalizeSliderDimension(dimension, index = 0) {
     return { id: `dim_${index + 1}` };
   }
   const next = { ...dimension };
-  const mappedLabel = text(next.label || next.text || next.name || next.title);
+  const mappedLabel = explicitDisplayName(next) || idAsDisplayName(next);
   if (mappedLabel && !text(next.label)) next.label = mappedLabel;
+  const { left, right } = dimensionPoles(next);
+  if (left && !text(next.left)) next.left = left;
+  if (right && !text(next.right)) next.right = right;
   if (!text(next.id)) {
     const fromValue = text(next.value);
     next.id = fromValue || mappedLabel.replace(/\s+/g, '_').slice(0, 40) || `dim_${index + 1}`;

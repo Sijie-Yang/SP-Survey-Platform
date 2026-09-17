@@ -8,6 +8,7 @@ import {
   claimRun,
   claimAfterRunInput,
   claimSessionInput,
+  expireStaleAiRuns,
   markInboxFailed,
   createRun,
   createRunCancellationCheck,
@@ -263,6 +264,11 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
     };
   }
 
+  if (!body?._claimedBy) {
+    body._claimedBy = `inline:${run.id}`;
+    await claimRun(env, run.id, body._claimedBy).catch(() => null);
+  }
+
   if (assistantMode === 'question' && (intent.draftWrite || intent.publishOrDelete || intent.projectMeta)) {
     await emit(createEvent('assistant.message', {
       content: QUESTION_MODE_WRITE_REFUSED,
@@ -416,6 +422,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
         : ['survey_apply_operations'],
       checkCancelled: createRunCancellationCheck(env, run.id, {
         signal: request?.signal,
+        claimedBy: body?._claimedBy || `inline:${run.id}`,
       }),
       readInbox: () => claimSessionInput(env, session.id).catch(() => []),
       checkpoint: body?._checkpoint || null,
@@ -439,6 +446,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
         userId,
         sessionId: session.id,
         runId: run.id,
+        claimedBy: body?._claimedBy,
         body: queuedBody(body),
         checkpoint: result.checkpoint,
       });
@@ -636,6 +644,7 @@ function queuedBody(body = {}) {
 }
 
 export async function startDesignerRun(env, userId, body, request, ctx) {
+  await expireStaleAiRuns(env, { userId }).catch(() => null);
   const prepared = await runDesignerChat(env, userId, {
     ...queuedBody(body),
     sessionId: body?.sessionId || null,
@@ -698,6 +707,7 @@ export async function executeQueuedDesignerRun(env, job, ctx) {
       runId: job.runId,
     };
   }
+  await expireStaleAiRuns(env, { userId: job.userId }).catch(() => null);
   const claimed = await claimRun(env, job.runId, job.claimedBy || `queue:${job.runId}`);
   if (!claimed) {
     return {
@@ -721,6 +731,7 @@ export async function executeQueuedDesignerRun(env, job, ctx) {
       _runId: job.runId,
       _sessionPrepared: true,
       _checkpoint: checkpoint,
+      _claimedBy: job.claimedBy || claimed.claimed_by || `queue:${job.runId}`,
     }, request, ctx);
   } catch (error) {
     // Provider retries and self-repair happen inside the durable loop. Once it

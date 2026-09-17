@@ -5,7 +5,7 @@
  */
 
 import { ANNOTATION_TOOLS, normalizeAllowedTools } from './annotationTools.mjs';
-import { dimensionIncomplete, matrixItemLabel, normalizeSliderQuestion } from './sliderScale.mjs';
+import { describeDimensionIncomplete, matrixItemLabel, normalizeSliderQuestion } from './sliderScale.mjs';
 import {
   OPERATION_TYPES,
   PLATFORM_SCHEMA,
@@ -233,10 +233,13 @@ export function validateSurveyConfig(surveyConfig) {
             });
           } else {
             element.dimensions.forEach((dimension, dimIndex) => {
-              if (dimensionIncomplete(dimension)) {
+              const detail = describeDimensionIncomplete(dimension, dimIndex);
+              if (detail) {
+                const question = element.name || 'unnamed question';
+                const title = element.title ? ` (${element.title})` : '';
                 warnings.push({
                   path: `${elementPath}.dimensions[${dimIndex}]`,
-                  message: `Dimension ${dimIndex + 1} is incomplete (needs a display name and both pole labels). Historical answer ids are unchanged.`,
+                  message: `Question "${question}"${title}: ${detail}`,
                 });
               }
             });

@@ -132,6 +132,24 @@ describe('Agent API asynchronous runs', () => {
     expect(global.fetch.mock.calls[2][0]).toContain('/api/agent/sessions/session-1?after=2');
   });
 
+  test('cancels the server run when the browser watcher times out', async () => {
+    const { waitForAgentRun } = await import('./agentApi');
+    global.fetch.mockImplementation((url) => {
+      if (String(url).includes('/cancel')) return jsonResponse({ success: true });
+      return jsonResponse({
+        success: true,
+        run: { id: 'run-stuck', status: 'running' },
+        runs: [{ id: 'run-stuck', status: 'running' }],
+        events: [],
+        messages: [],
+      });
+    });
+    const result = await waitForAgentRun('session-1', 'run-stuck', { intervalMs: 1, timeoutMs: 5 });
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('AGENT_RUN_TIMEOUT');
+    expect(global.fetch.mock.calls.some(([url]) => String(url).includes('/api/agent/runs/run-stuck/cancel'))).toBe(true);
+  });
+
   test('exposes cancellation and steering endpoints', async () => {
     global.fetch.mockImplementation(() => jsonResponse({ success: true }));
     await cancelAiRun('run-1');

@@ -2,8 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   claimRun,
+  expireStaleAiRuns,
   finishRun,
   markRunRunning,
+  refreshRunLease,
   updateRunCheckpoint,
 } from './sessions.mjs';
 import { processAgentQueue } from './runDispatcher.mjs';
@@ -115,6 +117,49 @@ describe('run claim and recovery', () => {
     try {
       await assert.rejects(updateRunCheckpoint(env(), 'run-1', { step: 1 }, 'running'));
       assert.equal(dispatched, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('cancels running Agent jobs whose lease has expired', async () => {
+    const originalFetch = globalThis.fetch;
+    const patched = [];
+    globalThis.fetch = async (url, options) => {
+      const href = String(url);
+      if (href.includes('/ai_runs') && (!options?.method || options.method === 'GET')) {
+        return jsonResponse([{ id: 'run-stale', user_id: 'user-1' }]);
+      }
+      if (href.includes('/ai_runs?') && options?.method === 'PATCH') {
+        patched.push(JSON.parse(options.body));
+        return jsonResponse([{ id: 'run-stale', status: 'cancelled' }]);
+      }
+      return jsonResponse([]);
+    };
+    try {
+      const result = await expireStaleAiRuns(env(), { userId: 'user-1' });
+      assert.deepEqual(result.expired, ['run-stale']);
+      assert.equal(patched[0].status, 'cancelled');
+      assert.equal(patched[0].cancel_requested, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('refreshes a live Agent lease for the same owner', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options) => {
+      const href = String(url);
+      if (href.includes('/rpc/claim_ai_run')) {
+        const body = JSON.parse(options.body);
+        assert.equal(body.p_claimed_by, 'queue:run-1');
+        return jsonResponse([{ id: 'run-1', claimed_by: 'queue:run-1' }]);
+      }
+      return jsonResponse([]);
+    };
+    try {
+      const row = await refreshRunLease(env(), 'run-1', 'queue:run-1');
+      assert.equal(row.claimed_by, 'queue:run-1');
     } finally {
       globalThis.fetch = originalFetch;
     }

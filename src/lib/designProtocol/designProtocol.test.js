@@ -116,6 +116,26 @@ describe('designProtocol normalize + operations', () => {
     expect(out.pages[0].elements[0].annotationLabels).toEqual(['危险点', '遮挡']);
   });
 
+  test('postProcessAiConfig persists slider id/pole aliases as survey settings', () => {
+    const out = postProcessAiConfig({
+      pages: [{
+        name: 'p1',
+        elements: [{
+          type: 'imageslidergroup',
+          name: 'scene_semantic_diff',
+          dimensions: [
+            { id: 'safety', left: '感觉不安全', right: '感觉很安全' },
+            { id: 'walkability', leftLabel: '不适合步行', rightLabel: '非常适合步行' },
+          ],
+        }],
+      }],
+    });
+    expect(out.pages[0].elements[0].dimensions).toEqual([
+      expect.objectContaining({ id: 'safety', label: 'safety', left: '感觉不安全', right: '感觉很安全' }),
+      expect.objectContaining({ id: 'walkability', label: 'walkability', left: '不适合步行', right: '非常适合步行' }),
+    ]);
+  });
+
   test('postProcessAiConfig sets image defaults', () => {
     const out = postProcessAiConfig({
       pages: [{

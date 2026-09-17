@@ -453,6 +453,13 @@ export async function runToolLoop({
           { status: 422, code: 'GENERATE_REPAIR_EXHAUSTED', retryable: false },
         );
       }
+      const conflictStopped = outcomes.some((outcome) => outcome.result?.code === 'DRAFT_WRITE_CONFLICT');
+      if (conflictStopped) {
+        throw Object.assign(
+          new Error('Draft changed while saving. The original draft is unchanged.'),
+          { status: 409, code: 'DRAFT_WRITE_CONFLICT', retryable: false },
+        );
+      }
       const fingerprint = stepFingerprint(calls, outcomes);
       repeatedFingerprint = fingerprint === previousFingerprint ? repeatedFingerprint + 1 : 1;
       previousFingerprint = fingerprint;
@@ -570,6 +577,18 @@ export async function runToolLoop({
     if (ok || !isWriteTool(name)) return;
     lastRetryAction = retryActionForWriteFailure(result, outcome.outcome);
     lastDraftWriteError = String(result?.error || 'Unknown write error').slice(0, 500);
+    if (isDraftConflict(result)) {
+      lastRetryAction = 'reload_draft';
+      repairFamilies.conflict = Number(repairFamilies.conflict || 0) + 1;
+      if (repairFamilies.conflict >= 2) {
+        lastRetryAction = 'stop_conflict';
+        outcome.result = {
+          ...result,
+          code: 'DRAFT_WRITE_CONFLICT',
+          error: 'Draft changed while saving. The original draft is unchanged.',
+        };
+      }
+    }
     if (lastRetryAction === 'reload_draft' || lastRetryAction === 'verify_draft') {
       loadedDraft = false;
     }
@@ -1006,6 +1025,7 @@ export function nextRequiredTool({
 }) {
   if (!requireDraftChange || latestDraft) return '';
   if (!loadedCapabilities) return 'survey_capabilities';
+  if (lastRetryAction === 'stop_conflict') return '';
   if (!loadedDraft || lastRetryAction === 'reload_draft' || lastRetryAction === 'verify_draft') {
     return 'survey_get_draft';
   }
@@ -1013,8 +1033,15 @@ export function nextRequiredTool({
   return '';
 }
 
+function isDraftConflict(result) {
+  const code = String(result?.code || '');
+  const error = String(result?.error || result?.message || '');
+  return code === 'CONFLICT' || code === '40001' || /draft changed|40001/i.test(error);
+}
+
 function retryActionForWriteFailure(result, outcome) {
   if (outcome === 'unknown') return 'verify_draft';
+  if (isDraftConflict(result)) return 'reload_draft';
   if (result?.retryAction) return result.retryAction;
   if (result?.code === 'INCOMPLETE_TOOL_ARGS' || result?.code === 'OUTPUT_TRUNCATED') {
     return 'stop_truncated';

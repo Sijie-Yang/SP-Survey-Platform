@@ -904,6 +904,58 @@ describe('runtime tool loop', () => {
       loadedDraft: true,
       lastRetryAction: 'reload_draft',
     }), 'survey_get_draft');
+    assert.equal(nextRequiredTool({
+      requireDraftChange: true,
+      latestDraft: null,
+      loadedCapabilities: true,
+      loadedDraft: true,
+      lastRetryAction: 'stop_conflict',
+    }), '');
+  });
+
+  it('stops after two draft-conflict writes instead of retrying the stale token', async () => {
+    const originalFetch = globalThis.fetch;
+    let saves = 0;
+    globalThis.fetch = async () => sseToolCalls([{
+      id: `apply_${saves + 1}`,
+      name: 'survey_apply_operations',
+      args: { expectedDraftUpdatedAt: 'stale', operations: [{ op: 'addPage', page: { name: 'p1' } }] },
+    }]);
+    const registry = createToolRegistry(applyAssistantModeToTools([
+      { name: 'survey_capabilities', execute: async () => ({ summary: 'ok' }) },
+      { name: 'survey_get_draft', execute: async () => ({ draftUpdatedAt: 'fresh', surveyConfig: { pages: [] } }) },
+      {
+        name: 'survey_apply_operations',
+        minPermission: 'edit_draft',
+        execute: async () => {
+          saves += 1;
+          throw Object.assign(new Error('conflict: draft changed'), { code: 'CONFLICT' });
+        },
+      },
+    ], getAssistantModePolicy('adjust')));
+    try {
+      const route = resolveModelRoute('deepseek', 'deepseek-v4-pro');
+      await assert.rejects(
+        () => runToolLoop({
+          apiKey: 'test-key',
+          provider: 'deepseek',
+          baseUrl: route.baseUrl,
+          model: route.model.id,
+          modelRecord: route.model,
+          protocol: route.protocol,
+          compat: route.model.compat,
+          messages: [{ role: 'user', content: 'Change the theme color' }],
+          registry,
+          ctx: { permission: 'edit_draft' },
+          requireDraftChange: false,
+          writeTools: ['survey_apply_operations'],
+        }),
+        (error) => error.code === 'DRAFT_WRITE_CONFLICT',
+      );
+      assert.equal(saves, 2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('stops repeating generate contract errors before max steps', async () => {

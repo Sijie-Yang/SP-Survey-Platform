@@ -5,7 +5,7 @@ import {
 } from '@mui/material';
 import { Add, Delete, ArrowUpward, ArrowDownward } from '@mui/icons-material';
 
-const DEFAULT_DIMENSION = { id: 'dim1', left: 'Low', right: 'High' };
+const DEFAULT_DIMENSION = { id: 'dim1', label: 'Dimension 1', left: 'Low', right: 'High' };
 
 export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scaleMax = 7 }) {
   const { tr, zh } = useQuestionEditorText();
@@ -21,7 +21,7 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
   const add = () => {
     let n = dims.length + 1;
     while (dims.some((d) => d.id === `dim${n}`)) n += 1;
-    update([...dims, { id: `dim${n}`, left: 'Left label', right: 'Right label' }]);
+    update([...dims, { id: `dim${n}`, label: `Dimension ${n}`, left: 'Left label', right: 'Right label' }]);
   };
 
   const remove = (index) => {
@@ -66,20 +66,20 @@ export function SkillDimensionsEditor({ value = [], onChange, scaleMin = 1, scal
           <TextField
             size="small"
             label={zh ? '显示名称' : 'Display name'}
-            value={d.label || d.text || d.name || ''}
+            value={d.label || d.text || d.name || d.title || ''}
             onChange={(e) => patch(i, { label: e.target.value })}
             placeholder={zh ? `维度 ${i + 1}` : `Dimension ${i + 1}`}
           />
           <TextField
             size="small"
             label={tr("Left pole")}
-            value={d.left || ''}
+            value={d.left || d.low || d.leftLabel || ''}
             onChange={(e) => patch(i, { left: e.target.value })}
           />
           <TextField
             size="small"
             label={tr("Right pole")}
-            value={d.right || ''}
+            value={d.right || d.high || d.rightLabel || ''}
             onChange={(e) => patch(i, { right: e.target.value })}
           />
           {['min', 'max', 'step'].map((key) => <TextField key={key} size="small" type="number"

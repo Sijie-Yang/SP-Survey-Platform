@@ -863,8 +863,8 @@ export default function QuestionEditor({
         }
         if (value === 'mediaslidergroup' && !editedQuestion.dimensions?.length) {
           updates.dimensions = [
-            { id: 'd1', left: 'Low', right: 'High' },
-            { id: 'd2', left: 'Disagree', right: 'Agree' },
+            { id: 'd1', label: 'Dimension 1', left: 'Low', right: 'High' },
+            { id: 'd2', label: 'Dimension 2', left: 'Disagree', right: 'Agree' },
           ];
           updates.scaleMin = 1;
           updates.scaleMax = 7;
@@ -915,8 +915,8 @@ export default function QuestionEditor({
       else if (value === 'slidergroup') {
         if (!editedQuestion.dimensions?.length) {
           updates.dimensions = [
-            { id: 'dim_1', left: 'Negative', right: 'Positive' },
-            { id: 'dim_2', left: 'Unpleasant', right: 'Pleasant' },
+            { id: 'dim_1', label: 'Dimension 1', left: 'Negative', right: 'Positive' },
+            { id: 'dim_2', label: 'Dimension 2', left: 'Unpleasant', right: 'Pleasant' },
           ];
         }
         if (editedQuestion.scaleMin == null) updates.scaleMin = 1;
@@ -929,8 +929,8 @@ export default function QuestionEditor({
         updates.excludePreviouslyUsedImages = true;
         if (!editedQuestion.dimensions?.length) {
           updates.dimensions = [
-            { id: 'dim_1', left: 'Negative', right: 'Positive' },
-            { id: 'dim_2', left: 'Unpleasant', right: 'Pleasant' },
+            { id: 'dim_1', label: 'Dimension 1', left: 'Negative', right: 'Positive' },
+            { id: 'dim_2', label: 'Dimension 2', left: 'Unpleasant', right: 'Pleasant' },
           ];
         }
         if (editedQuestion.scaleMin == null) updates.scaleMin = 1;

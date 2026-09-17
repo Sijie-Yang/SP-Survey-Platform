@@ -139,6 +139,7 @@ export async function updateSessionAssistantMode(env, sessionId, assistantMode) 
 }
 
 export async function listSessions(env, userId, { projectId, mode } = {}) {
+  await expireStaleAiRuns(env, { userId }).catch(() => null);
   const build = (select) => {
     let query = `?user_id=eq.${encodeURIComponent(userId)}&status=eq.active&select=${select}&order=updated_at.desc&limit=40`;
     if (projectId) query += `&project_id=eq.${encodeURIComponent(projectId)}`;
@@ -459,22 +460,73 @@ export async function isRunCancellationRequested(env, runId) {
   return run?.status === 'cancelled' || run?.cancel_requested === true;
 }
 
+export async function refreshRunLease(env, runId, claimedBy, { leaseSeconds = 90 } = {}) {
+  if (!runId || !claimedBy) return null;
+  try {
+    return firstRow(await rpc(env, 'claim_ai_run', {
+      p_run_id: runId,
+      p_claimed_by: claimedBy,
+      p_lease_seconds: leaseSeconds,
+    }, null, { serviceRole: true }));
+  } catch {
+    const now = new Date();
+    return patchRun(env, runId, {
+      lease_expires_at: new Date(now.getTime() + leaseSeconds * 1000).toISOString(),
+      updated_at: now.toISOString(),
+    }, `&claimed_by=eq.${encodeURIComponent(claimedBy)}&status=eq.running`).catch(() => null);
+  }
+}
+
+export async function expireStaleAiRuns(env, { userId } = {}) {
+  const now = new Date().toISOString();
+  let query = `?status=eq.running&lease_expires_at=lt.${encodeURIComponent(now)}&select=id,user_id&limit=20`;
+  if (userId) query += `&user_id=eq.${encodeURIComponent(userId)}`;
+  let rows = [];
+  try {
+    rows = await supabaseRest(env, {
+      path: '/rest/v1/ai_runs',
+      serviceRole: true,
+      query,
+    });
+  } catch {
+    return { expired: [] };
+  }
+  const expired = [];
+  for (const row of rows || []) {
+    if (!row?.id) continue;
+    await finishRun(env, row.id, {
+      status: 'cancelled',
+      cancel_requested: true,
+      error_summary: 'Abandoned: the Agent lease expired after the editor disconnected.',
+    }).catch(() => null);
+    expired.push(row.id);
+  }
+  return { expired };
+}
+
 /**
  * Cheap cooperative cancellation probe for the model/tool loop. The returned
  * callback is intentionally compatible with runToolLoop({ checkCancelled }).
  */
 export function createRunCancellationCheck(env, runId, {
   signal,
+  claimedBy = null,
   cacheMs = 250,
+  refreshEveryMs = 20000,
   now = () => Date.now(),
 } = {}) {
   let checkedAt = Number.NEGATIVE_INFINITY;
+  let refreshedAt = Number.NEGATIVE_INFINITY;
   let cancelled = false;
   return async () => {
     if (signal?.aborted || cancelled) return true;
     const current = now();
     if (current - checkedAt < cacheMs) return false;
     checkedAt = current;
+    if (claimedBy && current - refreshedAt >= refreshEveryMs) {
+      refreshedAt = current;
+      await refreshRunLease(env, runId, claimedBy).catch(() => null);
+    }
     cancelled = await isRunCancellationRequested(env, runId);
     return cancelled || Boolean(signal?.aborted);
   };

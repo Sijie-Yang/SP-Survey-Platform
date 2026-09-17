@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Box, Typography, Slider, TextField, Chip, Button } from '@mui/material';
-import { dimensionDisplayName, dimensionIncomplete, sliderScale } from '../lib/sliderScale';
+import { dimensionDisplayName, dimensionIncomplete, dimensionPoles, sliderScale } from '../lib/sliderScale';
 import { ImageGalleryGrid } from './MediaWidgets';
 
 /**
@@ -57,6 +57,7 @@ export function SliderGroupContent({
         const label = answered ? v : (zh ? '尚未评分' : 'Not rated');
         const title = dimensionDisplayName(d, index, { locale: zh ? 'zh' : 'en' });
         const incomplete = dimensionIncomplete(d);
+        const poles = dimensionPoles(d);
         return (
           <Box key={d.id} sx={{ px: { xs: 0, sm: 1 } }}>
             <Typography
@@ -81,7 +82,7 @@ export function SliderGroupContent({
               }}
             >
               <Typography variant="caption" color="text.secondary" sx={{ flex: 1, lineHeight: 1.3, overflowWrap: 'anywhere' }}>
-                {d.left}
+                {poles.left}
               </Typography>
               <Chip
                 size="small"
@@ -94,7 +95,7 @@ export function SliderGroupContent({
                 color="text.secondary"
                 sx={{ flex: 1, lineHeight: 1.3, textAlign: 'right', overflowWrap: 'anywhere' }}
               >
-                {d.right}
+                {poles.right}
               </Typography>
             </Box>
             <Box
@@ -107,7 +108,7 @@ export function SliderGroupContent({
               }}
             >
               <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'left' }}>
-                {d.left}
+                {poles.left}
               </Typography>
               <Chip
                 size="small"
@@ -116,7 +117,7 @@ export function SliderGroupContent({
                 sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700, justifySelf: 'center' }}
               />
               <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'right' }}>
-                {d.right}
+                {poles.right}
               </Typography>
             </Box>
             <Slider
@@ -126,7 +127,7 @@ export function SliderGroupContent({
               step={scale.step}
               marks={scale.valid && (scale.max - scale.min) / scale.step <= 20}
               disabled={readOnly || !scale.valid}
-              aria-label={`${title}: ${d.left || d.id} – ${d.right || d.id}`}
+              aria-label={`${title}: ${poles.left || d.id} – ${poles.right || d.id}`}
               onChange={(_, val) => onChange?.({ ...current, [d.id]: val })}
               valueLabelDisplay="auto"
             />

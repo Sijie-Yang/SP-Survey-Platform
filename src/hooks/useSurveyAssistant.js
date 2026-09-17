@@ -349,6 +349,9 @@ export default function useSurveyAssistant({
           timer = setTimeout(check, 1500);
           return;
         }
+        if ((status === 'queued' || status === 'running') && pending?.runId) {
+          await cancelAiRun(pending.runId).catch(() => null);
+        }
         if (pending && status === 'completed' && hasAppliedSurveyChange(runEvents)) {
           window.dispatchEvent(new CustomEvent('sp-agent-run-complete', {
             detail: { projectId, sessionId, runId: pending?.runId },

@@ -328,12 +328,13 @@ export async function waitForAgentRun(sessionId, runId, {
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+  await cancelAiRun(currentRunId).catch(() => null);
   return {
     success: false,
     sessionId,
-    runId,
+    runId: currentRunId,
     code: 'AGENT_RUN_TIMEOUT',
-    error: 'The Agent is still running. Reopen this project to reconnect.',
+    error: 'The Agent timed out and was stopped so it would not keep writing the draft.',
   };
 }
 
