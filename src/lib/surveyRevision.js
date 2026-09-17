@@ -28,9 +28,17 @@ export function surveyResponseContract(config, resolvedConfig = null) {
   return JSON.parse(JSON.stringify(contract));
 }
 
+function encodeContractBytes(contract) {
+  const json = JSON.stringify(contract);
+  if (globalThis.TextEncoder) return new TextEncoder().encode(json);
+  const bytes = new Uint8Array(json.length);
+  for (let i = 0; i < json.length; i += 1) bytes[i] = json.charCodeAt(i) & 255;
+  return bytes;
+}
+
 export async function surveyRevision(config, resolvedConfig = null) {
   const contract = surveyResponseContract(config, resolvedConfig);
-  const data = new TextEncoder().encode(JSON.stringify(contract));
+  const data = encodeContractBytes(contract);
   if (!globalThis.crypto?.subtle) {
     // Local phone testing over HTTP may not provide Web Crypto; never block a survey.
     let a = 2166136261; let b = 3339675911;

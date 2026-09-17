@@ -190,7 +190,7 @@ function questionFamily(type) {
 }
 
 /** Effective long/summary family for skill presets / skillquestion. */
-function exportFamilyForQuestion(question) {
+export function exportFamilyForQuestion(question) {
   if (isForcedChoiceSkill(question?.skillId)) return 'imagepicker';
   if (isMaxDiffSkill(question?.skillId)) return 'maxdiff';
   if (isVideoMomentSkill(question?.skillId)) return 'video_moments';

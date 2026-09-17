@@ -45,6 +45,10 @@ test('free practice sends a valid completion key and gives each new attempt a di
   await waitFor(() => expect(saveSurveyResponse).toHaveBeenCalledTimes(2));
   const [first, second] = saveSurveyResponse.mock.calls.map(([data]) => data);
   expect(first).toMatchObject({ project_id: project.id, survey_metadata: { practice_mode: true, practice_question: 'q' } });
+  expect(first.survey_metadata.survey_revision).toMatch(/^(sha256:|contract-v1:)/);
+  expect(first.survey_metadata.survey_response_contract.questions).toEqual(
+    expect.arrayContaining([expect.objectContaining({ name: 'q', type: 'rating' })]),
+  );
   expect(first.survey_metadata.completion_code).toMatch(/^practice_/);
   expect(second.survey_metadata.completion_code).not.toBe(first.survey_metadata.completion_code);
   expect(screen.queryByText('Invalid submission')).toBeNull();
