@@ -477,9 +477,14 @@ export async function refreshRunLease(env, runId, claimedBy, { leaseSeconds = 90
   }
 }
 
+function runWasUserCancelled(row) {
+  return row?.cancel_requested === true || row?.status === 'cancelled';
+}
+
 export async function expireStaleAiRuns(env, { userId } = {}) {
   const now = new Date().toISOString();
-  let query = `?status=eq.running&lease_expires_at=lt.${encodeURIComponent(now)}&select=id,user_id&limit=20`;
+  let query = `?status=eq.running&lease_expires_at=lt.${encodeURIComponent(now)}`
+    + '&select=id,user_id,status,checkpoint,checkpoint_seq,cancel_requested,claimed_by,lease_expires_at&limit=20';
   if (userId) query += `&user_id=eq.${encodeURIComponent(userId)}`;
   let rows = [];
   try {
@@ -489,19 +494,32 @@ export async function expireStaleAiRuns(env, { userId } = {}) {
       query,
     });
   } catch {
-    return { expired: [] };
+    return { expired: [], released: [], cancelled: [] };
   }
-  const expired = [];
+  const released = [];
+  const cancelled = [];
   for (const row of rows || []) {
     if (!row?.id) continue;
-    await finishRun(env, row.id, {
-      status: 'cancelled',
-      cancel_requested: true,
-      error_summary: 'Abandoned: the Agent lease expired after the editor disconnected.',
-    }).catch(() => null);
-    expired.push(row.id);
+    if (runWasUserCancelled(row)) {
+      await finishRun(env, row.id, {
+        status: 'cancelled',
+        cancel_requested: true,
+        error_summary: 'Cancelled by the user.',
+      }).catch(() => null);
+      cancelled.push(row.id);
+      continue;
+    }
+    // Executor lease expiry is not user abandonment. Release the holder so a
+    // delayed queue continue or list-sessions refresh can reclaim the checkpoint.
+    // CAS on the expired timestamp so a concurrent refresh wins cleanly.
+    const releasedRow = await patchRun(env, row.id, {
+      claimed_by: null,
+      lease_expires_at: null,
+      updated_at: new Date().toISOString(),
+    }, `&status=eq.running&lease_expires_at=lt.${encodeURIComponent(now)}`).catch(() => null);
+    if (releasedRow?.id) released.push(row.id);
   }
-  return { expired };
+  return { expired: [...released, ...cancelled], released, cancelled };
 }
 
 /**

@@ -1,6 +1,14 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { executeSiliconJob, isSiliconJob, siliconProgressStatuses } from './runner.mjs';
+import {
+  executeSiliconJob,
+  isSiliconJob,
+  recoverSiliconRuns,
+  responseHasUnitAnswer,
+  siliconProgressStatuses,
+  siliconRunShouldYield,
+  syncSavedUnitsOntoResponses,
+} from './runner.mjs';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -293,6 +301,7 @@ describe('silicon background job safety', () => {
     assert.equal(result.delaySeconds, 15);
     assert.equal(sent[0].options.delaySeconds, 15);
     assert.equal(sent[0].job.claimedBy, 'worker-a');
+    assert.equal(runs.r1.claimed_by, null);
   });
 
   it('reuses claimedBy when continuing the same run', async () => {
@@ -389,8 +398,15 @@ describe('silicon background job safety', () => {
         if (init.method === 'PATCH') Object.assign(runs.r1, JSON.parse(init.body || '{}'));
         return json([runs.r1]);
       }
-      if (path.endsWith('/silicon_responses') && String(init.method || 'GET').toUpperCase() !== 'GET') {
-        responseWrites += 1;
+      if (path.endsWith('/silicon_responses')) {
+        if (String(init.method || 'GET').toUpperCase() !== 'GET') responseWrites += 1;
+        return json([{
+          id: 'resp-1',
+          persona_id: 'p1',
+          repeat_index: 1,
+          responses: { q1: { trials: [{ answer: 4 }, { answer: 3 }] } },
+          displayed_images: {},
+        }]);
       }
       if (path.endsWith('/silicon_answer_units')) return json(units);
       if (path.endsWith('/silicon_answer_events')) return json(events);
@@ -486,5 +502,336 @@ describe('silicon background job safety', () => {
       () => executeSiliconJob(env, { runId: 'r1', claimedBy: 'worker-a', disableRedispatch: true }),
       (error) => error.code === 'SILICON_LEASE_UNAVAILABLE',
     );
+  });
+});
+
+describe('silicon peer scheduling and response sync', () => {
+  const env = {
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service',
+    SUPABASE_ANON_KEY: 'anon',
+  };
+
+  it('picks the earlier Silicon run as the winner', () => {
+    const older = { id: 'r-old', created_at: '2026-09-16T10:00:00.000Z' };
+    const newer = { id: 'r-new', created_at: '2026-09-16T11:00:00.000Z' };
+    assert.equal(siliconRunShouldYield(older, [newer]), false);
+    assert.equal(siliconRunShouldYield(newer, [older]), true);
+    assert.equal(siliconRunShouldYield(older, []), false);
+  });
+
+  it('lets two same-user runs finish without holding a blocking waiter lease', async () => {
+    const originalFetch = globalThis.fetch;
+    const runs = {
+      'r-old': {
+        id: 'r-old',
+        user_id: 'u1',
+        project_id: 'proj-a',
+        status: 'running',
+        cancel_requested: false,
+        claimed_by: 'worker-old',
+        lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+        created_at: '2026-09-16T10:00:00.000Z',
+        progress_total: 1,
+        progress_processed: 0,
+        tokens_used: 0,
+      },
+      'r-new': {
+        id: 'r-new',
+        user_id: 'u1',
+        project_id: 'proj-b',
+        status: 'running',
+        cancel_requested: false,
+        claimed_by: 'worker-new',
+        lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+        created_at: '2026-09-16T11:00:00.000Z',
+        progress_total: 1,
+        progress_processed: 0,
+        tokens_used: 0,
+      },
+    };
+    const units = {
+      'r-old': [{
+        id: 'u-old',
+        run_id: 'r-old',
+        persona_id: 'p1',
+        repeat_index: 1,
+        question_name: 'q1',
+        trial_index: 1,
+        status: 'saved',
+        answer: 4,
+      }],
+      'r-new': [{
+        id: 'u-new',
+        run_id: 'r-new',
+        persona_id: 'p1',
+        repeat_index: 1,
+        question_name: 'q1',
+        trial_index: 1,
+        status: 'pending',
+      }],
+    };
+    const responses = {
+      'r-old': { id: 'resp-old', run_id: 'r-old', persona_id: 'p1', repeat_index: 1, responses: { q1: 4 }, displayed_images: {} },
+      'r-new': { id: 'resp-new', run_id: 'r-new', persona_id: 'p1', repeat_index: 1, responses: { q1: 5 }, displayed_images: {} },
+    };
+    const sent = [];
+    globalThis.fetch = async (url, init = {}) => {
+      const parsed = new URL(url, 'https://example.supabase.co');
+      const path = parsed.pathname;
+      const id = parsed.searchParams.get('id')?.replace(/^eq\./, '');
+      const userId = parsed.searchParams.get('user_id')?.replace(/^eq\./, '');
+      if (path.endsWith('/rpc/claim_silicon_run')) {
+        const body = JSON.parse(init.body || '{}');
+        const run = runs[body.p_run_id];
+        const held = run.claimed_by
+          && run.claimed_by !== body.p_claimed_by
+          && Date.parse(run.lease_expires_at || 0) > Date.now();
+        if (held) return json([]);
+        run.claimed_by = body.p_claimed_by;
+        run.lease_expires_at = new Date(Date.now() + 60_000).toISOString();
+        return json([run]);
+      }
+      if (path.endsWith('/rpc/claim_silicon_unit')) return json([]);
+      if (path.endsWith('/silicon_runs')) {
+        if (String(init.method || 'GET').toUpperCase() === 'PATCH' && id && runs[id]) {
+          Object.assign(runs[id], JSON.parse(init.body || '{}'));
+          return json([runs[id]]);
+        }
+        if (id && runs[id]) return json([runs[id]]);
+        if (userId) {
+          return json(Object.values(runs).filter((row) => (
+            row.user_id === userId && ['queued', 'draft', 'running'].includes(row.status)
+          )));
+        }
+        return json(Object.values(runs));
+      }
+      if (path.endsWith('/silicon_answer_units')) {
+        const runId = parsed.searchParams.get('run_id')?.replace(/^eq\./, '');
+        return json(units[runId] || []);
+      }
+      if (path.endsWith('/silicon_responses')) {
+        const runId = parsed.searchParams.get('run_id')?.replace(/^eq\./, '')
+          || (id === 'resp-old' ? 'r-old' : id === 'resp-new' ? 'r-new' : null);
+        return json(runId && responses[runId] ? [responses[runId]] : Object.values(responses));
+      }
+      if (path.endsWith('/silicon_answer_events')) return json([]);
+      if (path.endsWith('/ai_runs')) return json([]);
+      return json([]);
+    };
+    try {
+      const newer = await executeSiliconJob({
+        ...env,
+        AGENT_QUEUE: { send: async (job, options) => sent.push({ job, options }) },
+      }, { runId: 'r-new', claimedBy: 'worker-new' });
+      assert.equal(newer.deferred, true);
+      assert.equal(newer.reason, 'Waiting for an earlier Silicon run');
+      assert.equal(runs['r-new'].claimed_by, null);
+      assert.equal(runs['r-old'].claimed_by, 'worker-old');
+
+      const older = await executeSiliconJob(env, {
+        runId: 'r-old',
+        claimedBy: 'worker-old',
+        disableRedispatch: true,
+      });
+      assert.notEqual(older.deferred, true);
+      assert.equal(older.finished, true);
+      assert.equal(older.status, 'completed');
+      assert.equal(runs['r-old'].status, 'completed');
+
+      units['r-new'][0] = {
+        ...units['r-new'][0],
+        status: 'saved',
+        answer: 5,
+      };
+      const later = await executeSiliconJob(env, {
+        runId: 'r-new',
+        claimedBy: 'worker-new',
+        disableRedispatch: true,
+      });
+      assert.notEqual(later.deferred, true);
+      assert.equal(later.finished, true);
+      assert.equal(later.status, 'completed');
+      assert.equal(runs['r-new'].status, 'completed');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('keeps Assistant priority and releases both Silicon leases while waiting', async () => {
+    const originalFetch = globalThis.fetch;
+    const runs = {
+      r1: {
+        id: 'r1',
+        user_id: 'u1',
+        status: 'running',
+        cancel_requested: false,
+        claimed_by: 'worker-a',
+        lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+        created_at: '2026-09-16T10:00:00.000Z',
+        progress_total: 1,
+        progress_processed: 0,
+      },
+      r2: {
+        id: 'r2',
+        user_id: 'u1',
+        status: 'running',
+        cancel_requested: false,
+        claimed_by: 'worker-b',
+        lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+        created_at: '2026-09-16T11:00:00.000Z',
+        progress_total: 1,
+        progress_processed: 0,
+      },
+    };
+    const units = [{
+      id: 'u1',
+      run_id: 'r1',
+      persona_id: 'p1',
+      repeat_index: 1,
+      question_name: 'q1',
+      trial_index: 1,
+      status: 'pending',
+    }];
+    globalThis.fetch = async (url, init = {}) => {
+      const parsed = new URL(url, 'https://example.supabase.co');
+      const path = parsed.pathname;
+      const id = parsed.searchParams.get('id')?.replace(/^eq\./, '');
+      if (path.endsWith('/rpc/claim_silicon_run')) {
+        const body = JSON.parse(init.body || '{}');
+        const run = runs[body.p_run_id];
+        run.claimed_by = body.p_claimed_by;
+        return json([run]);
+      }
+      if (path.endsWith('/rpc/claim_silicon_unit')) return json([]);
+      if (path.endsWith('/silicon_runs')) {
+        if (String(init.method || 'GET').toUpperCase() === 'PATCH' && id && runs[id]) {
+          Object.assign(runs[id], JSON.parse(init.body || '{}'));
+          return json([runs[id]]);
+        }
+        if (id && runs[id]) return json([runs[id]]);
+        return json(Object.values(runs).filter((row) => row.status === 'running'));
+      }
+      if (path.endsWith('/silicon_answer_units')) return json(units.map((unit) => ({ ...unit, run_id: id || unit.run_id })));
+      if (path.endsWith('/silicon_responses')) return json([]);
+      if (path.endsWith('/silicon_answer_events')) return json([]);
+      if (path.endsWith('/ai_runs')) {
+        return json([{
+          id: 'asst-1',
+          provider: 'qwen-dashscope',
+          claimed_by: 'chat',
+          lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+        }]);
+      }
+      return json([]);
+    };
+    try {
+      const first = await executeSiliconJob(env, { runId: 'r1', claimedBy: 'worker-a', disableRedispatch: true });
+      const second = await executeSiliconJob(env, { runId: 'r2', claimedBy: 'worker-b', disableRedispatch: true });
+      assert.equal(first.deferred, true);
+      assert.equal(second.deferred, true);
+      assert.match(first.reason, /Assistant/);
+      assert.match(second.reason, /Assistant/);
+      assert.equal(runs.r1.claimed_by, null);
+      assert.equal(runs.r2.claimed_by, null);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('recovers Compare/CSV after a saved unit whose response write failed without re-asking the model', async () => {
+    const originalFetch = globalThis.fetch;
+    const run = {
+      id: 'r1',
+      user_id: 'u1',
+      status: 'running',
+      cancel_requested: false,
+      claimed_by: 'worker-a',
+      lease_expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: '2026-09-16T10:00:00.000Z',
+      progress_total: 1,
+      progress_processed: 1,
+      tokens_used: 0,
+    };
+    const units = [{
+      id: 'u1',
+      run_id: 'r1',
+      persona_id: 'p1',
+      repeat_index: 1,
+      question_name: 'q1',
+      trial_index: 1,
+      status: 'saved',
+      answer: 4,
+      images: ['https://example.test/a.jpg'],
+      lease_owner: null,
+      lease_expires_at: null,
+    }];
+    const envelope = {
+      id: 'resp-1',
+      run_id: 'r1',
+      persona_id: 'p1',
+      repeat_index: 1,
+      responses: {},
+      displayed_images: {},
+      status: 'claimed',
+    };
+    let persistAttempts = 0;
+    let modelCalls = 0;
+    globalThis.fetch = async (url, init = {}) => {
+      const parsed = new URL(url, 'https://example.supabase.co');
+      const path = parsed.pathname;
+      if (path.includes('/chat/completions') || path.includes('/compatible-mode')) {
+        modelCalls += 1;
+        return json({ choices: [{ message: { content: '9' } }] });
+      }
+      if (path.endsWith('/rpc/claim_silicon_run')) return json([run]);
+      if (path.endsWith('/rpc/claim_silicon_unit')) return json([]);
+      if (path.endsWith('/silicon_runs')) {
+        if (String(init.method || 'GET').toUpperCase() === 'PATCH') Object.assign(run, JSON.parse(init.body || '{}'));
+        return json([run]);
+      }
+      if (path.endsWith('/silicon_answer_units')) return json(units);
+      if (path.endsWith('/silicon_responses')) {
+        const method = String(init.method || 'GET').toUpperCase();
+        if (method === 'PATCH') {
+          persistAttempts += 1;
+          if (persistAttempts === 1) {
+            return json({ message: 'write failed' }, 500);
+          }
+          Object.assign(envelope, JSON.parse(init.body || '{}'));
+          return json([envelope]);
+        }
+        return json([envelope]);
+      }
+      if (path.endsWith('/silicon_answer_events')) return json([]);
+      if (path.endsWith('/ai_runs')) return json([]);
+      return json([]);
+    };
+    try {
+      await assert.rejects(() => syncSavedUnitsOntoResponses(env, run));
+      assert.equal(modelCalls, 0);
+      assert.deepEqual(envelope.responses, {});
+      assert.equal(units[0].status, 'saved');
+      assert.equal(units[0].answer, 4);
+
+      const recovered = await recoverSiliconRuns(env, null, { userId: 'u1' });
+      assert.ok(recovered.recovered.includes('r1') || persistAttempts >= 2 || responseHasUnitAnswer(envelope, units[0]));
+
+      const result = await executeSiliconJob(env, {
+        runId: 'r1',
+        claimedBy: 'worker-a',
+        disableRedispatch: true,
+      });
+      assert.equal(modelCalls, 0);
+      assert.equal(units[0].status, 'saved');
+      assert.equal(units[0].answer, 4);
+      assert.equal(envelope.responses.q1, 4);
+      assert.equal(responseHasUnitAnswer(envelope, units[0]), true);
+      assert.equal(result.status, 'completed');
+      assert.equal(result.counts.valid, 1);
+      assert.equal(result.counts.processed, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

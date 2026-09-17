@@ -412,6 +412,42 @@ function envelopeStatus(responses = {}, units = []) {
   return 'partial';
 }
 
+export function responseHasUnitAnswer(envelope, unit, question = null) {
+  if (!envelope || !unit) return false;
+  const value = envelope.responses?.[unit.question_name];
+  if (value === undefined || value === null) return false;
+  const trialCount = Math.max(1, trialCountOf(question || {}));
+  if (trialCount > 1) {
+    const trial = Array.isArray(value?.trials) ? value.trials[Number(unit.trial_index || 1) - 1] : null;
+    return trial != null && (trial.answer !== undefined || trial.value !== undefined);
+  }
+  return true;
+}
+
+export async function syncSavedUnitsOntoResponses(env, run) {
+  if (!run?.id) return { synced: 0 };
+  const units = await listSiliconUnits(env, run.id);
+  const saved = (units || []).filter((unit) => (
+    unit.status === 'saved' && unit.answer !== undefined && unit.answer !== null
+  ));
+  let synced = 0;
+  for (const unit of saved) {
+    const envelope = await ensureResponseRow(env, run, {
+      personaId: unit.persona_id,
+      repeat: unit.repeat_index,
+    });
+    const question = questionFromRun(run, unit.question_name);
+    if (responseHasUnitAnswer(envelope, unit, question)) continue;
+    await persistUnitOnResponse(env, run, unit, {
+      answer: unit.answer,
+      images: unit.images,
+      error: unit.error,
+    });
+    synced += 1;
+  }
+  return { synced };
+}
+
 async function persistUnitOnResponse(env, run, unit, { answer, images, error }) {
   const envelope = await ensureResponseRow(env, run, {
     personaId: unit.persona_id,
@@ -482,20 +518,77 @@ async function interactiveBusy(env, userId, provider) {
   }
 }
 
-async function otherSiliconLease(env, userId, runId) {
-  if (!userId) return false;
+function compareSiliconRuns(a, b) {
+  const ta = Date.parse(a?.created_at || '') || 0;
+  const tb = Date.parse(b?.created_at || '') || 0;
+  if (ta !== tb) return ta - tb;
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
+export function siliconRunShouldYield(self, peers = []) {
+  if (!self?.id) return false;
+  const others = (peers || []).filter((row) => row?.id && row.id !== self.id);
+  if (!others.length) return false;
+  const ranked = [self, ...others].sort(compareSiliconRuns);
+  return ranked[0]?.id !== self.id;
+}
+
+async function listPeerSiliconRuns(env, userId) {
+  if (!userId) return [];
   try {
     const rows = await supabaseRest(env, {
       path: '/rest/v1/silicon_runs',
       serviceRole: true,
-      query: `?user_id=eq.${encodeURIComponent(userId)}&status=eq.running&id=neq.${encodeURIComponent(runId)}&select=id,claimed_by,lease_expires_at`,
+      query: `?user_id=eq.${encodeURIComponent(userId)}&status=in.(${ACTIVE_RUN_STATUSES.join(',')})`
+        + '&select=id,created_at,claimed_by,lease_expires_at,status&order=created_at.asc&limit=40',
     });
-    return (rows || []).some((row) => (
-      row.claimed_by && row.lease_expires_at && Date.parse(row.lease_expires_at) > Date.now()
-    ));
+    return Array.isArray(rows) ? rows : [];
   } catch {
-    return false;
+    return [];
   }
+}
+
+async function releaseSiliconRunLease(env, runId, claimedBy) {
+  if (!runId || !claimedBy) return null;
+  try {
+    return await patchRun(env, runId, {
+      claimed_by: null,
+      lease_expires_at: null,
+    }, { requireActive: true, claimedBy });
+  } catch (error) {
+    if (error?.code === 'SILICON_LEASE_LOST') return null;
+    throw error;
+  }
+}
+
+async function deferSiliconRun(env, ctx, job, run, claimedBy, reason) {
+  await setStage(env, run.id, {
+    phase: 'waiting_interactive',
+    started_at: new Date().toISOString(),
+    reason,
+  }, claimedBy);
+  await appendSiliconEvent(env, {
+    runId: run.id,
+    type: 'throttle',
+    payload: { reason },
+  }).catch(() => null);
+  await releaseSiliconRunLease(env, run.id, claimedBy);
+  if (!job.disableRedispatch) {
+    await dispatchSiliconRun(env, ctx, {
+      runId: run.id,
+      userId: run.user_id,
+      claimedBy,
+      delaySeconds: 15,
+    });
+  }
+  return {
+    success: true,
+    finished: false,
+    status: 'running',
+    deferred: true,
+    delaySeconds: 15,
+    reason,
+  };
 }
 
 export async function dispatchSiliconRun(env, ctx, {
@@ -543,6 +636,8 @@ export async function recoverSiliconRuns(env, ctx, { userId } = {}) {
   for (const run of [...(expired || []), ...(staleQueued || [])]) {
     if (!run?.id || seen.has(run.id) || run.cancel_requested) continue;
     seen.add(run.id);
+    const full = await getRun(env, run.id).catch(() => null);
+    if (full) await syncSavedUnitsOntoResponses(env, full).catch(() => null);
     await dispatchSiliconRun(env, ctx, { runId: run.id, userId: run.user_id });
     recovered.push(run.id);
   }
@@ -614,6 +709,25 @@ async function processClaimedUnit(env, run, unit, cred, claimedBy = null) {
 
   if (unit.status === 'saved' || unit.status === 'skipped'
     || (isTerminalUnitStatus(unit.status) && unit.status !== 'leased' && unit.status !== 'unknown')) {
+    if (unit.status === 'saved' && !responseHasUnitAnswer(envelope, unit, question)) {
+      await persistUnitOnResponse(env, run, unit, {
+        answer: unit.answer,
+        images: unit.images,
+        error: unit.error,
+      });
+      return { skippedExisting: true, synced: true };
+    }
+    return { skippedExisting: true };
+  }
+
+  if (responseHasUnitAnswer(envelope, unit, question)) {
+    await patchUnit(env, unit.id, {
+      status: 'saved',
+      response_id: envelope.id,
+      answer: unit.answer === undefined ? envelope.responses?.[unit.question_name] : unit.answer,
+      lease_owner: null,
+      lease_expires_at: null,
+    }, { claimedBy });
     return { skippedExisting: true };
   }
 
@@ -810,9 +924,19 @@ async function finishUnit(env, run, unit, envelope, {
   stage = {},
   claimedBy = unit.lease_owner || null,
 }) {
+  let saved = envelope;
+  try {
+    saved = await persistUnitOnResponse(env, run, { ...unit, status }, {
+      answer: status === 'saved' ? answer : undefined,
+      images,
+      error,
+    });
+  } catch {
+    saved = envelope;
+  }
   const unitRow = await patchUnit(env, unit.id, {
     status,
-    response_id: envelope?.id || null,
+    response_id: saved?.id || envelope?.id || null,
     answer: answer === undefined ? null : answer,
     rationale,
     images,
@@ -821,11 +945,6 @@ async function finishUnit(env, run, unit, envelope, {
     lease_owner: null,
     lease_expires_at: null,
   }, { claimedBy });
-  const saved = await persistUnitOnResponse(env, run, { ...unit, status }, {
-    answer: status === 'saved' ? answer : undefined,
-    images,
-    error,
-  });
   if (unitRow?.id && saved?.id && saved.id !== unitRow.response_id) {
     await patchUnit(env, unit.id, { response_id: saved.id }, { claimedBy }).catch(() => null);
   }
@@ -907,6 +1026,7 @@ export async function executeSiliconJob(env, job = {}, ctx = null) {
     };
   }
 
+  await syncSavedUnitsOntoResponses(env, run);
   const previewUnits = await listSiliconUnits(env, run.id);
   const previewCounts = previewUnits.length ? countsFromUnits(previewUnits) : null;
   const claimable = previewUnits.find((unit) => (
@@ -918,25 +1038,19 @@ export async function executeSiliconJob(env, job = {}, ctx = null) {
     return { success: true, ...(await finalizeRun(env, run)) };
   }
 
-  if (await interactiveBusy(env, run.user_id, run.provider) || await otherSiliconLease(env, run.user_id, run.id)) {
-    await setStage(env, run.id, {
-      phase: 'waiting_interactive',
-      started_at: new Date().toISOString(),
-    }, claimedBy);
-    await appendSiliconEvent(env, {
-      runId: run.id,
-      type: 'throttle',
-      payload: { reason: 'Waiting for the interactive Assistant or another Silicon call' },
-    }).catch(() => null);
-    if (!job.disableRedispatch) {
-      await dispatchSiliconRun(env, ctx, {
-        runId,
-        userId: run.user_id,
-        claimedBy,
-        delaySeconds: 15,
-      });
-    }
-    return { success: true, finished: false, status: 'running', deferred: true, delaySeconds: 15 };
+  const assistantBusy = await interactiveBusy(env, run.user_id, run.provider);
+  const peers = await listPeerSiliconRuns(env, run.user_id);
+  if (assistantBusy || siliconRunShouldYield(run, peers)) {
+    return deferSiliconRun(
+      env,
+      ctx,
+      job,
+      run,
+      claimedBy,
+      assistantBusy
+        ? 'Waiting for the interactive Assistant'
+        : 'Waiting for an earlier Silicon run',
+    );
   }
 
   const cred = await loadProviderCredential(env, run.user_id, run.provider);
