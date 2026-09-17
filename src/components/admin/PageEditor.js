@@ -237,7 +237,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
   );
 }
 
-export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig, onSelectionChange, onWorkspaceChange, onOpenAssistant }) {
+export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig, onSelectionChange, onWorkspaceChange }) {
   const { tr } = useQuestionEditorText();
   const [editedPage, setEditedPage] = useState({ ...page });
   const [selectedQuestion, setSelectedQuestion] = useState(null);
@@ -254,7 +254,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
     };
     onSelectionChange?.(selection);
     onWorkspaceChange?.({
-      open: Boolean(selectedQuestion),
+      open: false,
       ...selection,
     });
   }, [editedPage, page?.name, pageDirty, selectedQuestion, onSelectionChange, onWorkspaceChange]);
@@ -377,7 +377,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
 
   return (
     <>
-      <Dialog open={!selectedQuestion} onClose={closeEditor} maxWidth="lg" fullWidth>
+      <Dialog open onClose={closeEditor} maxWidth="lg" fullWidth>
         <DialogTitle>
           {tr('Edit Page: {title}', { title: page.title || tr('Page {number}', { number: pageIndex + 1 }) })}
         </DialogTitle>
@@ -473,7 +473,6 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
       {/* Question Editor */}
       {selectedQuestion && (
         <QuestionEditor
-          variant="workspace"
           pageName={editedPage?.name || page?.name}
           question={selectedQuestion.question}
           onSave={(updatedQuestion) => {
@@ -492,7 +491,6 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
               pageDirty,
             });
           }}
-          onOpenAssistant={onOpenAssistant}
           images={images}
           currentProject={currentProject}
           surveyConfig={surveyConfig}

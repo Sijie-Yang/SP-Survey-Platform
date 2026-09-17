@@ -2477,6 +2477,7 @@ export default function ResultsAnalysis({
   const [loadProgress, setLoadProgress] = useState(null);
   const fetchSequence = React.useRef(0);
   const [error, setError] = useState(null);
+  const [errorMeta, setErrorMeta] = useState(null);
   const [loadSource, setLoadSource] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -2559,6 +2560,7 @@ export default function ResultsAnalysis({
     setLoading(true);
     setLoadProgress(null);
     setError(null);
+    setErrorMeta(null);
     try {
       if ((adminMode || platformSupabase) && currentProject?.id) {
         const all = await readAllResponsePages(async (offset, after) => {
@@ -2591,6 +2593,11 @@ export default function ResultsAnalysis({
     } catch (err) {
       if (sequence !== fetchSequence.current) return;
       setError(`Failed to load responses: ${err.message}`);
+      setErrorMeta({
+        requestId: err.requestId || null,
+        stage: err.stage || null,
+        code: err.code || null,
+      });
     } finally {
       if (sequence === fetchSequence.current) { setLoading(false); setLoadProgress(null); }
     }
@@ -2987,8 +2994,22 @@ export default function ResultsAnalysis({
       )}
 
       {error && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={(
+            <Button color="inherit" size="small" onClick={fetchResponses} disabled={loading}>
+              {language === 'zh' ? '重试' : 'Retry'}
+            </Button>
+          )}
+        >
           {error}
+          {errorMeta?.requestId && (
+            <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+              {language === 'zh' ? '请求编号' : 'Request'} {errorMeta.requestId}
+              {errorMeta.stage ? ` · ${errorMeta.stage}` : ''}
+            </Typography>
+          )}
         </Alert>
       )}
 
@@ -3102,7 +3123,7 @@ export default function ResultsAnalysis({
           <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
             <People sx={{ fontSize: 32, color: 'primary.main', mb: 0.5 }} />
             <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
-              {loading ? '–' : totalResponses}
+              {loading || error ? '–' : totalResponses}
             </Typography>
             <Typography variant="body2" color="text.secondary">{t.resultsTotalResponses}</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>

@@ -450,6 +450,62 @@ export function expectedCategoryImageCount(pool, element, folderTags = {}) {
   return (usesSingleCategoryPerTrial(element) ? 1 : labels.length) * getMediaPerCategory(element);
 }
 
+/** Human-readable gap for preview/admin. Never invent a substitute pool. */
+export function describeMediaAssignmentFailure(element, pool, folderTags = {}, assignment = {}) {
+  const name = element?.name || 'unnamed';
+  const title = element?.title && element.title !== name ? ` (${element.title})` : '';
+  const mode = normalizeMediaAssignmentMode(element?.mediaAssignmentMode) || 'individual';
+  const scoped = filterPoolForQuestion(pool, element);
+  const perCategory = getMediaPerCategory(element);
+  const imageCount = element.imageCount || defaultMediaCount(element);
+  const scopeFolders = Array.isArray(element?.mediaFolders)
+    ? element.mediaFolders.map(normalizeFolderPath).filter(Boolean)
+    : [];
+  const got = (assignment.flatMedia || assignment.images || []).length;
+  const trialSets = assignment.trialMediaSets;
+  if (Array.isArray(trialSets) && trialSets.some((items) => !items?.length)) {
+    const empty = trialSets
+      .map((items, index) => (!items?.length ? index + 1 : null))
+      .filter(Boolean);
+    return `Question "${name}"${title}: trial ${empty.join(', ')} has no matching media.`;
+  }
+  if (mode === 'category') {
+    const byCategory = buildMediaByFolderCategory(scoped, folderTags, { scopeFolders });
+    const labels = [...byCategory.keys()].sort();
+    const available = getFolderCategories(pool, folderTags);
+    if (!labels.length) {
+      const needed = scopeFolders.length ? scopeFolders.join(', ') : 'tagged category folders';
+      return `Question "${name}"${title}: no matching category. Needed ${needed}. Tagged categories: ${available.join(', ') || 'none'}.`;
+    }
+    const counts = labels.map((cat) => `${cat} (have ${(byCategory.get(cat) || []).length}, need ${perCategory})`);
+    if (usesSingleCategoryPerTrial(element)) {
+      const eligible = labels.filter((cat) => (byCategory.get(cat) || []).length >= perCategory);
+      if (!eligible.length) {
+        return `Question "${name}"${title}: no specified category has ${perCategory} image(s). ${counts.join('; ')}.`;
+      }
+    } else {
+      const short = labels.filter((cat) => (byCategory.get(cat) || []).length < perCategory);
+      if (short.length) {
+        return `Question "${name}"${title}: not enough images in ${short.map((cat) => `${cat} (have ${(byCategory.get(cat) || []).length}, need ${perCategory})`).join(', ')}.`;
+      }
+    }
+    const expected = expectedCategoryImageCount(scoped, element, folderTags);
+    if (expected && got < expected) {
+      return `Question "${name}"${title}: category draw returned ${got} image(s), expected ${expected}. ${counts.join('; ')}.`;
+    }
+  }
+  if (mode === 'set') {
+    const eligible = getEligibleMediaSets(scoped, imageCount, folderTags, { scopeFolders });
+    if (!eligible.length) {
+      return `Question "${name}"${title}: no eligible set with ${imageCount} file(s). Scope: ${scopeFolders.join(', ') || 'all tagged sets'}.`;
+    }
+  }
+  if (got < imageCount) {
+    return `Question "${name}"${title}: not enough matching images (have ${scoped.length}, need ${imageCount}).`;
+  }
+  return null;
+}
+
 function pickOnePerCategory(pool, element, globallyUsedImageKeys, folderTags = {}) {
   const byCategory = buildMediaByFolderCategory(pool, folderTags, {
     scopeFolders: element?.mediaFolders,

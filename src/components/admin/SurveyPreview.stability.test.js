@@ -1,10 +1,11 @@
 import React from 'react';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import SurveyPreview from './SurveyPreview';
+import SurveyPreview, { previewSourceKey } from './SurveyPreview';
 
 jest.mock('../../lib/previewMediaLibrary', () => ({
   resolveMediaPoolForPreview: async () => [],
+  resolvePreviewMediaContext: async () => ({ images: [], imageDatasetConfig: {}, fromPreviewLibrary: false }),
 }));
 
 const twoPageConfig = {
@@ -33,4 +34,19 @@ test('parent rerender does not snap preview back to page 1', async () => {
   rerender(<SurveyPreview config={{ ...twoPageConfig }} currentProject={{ ...project, preloadedImages: [] }} />);
   expect(screen.getByText('Second page body')).toBeInTheDocument();
   expect(screen.queryByText('First page body')).not.toBeInTheDocument();
+});
+
+test('preview refresh key includes category tags and logical folders, not unrelated UI fields', () => {
+  const config = { pages: [{ name: 'p', elements: [{ name: 'q' }] }] };
+  const base = {
+    name: 'Study',
+    preloadedImages: [{ key: 'a', url: '/a.jpg', logicalFolder: 'park' }],
+    imageDatasetConfig: { mediaFolderTags: { park: 'category' }, mediaFolders: ['park'] },
+  };
+  expect(previewSourceKey(config, { ...base, uiOnly: 1 }))
+    .toBe(previewSourceKey(config, { ...base, uiOnly: 2 }));
+  expect(previewSourceKey(config, {
+    ...base,
+    imageDatasetConfig: { ...base.imageDatasetConfig, mediaFolderTags: { park: 'set' } },
+  })).not.toBe(previewSourceKey(config, base));
 });

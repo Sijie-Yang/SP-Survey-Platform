@@ -11,23 +11,27 @@ import registerImageRankingWidget, {
 } from '../SurveyCustomComponents';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, resolveSkillQuestions,
-  ensureSkillDemoMedia, pickMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
+  pickMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   applyMediaAssignmentToElement, hasMediaSlots,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
   resolveMediaFolderTags, pickTrialMediaSetsForQuestion, syncInjectedMediaOntoSurveyModel,
-  clearInjectedMediaStore,
+  clearInjectedMediaStore, describeMediaAssignmentFailure,
 } from '../../lib/surveyMediaInjection';
 import { getTrialCount } from '../../lib/trialNavigation';
 import { applySurveyLocale } from '../../lib/surveyLocale';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
-import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
+import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
 
-function previewSourceKey(config, currentProject) {
+export function previewSourceKey(config, currentProject) {
   const images = currentProject?.preloadedImages || [];
+  const dataset = currentProject?.imageDatasetConfig || {};
   return JSON.stringify({
     config: config || null,
     imageKeys: images.map((img) => img.key || img.url || img.name || ''),
+    imageFolders: images.map((img) => img.logicalFolder || img.folder || ''),
+    mediaFolderTags: dataset.mediaFolderTags || {},
+    mediaFolders: dataset.mediaFolders || [],
   });
 }
 
@@ -65,9 +69,10 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
   const [mediaAssignments, setMediaAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
+  const [mediaErrors, setMediaErrors] = useState([]);
   const sourceKey = useMemo(
     () => previewSourceKey(config, currentProject),
-    [config, currentProject?.preloadedImages],
+    [config, currentProject],
   );
 
   useEffect(() => {
@@ -90,17 +95,26 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
         
         const configCopy = JSON.parse(JSON.stringify(config));
         await resolveSkillQuestions(configCopy);
-        // Project media first; platform preview library when the project has none.
-        const mediaPool = await resolveMediaPoolForPreview(currentProject?.preloadedImages || []);
-        const fromPreviewLibrary = !(currentProject?.preloadedImages?.length)
-          && mediaPool.length > 0;
+        const mediaContext = await resolvePreviewMediaContext(currentProject || {});
+        const mediaPool = mediaContext.images;
+        const fromPreviewLibrary = mediaContext.fromPreviewLibrary;
         setUsingPreviewLibrary(fromPreviewLibrary);
+        const folderHost = fromPreviewLibrary
+          ? { ...currentProject, imageDatasetConfig: mediaContext.imageDatasetConfig, config: configCopy }
+          : { ...currentProject, config: configCopy };
+        const folderTags = resolveMediaFolderTags(folderHost, configCopy);
         const mediaAssignmentLog = [];
+        const nextMediaErrors = [];
         const globallyUsedImageKeys = new Set();
         const globallyUsedGroupKeys = new Set();
         const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
+        const recordAssignmentGap = (element, assignment = {}) => {
+          nextMediaErrors.push(
+            describeMediaAssignmentFailure(element, mediaPool, folderTags, assignment)
+            || `Question "${element?.name || 'unnamed'}": not enough matching media.`,
+          );
+        };
         const finalizeMediaSelection = (element, pool, preselected) => {
-          const folderTags = resolveMediaFolderTags(currentProject, configCopy);
           if (
             !hasMediaSlots(element)
             && !usesSetMediaAssignment(element)
@@ -202,7 +216,6 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                       console.log(`📦 Preview: Using media pool (${mediaPool.length} available${fromPreviewLibrary ? ', preview library' : ''})`);
                       const pool = filterPoolForQuestion(mediaPool, element);
                       const elementTrialCount = getTrialCount(element);
-                      const folderTags = resolveMediaFolderTags(currentProject, currentProject?.config);
                       if (elementTrialCount > 1) {
                         const { trialMediaSets, trialAssignments } = pickTrialMediaSetsForQuestion(
                           pool, element, elementTrialCount,
@@ -212,36 +225,23 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                         element.trialCount = elementTrialCount;
                         const assignment = trialAssignments[0] || { images: [] };
                         const selectedImages = assignment.flatMedia || assignment.images || [];
+                        const complete = trialMediaSets.length === elementTrialCount
+                          && trialMediaSets.every((items) => items?.length);
                         result = {
-                          success: !!selectedImages.length || trialMediaSets.some((s) => s?.length),
+                          success: complete,
                           images: selectedImages,
                           setId: assignment.setId || assignment.groupId,
                           groupId: assignment.setId || assignment.groupId,
                           categories: assignment.categories,
-                          assignment,
+                          assignment: { ...assignment, trialMediaSets },
                           _assigned: true,
                           trialMediaSets,
                         };
                       } else {
-                      let assignment = finalizeMediaSelection(element, pool);
-                      let selectedImages = assignment.images;
-                      if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
-                        const imageCount = element.imageCount || defaultMediaCount(element);
-                        selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
-                        assignment = {
-                          images: selectedImages, flatMedia: selectedImages,
-                          slots: selectedImages.map((img, i) => ({
-                            slotId: `legacy_${i}`, role: 'stimulus',
-                            type: img.type, url: img.url, name: img.name,
-                            media_id: img.media_id || img.key || img.name,
-                          })),
-                          groupKey: null, groupId: null,
-                        };
-                        trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
-                        console.log(`♻️ Preview: Pool exhausted, reusing ${selectedImages.length} images for skill question`);
-                      }
+                      const assignment = finalizeMediaSelection(element, pool);
+                      const selectedImages = assignment.images || [];
                       result = {
-                        success: true,
+                        success: selectedImages.length > 0,
                         images: selectedImages,
                         setId: assignment.setId || assignment.groupId,
                         groupId: assignment.setId || assignment.groupId,
@@ -249,7 +249,6 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                         assignment,
                         _assigned: true,
                       };
-                      console.log(`✅ Preview: Selected ${selectedImages.length} media file(s) from preloaded pool${(assignment.setId || assignment.groupId) ? ` (set: ${assignment.setId || assignment.groupId})` : ''}${assignment.categories?.length ? ` (categories: ${assignment.categories.join(', ')})` : ''}`);
                       }
                     }
                     // PRIORITY 2: Use global imageDatasetConfig if available
@@ -264,9 +263,8 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                       
                       if (datasetName) {
                         result = await getRandomImagesFromHuggingFace(huggingFaceToken, datasetName, imageCount);
-                        console.log(`✅ Preview: Successfully loaded ${result?.images?.length || 0} images from Hugging Face`);
                       } else {
-                        console.warn(`Preview: Hugging Face dataset name missing for question: ${element.name}`);
+                        recordAssignmentGap(element);
                         continue;
                       }
                     }
@@ -281,9 +279,8 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                       
                       if (datasetName) {
                         result = await getRandomImagesFromHuggingFace(huggingFaceToken, datasetName, imageCount);
-                        console.log(`✅ Preview: Successfully loaded ${result?.images?.length || 0} images from Hugging Face`);
                       } else {
-                        console.warn(`Preview: Hugging Face dataset name missing for question: ${element.name}`);
+                        recordAssignmentGap(element);
                         continue;
                       }
                     } else if (element.supabaseConfig) {
@@ -313,16 +310,11 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                         result = supabaseResult;
                       }
                     } else {
-                      if (element.type === 'skillquestion') {
-                        ensureSkillDemoMedia(element);
-                        console.log(`Preview: Using demo media for skill question: ${element.name}`);
-                      } else {
-                        console.warn(`Preview: No image source configured for question: ${element.name}`);
-                        continue;
-                      }
+                      recordAssignmentGap(element);
+                      continue;
                     }
                     
-                    if (result?.success && (result.images?.length > 0 || result.trialMediaSets?.length)) {
+                    if (result?.success && (result.images?.length > 0 || result.trialMediaSets?.every((items) => items?.length))) {
                       let selectedImages = result.images || [];
                       let setId = result.setId || result.groupId || null;
                       let categories = result.categories || null;
@@ -347,15 +339,13 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
                         element.trialMediaSets = result.trialMediaSets;
                       }
                       applyMediaAssignmentToElement(element, assignment);
-                      console.log(`Preview loaded ${selectedImages.length} random media for question: ${element.name}`);
-                    } else if (element.type === 'skillquestion') {
-                      ensureSkillDemoMedia(element);
-                      console.log(`Preview: Fallback demo media for skill: ${element.name}`);
+                    } else if (result) {
+                      recordAssignmentGap(element, result.assignment || result);
                     } else {
-                      console.warn(`Preview: No images found for random selection in question: ${element.name}`);
+                      recordAssignmentGap(element);
                     }
                   } catch (error) {
-                    console.error(`Preview: Error loading random images for question ${element.name}:`, error);
+                    recordAssignmentGap(element, { images: [] });
                   }
                 }
               }
@@ -389,9 +379,11 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
         }
         
         setMediaAssignments(mediaAssignmentLog);
+        setMediaErrors(nextMediaErrors);
         setProcessedConfig(configCopy);
       } catch (error) {
         console.error('Error processing config for preview:', error);
+        setMediaErrors([error.message || 'Preview could not load media.']);
         setProcessedConfig(config);
       } finally {
         setLoading(false);
@@ -455,6 +447,9 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
             ? ' · No project media — sampling from the platform preview media library'
             : ''}
         </Box>
+        {mediaErrors.map((message) => (
+          <Alert key={message} severity="error" sx={{ mb: 1 }}>{message}</Alert>
+        ))}
         {showMediaAssignment && mediaAssignments.length > 0 && (
           <Box sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
             <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>

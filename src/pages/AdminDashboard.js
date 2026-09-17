@@ -68,6 +68,7 @@ import SpBenchManagement from '../components/admin/SpBenchManagement';
 import NewsManagement from '../components/admin/NewsManagement';
 import SharedAssistantSubsidy from '../components/admin/SharedAssistantSubsidy';
 import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDialog';
+import { toAdminPreviewProject } from '../lib/adminPreviewProject';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 const projectSurveyPath = (projectId) => `/survey?project=${encodeURIComponent(projectId)}`;
@@ -1633,11 +1634,7 @@ function ProjectSurveyBuilderDialog({ project, open, onClose, onSaved }) {
 
   if (!project) return null;
 
-  const previewProject = {
-    id: project.id,
-    name: project.name,
-    preloadedImages: Array.isArray(project.preloadedImages) ? project.preloadedImages : [],
-  };
+  const previewProject = toAdminPreviewProject(project, { config: draftConfig });
 
   return (
     <Dialog open={open} onClose={onClose} fullScreen>
@@ -1682,11 +1679,7 @@ function ProjectSurveyBuilderDialog({ project, open, onClose, onSaved }) {
 
 function ProjectPreviewDialog({ project, open, onClose }) {
   if (!project) return null;
-  const previewProject = {
-    id: project.id,
-    name: project.name,
-    preloadedImages: Array.isArray(project.preloadedImages) ? project.preloadedImages : [],
-  };
+  const previewProject = toAdminPreviewProject(project);
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
       PaperProps={{ sx: { height: '90vh' } }}>

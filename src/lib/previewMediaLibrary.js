@@ -15,16 +15,13 @@ export const PREVIEW_MEDIA_PREFIX = 'skill-preview/';
 /** @deprecated Use PREVIEW_MEDIA_PREFIX */
 export const SKILL_PREVIEW_PREFIX = PREVIEW_MEDIA_PREFIX;
 
-/** List all media in the shared preview library. Returns [] on any failure. */
-export async function listPreviewMedia() {
-  try {
-    const saved = await loadPreviewMediaLibrary();
-    if (saved.revision > 0) return saved.preloadedImages
-      .map((entry) => normalizeMediaEntry(entry, PREVIEW_MEDIA_PREFIX)).filter((entry) => entry?.url);
-  } catch {
-    // Read-only previews remain available before the cloud manifest is initialized.
-    // The management UI requires cloud access and never saves this fallback listing.
-  }
+function normalizePreviewEntries(entries) {
+  return (entries || [])
+    .map((entry) => normalizeMediaEntry(entry, PREVIEW_MEDIA_PREFIX))
+    .filter((entry) => entry?.url);
+}
+
+async function listPreviewMediaFromR2() {
   const result = await listImagesFromR2(PREVIEW_MEDIA_PREFIX);
   if (!result.success) return [];
   return (result.images || [])
@@ -37,6 +34,46 @@ export async function listPreviewMedia() {
       folder: img.folder,
     }, PREVIEW_MEDIA_PREFIX))
     .filter(Boolean);
+}
+
+/** List all media in the shared preview library. Returns [] on any failure. */
+export async function listPreviewMedia() {
+  const context = await resolvePreviewMediaContext({});
+  return context.images;
+}
+
+/**
+ * Project/template media first. When falling back to the shared preview
+ * library, also return that library's category/set tags — images alone are
+ * not enough for per-category sampling.
+ */
+export async function resolvePreviewMediaContext(project = {}) {
+  const projectImages = Array.isArray(project.preloadedImages) ? project.preloadedImages : [];
+  if (projectImages.length > 0) {
+    return {
+      images: projectImages,
+      imageDatasetConfig: project.imageDatasetConfig || project.image_dataset_config || {},
+      fromPreviewLibrary: false,
+    };
+  }
+  try {
+    const saved = await loadPreviewMediaLibrary();
+    if (saved.revision > 0) {
+      return {
+        images: normalizePreviewEntries(saved.preloadedImages),
+        imageDatasetConfig: saved.imageDatasetConfig || {},
+        fromPreviewLibrary: true,
+      };
+    }
+  } catch {
+    // Read-only previews remain available before the cloud manifest is initialized.
+  }
+  const images = await listPreviewMediaFromR2();
+  return {
+    images,
+    imageDatasetConfig: {},
+    fromPreviewLibrary: images.length > 0,
+  };
 }
 
 /** @deprecated Use listPreviewMedia */
@@ -65,8 +102,6 @@ export function pickPreviewMedia(pool, mediaType, count) {
  * Prefer project/template media; fall back to the platform preview library.
  */
 export async function resolveMediaPoolForPreview(projectImages = []) {
-  if (Array.isArray(projectImages) && projectImages.length > 0) {
-    return projectImages;
-  }
-  return listPreviewMedia();
+  const context = await resolvePreviewMediaContext({ preloadedImages: projectImages });
+  return context.images;
 }
