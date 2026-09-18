@@ -495,23 +495,38 @@ export async function retryFailedSiliconRun(env, auth, runId, ctx) {
   return { success: true, queued: true, retried: reset };
 }
 
+const LIST_RECOVER_INTERVAL_MS = 30_000;
+let lastListRecoverAt = 0;
+
+export function resetSiliconListRecoverForTests() {
+  lastListRecoverAt = 0;
+}
+
 export async function listSiliconTasks(env, auth, ctx) {
-  await recoverSiliconRuns(env, ctx, { userId: auth.userId }).catch(() => null);
+  const now = Date.now();
+  if (now - lastListRecoverAt >= LIST_RECOVER_INTERVAL_MS) {
+    lastListRecoverAt = now;
+    await recoverSiliconRuns(env, ctx, { userId: auth.userId }).catch(() => null);
+  }
   let active = await selectSiliconRuns(
     env,
     auth,
     `?user_id=eq.${encodeURIComponent(auth.userId)}&status=in.(queued,draft,running)&order=updated_at.desc`,
     { serviceRole: true },
   );
+  let finalized = false;
   for (const run of active || []) {
-    await finalizeSiliconRunIfComplete(env, run).catch(() => null);
+    const next = await finalizeSiliconRunIfComplete(env, run).catch(() => null);
+    if (next) finalized = true;
   }
-  active = await selectSiliconRuns(
-    env,
-    auth,
-    `?user_id=eq.${encodeURIComponent(auth.userId)}&status=in.(queued,draft,running)&order=updated_at.desc`,
-    { serviceRole: true },
-  );
+  if (finalized) {
+    active = await selectSiliconRuns(
+      env,
+      auth,
+      `?user_id=eq.${encodeURIComponent(auth.userId)}&status=in.(queued,draft,running)&order=updated_at.desc`,
+      { serviceRole: true },
+    );
+  }
   const recent = await selectSiliconRuns(
     env,
     auth,

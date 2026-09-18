@@ -13,6 +13,7 @@ const ACTIVE = new Set(['queued', 'draft', 'running']);
 
 export function useSiliconTasks({
   enabled = true,
+  watch = false,
   pollMs = 1500,
   onTerminal = null,
 } = {}) {
@@ -91,12 +92,28 @@ export function useSiliconTasks({
     }
   }, []);
 
+  const [pageVisible, setPageVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  );
   useEffect(() => {
-    if (!enabled) return undefined;
+    if (typeof document === 'undefined') return undefined;
+    const onVisibility = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (!enabled || !pageVisible) return undefined;
     refreshList();
+    return undefined;
+  }, [enabled, pageVisible, watch, refreshList]);
+
+  useEffect(() => {
+    if (!enabled || !pageVisible) return undefined;
+    if (!watch && knownActiveRef.current.size === 0) return undefined;
     const timer = setInterval(refreshList, Math.max(1500, pollMs));
     return () => clearInterval(timer);
-  }, [enabled, pollMs, refreshList]);
+  }, [enabled, pageVisible, watch, pollMs, refreshList, active.length]);
 
   useEffect(() => {
     if (!enabled || !viewingRunId) return undefined;
