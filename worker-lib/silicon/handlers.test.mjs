@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { siliconResponsesToCsv, cancelSiliconRun, listSiliconTasks, getSiliconProgress } from './handlers.mjs';
+import { siliconResponsesToCsv, cancelSiliconRun, listSiliconTasks, getSiliconProgress, resetSiliconListRecoverForTests } from './handlers.mjs';
 import { countsFromUnits } from './executionPlan.mjs';
 
 describe('silicon export', () => {
@@ -57,6 +57,7 @@ describe('silicon task APIs', () => {
   let originalFetch;
 
   beforeEach(() => {
+    resetSiliconListRecoverForTests();
     store = {
       runs: [
         {
@@ -163,6 +164,22 @@ describe('silicon task APIs', () => {
     assert.equal(result.active.some((run) => run.user_id === 'u2'), false);
     assert.deepEqual(result.recent.map((run) => run.id), ['r-done']);
     assert.equal(result.active[0].project_name, 'Project A');
+  });
+
+  it('recovers stale leases on the first list, then skips recover on the next list', async () => {
+    const recoverUrls = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('lease_expires_at=lt') || href.includes('status=eq.queued')) recoverUrls.push(href);
+      return original(url, init);
+    };
+    await listSiliconTasks(env, auth, null);
+    const first = recoverUrls.length;
+    assert.ok(first >= 2);
+    recoverUrls.length = 0;
+    await listSiliconTasks(env, auth, null);
+    assert.equal(recoverUrls.length, 0);
   });
 
   it('returns incremental progress events after a cursor', async () => {

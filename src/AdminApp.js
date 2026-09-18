@@ -974,8 +974,13 @@ export default function AdminApp() {
     if (!wideLayout) setAiSidebarOpen(false);
   }, [siliconEnabled, wideLayout]);
 
+  const siliconWatching = siliconEnabled && (
+    tabValue === 6
+    || (aiSidebarOpen && aiSidebarPanel === 'tasks')
+  );
   const siliconTasks = useSiliconTasks({
     enabled: siliconEnabled,
+    watch: siliconWatching,
     onTerminal: (run) => {
       setSnackbar({
         open: true,
