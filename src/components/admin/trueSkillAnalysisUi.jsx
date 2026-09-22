@@ -10,8 +10,11 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TableSortLabel,
+  Tabs,
+  Tab,
   Paper,
 } from '@mui/material';
 import Download from '@mui/icons-material/Download';
@@ -46,6 +49,7 @@ const INT_COLS = new Set([
   'games', 'nRanks', 'wins', 'losses', 'best', 'worst', 'appearances',
 ]);
 const ASC_DEFAULT_COLS = new Set(['avgRank', 'imageKey']);
+export const TRUESKILL_PAGE_SIZE = 10;
 
 function imageDisplayName(key) {
   const source = String(key || '');
@@ -90,18 +94,35 @@ export function TrueSkillMuChart({ rankings, title, caption, xLabel }) {
   );
 }
 
-/** One labeled board per category, or a single board when the ranking is pooled. */
+/** Category rankings sit in tabs under one question. A single ranking has no tabs. */
 export function TrueSkillBoardStack({ boards, renderBoard }) {
-  return (boards || []).map((board, index) => (
-    <Box key={board.label || `ranking-${index}`} sx={{ mb: (boards || []).length > 1 ? 3 : 0 }}>
-      {board.label ? (
-        <Typography variant="subtitle2" component="h3" sx={{ fontWeight: 700, mt: 1.5 }}>
-          {`Category: ${board.label}`}
-        </Typography>
-      ) : null}
-      {renderBoard(board)}
+  const items = boards || [];
+  const [tab, setTab] = useState(0);
+  if (!items.length) return null;
+  if (items.length === 1) return renderBoard(items[0]);
+  const safeTab = Math.min(tab, items.length - 1);
+  return (
+    <Box>
+      <Tabs
+        value={safeTab}
+        onChange={(_, value) => setTab(value)}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{
+          mt: 1,
+          borderBottom: 1,
+          borderColor: 'divider',
+          minHeight: 40,
+          '& .MuiTab-root': { minHeight: 40, textTransform: 'none', fontSize: 13 },
+        }}
+      >
+        {items.map((board, index) => (
+          <Tab key={board.label || `ranking-${index}`} label={board.label} />
+        ))}
+      </Tabs>
+      {renderBoard(items[safeTab])}
     </Box>
-  ));
+  );
 }
 
 export function TrueSkillTable({
@@ -114,6 +135,8 @@ export function TrueSkillTable({
   const resolvedUrl = useContext(ImageResolverContext);
   const [orderBy, setOrderBy] = useState('mu');
   const [order, setOrder] = useState('desc');
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(TRUESKILL_PAGE_SIZE);
 
   const sorted = useMemo(() => {
     if (!rankings?.length) return [];
@@ -121,6 +144,11 @@ export function TrueSkillTable({
   }, [rankings, orderBy, order]);
 
   if (!rankings?.length) return null;
+
+  const maxPage = Math.max(0, Math.ceil(sorted.length / rowsPerPage) - 1);
+  const safePage = Math.min(page, maxPage);
+  const pageStart = safePage * rowsPerPage;
+  const visible = sorted.slice(pageStart, pageStart + rowsPerPage);
 
   const resolveImg = (row) => {
     if (row.displayUrl) return row.displayUrl;
@@ -130,6 +158,7 @@ export function TrueSkillTable({
   };
 
   const handleSort = (colId) => {
+    setPage(0);
     if (orderBy === colId) {
       setOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
       return;
@@ -193,9 +222,9 @@ export function TrueSkillTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {sorted.map((row, idx) => (
+            {visible.map((row, idx) => (
               <TableRow key={row.imageKey}>
-                <TableCell>{idx + 1}</TableCell>
+                <TableCell>{pageStart + idx + 1}</TableCell>
                 <TableCell>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                     {resolveImg(row) && (
@@ -221,6 +250,21 @@ export function TrueSkillTable({
           </TableBody>
         </Table>
       </TableContainer>
+      {sorted.length > TRUESKILL_PAGE_SIZE && (
+        <TablePagination
+          component="div"
+          count={sorted.length}
+          page={safePage}
+          rowsPerPage={rowsPerPage}
+          rowsPerPageOptions={[10, 25, 50]}
+          onPageChange={(_, nextPage) => setPage(nextPage)}
+          onRowsPerPageChange={(event) => {
+            setRowsPerPage(Number(event.target.value));
+            setPage(0);
+          }}
+          labelRowsPerPage="Rows per page"
+        />
+      )}
     </Box>
   );
 }
