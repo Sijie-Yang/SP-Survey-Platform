@@ -363,6 +363,7 @@ export async function summarizeResponses(env, ctx, projectId, filters = {}) {
   payload.catalogOffset = opts.catalogOffset;
   payload.catalogLimit = opts.catalogLimit;
   payload.projectName = project.name;
+  payload.surveyRevision = payload.scope?.surveyRevision || opts.surveyRevision || null;
   payload.availableRevisions = [...new Set(all.map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))];
   payload.n_total = all.length;
   payload.n_practice = payload.counts?.nPractice ?? 0;

@@ -14,7 +14,11 @@ function mockDatabase(t, { admin = true, project = true, failAdmin = false, fail
     if (path === '/rest/v1/projects') return Response.json(project ? [{ id: 'project-a' }] : []);
     if (path === '/rest/v1/survey_responses') {
       if (failResponses) return Response.json({ message: 'secret row body' }, { status: 500 });
-      return Response.json([{ id: 'response-a', project_id: 'project-a' }]);
+      const select = new URL(url).searchParams.get('select') || '';
+      if (select === 'id,created_at,project_id') {
+        return Response.json([{ id: 'response-a', created_at: '2026-01-01T00:00:00Z', project_id: 'project-a' }]);
+      }
+      return Response.json([{ id: 'response-a', project_id: 'project-a', responses: { q: 1 } }]);
     }
     throw new Error(`Unexpected path ${path}`);
   });
@@ -52,11 +56,15 @@ test('admin access is scoped to the requested project and bounded page', async (
   assert.equal(result.status, 200);
   assert.match(result.headers.get('cache-control') || '', /no-store/);
   assert.equal((await result.json()).responses.length, 1);
-  const url = new URL(db.mock.calls.at(-1).arguments[0]);
-  assert.equal(url.searchParams.get('project_id'), 'eq.project-a');
-  assert.equal(url.searchParams.get('limit'), '1000');
-  assert.equal(url.searchParams.get('offset'), '1000');
-  assert.equal(url.searchParams.get('order'), 'created_at.desc.nullslast,id.desc');
+  const responseUrls = db.mock.calls
+    .map((call) => new URL(call.arguments[0]))
+    .filter((url) => url.pathname === '/rest/v1/survey_responses');
+  assert.equal(responseUrls[0].searchParams.get('project_id'), 'eq.project-a');
+  assert.equal(responseUrls[0].searchParams.get('select'), 'id,created_at,project_id');
+  assert.equal(responseUrls[0].searchParams.get('limit'), '40');
+  assert.equal(responseUrls[0].searchParams.get('offset'), '1000');
+  assert.equal(responseUrls[0].searchParams.get('order'), 'created_at.desc.nullslast,id.desc');
+  assert.ok(responseUrls.some((url) => url.searchParams.get('select') === '*'));
 });
 
 test('missing projects produce a clear not-found result', async (t) => {

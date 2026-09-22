@@ -1,18 +1,20 @@
 import { getUserFromBearer, jsonResponse } from './auth/supabaseJwt.mjs';
 import { supabaseRest } from './supabaseUserClient.mjs';
-import { responseCursorFilter } from '../src/lib/responsePagination.js';
+import { loadSurveyResponsePage } from './surveyResponsePages.mjs';
 
 function newRequestId() {
   return globalThis.crypto?.randomUUID?.() || `admin-results-${Date.now().toString(36)}`;
 }
 
-function logFailure(requestId, status, code, stage) {
+function logFailure(requestId, status, code, stage, extra = {}) {
   console.error(JSON.stringify({
     event: 'admin_project_responses_failed',
     requestId,
     stage,
     code,
     status,
+    ...(extra.supabaseStatus != null ? { supabaseStatus: extra.supabaseStatus } : {}),
+    ...(extra.supabaseCode ? { supabaseCode: extra.supabaseCode } : {}),
   }));
 }
 
@@ -25,8 +27,8 @@ export async function handleAdminResultsRoutes(request, env) {
     status,
     headers: { 'Cache-Control': 'no-store', 'X-Request-Id': requestId },
   });
-  const fail = (status, error, code, stage) => {
-    logFailure(requestId, status, code, stage);
+  const fail = (status, error, code, stage, extra) => {
+    logFailure(requestId, status, code, stage, extra);
     return reply({ error, code, stage }, status);
   };
   if (request.method !== 'GET') return fail(405, 'Method not allowed', 'ADMIN_RESULTS_METHOD', 'method');
@@ -77,17 +79,13 @@ export async function handleAdminResultsRoutes(request, env) {
     if (!projects?.length) return fail(404, '项目不存在或已删除。', 'ADMIN_RESULTS_PROJECT', 'project');
 
     try {
-      const rows = await supabaseRest(env, {
-        path: '/rest/v1/survey_responses', serviceRole: true,
-        query: `?${new URLSearchParams({
-          project_id: `eq.${projectId}`, select: '*',
-          order: 'created_at.desc.nullslast,id.desc', limit: '1000', offset: after ? '0' : String(offset),
-          ...(after ? { or: `(${responseCursorFilter(after)})` } : {}),
-        })}`,
+      const page = await loadSurveyResponsePage((opts) => supabaseRest(env, opts), projectId, { after, offset });
+      return reply({ responses: page.responses, skipped: page.skipped });
+    } catch (err) {
+      return fail(500, '无法加载项目答卷，请稍后重试。', 'ADMIN_RESULTS_RESPONSE_QUERY', 'responses', {
+        supabaseStatus: err?.status || null,
+        supabaseCode: err?.code || null,
       });
-      return reply({ responses: rows || [] });
-    } catch {
-      return fail(500, '无法加载项目答卷，请稍后重试。', 'ADMIN_RESULTS_RESPONSE_QUERY', 'responses');
     }
   } catch {
     return fail(500, '无法加载项目答卷，请检查服务配置或稍后重试。', 'ADMIN_RESULTS_UNKNOWN', 'unknown');
