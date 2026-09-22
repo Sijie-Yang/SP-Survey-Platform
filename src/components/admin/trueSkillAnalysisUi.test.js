@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { TrueSkillTable } from './trueSkillAnalysisUi';
+import { ForcedChoicePreferenceAnalysis, MaxDiffAnalysis } from './skillAnalysis';
 
 test('ranking labels use readable filenames while same-name sources remain distinct', () => {
   const urls = ['https://media.test/a/%E8%A1%97%E6%99%AF.jpg?token=first', 'https://media.test/b/%E8%A1%97%E6%99%AF.jpg?token=second'];
@@ -12,6 +13,61 @@ test('ranking labels use readable filenames while same-name sources remain disti
   expect(screen.getByRole('table').textContent).not.toContain('https://');
   expect(screen.getAllByRole('row')).toHaveLength(3);
   expect(rankings.map((row) => row.imageKey)).toEqual(urls);
+});
+
+test('one category per trial shows a separate TrueSkill board for each category', () => {
+  const question = {
+    name: 'fc',
+    mediaAssignmentMode: 'category',
+    mediaCategoryMode: 'single',
+  };
+  const answers = [
+    { answer: { choice: 'A', chosenIndex: 0 }, shown_images: ['park-a.jpg', 'park-b.jpg'], shown_media_categories: ['park'] },
+    { answer: { choice: 'A', chosenIndex: 0 }, shown_images: ['park-a.jpg', 'park-b.jpg'], shown_media_categories: ['park'] },
+    { answer: { choice: 'B', chosenIndex: 1 }, shown_images: ['urban-c.jpg', 'urban-d.jpg'], shown_media_categories: ['urban'] },
+  ];
+  render(<ForcedChoicePreferenceAnalysis answers={answers} question={question} />);
+  expect(screen.getByRole('heading', { name: 'Category: park' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Category: urban' })).toBeTruthy();
+  const tables = screen.getAllByRole('table');
+  expect(tables).toHaveLength(2);
+  expect(tables[0].textContent).toContain('park-a.jpg');
+  expect(tables[0].textContent).not.toContain('urban-c.jpg');
+  expect(tables[1].textContent).toContain('urban-c.jpg');
+  expect(tables[1].textContent).not.toContain('park-a.jpg');
+});
+
+test('other sampling modes keep one TrueSkill board', () => {
+  const question = { name: 'fc', mediaAssignmentMode: 'category', mediaCategoryMode: 'all' };
+  const answers = [
+    { answer: { choice: 'A', chosenIndex: 0 }, shown_images: ['park-a.jpg', 'park-b.jpg'], shown_media_categories: ['park'] },
+    { answer: { choice: 'B', chosenIndex: 1 }, shown_images: ['urban-c.jpg', 'urban-d.jpg'], shown_media_categories: ['urban'] },
+  ];
+  render(<ForcedChoicePreferenceAnalysis answers={answers} question={question} />);
+  expect(screen.queryByRole('heading', { name: /Category:/ })).toBeNull();
+  expect(screen.getAllByRole('table')).toHaveLength(1);
+  expect(screen.getByRole('table').textContent).toContain('park-a.jpg');
+  expect(screen.getByRole('table').textContent).toContain('urban-c.jpg');
+});
+
+test('MaxDiff one-category trials use one board per category', () => {
+  const question = {
+    name: 'bw',
+    mediaAssignmentMode: 'category',
+    mediaCategoryMode: 'single',
+    skillConfig: { mediaCount: 3 },
+  };
+  const answers = [
+    { answer: { bestIndex: 0, worstIndex: 2 }, shown_images: ['park-a.jpg', 'park-b.jpg', 'park-c.jpg'], shown_media_categories: ['park'] },
+    { answer: { bestIndex: 1, worstIndex: 0 }, shown_images: ['urban-c.jpg', 'urban-d.jpg', 'urban-e.jpg'], shown_media_categories: ['urban'] },
+  ];
+  render(<MaxDiffAnalysis answers={answers} question={question} />);
+  expect(screen.getByRole('heading', { name: 'Category: park' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Category: urban' })).toBeTruthy();
+  const tables = screen.getAllByRole('table');
+  expect(tables).toHaveLength(2);
+  expect(tables[0].textContent).toContain('park-a.jpg');
+  expect(tables[0].textContent).not.toContain('urban-d.jpg');
 });
 
 test('Image sorting follows filenames rather than host or folder names', () => {

@@ -8,6 +8,20 @@ import {
   computeMaxDiffTrueSkill,
 } from './trueskill.js';
 
+function describeTrueSkillExport(question, result, kind = '') {
+  const { rankings, matches, splitByCategory, categories } = result || {};
+  if (!rankings?.length) return null;
+  const title = question.title || question.name;
+  const kindLabel = kind ? ` (${kind})` : '';
+  if (splitByCategory && categories?.length) {
+    const labels = categories.map((board) => board.label).filter(Boolean).join(', ');
+    return `"${title}"${kindLabel}: separate TrueSkill rankings for ${labels} `
+      + `(${rankings.length} images, ${matches.length} pairwise comparisons)`;
+  }
+  return `"${title}"${kindLabel}: ${rankings.length} images rated across `
+    + `${matches.length} pairwise comparisons`;
+}
+
 function questionTypeLabel(type) {
   const labels = {
     imagepicker: 'pairwise image choice',
@@ -175,24 +189,9 @@ export function generateMethodsText({
   }
 
   const tsLines = [
-    ...pairwiseQs.map((q) => {
-      const { rankings, matches } = computeQuestionTrueSkill(effective, q.name);
-      if (!rankings.length) return null;
-      return `"${q.title || q.name}": ${rankings.length} images rated across `
-        + `${matches.length} pairwise comparisons`;
-    }),
-    ...forcedChoiceQs.map((q) => {
-      const { rankings, matches } = computeForcedChoiceTrueSkill(effective, q.name);
-      if (!rankings.length) return null;
-      return `"${q.title || q.name}" (forced-choice A/B): ${rankings.length} images rated across `
-        + `${matches.length} pairwise comparisons`;
-    }),
-    ...maxDiffQs.map((q) => {
-      const { rankings, matches } = computeMaxDiffTrueSkill(effective, q.name);
-      if (!rankings.length) return null;
-      return `"${q.title || q.name}" (best–worst): ${rankings.length} images rated across `
-        + `${matches.length} pairwise comparisons`;
-    }),
+    ...pairwiseQs.map((q) => describeTrueSkillExport(q, computeQuestionTrueSkill(effective, q.name, q))),
+    ...forcedChoiceQs.map((q) => describeTrueSkillExport(q, computeForcedChoiceTrueSkill(effective, q.name, q), 'forced-choice A/B')),
+    ...maxDiffQs.map((q) => describeTrueSkillExport(q, computeMaxDiffTrueSkill(effective, q.name, q), 'best–worst')),
   ].filter(Boolean);
   if (tsLines.length) {
     lines.push('');

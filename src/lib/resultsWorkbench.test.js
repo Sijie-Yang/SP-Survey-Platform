@@ -59,6 +59,41 @@ describe('results workbench engine', () => {
     expect(report.limitations.some((line) => line.includes('significantly'))).toBe(true);
   });
 
+  test('one category per trial fits TrueSkill inside each category', () => {
+    const question = {
+      ...picker,
+      mediaAssignmentMode: 'category',
+      mediaCategoryMode: 'single',
+    };
+    const rows = [
+      row('1', {
+        ab: {
+          trials: [
+            { answer: 'park-a.jpg', shown_images: ['park-a.jpg', 'park-b.jpg'], shown_media_categories: ['park'] },
+            { answer: 'park-a.jpg', shown_images: ['park-a.jpg', 'park-b.jpg'], shown_media_categories: ['park'] },
+            { answer: 'park-a.jpg', shown_images: ['park-a.jpg', 'park-b.jpg'], shown_media_categories: ['park'] },
+            { answer: 'urban-c.jpg', shown_images: ['urban-c.jpg', 'urban-d.jpg'], shown_media_categories: ['urban'] },
+          ],
+        },
+      }),
+    ];
+    const report = buildTrueSkillReport(question, rows);
+    expect(report.splitByCategory).toBe(true);
+    expect(report.warnings).not.toContain('disconnected_comparison_groups');
+    expect(report.categories.map((board) => board.label)).toEqual(['park', 'urban']);
+    for (const board of report.categories) {
+      expect(board.rankings[0].rank).toBe(1);
+      expect(board.rankings[0].muStd5).toBeCloseTo(5);
+      expect(board.rankings[1].muStd5).toBeCloseTo(0);
+    }
+    const pooled = buildTrueSkillReport({ ...question, mediaCategoryMode: 'all' }, rows);
+    expect(pooled.splitByCategory).toBe(false);
+    expect(pooled.warnings).toContain('disconnected_comparison_groups');
+    const urban = pooled.rankings.find((item) => item.imageKey === 'urban-c.jpg');
+    expect(urban.rank).toBeGreaterThan(1);
+    expect(urban.muStd5).toBeLessThan(5);
+  });
+
   test('disconnected comparison groups are flagged', () => {
     const rows = [
       row('1', { ab: 'a.jpg' }, { displayed_images: { ab: ['a.jpg', 'b.jpg'] } }),

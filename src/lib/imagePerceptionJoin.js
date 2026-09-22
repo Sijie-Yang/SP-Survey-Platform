@@ -15,6 +15,8 @@ import {
   computeMaxDiffTrueSkill,
   computeTrueSkillFromMatches,
   matchesFromOrderedRanking,
+  attachMatchCategory,
+  splitsTrueSkillByCategory,
 } from './trueskill';
 import { expandQuestionAnswerUnits } from './responseAnswerUnits';
 import { isForcedChoiceSkill, isMaxDiffSkill } from './skillMediaUtils';
@@ -89,11 +91,13 @@ function extractAnswerPayloads(row, questionName) {
     answer: u.answer,
     shown: u.shown_images,
     shownIds: u.shown_media_ids?.length ? u.shown_media_ids : null,
+    shown_media_categories: u.shown_media_categories,
     trial_index: u.trial_index,
     qData: {
       answer: u.answer,
       shown_images: u.shown_images,
       shown_media_ids: u.shown_media_ids,
+      shown_media_categories: u.shown_media_categories,
     },
   }));
 }
@@ -346,14 +350,14 @@ function aggregateRatingLike(responses, questionName, pool, toScore) {
   return byMedia;
 }
 
-function aggregateTrueSkillPicker(responses, questionName, pool, { mode = 'picker' } = {}) {
+function aggregateTrueSkillPicker(responses, questionName, pool, { mode = 'picker', question = null } = {}) {
   let rankings;
   if (mode === 'forcedChoice') {
-    ({ rankings } = computeForcedChoiceTrueSkill(responses || [], questionName));
+    ({ rankings } = computeForcedChoiceTrueSkill(responses || [], questionName, question));
   } else if (mode === 'maxdiff') {
-    ({ rankings } = computeMaxDiffTrueSkill(responses || [], questionName));
+    ({ rankings } = computeMaxDiffTrueSkill(responses || [], questionName, question));
   } else {
-    ({ rankings } = computeQuestionTrueSkill(responses || [], questionName));
+    ({ rankings } = computeQuestionTrueSkill(responses || [], questionName, question));
   }
   return (rankings || []).map((r) => {
     const mediaId = resolveMediaIdFromKey(r.imageKey, pool);
@@ -370,7 +374,7 @@ function aggregateTrueSkillPicker(responses, questionName, pool, { mode = 'picke
   }).filter((r) => r.mediaId);
 }
 
-function aggregateTrueSkillRanking(responses, questionName, pool) {
+function aggregateTrueSkillRanking(responses, questionName, pool, question = null) {
   const allMatches = [];
   for (const row of responses || []) {
     for (const payload of extractAnswerPayloads(row, questionName)) {
@@ -380,10 +384,12 @@ function aggregateTrueSkillRanking(responses, questionName, pool) {
         .map((v) => resolveImageChoiceKey(v, payload.shown))
         .filter(Boolean);
       if (keys.length < 2) continue;
-      allMatches.push(...matchesFromOrderedRanking(keys));
+      allMatches.push(...attachMatchCategory(matchesFromOrderedRanking(keys), payload.shown_media_categories));
     }
   }
-  const { rankings } = computeTrueSkillFromMatches(allMatches);
+  const { rankings } = computeTrueSkillFromMatches(allMatches, {
+    splitByCategory: splitsTrueSkillByCategory(question),
+  });
   return (rankings || []).map((r) => {
     const mediaId = resolveMediaIdFromKey(r.imageKey, pool);
     const hit = (pool || []).find((m) => getMediaId(m) === mediaId);
@@ -475,16 +481,16 @@ export function aggregatePerceptionByMedia(responses, question, pool = [], attri
   const name = question.name;
 
   if (type === 'imagepicker') {
-    return aggregateTrueSkillPicker(responses, name, pool);
+    return aggregateTrueSkillPicker(responses, name, pool, { question });
   }
   if (type === 'skillquestion' && isForcedChoiceSkill(question.skillId)) {
-    return aggregateTrueSkillPicker(responses, name, pool, { mode: 'forcedChoice' });
+    return aggregateTrueSkillPicker(responses, name, pool, { mode: 'forcedChoice', question });
   }
   if (type === 'skillquestion' && isMaxDiffSkill(question.skillId)) {
-    return aggregateTrueSkillPicker(responses, name, pool, { mode: 'maxdiff' });
+    return aggregateTrueSkillPicker(responses, name, pool, { mode: 'maxdiff', question });
   }
   if (type === 'imageranking' || type === 'image_ranking' || type === 'mediaranking') {
-    return aggregateTrueSkillRanking(responses, name, pool);
+    return aggregateTrueSkillRanking(responses, name, pool, question);
   }
   if (type === 'imagerating' || type === 'image_rating' || type === 'mediarating') {
     return finalizeMediaScores(

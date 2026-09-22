@@ -86,7 +86,7 @@ test('holdout and CV each retain training-only preprocessing metadata', async ()
     expect(result.preprocessing).toHaveLength(folds);
     expect(result.results[0].failed).toBe(false);
   }
-  expect(buildManifest({ responses: [] }).analysis_algorithm_version).toBe('2026-09-10.1');
+  expect(buildManifest({ responses: [] }).analysis_algorithm_version).toBe('2026-09-22.1');
 });
 
 
