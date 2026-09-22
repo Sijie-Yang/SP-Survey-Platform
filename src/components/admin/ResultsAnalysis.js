@@ -2478,6 +2478,7 @@ export default function ResultsAnalysis({
   const fetchSequence = React.useRef(0);
   const [error, setError] = useState(null);
   const [errorMeta, setErrorMeta] = useState(null);
+  const [loadSkipped, setLoadSkipped] = useState([]);
   const [loadSource, setLoadSource] = useState(null);
   const [searchText, setSearchText] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -2561,21 +2562,28 @@ export default function ResultsAnalysis({
     setLoadProgress(null);
     setError(null);
     setErrorMeta(null);
+    setLoadSkipped([]);
     try {
       if ((adminMode || platformSupabase) && currentProject?.id) {
         const all = await readAllResponsePages(async (offset, after) => {
           if (adminMode) return fetchAdminResponsePage(currentProject.id, 0, after);
-          let query = platformSupabase
-            .from('survey_responses').select('*').eq('project_id', currentProject.id)
-            .order('created_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false })
-            .limit(1000);
-          if (after) query = query.or(responseCursorFilter(after));
-          const { data, error: sbError } = await query;
-          if (sbError) throw sbError;
-          return data || [];
+          let lastError = null;
+          for (const limit of [50, 10, 1]) {
+            let query = platformSupabase
+              .from('survey_responses').select('*').eq('project_id', currentProject.id)
+              .order('created_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false })
+              .limit(limit);
+            if (after) query = query.or(responseCursorFilter(after));
+            const { data, error: sbError } = await query;
+            if (!sbError) return data || [];
+            lastError = sbError;
+          }
+          throw lastError;
         }, { cancelled: () => sequence !== fetchSequence.current,
-          onProgress: (loaded) => setLoadProgress({ loaded, page: Math.ceil(loaded / 1000) }) });
-        setResponses(all);
+          onProgress: (loaded) => setLoadProgress({ loaded, page: Math.ceil(loaded / 50) }) });
+        const skipped = all.filter((row) => row?._unreadable);
+        setResponses(all.filter((row) => !row?._unreadable));
+        setLoadSkipped(skipped);
         setLoadSource('supabase');
       } else {
         // Self-hosted fallback: local file server
@@ -3010,6 +3018,13 @@ export default function ResultsAnalysis({
               {errorMeta.stage ? ` · ${errorMeta.stage}` : ''}
             </Typography>
           )}
+        </Alert>
+      )}
+      {!error && loadSkipped.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {language === 'zh'
+            ? `有 ${loadSkipped.length} 份答卷过大或无法解析，已跳过。其余答卷仍可分析。`
+            : `${loadSkipped.length} response(s) were too large or unreadable and were skipped. The remaining responses are still available.`}
         </Alert>
       )}
 

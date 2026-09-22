@@ -30,6 +30,17 @@ test('platform admin reads the selected project through the admin API without de
   expect(saveProjectFull).not.toHaveBeenCalled();
 });
 
+test('unreadable admin rows are skipped so the rest of the project still loads', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce([
+    ...responses,
+    { id: 'bad', _unreadable: true, _unreadableReason: 'oversized_or_timeout', responses: {} },
+  ]).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project' }} surveyConfig={config} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  expect(screen.getByText(/too large or unreadable/i)).toBeTruthy();
+  expect(screen.queryByText(/Failed to load responses/)).toBeNull();
+});
+
 test('admin permission errors are shown instead of falling back to local responses', async () => {
   const denied = new Error('仅平台管理员可以查看此项目的答卷。');
   denied.requestId = 'req-admin-forbidden';
