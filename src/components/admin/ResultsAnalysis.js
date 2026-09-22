@@ -83,6 +83,9 @@ import {
   computeQuestionTrueSkill,
   computeTrueSkillFromMatches,
   matchesFromOrderedRanking,
+  attachMatchCategory,
+  splitsTrueSkillByCategory,
+  trueSkillBoards,
 } from '../../lib/trueskill';
 import { average, pct, wilsonCI } from '../../lib/stats';
 import { computeBordaScores, kendallW, interpretKendallW } from '../../lib/rankingStats';
@@ -116,6 +119,7 @@ import { getPresetSkillAnalysis } from './skillAnalysis';
 import {
   TrueSkillMuChart,
   TrueSkillTable,
+  TrueSkillBoardStack,
   TRUESKILL_SORT_COLUMNS,
   RANKING_EXTRA_COLUMNS,
 } from './trueSkillAnalysisUi';
@@ -605,12 +609,12 @@ function ImageMatrixAttributeTabs({ question, answers, getImageUrl }) {
 
 function ImagePickerDistribution({ question, allResponses }) {
   const trueskillResult = useMemo(() => {
-    if (!allResponses?.length || !question?.name) return { matches: [], rankings: [] };
+    if (!allResponses?.length || !question?.name) return { matches: [], rankings: [], splitByCategory: false, categories: [] };
     const eligible = responsesEligibleForQuestion(question.name, allResponses);
-    return computeQuestionTrueSkill(eligible, question.name);
-  }, [allResponses, question?.name]);
+    return computeQuestionTrueSkill(eligible, question.name, question);
+  }, [allResponses, question]);
 
-  const { matches, rankings } = trueskillResult;
+  const boards = trueSkillBoards(trueskillResult);
 
   return (
     <Box>
@@ -618,18 +622,31 @@ function ImagePickerDistribution({ question, allResponses }) {
       <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
         TrueSkill (pairwise from selections vs non-selected shown images)
       </Typography>
-      {matches.length === 0 ? (
+      {trueskillResult.matches.length === 0 ? (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Not enough pairwise comparisons for TrueSkill (need participants to select among shown images).
         </Alert>
       ) : (
-        <>
-          <TrueSkillMuChart rankings={rankings} />
-          <TrueSkillTable
-            rankings={rankings}
-            caption="Each selection counts as a win over every non-selected image shown in that trial. Click a column header to sort (default: μ descending)."
-          />
-        </>
+        <TrueSkillBoardStack
+          boards={boards}
+          renderBoard={(board) => (
+            <>
+              <TrueSkillMuChart
+                rankings={board.rankings}
+                title={board.label ? `Relative μ in ${board.label} (0–5)` : undefined}
+                caption={board.label ? 'Min-max of μ inside this category. Blue: density histogram. Orange: fitted normal PDF.' : undefined}
+                xLabel={board.label ? `Relative μ in ${board.label} (0–5)` : undefined}
+              />
+              <TrueSkillTable
+                rankings={board.rankings}
+                title={board.label ? `TrueSkill — ${board.label}` : 'TrueSkill image rankings'}
+                caption={board.label
+                  ? 'Rank and relative μ stay inside this category. Each selection counts as a win over every non-selected image in that trial.'
+                  : 'Each selection counts as a win over every non-selected image shown in that trial. Click a column header to sort (default: μ descending).'}
+              />
+            </>
+          )}
+        />
       )}
     </Box>
   );
@@ -973,13 +990,13 @@ function ShownImagesContext({ imageUrls, label }) {
 function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
   const mediaLabel = type === 'mediaranking' ? 'Media' : 'Image';
 
-  const { matches, rankings, kendallWVal } = useMemo(() => {
+  const { matches, rankings, boards, kendallWVal } = useMemo(() => {
     const imageRankPositions = {};
     const imageUrls = {};
     const rankingLists = [];
     const allMatches = [];
 
-    for (const { answer, shown_images: shown } of answers || []) {
+    for (const { answer, shown_images: shown, shown_media_categories: categories } of answers || []) {
       const ranked = Array.isArray(answer) ? answer : [];
       if (!ranked.length) continue;
       const keys = ranked
@@ -993,7 +1010,7 @@ function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
         .filter(Boolean);
       if (keys.length < 2) continue;
       rankingLists.push(keys);
-      allMatches.push(...matchesFromOrderedRanking(keys));
+      allMatches.push(...attachMatchCategory(matchesFromOrderedRanking(keys), categories));
       keys.forEach((key, rankIdx) => {
         if (!imageRankPositions[key]) imageRankPositions[key] = [];
         imageRankPositions[key].push(rankIdx + 1);
@@ -1004,7 +1021,10 @@ function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
     const nItems = items.length;
     const w = kendallW(rankingLists, items);
     const bordaMap = computeBordaScores(imageRankPositions, nItems);
-    const { matches: m, rankings: tsRows } = computeTrueSkillFromMatches(allMatches);
+    const fitted = computeTrueSkillFromMatches(allMatches, {
+      splitByCategory: splitsTrueSkillByCategory(question),
+    });
+    const { matches: m, rankings: tsRows } = fitted;
 
     const byKey = new Map((tsRows || []).map((r) => [r.imageKey, r]));
     // Include images that only appear in rank stats (edge case: single-item lists)
@@ -1039,8 +1059,15 @@ function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
       };
     });
 
-    return { matches: m, rankings: merged, kendallWVal: w };
-  }, [answers]);
+    const boards = trueSkillBoards(fitted).map((board) => ({
+      ...board,
+      rankings: (board.rankings || []).map((row) => merged.find((item) => item.imageKey === row.imageKey) || row),
+    }));
+    if (!fitted.splitByCategory) {
+      boards[0] = { ...boards[0], rankings: merged };
+    }
+    return { matches: m, rankings: merged, boards, kendallWVal: w };
+  }, [answers, question]);
 
   if (!answers?.length || (!rankings.length && !matches.length)) {
     return <Typography variant="body2" color="text.secondary">No responses yet.</Typography>;
@@ -1066,15 +1093,27 @@ function ImageRankingTrueSkillAnalysis({ answers, question, type }) {
       {matches.length === 0 ? (
         <Alert severity="warning">Not enough ranking comparisons for TrueSkill yet.</Alert>
       ) : (
-        <>
-          <TrueSkillMuChart rankings={rankings.filter((r) => r.mu != null)} />
-          <TrueSkillTable
-            rankings={rankings}
-            columns={rankingColumns}
-            title={`${mediaLabel} TrueSkill + ranking stats`}
-            caption="Higher rank beats lower rank in each trial. Avg rank / Borda / n are classical ranking summaries. Default sort: μ descending."
-          />
-        </>
+        <TrueSkillBoardStack
+          boards={boards}
+          renderBoard={(board) => (
+            <>
+              <TrueSkillMuChart
+                rankings={(board.rankings || []).filter((r) => r.mu != null)}
+                title={board.label ? `Relative μ in ${board.label} (0–5)` : undefined}
+                caption={board.label ? 'Min-max of μ inside this category. Blue: density histogram. Orange: fitted normal PDF.' : undefined}
+                xLabel={board.label ? `Relative μ in ${board.label} (0–5)` : undefined}
+              />
+              <TrueSkillTable
+                rankings={board.rankings}
+                columns={rankingColumns}
+                title={board.label ? `${mediaLabel} TrueSkill — ${board.label}` : `${mediaLabel} TrueSkill + ranking stats`}
+                caption={board.label
+                  ? 'TrueSkill rank and relative μ stay inside this category. Avg rank and Borda describe the recorded ranks.'
+                  : 'Higher rank beats lower rank in each trial. Avg rank / Borda / n are classical ranking summaries. Default sort: μ descending.'}
+              />
+            </>
+          )}
+        />
       )}
     </Box>
   );
