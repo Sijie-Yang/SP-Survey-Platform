@@ -334,6 +334,20 @@ describe('review apply, undo, and projection', () => {
     assert.equal(appended.some((event) => event.type === 'review.applied'), false);
   });
 
+  it('marks a cancelled review card as cancelled instead of running', () => {
+    const stream = [
+      { type: 'review.start', payload: { options: { roles: ['scientist', 'participant'] } }, run_id: 'run-9', seq: 1 },
+      { type: 'review.round', payload: { round: 1, status: 'start' }, run_id: 'run-9', seq: 2 },
+      { type: 'review.role', payload: { round: 1, role: 'scientist', status: 'completed', rating: 7 }, run_id: 'run-9', seq: 3 },
+      { type: 'review.role', payload: { round: 1, role: 'participant', status: 'start' }, run_id: 'run-9', seq: 4 },
+      { type: 'run.status', payload: { status: 'cancelled' }, run_id: 'run-9', seq: 5 },
+    ];
+    const card = eventsToUiMessages(stream).find((message) => message.metadata?.review);
+    assert.equal(card.metadata.review.status, 'cancelled');
+    assert.equal(card.metadata.review.rounds[0].reviews[1].status, 'cancelled');
+    assert.equal(card.metadata.review.active, null);
+  });
+
   it('projects a persistent review card and keeps reviewer text out of chat and model history', async () => {
     const { events } = await proposedEvents();
     const stream = [
