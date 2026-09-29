@@ -34,8 +34,46 @@ a semantic test.
   unless the user explicitly requests a complete redesign.
 - `question`: read-only registry; mutation tools are not sent to the model.
 
+- `review`: multi-agent review. Only this mode is multi-agent; the other four
+  are unchanged. See below.
+
 The selected mode is stored on sessions/runs when the current migration is
 installed and is always present in append-only events.
+
+## Review mode
+
+`POST /api/agent/chat` with `assistantMode: "review"` and
+`review: { roles, method, maxRounds, threshold, applyMode, maxRoles }`.
+
+- Roles: `scientist`, `participant`, `planner`, `psychologist`, `analyst`
+  (all on by default; `maxRoles` caps how many may run).
+- `method`: `linear` (each role reviews independently, in sequence) or
+  `group` (round-robin discussion; each role sees the earlier turns).
+- Each round, every role runs as a `runToolLoop` sub-run in the same run with
+  read-only tools (`survey_capabilities`, `survey_get_draft`,
+  `survey_validate`, `survey_answerability`, `survey_preflight`) and submits a
+  rating and comments through `review_submit`. One reviewer failing is
+  recorded and the rest continue.
+- Average rating ≥ `threshold` → Accept and stop. Otherwise a revision
+  sub-run produces Summary, Planning, and Revise (design-protocol operations,
+  dry-run and validated server-side through `review_submit_revision`).
+- `applyMode: "apply"` saves each round through the Adjust-mode
+  `survey_apply_operations` tool with `expectedDraftUpdatedAt`; a conflict
+  stops the review. `applyMode: "review"` re-reviews the unsaved candidate;
+  the user applies proposals later, in order, with
+  `POST /api/agent/runs/:id/review/apply { rounds }` (same apply tool and
+  concurrency check). The browser keeps its usual undo snapshot.
+- `POST /api/agent/review/estimate` returns model-call, token, and USD bounds
+  (catalog pricing) before a run. The server stops a run at 1.5× the upper
+  token bound. Queue deliveries still process at most three model/tool steps;
+  review state is checkpointed between them.
+- Progress, ratings, comments, and revisions are `review.*` events in the
+  session stream, so the chat card survives reloads. Reviewer sub-run events
+  carry `payload.review` and are excluded from later model history; the
+  `review.result` summary is kept.
+
+Apply the updated `supabase/ai_runtime.sql` so `ai_sessions.assistant_mode`
+accepts `review`. Older schemas fall back to event-derived mode.
 
 ## Durable lifecycle
 

@@ -88,7 +88,9 @@ export async function runToolLoop({
   stepBudget = Number.POSITIVE_INFINITY,
   stopReasonOverride = '',
   writeTools = DEFAULT_WRITE_TOOLS,
+  terminalTools = [],
 }) {
+  const terminalToolNames = new Set(terminalTools || []);
   const writeToolNames = new Set(writeTools?.length ? writeTools : DEFAULT_WRITE_TOOLS);
   const defaultWriteTool = [...writeToolNames][0];
   const isWriteTool = (name) => writeToolNames.has(name);
@@ -476,6 +478,11 @@ export async function runToolLoop({
       workSteps += 1;
 
       if (cancelled) throw cancelledError();
+      if (terminalToolNames.size && outcomes.some((outcome) => outcome.ok && terminalToolNames.has(outcome.name))) {
+        terminalReason = 'terminal_tool';
+        terminal = true;
+        break;
+      }
       if (stagnated) {
         throw Object.assign(
           new Error(`Agent stopped after ${repeatedFingerprint} identical tool steps without progress.`),

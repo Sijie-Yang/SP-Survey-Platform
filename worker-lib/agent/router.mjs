@@ -14,6 +14,7 @@ import {
   deleteProviderCredential,
   getCredentialStatus,
   listProviderProfiles,
+  resolveAssistantBinding,
   saveProviderProfile,
   saveUserAiSettings,
   storeCredential,
@@ -22,8 +23,14 @@ import {
 import { handleAgentChat } from './chatHandler.mjs';
 import { useAgentRuntime } from './runtime/flags.mjs';
 import { startDesignerRun } from './runtime/designerChat.mjs';
-import { assistantModeFromEvents, normalizeAssistantMode } from './runtime/modes.mjs';
 import {
+  applyAssistantModeToTools,
+  assistantModeFromEvents,
+  getAssistantModePolicy,
+  normalizeAssistantMode,
+} from './runtime/modes.mjs';
+import {
+  appendEvent,
   archiveSession,
   cancelRun,
   discardSessionInput,
@@ -43,7 +50,10 @@ import {
 import { dispatchAgentRun } from './runtime/runDispatcher.mjs';
 import { eventsToUiMessages, PROVIDERS } from './runtime/index.mjs';
 import { PROTOCOLS, CATALOG_VERSION } from './runtime/catalog.mjs';
-import { publicCatalog } from './runtime/registry.mjs';
+import { publicCatalog, resolveModel } from './runtime/registry.mjs';
+import { estimateReviewCost, normalizeReviewOptions, REVIEW_ROLES } from './runtime/review.mjs';
+import { applyReviewRevisions } from './runtime/reviewRun.mjs';
+import { createDesignerTools } from './runtime/designerTools.mjs';
 import { listProviderModels } from './runtime/providers.mjs';
 import { assertCustomProviderDraft, assertProtocol } from './runtime/validators.mjs';
 import { loadProviderCredential } from './credentials.mjs';
@@ -631,6 +641,61 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
       if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
       const sessionId = decodeURIComponent(pathname.slice('/api/agent/sessions/'.length));
       return jsonResponse(await archiveSession(env, auth.userId, sessionId));
+    }
+    if (pathname === '/api/agent/review/estimate' && request.method === 'POST') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const body = await request.json();
+      const options = normalizeReviewOptions(body?.review);
+      const provider = String(body?.provider || '');
+      const model = String(body?.model || '');
+      const profiles = await listProviderProfiles(env, auth.userId);
+      const binding = provider && model
+        ? await resolveAssistantBinding(env, auth.userId, provider, model, { receiverProfiles: profiles })
+        : null;
+      const modelRecord = binding ? resolveModel(provider, model, binding.profile) : null;
+      let surveyConfig = null;
+      if (body?.projectId) {
+        const draft = await getDraft(env, auth.accessToken, body.projectId, request).catch(() => null);
+        surveyConfig = draft?.surveyConfig || null;
+      }
+      const estimate = estimateReviewCost({ options, surveyConfig, cost: modelRecord?.cost || null });
+      return jsonResponse({
+        success: true,
+        ...estimate,
+        roles: REVIEW_ROLES.map(({ id, name, emoji }) => ({ id, name, emoji })),
+        route: binding ? { provider, model, source: binding.source } : null,
+      });
+    }
+    if (pathname.startsWith('/api/agent/runs/') && pathname.endsWith('/review/apply') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));
+      const runId = decodeURIComponent(pathname.slice('/api/agent/runs/'.length, -'/review/apply'.length));
+      const run = await getOwnedRun(env, auth.userId, runId);
+      if (!run) return errorResponse(Object.assign(new Error('Run not found'), { status: 404 }));
+      const body = await request.json().catch(() => ({}));
+      const events = await listEvents(env, run.session_id);
+      const applyTool = applyAssistantModeToTools(createDesignerTools({
+        env,
+        accessToken: auth.accessToken,
+        projectId: run.project_id,
+        request,
+        writerSource: 'assistant',
+        assistantMode: 'adjust',
+      }), getAssistantModePolicy('adjust')).find((tool) => tool.name === 'survey_apply_operations');
+      const applied = await applyReviewRevisions({
+        events,
+        runId,
+        rounds: Array.isArray(body?.rounds) ? body.rounds : [],
+        applyTool,
+        appendEvent: (event) => appendEvent(env, {
+          sessionId: run.session_id,
+          runId,
+          type: event.type,
+          payload: event.payload,
+        }),
+        ctx: { userId: auth.userId, projectId: run.project_id, assistantMode: 'review' },
+      });
+      const nextEvents = await listEvents(env, run.session_id);
+      return jsonResponse({ ...applied, messages: eventsToUiMessages(nextEvents) });
     }
     if (pathname.startsWith('/api/agent/runs/') && pathname.endsWith('/cancel') && request.method === 'POST') {
       if (auth.kind !== 'supabase') return errorResponse(Object.assign(new Error('Forbidden'), { status: 403 }));

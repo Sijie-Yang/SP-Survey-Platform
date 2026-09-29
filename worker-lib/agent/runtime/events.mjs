@@ -1,3 +1,5 @@
+import { reviewFromEvents } from './review.mjs';
+
 /**
  * Stable SP-Survey Agent Runtime event protocol.
  * Inspired by DeepSeek Harness append-only session logs (MIT), not a wire clone.
@@ -30,7 +32,26 @@ export const EVENT_TYPES = [
   'error',
   'model.selection',
   'llm.retry',
+  'review.start',
+  'review.round',
+  'review.role',
+  'review.revision',
+  'review.applied',
+  'review.result',
 ];
+
+const REVIEW_UI_EVENTS = new Set([
+  'review.start',
+  'review.round',
+  'review.role',
+  'review.revision',
+  'review.applied',
+  'review.result',
+]);
+
+function isReviewSubRunEvent(ev) {
+  return Boolean(ev?.payload?.review && typeof ev.payload.review === 'object');
+}
 
 export function createEvent(type, payload = {}, extras = {}) {
   if (!EVENT_TYPES.includes(type)) {
@@ -106,12 +127,13 @@ export function eventsToUiMessages(events = []) {
   const messages = [];
   let assistant = null;
   const runStatus = new Map();
+  const reviewCards = new Map();
   for (const ev of events) {
     const runId = ev.runId || ev.run_id || ev.payload?.runId || null;
     if (ev.type === 'run.status' && ev.payload?.status && runId) {
       runStatus.set(runId, ev.payload.status);
     }
-    if (ev.type === 'user.message' || ev.type === 'steering.message') {
+    if (ev.type === 'user.message' || (ev.type === 'steering.message' && !isReviewSubRunEvent(ev))) {
       assistant = null;
       const taskStatus = ev.payload?.taskStatus
         || (ev.payload?.questionModeWriteRefused ? 'rejected' : null);
@@ -128,6 +150,40 @@ export function eventsToUiMessages(events = []) {
           runId,
         },
       });
+    } else if (REVIEW_UI_EVENTS.has(ev.type)) {
+      let card = reviewCards.get(runId);
+      if (!card || ev.type === 'review.start') {
+        card = {
+          id: `event-${ev.seq ?? messages.length}`,
+          role: 'assistant',
+          content: '',
+          tools: [],
+          runId,
+          createdAt: ev.createdAt || ev.created_at,
+        };
+        messages.push(card);
+        reviewCards.set(runId, card);
+      }
+      assistant = card;
+      card.reviewEvents = [...(card.reviewEvents || []), { ...ev, runId }];
+      card.metadata = {
+        ...(card.metadata || {}),
+        actionType: 'review',
+        review: reviewFromEvents(card.reviewEvents, runId),
+      };
+      if (ev.type === 'review.result' && ev.payload?.summary) {
+        card.content = String(ev.payload.summary);
+      }
+    } else if (ev.type === 'steering.message' && isReviewSubRunEvent(ev)) {
+      const card = reviewCards.get(runId);
+      if (card) {
+        card.metadata = {
+          ...(card.metadata || {}),
+          steering: [...(card.metadata?.steering || []), ev.payload?.content || ''],
+        };
+      }
+    } else if ((ev.type === 'assistant.delta' || ev.type === 'assistant.message') && isReviewSubRunEvent(ev)) {
+      continue;
     } else if (ev.type === 'assistant.delta' || ev.type === 'assistant.message') {
       if (!assistant) {
         assistant = {
@@ -159,6 +215,14 @@ export function eventsToUiMessages(events = []) {
           prior.metadata = { ...(prior.metadata || {}), taskStatus: 'rejected' };
         }
       }
+    } else if (ev.type === 'tool.call' && isReviewSubRunEvent(ev) && reviewCards.get(runId)) {
+      reviewCards.get(runId).tools.push({
+        name: ev.payload?.name,
+        args: ev.payload?.args,
+        status: 'running',
+        id: ev.payload?.id,
+        review: ev.payload.review,
+      });
     } else if (ev.type === 'tool.call') {
       if (!assistant) {
         assistant = {
@@ -176,6 +240,7 @@ export function eventsToUiMessages(events = []) {
         args: ev.payload?.args,
         status: 'running',
         id: ev.payload?.id,
+        ...(isReviewSubRunEvent(ev) ? { review: ev.payload.review } : {}),
         diagnostics: {
           receivedShape: ev.payload?.receivedShape,
           rawArgsComplete: ev.payload?.rawArgsComplete,
@@ -193,7 +258,8 @@ export function eventsToUiMessages(events = []) {
         repairLimit: ev.payload?.repairLimit,
       };
     } else if (ev.type === 'tool.result' || ev.type === 'tool.outcome.unknown') {
-      const tool = findUiTool(assistant?.tools, ev.payload);
+      const owner = (isReviewSubRunEvent(ev) && reviewCards.get(runId)) || assistant;
+      const tool = findUiTool(owner?.tools, ev.payload);
       if (tool) {
         tool.status = ev.type === 'tool.outcome.unknown' || ev.payload?.outcome === 'unknown'
           ? 'unknown'
@@ -252,6 +318,9 @@ export function eventsToUiMessages(events = []) {
     if (!message.metadata?.taskStatus) {
       message.metadata = { ...(message.metadata || {}), taskStatus: 'unknown' };
     }
+  }
+  for (const message of messages) {
+    if (message.reviewEvents) delete message.reviewEvents;
   }
   return messages;
 }
@@ -321,6 +390,12 @@ export function eventsToModelMessages(events = [], {
 
   for (const event of events || []) {
     const payload = event?.payload || {};
+    if (isReviewSubRunEvent(event)) continue;
+    if (event?.type === 'review.result') {
+      boundary();
+      if (payload.summary) messages.push({ role: 'assistant', content: String(payload.summary) });
+      continue;
+    }
     if (event?.type === 'user.message' || event?.type === 'steering.message') {
       boundary();
       messages.push({

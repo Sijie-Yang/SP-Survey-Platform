@@ -44,6 +44,8 @@ import { parseGenerateGoals } from './generateGoals.mjs';
 import { dispatchAgentRun } from './runDispatcher.mjs';
 import { requestRunApproval } from './approvals.mjs';
 import { verifySavedDraft } from './draftVerify.mjs';
+import { runReviewRun } from './reviewRun.mjs';
+import { normalizeReviewOptions } from './review.mjs';
 import {
   annotateHistoryForModel,
   classifyUserIntent,
@@ -106,6 +108,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
   const message = String(body?.message || '').trim();
   if (!message) throw Object.assign(new Error('message is required'), { status: 400 });
   const assistantMode = normalizeAssistantMode(body?.assistantMode);
+  const reviewOptions = assistantMode === 'review' ? normalizeReviewOptions(body?.review) : null;
   const intent = classifyUserIntent(message, assistantMode);
   const draftRequestedByGoal = intent.draftWrite || requestsContinuePriorTask(message);
   const modePolicy = getAssistantModePolicy(assistantMode, {
@@ -381,9 +384,60 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
     ? `\nResults analysisScope (authoritative; do not silently change it):\n${JSON.stringify(resultsScope)}\nCall survey_results_summary with this scope. Platform computes statistics including TrueSkill. Explain numbers; never invent methods, significance, or causal claims. Results tasks are read-only: do not save, publish, or delete. survey_export_responses returns a downloadable file, not CSV text to quote.`
     : '';
   const draftRequested = modePolicy.requireDraftChange;
+  const loopConfig = {
+    apiKey: cred.apiKey,
+    provider: cred.provider,
+    baseUrl: route.baseUrl,
+    model,
+    modelRecord,
+    protocol: route.protocol,
+    compat: resolved.catalog
+      ? (modelRecord?.compat || {})
+      : { ...resolved.compat, ...(modelRecord?.compat || {}) },
+    extra: route.headers,
+    retryPolicy: resolved.retryPolicy,
+    effort,
+    efforts: modelRecord?.reasoningEfforts || false,
+    temperature,
+    maxTokens,
+  };
+  const checkCancelled = createRunCancellationCheck(env, run.id, {
+    signal: request?.signal,
+    claimedBy: body?._claimedBy || `inline:${run.id}`,
+  });
 
   try {
-    const result = await runToolLoop({
+    const result = assistantMode === 'review' ? await runReviewRun({
+      loopConfig,
+      baseTools: coreTools,
+      applyTool: applyAssistantModeToTools(createDesignerTools({
+        env,
+        accessToken: body?.accessToken,
+        projectId,
+        getProjectId: () => boundProjectId,
+        request,
+        writerSource: 'assistant',
+        ownerUserId: body?._sessionPrepared ? userId : null,
+        assistantMode: 'adjust',
+      }), getAssistantModePolicy('adjust')).find((tool) => tool.name === 'survey_apply_operations'),
+      options: reviewOptions,
+      checkpoint: body?._checkpoint || null,
+      stepBudget: body?._sessionPrepared ? 3 : Number.POSITIVE_INFINITY,
+      emit,
+      checkCancelled,
+      readInbox: () => claimSessionInput(env, session.id).catch(() => []),
+      ctx: {
+        permission: 'ask',
+        userId,
+        projectId,
+        assistantMode,
+        ...createToolExecutionHooks(env, run.id),
+      },
+      userRequest: message,
+      researchContext: body?.researchContext || null,
+      language: body?.language === 'zh' ? 'Chinese (简体中文)' : '',
+      runId: run.id,
+    }) : await runToolLoop({
       apiKey: cred.apiKey,
       provider: cred.provider,
       baseUrl: route.baseUrl,
@@ -438,10 +492,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       writeTools: assistantMode === 'generate'
         ? ['survey_submit_generated_draft']
         : ['survey_apply_operations'],
-      checkCancelled: createRunCancellationCheck(env, run.id, {
-        signal: request?.signal,
-        claimedBy: body?._claimedBy || `inline:${run.id}`,
-      }),
+      checkCancelled,
       readInbox: () => claimSessionInput(env, session.id).catch(() => []),
       checkpoint: body?._checkpoint || null,
       stepBudget: body?._sessionPrepared ? 3 : Number.POSITIVE_INFINITY,
@@ -560,7 +611,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       completion_tokens: result.usage.completion_tokens || 0,
       result: {
         assistantMode,
-        intent: intent.goal || modePolicy.responseIntent
+        intent: (assistantMode === 'review' ? 'review' : intent.goal) || modePolicy.responseIntent
           || (result.latestDraft?.surveyConfig ? 'adjust' : 'agent'),
         message: result.content || 'Done.',
         draftUpdatedAt: result.latestDraft?.draftUpdatedAt || null,
@@ -571,6 +622,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
         projectUpdated: projectWriteDone,
         published: publishDone,
         taskStatus: 'completed',
+        ...(result.review ? { review: result.review } : {}),
       },
     });
     await emit(createEvent('run.status', {
@@ -658,6 +710,8 @@ function queuedBody(body = {}) {
     max_tokens: body.max_tokens,
     researchContext: body.researchContext || {},
     editorContext: body.editorContext || null,
+    ...(body.review ? { review: body.review } : {}),
+    ...(body.language ? { language: body.language } : {}),
   };
 }
 
