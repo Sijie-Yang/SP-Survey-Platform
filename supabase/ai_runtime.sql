@@ -164,7 +164,7 @@ ALTER TABLE public.ai_sessions
 
 ALTER TABLE public.ai_sessions
   ADD CONSTRAINT ai_sessions_assistant_mode_check
-  CHECK (assistant_mode IN ('agent', 'generate', 'adjust', 'question'));
+  CHECK (assistant_mode IN ('agent', 'generate', 'adjust', 'question', 'review'));
 
 ALTER TABLE public.ai_runs
   DROP CONSTRAINT IF EXISTS ai_runs_status_check;

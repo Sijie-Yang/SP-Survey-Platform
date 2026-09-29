@@ -138,6 +138,8 @@ export async function sendAgentChat({
   onStarted,
   onSnapshot,
   editorContext = null,
+  review = null,
+  language = null,
 }) {
   const started = await agentFetch('/api/agent/chat', {
     method: 'POST',
@@ -157,6 +159,8 @@ export async function sendAgentChat({
       permission,
       assistantMode,
       editorContext,
+      ...(review ? { review } : {}),
+      ...(language ? { language } : {}),
     }),
   });
   if (!started?.success || !started?.queued || !started?.sessionId || !started?.runId) {
@@ -184,6 +188,20 @@ export async function archiveAiSession(sessionId) {
 
 export async function getAiRun(runId) {
   return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function estimateAgentReview({ projectId, provider, model, review }) {
+  return agentFetch('/api/agent/review/estimate', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, provider, model, review }),
+  });
+}
+
+export async function applyAgentReview(runId, rounds = []) {
+  return agentFetch(`/api/agent/runs/${encodeURIComponent(runId)}/review/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ rounds }),
+  });
 }
 
 export async function cancelAiRun(runId) {
