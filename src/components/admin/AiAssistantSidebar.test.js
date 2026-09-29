@@ -190,7 +190,7 @@ describe('AiAssistantSidebar', () => {
     expect(sidebar.contains(input)).toBe(true);
   });
 
-  test('uses three simple settings sections and explains hosted multi-agent availability', async () => {
+  test('uses three simple settings sections and points multi-agent review to Review mode', async () => {
     renderSidebar({ assistant: assistantFixture({ isPlatformMode: true }) });
     fireEvent.click(screen.getByLabelText('Assistant settings'));
 
@@ -203,7 +203,7 @@ describe('AiAssistantSidebar', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
 
     expect(screen.getByText('Multi-agent review')).toBeInTheDocument();
-    expect(screen.getByText(/current hosted Agent Runtime does not support/i)).toBeInTheDocument();
+    expect(screen.getByText(/runs as the Review mode in the Assistant composer/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('Advanced: Agents')).not.toBeInTheDocument());
   });
 });
