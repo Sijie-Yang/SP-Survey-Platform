@@ -290,6 +290,11 @@ export function eventsToUiMessages(events = []) {
         };
       }
     } else if (ev.type === 'run.status' && ['completed', 'failed', 'cancelled'].includes(ev.payload?.status)) {
+      const card = reviewCards.get(runId);
+      if (card) {
+        card.reviewEvents = [...(card.reviewEvents || []), { ...ev, runId }];
+        card.metadata = { ...(card.metadata || {}), review: reviewFromEvents(card.reviewEvents, runId) };
+      }
       assistant?.tools?.forEach((tool) => {
         if (tool.status === 'running') tool.status = 'unknown';
       });
