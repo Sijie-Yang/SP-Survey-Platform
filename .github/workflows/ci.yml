@@ -34,6 +34,15 @@ jobs:
       - name: Admin results authorization tests
         run: node --test worker-lib/adminResults.test.mjs worker-lib/surveyResponsePages.test.mjs worker-lib/agent/skillContracts.test.mjs worker-lib/agent/skillHtmlValidate.test.mjs
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Street-level helper tests (stubbed upstream, no Google traffic)
+        run: |
+          python -m pip install -q "./tools/streetlevel-helper[test]"
+          python -m pytest -q tools/streetlevel-helper
+
       - name: Media pipeline smoke
         run: npm run test:media-pipeline
 
