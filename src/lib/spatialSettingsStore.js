@@ -47,23 +47,11 @@ export async function loadUserSpatialSettings(userId) {
   }
 }
 
-async function loadRawUserSettings(userId) {
-  const { data, error } = await supabase
-    .from('user_spatial_settings')
-    .select('settings_json')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw error;
-  const raw = data?.settings_json;
-  return raw && typeof raw === 'object' ? raw : {};
-}
-
-/** Upsert user-level spatial settings, keeping other keys (e.g. the Mapillary token). */
+/** Upsert user-level spatial settings. */
 export async function saveUserSpatialSettings(userId, spatial) {
   if (!supabase || !userId) return { success: false, skipped: true };
+  const settings = pickSpatialSettings(spatial);
   try {
-    const existing = await loadRawUserSettings(userId).catch(() => ({}));
-    const settings = { ...existing, ...pickSpatialSettings(spatial) };
     const { error } = await supabase.from('user_spatial_settings').upsert({
       user_id: userId,
       settings_json: settings,
@@ -88,45 +76,4 @@ export function coalesceSpatialSettings(projectCfg, userSettings) {
     huggingFaceToken: String(p.huggingFaceToken || u.huggingFaceToken || '').trim(),
     enableSamAssist: p.enableSamAssist != null ? !!p.enableSamAssist : !!u.enableSamAssist,
   };
-}
-
-const MAPILLARY_LOCAL_KEY = 'sp-mapillary-token';
-
-/**
- * Mapillary client token lives on the user row (RLS: owner only), never in project
- * data, because project image_dataset_config is readable by participants.
- * Without Supabase (local dev) it falls back to this browser's localStorage.
- */
-export async function loadUserMapillaryToken(userId) {
-  if (!supabase || !userId) {
-    try { return localStorage.getItem(MAPILLARY_LOCAL_KEY) || ''; } catch { return ''; }
-  }
-  try {
-    const raw = await loadRawUserSettings(userId);
-    return String(raw.mapillaryAccessToken || '').trim();
-  } catch (err) {
-    console.warn('loadUserMapillaryToken:', err.message || err);
-    return '';
-  }
-}
-
-export async function saveUserMapillaryToken(userId, token) {
-  const value = String(token || '').trim();
-  if (!supabase || !userId) {
-    try { localStorage.setItem(MAPILLARY_LOCAL_KEY, value); } catch { /* ignore */ }
-    return { success: true, local: true };
-  }
-  try {
-    const existing = await loadRawUserSettings(userId).catch(() => ({}));
-    const { error } = await supabase.from('user_spatial_settings').upsert({
-      user_id: userId,
-      settings_json: { ...existing, mapillaryAccessToken: value },
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id' });
-    if (error) throw error;
-    return { success: true };
-  } catch (err) {
-    console.warn('saveUserMapillaryToken:', err.message || err);
-    return { success: false, error: err.message || String(err) };
-  }
 }
