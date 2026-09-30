@@ -4,8 +4,8 @@ import {
   expandShortMapsUrl,
   expandShortMapsUrls,
   handleStreetLevelRoutes,
-  isAllowedMapillaryImageUrl,
   isShortMapsUrl,
+  mergeRegistration,
 } from './streetLevel.mjs';
 
 const FINAL = 'https://www.google.com/maps/@48.85,2.29,3a,75y,90h,95t/data=!3m6!1e1!3m4!1sPANO!2e0';
@@ -66,22 +66,18 @@ test('batch expansion keeps order and caps input', async () => {
 
 test('host checks', () => {
   assert.equal(isShortMapsUrl('https://goo.gl/other'), false);
-  assert.equal(isAllowedMapillaryImageUrl('https://scontent-arn2-1.xx.fbcdn.net/m1/v/t6/a.jpg'), true);
-  assert.equal(isAllowedMapillaryImageUrl('https://maps.googleapis.com/maps/api/streetview?x'), false);
-  assert.equal(isAllowedMapillaryImageUrl('http://scontent.xx.fbcdn.net/a.jpg'), false);
+  assert.equal(isShortMapsUrl('https://maps.app.goo.gl/x'), true);
 });
 
-test('route handler: auth, expand, and the Mapillary proxy allowlist', async () => {
+test('route handler: auth and expand', async () => {
   const deny = await handleStreetLevelRoutes(
     new Request('https://x/api/street-level/expand', { method: 'POST', body: '{}' }),
     {},
     { authorize: async () => null },
   );
   assert.equal(deny.status, 401);
-
   const fetchImpl = async (url) => {
     if (url === 'https://maps.app.goo.gl/abc') return new Response(null, { status: 301, headers: { Location: FINAL } });
-    if (url.startsWith('https://scontent.xx.fbcdn.net/')) return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/jpeg' } });
     throw new Error(`unexpected fetch ${url}`);
   };
   const expand = await handleStreetLevelRoutes(
@@ -90,19 +86,94 @@ test('route handler: auth, expand, and the Mapillary proxy allowlist', async () 
     { authorize: async () => ({ userId: 'u' }), fetchImpl },
   );
   assert.equal((await expand.json()).results[0].url, FINAL);
-
-  const img = await handleStreetLevelRoutes(
-    new Request(`https://x/api/street-level/mapillary-image?url=${encodeURIComponent('https://scontent.xx.fbcdn.net/a.jpg')}`),
-    {}, { fetchImpl },
-  );
-  assert.equal(img.status, 200);
-  assert.equal((await img.arrayBuffer()).byteLength, 3);
-
-  const blocked = await handleStreetLevelRoutes(
-    new Request(`https://x/api/street-level/mapillary-image?url=${encodeURIComponent('https://maps.googleapis.com/maps/api/streetview')}`),
-    {}, { fetchImpl },
-  );
-  assert.equal(blocked.status, 400);
-
   assert.equal(await handleStreetLevelRoutes(new Request('https://x/api/other'), {}), null);
+});
+
+test('there is no imagery proxy or panorama route on the Worker', async () => {
+  for (const path of ['/api/street-level/mapillary-image?url=x', '/api/street-level/panorama?pano=x', '/api/street-level/tile']) {
+    const res = await handleStreetLevelRoutes(new Request(`https://x${path}`), {}, { authorize: async () => ({ userId: 'u' }) });
+    assert.equal(res.status, 404, path);
+  }
+});
+
+function fakeSupabase(row) {
+  const calls = [];
+  const fn = async (_env, opts) => {
+    calls.push(opts);
+    if (opts.method === 'PATCH') return [];
+    return opts.query.includes(`user_id=eq.${row.user_id}`) && opts.query.includes(`id=eq.${row.id}`) ? [row] : [];
+  };
+  return { fn, calls };
+}
+
+const ROW = {
+  id: 'proj1',
+  user_id: 'u1',
+  preloaded_images: [{ key: 'u1/proj1/old.jpg', name: 'old.jpg', url: 'https://pub/u1/proj1/old.jpg' }],
+  image_dataset_config: {
+    mediaFolders: ['a'],
+    mediaFolderTags: { a: 'set' },
+    streetLevel: { points: [{ id: 'p1', lat: 1, lng: 2 }], capture: { preset: 'road' } },
+  },
+};
+
+test('project route returns the point list and owner-scoped media prefix', async () => {
+  const sb = fakeSupabase(ROW);
+  const res = await handleStreetLevelRoutes(
+    new Request('https://x/api/street-level/projects/proj1'),
+    { R2_PUBLIC_URL: 'https://pub/' },
+    { authorize: async () => ({ userId: 'u1' }), supabaseRest: sb.fn },
+  );
+  const body = await res.json();
+  assert.deepEqual(body, {
+    success: true, projectId: 'proj1', mediaPrefix: 'u1/proj1/', publicBase: 'https://pub',
+    points: [{ id: 'p1', lat: 1, lng: 2 }], capture: { preset: 'road' },
+  });
+  assert.equal(sb.calls[0].serviceRole, true);
+
+  const other = await handleStreetLevelRoutes(
+    new Request('https://x/api/street-level/projects/proj1'),
+    {},
+    { authorize: async () => ({ userId: 'someone-else' }), supabaseRest: sb.fn },
+  );
+  assert.equal(other.status, 404);
+
+  const open = await handleStreetLevelRoutes(
+    new Request('https://x/api/street-level/projects/proj1'),
+    {},
+    { authorize: async () => ({ userId: null, kind: 'open' }), supabaseRest: sb.fn },
+  );
+  assert.equal(open.status, 501);
+});
+
+test('register merges uploads by key, keeps only owned image keys, and unions folders/tags', async () => {
+  const merged = mergeRegistration(ROW, {
+    entries: [
+      { key: 'u1/proj1/street-level/gsv-P-h000-p00-f090.jpg', url: 'https://evil/x', attribution: { text: '© Google' }, streetLevel: { panoId: 'P' } },
+      { key: 'u2/proj1/street-level/x.jpg' },
+      { key: 'u1/proj1/features/street_level_v1.csv' },
+      { key: 'u1/proj1/old.jpg', name: 'old.jpg' },
+    ],
+    folders: ['street-level'],
+    tags: { 'street-level': 'category', bad: 'nope' },
+  }, { prefix: 'u1/proj1/', publicBase: 'https://pub' });
+  assert.equal(merged.registered, 2);
+  assert.equal(merged.preloadedImages.length, 2);
+  const added = merged.preloadedImages.find((p) => p.key.includes('gsv-'));
+  assert.equal(added.url, 'https://pub/u1/proj1/street-level/gsv-P-h000-p00-f090.jpg');
+  assert.equal(added.folder, 'street-level');
+  assert.deepEqual(merged.imageDatasetConfig.mediaFolders, ['a', 'street-level']);
+  assert.deepEqual(merged.imageDatasetConfig.mediaFolderTags, { a: 'set', 'street-level': 'category' });
+  assert.deepEqual(merged.imageDatasetConfig.streetLevel, ROW.image_dataset_config.streetLevel);
+
+  const sb = fakeSupabase(ROW);
+  const res = await handleStreetLevelRoutes(
+    new Request('https://x/api/street-level/projects/proj1/register', { method: 'POST', body: JSON.stringify({ entries: [{ key: 'u1/proj1/s/a.jpg' }] }) }),
+    { R2_PUBLIC_URL: 'https://pub' },
+    { authorize: async () => ({ userId: 'u1' }), supabaseRest: sb.fn },
+  );
+  assert.equal((await res.json()).registered, 1);
+  const patch = sb.calls.find((c) => c.method === 'PATCH');
+  assert.match(patch.query, /user_id=eq\.u1/);
+  assert.equal(patch.body.preloaded_images.length, 2);
 });
