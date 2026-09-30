@@ -60,7 +60,7 @@ function openGoogle(url) {
 
 const fmt = (n, d = 5) => (n == null || n === '' ? '—' : Number(n).toFixed(d));
 
-function NumberCell({ value, onCommit, min, max, width = 64, label }) {
+function NumberCell({ value, onCommit, min, max, width = 64, label, placeholder }) {
   const [draft, setDraft] = useState(value ?? '');
   useEffect(() => { setDraft(value ?? ''); }, [value]);
   return (
@@ -68,6 +68,7 @@ function NumberCell({ value, onCommit, min, max, width = 64, label }) {
       size="small"
       variant="standard"
       value={draft}
+      placeholder={placeholder}
       inputProps={{ 'aria-label': label, inputMode: 'decimal', style: { width, fontSize: 13 } }}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
@@ -218,7 +219,7 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
         let expandedFrom = null;
         if (isShortMapsUrl(url)) {
           const e = expanded.get(url);
-          if (!e?.ok) return { url, ok: false, reason: e?.error || tx('Short link not resolved') };
+          if (!e?.ok) return { url, ok: false, reason: tx('Short link not resolved'), detail: e?.error };
           target = e.url;
           expandedFrom = url;
         }
@@ -488,7 +489,7 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
                       {parsed.map((r, i) => (
                         <tr key={`${r.url}-${i}`}>
                           <td>
-                            {!r.ok && <Chip size="small" color="error" label={r.reason} />}
+                            {!r.ok && <Chip size="small" color="error" label={r.reason} title={r.detail || undefined} />}
                             {r.ok && r.duplicate && <Chip size="small" label={tx('Duplicate')} />}
                             {r.ok && !r.duplicate && <Chip size="small" color="success" label={r.expandedFrom ? tx('OK (short link)') : 'OK'} />}
                             {r.ok && r.parsed.userUploaded && <Chip size="small" color="warning" sx={{ ml: 0.5 }} label={tx('User photo')} />}
@@ -546,14 +547,14 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
                           <td>
                             <Tooltip title={p.panoId ? `pano ${p.panoId}` : ''}><span>{fmt(p.lat)}, {fmt(p.lng)}</span></Tooltip>
                           </td>
-                          <td><NumberCell label={tx('Heading')} value={p.heading} min={-360} max={720} onCommit={(v) => updatePoint(p.id, { heading: v })} /></td>
+                          <td><NumberCell label={tx('Heading')} value={p.heading} min={-360} max={720} placeholder={p.roadBearing == null ? '' : `↗${Math.round(p.roadBearing)}`} onCommit={(v) => updatePoint(p.id, { heading: v })} /></td>
                           <td><NumberCell label={tx('Pitch')} value={p.pitch} min={-90} max={90} width={48} onCommit={(v) => updatePoint(p.id, { pitch: v })} /></td>
                           <td><NumberCell label="FOV" value={p.fov} min={1} max={180} width={44} onCommit={(v) => updatePoint(p.id, { fov: v })} /></td>
                           <td><Chip size="small" variant="outlined" label={tx(`source:${p.source}`)} /></td>
                           <td style={{ whiteSpace: 'nowrap' }}>
                             <Tooltip title={tx('Open in Google Street View')}>
                               <IconButton size="small" aria-label={tx('Open in Google Street View')}
-                                onClick={() => openGoogle(buildStreetViewUrl(p))}><OpenInNew fontSize="inherit" /></IconButton>
+                                onClick={() => openGoogle(buildStreetViewUrl({ ...p, heading: p.heading ?? p.roadBearing }))}><OpenInNew fontSize="inherit" /></IconButton>
                             </Tooltip>
                             <Tooltip title={tx('Delete')}>
                               <IconButton size="small" aria-label={tx('Delete')} onClick={() => deletePoints([p.id])}><DeleteOutline fontSize="inherit" /></IconButton>
