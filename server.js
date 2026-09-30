@@ -92,7 +92,8 @@ app.use(async (req, res, next) => {
   const isAdminResultsRoute = pathName === '/api/admin/project-responses';
   const isSubsidyRoute = pathName === '/api/admin/assistant-subsidy';
   const isR2Route = pathName === '/api/r2' || pathName.startsWith('/api/r2/');
-  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute && !isSubsidyRoute && !isR2Route) return next();
+  const isStreetLevelRoute = pathName.startsWith('/api/street-level/');
+  if (!isAgentRoute && !isBenchRoute && !isAdminResultsRoute && !isSubsidyRoute && !isR2Route && !isStreetLevelRoute) return next();
 
   try {
     const url = `http://localhost:${PORT}${req.originalUrl}`;
@@ -156,7 +157,10 @@ app.use(async (req, res, next) => {
       return next();
     } else {
       const request = new Request(url, init);
-      if (isAdminResultsRoute) {
+      if (isStreetLevelRoute) {
+        const { handleStreetLevelRoutes } = await import('./worker-lib/streetLevel.mjs');
+        response = await handleStreetLevelRoutes(request, env);
+      } else if (isAdminResultsRoute) {
         const { handleAdminResultsRoutes } = await import('./worker-lib/adminResults.mjs');
         response = await handleAdminResultsRoutes(request, env);
       } else if (isSubsidyRoute) {
