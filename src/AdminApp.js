@@ -1035,7 +1035,8 @@ export default function AdminApp() {
           surveyConfig,
           lastSavedConfig,
           hasUnsavedChanges,
-          tabValue: currentTabValue
+          tabValue: currentTabValue,
+          tabsVersion: ADMIN_TABS_VERSION,
         }
       };
       
