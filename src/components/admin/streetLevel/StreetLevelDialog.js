@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, AppBar, Box, Button, Checkbox, Chip, CircularProgress, Dialog, Divider, IconButton,
-  LinearProgress, Link, MenuItem, Stack, Tab, Tabs, TextField, ToggleButton, ToggleButtonGroup,
+  Stack, Tab, Tabs, TextField, ToggleButton, ToggleButtonGroup,
   Toolbar, Tooltip, Typography,
 } from '@mui/material';
 import {
@@ -14,32 +14,20 @@ import {
 } from '../../../lib/streetLevel/googleMapsUrl';
 import {
   gridInBounds, gridInPolygon, mergePoints, normalizePoint, pointDedupKey, pointFromParsedUrl,
-  parseCsvRows, pointsFromCsv, pointsFromGeoJson, pointsToCsv, pointsToGeoJson, samplePolyline, MAX_POINTS,
+  pointsFromCsv, pointsFromGeoJson, pointsToCsv, pointsToGeoJson, samplePolyline, MAX_POINTS,
 } from '../../../lib/streetLevel/points';
-import {
-  DEFAULT_CAPTURE_OPTIONS, FOLDER_MODES, STREET_LEVEL_CSV_MODEL, folderTagsFor, mergeMediaEntries,
-  mergeStreetLevelRows, newJobState, runCaptureJob, streetLevelRowsToCsv, summarizeJob,
-} from '../../../lib/streetLevel/captureRunner';
-import { CAPTURE_PRESETS, MAPILLARY_MAX_RADIUS_M } from '../../../lib/streetLevel/mapillary';
-import { expandShortLinks, fetchMapillaryImageBlob, mapillarySearch } from '../../../lib/streetLevel/api';
-import { reprojectPanoramaBlob } from '../../../lib/streetLevel/reproject';
-import { compressImage } from '../../../lib/templateRequest';
-import { featureCsvKey, featureCsvPublicUrl } from '../../../lib/imageFeaturesR2';
-import { getR2PublicBase, listImagesFromR2, uploadImageToR2 } from '../../../lib/r2';
-import { normalizeFolderPath, compareMediaNames } from '../../../lib/mediaUtils';
-import { loadUserMapillaryToken, saveUserMapillaryToken } from '../../../lib/spatialSettingsStore';
-import { useAuth } from '../../../contexts/AuthContext';
+import { expandShortLinks } from '../../../lib/streetLevel/api';
+import { DEFAULT_CAPTURE } from '../../../lib/streetLevel/localHelper';
+import StreetLevelDownloadTab from './StreetLevelDownloadTab';
 
 const PAGE_SIZE = 100;
 const GOOGLE_WINDOW = 'sp-google-maps';
-const PANO_MAX_BYTES = 1200 * 1024;
-const VIEW_MAX_BYTES = 300 * 1024;
 
 export function readStreetLevelConfig(project) {
   const sl = project?.imageDatasetConfig?.streetLevel || {};
   return {
     points: Array.isArray(sl.points) ? sl.points : [],
-    capture: { ...DEFAULT_CAPTURE_OPTIONS, ...(sl.capture || {}) },
+    capture: { ...DEFAULT_CAPTURE, ...(sl.capture || {}) },
     lastJob: sl.lastJob || null,
     view: sl.view || null,
   };
@@ -103,19 +91,6 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
   const [parsed, setParsed] = useState([]);
   const [parsing, setParsing] = useState(false);
 
-  const { user } = useAuth();
-  const [token, setToken] = useState('');
-  useEffect(() => {
-    let alive = true;
-    loadUserMapillaryToken(user?.id).then((t) => { if (alive && t) setToken(t); });
-    return () => { alive = false; };
-  }, [user?.id]);
-  const [capture, setCapture] = useState(config.capture);
-  const [scope, setScope] = useState('all');
-  const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState(null);
-  const [runError, setRunError] = useState(null);
-  const abortRef = useRef(null);
   const fileRef = useRef(null);
 
   const commitStreetLevel = useCallback((patch) => {
@@ -277,103 +252,6 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
   const pagePoints = points.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(points.length / PAGE_SIZE));
 
-  // ── Capture ──────────────────────────────────────────────────────────────
-  const lastJob = config.lastJob;
-  const scopePoints = scope === 'selected' ? points.filter((p) => selected.includes(p.id)) : points;
-  const lastSummary = lastJob ? summarizeJob(lastJob, scopePoints) : null;
-  const canResume = Boolean(lastJob && lastSummary && Object.keys(lastJob.items || {}).length
-    && (lastSummary.failed > 0 || lastSummary.pending > 0));
-
-  const setCaptureField = (key, value) => setCapture((c) => ({ ...c, [key]: value }));
-
-  const runJob = async (resume) => {
-    const p = projectRef.current;
-    if (!p?.id || !projectPrefix) { setRunError(tx('Open a project first.')); return; }
-    if (!token.trim()) { setRunError(tx('Enter a Mapillary client access token.')); return; }
-    if (!scopePoints.length) { setRunError(tx('Add points first.')); return; }
-    const options = { ...capture, folder: normalizeFolderPath(capture.folder || 'street-level') || 'street-level' };
-    commitStreetLevel({ capture: options });
-    saveUserMapillaryToken(user?.id, token);
-    setRunError(null);
-    setRunning(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const state = resume && lastJob ? lastJob : newJobState(options);
-    const jobOptions = state.options;
-    try {
-      const listing = await listImagesFromR2(`${projectPrefix}${normalizeFolderPath(jobOptions.folder)}/`);
-      const existingKeys = new Set((listing.images || []).map((i) => i.key));
-      let csvRows = [];
-      try {
-        const res = await fetch(`${featureCsvPublicUrl(projectPrefix, STREET_LEVEL_CSV_MODEL)}?t=${Date.now()}`, { cache: 'no-store' });
-        if (res.ok) csvRows = parseCsvRows(await res.text());
-      } catch { /* first run: no CSV yet */ }
-
-      const onCheckpoint = async ({ state: s, entries, rows, folders }) => {
-        const cur = projectRef.current;
-        const cfg = cur.imageDatasetConfig || {};
-        const tags = folderTagsFor(folders, s.options);
-        const mediaFolders = [...new Set([...(cfg.mediaFolders || []), ...folders, normalizeFolderPath(s.options.folder)].filter(Boolean))].sort(compareMediaNames);
-        const next = {
-          ...cur,
-          preloadedImages: entries.length ? mergeMediaEntries(cur.preloadedImages || [], entries) : cur.preloadedImages,
-          preloadedSource: 'r2',
-          imageDatasetConfig: {
-            ...cfg,
-            mediaFolders,
-            mediaFolderTags: { ...(cfg.mediaFolderTags || {}), ...tags },
-            streetLevel: { ...(cfg.streetLevel || {}), lastJob: s },
-          },
-        };
-        projectRef.current = next;
-        onProjectUpdate(next);
-        if (rows.length) {
-          csvRows = mergeStreetLevelRows(csvRows, rows);
-          const csv = streetLevelRowsToCsv(csvRows);
-          const up = await uploadImageToR2(new Blob([csv], { type: 'text/csv;charset=utf-8' }), featureCsvKey(projectPrefix, STREET_LEVEL_CSV_MODEL));
-          if (!up.success) setRunError(tx('Metadata CSV upload failed: {e}', { e: up.error }));
-        }
-      };
-
-      await runCaptureJob({
-        points: scopePoints,
-        state,
-        prefix: projectPrefix,
-        signal: controller.signal,
-        onProgress: setProgress,
-        onCheckpoint,
-        deps: {
-          search: mapillarySearch(token.trim()),
-          fetchImage: fetchMapillaryImageBlob,
-          reproject: reprojectPanoramaBlob,
-          prepare: (blob, name, v) => compressImage(
-            new File([blob], name, { type: blob.type || 'image/jpeg' }),
-            v.kind === 'pano' ? PANO_MAX_BYTES : VIEW_MAX_BYTES,
-          ),
-          upload: async (blob, key) => {
-            const res = await uploadImageToR2(blob, key);
-            if (!res.success) throw Object.assign(new Error(res.error || 'R2 upload failed'), { retryable: !res.unreachable });
-            return res;
-          },
-          publicUrl: (key) => `${getR2PublicBase()}/${key}`,
-          existingKeys,
-        },
-      });
-    } catch (err) {
-      setRunError(err.message || String(err));
-    } finally {
-      setRunning(false);
-      abortRef.current = null;
-    }
-  };
-
-  useEffect(() => () => abortRef.current?.abort(), []);
-
-  const summary = progress || lastSummary;
-  const failures = lastJob
-    ? Object.entries(lastJob.items || {}).filter(([, it]) => it?.status === 'failed').slice(0, 50)
-    : [];
-
   const persistView = () => { if (view) commitStreetLevel({ view }); };
 
   const draftCount = Array.isArray(draftPreview) ? draftPreview.length : 0;
@@ -447,7 +325,7 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
         <Box sx={{ width: { xs: '100%', md: 560 }, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="fullWidth">
             <Tab label={tx('Points')} />
-            <Tab label={tx('Capture (Mapillary)')} />
+            <Tab label={tx('Download (local helper)')} />
           </Tabs>
           <Divider />
           {notice && (
@@ -576,87 +454,17 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
             )}
 
             {tab === 1 && (
-              <Stack spacing={1.5}>
-                <Alert severity="info" variant="outlined" sx={{ py: 0.25 }}>
-                  {tx('For each point, the nearest Mapillary image within the radius is downloaded (preferring the point heading), saved to R2 and the media library, with metadata and attribution in features/street_level_v1.csv. Mapillary imagery is CC BY-SA 4.0.')}
-                </Alert>
-                <TextField select size="small" label={tx('Provider')} value="mapillary">
-                  <MenuItem value="mapillary">Mapillary</MenuItem>
-                  <MenuItem value="kartaview" disabled>{tx('KartaView (next step)')}</MenuItem>
-                </TextField>
-                <TextField size="small" type="password" label={tx('Mapillary client access token')} value={token}
-                  onChange={(e) => setToken(e.target.value)} autoComplete="off"
-                  helperText={<>{tx('Create one at')} <Link href="https://www.mapillary.com/dashboard/developers" target="_blank" rel="noopener">mapillary.com/dashboard/developers</Link>. {tx('Saved to your account, not to the project; never shown to participants or agents.')}</>} />
-                <Stack direction="row" spacing={1}>
-                  <TextField size="small" type="number" label={tx('Search radius (m)')} value={capture.radius} sx={{ flex: 1 }}
-                    inputProps={{ min: 1, max: MAPILLARY_MAX_RADIUS_M }}
-                    onChange={(e) => setCaptureField('radius', Math.max(1, Math.min(MAPILLARY_MAX_RADIUS_M, Number(e.target.value) || 30)))} />
-                  <TextField select size="small" label={tx('Capture preset')} value={capture.preset} sx={{ flex: 1.4 }}
-                    onChange={(e) => setCaptureField('preset', e.target.value)}>
-                    {CAPTURE_PRESETS.map((p) => <MenuItem key={p} value={p}>{tx(`preset:${p}`)}</MenuItem>)}
-                  </TextField>
-                </Stack>
-                <Stack direction="row" spacing={1}>
-                  {capture.preset === 'headings' && (
-                    <TextField size="small" type="number" label={tx('Headings (N)')} value={capture.headingCount} sx={{ flex: 1 }}
-                      inputProps={{ min: 1, max: 12 }} onChange={(e) => setCaptureField('headingCount', Math.max(1, Math.min(12, Number(e.target.value) || 4)))} />
-                  )}
-                  <TextField size="small" type="number" label={tx('Default pitch')} value={capture.pitch} sx={{ flex: 1 }}
-                    onChange={(e) => setCaptureField('pitch', Math.max(-90, Math.min(90, Number(e.target.value) || 0)))} />
-                  <TextField size="small" type="number" label={tx('Default FOV')} value={capture.fov} sx={{ flex: 1 }}
-                    onChange={(e) => setCaptureField('fov', Math.max(10, Math.min(120, Number(e.target.value) || 90)))} />
-                  <TextField size="small" type="number" label={tx('View width (px)')} value={capture.width} sx={{ flex: 1 }}
-                    onChange={(e) => setCaptureField('width', Math.max(256, Math.min(2048, Number(e.target.value) || 1024)))} />
-                </Stack>
-                <Typography variant="caption" color="text.secondary">{tx('preset-help')}</Typography>
-                <Stack direction="row" spacing={1}>
-                  <TextField size="small" label={tx('Target folder')} value={capture.folder} sx={{ flex: 1 }}
-                    onChange={(e) => setCaptureField('folder', e.target.value)} />
-                  <TextField select size="small" label={tx('Folder role')} value={capture.folderMode} sx={{ flex: 1.2 }}
-                    onChange={(e) => setCaptureField('folderMode', e.target.value)}>
-                    {FOLDER_MODES.map((m) => <MenuItem key={m} value={m}>{tx(`folder:${m}`)}</MenuItem>)}
-                  </TextField>
-                  <TextField select size="small" label={tx('Points')} value={scope} sx={{ flex: 1 }}
-                    onChange={(e) => setScope(e.target.value)}>
-                    <MenuItem value="all">{tx('All ({n})', { n: points.length })}</MenuItem>
-                    <MenuItem value="selected" disabled={!selected.length}>{tx('Selected ({n})', { n: selected.length })}</MenuItem>
-                  </TextField>
-                </Stack>
-                <Stack direction="row" spacing={1}>
-                  <Button variant="contained" disabled={running || !scopePoints.length} onClick={() => runJob(false)}>
-                    {tx('Start capture')}
-                  </Button>
-                  <Button variant="outlined" disabled={running || !canResume} onClick={() => runJob(true)}>
-                    {tx('Resume / retry failed')}
-                  </Button>
-                  {running && <Button color="warning" onClick={() => abortRef.current?.abort()}>{tx('Cancel')}</Button>}
-                </Stack>
-                {runError && <Alert severity="error">{runError}</Alert>}
-                {summary && (
-                  <Box>
-                    <LinearProgress variant={running && !summary.total ? 'indeterminate' : 'determinate'}
-                      value={summary.total ? ((summary.done + summary.noImage + summary.failed) / summary.total) * 100 : 0}
-                      sx={{ height: 8, borderRadius: 4, mb: 0.75 }} />
-                    <Typography variant="body2">
-                      {tx('{done} done ({files} file(s)), {none} without Mapillary coverage, {failed} failed, {pending} pending — of {total}.', {
-                        done: summary.done, files: summary.files, none: summary.noImage, failed: summary.failed, pending: summary.pending, total: summary.total,
-                      })}
-                    </Typography>
-                    {!running && lastJob?.status && (
-                      <Typography variant="caption" color="text.secondary">{tx('Last run: {s}', { s: tx(`status:${lastJob.status}`) })}</Typography>
-                    )}
-                  </Box>
-                )}
-                {!running && failures.length > 0 && (
-                  <Box sx={{ fontSize: 12 }}>
-                    <Typography variant="subtitle2">{tx('Failures')}</Typography>
-                    {failures.map(([id, it]) => {
-                      const idx = points.findIndex((p) => p.id === id);
-                      return <div key={id}>#{idx + 1}: {it.error}</div>;
-                    })}
-                  </Box>
-                )}
-              </Stack>
+              <StreetLevelDownloadTab
+                points={points}
+                selectedIds={selected}
+                currentProject={currentProject}
+                projectRef={projectRef}
+                projectPrefix={projectPrefix}
+                onProjectUpdate={onProjectUpdate}
+                commitStreetLevel={commitStreetLevel}
+                initialCapture={config.capture}
+                lastJob={config.lastJob}
+              />
             )}
           </Box>
         </Box>

@@ -22,7 +22,7 @@ export default function StreetLevelCard({ currentProject, onProjectUpdate, proje
           <MapIcon fontSize="small" /> {tx('Street-level imagery')}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          {tx('Pick points on our own map or paste Google Street View URLs (no API key), then download matching Mapillary images (CC BY-SA 4.0) into this media library with location metadata.')}
+          {tx('Pick points on our own map or paste Google Street View URLs, then a small helper on your computer downloads the views (no API key) into this media library with location metadata.')}
         </Typography>
         {count > 0 && (
           <Typography variant="caption" color="text.secondary">
