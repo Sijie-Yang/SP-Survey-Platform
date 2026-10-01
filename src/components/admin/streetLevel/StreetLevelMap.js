@@ -2,12 +2,18 @@ import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-const OSM_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+// Standard OSM tiles washed out to light gray (keyless; CARTO/Stadia toner styles now need API keys),
+// so selected points and drawings carry the only strong colour.
+const BASEMAP_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const BASEMAP_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+const BASEMAP_FILTER = 'grayscale(1) contrast(0.72) brightness(1.12)';
 
-const POINT_STYLE = { radius: 5, color: '#1565c0', weight: 1.5, fillColor: '#42a5f5', fillOpacity: 0.85 };
-const SELECTED_STYLE = { radius: 7, color: '#e65100', weight: 2, fillColor: '#ff9800', fillOpacity: 0.95 };
-const DRAFT_STYLE = { color: '#d81b60', weight: 3, dashArray: '6 4' };
+const POINT_STYLE = { radius: 4.5, color: '#ffffff', weight: 1.5, fillColor: '#37474f', fillOpacity: 0.9 };
+const SELECTED_STYLE = { radius: 7, color: '#ffffff', weight: 2, fillColor: '#ff6d00', fillOpacity: 1 };
+const HEADING_COLOR = '#455a64';
+const SELECTED_HEADING_COLOR = '#ff6d00';
+const DRAFT_STYLE = { color: '#d500f9', weight: 3.5, dashArray: '7 5' };
+const DRAFT_PREVIEW_STYLE = { radius: 3, color: '#d500f9', weight: 1, fillColor: '#d500f9', fillOpacity: 0.75 };
 
 function headingTip(p) {
   if (p.heading == null) return null;
@@ -45,7 +51,9 @@ export default function StreetLevelMap({
       zoom: initialView?.zoom ?? 15,
       zoomControl: true,
     });
-    L.tileLayer(OSM_TILES, { maxZoom: 19, attribution: OSM_ATTRIBUTION }).addTo(map);
+    const tiles = L.tileLayer(BASEMAP_TILES, { maxZoom: 19, opacity: 0.85, attribution: BASEMAP_ATTRIBUTION }).addTo(map);
+    const tileContainer = tiles.getContainer();
+    if (tileContainer) tileContainer.style.filter = BASEMAP_FILTER;
     pointLayerRef.current = L.layerGroup().addTo(map);
     draftLayerRef.current = L.layerGroup().addTo(map);
     const emitView = () => {
@@ -73,7 +81,7 @@ export default function StreetLevelMap({
     points.forEach((p) => {
       const isSel = selected.has(p.id);
       const tip = headingTip(p);
-      if (tip) L.polyline([[p.lat, p.lng], tip], { color: isSel ? '#e65100' : '#1565c0', weight: 2 }).addTo(layer);
+      if (tip) L.polyline([[p.lat, p.lng], tip], { color: isSel ? SELECTED_HEADING_COLOR : HEADING_COLOR, weight: 2 }).addTo(layer);
       const marker = L.circleMarker([p.lat, p.lng], isSel ? SELECTED_STYLE : POINT_STYLE).addTo(layer);
       marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
@@ -96,8 +104,8 @@ export default function StreetLevelMap({
     } else if (latlngs.length >= 2) {
       L.polyline(latlngs, DRAFT_STYLE).addTo(layer);
     }
-    latlngs.forEach((ll) => L.circleMarker(ll, { radius: 4, color: '#d81b60', fillOpacity: 1 }).addTo(layer));
-    (draft.preview || []).forEach((p) => L.circleMarker([p.lat, p.lng], { radius: 3, color: '#8e24aa', weight: 1, fillOpacity: 0.6 }).addTo(layer));
+    latlngs.forEach((ll) => L.circleMarker(ll, { radius: 5, color: '#ffffff', weight: 2, fillColor: '#d500f9', fillOpacity: 1 }).addTo(layer));
+    (draft.preview || []).forEach((p) => L.circleMarker([p.lat, p.lng], DRAFT_PREVIEW_STYLE).addTo(layer));
   }, [draft]);
 
   useEffect(() => {
