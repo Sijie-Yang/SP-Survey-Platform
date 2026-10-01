@@ -63,6 +63,7 @@ import { applySurveyLocale } from '../../lib/surveyLocale';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
+import { markGuideProgress } from '../../lib/adminGuide';
 
 let widgetsRegistered = false;
 function ensureWidgets() {
@@ -290,7 +291,8 @@ export default function ResearcherPractice({
 
   useEffect(() => {
     onSessionActiveChange?.(sessionActive);
-  }, [sessionActive, onSessionActiveChange]);
+    if (sessionActive) markGuideProgress(projectId, 'preview');
+  }, [sessionActive, onSessionActiveChange, projectId]);
 
   const refreshAnalysisData = useCallback(async () => {
     if (!projectId || !supabase) {

@@ -22,6 +22,7 @@ import { applySurveyLocale } from '../../lib/surveyLocale';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
 import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
+import { markGuideProgress } from '../../lib/adminGuide';
 
 export function previewSourceKey(config, currentProject) {
   const images = currentProject?.preloadedImages || [];
@@ -65,6 +66,7 @@ export function createSurveyPreviewModel(processedConfig) {
 }
 
 export default function SurveyPreview({ config, currentProject, showMediaAssignment = true }) {
+  useEffect(() => { markGuideProgress(currentProject?.id, 'preview'); }, [currentProject?.id]);
   const [processedConfig, setProcessedConfig] = useState(null);
   const [mediaAssignments, setMediaAssignments] = useState([]);
   const [loading, setLoading] = useState(true);

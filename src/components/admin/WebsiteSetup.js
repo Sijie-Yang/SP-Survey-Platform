@@ -3,6 +3,7 @@ import SurveyPreflight from './SurveyPreflight';
 import ProjectVersions from './ProjectVersions';
 import { validateSurveyConfig } from '../../lib/designProtocol/validate';
 import { getTrialCount } from '../../lib/trialNavigation';
+import { markGuideProgress } from '../../lib/adminGuide';
 import React, { useState } from 'react';
 import {
   Box,
@@ -45,6 +46,7 @@ export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedC
   const copy = async (text) => {
     try {
       await navigator.clipboard.writeText(text);
+      markGuideProgress(currentProject?.id, 'shared');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -99,6 +101,7 @@ export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedC
                     variant="outlined"
                     startIcon={<OpenInNew />}
                     href={surveyUrl}
+                    onClick={() => markGuideProgress(currentProject.id, 'shared')}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
