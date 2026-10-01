@@ -1,17 +1,20 @@
 /**
- * Client for the researcher's local `sp-streetlevel` helper (127.0.0.1 only).
+ * Client for the researcher's local `sp_streetlevel` helper (127.0.0.1 only).
  * The helper downloads imagery on the researcher's machine and uploads the
  * finished files through the normal media upload API; nothing here fetches imagery.
  */
 
 export const HELPER_PORT = 47821;
 export const HELPER_BASE = `http://127.0.0.1:${HELPER_PORT}`;
-export const HELPER_PACKAGE = 'git+https://github.com/Sijie-Yang/SP-Survey-Platform@main#subdirectory=tools/streetlevel-helper';
-export const DONE_ITEM_STATUSES = new Set(['done', 'no-image']);
+export const HELPER_PACKAGE = 'https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper';
 export const ACTIVE_JOB_STATES = new Set(['queued', 'running']);
+export const MAPILLARY_TOKEN_STORAGE_KEY = 'sp-streetlevel-mapillary-token';
 
 export const DEFAULT_CAPTURE = {
+  source: 'google',
   preset: 'current',
+  headingMode: 'road',
+  fixedHeading: 0,
   headingCount: 4,
   pitch: 0,
   fov: 90,
@@ -23,26 +26,56 @@ export const DEFAULT_CAPTURE = {
   minInterval: 1.5,
 };
 
-export const PRESETS = ['current', 'pano', 'headings', 'road'];
+export const SOURCES = ['google', 'mapillary'];
+export const PRESETS = ['current', 'road', 'headings', 'pano'];
+export const HEADING_MODES = ['road', 'fixed'];
 export const FOLDER_MODES = ['single', 'category', 'set-per-point'];
+export const OPERATING_SYSTEMS = ['mac', 'windows', 'linux'];
 
-export function installCommand() {
-  return `pipx install "${HELPER_PACKAGE}"`;
+/** 'mac' | 'windows' | 'linux' from the browser's platform hints. */
+export function detectOs(nav = typeof navigator !== 'undefined' ? navigator : {}) {
+  const hint = `${nav.userAgentData?.platform || ''} ${nav.platform || ''} ${nav.userAgent || ''}`.toLowerCase();
+  if (/win/.test(hint)) return 'windows';
+  if (/mac|iphone|ipad|darwin/.test(hint)) return 'mac';
+  return 'linux';
 }
 
-export function serveCommand(origin) {
-  const extra = origin && !/^https:\/\/sp-survey\.org$/.test(origin)
-    && !/^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(origin) ? ` --allow-origin ${origin}` : '';
-  return `sp-streetlevel serve${extra}`;
+export function pythonCommand(os) {
+  return os === 'windows' ? 'py' : 'python3';
 }
 
-export function runCommand({ projectId, apiBase, capture = {} }) {
+function originFlag(origin) {
+  if (!origin || /^https:\/\/sp-survey\.org$/.test(origin) || /^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(origin)) return '';
+  return ` --allow-origin ${origin}`;
+}
+
+/** Install + start commands that need nothing but Python 3.9+ (no pipx, no git, no PATH edit). */
+export function helperCommands(os, origin) {
+  const py = pythonCommand(os);
+  const commands = {
+    install: `${py} -m pip install --user "${HELPER_PACKAGE}"`,
+    serve: `${py} -m sp_streetlevel serve${originFlag(origin)}`,
+  };
+  if (os !== 'windows') {
+    commands.isolatedInstall = `python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install "${HELPER_PACKAGE}"`;
+    commands.isolatedServe = `~/.sp-streetlevel/bin/python -m sp_streetlevel serve${originFlag(origin)}`;
+  }
+  return commands;
+}
+
+export function runCommand({ projectId, apiBase, capture = {}, os = 'mac' }) {
   const c = { ...DEFAULT_CAPTURE, ...capture };
-  const parts = ['sp-streetlevel run', `--project ${projectId}`];
+  const parts = [`${pythonCommand(os)} -m sp_streetlevel run`, `--project ${projectId}`];
   if (apiBase && apiBase !== 'https://sp-survey.org') parts.push(`--api ${apiBase}`);
+  if (c.source !== 'google') parts.push(`--source ${c.source}`);
   parts.push(`--preset ${c.preset}`);
   if (c.preset === 'headings') parts.push(`--heading-count ${c.headingCount}`);
-  parts.push(`--zoom ${c.zoom}`, `--folder ${c.folder}`, `--folder-mode ${c.folderMode}`);
+  if (c.headingMode === 'fixed' && (c.preset === 'current' || c.preset === 'headings')) {
+    parts.push('--heading-mode fixed', `--fixed-heading ${c.fixedHeading}`);
+  }
+  parts.push(`--pitch ${c.pitch}`, `--fov ${c.fov}`);
+  if (c.source === 'google') parts.push(`--zoom ${c.zoom}`);
+  parts.push(`--folder ${c.folder}`, `--folder-mode ${c.folderMode}`);
   return parts.join(' ');
 }
 
@@ -104,7 +137,7 @@ export function mergeMediaEntries(existing = [], incoming = []) {
   return [...byKey.values()];
 }
 
-/** Per-point status for the panel; points not in the job are "not in run". */
+/** Per-point status counts; files are unique keys (points can share a pano view). */
 export function summarizeItems(points = [], items = {}) {
   const counts = { total: 0, done: 0, noImage: 0, failed: 0, pending: 0, running: 0, files: 0 };
   const files = new Set();
@@ -120,4 +153,9 @@ export function summarizeItems(points = [], items = {}) {
   });
   counts.files = files.size;
   return counts;
+}
+
+/** True when the point carries its own view (pasted Street View URL or a manual override). */
+export function hasOwnView(point) {
+  return point?.heading != null || point?.pitch != null || point?.fov != null;
 }

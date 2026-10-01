@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, AppBar, Box, Button, Checkbox, Chip, CircularProgress, Dialog, Divider, IconButton,
-  Stack, Tab, Tabs, TextField, ToggleButton, ToggleButtonGroup,
+  Popover, Stack, TextField, ToggleButton, ToggleButtonGroup,
   Toolbar, Tooltip, Typography,
 } from '@mui/material';
 import {
-  Close, DeleteOutline, Download, OpenInNew, Place, PanTool, Timeline, CropSquare, GridOn, Upload,
+  Close, DeleteOutline, Download, OpenInNew, Place, PanTool, Timeline, CropSquare, GridOn, Tune, Upload,
 } from '@mui/icons-material';
 import StreetLevelMap from './StreetLevelMap';
 import { useStreetLevelText } from '../../../contexts/streetLevelI18n';
@@ -17,8 +17,8 @@ import {
   pointsFromCsv, pointsFromGeoJson, pointsToCsv, pointsToGeoJson, samplePolyline, MAX_POINTS,
 } from '../../../lib/streetLevel/points';
 import { expandShortLinks } from '../../../lib/streetLevel/api';
-import { DEFAULT_CAPTURE } from '../../../lib/streetLevel/localHelper';
-import StreetLevelDownloadTab from './StreetLevelDownloadTab';
+import { DEFAULT_CAPTURE, hasOwnView } from '../../../lib/streetLevel/localHelper';
+import StreetLevelDownloadPanel from './StreetLevelDownloadPanel';
 
 const PAGE_SIZE = 100;
 const GOOGLE_WINDOW = 'sp-google-maps';
@@ -47,6 +47,12 @@ function openGoogle(url) {
 }
 
 const fmt = (n, d = 5) => (n == null || n === '' ? '—' : Number(n).toFixed(d));
+const STATUS_COLOR = { done: 'success', 'no-image': 'default', failed: 'error', running: 'info', pending: 'default' };
+
+function viewLabel(p) {
+  const part = (v, unit) => (v == null ? '·' : `${Math.round(v)}${unit}`);
+  return `${part(p.heading, '°')} / ${part(p.pitch, '°')} / ${part(p.fov, '')}`;
+}
 
 function NumberCell({ value, onCommit, min, max, width = 64, label, placeholder }) {
   const [draft, setDraft] = useState(value ?? '');
@@ -77,7 +83,8 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
   const config = readStreetLevelConfig(currentProject);
   const points = config.points;
 
-  const [tab, setTab] = useState(0);
+  const [downloadItems, setDownloadItems] = useState({});
+  const [viewEdit, setViewEdit] = useState(null);
   const [mode, setMode] = useState('point');
   const [spacing, setSpacing] = useState(25);
   const [draft, setDraft] = useState(null);
@@ -250,6 +257,7 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
   const exportGeoJson = () => downloadText(`${projectSlug}_street_points.geojson`, JSON.stringify(pointsToGeoJson(points), null, 2), 'application/geo+json');
 
   const pagePoints = points.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const viewEditPoint = viewEdit ? points.find((p) => p.id === viewEdit.id) : null;
   const pageCount = Math.max(1, Math.ceil(points.length / PAGE_SIZE));
 
   const persistView = () => { if (view) commitStreetLevel({ view }); };
@@ -323,138 +331,12 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
 
         <Divider orientation="vertical" flexItem />
         <Box sx={{ width: { xs: '100%', md: 560 }, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="fullWidth">
-            <Tab label={tx('Points')} />
-            <Tab label={tx('Download (local helper)')} />
-          </Tabs>
-          <Divider />
           {notice && (
             <Alert severity={notice.severity} onClose={() => setNotice(null)} sx={{ m: 1, mb: 0 }}>{notice.text}</Alert>
           )}
           <Box sx={{ flex: 1, overflow: 'auto', p: 1.5 }}>
-            {tab === 0 && (
-              <Stack spacing={1.5}>
-                <Alert severity="info" variant="outlined" sx={{ py: 0.25 }}>
-                  {tx('Google Maps is used only to choose points. Browse Street View in the Google window, copy the address bar URL, and paste it here. No Google API key is used and no Google imagery is stored.')}
-                </Alert>
-                <TextField
-                  multiline
-                  minRows={3}
-                  maxRows={8}
-                  label={tx('Paste Google Maps / Street View URLs (one or many)')}
-                  placeholder="https://www.google.com/maps/@1.2966,103.7764,3a,75y,90h,95t/data=…"
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                />
-                <Stack direction="row" spacing={1}>
-                  <Button variant="contained" size="small" onClick={parsePaste} disabled={!pasteText.trim() || parsing}
-                    startIcon={parsing ? <CircularProgress size={14} /> : null}>
-                    {tx('Parse URLs')}
-                  </Button>
-                  {parsed.length > 0 && (
-                    <Button variant="outlined" size="small" onClick={addParsed}
-                      disabled={!parsed.some((r) => r.ok && !r.duplicate)}>
-                      {tx('Add {n} point(s)', { n: parsed.filter((r) => r.ok && !r.duplicate).length })}
-                    </Button>
-                  )}
-                </Stack>
-                {parsed.length > 0 && (
-                  <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, '& td, & th': { borderBottom: '1px solid', borderColor: 'divider', p: 0.5, textAlign: 'left' } }}>
-                    <thead>
-                      <tr><th>{tx('Status')}</th><th>lat, lng</th><th>{tx('Heading')}</th><th>{tx('Pitch')}</th><th>FOV</th><th>{tx('Pano id')}</th></tr>
-                    </thead>
-                    <tbody>
-                      {parsed.map((r, i) => (
-                        <tr key={`${r.url}-${i}`}>
-                          <td>
-                            {!r.ok && <Chip size="small" color="error" label={r.reason} title={r.detail || undefined} />}
-                            {r.ok && r.duplicate && <Chip size="small" label={tx('Duplicate')} />}
-                            {r.ok && !r.duplicate && <Chip size="small" color="success" label={r.expandedFrom ? tx('OK (short link)') : 'OK'} />}
-                            {r.ok && r.parsed.userUploaded && <Chip size="small" color="warning" sx={{ ml: 0.5 }} label={tx('User photo')} />}
-                          </td>
-                          <td>{r.ok ? `${fmt(r.point.lat)}, ${fmt(r.point.lng)}` : <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>{r.url.slice(0, 60)}</Typography>}</td>
-                          <td>{r.ok ? fmt(r.point.heading, 1) : ''}</td>
-                          <td>{r.ok ? fmt(r.point.pitch, 1) : ''}</td>
-                          <td>{r.ok ? fmt(r.point.fov, 0) : ''}</td>
-                          <td style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ok ? r.point.panoId || '—' : ''}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Box>
-                )}
-
-                <Divider />
-                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
-                  <Typography variant="subtitle2" sx={{ mr: 1 }}>{tx('Point list')}</Typography>
-                  <input ref={fileRef} type="file" accept=".csv,.geojson,.json,text/csv,application/geo+json,application/json" hidden
-                    onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ''; }} />
-                  <Button size="small" startIcon={<Upload />} onClick={() => fileRef.current?.click()}>{tx('Import CSV / GeoJSON')}</Button>
-                  <Button size="small" startIcon={<Download />} disabled={!points.length} onClick={exportCsv}>CSV</Button>
-                  <Button size="small" startIcon={<Download />} disabled={!points.length} onClick={exportGeoJson}>GeoJSON</Button>
-                  <Button size="small" onClick={() => setFitKey((k) => k + 1)} disabled={!points.length}>{tx('Zoom to points')}</Button>
-                  <Button size="small" color="error" disabled={!selected.length} onClick={() => deletePoints(selected)}>
-                    {tx('Delete selected ({n})', { n: selected.length })}
-                  </Button>
-                  <Button size="small" color="error" disabled={!points.length}
-                    onClick={() => { if (window.confirm(tx('Delete all {n} points?', { n: points.length }))) deletePoints(points.map((p) => p.id)); }}>
-                    {tx('Clear all')}
-                  </Button>
-                </Stack>
-                {!points.length && (
-                  <Typography variant="body2" color="text.secondary">{tx('No points yet. Click the map, draw a road / area / grid, paste Google URLs, or import a file.')}</Typography>
-                )}
-                {points.length > 0 && (
-                  <Box component="table" data-testid="street-level-points" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, '& td, & th': { borderBottom: '1px solid', borderColor: 'divider', p: 0.25, textAlign: 'left', verticalAlign: 'middle' } }}>
-                    <thead>
-                      <tr>
-                        <th>
-                          <Checkbox size="small" sx={{ p: 0.25 }}
-                            checked={pagePoints.length > 0 && pagePoints.every((p) => selected.includes(p.id))}
-                            onChange={(e) => setSelected((s) => (e.target.checked
-                              ? [...new Set([...s, ...pagePoints.map((p) => p.id)])]
-                              : s.filter((id) => !pagePoints.some((p) => p.id === id))))} />
-                        </th>
-                        <th>#</th><th>lat, lng</th><th>{tx('Heading')}</th><th>{tx('Pitch')}</th><th>FOV</th><th>{tx('Source')}</th><th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagePoints.map((p, i) => (
-                        <tr key={p.id} style={selected.includes(p.id) ? { background: 'rgba(255,152,0,0.12)' } : undefined}>
-                          <td><Checkbox size="small" sx={{ p: 0.25 }} checked={selected.includes(p.id)} onChange={() => togglePoint(p.id, true)} /></td>
-                          <td>{page * PAGE_SIZE + i + 1}</td>
-                          <td>
-                            <Tooltip title={p.panoId ? `pano ${p.panoId}` : ''}><span>{fmt(p.lat)}, {fmt(p.lng)}</span></Tooltip>
-                          </td>
-                          <td><NumberCell label={tx('Heading')} value={p.heading} min={-360} max={720} placeholder={p.roadBearing == null ? '' : `↗${Math.round(p.roadBearing)}`} onCommit={(v) => updatePoint(p.id, { heading: v })} /></td>
-                          <td><NumberCell label={tx('Pitch')} value={p.pitch} min={-90} max={90} width={48} onCommit={(v) => updatePoint(p.id, { pitch: v })} /></td>
-                          <td><NumberCell label="FOV" value={p.fov} min={1} max={180} width={44} onCommit={(v) => updatePoint(p.id, { fov: v })} /></td>
-                          <td><Chip size="small" variant="outlined" label={tx(`source:${p.source}`)} /></td>
-                          <td style={{ whiteSpace: 'nowrap' }}>
-                            <Tooltip title={tx('Open in Google Street View')}>
-                              <IconButton size="small" aria-label={tx('Open in Google Street View')}
-                                onClick={() => openGoogle(buildStreetViewUrl({ ...p, heading: p.heading ?? p.roadBearing }))}><OpenInNew fontSize="inherit" /></IconButton>
-                            </Tooltip>
-                            <Tooltip title={tx('Delete')}>
-                              <IconButton size="small" aria-label={tx('Delete')} onClick={() => deletePoints([p.id])}><DeleteOutline fontSize="inherit" /></IconButton>
-                            </Tooltip>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Box>
-                )}
-                {pageCount > 1 && (
-                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                    <Button size="small" disabled={page === 0} onClick={() => setPage((x) => x - 1)}>‹</Button>
-                    <Typography variant="caption">{tx('Page {p} / {n}', { p: page + 1, n: pageCount })}</Typography>
-                    <Button size="small" disabled={page >= pageCount - 1} onClick={() => setPage((x) => x + 1)}>›</Button>
-                  </Stack>
-                )}
-              </Stack>
-            )}
-
-            {tab === 1 && (
-              <StreetLevelDownloadTab
+            <Stack spacing={1.5}>
+              <StreetLevelDownloadPanel
                 points={points}
                 selectedIds={selected}
                 currentProject={currentProject}
@@ -464,10 +346,165 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
                 commitStreetLevel={commitStreetLevel}
                 initialCapture={config.capture}
                 lastJob={config.lastJob}
+                onItemsChange={setDownloadItems}
               />
-            )}
+              <TextField
+                multiline
+                minRows={2}
+                maxRows={8}
+                size="small"
+                label={tx('Paste Google Maps / Street View URLs (one or many)')}
+                placeholder="https://www.google.com/maps/@1.2966,103.7764,3a,75y,90h,95t/data=…"
+                helperText={tx('paste-help')}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+              />
+              {(pasteText.trim() || parsed.length > 0) && (
+                <Stack direction="row" spacing={1}>
+                  <Button variant="outlined" size="small" onClick={parsePaste} disabled={!pasteText.trim() || parsing}
+                    startIcon={parsing ? <CircularProgress size={14} /> : null}>
+                    {tx('Parse URLs')}
+                  </Button>
+                  {parsed.length > 0 && (
+                    <Button variant="contained" size="small" onClick={addParsed}
+                      disabled={!parsed.some((r) => r.ok && !r.duplicate)}>
+                      {tx('Add {n} point(s)', { n: parsed.filter((r) => r.ok && !r.duplicate).length })}
+                    </Button>
+                  )}
+                </Stack>
+              )}
+              {parsed.length > 0 && (
+                <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, '& td, & th': { borderBottom: '1px solid', borderColor: 'divider', p: 0.5, textAlign: 'left' } }}>
+                  <thead>
+                    <tr><th>{tx('Status')}</th><th>lat, lng</th><th>{tx('Own view')}</th><th>{tx('Pano id')}</th></tr>
+                  </thead>
+                  <tbody>
+                    {parsed.map((r, i) => (
+                      <tr key={`${r.url}-${i}`}>
+                        <td>
+                          {!r.ok && <Chip size="small" color="error" label={r.reason} title={r.detail || undefined} />}
+                          {r.ok && r.duplicate && <Chip size="small" label={tx('Duplicate')} />}
+                          {r.ok && !r.duplicate && <Chip size="small" color="success" label={r.expandedFrom ? tx('OK (short link)') : 'OK'} />}
+                          {r.ok && r.parsed.userUploaded && <Chip size="small" color="warning" sx={{ ml: 0.5 }} label={tx('User photo')} />}
+                        </td>
+                        <td>{r.ok ? `${fmt(r.point.lat)}, ${fmt(r.point.lng)}` : <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>{r.url.slice(0, 60)}</Typography>}</td>
+                        <td>{r.ok ? viewLabel(r.point) : ''}</td>
+                        <td style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ok ? r.point.panoId || '—' : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Box>
+              )}
+
+              <Divider />
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1, alignItems: 'center' }}>
+                <Typography variant="subtitle2" sx={{ mr: 1 }}>{tx('Point list')}</Typography>
+                <input ref={fileRef} type="file" accept=".csv,.geojson,.json,text/csv,application/geo+json,application/json" hidden
+                  onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ''; }} />
+                <Button size="small" startIcon={<Upload />} onClick={() => fileRef.current?.click()}>{tx('Import CSV / GeoJSON')}</Button>
+                <Button size="small" startIcon={<Download />} disabled={!points.length} onClick={exportCsv}>CSV</Button>
+                <Button size="small" startIcon={<Download />} disabled={!points.length} onClick={exportGeoJson}>GeoJSON</Button>
+                <Button size="small" onClick={() => setFitKey((k) => k + 1)} disabled={!points.length}>{tx('Zoom to points')}</Button>
+                <Button size="small" color="error" disabled={!selected.length} onClick={() => deletePoints(selected)}>
+                  {tx('Delete selected ({n})', { n: selected.length })}
+                </Button>
+                <Button size="small" color="error" disabled={!points.length}
+                  onClick={() => { if (window.confirm(tx('Delete all {n} points?', { n: points.length }))) deletePoints(points.map((p) => p.id)); }}>
+                  {tx('Clear all')}
+                </Button>
+              </Stack>
+              {!points.length && (
+                <Typography variant="body2" color="text.secondary">{tx('No points yet. Click the map, draw a road / area / grid, paste Google URLs, or import a file.')}</Typography>
+              )}
+              {points.length > 0 && (
+                <Box component="table" data-testid="street-level-points" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, '& td, & th': { borderBottom: '1px solid', borderColor: 'divider', p: 0.25, textAlign: 'left', verticalAlign: 'middle' } }}>
+                  <thead>
+                    <tr>
+                      <th>
+                        <Checkbox size="small" sx={{ p: 0.25 }}
+                          checked={pagePoints.length > 0 && pagePoints.every((p) => selected.includes(p.id))}
+                          onChange={(e) => setSelected((s) => (e.target.checked
+                            ? [...new Set([...s, ...pagePoints.map((p) => p.id)])]
+                            : s.filter((id) => !pagePoints.some((p) => p.id === id))))} />
+                      </th>
+                      <th>#</th><th>lat, lng</th><th>{tx('View')}</th><th>{tx('Source')}</th><th>{tx('Download')}</th><th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagePoints.map((p, i) => {
+                      const it = downloadItems[p.id];
+                      return (
+                        <tr key={p.id} style={selected.includes(p.id) ? { background: 'rgba(255,109,0,0.10)' } : undefined}>
+                          <td><Checkbox size="small" sx={{ p: 0.25 }} checked={selected.includes(p.id)} onChange={() => togglePoint(p.id, true)} /></td>
+                          <td>{page * PAGE_SIZE + i + 1}</td>
+                          <td>
+                            <Tooltip title={p.panoId ? `pano ${p.panoId}` : ''}><span>{fmt(p.lat)}, {fmt(p.lng)}</span></Tooltip>
+                          </td>
+                          <td>
+                            {hasOwnView(p)
+                              ? <Tooltip title={tx('This point keeps its own view instead of the batch settings.')}><Chip size="small" color="primary" variant="outlined" label={viewLabel(p)} /></Tooltip>
+                              : <Typography variant="caption" color="text.secondary">{tx('Batch')}</Typography>}
+                          </td>
+                          <td><Typography variant="caption">{tx(`source:${p.source}`)}</Typography></td>
+                          <td>
+                            {it ? <Chip size="small" color={STATUS_COLOR[it.status] || 'default'} variant={it.status === 'done' ? 'filled' : 'outlined'}
+                              label={tx(`item:${it.status}`)} title={it.error || undefined} /> : null}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <Tooltip title={tx('Edit this point’s view')}>
+                              <IconButton size="small" aria-label={tx('Edit this point’s view')}
+                                onClick={(e) => setViewEdit({ anchor: e.currentTarget, id: p.id })}><Tune fontSize="inherit" /></IconButton>
+                            </Tooltip>
+                            <Tooltip title={tx('Open in Google Street View')}>
+                              <IconButton size="small" aria-label={tx('Open in Google Street View')}
+                                onClick={() => openGoogle(buildStreetViewUrl({ ...p, heading: p.heading ?? p.roadBearing }))}><OpenInNew fontSize="inherit" /></IconButton>
+                            </Tooltip>
+                            <Tooltip title={tx('Delete')}>
+                              <IconButton size="small" aria-label={tx('Delete')} onClick={() => deletePoints([p.id])}><DeleteOutline fontSize="inherit" /></IconButton>
+                            </Tooltip>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </Box>
+              )}
+              {pageCount > 1 && (
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                  <Button size="small" disabled={page === 0} onClick={() => setPage((x) => x - 1)}>‹</Button>
+                  <Typography variant="caption">{tx('Page {p} / {n}', { p: page + 1, n: pageCount })}</Typography>
+                  <Button size="small" disabled={page >= pageCount - 1} onClick={() => setPage((x) => x + 1)}>›</Button>
+                </Stack>
+              )}
+            </Stack>
           </Box>
         </Box>
+        <Popover
+          open={Boolean(viewEditPoint)}
+          anchorEl={viewEdit?.anchor}
+          onClose={() => setViewEdit(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        >
+          {viewEditPoint && (
+            <Box sx={{ p: 1.5, width: 260 }} data-testid="point-view-editor">
+              <Typography variant="subtitle2">{tx('View for point #{n}', { n: points.indexOf(viewEditPoint) + 1 })}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{tx('Leave empty to use the batch settings.')}</Typography>
+              <Stack direction="row" spacing={1}>
+                <NumberCell label={tx('Heading')} value={viewEditPoint.heading} min={-360} max={720} width={56}
+                  placeholder={tx('Heading')} onCommit={(v) => updatePoint(viewEditPoint.id, { heading: v })} />
+                <NumberCell label={tx('Pitch')} value={viewEditPoint.pitch} min={-90} max={90} width={48}
+                  placeholder={tx('Pitch')} onCommit={(v) => updatePoint(viewEditPoint.id, { pitch: v })} />
+                <NumberCell label="FOV" value={viewEditPoint.fov} min={10} max={120} width={44}
+                  placeholder="FOV" onCommit={(v) => updatePoint(viewEditPoint.id, { fov: v })} />
+              </Stack>
+              <Button size="small" sx={{ mt: 1 }} disabled={!hasOwnView(viewEditPoint)}
+                onClick={() => { updatePoint(viewEditPoint.id, { heading: null, pitch: null, fov: null }); setViewEdit(null); }}>
+                {tx('Use batch settings')}
+              </Button>
+            </Box>
+          )}
+        </Popover>
       </Box>
     </Dialog>
   );
