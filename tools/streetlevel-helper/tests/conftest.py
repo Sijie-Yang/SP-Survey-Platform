@@ -146,3 +146,48 @@ def point(pid, lat=1.29745, lng=103.77315, **extra):
 
 def dumps(obj):
     return json.dumps(obj)
+
+
+class MapillaryStub:
+    """Graph API /images radius search + CDN JPEGs. Requires access_token on every search call."""
+
+    def __init__(self, token="MLY|good"):
+        self.token = token
+        self.requests = []
+        self.app = web.Application()
+        self.app.router.add_get("/images", self.images)
+        self.app.router.add_get("/cdn/{name}", self.cdn)
+        self.base = ""
+
+    async def images(self, request):
+        self.requests.append(dict(request.query))
+        if request.query.get("access_token") != self.token:
+            return web.json_response({"error": {"message": "Invalid OAuth access token"}}, status=401)
+        lat, lng = float(request.query["lat"]), float(request.query["lng"])
+        if lat > 10:
+            return web.json_response({"data": []})
+        pano = lat < 1.2975
+        image = {
+            "id": "9001" if pano else "9002", "is_pano": pano, "computed_compass_angle": 30.0,
+            "computed_geometry": {"type": "Point", "coordinates": [lng + 0.00002, lat]},
+            "captured_at": 1715000000000, "creator": {"username": "mapper_a"}, "quality_score": 0.9,
+            "thumb_2048_url": f"{self.base}/cdn/{'pano' if pano else 'photo'}.jpg",
+            "thumb_original_url": f"{self.base}/cdn/{'pano' if pano else 'photo'}.jpg",
+        }
+        return web.json_response({"data": [image]})
+
+    async def cdn(self, request):
+        size = (2048, 1024) if request.match_info["name"].startswith("pano") else (1024, 768)
+        img = Image.new("RGB", size, (40, 120, 200))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG")
+        return web.Response(body=buf.getvalue(), content_type="image/jpeg")
+
+
+@pytest.fixture
+async def mapillary():
+    stub = MapillaryStub()
+    runner, base = await _start(stub.app)
+    stub.base = base
+    yield stub
+    await runner.cleanup()

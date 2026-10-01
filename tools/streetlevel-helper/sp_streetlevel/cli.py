@@ -10,18 +10,22 @@ import sys
 
 from . import __version__
 from .core import folder_tags
-from .google import GoogleStreetViewBackend
+from .backends import make_backend
 from .job import Job, run_job
 from .platform import PlatformClient, validate_api_base
 from .server import DEFAULT_ORIGINS, DEFAULT_PORT, serve
 
 DEFAULT_API = "https://sp-survey.org"
-OPTION_FLAGS = ("preset", "heading_count", "pitch", "fov", "width", "zoom", "radius", "folder", "folder_mode",
-                "min_interval")
+OPTION_FLAGS = ("source", "preset", "heading_mode", "fixed_heading", "heading_count", "pitch", "fov", "width", "zoom",
+                "radius", "folder", "folder_mode", "min_interval")
 
 
 def _add_capture_flags(p: argparse.ArgumentParser):
+    p.add_argument("--source", choices=["google", "mapillary"], help="imagery source (default google)")
     p.add_argument("--preset", choices=["current", "pano", "headings", "road"])
+    p.add_argument("--heading-mode", dest="heading_mode", choices=["road", "fixed"],
+                   help="batch heading: follow the road (default) or a fixed compass heading")
+    p.add_argument("--fixed-heading", dest="fixed_heading", type=float)
     p.add_argument("--heading-count", dest="heading_count", type=int)
     p.add_argument("--pitch", type=float)
     p.add_argument("--fov", type=float)
@@ -61,9 +65,12 @@ def cmd_run(args) -> int:
     if not points:
         print("No points in this project's street-level list. Add points in the Platform panel first.")
         return 1
+    if options.get("source") == "mapillary":
+        options["mapillary_token"] = os.environ.get("MAPILLARY_TOKEN", "")
     job = Job(points=points, options=options, media_prefix=project["mediaPrefix"],
               public_base=project.get("publicBase", ""), project_id=args.project)
-    backend = GoogleStreetViewBackend(upstream_override=args.upstream_override)
+    backend = make_backend(job.options, upstream_override=args.upstream_override,
+                           mapillary_api=args.mapillary_api)
     asyncio.run(run_job(job, backend, platform, on_progress=_progress))
     print()
     if job.entries:
@@ -84,13 +91,13 @@ def cmd_login(args) -> int:
 
 def cmd_serve(args) -> int:
     origins = list(DEFAULT_ORIGINS) + list(args.allow_origin or [])
-    serve(lambda: GoogleStreetViewBackend(upstream_override=args.upstream_override), port=args.port,
-          allowed_origins=origins)
+    serve(lambda opts: make_backend(opts, upstream_override=args.upstream_override, mapillary_api=args.mapillary_api),
+          port=args.port, allowed_origins=origins)
     return 0
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="sp-streetlevel", description=__doc__)
+    parser = argparse.ArgumentParser(prog="python -m sp_streetlevel", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -98,6 +105,7 @@ def main(argv=None) -> int:
     s.add_argument("--port", type=int, default=DEFAULT_PORT)
     s.add_argument("--allow-origin", action="append", help="extra Platform origin allowed to call the helper")
     s.add_argument("--upstream-override", help=argparse.SUPPRESS)
+    s.add_argument("--mapillary-api", help=argparse.SUPPRESS)
     s.set_defaults(func=cmd_serve)
 
     r = sub.add_parser("run", help="download every point of a project in one command (fallback)")
@@ -105,6 +113,7 @@ def main(argv=None) -> int:
     r.add_argument("--api", default=DEFAULT_API)
     r.add_argument("--selected", help="comma-separated point ids")
     r.add_argument("--upstream-override", help=argparse.SUPPRESS)
+    r.add_argument("--mapillary-api", help=argparse.SUPPRESS)
     _add_capture_flags(r)
     r.set_defaults(func=cmd_run)
 

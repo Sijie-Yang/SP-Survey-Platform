@@ -2,7 +2,7 @@ import asyncio
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from sp_streetlevel.google import GoogleStreetViewBackend
+from sp_streetlevel.backends import make_backend
 from sp_streetlevel.server import HelperState, make_app
 
 from .conftest import point
@@ -11,7 +11,7 @@ ORIGIN = "http://localhost:3000"
 
 
 async def client_for(upstream, origins=(ORIGIN,)):
-    state = HelperState(lambda: GoogleStreetViewBackend(upstream_override=upstream.base), allowed_origins=origins)
+    state = HelperState(lambda opts: make_backend(opts, upstream_override=upstream.base), allowed_origins=origins)
     client = TestClient(TestServer(make_app(state)))
     await client.start_server()
     return client, state
@@ -62,6 +62,8 @@ async def test_rejects_unsafe_api_base_and_prefix(upstream, platform_api):
         assert res.status == 400
         res = await client.post("/jobs", json={**body, "mediaPrefix": "templates/x/"}, headers={"Origin": ORIGIN})
         assert res.status == 400
+        res = await client.post("/jobs", json={**body, "options": {"source": "mapillary"}}, headers={"Origin": ORIGIN})
+        assert res.status == 400 and "free access token" in (await res.json())["error"]
     finally:
         await client.close()
 

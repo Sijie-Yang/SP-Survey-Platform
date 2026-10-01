@@ -10,10 +10,11 @@ from typing import Callable, List, Optional
 
 from . import __version__
 from .core import (
-    CSV_MODEL, capture_filename, folder_for_point, folder_tags, media_key, merge_rows, metadata_row,
+    CSV_MODEL, SECRET_OPTIONS, capture_filename, folder_for_point, folder_tags, media_key, merge_rows, metadata_row,
     normalize_options, normalize_point, parse_csv, plan_views, render_perspective, rows_to_csv,
 )
 from .google import encode_jpeg
+from .mapillary import ProviderAuthError
 from .platform import AuthError, PlatformError
 
 try:
@@ -23,6 +24,7 @@ except Exception:  # pragma: no cover
     STREETLEVEL_VERSION = "unknown"
 
 ACQUISITION = f"streetlevel {STREETLEVEL_VERSION} via sp-streetlevel {__version__} (unofficial Google Street View endpoints)"
+MAPILLARY_ACQUISITION = f"Mapillary Graph API v4 via sp-streetlevel {__version__}"
 DONE = {"done", "no-image"}
 
 
@@ -46,7 +48,7 @@ class RateLimiter:
 
 
 def _retryable(err: Exception) -> bool:
-    if isinstance(err, AuthError):
+    if isinstance(err, (AuthError, ProviderAuthError)):
         return False
     if isinstance(err, PlatformError):
         return err.retryable
@@ -116,7 +118,7 @@ class Job:
             "entryCount": len(self.entries),
             "folders": sorted(self.folders),
             "tags": folder_tags(self.folders, self.options),
-            "options": self.options,
+            "options": {k: v for k, v in self.options.items() if k not in SECRET_OPTIONS},
             "csvUploads": self.csv_uploaded,
             "updatedAt": self.updated_at,
         }
@@ -174,7 +176,8 @@ async def run_job(job: Job, backend, platform, *, sleep=asyncio.sleep, clock=tim
         try:
             async def lookup():
                 await limiter.wait(0.5)
-                return await asyncio.to_thread(backend.lookup, point, opts["radius"], opts["search_third_party"])
+                prefer = opts["fixed_heading"] if opts["heading_mode"] == "fixed" else None
+                return await asyncio.to_thread(backend.lookup, point, opts["radius"], opts["search_third_party"], prefer)
             pano = await with_retry(lookup, opts["max_attempts"], sleep)
             if pano is None:
                 item["status"] = "no-image"
@@ -182,7 +185,7 @@ async def run_job(job: Job, backend, platform, *, sleep=asyncio.sleep, clock=tim
             item["pano_id"] = pano.id
             folder = folder_for_point(point, opts, index)
             views = plan_views(point, pano, opts)
-            names = [capture_filename(pano.id, v) for v in views]
+            names = [capture_filename(pano.id, v, pano.provider) for v in views]
             keys = [media_key(job.media_prefix, folder, n) for n in names]
             missing = [i for i, k in enumerate(keys) if k not in existing]
             equirect = None
@@ -196,13 +199,13 @@ async def run_job(job: Job, backend, platform, *, sleep=asyncio.sleep, clock=tim
                 last_pano.update(id=pano.id, pixels=equirect)
             now = datetime.now(timezone.utc).isoformat()
             for i, (view, name, key) in enumerate(zip(views, names, keys)):
-                if view["kind"] == "pano":
+                if view["kind"] in ("pano", "original"):
                     height, width = equirect.shape[:2] if equirect is not None else ("", "")
                 else:
                     width, height = opts["width"], round(opts["width"] * 3 / 4)
                 url = f"{job.public_base}/{key}" if job.public_base else ""
                 if i in missing:
-                    pixels = equirect if view["kind"] == "pano" else render_perspective(
+                    pixels = equirect if view["kind"] in ("pano", "original") else render_perspective(
                         equirect, view["heading"], view["pitch"], view["fov"], width, height, pano.heading)
                     data = encode_jpeg(pixels, opts["jpeg_quality"])
                     url = await with_retry(lambda d=data, k=key: asyncio.to_thread(platform.upload, k, d, "image/jpeg"),
@@ -215,16 +218,24 @@ async def run_job(job: Job, backend, platform, *, sleep=asyncio.sleep, clock=tim
                 reported.add(key)
                 job.entries.append({
                     "url": url, "name": name, "key": key, "media_id": key, "folder": folder, "type": "image",
-                    "attribution": {"text": pano.copyright or "Google", "url": "", "license": "Google Street View (unofficial download)"},
-                    "streetLevel": {"provider": "google_streetview", "panoId": pano.id, "pointId": point["id"], "runId": job.id},
+                    "attribution": {
+                        "text": pano.copyright or ("Mapillary" if pano.provider == "mapillary" else "Google"),
+                        "url": pano.link,
+                        "license": pano.license or "Google Street View (unofficial download)",
+                    },
+                    "streetLevel": {"provider": pano.provider, "panoId": pano.id, "pointId": point["id"], "runId": job.id},
                 })
                 new_rows.append(metadata_row(key=key, name=name, folder=folder, pano=pano, view=view, point=point,
                                              width=width, height=height, zoom=opts["zoom"], run_id=job.id,
-                                             now=now, acquisition=ACQUISITION))
+                                             now=now, acquisition=MAPILLARY_ACQUISITION if pano.provider == "mapillary" else ACQUISITION))
             item["status"] = "done"
         except AuthError as err:
             item.update(status="pending", error=str(err))
             job.state, job.error = "needs-auth", str(err)
+            break
+        except ProviderAuthError as err:
+            item.update(status="pending", error=str(err))
+            job.state, job.error = "failed", str(err)
             break
         except Exception as err:  # noqa: BLE001 - recorded per point
             item.update(status="failed", error=str(err)[:300])
@@ -237,10 +248,10 @@ async def run_job(job: Job, backend, platform, *, sleep=asyncio.sleep, clock=tim
                 except AuthError as err:
                     job.state, job.error = "needs-auth", str(err)
             report()
-        if job.state == "needs-auth":
+        if job.state in ("needs-auth", "failed"):
             break
 
-    if job.state != "needs-auth":
+    if job.state not in ("needs-auth",):
         try:
             await flush_csv()
         except AuthError as err:

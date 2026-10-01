@@ -39,7 +39,7 @@ class HelperState:
             if job and not job.cancelled:
                 platform = self.platform_factory(self.api_bases[job_id], lambda jid=job_id: self.tokens.get(jid))
                 try:
-                    await run_job(job, self.backend_factory(), platform)
+                    await run_job(job, self.backend_factory(job.options), platform)
                 except Exception as err:  # noqa: BLE001 - surfaced to the panel
                     job.state, job.error = "failed", str(err)[:300]
             elif job:
@@ -99,7 +99,11 @@ def make_app(state: HelperState) -> web.Application:
         prefix = str(body.get("mediaPrefix") or "")
         if not prefix or ".." in prefix or prefix.startswith(("/", "templates/")):
             raise web.HTTPBadRequest(text="mediaPrefix required")
-        job = Job(points=points, options=body.get("options") or {}, media_prefix=prefix,
+        options = body.get("options") or {}
+        if options.get("source") == "mapillary" and not str(options.get("mapillaryToken") or options.get("mapillary_token") or "").strip():
+            raise web.HTTPBadRequest(text="Mapillary needs a free access token (mapillary.com/dashboard/developers). "
+                                          "Google Street View does not need one.")
+        job = Job(points=points, options=options, media_prefix=prefix,
                   public_base=str(body.get("publicBase") or ""), project_id=str(body.get("projectId") or ""))
         if not job.points:
             raise web.HTTPBadRequest(text="no valid points")

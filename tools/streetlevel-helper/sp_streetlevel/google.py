@@ -23,6 +23,7 @@ from streetlevel.streetview import streetview as sv_impl
 from streetlevel.util import get_equirectangular_panorama_async, get_image_async
 
 from .core import PanoInfo
+from .net import ssl_context
 
 UPSTREAM_HOSTS = (
     "maps.googleapis.com",
@@ -79,7 +80,8 @@ class GoogleStreetViewBackend:
         self.locale = locale
         self.session = _RewritingSession(upstream_override)
 
-    def lookup(self, point: dict, radius: int = 50, search_third_party: bool = False) -> Optional[PanoInfo]:
+    def lookup(self, point: dict, radius: int = 50, search_third_party: bool = False,
+               prefer_heading: Optional[float] = None) -> Optional[PanoInfo]:
         """Pano id first (from a pasted URL), then nearest pano to lat/lng. Blocking."""
         pano = None
         if point.get("pano_id"):
@@ -97,7 +99,7 @@ class GoogleStreetViewBackend:
         if not pano.image_sizes:
             raise ValueError("panorama has no image sizes")
         zoom = max(0, min(zoom, len(pano.image_sizes) - 1))
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context())) as session:
             if pano.is_third_party:
                 url = rewrite_url(sv_impl._build_sized_third_party_image_url(pano, zoom), self.override)
                 image = await get_image_async(url, session)
