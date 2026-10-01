@@ -17,7 +17,10 @@ PROVIDER = "google_streetview"
 CSV_MODEL = "street_level_v1"
 
 DEFAULT_OPTIONS = {
+    "source": "google",
     "preset": "current",
+    "heading_mode": "road",
+    "fixed_heading": 0.0,
     "heading_count": 4,
     "pitch": 0.0,
     "fov": 90.0,
@@ -39,7 +42,13 @@ _OPTION_ALIASES = {
     "minInterval": "min_interval",
     "maxAttempts": "max_attempts",
     "jpegQuality": "jpeg_quality",
+    "headingMode": "heading_mode",
+    "fixedHeading": "fixed_heading",
+    "mapillaryToken": "mapillary_token",
 }
+SOURCES = ("google", "mapillary")
+HEADING_MODES = ("road", "fixed")
+SECRET_OPTIONS = ("mapillary_token",)
 
 CSV_HEADERS = [
     "media_id", "name", "folder", "provider", "pano_id", "captured_at", "lat", "lng",
@@ -47,7 +56,8 @@ CSV_HEADERS = [
     "width", "height", "zoom",
     "point_id", "point_label", "point_lat", "point_lng", "point_heading", "point_pitch", "point_fov",
     "point_pano_id", "point_source", "point_source_url", "distance_m",
-    "copyright", "uploader", "source", "acquisition", "attribution_url", "run_id", "downloaded_at",
+    "copyright", "uploader", "source", "license", "acquisition", "attribution_url", "view_source",
+    "run_id", "downloaded_at",
 ]
 
 EARTH_RADIUS_M = 6371008.8
@@ -77,6 +87,10 @@ def normalize_options(raw: Optional[dict] = None) -> dict:
     for key, value in (raw or {}).items():
         opts[_OPTION_ALIASES.get(key, key)] = value
     opts["preset"] = opts["preset"] if opts["preset"] in PRESETS else "current"
+    opts["source"] = opts["source"] if opts["source"] in SOURCES else "google"
+    opts["heading_mode"] = opts["heading_mode"] if opts["heading_mode"] in HEADING_MODES else "road"
+    opts["fixed_heading"] = (_num(opts["fixed_heading"]) or 0.0) % 360.0
+    opts["mapillary_token"] = str(opts.get("mapillary_token") or "").strip()
     opts["folder_mode"] = opts["folder_mode"] if opts["folder_mode"] in FOLDER_MODES else "category"
     opts["heading_count"] = int(_clamp(int(_num(opts["heading_count"]) or 4), 1, 12))
     opts["pitch"] = float(_clamp(_num(opts["pitch"]) or 0.0, -90, 90))
@@ -151,6 +165,10 @@ class PanoInfo:
     source: str = ""
     links: List[float] = field(default_factory=list)
     raw: object = None
+    provider: str = PROVIDER
+    is_pano: bool = True
+    license: str = ""
+    link: str = ""
 
 
 def road_base(point: dict, pano: PanoInfo) -> float:
@@ -164,7 +182,19 @@ def road_base(point: dict, pano: PanoInfo) -> float:
     return pano.heading
 
 
+def batch_heading(point: dict, pano: PanoInfo, options: dict) -> float:
+    """A point's own heading (pasted URL or manual override) wins; otherwise the batch rule."""
+    if point.get("heading") is not None:
+        return point["heading"]
+    if options["heading_mode"] == "fixed":
+        return options["fixed_heading"]
+    return road_base(point, pano)
+
+
 def plan_views(point: dict, pano: PanoInfo, options: dict) -> List[dict]:
+    """Batch settings apply to every point; a point's own pitch / FOV / heading override them."""
+    if not pano.is_pano:
+        return [{"kind": "original"}]
     pitch = point["pitch"] if point.get("pitch") is not None else options["pitch"]
     fov = point["fov"] if point.get("fov") is not None else options["fov"]
     fov = _clamp(fov, 10, 120)
@@ -173,29 +203,29 @@ def plan_views(point: dict, pano: PanoInfo, options: dict) -> List[dict]:
         return [{"kind": "pano"}]
     if preset == "headings":
         n = options["heading_count"]
-        start = point["heading"] if point.get("heading") is not None else 0.0
+        start = batch_heading(point, pano, options)
         return [{"kind": "view", "heading": (start + 360.0 / n * i) % 360.0, "pitch": pitch, "fov": fov} for i in range(n)]
     if preset == "road":
         base = road_base(point, pano)
         return [{"kind": "view", "heading": (base + off) % 360.0, "pitch": pitch, "fov": fov, "road_offset": off}
                 for off in (0, 90, 180, 270)]
-    if point.get("heading") is not None:
-        heading = point["heading"]
-    elif distance_m(pano.lat, pano.lng, point["lat"], point["lng"]) > 3:
-        heading = bearing_deg(pano.lat, pano.lng, point["lat"], point["lng"])
-    else:
-        heading = pano.heading
-    return [{"kind": "view", "heading": heading, "pitch": pitch, "fov": fov}]
+    return [{"kind": "view", "heading": batch_heading(point, pano, options), "pitch": pitch, "fov": fov}]
 
 
-def capture_filename(pano_id: str, view: dict) -> str:
+FILE_PREFIX = {"google_streetview": "gsv", "mapillary": "mly"}
+
+
+def capture_filename(pano_id: str, view: dict, provider: str = PROVIDER) -> str:
     pid = re.sub(r"[^a-zA-Z0-9_-]", "_", str(pano_id))
+    prefix = FILE_PREFIX.get(provider, "sl")
     if view["kind"] == "pano":
-        return f"gsv-{pid}-pano.jpg"
+        return f"{prefix}-{pid}-pano.jpg"
+    if view["kind"] == "original":
+        return f"{prefix}-{pid}-orig.jpg"
     h = int(round(view["heading"])) % 360
     p = int(round(view.get("pitch") or 0))
     f = int(round(view.get("fov") or 90))
-    return f"gsv-{pid}-h{h:03d}-{'m' if p < 0 else 'p'}{abs(p):02d}-f{f:03d}.jpg"
+    return f"{prefix}-{pid}-h{h:03d}-{'m' if p < 0 else 'p'}{abs(p):02d}-f{f:03d}.jpg"
 
 
 def folder_for_point(point: dict, options: dict, index: int) -> str:
@@ -257,11 +287,12 @@ def attribution_url(pano: PanoInfo) -> str:
 
 def metadata_row(*, key, name, folder, pano: PanoInfo, view, point, width, height, zoom,
                  run_id, now, acquisition) -> dict:
+    own_view = any(point.get(k) is not None for k in ("heading", "pitch", "fov"))
     return {
         "media_id": key,
         "name": name,
         "folder": folder,
-        "provider": PROVIDER,
+        "provider": pano.provider,
         "pano_id": pano.id,
         "captured_at": pano.date,
         "lat": round(pano.lat, 7),
@@ -290,8 +321,10 @@ def metadata_row(*, key, name, folder, pano: PanoInfo, view, point, width, heigh
         "copyright": pano.copyright,
         "uploader": pano.uploader,
         "source": pano.source,
+        "license": pano.license,
         "acquisition": acquisition,
-        "attribution_url": attribution_url(pano),
+        "attribution_url": pano.link or attribution_url(pano),
+        "view_source": "point" if own_view else "batch",
         "run_id": run_id,
         "downloaded_at": now,
     }

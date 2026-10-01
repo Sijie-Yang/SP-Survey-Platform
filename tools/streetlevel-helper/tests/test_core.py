@@ -30,14 +30,22 @@ def test_presets():
     assert [round(v["heading"], 1) for v in road] == [200.7, 290.7, 20.7, 110.7]
     assert [v["road_offset"] for v in road] == [0, 90, 180, 270]
     bare = normalize_point({"id": "b", "lat": 1.0, "lng": 2.0})
-    assert plan_views(bare, PANO, opts())[0]["heading"] == 200.0
-    away = normalize_point({"id": "c", "lat": 1.001, "lng": 2.0})
-    assert round(plan_views(away, PANO, opts())[0]["heading"]) == 0
+    # batch default: follow the road (pano link nearest the car direction)
+    assert plan_views(bare, PANO, opts())[0]["heading"] == 200.7
+    assert plan_views(bare, PANO, opts(heading_mode="fixed", fixed_heading=-90))[0]["heading"] == 270
+    assert plan_views({**bare, "road_bearing": 33}, PANO, opts())[0]["heading"] == 33
+    # batch pitch / FOV apply unless the point carries its own (pasted URL / override)
+    assert plan_views(bare, PANO, opts(pitch=7, fov=70))[0] == {"kind": "view", "heading": 200.7, "pitch": 7, "fov": 70}
+    assert plan_views(pt, PANO, opts(heading_mode="fixed", fixed_heading=0, pitch=7, fov=70))[0] == \
+        {"kind": "view", "heading": 90, "pitch": 5, "fov": 60}
+    flat = PanoInfo(id="M", lat=1.0, lng=2.0, is_pano=False, provider="mapillary")
+    assert plan_views(bare, flat, opts(preset="headings")) == [{"kind": "original"}]
 
 
 def test_filenames_are_deterministic():
     assert capture_filename("Ab/c", {"kind": "view", "heading": 5.4, "pitch": -3, "fov": 60}) == "gsv-Ab_c-h005-m03-f060.jpg"
     assert capture_filename("P", {"kind": "pano"}) == "gsv-P-pano.jpg"
+    assert capture_filename("123", {"kind": "original"}, "mapillary") == "mly-123-orig.jpg"
 
 
 def test_folders_and_tags():

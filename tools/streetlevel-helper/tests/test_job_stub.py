@@ -52,15 +52,16 @@ async def test_full_job_uploads_views_and_metadata(platform_api, upstream):
     assert job.state == "done", job.error
     assert job.counts() == {"total": 3, "done": 2, "noImage": 1, "failed": 0, "pending": 0, "running": 0, "files": 4}
     imgs = sorted(k for k in platform_api.uploads if k.endswith(".jpg"))
-    assert imgs == [f"user1/proj1/street-level/gsv-{PANO_ID}-h000-p00-f090.jpg",
+    assert imgs == [f"user1/proj1/street-level/gsv-{PANO_ID}-h021-p00-f090.jpg",
                     f"user1/proj1/street-level/gsv-{PANO_ID}-h090-p05-f060.jpg",
-                    f"user1/proj1/street-level/gsv-{PANO_ID}-h180-p00-f090.jpg",
+                    f"user1/proj1/street-level/gsv-{PANO_ID}-h201-p00-f090.jpg",
                     f"user1/proj1/street-level/gsv-{PANO_ID}-h270-p05-f060.jpg"]
     assert all(host in {"maps.googleapis.com", "www.google.com", "streetviewpixels-pa.googleapis.com"}
                for host, _p, _q in upstream.requests)
     tiles = [q for host, _p, q in upstream.requests if host.startswith("streetviewpixels")]
     assert len(tiles) == 2 and {q["zoom"] for q in tiles} == {"1"}  # shared pano fetched once
     view = Image.open(io.BytesIO(platform_api.objects[imgs[1]][0]))
+    assert {r["view_source"] for r in parse_csv(platform_api.objects["user1/proj1/features/street_level_v1.csv"][0].decode())} == {"point", "batch"}
     assert view.size == (320, 240)
 
     csv_key = "user1/proj1/features/street_level_v1.csv"
