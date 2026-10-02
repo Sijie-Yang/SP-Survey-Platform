@@ -34,6 +34,7 @@ import AdminGuideTour from './AdminGuideTour';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { tf } from '../../contexts/adminI18n';
+import { useStreetLevelText } from '../../contexts/streetLevelI18n';
 import { supabase } from '../../lib/supabase';
 import {
   CHECKLIST_KEYS,
@@ -46,6 +47,18 @@ import {
 } from '../../lib/adminGuide';
 
 const TAB = { media: 1, builder: 2, share: 3, results: 4, practice: 5 };
+const STREET_LEVEL_OPEN = 'Open street-level panel';
+
+/** The card lives inside the lazily rendered Dataset tab, so poll briefly for its button. */
+function revealButtonByText(label, attempts = 20) {
+  const button = Array.from(document.querySelectorAll('button')).find((node) => node.textContent.trim() === label);
+  if (button) {
+    button.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    button.focus({ preventScroll: true });
+    return;
+  }
+  if (attempts > 0) setTimeout(() => revealButtonByText(label, attempts - 1), 150);
+}
 
 function useResponseCount(projectId) {
   const [count, setCount] = useState(null);
@@ -251,6 +264,12 @@ function WorkflowStep({ t, step }) {
           <Box component="span" fontWeight={600}>{t.guideDoLabel}: </Box>
           <Box component="span" color="text.secondary">{step.what}</Box>
         </Typography>
+        {step.extra && (
+          <Typography variant="body2" sx={{ mt: 0.25 }}>
+            <Box component="span" fontWeight={600}>{step.extra.label}: </Box>
+            <Box component="span" color="text.secondary">{step.extra.text}</Box>
+          </Typography>
+        )}
         {step.hint && (
           <Alert severity="info" icon={<TipsAndUpdates fontSize="small" />} sx={{ mt: 1, py: 0 }}>
             {step.hint}
@@ -368,6 +387,7 @@ export default function AdminIntroduction({
 }) {
   const navigate = useNavigate();
   const { t } = useRegion();
+  const tsl = useStreetLevelText();
   const { user } = useAuth();
   const userId = user?.id || 'anonymous';
   const [prefs, setPrefs] = useState(() => loadGuidePrefs(userId));
@@ -426,8 +446,21 @@ export default function AdminIntroduction({
       why: t.guideMediaWhy,
       what: t.guideMediaDo,
       done: items.media.done,
+      extra: {
+        label: tsl('Street-level imagery'),
+        text: tsl('Pick points on our own map or paste Google Street View URLs, then a small helper on your computer downloads the views (no API key) into this media library with location metadata.'),
+      },
       hint: items.media.done ? null : t.guideMediaEmpty,
-      buttons: [openTabButton('tabMedia', TAB.media)],
+      buttons: [
+        openTabButton('tabMedia', TAB.media),
+        {
+          label: tsl('Street-level imagery'),
+          onClick: () => {
+            goTo(TAB.media);
+            revealButtonByText(tsl(STREET_LEVEL_OPEN));
+          },
+        },
+      ],
     },
     {
       id: 'builder',

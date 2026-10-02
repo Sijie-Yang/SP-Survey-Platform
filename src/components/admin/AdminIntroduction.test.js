@@ -59,6 +59,10 @@ test('new project shows quick start, empty checklist and empty-state hints', () 
   expect(handlers.onOpenProjects).toHaveBeenCalled();
   fireEvent.click(within(screen.getByTestId('guide-step-share')).getByRole('button', { name: `Open ${en.tabShare}` }));
   expect(handlers.onGoToTab).toHaveBeenCalledWith(3);
+  const mediaStep = within(screen.getByTestId('guide-step-media'));
+  expect(mediaStep.getByText(/paste Google Street View URLs/)).toBeInTheDocument();
+  fireEvent.click(mediaStep.getByRole('button', { name: 'Street-level imagery' }));
+  expect(handlers.onGoToTab).toHaveBeenLastCalledWith(1);
   fireEvent.click(screen.getByRole('button', { name: `Open ${en.tabSilicon}` }));
   expect(handlers.onOpenSilicon).toHaveBeenCalled();
   for (const mode of [en.aiSidebarModeAgent, en.aiSidebarModeGenerate, en.aiSidebarModeAdjust, en.aiSidebarModeQuestion]) {
@@ -101,6 +105,7 @@ test('renders in Chinese and auto-starts the one-time tour for a first visit', (
   setup();
   expect(screen.getByText(zh.guideTitle)).toBeInTheDocument();
   expect(screen.getByText(zh.guideQuickTitle)).toBeInTheDocument();
+  expect(within(screen.getByTestId('guide-step-media')).getByRole('button', { name: '街景影像' })).toBeInTheDocument();
   act(() => { jest.advanceTimersByTime(800); });
   expect(screen.getByRole('dialog', { name: zh.guideTourLabel })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: zh.guideTourSkip }));
