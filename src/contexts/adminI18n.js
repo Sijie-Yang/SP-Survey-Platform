@@ -1084,6 +1084,14 @@ export const adminI18n = {
     supabase: 'Supabase Storage',
     aliyunOss: 'Alibaba Cloud OSS',
     chinaModeBanner: 'China Mode enabled — Using ModelScope, Alibaba Cloud OSS, and Zeabur',
+
+    // Platform admin → Templates: online → builtin ZIP
+    tplExportAll: 'Export all online templates',
+    tplExportAllTooltip: 'Download every Supabase template as a built-in ZIP (JSON + index.json, no images). Unzip into public/project_templates/ and commit. _export/manifest.json records export time and each template\'s updated_at.',
+    tplExportAllDone: 'Exported {count} online templates as a built-in ZIP — unzip into public/project_templates/ and commit',
+    tplExportAllSkipped: 'Skipped {count} without a name or config: {ids}',
+    tplExportAllLog: 'Exported all online templates → repo ZIP ({count}): {files}',
+    tplSeedSelectAll: 'Select all',
   },
 
   zh: {
@@ -2138,6 +2146,13 @@ export const adminI18n = {
     supabase: 'Supabase 存储',
     aliyunOss: '阿里云 OSS',
     chinaModeBanner: '中国区模式已启用 — 使用 ModelScope、阿里云 OSS 与 Zeabur',
+
+    tplExportAll: '导出全部线上模板',
+    tplExportAllTooltip: '把 Supabase 中的全部模板下载为内置 ZIP（JSON + index.json，不含图片），解压到 public/project_templates/ 后提交。_export/manifest.json 记录导出时间和每个模板的 updated_at。',
+    tplExportAllDone: '已导出 {count} 个线上模板为内置 ZIP（解压到 public/project_templates/ 后提交）',
+    tplExportAllSkipped: '跳过 {count} 个缺少名称或配置的模板：{ids}',
+    tplExportAllLog: '已导出全部线上模板 → 仓库 ZIP（{count}）：{files}',
+    tplSeedSelectAll: '全选',
   },
 };
 

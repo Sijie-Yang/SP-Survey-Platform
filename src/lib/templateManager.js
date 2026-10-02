@@ -644,12 +644,22 @@ export async function fetchBuiltinTemplateJson(idOrFilename) {
 }
 
 /**
- * Download selected online templates as a builtin pack ZIP
- * (`{id}.json` + `index.json`) for committing into `public/project_templates/`.
+ * Export metadata lives in a subfolder so unzipping into
+ * `public/project_templates/` never adds a top-level `*.json` next to the
+ * template files (index.json drives import; deploy-pages copies `*.json`).
  */
-export function downloadOnlineTemplatesAsBuiltinZip(templates) {
+export const BUILTIN_EXPORT_MANIFEST_PATH = '_export/manifest.json';
+
+/**
+ * Build the builtin pack entries (`{id}.json` + `index.json` + export manifest).
+ * Template JSON and index.json bytes are identical for the selected and the
+ * export-all paths; only the manifest differs.
+ */
+export function buildOnlineTemplatesBuiltinZipFiles(templates, {
+  scope = 'selected',
+  exportedAt = new Date().toISOString(),
+} = {}) {
   const list = (templates || []).filter((t) => t?.id && t?.name && t?.config);
-  if (!list.length) throw new Error('没有可导出的模板');
   const files = list.map((t) => {
     const json = templateToBuiltinJson(t);
     return {
@@ -662,9 +672,65 @@ export function downloadOnlineTemplatesAsBuiltinZip(templates) {
     path: 'index.json',
     content: `${JSON.stringify({ templates: indexNames }, null, 2)}\n`,
   });
-  const stamp = new Date().toISOString().slice(0, 10);
-  downloadZip(`builtin_templates_${stamp}.zip`, files);
-  return { count: list.length, filenames: indexNames };
+  const manifest = {
+    format: 'sp-survey-builtin-templates',
+    version: 1,
+    scope,
+    exported_at: exportedAt,
+    template_count: list.length,
+    templates: list.map((t) => ({
+      id: normalizeTemplateId(t.id),
+      updated_at: t.updatedAt ?? t.updated_at ?? null,
+    })),
+  };
+  files.push({
+    path: BUILTIN_EXPORT_MANIFEST_PATH,
+    content: `${JSON.stringify(manifest, null, 2)}\n`,
+  });
+  return { list, files, indexNames, manifest };
+}
+
+/**
+ * Download selected online templates as a builtin pack ZIP
+ * (`{id}.json` + `index.json`) for committing into `public/project_templates/`.
+ */
+export function downloadOnlineTemplatesAsBuiltinZip(templates, { scope = 'selected' } = {}) {
+  const exportedAt = new Date().toISOString();
+  const { list, files, indexNames, manifest } = buildOnlineTemplatesBuiltinZipFiles(templates, {
+    scope,
+    exportedAt,
+  });
+  if (!list.length) throw new Error('没有可导出的模板');
+  const stamp = exportedAt.slice(0, 10);
+  const prefix = scope === 'all' ? 'builtin_templates_all' : 'builtin_templates';
+  downloadZip(`${prefix}_${stamp}.zip`, files);
+  return { count: list.length, filenames: indexNames, manifest };
+}
+
+/**
+ * Admin: fetch every row in `templates` (RLS `is_platform_admin()`), same
+ * order as listAllTemplates. Unlike listAllTemplates this throws, so a failed
+ * read never produces a partial "complete" export.
+ */
+export async function listAllTemplatesForExport() {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { data, error } = await supabase
+    .from('templates')
+    .select('*')
+    .order('is_pinned', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(rowToTemplate);
+}
+
+/** Admin: export every online template as one builtin pack ZIP. */
+export async function exportAllOnlineTemplatesAsBuiltinZip() {
+  const all = await listAllTemplatesForExport();
+  const result = downloadOnlineTemplatesAsBuiltinZip(all, { scope: 'all' });
+  const skipped = all
+    .filter((t) => !(t?.id && t?.name && t?.config))
+    .map((t) => t.id);
+  return { ...result, total: all.length, skipped };
 }
 
 /**
