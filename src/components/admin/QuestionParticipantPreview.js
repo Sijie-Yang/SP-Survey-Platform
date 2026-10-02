@@ -8,6 +8,7 @@ import { getTrialCount } from '../../lib/trialNavigation';
 import { isCuratedMediaMode, isRandomMediaQuestion, resolveMediaFolderTags, resolveSkillQuestions } from '../../lib/surveyMediaInjection';
 import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
 import { useRegion } from '../../contexts/RegionContext';
+import { conditionVariants, normalizeConditions, withConditionWording } from '../../lib/surveyRuntimeContext';
 import { isPreviewMessage, previewAppearance, PREVIEW_DEVICES, PREVIEW_FAILED, PREVIEW_READY, PREVIEW_RENDERED, PREVIEW_UPDATE, QUESTION_PREVIEW_PATH } from '../../lib/questionPreviewProtocol';
 
 /** An actual independent viewport, scaled only after participant layout has run. */
@@ -23,6 +24,10 @@ export default function QuestionParticipantPreview({ question, currentProject, s
   const [error, setError] = useState('');
   const [pending, setPending] = useState(true);
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
+  const conditions = normalizeConditions(surveyConfig);
+  const showConditions = conditions.length > 1 && conditionVariants(question).length > 0;
+  const [previewCondition, setPreviewCondition] = useState(conditions[0]?.id || '');
+  const activeCondition = showConditions && conditions.some((c) => c.id === previewCondition) ? previewCondition : (conditions[0]?.id || '');
   const iframeRef = useRef(null);
   const sequence = useRef(0);
   // Watch the full draft so new settings (including allowTie/tieLabel) cannot be omitted.
@@ -39,7 +44,7 @@ export default function QuestionParticipantPreview({ question, currentProject, s
     setPending(true);
     const timer = setTimeout(async () => {
       try {
-        const draft = JSON.parse(questionKey);
+        const draft = withConditionWording(JSON.parse(questionKey), activeCondition);
         if (!draft.type) return;
         const media = await resolvePreviewMediaContext(currentProject || {});
         if (cancelled) return;
@@ -69,7 +74,7 @@ export default function QuestionParticipantPreview({ question, currentProject, s
       }
     }, 0);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [questionKey, mediaSourceKey, currentProject, appearance, zh, resetCount]);
+  }, [questionKey, mediaSourceKey, currentProject, appearance, zh, resetCount, activeCondition]);
 
   const sendSnapshot = useCallback(() => {
     if (snapshot) iframeRef.current?.contentWindow?.postMessage({ type: PREVIEW_UPDATE, ...snapshot }, window.location.origin);
@@ -107,6 +112,11 @@ export default function QuestionParticipantPreview({ question, currentProject, s
         <ToggleButton value="desktop"><DesktopWindowsIcon fontSize="small" sx={{ mr: 0.75 }} />{zh ? 'PC 端' : 'Desktop'}</ToggleButton>
         <ToggleButton value="mobile"><SmartphoneIcon fontSize="small" sx={{ mr: 0.75 }} />{zh ? '手机端' : 'Mobile'}</ToggleButton>
       </ToggleButtonGroup>
+      {showConditions && (
+        <ToggleButtonGroup size="small" exclusive value={activeCondition} onChange={(_, next) => next && setPreviewCondition(next)} aria-label={zh ? '预览实验条件' : 'Preview condition'}>
+          {conditions.map((c) => <ToggleButton key={c.id} value={c.id}>{c.label}</ToggleButton>)}
+        </ToggleButtonGroup>
+      )}
       <Typography variant="caption" color="text.secondary">{viewport.width} × {viewport.height} · {Math.round(scale * 100)}%</Typography>
       <Stack direction="row" spacing={0.5} sx={{ ml: 'auto' }}>
         <Button size="small" startIcon={<RestartAltIcon />} onClick={() => setResetCount(count => count + 1)}

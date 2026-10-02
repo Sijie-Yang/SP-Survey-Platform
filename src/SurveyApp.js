@@ -23,7 +23,7 @@ import registerImageRankingWidget, {
 } from './components/SurveyCustomComponents';
 import { getBrowserId, generateCompletionCode } from './lib/browserId';
 import { countProjectResponses, fetchConditionCounts, fetchPairStats } from './lib/surveyPublicApi';
-import { applyRuntimeVariables, hasConditions, resolveRuntimeContext, runtimeMetadata } from './lib/surveyRuntimeContext';
+import { applyRuntimeVariables, conditionFromUrl, hasConditions, resolveRuntimeContext, runtimeMetadata } from './lib/surveyRuntimeContext';
 import { clearMediaWatchLog, mediaWatchMetadata } from './lib/mediaWatch';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
@@ -921,6 +921,7 @@ export default function SurveyApp() {
         finalSurveyJson._spRuntimeContext = await resolveRuntimeContext(runtimeConfig, {
           projectId,
           search: window.location.search,
+          override: conditionFromUrl(window.location.search),
           persist: true,
           fetchCounts: hasConditions(runtimeConfig) ? () => withTimeout(fetchConditionCounts(projectId), 5000, null) : null,
         });

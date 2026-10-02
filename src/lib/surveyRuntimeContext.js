@@ -121,6 +121,18 @@ export function reverseCodedConditions(question) {
   return conditionVariants(question).filter((v) => v.reverseCoded === true).map((v) => v.condition);
 }
 
+/** Question JSON as participants in this condition see it. */
+export function withConditionWording(questionJson, conditionId) {
+  const title = conditionVariant(questionJson, conditionId)?.title;
+  return typeof title === 'string' && title.trim() ? { ...questionJson, title } : questionJson;
+}
+
+/** Condition forced by the link (?sp_condition=id), for researcher testing or fixed per-condition links. */
+export function conditionFromUrl(search) {
+  const v = new URLSearchParams(search || '').get(CONDITION_VARIABLE);
+  return v && v.trim() ? v.trim() : null;
+}
+
 export function applyConditionWording(model, conditionId) {
   if (!model || !conditionId) return;
   model.getAllQuestions(false, false, true).forEach((q) => {

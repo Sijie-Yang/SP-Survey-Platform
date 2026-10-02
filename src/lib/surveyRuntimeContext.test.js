@@ -1,5 +1,6 @@
 import { Model } from 'survey-core';
 import {
+  conditionFromUrl, withConditionWording,
   reverseCodedConditions,
   applyRuntimeVariables, captureUrlParams, chooseCondition, normalizeConditions, resolveRuntimeContext, runtimeMetadata,
 } from './surveyRuntimeContext';
@@ -78,4 +79,12 @@ test('conditionVariants reword a question per condition', () => {
   expect(other.getQuestionByName('q').title).toBe('Looks safe?');
   expect(reverseCodedConditions(json.pages[0].elements[0])).toEqual(['less']);
   expect(new Model(json).toJSON().pages[0].elements[0].conditionVariants).toEqual(json.pages[0].elements[0].conditionVariants);
+});
+
+test('link override and per-condition question JSON', () => {
+  expect(conditionFromUrl('?sp_condition=less_safe&pid=1')).toBe('less_safe');
+  expect(conditionFromUrl('?pid=1')).toBeNull();
+  const q = { name: 'q', title: 'A', conditionVariants: [{ condition: 'b', title: 'B' }] };
+  expect(withConditionWording(q, 'b').title).toBe('B');
+  expect(withConditionWording(q, 'a')).toBe(q);
 });
