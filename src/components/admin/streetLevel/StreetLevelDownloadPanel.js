@@ -81,6 +81,8 @@ export default function StreetLevelDownloadPanel({
     || ['partial', 'cancelled', 'needs-auth', 'failed', 'interrupted'].includes(runState));
   const commands = helperCommands(os, origin);
   const mapillaryMissingToken = capture.source === 'mapillary' && !mapillaryToken.trim();
+  const helperCall = helper.base ? { base: helper.base } : {};
+  const backupCommand = runCommand({ projectId: projectId || '<project-id>', apiBase, capture: { ...capture, folder }, os });
 
   useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
 
@@ -137,7 +139,7 @@ export default function StreetLevelDownloadPanel({
     let timer;
     const poll = async () => {
       try {
-        const snap = await getJob(jobId, seenRef.current);
+        const snap = await getJob(jobId, seenRef.current, helper.base ? { base: helper.base } : {});
         if (!alive) return;
         seenRef.current = snap.entryCount;
         setJob(snap);
@@ -148,7 +150,7 @@ export default function StreetLevelDownloadPanel({
           const token = await currentAccessToken();
           if (token && now - tokenSentAt.current > 20000) {
             tokenSentAt.current = now;
-            await sendToken(jobId, token);
+            await sendToken(jobId, token, helper.base ? { base: helper.base } : {});
           }
         }
         if (ACTIVE_JOB_STATES.has(snap.state) || snap.state === 'needs-auth') timer = setTimeout(poll, POLL_MS);
@@ -161,7 +163,7 @@ export default function StreetLevelDownloadPanel({
     };
     poll();
     return () => { alive = false; clearTimeout(timer); };
-  }, [jobId, helper.running, registerEntries, checkHelper]);
+  }, [jobId, helper.running, helper.base, registerEntries, checkHelper]);
 
   const refreshLanded = useCallback(async () => {
     if (!projectPrefix) return;
@@ -185,7 +187,11 @@ export default function StreetLevelDownloadPanel({
     setError(null);
     if (!projectId || !projectPrefix) { setError(tx('Open a project first.')); return; }
     if (!scopePoints.length) { setError(tx('Add points first.')); return; }
-    if (!helper.running) { setError(tx('Start the local helper first (commands in Download settings).')); revealHelper(); return; }
+    if (!helper.running) {
+      if (!helper.blocked) setError(tx('Start the local helper first (commands in Download settings).'));
+      revealHelper();
+      return;
+    }
     if (mapillaryMissingToken) { setError(tx('mapillary-token-required')); setSettingsOpen(true); return; }
     const options = { ...capture, folder };
     commitStreetLevel({ capture: options });
@@ -193,14 +199,14 @@ export default function StreetLevelDownloadPanel({
       const token = await currentAccessToken();
       tokenSentAt.current = Date.now();
       if (resume && jobId && job && !ACTIVE_JOB_STATES.has(job.state)) {
-        await resumeJob(jobId, token);
+        await resumeJob(jobId, token, helperCall);
         setJob({ ...job, state: 'queued' });
         return;
       }
       const res = await startJob({
         apiBase, projectId, mediaPrefix: projectPrefix, publicBase: getR2PublicBase(), token, points: scopePoints,
         options: capture.source === 'mapillary' ? { ...options, mapillaryToken: mapillaryToken.trim() } : options,
-      });
+      }, helperCall);
       seenRef.current = 0;
       setJob(null);
       setInterrupted(false);
@@ -231,18 +237,25 @@ export default function StreetLevelDownloadPanel({
         {hasResumable && !active && (
           <Button variant="outlined" size="small" onClick={() => start(true)}>{tx('Resume')}</Button>
         )}
-        {active && <Button color="warning" size="small" onClick={() => cancelJob(jobId).catch(() => {})}>{tx('Cancel')}</Button>}
+        {active && <Button color="warning" size="small" onClick={() => cancelJob(jobId, helperCall).catch(() => {})}>{tx('Cancel')}</Button>}
         <Box sx={{ flex: 1 }} />
         {helper.checking ? null : helper.running ? (
           <Chip size="small" color="success" variant="outlined" label={tx('Helper connected')} />
         ) : (
-          <Chip size="small" color="warning" variant="outlined" label={tx('Helper not running')} onClick={revealHelper} data-testid="helper-missing-chip" />
+          <Chip size="small" color="warning" variant="outlined" label={tx(helper.blocked ? 'Browser blocked the helper' : 'Helper not running')} onClick={revealHelper} data-testid={helper.blocked ? 'helper-blocked-chip' : 'helper-missing-chip'} />
         )}
         <Chip size="small" variant="outlined" label={capture.source === 'mapillary' ? 'Mapillary' : 'Google Street View'} />
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
         {capture.source === 'mapillary' ? tx('terms-short-mapillary') : tx('terms-short')}
       </Typography>
+
+      {!helper.checking && helper.blocked && (
+        <Alert severity="warning" sx={{ mt: 1 }} data-testid="helper-blocked">
+          <Typography variant="body2">{tx('helper-blocked')}</Typography>
+          <Box sx={{ mt: 0.75 }}><CopyLine text={backupCommand} label={tx('Copy')} /></Box>
+        </Alert>
+      )}
 
       {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
       {job?.state === 'needs-auth' && <Alert severity="warning" sx={{ mt: 1 }}>{tx('Sign-in expired; sending a fresh session to the helper…')}</Alert>}
@@ -358,10 +371,10 @@ export default function StreetLevelDownloadPanel({
             <Box ref={helperSectionRef} data-testid="helper-section">
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Typography variant="subtitle2" sx={{ flex: 1 }}>{tx('Local helper')}</Typography>
-                <Typography variant="caption" color={helper.running ? 'success.main' : 'warning.main'}>
+                <Typography variant="caption" color={helper.running ? 'success.main' : 'warning.main'} data-testid="helper-status">
                   {helper.running
                     ? tx('Connected (sp_streetlevel {v}, streetlevel {s}).', { v: helper.version, s: helper.streetlevel })
-                    : tx('Not running on this computer.')}
+                    : tx(helper.blocked ? 'The helper is running, but this browser blocked it.' : 'Not running on this computer.')}
                 </Typography>
               </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>{tx('helper-prereq')}</Typography>
@@ -375,10 +388,14 @@ export default function StreetLevelDownloadPanel({
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>{tx('mac-deps-why')}</Typography>
                 </Box>
               )}
+              {commands.systemDeps && (
+                <Typography variant="body2" sx={{ mt: 0.75 }} data-testid="mac-reinstall">{tx('mac-reinstall')}</Typography>
+              )}
               <Typography variant="body2" sx={{ mt: 0.75 }}>{tx('1. Install once:')}</Typography>
               <CopyLine text={commands.install} label={tx('Copy')} />
               <Typography variant="body2" sx={{ mt: 0.75 }}>{tx('2. Start it and keep the window open:')}</Typography>
               <CopyLine text={commands.serve} label={tx('Copy')} />
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }} data-testid="helper-listen">{tx('helper-listen')}</Typography>
               {commands.isolatedInstall && (
                 <>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>{tx('externally-managed-help')}</Typography>
@@ -388,7 +405,7 @@ export default function StreetLevelDownloadPanel({
               )}
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>{tx(os === 'windows' ? 'python-missing-windows' : os === 'mac' ? 'python-missing-mac' : 'python-missing-linux')}</Typography>
               <Typography variant="body2" sx={{ mt: 1 }}>{tx('Without the browser (same batch, one command):')}</Typography>
-              <CopyLine text={runCommand({ projectId: projectId || '<project-id>', apiBase, capture: { ...capture, folder }, os })} label={tx('Copy')} />
+              <CopyLine text={backupCommand} label={tx('Copy')} />
               {capture.source === 'mapillary' && (
                 <Typography variant="caption" color="text.secondary">{tx('mapillary-cli-token')}</Typography>
               )}

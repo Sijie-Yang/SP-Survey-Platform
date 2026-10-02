@@ -41,13 +41,13 @@ not need this step. If the libraries are missing, `python3 -m sp_streetlevel ser
 macOS / Linux:
 
 ```bash
-python3 -m pip install --user "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
+python3 -m pip install --user --upgrade "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
 ```
 
 Windows:
 
 ```bat
-py -m pip install --user "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
+py -m pip install --user --upgrade "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
 ```
 
 No pipx, git or PATH changes are needed; everything runs through `python -m`.
@@ -55,9 +55,15 @@ If pip refuses with `externally-managed-environment` (Homebrew Python, Debian/Ub
 use a private environment instead:
 
 ```bash
-python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
+python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install --upgrade "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
 ~/.sp-streetlevel/bin/python -m sp_streetlevel serve
 ```
+
+Already installed an older helper (HTTP only)? Safari on https://sp-survey.org cannot call
+`http://127.0.0.1`. Stop the running `serve` (Ctrl-C), run the same install command again so pip
+upgrades from `main`, then start `serve` again. On a Mac, approve the one-time prompt that trusts
+the local certificate. A private environment uses the `~/.sp-streetlevel/bin/python -m pip install --upgrade …`
+form of that install command, then `~/.sp-streetlevel/bin/python -m sp_streetlevel serve`.
 
 No Python? Get it from https://www.python.org/downloads/ (on a Mac, `brew install python` also works).
 
@@ -67,10 +73,31 @@ No Python? Get it from https://www.python.org/downloads/ (on a Mac, `brew instal
 python3 -m sp_streetlevel serve      # Windows: py -m sp_streetlevel serve
 ```
 
-Keep it running. The Street-level panel detects it on `http://127.0.0.1:47821`; its **Download**
-button sends the point list, the batch settings and your signed-in session, and shows per-point
-progress, failures and resume. The helper binds to 127.0.0.1 only and accepts browser calls only
-from `https://sp-survey.org` and `http://localhost:3000` (add others with `--allow-origin https://your-host`).
+Keep it running. The helper binds to 127.0.0.1 only and listens on two ports:
+
+| URL | Who uses it |
+|---|---|
+| `https://127.0.0.1:47822` | The Street-level panel tries this first. Safari on https://sp-survey.org needs it. |
+| `http://127.0.0.1:47821` | Fallback for browsers that still allow loopback HTTP, and for a manual `/health` check. |
+
+The first run creates a CA and a leaf certificate for `127.0.0.1` and `localhost` under
+`~/.sp-streetlevel/certs/` (not in this repo; each computer has its own key). On macOS, `serve`
+trusts that CA in the login keychain for SSL and prints one sentence if a password or GUI prompt
+appears — approve it. If the CA is already trusted, the server starts with no prompt. On Windows
+it installs the CA into the current-user root store (`certutil -user -addstore Root …`) when that
+works without admin; otherwise it prints that command. On Linux it prints:
+
+```bash
+sudo cp ~/.sp-streetlevel/certs/ca.crt /usr/local/share/ca-certificates/sp-streetlevel-local-ca.crt && sudo update-ca-certificates
+```
+
+A dismissed trust prompt does not stop the server. `sp-streetlevel run` does not need the certificate.
+
+The panel's **Download** button sends the point list, the batch settings and your signed-in session,
+and shows per-point progress, failures and resume. If the browser blocks both ports, the panel says
+so and shows the `sp-streetlevel run` backup command. Browser calls are accepted only from
+`https://sp-survey.org`, `https://www.sp-survey.org` and `http://localhost:3000` (add others with
+`--allow-origin https://your-host`). Change the HTTPS port with `--https-port` (the panel expects 47822).
 
 ## Fallback: one command
 

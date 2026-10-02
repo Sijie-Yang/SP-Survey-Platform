@@ -13,7 +13,7 @@ from .core import folder_tags
 from .backends import make_backend
 from .job import Job, run_job
 from .platform import PlatformClient, validate_api_base
-from .server import DEFAULT_ORIGINS, DEFAULT_PORT, serve
+from .server import DEFAULT_HTTPS_PORT, DEFAULT_ORIGINS, DEFAULT_PORT, serve
 
 DEFAULT_API = "https://sp-survey.org"
 OPTION_FLAGS = ("source", "preset", "heading_mode", "fixed_heading", "heading_count", "pitch", "fov", "width", "zoom",
@@ -92,7 +92,7 @@ def cmd_login(args) -> int:
 def cmd_serve(args) -> int:
     origins = list(DEFAULT_ORIGINS) + list(args.allow_origin or [])
     serve(lambda opts: make_backend(opts, upstream_override=args.upstream_override, mapillary_api=args.mapillary_api),
-          port=args.port, allowed_origins=origins)
+          port=args.port, https_port=args.https_port, allowed_origins=origins)
     return 0
 
 
@@ -102,7 +102,8 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("serve", help="run the localhost helper used by the Platform Download button")
-    s.add_argument("--port", type=int, default=DEFAULT_PORT)
+    s.add_argument("--port", type=int, default=DEFAULT_PORT, help="HTTP port (default %(default)s)")
+    s.add_argument("--https-port", type=int, default=DEFAULT_HTTPS_PORT, help="HTTPS port (default %(default)s)")
     s.add_argument("--allow-origin", action="append", help="extra Platform origin allowed to call the helper")
     s.add_argument("--upstream-override", help=argparse.SUPPRESS)
     s.add_argument("--mapillary-api", help=argparse.SUPPRESS)
