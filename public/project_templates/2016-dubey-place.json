@@ -11,6 +11,9 @@
     "official"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": true,
+  "thumbnailUrl": null,
   "website": "https://arxiv.org/abs/1608.01769",
   "huggingfaceDataset": null,
   "createdAt": "2026-05-04T00:00:00+00:00",
@@ -222,8 +225,8 @@
     "showPreviewBeforeComplete": "showAllQuestions"
   },
   "imageDatasetConfig": {
-    "mediaFolderTags": {},
-    "mediaFolders": []
+    "mediaFolders": [],
+    "mediaFolderTags": {}
   },
   "preloadedImages": [],
   "preloadedSource": null,

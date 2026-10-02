@@ -17,6 +17,9 @@
     "official"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": false,
+  "thumbnailUrl": null,
   "website": "https://doi.org/10.1016/j.tourman.2026.105481",
   "huggingfaceDataset": null,
   "createdAt": "2026-07-15T00:00:00+00:00",
@@ -724,15 +727,15 @@
     "showPreviewBeforeComplete": "showAllQuestions"
   },
   "imageDatasetConfig": {
-    "mediaFolderTags": {
-      "study2": "set",
-      "study4": "set"
-    },
     "mediaFolders": [
       "study2",
       "study3b",
       "study4"
-    ]
+    ],
+    "mediaFolderTags": {
+      "study2": "set",
+      "study4": "set"
+    }
   },
   "preloadedImages": [],
   "preloadedSource": null,

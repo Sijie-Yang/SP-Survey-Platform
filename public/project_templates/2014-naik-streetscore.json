@@ -11,6 +11,9 @@
     "official"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": true,
+  "thumbnailUrl": null,
   "website": "https://www.media.mit.edu/projects/streetscore/overview/",
   "huggingfaceDataset": null,
   "createdAt": "2026-05-04T00:00:00+00:00",

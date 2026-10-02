@@ -12,6 +12,9 @@
     "urban-perception"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": true,
+  "thumbnailUrl": "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev/templates/2026-peng-city/104107001320.jpg",
   "website": "https://doi.org/10.1016/j.landurbplan.2026.105734",
   "huggingfaceDataset": "sijiey/City-Landscape-In-Sight",
   "createdAt": "2026-07-09T00:00:00+00:00",
