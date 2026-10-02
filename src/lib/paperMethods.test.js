@@ -1,4 +1,5 @@
 import {
+  annotationBaseImage,
   pairwiseOutcomes, qScores, trueSkillScores, scaleScores, comparisonCounts, coverageSummary,
   splitHalfReliability, cohensKappa, weightedKappa, choiceRetestKappa, stimulusObservations,
   perStimulusStats, welchTTest, welchAnova, bfiTraitScore, responseGroups, participantGroupMap,
@@ -246,4 +247,10 @@ describe('evaluative map and notes (A15, S5)', () => {
     expect(map.cells.find((c) => c.row === 9 && c.col === 9).diff).toBe(-1);
     expect(annotationNotes(rows, 'liked')).toEqual([{ participant_id: 'a', label: 'Liked', note: 'trees' }]);
   });
+});
+
+test('annotationBaseImage picks the most shown map', () => {
+  const row = (url) => ({ responses: { liked: { answer: { shapes: [] }, shown_images: [url] } } });
+  expect(annotationBaseImage([row('a.png'), row('b.png'), row('b.png')], 'liked')).toBe('b.png');
+  expect(annotationBaseImage([], 'liked')).toBe('');
 });

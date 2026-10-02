@@ -915,6 +915,22 @@ export function evaluativeMap(responses, likedQuestion, dislikedQuestion, { grid
   return { grid, likedUnits: liked.units, dislikedUnits: disliked.units, cells };
 }
 
+/** Most frequently shown image for an annotation question (the base map when it comes from the media pool). */
+export function annotationBaseImage(responses, questionName) {
+  const counts = new Map();
+  (responses || []).forEach((row) => {
+    expandQuestionAnswerUnits(row, questionName, { requireAnswer: false }).forEach((unit) => {
+      const first = unit.shown_images?.[0];
+      const url = typeof first === 'string' ? first : first?.url || first?.imageLink || '';
+      if (url) counts.set(url, (counts.get(url) || 0) + 1);
+    });
+  });
+  let best = '';
+  let max = 0;
+  counts.forEach((n, url) => { if (n > max) { best = url; max = n; } });
+  return best;
+}
+
 /** Annotation notes (S5) grouped by label for text review. */
 export function annotationNotes(responses, questionName) {
   const notes = [];

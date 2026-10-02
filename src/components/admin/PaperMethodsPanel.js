@@ -9,7 +9,7 @@ import { mediaDisplayName, stimulusUnitLabel } from '../../lib/mediaIdentity';
 import { objectsToCsv } from '../../lib/csvUtil';
 import { downloadPerceptionFile } from '../../lib/imagePerceptionJoin';
 import {
-  COVERAGE_THRESHOLDS, aggregateByParam, annotationNotes, choiceRetestKappa, comparisonCounts, coverageSummary,
+  COVERAGE_THRESHOLDS, aggregateByParam, annotationBaseImage, annotationNotes, choiceRetestKappa, comparisonCounts, coverageSummary,
   evaluativeMap, imageChoiceShares, longFormatRows, pairChoiceShares, pairwiseGroupComparison, pairwiseOutcomes,
   participantGroupMap, perStimulusStats, qScores, raterAgreement, ratingGroupComparison, ratingRetestKappa,
   responseGroups, robustStimulusStats, samePositionParticipants, scaleScores, splitHalfReliability,
@@ -363,7 +363,7 @@ function AnnotationMethods({ question, responses, surveyConfig, zh }) {
   const grid = 40;
   const map = useMemo(() => (other ? evaluativeMap(responses, thisIsLiked ? question.name : other, thisIsLiked ? other : question.name, { grid }) : null), [responses, other, question.name, thisIsLiked]);
   const notes = useMemo(() => annotationNotes(responses, question.name), [responses, question.name]);
-  const base = question.annotationImageUrl || '';
+  const base = useMemo(() => question.annotationImageUrl || annotationBaseImage(responses, question.name), [question.annotationImageUrl, question.name, responses]);
   const maxAbs = map ? Math.max(1e-9, ...map.cells.map((c) => Math.abs(c.diff))) : 1;
   return (
     <Stack gap={2}>

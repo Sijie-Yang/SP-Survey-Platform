@@ -1,0 +1,158 @@
+{
+  "id": "1990-nasar-evaluative",
+  "name": "The Evaluative Image of the City",
+  "description": "Rebuilt from the published description of Nasar (1990). Residents and visitors mark the areas of a city they like and dislike visually on a map and describe the features behind each judgement; the results form a composite evaluative map. Differences from the original study: (1) The original used telephone and face-to-face interviews with verbal descriptions of each area; here participants draw on a map. (2) Upload one city map to the \"map\" folder; both mark-up pages show it.",
+  "author": "Nasar",
+  "year": "1990",
+  "category": "Academic Research",
+  "tags": [
+    "official",
+    "paper"
+  ],
+  "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": true,
+  "thumbnailUrl": null,
+  "website": "https://doi.org/10.1080/01944369008975742",
+  "huggingfaceDataset": null,
+  "createdAt": "2026-10-02T00:00:00+00:00",
+  "imageDatasetConfig": {
+    "mediaFolders": [
+      "map"
+    ],
+    "mediaFolderTags": {}
+  },
+  "preloadedImages": [],
+  "preloadedSource": null,
+  "preloadedAt": null,
+  "config": {
+    "title": "The Evaluative Image of the City",
+    "description": "This survey asks which parts of the city you like and dislike visually.",
+    "logoPosition": "right",
+    "autoGrowComment": true,
+    "progressBarType": "questions",
+    "showProgressBar": "aboveheader",
+    "showQuestionNumbers": "off",
+    "spAnalysisRecommendation": {
+      "citation": "Nasar 1990",
+      "items": [
+        {
+          "questions": [
+            "liked_areas",
+            "disliked_areas"
+          ],
+          "method": "evaluative_map",
+          "likedQuestion": "liked_areas",
+          "dislikedQuestion": "disliked_areas"
+        }
+      ]
+    },
+    "pages": [
+      {
+        "name": "page_intro",
+        "elements": [
+          {
+            "name": "intro",
+            "type": "expression",
+            "title": "About this survey",
+            "description": "We are interested in how the city looks to you. On the next pages you will see a map of the city. Mark the areas you like and dislike visually, and tell us why."
+          },
+          {
+            "name": "resident_or_visitor",
+            "type": "radiogroup",
+            "title": "Are you a resident of or a visitor to this city?",
+            "choices": [
+              {
+                "value": "resident",
+                "text": "Resident"
+              },
+              {
+                "value": "visitor",
+                "text": "Visitor"
+              }
+            ],
+            "isRequired": true
+          },
+          {
+            "name": "years_in_city",
+            "type": "text",
+            "title": "How many years have you lived in the city?",
+            "isRequired": false,
+            "inputType": "number"
+          }
+        ],
+        "title": "Introduction"
+      },
+      {
+        "name": "page_liked",
+        "elements": [
+          {
+            "name": "liked_areas",
+            "type": "imageannotation",
+            "title": "Mark up to five areas in the city that you like visually.",
+            "imageFit": "cover",
+            "imageSource": "huggingface",
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "isRequired": false,
+            "imageCount": 1,
+            "mediaFolders": [
+              "map"
+            ],
+            "excludePreviouslyUsedImages": false,
+            "allowedTools": [
+              "polygon",
+              "point"
+            ],
+            "annotationLabels": [
+              "Liked"
+            ],
+            "minAnnotations": 0,
+            "maxAnnotations": 5,
+            "annotationNotePrompt": "Describe the physical features on which you base your evaluation."
+          }
+        ]
+      },
+      {
+        "name": "page_disliked",
+        "elements": [
+          {
+            "name": "disliked_areas",
+            "type": "imageannotation",
+            "title": "Mark up to five areas in the city that you dislike visually.",
+            "imageFit": "cover",
+            "imageSource": "huggingface",
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "isRequired": false,
+            "imageCount": 1,
+            "mediaFolders": [
+              "map"
+            ],
+            "excludePreviouslyUsedImages": false,
+            "allowedTools": [
+              "polygon",
+              "point"
+            ],
+            "annotationLabels": [
+              "Disliked"
+            ],
+            "minAnnotations": 0,
+            "maxAnnotations": 5,
+            "annotationNotePrompt": "Describe the physical features on which you base your evaluation."
+          }
+        ]
+      },
+      {
+        "name": "page_improvement",
+        "elements": [
+          {
+            "name": "needs_improvement",
+            "type": "comment",
+            "title": "Which area of the city most needs visual improvement?"
+          }
+        ]
+      }
+    ]
+  }
+}
