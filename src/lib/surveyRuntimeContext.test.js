@@ -15,18 +15,23 @@ test('projects without the new settings get no variables and no metadata', async
   expect(runtimeMetadata(ctx)).toEqual({});
 });
 
-test('balanced assignment picks the least-filled condition relative to weight, ties at random', () => {
+test('assignment is random every session and leans toward smaller groups', () => {
   const conds = normalizeConditions({ conditions: [{ id: 'a' }, { id: 'b', weight: 2 }, 'c'] });
   expect(conds.map((c) => c.id)).toEqual(['a', 'b', 'c']);
-  expect(chooseCondition(conds, { a: 3, b: 4, c: 3 }, () => 0)).toBe('b');
-  expect(chooseCondition(conds, { a: 1, b: 2, c: 1 }, () => 0)).toBe('a');
-  expect(chooseCondition(conds, { a: 1, b: 2, c: 1 }, () => 0.99)).toBe('c');
   expect(chooseCondition(conds, null, () => 0.3)).toBe('b');
+  const two = normalizeConditions({ conditions: ['more', 'less'] });
+  expect(chooseCondition(two, { more: 5, less: 1 }, () => 0.1)).toBe('more');
+  expect(chooseCondition(two, { more: 5, less: 1 }, () => 0.5)).toBe('less');
+  const seen = new Set();
+  let seed = 1;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < 50; i += 1) seen.add(chooseCondition(two, { more: 0, less: 0 }, rand));
+  expect([...seen].sort()).toEqual(['less', 'more']);
 });
 
 test('assignment persists per project and override wins', async () => {
   const config = { conditions: [{ id: 'more_safe' }, { id: 'less_safe' }] };
-  const first = await resolveRuntimeContext(config, { projectId: 'p1', persist: true, fetchCounts: async () => ({ more_safe: 5, less_safe: 1 }) });
+  const first = await resolveRuntimeContext(config, { projectId: 'p1', persist: true, fetchCounts: async () => ({ more_safe: 5, less_safe: 1 }), rand: () => 0.5 });
   expect(first.condition).toBe('less_safe');
   const again = await resolveRuntimeContext(config, { projectId: 'p1', persist: true, fetchCounts: async () => ({ more_safe: 0, less_safe: 9 }) });
   expect(again.condition).toBe('less_safe');

@@ -922,7 +922,6 @@ export default function SurveyApp() {
           projectId,
           search: window.location.search,
           override: conditionFromUrl(window.location.search),
-          persist: true,
           fetchCounts: hasConditions(runtimeConfig) ? () => withTimeout(fetchConditionCounts(projectId), 5000, null) : null,
         });
       }

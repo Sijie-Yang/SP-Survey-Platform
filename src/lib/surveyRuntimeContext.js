@@ -31,19 +31,20 @@ export function hasConditions(config) {
 }
 
 /** Fewest completed responses relative to weight; ties broken at random. */
+/**
+ * Random assignment for each new session. With completed counts, a smaller group is
+ * proportionally more likely (weight ÷ (1 + completed)), so groups stay close without
+ * ever making the next assignment predictable.
+ */
 export function chooseCondition(conditions, counts = null, rand = Math.random) {
   if (!conditions.length) return null;
-  if (counts && typeof counts === 'object') {
-    const load = conditions.map((c) => (Number(counts[c.id]) || 0) / c.weight);
-    const min = Math.min(...load);
-    const tied = conditions.filter((_, i) => load[i] - min < 1e-9);
-    return tied[Math.min(tied.length - 1, Math.floor(rand() * tied.length))].id;
-  }
-  const total = conditions.reduce((s, c) => s + c.weight, 0);
+  const hasCounts = counts && typeof counts === 'object';
+  const odds = conditions.map((c) => c.weight / (hasCounts ? 1 + (Number(counts[c.id]) || 0) : 1));
+  const total = odds.reduce((s, o) => s + o, 0);
   let r = rand() * total;
-  for (const c of conditions) {
-    r -= c.weight;
-    if (r < 0) return c.id;
+  for (let i = 0; i < conditions.length; i += 1) {
+    r -= odds[i];
+    if (r < 0) return conditions[i].id;
   }
   return conditions[conditions.length - 1].id;
 }
