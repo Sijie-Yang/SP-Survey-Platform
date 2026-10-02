@@ -22,7 +22,7 @@ export const REVIEW_ROLES = Object.freeze([
   {
     id: 'participant',
     name: 'Participant',
-    emoji: '👤',
+    emoji: '🧑',
     expertise: 'Participant experience, survey usability and accessibility',
     focus: [
       'Survey length, fatigue and engagement',
