@@ -1,4 +1,5 @@
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
+import { conditionFromVisibleIf } from '../../lib/surveyRuntimeContext';
 import React, { useEffect, useState, useRef } from 'react';
 import {
   Dialog,
@@ -173,6 +174,9 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
               color="secondary"
               variant="outlined"
             />
+            {conditionFromVisibleIf(question.visibleIf) && (
+              <Chip label={`${tr('Condition')}: ${conditionFromVisibleIf(question.visibleIf)}`} size="small" color="info" variant="outlined" />
+            )}
             {question.isRequired && (
               <Chip
                 label={tr("Required")}
