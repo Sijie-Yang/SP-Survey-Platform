@@ -31,6 +31,8 @@ export const PRESETS = ['current', 'road', 'headings', 'pano'];
 export const HEADING_MODES = ['road', 'fixed'];
 export const FOLDER_MODES = ['single', 'category', 'set-per-point'];
 export const OPERATING_SYSTEMS = ['mac', 'windows', 'linux'];
+/** macOS only: pyexiv2 (a streetlevel dependency) ships libexiv2 linked against these Homebrew libraries. */
+export const MAC_SYSTEM_DEPS = 'brew install gettext && brew install inih';
 
 /** 'mac' | 'windows' | 'linux' from the browser's platform hints. */
 export function detectOs(nav = typeof navigator !== 'undefined' ? navigator : {}) {
@@ -53,6 +55,7 @@ function originFlag(origin) {
 export function helperCommands(os, origin) {
   const py = pythonCommand(os);
   const commands = {
+    ...(os === 'mac' ? { systemDeps: MAC_SYSTEM_DEPS } : {}),
     install: `${py} -m pip install --user "${HELPER_PACKAGE}"`,
     serve: `${py} -m sp_streetlevel serve${originFlag(origin)}`,
   };

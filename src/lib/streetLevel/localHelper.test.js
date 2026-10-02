@@ -55,10 +55,13 @@ describe('local helper client', () => {
   it('builds Python-only install and serve commands per OS (no pipx, no git)', () => {
     expect(HELPER_PACKAGE).toBe('https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper');
     const mac = helperCommands('mac', 'https://sp-survey.org');
+    expect(mac.systemDeps).toBe('brew install gettext && brew install inih');
+    expect(Object.keys(mac)[0]).toBe('systemDeps');
     expect(mac.install).toBe(`python3 -m pip install --user "${HELPER_PACKAGE}"`);
     expect(mac.serve).toBe('python3 -m sp_streetlevel serve');
     expect(mac.isolatedInstall).toBe(`python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install "${HELPER_PACKAGE}"`);
     const win = helperCommands('windows', 'https://sp-survey.org');
+    expect(helperCommands('linux', 'https://sp-survey.org').systemDeps).toBeUndefined();
     expect(win).toEqual({ install: `py -m pip install --user "${HELPER_PACKAGE}"`, serve: 'py -m sp_streetlevel serve' });
     expect(helperCommands('linux', 'https://staging.example.org').serve).toBe('python3 -m sp_streetlevel serve --allow-origin https://staging.example.org');
     Object.values({ ...mac, ...win }).forEach((cmd) => {

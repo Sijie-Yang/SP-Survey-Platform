@@ -368,6 +368,13 @@ export default function StreetLevelDownloadPanel({
               <Tabs value={os} onChange={(_, v) => setOs(v)} sx={{ minHeight: 32, '& .MuiTab-root': { minHeight: 32, py: 0.5 } }}>
                 {OPERATING_SYSTEMS.map((o) => <Tab key={o} value={o} label={tx(`os:${o}`)} />)}
               </Tabs>
+              {commands.systemDeps && (
+                <Box data-testid="mac-system-deps">
+                  <Typography variant="body2" sx={{ mt: 0.75 }}>{tx('0. macOS only — install two Homebrew libraries first:')}</Typography>
+                  <CopyLine text={commands.systemDeps} label={tx('Copy')} />
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>{tx('mac-deps-why')}</Typography>
+                </Box>
+              )}
               <Typography variant="body2" sx={{ mt: 0.75 }}>{tx('1. Install once:')}</Typography>
               <CopyLine text={commands.install} label={tx('Copy')} />
               <Typography variant="body2" sx={{ mt: 0.75 }}>{tx('2. Start it and keep the window open:')}</Typography>
