@@ -754,7 +754,7 @@ export function pickRandomMediaForQuestion(
     }
 
     return {
-      images: picked.members,
+      images: element.randomizeSetOrder ? [...picked.members].sort(() => 0.5 - Math.random()) : picked.members,
       setKey: picked.setKey,
       setId: picked.setId,
       groupKey: picked.setKey,

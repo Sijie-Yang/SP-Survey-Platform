@@ -75,6 +75,11 @@
           "description": "Allow-listed URL parameter names stored (trimmed to 64 characters) as survey_metadata.url_params and SurveyJS variables {url_<name>}.",
           "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$" }
         },
+        "qualityChecks": {
+          "type": "object",
+          "description": "Opt-in quality flags. samePosition: { minTrials } flags responses whose two-image choices were all on the same side.",
+          "properties": { "samePosition": { "type": ["object", "boolean"] } }
+        },
         "spAnalysisRecommendation": {
           "type": ["object", "array"],
           "description": "Template analysis recommendation shown in Results (paper methods). Does not change default results."
@@ -276,6 +281,7 @@
     "mediaPerCategory": { "type": "integer", "minimum": 1 },
     "mediaCategoryMode": { "type": "string", "enum": ["all", "single"] },
     "pairingMode": { "type": "string", "enum": ["random", "balanced", "adaptive", "uncertain", "high_sigma"] },
+    "randomizeSetOrder": { "type": "boolean", "description": "Set mode: shuffle the order of the set's media for each participant (randomised left/right positions)." },
     "assignedMediaSetId": { "type": "string" },
     "assignedMediaGroupId": { "type": "string" },
     "assignedMediaCategories": { "type": "array", "items": { "type": "string" } },
@@ -325,7 +331,7 @@
     "rating": ["rateMin", "rateMax", "rateStep", "minRateDescription", "maxRateDescription", "rateLabels"],
     "slider": ["dimensions", "scaleMin", "scaleMax", "scaleStep"],
     "allocation": ["choices", "budget"],
-    "stimulus": ["trialCount", "trialMediaSets", "spTrialsAnswer", "imageCount", "imageSelectionMode", "randomImageSelection", "excludePreviouslyUsedImages", "selectedImageUrls", "imageLink", "imageLinks", "imageUrls", "imageNames", "imageHtml", "mediaAssignmentMode", "mediaFolders", "mediaPerCategory", "mediaCategoryMode", "pairingMode", "assignedMediaSetId", "assignedMediaGroupId", "assignedMediaCategories"],
+    "stimulus": ["trialCount", "trialMediaSets", "spTrialsAnswer", "imageCount", "imageSelectionMode", "randomImageSelection", "excludePreviouslyUsedImages", "selectedImageUrls", "imageLink", "imageLinks", "imageUrls", "imageNames", "imageHtml", "mediaAssignmentMode", "mediaFolders", "mediaPerCategory", "mediaCategoryMode", "pairingMode", "randomizeSetOrder", "assignedMediaSetId", "assignedMediaGroupId", "assignedMediaCategories"],
     "media": ["mediaType", "requireMediaEnded", "minWatchSeconds", "mediaSlots", "mediaSlotsResolved", "slotIds", "slotUrls", "slotTypes", "slotRoles", "slotNames", "mediaPresentation", "mediaUrl", "mediaUrls", "mediaName", "mediaNames", "mediaTypes", "mediaItems"],
     "annotation": ["annotationImageUrl", "allowedTools", "annotationLabels", "minAnnotations", "maxAnnotations", "annotationNotePrompt", "projectId"],
     "skill": ["skillId", "skillConfig", "skillRevision", "skillContractVersion", "skillResultSchema", "skillHtml", "skillAnalysisHtml", "skillAnswerSnapshot"]

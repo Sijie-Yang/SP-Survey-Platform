@@ -149,7 +149,7 @@ export function pairwiseOutcomes(responses, questionName, { reverseCoded = false
         const l = reverseCoded ? winner : loser;
         out.push({
           ...base, a: shown[0], b: shown[1], tie: false, winner: w, loser: l,
-          chosenPosition: shown.length === 2 ? shown.indexOf(w) : null,
+          chosenPosition: shown.length === 2 ? shown.indexOf(winner) : null,
         });
       });
     });

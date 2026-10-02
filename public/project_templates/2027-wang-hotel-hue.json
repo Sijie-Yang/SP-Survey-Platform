@@ -80,7 +80,8 @@
             "imageSelectionMode": "huggingface_random",
             "mediaAssignmentMode": "set",
             "randomImageSelection": true,
-            "excludePreviouslyUsedImages": true
+            "excludePreviouslyUsedImages": true,
+            "randomizeSetOrder": true
           }
         ],
         "description": "Study 2 scenario and DV (verbatim from the article). Stimuli: Appendix C Fig. S1 (folder study2)."
@@ -409,7 +410,8 @@
             "imageSelectionMode": "huggingface_random",
             "mediaAssignmentMode": "set",
             "randomImageSelection": true,
-            "excludePreviouslyUsedImages": true
+            "excludePreviouslyUsedImages": true,
+            "randomizeSetOrder": true
           }
         ],
         "description": "Study 4 scenario and DV (verbatim). Stimuli: Appendix C Fig. S3 (folder study4). Twin rooms for companion-based travel."
@@ -724,7 +726,33 @@
     "progressBarType": "questions",
     "showProgressBar": "aboveheader",
     "showQuestionNumbers": "off",
-    "showPreviewBeforeComplete": "showAllQuestions"
+    "showPreviewBeforeComplete": "showAllQuestions",
+    "spAnalysisRecommendation": {
+      "citation": "Wang & Li 2027",
+      "items": [
+        {
+          "questions": [
+            "study2_hotel_preference",
+            "study4_hotel_preference"
+          ],
+          "method": "choice_share"
+        },
+        {
+          "questions": [
+            "study2_hotel_preference",
+            "study4_hotel_preference"
+          ],
+          "method": "long_export"
+        },
+        {
+          "questions": [
+            "study3b_booking_likelihood",
+            "study3b_hue_check"
+          ],
+          "method": "scalar_distribution"
+        }
+      ]
+    }
   },
   "imageDatasetConfig": {
     "mediaFolders": [
