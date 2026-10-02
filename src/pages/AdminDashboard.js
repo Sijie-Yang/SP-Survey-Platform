@@ -22,8 +22,10 @@ import {
   normalizeTemplateId, templateImagePrefix,
   listAllProjects, updateProjectAdmin, deleteProjectAdmin,
   seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
-  downloadOnlineTemplatesAsBuiltinZip,
+  downloadOnlineTemplatesAsBuiltinZip, exportAllOnlineTemplatesAsBuiltinZip,
 } from '../lib/templateManager';
+import { useRegion } from '../contexts/RegionContext';
+import { tf } from '../contexts/adminI18n';
 import { findDuplicateQuestionNames, repairDuplicateQuestionNames } from '../lib/questionNames';
 import {
   listAllLiveSurveys,
@@ -624,6 +626,7 @@ function TemplateSortLabel({ column, label, align, sortBy, sortOrder, onSort }) 
 
 function TemplateManagement() {
   const { user } = useAuth();
+  const { t: ti } = useRegion();
   const [templates, setTemplates]         = useState([]);
   const [loading, setLoading]             = useState(false);
   const [editTarget, setEditTarget]       = useState(null);
@@ -640,6 +643,7 @@ function TemplateManagement() {
   const [seedConfirmOpen, setSeedConfirmOpen] = useState(false);
   const [seedPreview, setSeedPreview]     = useState(null);
   const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
   /** Selected builtin template ids in the import confirm dialog. */
   const [seedSelectedIds, setSeedSelectedIds] = useState(() => new Set());
   const [sortBy, setSortBy]               = useState('year');
@@ -1011,6 +1015,40 @@ function TemplateManagement() {
     handleDownloadOnlineAsBuiltin(selectedOnlineForBuiltinDownload);
   };
 
+  const handleExportAllOnlineAsBuiltin = async () => {
+    setExportingAll(true);
+    try {
+      const result = await exportAllOnlineTemplatesAsBuiltinZip();
+      showSnack(tf(ti.tplExportAllDone, { count: result.count }));
+      const lines = [tf(ti.tplExportAllLog, { count: result.count, files: result.filenames.join(', ') })];
+      if (result.skipped.length) {
+        lines.push(tf(ti.tplExportAllSkipped, { count: result.skipped.length, ids: result.skipped.join(', ') }));
+      }
+      setSeedLog(lines.join('\n'));
+    } catch (err) {
+      showSnack(err.message, 'error');
+    } finally {
+      setExportingAll(false);
+    }
+  };
+
+  const exportAllButton = (
+    <Tooltip title={ti.tplExportAllTooltip}>
+      <span>
+        <Button
+          variant="outlined"
+          color="secondary"
+          startIcon={exportingAll ? <CircularProgress size={16} color="inherit" /> : <CloudDownload />}
+          onClick={handleExportAllOnlineAsBuiltin}
+          disabled={exportingAll || seeding || bulkFeat.active}
+          data-testid="export-all-online-templates"
+        >
+          {ti.tplExportAll}
+        </Button>
+      </span>
+    </Tooltip>
+  );
+
   return (
     <Box>
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
@@ -1049,6 +1087,7 @@ function TemplateManagement() {
             导入内置模板
           </Button>
         </Tooltip>
+        {exportAllButton}
         <Button startIcon={<Refresh />} onClick={load} disabled={loading || bulkFeat.active}>
           刷新
         </Button>
@@ -1280,6 +1319,12 @@ function TemplateManagement() {
                   variant="outlined"
                   label={`已一致 ${seedPreview.toUnchanged?.length || 0}`}
                 />
+                <Button
+                  size="small"
+                  onClick={() => setSeedSelectedIds(new Set(seedSelectableItems.map((item) => item.id)))}
+                >
+                  {ti.tplSeedSelectAll}
+                </Button>
                 <Button size="small" onClick={() => setSeedSelectionForAction('insert', true)}>全选新建</Button>
                 <Button size="small" onClick={() => setSeedSelectionForAction('update', true)}>全选有差异</Button>
                 <Button size="small" onClick={() => setSeedSelectedIds(new Set())}>清空</Button>
@@ -1482,6 +1527,7 @@ function TemplateManagement() {
               </Button>
             </span>
           </Tooltip>
+          {exportAllButton}
           <Button
             variant="contained"
             onClick={handleConfirmSeed}
