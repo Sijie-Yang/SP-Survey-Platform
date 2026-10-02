@@ -155,7 +155,31 @@
     "progressBarType": "questions",
     "showProgressBar": "aboveheader",
     "showQuestionNumbers": "off",
-    "showPreviewBeforeComplete": "showAllQuestions"
+    "showPreviewBeforeComplete": "showAllQuestions",
+    "qualityChecks": {
+      "samePosition": {
+        "minTrials": 6
+      }
+    },
+    "spAnalysisRecommendation": {
+      "citation": "Peng et al. 2026",
+      "items": [
+        {
+          "questions": [
+            "prefer",
+            "monotonous",
+            "quiet",
+            "extensive",
+            "vivid",
+            "oppressive"
+          ],
+          "method": "trueskill_pairwise",
+          "tieHandling": "exclude",
+          "runs": 1,
+          "scale": "0-5"
+        }
+      ]
+    }
   },
   "imageDatasetConfig": {
     "mediaFolderTags": {},

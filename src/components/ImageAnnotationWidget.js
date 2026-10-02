@@ -311,6 +311,7 @@ export default function ImageAnnotationCanvas({
   projectId = '',
   centerContent = false,
   language: languageProp,
+  notePrompt = '',
 }) {
   const region = React.useContext(RegionContext);
   const language = languageProp || region?.language || 'en';
@@ -1490,7 +1491,56 @@ export default function ImageAnnotationCanvas({
         )}
       </Box>
       </Box>
+      {notePrompt && !readOnly && selectedShapes.length === 1 && (
+        <ShapeNoteField
+          key={selectedShapes[0].id}
+          prompt={notePrompt}
+          initial={selectedShapes[0].note || ''}
+          onCommit={(note) => {
+            const next = withShapeNote(shapesRef.current, selectedShapes[0].id, note);
+            if (next !== shapesRef.current) emitChange(next);
+          }}
+        />
+      )}
     </Box>
+  );
+}
+
+const NOTE_MAX_LENGTH = 500;
+
+/** Returns the same array when nothing changes; an empty note removes the field. */
+export function withShapeNote(shapes, id, note) {
+  const current = shapes.find((sh) => sh.id === id);
+  const clean = String(note || '').trim().slice(0, NOTE_MAX_LENGTH);
+  if (!current || (current.note || '') === clean) return shapes;
+  return shapes.map((sh) => {
+    if (sh.id !== id) return sh;
+    const { note: _old, ...rest } = sh;
+    return clean ? { ...rest, note: clean } : rest;
+  });
+}
+
+export function ShapeNoteField({ prompt, initial, onCommit }) {
+  const [text, setText] = useState(initial);
+  const latest = useRef(text);
+  latest.current = text;
+  const commitRef = useRef(onCommit);
+  commitRef.current = onCommit;
+  useEffect(() => () => commitRef.current(latest.current.trim()), []);
+  return (
+    <TextField
+      size="small"
+      fullWidth
+      multiline
+      maxRows={3}
+      label={prompt}
+      value={text}
+      autoFocus
+      inputProps={{ maxLength: NOTE_MAX_LENGTH, 'data-testid': 'annotation-note' }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => onCommit(text.trim())}
+      sx={{ mt: 1 }}
+    />
   );
 }
 /** Overlay multiple participants' annotations on one image (for ResultsAnalysis). */

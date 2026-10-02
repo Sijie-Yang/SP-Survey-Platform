@@ -23,6 +23,7 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  MenuItem,
   Paper,
   Radio,
   RadioGroup,
@@ -58,12 +59,14 @@ import {
 } from '../../lib/trialNavigation';
 import { enrichSurveyResponses } from '../../lib/enrichSurveyResponses';
 import { resolveSkillQuestions, syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
-import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
+import { adaptQuestionForPreviewLibrary, resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 import { applySurveyLocale } from '../../lib/surveyLocale';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
 import { markGuideProgress } from '../../lib/adminGuide';
+import { applyRuntimeVariables, normalizeConditions, runtimeMetadata } from '../../lib/surveyRuntimeContext';
+import { clearMediaWatchLog, mediaWatchMetadata } from '../../lib/mediaWatch';
 
 let widgetsRegistered = false;
 function ensureWidgets() {
@@ -247,6 +250,17 @@ export default function ResearcherPractice({
   const [statusMsg, setStatusMsg] = useState(null); // durable messages only (session start/stop)
   const [toast, setToast] = useState(null); // brief overlay — no layout shift
   const [reloadToken, setReloadToken] = useState(0);
+  const practiceConditions = useMemo(() => normalizeConditions(surveyConfig), [surveyConfig]);
+  const [practiceConditionChoice, setPracticeCondition] = useState(null);
+  const practiceCondition = practiceConditions.some((c) => c.id === practiceConditionChoice)
+    ? practiceConditionChoice
+    : practiceConditions[0]?.id || '';
+  const practiceContext = useMemo(
+    () => ({ condition: practiceConditions.length > 1 ? practiceCondition : null, urlParams: null }),
+    [practiceConditions.length, practiceCondition],
+  );
+  const practiceContextRef = useRef(practiceContext);
+  practiceContextRef.current = practiceContext;
   /** Bumps every loadRound so TrialShell nav state cannot leak across attempts. */
   const [practiceNavKey, setPracticeNavKey] = useState(0);
   const [practiceCounts, setPracticeCounts] = useState({});
@@ -634,12 +648,16 @@ export default function ResearcherPractice({
     try {
       ensureWidgets();
       clearTrialsAnswerStore();
+      clearMediaWatchLog();
       const mediaPool = await resolveMediaPoolForPreview(currentProject?.preloadedImages || []);
       const questionConfig = {
         pages: [{ elements: [JSON.parse(JSON.stringify(selectedQuestion))] }],
       };
       await resolveSkillQuestions(questionConfig);
-      const resolvedQuestion = questionConfig.pages[0].elements[0];
+      const fromPreviewLibrary = !(currentProject?.preloadedImages || []).length && mediaPool.length > 0;
+      const resolvedQuestion = fromPreviewLibrary
+        ? adaptQuestionForPreviewLibrary(questionConfig.pages[0].elements[0], mediaPool)
+        : questionConfig.pages[0].elements[0];
       const built = buildSingleQuestionSurvey({
         question: resolvedQuestion,
         projectImages: mediaPool,
@@ -659,6 +677,7 @@ export default function ResearcherPractice({
       }
       const m = new Model(built.surveyJson);
       applySurveyLocale(m, surveyConfig);
+      applyRuntimeVariables(m, practiceContext);
       m.showPreviewBeforeComplete = false;
       m.showCompletedPage = false;
       applyAdminThemeToSurveyModel(m, surveyConfig);
@@ -686,7 +705,7 @@ export default function ResearcherPractice({
         writeSessionPersist(sessionRef.current);
       }
     }
-  }, [selectedQuestion, currentProject?.preloadedImages, currentProject?.id, currentProject?.imageDatasetConfig, surveyConfig, reloadToken, writeSessionPersist]);
+  }, [selectedQuestion, currentProject?.preloadedImages, currentProject?.id, currentProject?.imageDatasetConfig, surveyConfig, reloadToken, writeSessionPersist, practiceContext]);
 
   useEffect(() => {
     let cancelled = false;
@@ -761,6 +780,8 @@ export default function ResearcherPractice({
         survey_revision: revision.id,
         survey_response_contract: revision.contract,
         survey_draft_updated_at: currentProject?.draftUpdatedAt || null,
+        ...runtimeMetadata(practiceContextRef.current),
+        ...mediaWatchMetadata(),
       },
     };
 
@@ -1070,6 +1091,18 @@ export default function ResearcherPractice({
               >
                 {t.practiceEditSettings}
               </Button>
+              {practiceConditions.length > 1 && (
+                <TextField
+                  select
+                  size="small"
+                  label={tx('Condition')}
+                  value={practiceCondition}
+                  onChange={(e) => setPracticeCondition(e.target.value)}
+                  sx={{ minWidth: 150 }}
+                >
+                  {practiceConditions.map((c) => <MenuItem key={c.id} value={c.id}>{c.label}</MenuItem>)}
+                </TextField>
+              )}
               {!sessionActive && (
                 <Button
                   size="small"

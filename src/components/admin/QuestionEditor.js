@@ -4,6 +4,7 @@ import ConfirmDialog from '../layout/ConfirmDialog';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import { useRegion } from '../../contexts/RegionContext';
 import { validateQuestionSettings } from '../../lib/designProtocol/validate';
+import { conditionVariants, normalizeConditions } from '../../lib/surveyRuntimeContext';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
@@ -329,6 +330,62 @@ function TrialCountField({ question, onChange }) {
       inputProps={{ min: 1, max: TRIAL_COUNT_MAX, step: 1 }}
       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
     />
+  );
+}
+
+const REVERSIBLE_TYPES = new Set(['imagepicker', 'mediapicker']);
+
+/** One row per experimental condition: optional reworded title and reverse coding. */
+function ConditionWordingField({ question, onChange, surveyConfig }) {
+  const { tr } = useQuestionEditorText();
+  const conditions = normalizeConditions(surveyConfig);
+  const variants = conditionVariants(question);
+  if (conditions.length < 2 && !variants.length) return null;
+  const ids = [...conditions.map((c) => c.id), ...variants.map((v) => v.condition).filter((id) => !conditions.some((c) => c.id === id))];
+  const labelOf = (id) => conditions.find((c) => c.id === id)?.label || id;
+  const reversible = REVERSIBLE_TYPES.has(question.type);
+  const update = (id, patch) => {
+    const byId = Object.fromEntries(variants.map((v) => [v.condition, v]));
+    byId[id] = { ...(byId[id] || { condition: id }), ...patch };
+    const next = ids.map((cid) => byId[cid]).filter(Boolean).map((v) => {
+      const out = { condition: v.condition };
+      if (typeof v.title === 'string' && v.title.trim()) out.title = v.title;
+      if (v.reverseCoded) out.reverseCoded = true;
+      return out;
+    }).filter((v) => v.title || v.reverseCoded);
+    onChange('conditionVariants', next.length ? next : undefined);
+  };
+  return (
+    <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{tr('Wording per condition')}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        {tr('Participants see the wording for their condition. Leave a row empty to use the question title above. Answers are saved under this one question, with the condition recorded.')}
+      </Typography>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        {ids.map((id) => {
+          const v = variants.find((x) => x.condition === id) || {};
+          return (
+            <Box key={id} sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+              <TextField
+                size="small"
+                sx={{ flex: '1 1 320px' }}
+                label={labelOf(id)}
+                value={v.title || ''}
+                placeholder={question.title || ''}
+                onChange={(e) => update(id, { title: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+              />
+              {reversible && (
+                <FormControlLabel
+                  control={<Switch size="small" checked={!!v.reverseCoded} onChange={(e) => update(id, { reverseCoded: e.target.checked })} />}
+                  label={tr('Reverse-code (wording asks for the opposite)')}
+                />
+              )}
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
   );
 }
 
@@ -1321,6 +1378,7 @@ export default function QuestionEditor({
                 }
                 label={tr("Required — participants must answer to continue")}
               />
+              <ConditionWordingField question={editedQuestion} onChange={handleQuestionChange} surveyConfig={surveyConfig} />
 
               {editedQuestion.type === 'boolean' && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1858,6 +1916,52 @@ export default function QuestionEditor({
                   </>
                 )}
 
+                {['imagerating', 'mediarating', 'rating'].includes(editedQuestion.type) && (
+                  <TextField
+                    name="rateLabels"
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    variant="outlined"
+                    label={tr("Label for every scale point (optional)")}
+                    value={(editedQuestion.rateLabels || []).join('\n')}
+                    onChange={(e) => {
+                      const lines = e.target.value.split('\n');
+                      handleQuestionChange('rateLabels', lines.some((l) => l.trim()) ? lines : undefined);
+                    }}
+                    helperText={tr("One label per line, from the lowest to the highest value. Used only when the count matches the scale; answers stay numeric.")}
+                    sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                )}
+
+                {editedQuestion.type?.startsWith('media') && editedQuestion.type !== 'mediadisplay' && (
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <FormControlLabel
+                      control={(
+                        <Switch
+                          checked={!!editedQuestion.requireMediaEnded}
+                          onChange={(e) => handleQuestionChange('requireMediaEnded', e.target.checked || undefined)}
+                        />
+                      )}
+                      label={tr("Require video/audio to play to the end before answering")}
+                    />
+                    <TextField
+                      name="minWatchSeconds"
+                      type="number"
+                      variant="outlined"
+                      size="small"
+                      label={tr("Minimum viewing time (seconds)")}
+                      value={editedQuestion.minWatchSeconds ?? ''}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        handleQuestionChange('minWatchSeconds', Number.isFinite(v) && v > 0 ? Math.min(v, 600) : undefined);
+                      }}
+                      inputProps={{ min: 0, max: 600, step: 1 }}
+                      sx={{ width: 220, '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                  </Box>
+                )}
+
                 {editedQuestion.type === 'imageannotation' && (
                   <>
                     <FormControl fullWidth variant="outlined">
@@ -1907,6 +2011,17 @@ export default function QuestionEditor({
                       }}
                       helperText={tr("Comma-separated labels applied to new shapes (e.g. building, tree, sky). Leave empty for unlabeled annotation.")}
                       placeholder={tr("building, tree, sky")}
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <TextField
+                      name="annotationNotePrompt"
+                      fullWidth
+                      variant="outlined"
+                      label={tr("Ask for a note on each annotation (optional)")}
+                      value={editedQuestion.annotationNotePrompt || ''}
+                      onChange={(e) => handleQuestionChange('annotationNotePrompt', e.target.value || undefined)}
+                      placeholder={tr("e.g. Why do you like this place?")}
+                      helperText={tr("Shown as a short text field for the selected annotation; stored as the shape's note. Notes are optional.")}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
                     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>

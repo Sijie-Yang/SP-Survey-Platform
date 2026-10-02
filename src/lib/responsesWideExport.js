@@ -120,6 +120,8 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     }
   }
 
+  const hasCondition = responses.some((row) => row.survey_metadata?.condition != null);
+  const urlParamNames = [...new Set(responses.flatMap((row) => Object.keys(row.survey_metadata?.url_params || {})))].sort();
   const headers = [
     'participant_id',
     'created_at',
@@ -129,6 +131,8 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     'practice_mode',
     'quality_flags',
     'survey_revision',
+    ...(hasCondition ? ['condition'] : []),
+    ...urlParamNames.map((n) => `url_${n}`),
     ...headerCols,
   ];
 
@@ -146,6 +150,8 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
       quality_flags: flags.join('|'),
       survey_revision: row.survey_metadata?.survey_revision || '',
     };
+    if (hasCondition) obj.condition = row.survey_metadata?.condition ?? '';
+    urlParamNames.forEach((n) => { obj[`url_${n}`] = row.survey_metadata?.url_params?.[n] ?? ''; });
 
     for (const q of questions) {
       const qName = q.name;

@@ -17,3 +17,10 @@ test('snapshot copies nested settings and records resolved skill revisions witho
   expect(snapshot.questions[0].skillResultSchema[0].options).toEqual(['a']);
   expect(JSON.stringify(snapshot)).not.toMatch(/secret|script/);
 });
+
+test('recorded contracts without conditionVariants borrow them from the current question', () => {
+  const variants = [{ condition: 'less', title: 'Less?', reverseCoded: true }];
+  const responses = [{ survey_metadata: { survey_revision: 'r1', survey_response_contract: { questions: [{ name: 'q', type: 'imagepicker', title: 'More?' }] } } }];
+  const current = { pages: [{ elements: [{ name: 'q', type: 'imagepicker', title: 'More?', conditionVariants: variants }] }] };
+  expect(recordedSurveyConfig(responses, current).pages[0].elements[0].conditionVariants).toEqual(variants);
+});

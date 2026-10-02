@@ -2,6 +2,7 @@ import { responseRecordKey } from './responseIdentity.js';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { flattenQuestions, getAttentionCheckQuestions, summarizeQuality } from './quality.js';
 import { computeQuestionIrr, irrLevelForQuestion } from './reliability.js';
+import { describeRecommendation } from './analysisRecommendation.js';
 import {
   computeQuestionTrueSkill,
   computeForcedChoiceTrueSkill,
@@ -201,6 +202,22 @@ export function generateMethodsText({
 
   if (allQuestions.some((q) => q.allowTie)) {
     lines.push('No-preference responses are recorded as ties and summarized separately. TrueSkill rankings use decisive outcomes only; ties are excluded.');
+  }
+
+  if (Array.isArray(surveyConfig?.conditions) && surveyConfig.conditions.length > 1) {
+    lines.push(`Participants were assigned to ${surveyConfig.conditions.length} between-participant conditions `
+      + `(${surveyConfig.conditions.map((c) => c.id).join(', ')}) by balanced random assignment.`);
+  }
+
+  const recommendation = describeRecommendation(surveyConfig);
+  if (recommendation.lines.length) {
+    lines.push('');
+    lines.push('Score derivation (template recommendation):');
+    recommendation.lines.forEach((l) => lines.push(`  • ${l}`));
+    lines.push('Min–max scaled scores are relative to the current sample and are not comparable across studies.');
+    lines.push('');
+    lines.push('References:');
+    recommendation.references.forEach((r) => lines.push(`  ${r}`));
   }
 
   let bibtex = '';

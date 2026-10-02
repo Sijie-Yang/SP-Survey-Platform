@@ -1,4 +1,5 @@
 import QuestionMediaBoundary, { questionMediaFailed } from './QuestionMediaBoundary';
+import MediaWatchGate from './MediaWatchGate';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, LinearProgress, Typography, Tooltip, useMediaQuery } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
@@ -53,6 +54,10 @@ function resolveTrialMediaSets(question, trialCount) {
   return Array.from({ length: Math.max(1, trialCount) }, () => (
     images.map((img) => ({ ...img }))
   ));
+}
+
+function isDisplayModeSurvey(survey) {
+  return survey?.mode === 'display' || !!survey?.isDisplayMode;
 }
 
 function writeQuestionProp(question, key, value) {
@@ -192,7 +197,7 @@ export default function TrialShell({ question, Inner, ...rest }) {
   const nav = useSurveyTrialNav();
 
   if (trialCount <= 1 || !Inner) {
-    return <Inner question={question} {...rest} />;
+    return <MediaWatchGate question={question} trialIndex={0}><Inner question={question} {...rest} /></MediaWatchGate>;
   }
 
   return (
@@ -328,15 +333,19 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
     let next = normalizeTrialsAnswer(answersRef.current, trialCount);
     const trial = next.trials?.[index];
     const shown = mediaSetToShownImages(set || []);
-    if (trial && (!trial.shown_images?.length) && shown.length) {
+    const stampShown = trial && !trial.shown_at && !isDisplayModeSurvey(question.survey);
+    if (trial && ((!trial.shown_images?.length && shown.length) || stampShown)) {
       next = {
         ...next,
         trials: next.trials.map((t, i) => (
           i === index
             ? {
               ...t,
-              shown_images: shown,
-              shown_media_ids: mediaSetToShownIds(set || []),
+              ...(!t.shown_images?.length && shown.length ? {
+                shown_images: shown,
+                shown_media_ids: mediaSetToShownIds(set || []),
+              } : {}),
+              ...(stampShown ? { shown_at: new Date().toISOString() } : {}),
             }
             : t
         )),
@@ -366,11 +375,14 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
       const storedValue = Array.isArray(raw)
         ? [...raw]
         : (raw && typeof raw === 'object' ? { ...raw } : raw);
+      const previous = normalized.trials[trialIndex] || {};
       next.trials[trialIndex] = {
         ...(question.trialMediaContexts?.[trialIndex] || question.jsonObj?.trialMediaContexts?.[trialIndex] || {}),
         value: storedValue,
         shown_images: mediaSetToShownImages(set),
         shown_media_ids: mediaSetToShownIds(set),
+        ...(previous.shown_at ? { shown_at: previous.shown_at } : {}),
+        answered_at: new Date().toISOString(),
       };
       persistAnswers(next, trialIndex);
       if (!trialHasAnswer(next.trials[trialIndex], question)) {
@@ -668,11 +680,13 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
         key={`trial-media-${index}-${mediaEpoch}-${mediaSetToShownImages(trialMediaSets[index] || []).join('|')}`}
         sx={{ mb: 1.5 }}
       >
-        <Inner
-          question={question}
-          trialStimulusMedia={trialMediaSets[index] || []}
-          {...rest}
-        />
+        <MediaWatchGate question={question} trialIndex={index}>
+          <Inner
+            question={question}
+            trialStimulusMedia={trialMediaSets[index] || []}
+            {...rest}
+          />
+        </MediaWatchGate>
       </Box>
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', mt: 1, flexWrap: 'wrap' }}>

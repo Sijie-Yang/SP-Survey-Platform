@@ -135,6 +135,7 @@ const zh = {
   "Please complete the required fields before submitting.": "请先完成必答项再提交。",
   "Failed to save response": "保存失败，请重试",
   "Failed to load question": "题目加载失败",
+  "Condition": "实验条件",
   "Select at least one question for the session.": "请至少选择一道练习题。",
   "Unlimited": "不限次数",
   "Repeats per question": "每题练习次数",

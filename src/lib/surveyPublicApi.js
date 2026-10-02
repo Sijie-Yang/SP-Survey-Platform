@@ -13,6 +13,19 @@ export async function countProjectResponses(projectId) {
   }
 }
 
+/** Anonymous RPC: completed responses per condition; null when unavailable (falls back to weighted random). */
+export async function fetchConditionCounts(projectId) {
+  if (!supabase || !projectId) return null;
+  try {
+    const { data, error } = await supabase.rpc('count_condition_responses', { p_project_id: projectId });
+    if (error) throw error;
+    return data && typeof data === 'object' ? data : {};
+  } catch (err) {
+    console.warn('fetchConditionCounts failed:', err.message);
+    return null;
+  }
+}
+
 /** Anonymous RPC: per-image exposure / win stats for balanced & adaptive sampling. */
 export async function fetchPairStats(projectId) {
   if (!supabase || !projectId) return null;

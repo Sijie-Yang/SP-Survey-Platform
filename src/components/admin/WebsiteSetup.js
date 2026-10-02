@@ -1,4 +1,5 @@
 import SurveyQrCode from './SurveyQrCode';
+import ParameterLinks from './ParameterLinks';
 import SurveyPreflight from './SurveyPreflight';
 import ProjectVersions from './ProjectVersions';
 import { validateSurveyConfig } from '../../lib/designProtocol/validate';
@@ -119,6 +120,8 @@ export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedC
           )}
         </CardContent>
       </Card>
+
+      <ParameterLinks surveyUrl={surveyUrl} surveyConfig={surveyConfig} projectId={currentProject?.id} />
 
       <Alert severity={!answerable.length || report.errors.length ? 'warning' : 'info'} sx={{ mb: 2 }}>
         {zh ? `${report.pageCount} 页 · ${answerable.length} 道作答题 · 共 ${rounds} 轮` : `${report.pageCount} pages · ${answerable.length} answerable questions · ${rounds} rounds`}

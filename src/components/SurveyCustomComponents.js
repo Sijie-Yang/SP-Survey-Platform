@@ -353,6 +353,7 @@ export function registerImageRatingWidget() {
         name: 'maxRateDescription',
         category: 'general',
       },
+      { name: 'rateLabels:string[]', category: 'general' },
       { name: 'imageHtml:string', category: 'general' },
       { name: 'imageLinks:string[]', category: 'general', default: [] },
       { name: 'imageNames:string[]', category: 'general', default: [] },
@@ -791,6 +792,10 @@ export function registerMediaPairingProps() {
       name: 'assignedMediaCategories',
       category: 'general',
     });
+    if (typeName.startsWith('media')) {
+      Serializer.addProperty(typeName, { name: 'requireMediaEnded:boolean', default: false, category: 'general' });
+      Serializer.addProperty(typeName, { name: 'minWatchSeconds:number', default: 0, category: 'general' });
+    }
   });
 }
 
@@ -933,6 +938,7 @@ export function registerMediaRatingWidget() {
     // surveys otherwise never see builder low/high-end labels.
     { name: 'minRateDescription', category: 'general' },
     { name: 'maxRateDescription', category: 'general' },
+    { name: 'rateLabels:string[]', category: 'general' },
     { name: 'mediaItems', default: [], category: 'general' },
     { name: 'mediaUrls:string[]', category: 'general' },
     { name: 'mediaNames:string[]', category: 'general' },
@@ -954,6 +960,7 @@ export function registerMediaRatingWidget() {
       rateMax: q.rateMax ?? 5,
       minRateDescription: q.minRateDescription || '',
       maxRateDescription: q.maxRateDescription || '',
+      rateLabels: q.rateLabels,
       onChange: (v) => { q.value = v; },
     });
   }
@@ -1266,6 +1273,7 @@ export function registerImageAnnotationWidget() {
     { name: 'annotationLabels', default: [], category: 'general' },
     { name: 'minAnnotations:number', default: 0, category: 'general' },
     { name: 'maxAnnotations:number', default: 50, category: 'general' },
+    { name: 'annotationNotePrompt', category: 'general' },
     { name: 'enableSamAssist:boolean', default: false, category: 'general' },
     { name: 'falApiKey', category: 'general' },
     { name: 'projectId', category: 'general' },
@@ -1281,6 +1289,7 @@ export function registerImageAnnotationWidget() {
       annotationLabels: (q.annotationLabels || []).map(annotationLabelText).filter(Boolean),
       minAnnotations: q.minAnnotations || 0,
       maxAnnotations: q.maxAnnotations ?? 50,
+      notePrompt: q.annotationNotePrompt || '',
       enableSamAssist: false, // never expose SAM in live / practice surveys
       falKey: '',
       projectId: q.projectId || '',

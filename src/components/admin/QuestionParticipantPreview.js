@@ -6,8 +6,9 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 import { getTrialCount } from '../../lib/trialNavigation';
 import { isCuratedMediaMode, isRandomMediaQuestion, resolveMediaFolderTags, resolveSkillQuestions } from '../../lib/surveyMediaInjection';
-import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
+import { adaptQuestionForPreviewLibrary, resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
 import { useRegion } from '../../contexts/RegionContext';
+import { conditionVariants, normalizeConditions, withConditionWording } from '../../lib/surveyRuntimeContext';
 import { isPreviewMessage, previewAppearance, PREVIEW_DEVICES, PREVIEW_FAILED, PREVIEW_READY, PREVIEW_RENDERED, PREVIEW_UPDATE, QUESTION_PREVIEW_PATH } from '../../lib/questionPreviewProtocol';
 
 /** An actual independent viewport, scaled only after participant layout has run. */
@@ -23,6 +24,14 @@ export default function QuestionParticipantPreview({ question, currentProject, s
   const [error, setError] = useState('');
   const [pending, setPending] = useState(true);
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
+  const conditions = normalizeConditions(surveyConfig);
+  const showConditions = conditions.length > 1 && conditionVariants(question).length > 0;
+  const conditionIds = conditions.map((c) => c.id).join('|');
+  // Like a participant: each load or reset draws a random condition.
+  const activeCondition = useMemo(() => {
+    const ids = conditionIds ? conditionIds.split('|') : [];
+    return showConditions && ids.length ? ids[Math.floor(Math.random() * ids.length)] : '';
+  }, [showConditions, conditionIds, resetCount]); // eslint-disable-line react-hooks/exhaustive-deps
   const iframeRef = useRef(null);
   const sequence = useRef(0);
   // Watch the full draft so new settings (including allowTie/tieLabel) cannot be omitted.
@@ -39,10 +48,11 @@ export default function QuestionParticipantPreview({ question, currentProject, s
     setPending(true);
     const timer = setTimeout(async () => {
       try {
-        const draft = JSON.parse(questionKey);
+        let draft = withConditionWording(JSON.parse(questionKey), activeCondition);
         if (!draft.type) return;
         const media = await resolvePreviewMediaContext(currentProject || {});
         if (cancelled) return;
+        if (media.fromPreviewLibrary) draft = adaptQuestionForPreviewLibrary(draft, media.images);
         const questionConfig = { pages: [{ elements: [draft] }] };
         await resolveSkillQuestions(questionConfig);
         if (cancelled) return;
@@ -69,7 +79,7 @@ export default function QuestionParticipantPreview({ question, currentProject, s
       }
     }, 0);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [questionKey, mediaSourceKey, currentProject, appearance, zh, resetCount]);
+  }, [questionKey, mediaSourceKey, currentProject, appearance, zh, resetCount, activeCondition]);
 
   const sendSnapshot = useCallback(() => {
     if (snapshot) iframeRef.current?.contentWindow?.postMessage({ type: PREVIEW_UPDATE, ...snapshot }, window.location.origin);
@@ -119,6 +129,13 @@ export default function QuestionParticipantPreview({ question, currentProject, s
     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
       {zh ? '按设备实际宽度排版，缩放仅用于适应此面板；可在预览内滚动和试答。修改设置会重置试答，不保存结果。' : 'Rendered at device width, then scaled to fit. Scroll and try answers inside; editing resets preview answers. Results are not saved.'}
     </Typography>
+    {showConditions && (
+      <Typography variant="caption" color="info.main" sx={{ display: 'block', mb: 1 }}>
+        {zh
+          ? `实验条件随机抽取，本次为「${conditions.find((c) => c.id === activeCondition)?.label || activeCondition}」。点「重置预览」重新抽取。`
+          : `Condition drawn at random, like a participant: ${conditions.find((c) => c.id === activeCondition)?.label || activeCondition}. Reset preview to draw again.`}
+      </Typography>
+    )}
     {error && <Alert severity="warning" sx={{ mb: 1 }}>{error}</Alert>}
     <Box ref={setHost} sx={{ width: '100%', minWidth: 0, bgcolor: 'grey.100', borderRadius: 2, overflow: 'hidden', position: 'relative', display: error ? 'none' : 'block' }}>
       <Box sx={{ width: viewport.width * scale, height: viewport.height * scale, mx: 'auto' }}>

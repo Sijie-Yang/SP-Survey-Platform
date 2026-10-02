@@ -23,17 +23,6 @@
         "title": "Likert Scale Survey Questions",
         "elements": [
           {
-            "name": "likert_image",
-            "type": "image",
-            "title": "See the below image:",
-            "imageFit": "cover",
-            "imageCount": 1,
-            "isRequired": true,
-            "imageSource": "huggingface",
-            "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
-          },
-          {
             "name": "likert",
             "rows": [
               {
@@ -61,7 +50,7 @@
                 "value": "beautiful"
               }
             ],
-            "type": "matrix",
+            "type": "imagematrix",
             "title": "Rate the image:",
             "columns": [
               {
@@ -89,9 +78,8 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "maxRateDescription": "5",
-            "minRateDescription": "1",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "imageFit": "cover"
           }
         ],
         "description": "Please answer the following questions."
@@ -109,7 +97,9 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "allowTie": true,
+            "tieLabel": "Equal"
           },
           {
             "name": "pairwise_lively",
@@ -120,7 +110,9 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "allowTie": true,
+            "tieLabel": "Equal"
           },
           {
             "name": "pairwise_boring",
@@ -131,7 +123,9 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "allowTie": true,
+            "tieLabel": "Equal"
           },
           {
             "name": "pairwise_depressing",
@@ -142,7 +136,9 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "allowTie": true,
+            "tieLabel": "Equal"
           },
           {
             "name": "pairwise_wealthy",
@@ -153,7 +149,9 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "allowTie": true,
+            "tieLabel": "Equal"
           },
           {
             "name": "pairwise_beautiful",
@@ -164,7 +162,9 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "allowTie": true,
+            "tieLabel": "Equal"
           }
         ],
         "description": "Please answer the following questions."
@@ -180,7 +180,45 @@
       "showPreviewBeforeComplete": "showAllQuestions"
     },
     "description": "This study proposes the first comprehensive framework to guide image-based survey design for capturing perceptions of outdoor urban environments across different scenarios, addressing the lack of methodological standardisation in current research.",
-    "logoPosition": "right"
+    "logoPosition": "right",
+    "spAnalysisRecommendation": {
+      "citation": "Gu et al. 2025",
+      "items": [
+        {
+          "questions": [
+            "likert"
+          ],
+          "method": "matrix_rows",
+          "minPerImage": 12
+        },
+        {
+          "questions": [
+            "pairwise_safe",
+            "pairwise_lively",
+            "pairwise_boring",
+            "pairwise_depressing",
+            "pairwise_wealthy",
+            "pairwise_beautiful"
+          ],
+          "method": "qscore_pairwise",
+          "minPerImage": 22
+        },
+        {
+          "questions": [
+            "pairwise_safe",
+            "pairwise_lively",
+            "pairwise_boring",
+            "pairwise_depressing",
+            "pairwise_wealthy",
+            "pairwise_beautiful"
+          ],
+          "method": "trueskill_pairwise",
+          "tieHandling": "exclude",
+          "runs": 1,
+          "minPerImage": 29
+        }
+      ]
+    }
   },
   "imageDatasetConfig": {
     "mediaFolderTags": {},

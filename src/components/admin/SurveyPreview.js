@@ -21,8 +21,9 @@ import { getTrialCount } from '../../lib/trialNavigation';
 import { applySurveyLocale } from '../../lib/surveyLocale';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
-import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
+import { adaptSurveyForPreviewLibrary, resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
 import { markGuideProgress } from '../../lib/adminGuide';
+import { applyRuntimeVariables, normalizeConditions } from '../../lib/surveyRuntimeContext';
 
 export function previewSourceKey(config, currentProject) {
   const images = currentProject?.preloadedImages || [];
@@ -36,7 +37,7 @@ export function previewSourceKey(config, currentProject) {
   });
 }
 
-export function createSurveyPreviewModel(processedConfig) {
+export function createSurveyPreviewModel(processedConfig, runtimeContext = null) {
   const configToUse = JSON.parse(JSON.stringify(processedConfig || {}));
   if (typeof configToUse.showQuestionNumbers === 'boolean') {
     configToUse.showQuestionNumbers = configToUse.showQuestionNumbers ? 'on' : 'off';
@@ -47,6 +48,7 @@ export function createSurveyPreviewModel(processedConfig) {
   const normalizedPreviewJson = normalizeBuilderSurveyJson(configToUse);
   const model = new Model(normalizedPreviewJson);
   applySurveyLocale(model, normalizedPreviewJson);
+  applyRuntimeVariables(model, runtimeContext);
   syncInjectedMediaOntoSurveyModel(model, normalizedPreviewJson);
   try {
     if (configToUse.theme) {
@@ -95,11 +97,12 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
         registerImageMatrixWidget();
         registerAllExtendedWidgets();
         
-        const configCopy = JSON.parse(JSON.stringify(config));
+        let configCopy = JSON.parse(JSON.stringify(config));
         await resolveSkillQuestions(configCopy);
         const mediaContext = await resolvePreviewMediaContext(currentProject || {});
         const mediaPool = mediaContext.images;
         const fromPreviewLibrary = mediaContext.fromPreviewLibrary;
+        if (fromPreviewLibrary) configCopy = adaptSurveyForPreviewLibrary(configCopy, mediaPool);
         setUsingPreviewLibrary(fromPreviewLibrary);
         const folderHost = fromPreviewLibrary
           ? { ...currentProject, imageDatasetConfig: mediaContext.imageDatasetConfig, config: configCopy }
@@ -395,9 +398,14 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
     processConfig();
   }, [sourceKey]);
 
+  const conditions = useMemo(() => normalizeConditions(config), [config]);
+  const [conditionChoice, setConditionChoice] = useState(null);
+  const previewCondition = conditions.length > 1
+    ? (conditions.some((c) => c.id === conditionChoice) ? conditionChoice : conditions[0].id)
+    : null;
   const model = useMemo(
-    () => (processedConfig && !loading ? createSurveyPreviewModel(processedConfig) : null),
-    [processedConfig, loading],
+    () => (processedConfig && !loading ? createSurveyPreviewModel(processedConfig, { condition: previewCondition }) : null),
+    [processedConfig, loading, previewCondition],
   );
 
   useEffect(() => () => {
@@ -449,6 +457,20 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
             ? ' · No project media — sampling from the platform preview media library'
             : ''}
         </Box>
+        {conditions.length > 1 && (
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
+            <Typography variant="body2">Condition:</Typography>
+            {conditions.map((c) => (
+              <Chip
+                key={c.id}
+                size="small"
+                label={c.label}
+                color={c.id === previewCondition ? 'primary' : 'default'}
+                onClick={() => setConditionChoice(c.id)}
+              />
+            ))}
+          </Box>
+        )}
         {mediaErrors.map((message) => (
           <Alert key={message} severity="error" sx={{ mb: 1 }}>{message}</Alert>
         ))}
