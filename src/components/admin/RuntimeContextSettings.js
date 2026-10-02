@@ -99,8 +99,8 @@ export default function RuntimeContextSettings({ config, onChange }) {
         onBlur={() => onChange('captureUrlParams', parseUrlParamsText(paramsText))}
         placeholder="site, pid"
         helperText={zh
-          ? '用逗号分隔。只记录列出的参数（截断到 64 字符），导出为 url_<名称> 列，题目里可用 {url_<名称>}。'
-          : 'Comma-separated. Only these parameters are recorded (trimmed to 64 characters), exported as url_<name> columns, and available as {url_<name>}.'}
+          ? '例如 site 或 pid，用逗号分隔。参与者链接里带上 ?site=S01 时会记录这个值（导出为 url_site 列）。在「分享」页可以为每个取值生成专属链接和二维码。'
+          : 'e.g. site or pid, comma-separated. When a participant link contains ?site=S01 the value is recorded (exported as url_site). The Share tab builds one link and QR code per value.'}
       />
     </>
   );
