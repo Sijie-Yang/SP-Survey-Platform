@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applicableReviewRounds,
+  normalizeReviewSettings,
   estimateReviewCost,
   normalizeReviewOptions,
   parseRoleReview,
@@ -136,6 +137,45 @@ describe('review options and estimate', () => {
       { name: 'survey_apply_operations', minPermission: 'edit_draft', execute() {} },
     ], review);
     assert.deepEqual(tools.map((tool) => tool.name), ['survey_get_draft']);
+  });
+});
+
+describe('per-user review settings', () => {
+  it('defaults to on with all five roles and clamps stored values', () => {
+    assert.deepEqual(normalizeReviewSettings(null), {
+      enabled: true,
+      roles: REVIEW_ROLE_IDS,
+      method: 'linear',
+      maxRounds: 2,
+      threshold: 8,
+      applyMode: 'review',
+      maxRoles: 5,
+    });
+    const stored = normalizeReviewSettings({ enabled: false, roles: ['analyst', 'judge', 'scientist'], method: 'group', maxRounds: 9, threshold: 0, applyMode: 'apply', maxRoles: 1 });
+    assert.equal(stored.enabled, false);
+    assert.deepEqual(stored.roles, ['scientist']);
+    assert.equal(stored.maxRounds, 5);
+    assert.equal(stored.threshold, 1);
+    assert.equal(stored.applyMode, 'apply');
+  });
+
+  it('refuses a Review run when the user turned Review off', async () => {
+    const { runDesignerChat } = await import('./designerChat.mjs');
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify([{ user_id: 'u1', review_settings: { enabled: false } }]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    try {
+      await assert.rejects(
+        runDesignerChat({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k' }, 'u1', {
+          message: 'Review', projectId: 'p1', assistantMode: 'review',
+        }),
+        (error) => error.code === 'REVIEW_MODE_DISABLED' && error.status === 403,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

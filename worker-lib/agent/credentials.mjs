@@ -1,3 +1,4 @@
+import { normalizeReviewSettings } from './runtime/review.mjs';
 /**
  * Encrypted BYOK credentials (write-only) plus provider profiles.
  */
@@ -177,6 +178,9 @@ export async function saveUserAiSettings(env, userId, patch = {}) {
     'temperature', 'max_tokens', 'reasoning_effort', 'permission',
     'assistant_reasoning_effort', 'silicon_reasoning_effort',
   ];
+  if (patch.review_settings !== undefined) {
+    body.review_settings = normalizeReviewSettings(patch.review_settings);
+  }
   const body = {
     user_id: userId,
     updated_at: now,
@@ -224,9 +228,11 @@ export async function saveUserAiSettings(env, userId, patch = {}) {
     });
     return { success: true, settings: Array.isArray(rows) ? rows[0] : rows };
   } catch (error) {
+    const reviewSettingsRequested = body.review_settings !== undefined;
     delete body.settings_revision;
     delete body.assistant_reasoning_effort;
     delete body.silicon_reasoning_effort;
+    delete body.review_settings;
     const rows = await supabaseRest(env, {
       path: '/rest/v1/user_ai_settings',
       method: 'POST',
@@ -234,7 +240,11 @@ export async function saveUserAiSettings(env, userId, patch = {}) {
       body,
       prefer: 'resolution=merge-duplicates,return=representation',
     });
-    return { success: true, settings: Array.isArray(rows) ? rows[0] : rows };
+    return {
+      success: true,
+      settings: Array.isArray(rows) ? rows[0] : rows,
+      ...(reviewSettingsRequested ? { reviewSettingsSaved: false } : {}),
+    };
   }
 }
 
@@ -318,6 +328,7 @@ export async function getCredentialStatus(env, userId) {
       ...settings,
       assistant_model: defaultRoute.model,
       silicon_model: siliconRoute.model,
+      review_settings: normalizeReviewSettings(settings.review_settings),
     },
     openai: assistantReady
       ? {

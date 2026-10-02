@@ -44,7 +44,15 @@ import {
 } from './surveyAssistantUtils';
 import { classifyUserIntent, initialLoadingStatus, shouldPrepareWrite } from './taskIntent';
 import { RegionContext } from '../contexts/RegionContext';
-import { DEFAULT_REVIEW_OPTIONS, normalizeClientReviewOptions, reviewDefaultMessage } from '../lib/reviewMode';
+import {
+  DEFAULT_REVIEW_SETTINGS,
+  cacheReviewSettings,
+  normalizeClientReviewOptions,
+  normalizeReviewSettings,
+  readCachedReviewSettings,
+  reviewDefaultMessage,
+  reviewOptionsFromSettings,
+} from '../lib/reviewMode';
 
 function loadProjectFlag(projectId, key, fallback) {
   if (!projectId || typeof window === 'undefined') return fallback;
@@ -68,15 +76,6 @@ const ASSISTANT_MODES = new Set(['agent', 'generate', 'adjust', 'question', 'rev
 
 function normalizeAssistantMode(value) {
   return ASSISTANT_MODES.has(value) ? value : 'agent';
-}
-
-function loadReviewOptions(projectId) {
-  if (!projectId || typeof window === 'undefined') return { ...DEFAULT_REVIEW_OPTIONS };
-  try {
-    return normalizeClientReviewOptions(JSON.parse(window.localStorage.getItem(`reviewOptions_${projectId}`) || 'null'));
-  } catch {
-    return { ...DEFAULT_REVIEW_OPTIONS };
-  }
 }
 
 export default function useSurveyAssistant({
@@ -131,7 +130,11 @@ export default function useSurveyAssistant({
   const [reviewMode, setReviewMode] = useState(() => loadProjectString(projectId, 'reviewMode', '1v1'));
   const [maxReviewRounds, setMaxReviewRounds] = useState(() => loadProjectNumber(projectId, 'maxReviewRounds', 3));
   const [customPrompts, setCustomPrompts] = useState(null);
-  const [reviewOptions, setReviewOptionsState] = useState(() => loadReviewOptions(projectId));
+  const [reviewSettings, setReviewSettings] = useState(() => readCachedReviewSettings(null) || { ...DEFAULT_REVIEW_SETTINGS });
+  const [reviewOptions, setReviewOptionsState] = useState(() => reviewOptionsFromSettings(reviewSettings));
+  const reviewUserIdRef = useRef(null);
+  const reviewSettingsRef = useRef(reviewSettings);
+  reviewSettingsRef.current = reviewSettings;
   const [reviewEstimate, setReviewEstimate] = useState(null);
   const [reviewApplying, setReviewApplying] = useState('');
 
@@ -197,6 +200,13 @@ export default function useSurveyAssistant({
   const applyCredentialStatus = useCallback((status) => {
     if (!status) return;
     lastStatusRef.current = status;
+    if (status.settings) {
+      const nextReview = normalizeReviewSettings(status.settings.review_settings);
+      reviewUserIdRef.current = status.settings.user_id || null;
+      cacheReviewSettings(reviewUserIdRef.current, nextReview);
+      setReviewSettings(nextReview);
+      setReviewOptionsState(reviewOptionsFromSettings(nextReview));
+    }
     const configured = credentialConfigured(status);
     if (configured) {
       setApiKeyValid(true);
@@ -407,7 +417,7 @@ export default function useSurveyAssistant({
     setReviewMode(loadProjectString(projectId, 'reviewMode', '1v1'));
     setMaxReviewRounds(loadProjectNumber(projectId, 'maxReviewRounds', 3));
     setAssistantMode(normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', 'agent')));
-    setReviewOptionsState(loadReviewOptions(projectId));
+    setReviewOptionsState(reviewOptionsFromSettings(reviewSettingsRef.current));
     const timer = setTimeout(() => {
       isLoadingProjectSettings.current = false;
     }, 100);
@@ -523,17 +533,26 @@ export default function useSurveyAssistant({
   }, [persistAssistantDefault, selectedRoute]);
 
   const setReviewOptions = useCallback((patch) => {
-    setReviewOptionsState((current) => {
-      const next = normalizeClientReviewOptions({
-        ...current,
-        ...(typeof patch === 'function' ? patch(current) : patch),
-      });
-      if (typeof window !== 'undefined' && projectIdRef.current) {
-        window.localStorage.setItem(`reviewOptions_${projectIdRef.current}`, JSON.stringify(next));
-      }
-      return next;
-    });
+    setReviewOptionsState((current) => normalizeClientReviewOptions({
+      ...current,
+      ...(typeof patch === 'function' ? patch(current) : patch),
+    }));
   }, []);
+
+  const saveReviewSettings = useCallback(async (patch) => {
+    const next = normalizeReviewSettings({ ...reviewSettingsRef.current, ...patch });
+    setReviewSettings(next);
+    setReviewOptionsState(reviewOptionsFromSettings(next));
+    cacheReviewSettings(reviewUserIdRef.current, next);
+    if (!platformMode) return { success: true, settings: next };
+    const { saveAiSettings } = await import('../lib/agentApi');
+    const result = await saveAiSettings({ review_settings: next }).catch((error) => ({ success: false, error: error.message }));
+    return { ...result, settings: next };
+  }, [platformMode]);
+
+  useEffect(() => {
+    if (!reviewSettings.enabled && assistantMode === 'review') handleAssistantModeChange('agent');
+  }, [assistantMode, handleAssistantModeChange, reviewSettings.enabled]);
 
   useEffect(() => {
     if (!enabled || !platformMode || assistantMode !== 'review' || !projectId) {
@@ -543,12 +562,12 @@ export default function useSurveyAssistant({
     const { provider, model } = parseRoute(selectedRoute);
     let cancelled = false;
     const timer = setTimeout(async () => {
-      const estimate = await estimateAgentReview({
+      const estimate = await Promise.resolve(estimateAgentReview({
         projectId,
         provider,
         model,
         review: reviewOptions,
-      }).catch(() => null);
+      })).catch(() => null);
       if (!cancelled) setReviewEstimate(estimate?.success ? estimate : null);
     }, 300);
     return () => {
@@ -695,6 +714,7 @@ export default function useSurveyAssistant({
     const typed = String(override.message != null ? override.message : userMessage).trim();
     const outgoing = typed || (sendMode === 'review' ? reviewDefaultMessage(language) : '');
     if (!outgoing) return;
+    if (sendMode === 'review' && !reviewSettings.enabled) return;
     const reviewWrites = sendMode === 'review' && reviewOptions.applyMode === 'apply';
     const request = {
       projectId: projectIdRef.current,
@@ -760,6 +780,7 @@ export default function useSurveyAssistant({
     refreshConversation();
 
     const currentUserMessage = outgoing;
+    if (sendMode === 'review') setReviewOptionsState(reviewOptionsFromSettings(reviewSettings));
     if (intent.write || reviewWrites) {
       const undo = {
         runId: null,
@@ -1249,6 +1270,7 @@ export default function useSurveyAssistant({
     lastSavedConfig,
     onPrepareWrite,
     reviewOptions,
+    reviewSettings,
     userMessage,
   ]);
 
@@ -1445,9 +1467,11 @@ export default function useSurveyAssistant({
     blockReason,
     canSend: !blockReason && (Boolean(userMessage.trim()) || assistantMode === 'review') && !isLoading,
     reviewOptions,
+    reviewSettings,
     reviewEstimate,
     reviewApplying,
     setReviewOptions,
+    saveReviewSettings,
     handleApplyReview,
     contextEnabled,
     multiAgentReviewEnabled,
@@ -1551,6 +1575,8 @@ export function chatPropsFromAssistant(assistant) {
     routeUnavailable: assistant.routeUnavailable,
     blockReason: assistant.blockReason,
     reviewOptions: assistant.reviewOptions,
+    reviewSettings: assistant.reviewSettings,
+    onReviewSettingsChange: assistant.saveReviewSettings,
     reviewEstimate: assistant.reviewEstimate,
     reviewApplying: assistant.reviewApplying,
     onReviewOptionsChange: assistant.setReviewOptions,

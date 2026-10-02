@@ -40,6 +40,47 @@ export function normalizeClientReviewOptions(raw) {
   };
 }
 
+export const DEFAULT_REVIEW_SETTINGS = Object.freeze({
+  enabled: true,
+  ...DEFAULT_REVIEW_OPTIONS,
+});
+
+export function normalizeReviewSettings(raw) {
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return { enabled: input.enabled !== false, ...normalizeClientReviewOptions(input) };
+}
+
+/** Composer options for one run, starting from the per-user Settings defaults. */
+export function reviewOptionsFromSettings(settings) {
+  const { enabled, ...options } = normalizeReviewSettings(settings);
+  return options;
+}
+
+export const REVIEW_SETTINGS_EVENT = 'sp-review-settings';
+const REVIEW_SETTINGS_KEY = 'sp-review-settings';
+
+function cacheKey(userId) {
+  return `${REVIEW_SETTINGS_KEY}:${userId || 'last'}`;
+}
+
+export function readCachedReviewSettings(userId) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(cacheKey(userId));
+    return raw ? normalizeReviewSettings(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function cacheReviewSettings(userId, settings) {
+  if (typeof window === 'undefined') return;
+  const next = normalizeReviewSettings(settings);
+  window.localStorage.setItem(cacheKey(userId), JSON.stringify(next));
+  if (userId) window.localStorage.setItem(cacheKey(null), JSON.stringify(next));
+  window.dispatchEvent(new CustomEvent(REVIEW_SETTINGS_EVENT, { detail: { userId: userId || null, settings: next } }));
+}
+
 export function reviewDefaultMessage(language = 'en') {
   return language === 'zh' ? '评审当前问卷。' : 'Review the current survey.';
 }

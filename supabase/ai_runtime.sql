@@ -148,6 +148,9 @@ ALTER TABLE public.user_ai_settings
 ALTER TABLE public.user_ai_settings
   ADD COLUMN IF NOT EXISTS silicon_reasoning_effort TEXT;
 
+ALTER TABLE public.user_ai_settings
+  ADD COLUMN IF NOT EXISTS review_settings JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 ALTER TABLE public.ai_sessions
   ADD COLUMN IF NOT EXISTS reasoning_effort TEXT;
 

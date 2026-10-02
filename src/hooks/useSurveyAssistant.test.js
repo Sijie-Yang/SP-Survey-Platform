@@ -524,6 +524,56 @@ describe('useSurveyAssistant', () => {
     expect(result.current.messages.at(-1).content).toMatch(/draft changed after this review/i);
   });
 
+  test('starts Review options from the per-user defaults and resets a one-run override after sending', async () => {
+    mockSendChatMessage.mockResolvedValue({ success: true, message: 'Reviewed', intent: 'review', sessionId: 's1' });
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Survey' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'],
+        directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+        settings: {
+          user_id: 'u1',
+          review_settings: { enabled: true, roles: ['scientist', 'analyst'], method: 'group', maxRounds: 3, threshold: 9, applyMode: 'apply', maxRoles: 4 },
+        },
+      });
+    });
+    expect(result.current.reviewOptions).toEqual({
+      roles: ['scientist', 'analyst'], method: 'group', maxRounds: 3, threshold: 9, applyMode: 'apply', maxRoles: 4,
+    });
+    expect(JSON.parse(localStorage.getItem('sp-review-settings:u1')).method).toBe('group');
+
+    act(() => result.current.handleAssistantModeChange('review'));
+    act(() => result.current.setReviewOptions({ method: 'linear', applyMode: 'review' }));
+    await act(async () => {
+      await result.current.handleSendMessage();
+    });
+    expect(mockSendChatMessage.mock.calls[0][8].review).toEqual(expect.objectContaining({ method: 'linear', applyMode: 'review' }));
+    expect(result.current.reviewOptions.method).toBe('group');
+    expect(result.current.reviewOptions.applyMode).toBe('apply');
+  });
+
+  test('switching Review off in settings leaves Review mode and saves the default per user', async () => {
+    mockSaveAiSettings.mockResolvedValue({ success: true });
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Survey' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    act(() => result.current.handleAssistantModeChange('review'));
+    expect(result.current.assistantMode).toBe('review');
+    await act(async () => {
+      await result.current.saveReviewSettings({ enabled: false });
+    });
+    expect(mockSaveAiSettings).toHaveBeenCalledWith({ review_settings: expect.objectContaining({ enabled: false }) });
+    expect(result.current.assistantMode).toBe('agent');
+    expect(result.current.reviewSettings.enabled).toBe(false);
+  });
+
   test('keeps the current session route when saving the default model fails', async () => {
     mockSaveAiSettings.mockRejectedValue(new Error('conflict'));
     const { result } = renderHook(() => useSurveyAssistant({

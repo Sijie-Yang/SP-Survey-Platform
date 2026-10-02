@@ -4,9 +4,13 @@ import {
   Button,
   Chip,
   CircularProgress,
+  FormControl,
+  FormControlLabel,
+  InputLabel,
   MenuItem,
   Select,
   Stack,
+  Switch,
   Typography,
 } from '@mui/material';
 import {
@@ -366,6 +370,99 @@ export function ReviewCard({ review, t, runId, isLoading = false, applying = '',
         </Box>
       ) : null}
       {applying && applying.startsWith(`${runId}:`) ? <CircularProgress size={14} /> : null}
+    </Box>
+  );
+}
+
+/** Per-user defaults in Assistant settings; the composer can override them for one run. */
+export function ReviewSettingsControls({ t, settings, onChange }) {
+  const [status, setStatus] = React.useState('');
+  if (!settings) return null;
+  const save = async (patch) => {
+    setStatus('saving');
+    const result = await onChange?.(patch);
+    setStatus(result && result.success === false ? 'error' : 'saved');
+  };
+  const toggleRole = (id) => {
+    const selected = settings.roles.includes(id);
+    if (selected && settings.roles.length === 1) return;
+    if (!selected && settings.roles.length >= settings.maxRoles) return;
+    save({ roles: selected ? settings.roles.filter((role) => role !== id) : [...settings.roles, id] });
+  };
+  const field = (label, value, options, onSelect) => (
+    <FormControl size="small" sx={{ minWidth: 150 }} disabled={!settings.enabled}>
+      <InputLabel>{label}</InputLabel>
+      <Select
+        label={label}
+        value={value}
+        onChange={(event) => onSelect(event.target.value)}
+      >
+        {options.map((option) => (
+          <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+  const numbers = (values, suffix = '') => values.map((n) => ({ value: n, label: `${n}${suffix}` }));
+  return (
+    <Box data-testid="review-settings" sx={{ display: 'grid', gap: 1.5 }}>
+      <FormControlLabel
+        control={(
+          <Switch
+            checked={settings.enabled}
+            onChange={(event) => save({ enabled: event.target.checked })}
+          />
+        )}
+        label={t.aiReviewSettingsEnable || 'Show Review mode in the Assistant composer'}
+      />
+      <Box sx={{ opacity: settings.enabled ? 1 : 0.55, display: 'grid', gap: 1.5 }}>
+        <Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            {t.aiReviewSettingsRoles || 'Default reviewers'}
+          </Typography>
+          <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', rowGap: 0.75 }}>
+            {REVIEW_ROLES.map((role) => {
+              const selected = settings.roles.includes(role.id);
+              return (
+                <Chip
+                  key={role.id}
+                  size="small"
+                  label={`${role.emoji} ${reviewRoleLabel(role.id, t)}`}
+                  color={selected ? 'primary' : 'default'}
+                  variant={selected ? 'filled' : 'outlined'}
+                  onClick={settings.enabled ? () => toggleRole(role.id) : undefined}
+                  aria-pressed={selected}
+                />
+              );
+            })}
+          </Stack>
+        </Box>
+        <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', rowGap: 1.5 }}>
+          {field(t.aiReviewMethod || 'Method', settings.method, [
+            { value: 'linear', label: t.aiReviewMethodLinear || 'Linear individual review' },
+            { value: 'group', label: t.aiReviewMethodGroup || 'Group discussion' },
+          ], (method) => save({ method }))}
+          {field(t.aiReviewMaxRounds || 'Max rounds', settings.maxRounds, numbers([1, 2, 3, 4, 5]), (maxRounds) => save({ maxRounds }))}
+          {field(t.aiReviewThreshold || 'Accept at', settings.threshold, numbers([5, 6, 7, 8, 9, 10], '/10'), (threshold) => save({ threshold }))}
+          {field(t.aiReviewMaxRoles || 'Reviewer cap', settings.maxRoles, numbers([1, 2, 3, 4, 5]), (maxRoles) => save({ maxRoles, roles: settings.roles.slice(0, maxRoles) }))}
+          {field(t.aiReviewApplyMode || 'Revisions', settings.applyMode, [
+            { value: 'review', label: t.aiReviewApplyModeReview || 'Review only, do not apply' },
+            { value: 'apply', label: t.aiReviewApplyModeApply || 'Apply each round' },
+          ], (applyMode) => save({ applyMode }))}
+        </Stack>
+      </Box>
+      <Typography variant="caption" color="text.secondary">
+        {t.aiReviewSettingsOverrideNote || 'These are defaults. The Review options in the composer can still change them for a single run.'}
+      </Typography>
+      {status ? (
+        <Typography variant="caption" color={status === 'error' ? 'error.main' : 'text.secondary'} data-testid="review-settings-status">
+          {status === 'saving'
+            ? (t.aiReviewSettingsSaving || 'Saving…')
+            : status === 'error'
+              ? (t.aiReviewSettingsError || 'Could not save. Your choice applies in this browser only.')
+              : (t.aiReviewSettingsSaved || 'Saved to your account')}
+        </Typography>
+      ) : null}
     </Box>
   );
 }

@@ -225,6 +225,8 @@ export default function ChatAssistant({
   steerTarget = 'next-step',
   onSteerTargetChange,
   reviewOptions = null,
+  reviewSettings = null,
+  onReviewSettingsChange,
   reviewEstimate = null,
   reviewApplying = '',
   onReviewOptionsChange,
@@ -493,7 +495,7 @@ export default function ChatAssistant({
     }
   }, [currentProject?.id]);
   
-  const reviewActive = Boolean(isPlatformMode && assistantMode === 'review');
+  const reviewActive = Boolean(isPlatformMode && assistantMode === 'review' && reviewSettings?.enabled !== false);
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1138,7 +1140,9 @@ export default function ChatAssistant({
                   <MenuItem value="generate">{t.aiSidebarModeGenerate}</MenuItem>
                   <MenuItem value="adjust">{t.aiSidebarModeAdjust}</MenuItem>
                   <MenuItem value="question">{t.aiSidebarModeQuestion}</MenuItem>
-                  <MenuItem value="review">{t.aiSidebarModeReview || 'Review'}</MenuItem>
+                  {reviewSettings?.enabled !== false || assistantMode === 'review' ? (
+                    <MenuItem value="review">{t.aiSidebarModeReview || 'Review'}</MenuItem>
+                  ) : null}
                 </Select>
               )}
               {isPlatformMode && modelOptions.length > 0 ? (
@@ -1328,6 +1332,8 @@ export default function ChatAssistant({
         isPlatformMode={isPlatformMode}
         assistantMode={assistantMode}
         onAssistantModeChange={onAssistantModeChange}
+        reviewSettings={reviewSettings}
+        onReviewSettingsChange={onReviewSettingsChange}
         onCredentialsChange={onCredentialsChange}
         codexConnected={codexConnected}
         codexStatusLoading={codexStatusLoading}
