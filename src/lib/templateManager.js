@@ -31,7 +31,10 @@ import {
   buildBuiltinImportSnapshot,
   buildOnlineImportSnapshot,
   compareBuiltinImagesToOnline,
+  detectBuiltinExportConflict,
   diffBuiltinImportSnapshots,
+  indexBuiltinExportManifest,
+  normalizeTemplateImageDatasetConfig,
 } from './templateBuiltinDiff';
 
 export function templateImagePrefix(templateId) {
@@ -95,6 +98,8 @@ function rowToTemplate(row) {
     preloadedSource:   row.preloaded_source   || null,
     // Folder / set / category tags (safe subset — no tokens)
     imageDatasetConfig: sanitizeMediaFolderConfig(row.image_dataset_config || {}),
+    // Every stored key (agent-saved templates carry more than folder tags); builtin export only
+    imageDatasetConfigFull: row.image_dataset_config || {},
     // Landing card cover (public media URL from template library)
     thumbnail_url:     row.thumbnail_url      || null,
     // submitter info
@@ -604,12 +609,18 @@ export function templateToBuiltinJson(template) {
     category: template?.category || 'Academic Research',
     tags,
     isPinned: !!(template?.is_pinned ?? template?.isPinned),
+    isApproved: !!(template?.is_approved ?? template?.isApproved),
+    showOnLanding: !!(template?.show_on_landing ?? template?.showOnLanding),
+    thumbnailUrl: template?.thumbnail_url || template?.thumbnailUrl || null,
     website: template?.website || null,
     huggingfaceDataset: template?.huggingfaceDataset || null,
     createdAt: template?.createdAt || new Date().toISOString(),
     config: template?.config || {},
-    imageDatasetConfig: sanitizeMediaFolderConfig(
-      template?.imageDatasetConfig || template?.image_dataset_config || {},
+    imageDatasetConfig: normalizeTemplateImageDatasetConfig(
+      template?.imageDatasetConfigFull
+        || template?.imageDatasetConfig
+        || template?.image_dataset_config
+        || {},
     ),
     preloadedImages: [],
     preloadedSource: null,
@@ -678,9 +689,11 @@ export function buildOnlineTemplatesBuiltinZipFiles(templates, {
     scope,
     exported_at: exportedAt,
     template_count: list.length,
+    // No submitter email: builtin packs are committed to a public repo.
     templates: list.map((t) => ({
       id: normalizeTemplateId(t.id),
       updated_at: t.updatedAt ?? t.updated_at ?? null,
+      user_id: t.user_id ?? null,
     })),
   };
   files.push({
@@ -688,6 +701,17 @@ export function buildOnlineTemplatesBuiltinZipFiles(templates, {
     content: `${JSON.stringify(manifest, null, 2)}\n`,
   });
   return { list, files, indexNames, manifest };
+}
+
+/** Committed export manifest (`/project_templates/_export/manifest.json`), or null. */
+export async function loadBuiltinExportManifest() {
+  try {
+    const res = await fetch(`/project_templates/${BUILTIN_EXPORT_MANIFEST_PATH}`, { cache: 'no-store' });
+    if (!res?.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -896,7 +920,18 @@ function describeBuiltinTemplateEntry(tpl, filename, bundledImageCount = 0) {
     category: tpl.category || '',
     pageCount: Array.isArray(pages) ? pages.length : 0,
     imageCount: Math.max(fromJson, bundledImageCount),
+    ...builtinInsertStatus(tpl),
   };
+}
+
+/**
+ * Review flags for a row the import inserts. Legacy builtin JSON (no flags) is
+ * an official template → approved + landing; exported packs keep their status.
+ */
+export function builtinInsertStatus(tpl) {
+  const isApproved = tpl?.isApproved ?? tpl?.is_approved ?? true;
+  const showOnLanding = !!isApproved && !!(tpl?.showOnLanding ?? tpl?.show_on_landing ?? true);
+  return { isApproved: !!isApproved, showOnLanding };
 }
 
 /**
@@ -947,6 +982,8 @@ async function resolveOnlineTemplatesForPreview(existingTemplatesOrIds = null) {
 export async function previewBuiltinTemplateImport(existingTemplatesOrIds = null) {
   const filenames = await loadBuiltinTemplateFilenames();
   const onlineById = await resolveOnlineTemplatesForPreview(existingTemplatesOrIds);
+  const manifest = await loadBuiltinExportManifest();
+  const manifestById = indexBuiltinExportManifest(manifest);
 
   const toInsert = [];
   const toUpdate = [];
@@ -995,6 +1032,7 @@ export async function previewBuiltinTemplateImport(existingTemplatesOrIds = null
       }
 
       const hasConfigOrMetaDiff = diffs.some((d) => d.field !== 'images');
+      const conflict = detectBuiltinExportConflict(manifestById.get(meta.id), online.updatedAt);
       toUpdate.push({
         ...meta,
         reason: hasConfigOrMetaDiff
@@ -1002,6 +1040,7 @@ export async function previewBuiltinTemplateImport(existingTemplatesOrIds = null
           : '补齐内置图片到模板图库',
         willRefreshImages,
         diffs,
+        conflict,
       });
       if (willRefreshImages) {
         toBackfillImages.push({ ...meta, reason: '补齐内置图片到模板图库' });
@@ -1028,6 +1067,8 @@ export async function previewBuiltinTemplateImport(existingTemplatesOrIds = null
     toUnchanged,
     toSkip,
     toBackfillImages,
+    toConflict: toUpdate.filter((item) => item.conflict),
+    exportedAt: manifestById.size ? (manifest.exported_at || null) : null,
     invalid,
     errors,
     total: filenames.length,
@@ -1035,17 +1076,23 @@ export async function previewBuiltinTemplateImport(existingTemplatesOrIds = null
 }
 
 /**
- * Seed built-in templates into Supabase (approved / landing).
+ * Seed built-in templates into Supabase.
  * Loads each file from static `/project_templates/` via fetchBuiltinTemplateJson.
- * Existing ids are updated (survey config + metadata; bundled images refreshed when present).
+ * Existing ids are updated (survey config + metadata; bundled images refreshed when present)
+ * but keep their review/pin flags and submitter. New ids take the exported review flags
+ * (legacy official JSON → approved + landing) and the exported submitter when known.
+ * Rows edited online after the committed export are skipped unless listed in
+ * `overwriteConflictIds`.
  */
-export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
+export async function seedBuiltinTemplates({ onProgress, idsToImport, overwriteConflictIds } = {}) {
   if (!supabase) throw new Error('Supabase not configured');
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
   const filenames = await loadBuiltinTemplateFilenames();
   const idFilter = idsToImport ? new Set(idsToImport) : null;
+  const conflictOverrides = new Set(overwriteConflictIds || []);
+  const manifestById = indexBuiltinExportManifest(await loadBuiltinExportManifest());
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
@@ -1068,12 +1115,25 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
 
       const { data: existing, error: selectError } = await supabase
         .from('templates')
-        .select('id, preloaded_images')
+        .select('id, preloaded_images, updated_at')
         .eq('id', id)
         .maybeSingle();
       if (selectError) {
         errors.push(`${filename}: ${selectError.message}`);
         continue;
+      }
+
+      const exportEntry = manifestById.get(id);
+      if (existing && !conflictOverrides.has(id)) {
+        const conflict = detectBuiltinExportConflict(exportEntry, existing.updated_at);
+        if (conflict) {
+          skipped++;
+          warnings.push(
+            `${filename}: 线上在导出后被修改（线上 ${conflict.onlineUpdatedAt} > 导出 ${conflict.exportedUpdatedAt}），未覆盖 / `
+            + 'edited online after the export, not overwritten',
+          );
+          continue;
+        }
       }
 
       const tags = Array.isArray(tpl.tags) ? [...tpl.tags] : [];
@@ -1138,15 +1198,12 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
           paper_url: tpl.website || null,
           huggingface_dataset: tpl.huggingfaceDataset || null,
           survey_config: tpl.config || {},
-          image_dataset_config: sanitizeMediaFolderConfig(
+          image_dataset_config: normalizeTemplateImageDatasetConfig(
             tpl.imageDatasetConfig || tpl.image_dataset_config || {},
           ),
-          is_approved: true,
-          show_on_landing: true,
-          is_active: true,
-          is_pinned: !!(tpl.isPinned ?? tpl.is_pinned),
           updated_at: new Date().toISOString(),
         };
+        if ('thumbnailUrl' in tpl) patch.thumbnail_url = tpl.thumbnailUrl || null;
         // Only overwrite media library when we actually synced missing builtin images.
         if (didSyncImages && preloadedImages.length) {
           patch.preloaded_images = preloadedImages;
@@ -1166,6 +1223,7 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
         continue;
       }
 
+      const status = builtinInsertStatus(tpl);
       const row = {
         id,
         name:                tpl.name,
@@ -1177,23 +1235,33 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport } = {}) {
         paper_url:           tpl.website      || null,
         huggingface_dataset: tpl.huggingfaceDataset || null,
         survey_config:       tpl.config       || {},
-        is_approved:         true,
-        show_on_landing:     true,
+        is_approved:         status.isApproved,
+        show_on_landing:     status.showOnLanding,
         is_pinned:           !!(tpl.isPinned ?? tpl.is_pinned),
-        is_active:           true,
+        is_active:           status.showOnLanding,
         preloaded_images:    preloadedImages,
         preloaded_at:        preloadedAt,
         preloaded_source:    preloadedSource,
-        image_dataset_config: sanitizeMediaFolderConfig(
+        image_dataset_config: normalizeTemplateImageDatasetConfig(
           tpl.imageDatasetConfig || tpl.image_dataset_config || {},
         ),
+        thumbnail_url:       tpl.thumbnailUrl || null,
         user_id:             user.id,
         submitter_email:     user.email       || null,
         created_at:          tpl.createdAt    || new Date().toISOString(),
         updated_at:          new Date().toISOString(),
       };
 
-      const { error } = await supabase.from('templates').insert(row);
+      // The export carries the submitter id but not the email (public repo).
+      const exportedOwner = exportEntry?.user_id;
+      let { error } = exportedOwner && exportedOwner !== user.id
+        ? await supabase.from('templates').insert({ ...row, user_id: exportedOwner, submitter_email: null })
+        : await supabase.from('templates').insert(row);
+      if (error && exportedOwner && exportedOwner !== user.id && error.code !== '23505') {
+        // Owner missing in this database (FK) or RLS refused — fall back to the importing admin.
+        warnings.push(`${filename}: 原提交者不可用，改为当前管理员 / original submitter unavailable, using current admin`);
+        ({ error } = await supabase.from('templates').insert(row));
+      }
       if (error) errors.push(`${filename}: ${error.message}`);
       else inserted++;
 

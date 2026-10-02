@@ -944,7 +944,7 @@ function TemplateManagement() {
     setSeedSelectedIds((prev) => {
       const next = new Set(prev);
       seedSelectableItems
-        .filter((item) => item.action === action)
+        .filter((item) => item.action === action && !(checked && item.conflict))
         .forEach((item) => {
           if (checked) next.add(item.id);
           else next.delete(item.id);
@@ -960,12 +960,16 @@ function TemplateManagement() {
     if (!idsToImport.length) return;
     const selectedInsert = (seedPreview?.toInsert || []).filter((i) => seedSelectedIds.has(i.id)).length;
     const selectedUpdate = (seedPreview?.toUpdate || []).filter((i) => seedSelectedIds.has(i.id)).length;
+    const overwriteConflictIds = (seedPreview?.toConflict || [])
+      .map((item) => item.id)
+      .filter((id) => seedSelectedIds.has(id));
     setSeeding(true);
     setSeedLog('');
     setSeedConfirmOpen(false);
     try {
       const result = await seedBuiltinTemplates({
         idsToImport,
+        overwriteConflictIds,
         onProgress: ({ inserted, updated, skipped, total, current }) => {
           setSeedLog(
             `进度: 新增 ${inserted} / 更新 ${updated ?? 0} / 跳过 ${skipped} / 共 ${total} — ${current}`,
@@ -1302,6 +1306,17 @@ function TemplateManagement() {
                 「导入内置→线上」用内置覆盖线上；若差异不合理、应以线上为准，勾选后点「下载线上→仓库」导出 ZIP，解压进仓库再提交。
                 默认只勾选「新建」。
               </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {ti.tplSeedKeepsStatus}
+              </Typography>
+              {(seedPreview.toConflict || []).length > 0 && (
+                <Alert severity="error" variant="outlined">
+                  {tf(ti.tplSeedConflictSummary, {
+                    count: seedPreview.toConflict.length,
+                    exportedAt: seedPreview.exportedAt || '—',
+                  })}
+                </Alert>
+              )}
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
                 <Chip
                   size="small"
@@ -1321,13 +1336,22 @@ function TemplateManagement() {
                 />
                 <Button
                   size="small"
-                  onClick={() => setSeedSelectedIds(new Set(seedSelectableItems.map((item) => item.id)))}
+                  onClick={() => setSeedSelectedIds(new Set(
+                    seedSelectableItems.filter((item) => !item.conflict).map((item) => item.id),
+                  ))}
                 >
                   {ti.tplSeedSelectAll}
                 </Button>
                 <Button size="small" onClick={() => setSeedSelectionForAction('insert', true)}>全选新建</Button>
                 <Button size="small" onClick={() => setSeedSelectionForAction('update', true)}>全选有差异</Button>
                 <Button size="small" onClick={() => setSeedSelectedIds(new Set())}>清空</Button>
+                {(seedPreview.toConflict || []).length > 0 && (
+                  <Chip
+                    size="small"
+                    color="error"
+                    label={tf(ti.tplSeedConflictChip, { count: seedPreview.toConflict.length })}
+                  />
+                )}
                 {(seedPreview.invalid.length + seedPreview.errors.length) > 0 && (
                   <Chip
                     size="small"
@@ -1370,6 +1394,15 @@ function TemplateManagement() {
                                     : '新建'
                                 }
                               />
+                              {item.conflict && (
+                                <Chip size="small" color="error" label={ti.tplSeedConflict} />
+                              )}
+                              {!isUpdate && !item.isApproved && (
+                                <Chip size="small" variant="outlined" color="warning" label={ti.tplSeedPending} />
+                              )}
+                              {!isUpdate && item.isApproved && !item.showOnLanding && (
+                                <Chip size="small" variant="outlined" label={ti.tplSeedHidden} />
+                              )}
                               <Typography variant="body2" fontWeight={600} noWrap>
                                 {item.name}
                               </Typography>
@@ -1398,6 +1431,14 @@ function TemplateManagement() {
                                 </Tooltip>
                               )}
                             </Stack>
+                            {item.conflict && (
+                              <Alert severity="error" sx={{ mt: 0.75, py: 0 }}>
+                                {tf(ti.tplSeedConflictDetail, {
+                                  online: item.conflict.onlineUpdatedAt,
+                                  exported: item.conflict.exportedUpdatedAt,
+                                })}
+                              </Alert>
+                            )}
                             {isUpdate && diffs.length > 0 && (
                               <Accordion
                                 disableGutters

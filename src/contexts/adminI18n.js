@@ -1092,6 +1092,13 @@ export const adminI18n = {
     tplExportAllSkipped: 'Skipped {count} without a name or config: {ids}',
     tplExportAllLog: 'Exported all online templates → repo ZIP ({count}): {files}',
     tplSeedSelectAll: 'Select all',
+    tplSeedConflict: 'Edited online after export',
+    tplSeedConflictDetail: 'Online updated {online}, export snapshot {exported}. Not selected by default — tick it to overwrite the newer online version.',
+    tplSeedConflictSummary: '{count} template(s) were edited online after the export ({exportedAt}). They stay unselected; tick one to overwrite it.',
+    tplSeedConflictChip: 'Conflicts {count}',
+    tplSeedPending: 'Pending review',
+    tplSeedHidden: 'Not on landing',
+    tplSeedKeepsStatus: 'Existing templates keep their approval, landing visibility and submitter. New templates keep the status from the export (pending stays pending).',
   },
 
   zh: {
@@ -2153,6 +2160,13 @@ export const adminI18n = {
     tplExportAllSkipped: '跳过 {count} 个缺少名称或配置的模板：{ids}',
     tplExportAllLog: '已导出全部线上模板 → 仓库 ZIP（{count}）：{files}',
     tplSeedSelectAll: '全选',
+    tplSeedConflict: '导出后线上已修改',
+    tplSeedConflictDetail: '线上更新于 {online}，导出快照为 {exported}。默认不勾选；勾选后会用内置版本覆盖更新的线上版本。',
+    tplSeedConflictSummary: '{count} 个模板在导出（{exportedAt}）后线上又被修改，默认不勾选；如需覆盖请单独勾选。',
+    tplSeedConflictChip: '冲突 {count}',
+    tplSeedPending: '待审核',
+    tplSeedHidden: '不在首页展示',
+    tplSeedKeepsStatus: '已存在的模板保留线上的审核状态、首页展示和提交者；新模板沿用导出时的状态（待审核的仍为待审核）。',
   },
 };
 
