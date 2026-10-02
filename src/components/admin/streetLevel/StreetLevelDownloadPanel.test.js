@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { RegionContext } from '../../../contexts/RegionContext';
@@ -53,8 +53,17 @@ describe('street-level download panel when the browser blocks the helper', () =>
     expect(alert).toHaveTextContent('python3 -m sp_streetlevel run --project proj_1');
     await userEvent.click(screen.getByText('Download settings'));
     await userEvent.click(screen.getByRole('tab', { name: 'macOS' }));
-    expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('Already installed? Reinstall from main');
+    expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('~/.sp-streetlevel');
+    expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('Anaconda');
     expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('https://127.0.0.1:47822');
+    const commands = within(screen.getByTestId('helper-section')).getAllByTestId('helper-command').map((el) => el.textContent);
+    expect(commands[0]).toBe('brew install gettext && brew install inih');
+    expect(commands[1]).toContain('python3 -m venv ~/.sp-streetlevel');
+    expect(commands[1]).not.toContain('--user');
+    expect(commands[2].startsWith('~/.sp-streetlevel/bin/python -m sp_streetlevel serve')).toBe(true);
+    expect(commands.some((cmd) => cmd.startsWith('python3 -m sp_streetlevel serve'))).toBe(true);
+    expect(commands.join('\n')).not.toContain('.local/bin');
+    expect(screen.getByTestId('mac-venv-why')).toHaveTextContent('cryptography');
     expect(screen.getByTestId('helper-listen')).toHaveTextContent('https://127.0.0.1:47822/health first, then http://127.0.0.1:47821/health');
     expect(screen.getByTestId('helper-status')).toHaveTextContent('The helper is running, but this browser blocked it.');
     expect(screen.queryByText('Helper not running')).not.toBeInTheDocument();
@@ -69,7 +78,10 @@ describe('street-level download panel when the browser blocks the helper', () =>
     expect(alert).toHaveTextContent('python3 -m sp_streetlevel run --project proj_1');
     await userEvent.click(screen.getByText('下载设置'));
     await userEvent.click(screen.getByRole('tab', { name: 'macOS' }));
-    expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('已经安装过？请用下面的命令从 main 重新安装');
+    expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('~/.sp-streetlevel');
+    expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('不会升级 Anaconda');
+    expect(screen.getByTestId('mac-venv-why')).toHaveTextContent('cryptography');
+    expect(screen.getByTestId('mac-already-serve')).toHaveTextContent('python3 -m sp_streetlevel serve 已经能用');
     expect(screen.getByTestId('mac-reinstall')).toHaveTextContent('https://127.0.0.1:47822');
     expect(screen.getByTestId('helper-listen')).toHaveTextContent('面板先请求 https://127.0.0.1:47822/health，再请求 http://127.0.0.1:47821/health。');
     expect(screen.getByTestId('helper-status')).toHaveTextContent('本地工具已在运行，但浏览器拦截了连接。');

@@ -44,7 +44,7 @@ class UpstreamStub:
             return web.Response(text=(FIXTURES / "single_image_search.txt").read_text())
         if host == "www.google.com" and path.startswith("maps/photometa"):
             return web.Response(text=(FIXTURES / "photometa.txt").read_text())
-        if host == "streetviewpixels-pa.googleapis.com":
+        if host in ("streetviewpixels-pa.googleapis.com", "cbk0.google.com"):
             if self.fail_tiles > 0:
                 self.fail_tiles -= 1
                 return web.Response(status=503)

@@ -221,3 +221,29 @@ export function parseGoogleMapsUrl(raw) {
 export function parseGoogleMapsText(text) {
   return extractUrls(text).map(parseGoogleMapsUrl);
 }
+
+/**
+ * One pasted Street View URL → the fields that replace a single point’s view.
+ * Heading, pitch (tilt − 90), FOV and pano id come from parseGoogleMapsUrl.
+ * Several URLs are rejected; this is not the batch paste box.
+ *
+ * @returns {{ ok: true, patch: { heading, pitch, fov, panoId, sourceUrl } }
+ *   | { ok: false, reason: string }}
+ */
+export function viewPatchFromStreetViewUrl(raw) {
+  const urls = extractUrls(raw);
+  if (urls.length !== 1) return { ok: false, reason: urls.length ? 'several' : 'empty' };
+  const parsed = parseGoogleMapsUrl(urls[0]);
+  if (!parsed.ok) return { ok: false, reason: parsed.reason };
+  if (parsed.kind !== 'pano') return { ok: false, reason: 'not-pano' };
+  return {
+    ok: true,
+    patch: {
+      heading: parsed.heading,
+      pitch: parsed.pitch,
+      fov: parsed.fov,
+      panoId: parsed.panoId,
+      sourceUrl: parsed.sourceUrl,
+    },
+  };
+}

@@ -51,14 +51,15 @@ async def test_full_job_uploads_views_and_metadata(platform_api, upstream):
 
     assert job.state == "done", job.error
     assert job.counts() == {"total": 3, "done": 2, "noImage": 1, "failed": 0, "pending": 0, "running": 0, "files": 4}
+    assert job.items["far"]["error"] == "no pano returned"
     imgs = sorted(k for k in platform_api.uploads if k.endswith(".jpg"))
     assert imgs == [f"user1/proj1/street-level/gsv-{PANO_ID}-h021-p00-f090.jpg",
                     f"user1/proj1/street-level/gsv-{PANO_ID}-h090-p05-f060.jpg",
                     f"user1/proj1/street-level/gsv-{PANO_ID}-h201-p00-f090.jpg",
                     f"user1/proj1/street-level/gsv-{PANO_ID}-h270-p05-f060.jpg"]
-    assert all(host in {"maps.googleapis.com", "www.google.com", "streetviewpixels-pa.googleapis.com"}
+    assert all(host in {"maps.googleapis.com", "www.google.com", "streetviewpixels-pa.googleapis.com", "cbk0.google.com"}
                for host, _p, _q in upstream.requests)
-    tiles = [q for host, _p, q in upstream.requests if host.startswith("streetviewpixels")]
+    tiles = [q for host, _p, q in upstream.requests if host.startswith("streetviewpixels") or host == "cbk0.google.com"]
     assert len(tiles) == 2 and {q["zoom"] for q in tiles} == {"1"}  # shared pano fetched once
     view = Image.open(io.BytesIO(platform_api.objects[imgs[1]][0]))
     assert {r["view_source"] for r in parse_csv(platform_api.objects["user1/proj1/features/street_level_v1.csv"][0].decode())} == {"point", "batch"}
@@ -89,14 +90,14 @@ async def test_resume_skips_existing_files_and_retries_tiles(platform_api, upstr
     job, backend, client = make(platform_api, upstream, [point("a", heading=0)])
     await run_job(job, backend, client, sleep=nosleep)
     assert job.state == "done"
-    first_tiles = sum(1 for h, _p, _q in upstream.requests if h.startswith("streetviewpixels"))
+    first_tiles = sum(1 for h, _p, _q in upstream.requests if h.startswith("streetviewpixels") or h == "cbk0.google.com")
     assert first_tiles == 3  # 2 tiles + one 503 retried by streetlevel
     uploads_before = len(platform_api.uploads)
 
     again, backend2, client2 = make(platform_api, upstream, [point("a", heading=0)])
     await run_job(again, backend2, client2, sleep=nosleep)
     assert again.state == "done" and again.items["a"]["keys"] == job.items["a"]["keys"]
-    assert sum(1 for h, _p, _q in upstream.requests if h.startswith("streetviewpixels")) == first_tiles
+    assert sum(1 for h, _p, _q in upstream.requests if h.startswith("streetviewpixels") or h == "cbk0.google.com") == first_tiles
     assert [k for k in platform_api.uploads[uploads_before:] if k.endswith(".jpg")] == []
 
 

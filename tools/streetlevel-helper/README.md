@@ -38,7 +38,18 @@ Homebrew's `gettext` and `inih`. Without them pip still succeeds, but the helper
 Anaconda and python.org builds. No Homebrew? Install it from https://brew.sh. Windows and Linux do
 not need this step. If the libraries are missing, `python3 -m sp_streetlevel serve` prints this fix.
 
-macOS / Linux:
+macOS — install into a private environment (this is the command the panel shows first).
+It does not upgrade packages inside Anaconda or conda base. `pip install --user` on that Python
+can upgrade `cryptography` past what conda’s `pyopenssl` accepts.
+
+```bash
+python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install --upgrade "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
+~/.sp-streetlevel/bin/python -m sp_streetlevel serve
+```
+
+If `python3 -m sp_streetlevel serve` already works because you installed it earlier, keep using that.
+
+Linux:
 
 ```bash
 python3 -m pip install --user --upgrade "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
@@ -50,7 +61,7 @@ Windows:
 py -m pip install --user --upgrade "https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper"
 ```
 
-No pipx, git or PATH changes are needed; everything runs through `python -m`.
+No pipx or git is needed; everything runs through `python -m`.
 If pip refuses with `externally-managed-environment` (Homebrew Python, Debian/Ubuntu system Python),
 use a private environment instead:
 
@@ -60,17 +71,18 @@ python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install
 ```
 
 Already installed an older helper (HTTP only)? Safari on https://sp-survey.org cannot call
-`http://127.0.0.1`. Stop the running `serve` (Ctrl-C), run the same install command again so pip
-upgrades from `main`, then start `serve` again. On a Mac, approve the one-time prompt that trusts
-the local certificate. A private environment uses the `~/.sp-streetlevel/bin/python -m pip install --upgrade …`
-form of that install command, then `~/.sp-streetlevel/bin/python -m sp_streetlevel serve`.
+`http://127.0.0.1`. Stop the running `serve` (Ctrl-C), run the install command again so pip
+upgrades from `main`, then start `serve` again. On a Mac that install command is the
+`~/.sp-streetlevel` one above. Approve the one-time prompt that trusts the local certificate.
 
 No Python? Get it from https://www.python.org/downloads/ (on a Mac, `brew install python` also works).
 
 ## Main path: the Download button
 
 ```bash
-python3 -m sp_streetlevel serve      # Windows: py -m sp_streetlevel serve
+~/.sp-streetlevel/bin/python -m sp_streetlevel serve      # macOS, after the private-environment install
+python3 -m sp_streetlevel serve                           # Linux, or a Mac where this already works
+py -m sp_streetlevel serve                                # Windows
 ```
 
 Keep it running. The helper binds to 127.0.0.1 only and listens on two ports:
