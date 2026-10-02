@@ -1,6 +1,8 @@
 """Localhost helper the Platform panel talks to (Download button).
 
-Binds 127.0.0.1 only. Browser calls are accepted only from allowlisted Platform
+Binds 127.0.0.1 only. HTTP stays on 47821; HTTPS (a per-user CA, leaf for
+127.0.0.1 and localhost) listens on 47822 so Safari can call it from
+https://sp-survey.org. Browser calls are accepted only from allowlisted Platform
 origins (CORS + Private Network Access preflight). Jobs run one at a time in
 FIFO order; the upstream rate limit lives in the job runner.
 """
@@ -8,16 +10,24 @@ FIFO order; the upstream rate limit lives in the job runner.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Dict, Iterable, Optional
 
 from aiohttp import web
 
 from . import __version__
+from .certs import default_cert_dir, ensure_certs, server_ssl_context, trust_local_ca
 from .job import STREETLEVEL_VERSION, Job, run_job
 from .platform import PlatformClient, validate_api_base
 
 DEFAULT_PORT = 47821
-DEFAULT_ORIGINS = ("https://sp-survey.org", "http://localhost:3000", "http://127.0.0.1:3000")
+DEFAULT_HTTPS_PORT = 47822
+DEFAULT_ORIGINS = (
+    "https://sp-survey.org",
+    "https://www.sp-survey.org",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
 MAX_POINTS = 5000
 
 
@@ -176,7 +186,51 @@ def make_app(state: HelperState) -> web.Application:
     return app
 
 
-def serve(backend_factory, port: int = DEFAULT_PORT, allowed_origins: Iterable[str] = DEFAULT_ORIGINS):
+def listening_message(port: int, https_port: int, origins: Iterable[str]) -> str:
+    return (
+        f"sp-streetlevel helper listening on http://127.0.0.1:{port} "
+        f"and https://127.0.0.1:{https_port} "
+        f"(origins: {', '.join(sorted(origins))})"
+    )
+
+
+def serve(
+    backend_factory,
+    port: int = DEFAULT_PORT,
+    allowed_origins: Iterable[str] = DEFAULT_ORIGINS,
+    https_port: int = DEFAULT_HTTPS_PORT,
+    cert_dir: Optional[Path] = None,
+    trust: bool = True,
+):
+    if port == https_port:
+        raise SystemExit("sp-streetlevel HTTP and HTTPS ports must differ")
+    certs = ensure_certs(Path(cert_dir) if cert_dir else default_cert_dir())
+    ssl_context = server_ssl_context(certs)
     state = HelperState(backend_factory, allowed_origins=allowed_origins)
-    web.run_app(make_app(state), host="127.0.0.1", port=port, print=lambda *_: print(
-        f"sp-streetlevel helper listening on http://127.0.0.1:{port} (origins: {', '.join(sorted(state.allowed))})"))
+
+    async def _bind(runner: web.AppRunner, host_port: int, context=None):
+        site = web.TCPSite(runner, "127.0.0.1", host_port, ssl_context=context)
+        try:
+            await site.start()
+        except OSError as err:
+            scheme = "https" if context else "http"
+            raise SystemExit(f"sp-streetlevel could not listen on {scheme}://127.0.0.1:{host_port}: {err}") from err
+
+    async def _main():
+        runner = web.AppRunner(make_app(state))
+        await runner.setup()
+        await _bind(runner, port)
+        await _bind(runner, https_port, ssl_context)
+        print(listening_message(port, https_port, state.allowed), flush=True)
+        if trust:
+            # The prompt can wait on a GUI password dialog; keep the accept loop running.
+            await asyncio.to_thread(trust_local_ca, certs.ca_cert)
+        while True:
+            await asyncio.sleep(3600)
+
+    try:
+        asyncio.run(_main())
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as err:
+        raise SystemExit(f"sp-streetlevel helper stopped: {err}") from err

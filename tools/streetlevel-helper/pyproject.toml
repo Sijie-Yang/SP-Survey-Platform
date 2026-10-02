@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sp-streetlevel"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local helper that downloads street-level views for SP-Survey Platform point lists"
 requires-python = ">=3.9"
 license = { text = "CC-BY-4.0" }
@@ -15,6 +15,7 @@ dependencies = [
   "numpy>=1.24",
   "pillow>=10",
   "certifi",
+  "cryptography>=42",
 ]
 
 [project.optional-dependencies]

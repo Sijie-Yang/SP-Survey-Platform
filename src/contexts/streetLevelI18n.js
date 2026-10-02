@@ -4,6 +4,9 @@ import { RegionContext } from './RegionContext';
 // English copy for enum-style keys; plain sentences are their own English text.
 const en = {
   "helper-prereq": "The only prerequisite is Python 3.9 or newer (on macOS, plus two Homebrew libraries shown below). Works on macOS, Windows and Linux; no pipx, git or PATH changes needed.",
+  "mac-reinstall": "Already installed? Reinstall from main with the command below, then restart serve and approve the certificate prompt. Safari on https://sp-survey.org uses https://127.0.0.1:47822.",
+  "helper-listen": "The panel calls https://127.0.0.1:47822/health first, then http://127.0.0.1:47821/health.",
+  "helper-blocked": "The helper is running, but this browser blocked the connection. Use the backup command below.",
   "mac-deps-why": "Why: streetlevel depends on pyexiv2, whose bundled libexiv2 on macOS is linked against Homebrew’s gettext and inih. Without them the helper stops at start with “Library not loaded: …libINIReader…”. Not needed on Windows or Linux. No Homebrew? Get it at brew.sh.",
   "preset:current": "One view per point",
   "preset:road": "Four road directions (front / right / back / left)",
@@ -64,6 +67,11 @@ const zh = {
   "0. macOS only — install two Homebrew libraries first:": "0. 仅限 macOS —— 先安装两个 Homebrew 库：",
   "mac-deps-why": "原因：streetlevel 依赖 pyexiv2，它在 macOS 上自带的 libexiv2 链接了 Homebrew 的 gettext 和 inih；缺少时本地工具一启动就会报 “Library not loaded: …libINIReader…”。Windows 和 Linux 不需要这一步。没有 Homebrew？请到 brew.sh 安装。",
   "helper-prereq": "唯一前提是 Python 3.9 或更新版本（macOS 另需下面列出的两个 Homebrew 库）。适用于 macOS、Windows 和 Linux；不需要 pipx、git，也不需要修改 PATH。",
+  "mac-reinstall": "已经安装过？请用下面的命令从 main 重新安装，然后重启 serve 并批准证书提示。在 Safari 中打开 https://sp-survey.org 时，面板通过 https://127.0.0.1:47822 连接。",
+  "helper-listen": "面板先请求 https://127.0.0.1:47822/health，再请求 http://127.0.0.1:47821/health。",
+  "helper-blocked": "本地工具已在运行，但浏览器拦截了连接。请使用下面的备用命令。",
+  "Browser blocked the helper": "浏览器拦截了本地工具",
+  "The helper is running, but this browser blocked it.": "本地工具已在运行，但浏览器拦截了连接。",
   "preset:current": "每个点位一个视角",
   "preset:road": "沿道路四个方向（前 / 右 / 后 / 左）",
   "preset:headings": "N 个等分方向",

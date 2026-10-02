@@ -5,7 +5,11 @@
  */
 
 export const HELPER_PORT = 47821;
+export const HELPER_HTTPS_PORT = 47822;
 export const HELPER_BASE = `http://127.0.0.1:${HELPER_PORT}`;
+/** Safari blocks http://127.0.0.1 from https://sp-survey.org, so the panel tries this first. */
+export const HELPER_HTTPS_BASE = `https://127.0.0.1:${HELPER_HTTPS_PORT}`;
+export const HELPER_BASES = [HELPER_HTTPS_BASE, HELPER_BASE];
 export const HELPER_PACKAGE = 'https://github.com/Sijie-Yang/SP-Survey-Platform/archive/refs/heads/main.zip#subdirectory=tools/streetlevel-helper';
 export const ACTIVE_JOB_STATES = new Set(['queued', 'running']);
 export const MAPILLARY_TOKEN_STORAGE_KEY = 'sp-streetlevel-mapillary-token';
@@ -47,7 +51,7 @@ export function pythonCommand(os) {
 }
 
 function originFlag(origin) {
-  if (!origin || /^https:\/\/sp-survey\.org$/.test(origin) || /^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(origin)) return '';
+  if (!origin || /^https:\/\/(www\.)?sp-survey\.org$/.test(origin) || /^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(origin)) return '';
   return ` --allow-origin ${origin}`;
 }
 
@@ -56,11 +60,11 @@ export function helperCommands(os, origin) {
   const py = pythonCommand(os);
   const commands = {
     ...(os === 'mac' ? { systemDeps: MAC_SYSTEM_DEPS } : {}),
-    install: `${py} -m pip install --user "${HELPER_PACKAGE}"`,
+    install: `${py} -m pip install --user --upgrade "${HELPER_PACKAGE}"`,
     serve: `${py} -m sp_streetlevel serve${originFlag(origin)}`,
   };
   if (os !== 'windows') {
-    commands.isolatedInstall = `python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install "${HELPER_PACKAGE}"`;
+    commands.isolatedInstall = `python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install --upgrade "${HELPER_PACKAGE}"`;
     commands.isolatedServe = `~/.sp-streetlevel/bin/python -m sp_streetlevel serve${originFlag(origin)}`;
   }
   return commands;
@@ -82,11 +86,11 @@ export function runCommand({ projectId, apiBase, capture = {}, os = 'mac' }) {
   return parts.join(' ');
 }
 
-async function call(path, { method = 'GET', body, timeoutMs = 8000, fetchImpl = fetch } = {}) {
+async function call(path, { method = 'GET', body, timeoutMs = 8000, fetchImpl = fetch, base = HELPER_BASE } = {}) {
   const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
-    const res = await fetchImpl(`${HELPER_BASE}${path}`, {
+    const res = await fetchImpl(`${base}${path}`, {
       method,
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -102,14 +106,22 @@ async function call(path, { method = 'GET', body, timeoutMs = 8000, fetchImpl = 
   }
 }
 
-/** { running: true, version, streetlevel } or { running: false }. */
+/**
+ * Probe HTTPS first (Safari on https://sp-survey.org), then HTTP.
+ * `{ running: true, version, streetlevel, base }` or `{ running: false, blocked: true }`
+ * when both probes fail — the helper may be up and the browser blocked the call.
+ */
 export async function helperHealth(opts = {}) {
-  try {
-    const data = await call('/health', { timeoutMs: 2500, ...opts });
-    return { running: true, version: data.version, streetlevel: data.streetlevel };
-  } catch {
-    return { running: false };
+  const { bases = HELPER_BASES, ...rest } = opts;
+  for (const base of bases) {
+    try {
+      const data = await call('/health', { timeoutMs: 2500, ...rest, base });
+      return { running: true, version: data.version, streetlevel: data.streetlevel, base };
+    } catch {
+      /* try the next listener */
+    }
   }
+  return { running: false, blocked: true };
 }
 
 export function startJob({ apiBase, projectId, mediaPrefix, publicBase, token, points, options }, opts = {}) {
