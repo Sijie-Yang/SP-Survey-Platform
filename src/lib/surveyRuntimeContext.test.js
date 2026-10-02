@@ -1,5 +1,6 @@
 import { Model } from 'survey-core';
 import {
+  pageRuleToVisibleIf, parsePageRule,
   conditionFromUrl, withConditionWording,
   reverseCodedConditions,
   applyRuntimeVariables, captureUrlParams, chooseCondition, normalizeConditions, resolveRuntimeContext, runtimeMetadata,
@@ -92,4 +93,13 @@ test('link override and per-condition question JSON', () => {
   const q = { name: 'q', title: 'A', conditionVariants: [{ condition: 'b', title: 'B' }] };
   expect(withConditionWording(q, 'b').title).toBe('B');
   expect(withConditionWording(q, 'a')).toBe(q);
+});
+
+test('page display rules map to simple choices', () => {
+  expect(parsePageRule('')).toEqual({ kind: 'always' });
+  expect(parsePageRule('{url_site} notempty')).toEqual({ kind: 'with_param', param: 'site' });
+  expect(parsePageRule('{url_site} empty')).toEqual({ kind: 'without_param', param: 'site' });
+  expect(parsePageRule('{age} > 18')).toBeNull();
+  expect(pageRuleToVisibleIf({ kind: 'with_param', param: 'site' })).toBe('{url_site} notempty');
+  expect(pageRuleToVisibleIf({ kind: 'always' })).toBeUndefined();
 });

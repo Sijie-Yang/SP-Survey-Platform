@@ -7,6 +7,8 @@ import {
   DialogActions,
   Button,
   TextField,
+  Alert,
+  MenuItem,
   Box,
   Typography,
   Card,
@@ -50,6 +52,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import QuestionEditor from './QuestionEditor';
 import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
+import { captureParamNames, pageRuleToVisibleIf, parsePageRule } from '../../lib/surveyRuntimeContext';
 import { getPresetSkill } from '../../lib/presetSkills';
 
 function skillQuestionTypeLabel(question) {
@@ -240,6 +243,42 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
   );
 }
 
+function PageVisibilityField({ page, surveyConfig, onChange }) {
+  const { tr } = useQuestionEditorText();
+  const rule = parsePageRule(page.visibleIf);
+  if (!rule) {
+    return (
+      <Alert severity="info" action={<Button size="small" onClick={() => onChange(undefined)}>{tr('Always show')}</Button>}>
+        {tr('This page has a custom display rule')}: <code>{page.visibleIf}</code>
+      </Alert>
+    );
+  }
+  const params = captureParamNames(surveyConfig);
+  if (rule.param && !params.includes(rule.param)) params.push(rule.param);
+  const value = rule.kind === 'always' ? 'always' : `${rule.kind}:${rule.param}`;
+  return (
+    <TextField
+      select
+      fullWidth
+      label={tr('When to show this page')}
+      value={value}
+      onChange={(e) => {
+        const [kind, param] = e.target.value.split(':');
+        onChange(pageRuleToVisibleIf({ kind, param }));
+      }}
+      helperText={params.length
+        ? tr('Link parameters are listed in Survey settings; the Share tab builds a link for each value.')
+        : tr('To show a page only for some links, first add a link parameter (e.g. site) in Survey settings.')}
+    >
+      <MenuItem value="always">{tr('Always show')}</MenuItem>
+      {params.flatMap((p) => [
+        <MenuItem key={`with_param:${p}`} value={`with_param:${p}`}>{tr('Only when the link has {param}', { param: p })}</MenuItem>,
+        <MenuItem key={`without_param:${p}`} value={`without_param:${p}`}>{tr('Only when the link has no {param}', { param: p })}</MenuItem>,
+      ])}
+    </TextField>
+  );
+}
+
 export default function PageEditor({ page, pageIndex, onSave, onCancel, images, currentProject, surveyConfig, onSelectionChange, onWorkspaceChange }) {
   const { tr } = useQuestionEditorText();
   const [editedPage, setEditedPage] = useState({ ...page });
@@ -411,6 +450,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
                 helperText={tr("Optional description to explain what this page is about")}
                 sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               />
+              <PageVisibilityField page={editedPage} surveyConfig={surveyConfig} onChange={(v) => handlePageChange('visibleIf', v)} />
             </Box>
           </Box>
 

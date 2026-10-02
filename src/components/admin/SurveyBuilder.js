@@ -29,6 +29,7 @@ import {
 } from '@mui/material';
 import { useRegion } from '../../contexts/RegionContext';
 import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
+import { parsePageRule } from '../../lib/surveyRuntimeContext';
 import {
   ExpandMore,
   Add,
@@ -205,6 +206,13 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
               color="primary"
               variant="outlined"
             />
+            {(() => {
+              const rule = parsePageRule(page.visibleIf);
+              if (rule?.kind === 'always') return null;
+              const label = !rule ? tr('Custom display rule')
+                : tr(rule.kind === 'with_param' ? 'Only links with {param}' : 'Only links without {param}', { param: rule.param });
+              return <Chip label={label} size="small" color="info" variant="outlined" />;
+            })()}
           </Box>
         }
         secondary={

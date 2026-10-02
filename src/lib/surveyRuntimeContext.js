@@ -134,6 +134,21 @@ export function conditionFromUrl(search) {
   return v && v.trim() ? v.trim() : null;
 }
 
+const PAGE_PARAM_RULE = /^\s*\{url_([A-Za-z][A-Za-z0-9_]*)\}\s+(notempty|empty)\s*$/;
+
+/** Page visibility as a simple choice: always, or only with / without a link parameter. Null for other rules. */
+export function parsePageRule(visibleIf) {
+  if (!visibleIf || !String(visibleIf).trim()) return { kind: 'always' };
+  const m = String(visibleIf).match(PAGE_PARAM_RULE);
+  if (!m) return null;
+  return { kind: m[2] === 'notempty' ? 'with_param' : 'without_param', param: m[1] };
+}
+
+export function pageRuleToVisibleIf(rule) {
+  if (!rule || rule.kind === 'always' || !rule.param) return undefined;
+  return `{url_${rule.param}} ${rule.kind === 'with_param' ? 'notempty' : 'empty'}`;
+}
+
 export function applyConditionWording(model, conditionId) {
   if (!model || !conditionId) return;
   model.getAllQuestions(false, false, true).forEach((q) => {
