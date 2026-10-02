@@ -87,6 +87,29 @@ export const REVIEW_DEFAULTS = Object.freeze({
   applyMode: 'review',
 });
 
+export const DEFAULT_REVIEW_SETTINGS = Object.freeze({
+  enabled: true,
+  ...REVIEW_DEFAULTS,
+  maxRoles: REVIEW_LIMITS.maxRoles,
+});
+
+/** Per-user Review defaults from Settings; the composer may override them per run. */
+export function normalizeReviewSettings(raw) {
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const maxRoles = clampInt(input.maxRoles, 1, REVIEW_LIMITS.maxRoles, REVIEW_LIMITS.maxRoles);
+  const requested = Array.isArray(input.roles) ? input.roles : REVIEW_DEFAULTS.roles;
+  const roles = REVIEW_ROLE_IDS.filter((id) => requested.includes(id)).slice(0, maxRoles);
+  return {
+    enabled: input.enabled !== false,
+    roles: roles.length ? roles : [REVIEW_ROLE_IDS[0]],
+    method: REVIEW_METHODS.includes(input.method) ? input.method : REVIEW_DEFAULTS.method,
+    maxRounds: clampInt(input.maxRounds, REVIEW_LIMITS.minRounds, REVIEW_LIMITS.maxRounds, REVIEW_DEFAULTS.maxRounds),
+    threshold: clampInt(input.threshold, REVIEW_LIMITS.minThreshold, REVIEW_LIMITS.maxThreshold, REVIEW_DEFAULTS.threshold),
+    applyMode: REVIEW_APPLY_MODES.includes(input.applyMode) ? input.applyMode : REVIEW_DEFAULTS.applyMode,
+    maxRoles,
+  };
+}
+
 export const REVIEW_SUBMIT_TOOL = 'review_submit';
 export const REVISION_SUBMIT_TOOL = 'review_submit_revision';
 export const REVIEW_READ_TOOLS = Object.freeze([

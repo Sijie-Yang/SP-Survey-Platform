@@ -203,7 +203,7 @@ describe('AiAssistantSidebar', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Advanced' }));
 
     expect(screen.getByText('Multi-agent review')).toBeInTheDocument();
-    expect(screen.getByText(/runs as the Review mode in the Assistant composer/i)).toBeInTheDocument();
+    expect(screen.getByText(/Set your defaults here/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('Advanced: Agents')).not.toBeInTheDocument());
   });
 });

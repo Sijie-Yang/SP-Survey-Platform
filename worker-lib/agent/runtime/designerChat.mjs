@@ -45,7 +45,7 @@ import { dispatchAgentRun } from './runDispatcher.mjs';
 import { requestRunApproval } from './approvals.mjs';
 import { verifySavedDraft } from './draftVerify.mjs';
 import { runReviewRun } from './reviewRun.mjs';
-import { normalizeReviewOptions } from './review.mjs';
+import { normalizeReviewOptions, normalizeReviewSettings } from './review.mjs';
 import {
   annotateHistoryForModel,
   classifyUserIntent,
@@ -118,6 +118,12 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
   });
 
   const settings = await loadUserAiSettings(env, userId);
+  if (assistantMode === 'review' && normalizeReviewSettings(settings.review_settings).enabled === false) {
+    throw Object.assign(new Error('Review mode is turned off in Assistant settings.'), {
+      status: 403,
+      code: 'REVIEW_MODE_DISABLED',
+    });
+  }
   const permission = body?.permission || settings.permission || 'edit_draft';
   const profiles = await listProviderProfiles(env, userId);
   const credentials = await listProviderCredentials(env, userId);

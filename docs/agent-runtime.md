@@ -72,8 +72,17 @@ installed and is always present in append-only events.
   carry `payload.review` and are excluded from later model history; the
   `review.result` summary is kept.
 
+Per-user defaults live in `user_ai_settings.review_settings` (JSONB:
+`enabled`, `roles`, `method`, `maxRounds`, `threshold`, `maxRoles`,
+`applyMode`), edited under Assistant settings → Advanced and returned with
+`GET /api/agent/credentials/status`. When `enabled` is false the composer and
+the Introduction hide Review and `POST /api/agent/chat` refuses it
+(`REVIEW_MODE_DISABLED`). The composer starts each Review run from these
+defaults; changes there apply to that run only.
+
 Apply the updated `supabase/ai_runtime.sql` so `ai_sessions.assistant_mode`
-accepts `review`. Older schemas fall back to event-derived mode.
+accepts `review` and `user_ai_settings.review_settings` exists. Older schemas
+fall back to event-derived mode, and Review defaults then stay in the browser.
 
 ## Durable lifecycle
 

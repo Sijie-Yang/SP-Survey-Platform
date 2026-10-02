@@ -82,3 +82,27 @@ describe('Review mode UI', () => {
     expect(screen.queryByText('Apply round 1')).not.toBeInTheDocument();
   });
 });
+
+describe('Review settings controls', () => {
+  const { ReviewSettingsControls } = require('./ReviewPanel');
+  const { normalizeReviewSettings } = require('../../lib/reviewMode');
+
+  it('saves the switch, roles, and method as per-user defaults', async () => {
+    const onChange = jest.fn(async () => ({ success: true }));
+    render(<ReviewSettingsControls t={t} settings={normalizeReviewSettings({})} onChange={onChange} />);
+    fireEvent.click(screen.getByRole('switch'));
+    expect(onChange).toHaveBeenCalledWith({ enabled: false });
+    fireEvent.click(screen.getByText(/Participant/));
+    expect(onChange).toHaveBeenLastCalledWith({ roles: ['scientist', 'planner', 'psychologist', 'analyst'] });
+    fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+    fireEvent.click(screen.getByRole('option', { name: 'Group discussion' }));
+    expect(onChange).toHaveBeenLastCalledWith({ method: 'group' });
+    expect(await screen.findByText('Saved to your account')).toBeInTheDocument();
+    expect(screen.getByText(/single run/)).toBeInTheDocument();
+  });
+
+  it('disables the default fields while Review mode is off', () => {
+    render(<ReviewSettingsControls t={t} settings={normalizeReviewSettings({ enabled: false })} onChange={jest.fn()} />);
+    expect(screen.getAllByRole('combobox')[0]).toHaveAttribute('aria-disabled', 'true');
+  });
+});
