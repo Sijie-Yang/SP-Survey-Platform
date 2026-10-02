@@ -150,7 +150,7 @@ function AdminWorkspaceTabs({ value, onChange, siliconEnabled = true }) {
     fontSize: '0.875rem',
   };
   return (
-    <Box ref={tabsRef} sx={{ minWidth: 0 }}>
+    <Box ref={tabsRef} sx={{ minWidth: 0 }} data-tour="tabs">
     <Tabs
       value={value}
       onChange={onChange}
@@ -1286,6 +1286,7 @@ export default function AdminApp() {
             <IconButton
               color="inherit"
               onClick={toggleProjectSidebar}
+              data-tour="projects"
               aria-expanded={sidebarOpen}
               aria-controls="admin-project-sidebar"
               sx={{ mr: { xs: 0, sm: 2 } }}
@@ -1401,6 +1402,7 @@ export default function AdminApp() {
                   e.stopPropagation();
                   handleManualSave();
                 }}
+                data-tour="save"
                 disabled={!currentProject}
                 size="small"
                 sx={{ 
@@ -1434,6 +1436,7 @@ export default function AdminApp() {
               <IconButton
                 color="inherit"
                 onClick={() => setPreviewOpen(true)}
+                data-tour="preview"
                 disabled={!currentProject || !surveyConfig}
                 size="small"
                 sx={{
@@ -1457,6 +1460,7 @@ export default function AdminApp() {
                     size="small"
                     startIcon={<AutoAwesome />}
                     onClick={toggleAiSidebar}
+                    data-tour="ai"
                     aria-expanded={aiSidebarOpen}
                     aria-controls={AI_SIDEBAR_ID}
                     sx={{
@@ -1522,6 +1526,7 @@ export default function AdminApp() {
               }
             }}
             disabled={!currentProject || !surveyConfig}
+            data-tour="live"
             sx={{
               display: { xs: 'none', md: 'inline-flex' },
               mr: 1,
@@ -1551,6 +1556,7 @@ export default function AdminApp() {
             <IconButton
               color="inherit"
               onClick={handleToolsMenuOpen}
+              data-tour="more"
               size="small"
               aria-label={t.moreTools}
               aria-controls={toolsMenuAnchor ? 'workspace-tools-menu' : undefined}
@@ -1777,7 +1783,17 @@ export default function AdminApp() {
 
             <Suspense fallback={<AdminLoadingState label={t.loadingWorkspace} />}>
             <TabPanel value={tabValue} index={0}>
-              <AdminIntroduction onGoToTab={goToAdminTab} />
+              <AdminIntroduction
+                onGoToTab={goToAdminTab}
+                currentProject={currentProject}
+                surveyConfig={surveyConfig}
+                assistantEnabled={assistantEnabled}
+                siliconEnabled={siliconEnabled}
+                onOpenAssistant={() => openAiSidebar('assistant')}
+                onOpenProjects={() => { if (!wideLayout) setAiSidebarOpen(false); setSidebarOpen(true); }}
+                onOpenPreview={surveyConfig ? () => setPreviewOpen(true) : undefined}
+                onOpenSilicon={openSiliconTab}
+              />
             </TabPanel>
 
             <TabPanel value={tabValue} index={1}>
