@@ -23,7 +23,20 @@ network; you are responsible for that choice. The Platform does not claim it is 
 Mapillary images are CC BY-SA 4.0. The contributor, licence and a link are stored with every file;
 keep that attribution when you publish them.
 
-## Install (once) — only Python 3.9+ is needed
+## Install (once) — Python 3.9+ (plus two Homebrew libraries on macOS)
+
+macOS only — do this **before** the pip command:
+
+```bash
+brew install gettext && brew install inih
+```
+
+Why: `streetlevel` depends on `pyexiv2`, whose bundled `libexiv2.dylib` on macOS is linked against
+Homebrew's `gettext` and `inih`. Without them pip still succeeds, but the helper stops at start with
+`OSError: dlopen(...libexiv2.dylib): Library not loaded: /opt/homebrew/opt/inih/lib/libINIReader.0.dylib`
+(this is the setup step from the streetlevel README). It applies to every macOS Python, including
+Anaconda and python.org builds. No Homebrew? Install it from https://brew.sh. Windows and Linux do
+not need this step. If the libraries are missing, `python3 -m sp_streetlevel serve` prints this fix.
 
 macOS / Linux:
 
