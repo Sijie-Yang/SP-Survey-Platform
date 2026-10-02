@@ -60,12 +60,40 @@ function summarizeConfig(config) {
   return `${pages} 页 / ${questions} 题 · title: ${title}`;
 }
 
+const SECRET_KEY_RE = /token|secret|password|passwd|api[_-]?key|credential|authorization|private[_-]?key|access[_-]?key/i;
+
+function stripSecretKeys(value) {
+  if (Array.isArray(value)) return value.map(stripSecretKeys);
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  Object.keys(value).forEach((k) => {
+    if (SECRET_KEY_RE.test(k)) return;
+    out[k] = stripSecretKeys(value[k]);
+  });
+  return out;
+}
+
+/**
+ * Template `image_dataset_config` as carried through builtin export/import:
+ * every key is kept (minus secret-looking ones, since builtin JSON is public),
+ * and the folder/tag subset is normalized like sanitizeMediaFolderConfig.
+ */
+export function normalizeTemplateImageDatasetConfig(cfg) {
+  const base = cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? stripSecretKeys(cfg) : {};
+  return { ...base, ...sanitizeMediaFolderConfig(base) };
+}
+
 function summarizeImageDatasetConfig(cfg) {
   const clean = sanitizeMediaFolderConfig(cfg || {});
   const folders = Array.isArray(clean.mediaFolders) ? clean.mediaFolders : [];
   const tags = clean.mediaFolderTags || {};
-  if (!folders.length && !Object.keys(tags).length) return '（空）';
-  return `${folders.length} folders · ${Object.keys(tags).length} tags`;
+  const extra = Object.keys(cfg || {})
+    .filter((k) => k !== 'mediaFolders' && k !== 'mediaFolderTags')
+    .sort();
+  if (!folders.length && !Object.keys(tags).length && !extra.length) return '（空）';
+  const parts = [`${folders.length} folders · ${Object.keys(tags).length} tags`];
+  if (extra.length) parts.push(truncate(extra.join(', '), 60));
+  return parts.join(' · ');
 }
 
 /** Collect up to `limit` JSON path differences (builtin vs online). */
@@ -195,9 +223,12 @@ export function buildBuiltinImportSnapshot(tpl, { bundledImages = [] } = {}) {
     website: tpl?.website || null,
     huggingfaceDataset: tpl?.huggingfaceDataset || null,
     config: tpl?.config || {},
-    imageDatasetConfig: sanitizeMediaFolderConfig(
+    imageDatasetConfig: normalizeTemplateImageDatasetConfig(
       tpl?.imageDatasetConfig || tpl?.image_dataset_config || {},
     ),
+    isPinned: !!(tpl?.isPinned ?? tpl?.is_pinned),
+    // Legacy builtin JSON has no thumbnailUrl key; import then keeps the online cover.
+    ...(tpl && 'thumbnailUrl' in tpl ? { thumbnailUrl: tpl.thumbnailUrl || null } : {}),
     bundledPaths,
     bundledImageCount: bundledPaths.length,
   };
@@ -216,7 +247,11 @@ export function buildOnlineImportSnapshot(template) {
     website: template?.website || null,
     huggingfaceDataset: template?.huggingfaceDataset || null,
     config: template?.config || {},
-    imageDatasetConfig: sanitizeMediaFolderConfig(template?.imageDatasetConfig || {}),
+    imageDatasetConfig: normalizeTemplateImageDatasetConfig(
+      template?.imageDatasetConfigFull || template?.imageDatasetConfig || {},
+    ),
+    isPinned: !!(template?.is_pinned ?? template?.isPinned),
+    thumbnailUrl: template?.thumbnail_url || template?.thumbnailUrl || null,
     onlineImageCount: preloaded.length,
     preloadedImages: preloaded,
   };
@@ -232,20 +267,53 @@ const FIELD_LABELS = {
   website: '论文链接',
   huggingfaceDataset: 'HF 数据集',
   config: '问卷配置',
-  imageDatasetConfig: '媒体文件夹标记',
+  imageDatasetConfig: '媒体设置',
+  isPinned: '置顶',
+  thumbnailUrl: '首页封面',
   images: '内置图包',
 };
+
+/** id → entry map from `_export/manifest.json` (empty for a missing/foreign manifest). */
+export function indexBuiltinExportManifest(manifest) {
+  const byId = new Map();
+  if (!manifest || manifest.format !== 'sp-survey-builtin-templates') return byId;
+  (Array.isArray(manifest.templates) ? manifest.templates : []).forEach((entry) => {
+    const id = String(entry?.id || '').trim().toLowerCase();
+    if (id) byId.set(id, entry);
+  });
+  return byId;
+}
+
+function toTime(value) {
+  if (!value) return NaN;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? t : NaN;
+}
+
+/**
+ * The online row was edited after the export the builtin JSON came from.
+ * @returns {{ exportedUpdatedAt: string, onlineUpdatedAt: string } | null}
+ */
+export function detectBuiltinExportConflict(manifestEntry, onlineUpdatedAt) {
+  const exportedUpdatedAt = manifestEntry?.updated_at || null;
+  const exported = toTime(exportedUpdatedAt);
+  const online = toTime(onlineUpdatedAt);
+  if (!Number.isFinite(exported) || !Number.isFinite(online) || online <= exported) return null;
+  return { exportedUpdatedAt, onlineUpdatedAt };
+}
 
 /**
  * @returns {{ diffs: Array<{field,label,online,builtin,paths?}>, unchanged: boolean }}
  */
 export function diffBuiltinImportSnapshots(builtinSnap, onlineSnap) {
   const diffs = [];
-  // Admin/review flags (置顶 / 首页展示 / 已批准) are managed online — not part of import diff.
+  // 置顶 / 首页展示 / 已批准 are managed online and never overwritten on update,
+  // so they are not diffed. The cover is written, so it is.
   const scalarFields = [
     'name', 'description', 'author', 'year', 'category', 'tags',
     'website', 'huggingfaceDataset',
   ];
+  if ('thumbnailUrl' in builtinSnap) scalarFields.push('thumbnailUrl');
 
   scalarFields.forEach((field) => {
     if (stableStringify(builtinSnap[field]) === stableStringify(onlineSnap[field])) return;
@@ -275,6 +343,7 @@ export function diffBuiltinImportSnapshots(builtinSnap, onlineSnap) {
       label: FIELD_LABELS.imageDatasetConfig,
       online: summarizeImageDatasetConfig(onlineSnap.imageDatasetConfig),
       builtin: summarizeImageDatasetConfig(builtinSnap.imageDatasetConfig),
+      paths: collectJsonPathDiffs(builtinSnap.imageDatasetConfig, onlineSnap.imageDatasetConfig, { limit: 8 }),
     });
   }
 
