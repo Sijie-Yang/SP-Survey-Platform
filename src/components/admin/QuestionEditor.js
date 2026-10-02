@@ -1858,6 +1858,52 @@ export default function QuestionEditor({
                   </>
                 )}
 
+                {['imagerating', 'mediarating', 'rating'].includes(editedQuestion.type) && (
+                  <TextField
+                    name="rateLabels"
+                    fullWidth
+                    multiline
+                    minRows={2}
+                    variant="outlined"
+                    label={tr("Label for every scale point (optional)")}
+                    value={(editedQuestion.rateLabels || []).join('\n')}
+                    onChange={(e) => {
+                      const lines = e.target.value.split('\n');
+                      handleQuestionChange('rateLabels', lines.some((l) => l.trim()) ? lines : undefined);
+                    }}
+                    helperText={tr("One label per line, from the lowest to the highest value. Used only when the count matches the scale; answers stay numeric.")}
+                    sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                  />
+                )}
+
+                {editedQuestion.type?.startsWith('media') && editedQuestion.type !== 'mediadisplay' && (
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <FormControlLabel
+                      control={(
+                        <Switch
+                          checked={!!editedQuestion.requireMediaEnded}
+                          onChange={(e) => handleQuestionChange('requireMediaEnded', e.target.checked || undefined)}
+                        />
+                      )}
+                      label={tr("Require video/audio to play to the end before answering")}
+                    />
+                    <TextField
+                      name="minWatchSeconds"
+                      type="number"
+                      variant="outlined"
+                      size="small"
+                      label={tr("Minimum viewing time (seconds)")}
+                      value={editedQuestion.minWatchSeconds ?? ''}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        handleQuestionChange('minWatchSeconds', Number.isFinite(v) && v > 0 ? Math.min(v, 600) : undefined);
+                      }}
+                      inputProps={{ min: 0, max: 600, step: 1 }}
+                      sx={{ width: 220, '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                  </Box>
+                )}
+
                 {editedQuestion.type === 'imageannotation' && (
                   <>
                     <FormControl fullWidth variant="outlined">
@@ -1907,6 +1953,17 @@ export default function QuestionEditor({
                       }}
                       helperText={tr("Comma-separated labels applied to new shapes (e.g. building, tree, sky). Leave empty for unlabeled annotation.")}
                       placeholder={tr("building, tree, sky")}
+                      sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
+                    />
+                    <TextField
+                      name="annotationNotePrompt"
+                      fullWidth
+                      variant="outlined"
+                      label={tr("Ask for a note on each annotation (optional)")}
+                      value={editedQuestion.annotationNotePrompt || ''}
+                      onChange={(e) => handleQuestionChange('annotationNotePrompt', e.target.value || undefined)}
+                      placeholder={tr("e.g. Why do you like this place?")}
+                      helperText={tr("Shown as a short text field for the selected annotation; stored as the shape's note. Notes are optional.")}
                       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
                     />
                     <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>

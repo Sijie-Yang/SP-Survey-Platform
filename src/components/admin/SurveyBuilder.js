@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import RuntimeContextSettings from './RuntimeContextSettings';
 import {
   Box,
   Typography,
@@ -828,6 +829,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   helperText={t.builderResponseQuotaHelp}
                   inputProps={{ min: 1 }}
                 />
+
+                <RuntimeContextSettings config={config} onChange={handleBasicInfoChange} />
               </Box>
             </Box>
 

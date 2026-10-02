@@ -129,6 +129,27 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.count_responses(TEXT) TO anon, authenticated;
 
+-- Completed responses per between-participant condition (balanced assignment).
+CREATE OR REPLACE FUNCTION public.count_condition_responses(p_project_id TEXT)
+RETURNS JSONB
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(jsonb_object_agg(c.condition, c.n), '{}'::jsonb)
+  FROM (
+    SELECT survey_metadata->>'condition' AS condition, COUNT(*)::INTEGER AS n
+    FROM public.survey_responses
+    WHERE project_id = p_project_id
+      AND survey_metadata->>'condition' IS NOT NULL
+      AND COALESCE((survey_metadata->>'researcher_mode')::BOOLEAN, FALSE) = FALSE
+    GROUP BY 1
+  ) c;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.count_condition_responses(TEXT) TO anon, authenticated;
+
 -- Pairwise / TrueSkill helper used by adaptive media (minimal stub if table exists)
 CREATE OR REPLACE FUNCTION public.get_pair_stats(p_project_id TEXT)
 RETURNS JSONB

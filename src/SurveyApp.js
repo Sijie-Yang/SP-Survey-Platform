@@ -22,7 +22,9 @@ import registerImageRankingWidget, {
   registerAllExtendedWidgets, captureSkillPreviewAnswers,
 } from './components/SurveyCustomComponents';
 import { getBrowserId, generateCompletionCode } from './lib/browserId';
-import { countProjectResponses, fetchPairStats } from './lib/surveyPublicApi';
+import { countProjectResponses, fetchConditionCounts, fetchPairStats } from './lib/surveyPublicApi';
+import { applyRuntimeVariables, hasConditions, resolveRuntimeContext, runtimeMetadata } from './lib/surveyRuntimeContext';
+import { clearMediaWatchLog, mediaWatchMetadata } from './lib/mediaWatch';
 import {
   isRandomMediaQuestion, defaultMediaCount, filterPoolForQuestion, applyMediaToElement, resolveSkillQuestions,
   ensureSkillDemoMedia, pickMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
@@ -911,8 +913,23 @@ export default function SurveyApp() {
       finalSurveyJson = normalizeBuilderSurveyJson(finalSurveyJson);
       const revision = finalSurveyJson._spRevision || await surveyRevision(resumeDraft?.finalSurveyJson ? finalSurveyJson : (adminConfig || finalSurveyJson), finalSurveyJson);
       finalSurveyJson._spRevision = revision;
+      if (!finalSurveyJson._spRuntimeContext) {
+        const runtimeConfig = {
+          conditions: finalSurveyJson.conditions ?? adminConfig?.conditions,
+          captureUrlParams: finalSurveyJson.captureUrlParams ?? adminConfig?.captureUrlParams,
+        };
+        finalSurveyJson._spRuntimeContext = await resolveRuntimeContext(runtimeConfig, {
+          projectId,
+          search: window.location.search,
+          persist: true,
+          fetchCounts: hasConditions(runtimeConfig) ? () => withTimeout(fetchConditionCounts(projectId), 5000, null) : null,
+        });
+      }
+      const runtimeContext = finalSurveyJson._spRuntimeContext;
+      clearMediaWatchLog();
       const model = new Model(finalSurveyJson);
       applySurveyLocale(model, finalSurveyJson);
+      applyRuntimeVariables(model, runtimeContext);
       // Re-apply media fields SurveyJS may have stripped (esp. media* + trialMediaSets)
       syncInjectedMediaOntoSurveyModel(model, finalSurveyJson);
       
@@ -1079,6 +1096,8 @@ export default function SurveyApp() {
               total_seconds: totalSeconds,
               page_seconds: { ...pageTimingRef.current },
             },
+            ...runtimeMetadata(runtimeContext),
+            ...mediaWatchMetadata(),
             ...(isRepeatMode ? {
               session_id: repeatSessionRef.current,
               attempt_index: attemptIndex,

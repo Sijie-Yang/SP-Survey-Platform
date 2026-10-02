@@ -388,7 +388,7 @@ export function MediaDisplayContent({
 export function MediaRatingContent({
   mediaUrl, mediaType, mediaName, mediaItems, mediaSlots, mediaPresentation,
   value, onChange, rateMin = 1, rateMax = 5,
-  minRateDescription = '', maxRateDescription = '', disabled = false,
+  minRateDescription = '', maxRateDescription = '', disabled = false, rateLabels = null,
 }) {
   return (
     <Box sx={{ width: '100%' }}>
@@ -399,6 +399,7 @@ export function MediaRatingContent({
         rateMax={rateMax}
         minRateDescription={minRateDescription}
         maxRateDescription={maxRateDescription}
+        rateLabels={rateLabels}
         value={value}
         onChange={onChange}
       />

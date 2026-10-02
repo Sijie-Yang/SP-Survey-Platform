@@ -109,6 +109,15 @@ export function normalizeBuilderQuestion(element) {
     question.isRequired = true;
     question.labelTrue = question.labelTrue || 'I agree / I consent';
     question.labelFalse = question.labelFalse || 'I do not agree';
+  } else if (question.type === 'rating' && Array.isArray(question.rateLabels) && !question.rateValues) {
+    const lo = Number(question.rateMin ?? 1);
+    const hi = Number(question.rateMax ?? 5);
+    const step = Number(question.rateStep) > 0 ? Number(question.rateStep) : 1;
+    const values = [];
+    for (let v = lo; v <= hi + 1e-9; v += step) values.push(Math.round(v * 1000) / 1000);
+    if (values.length === question.rateLabels.length) {
+      question.rateValues = values.map((value, i) => ({ value, text: String(question.rateLabels[i] ?? value) }));
+    }
   }
   return question;
 }
