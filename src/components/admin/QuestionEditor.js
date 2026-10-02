@@ -4,7 +4,6 @@ import ConfirmDialog from '../layout/ConfirmDialog';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import { useRegion } from '../../contexts/RegionContext';
 import { validateQuestionSettings } from '../../lib/designProtocol/validate';
-import { conditionFromVisibleIf, normalizeConditions, visibleIfForCondition } from '../../lib/surveyRuntimeContext';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
@@ -330,31 +329,6 @@ function TrialCountField({ question, onChange }) {
       inputProps={{ min: 1, max: TRIAL_COUNT_MAX, step: 1 }}
       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
     />
-  );
-}
-
-function ConditionVisibilityField({ question, onChange, surveyConfig }) {
-  const { tr } = useQuestionEditorText();
-  const conditions = normalizeConditions(surveyConfig);
-  const current = conditionFromVisibleIf(question.visibleIf);
-  if (conditions.length < 2 && !current) return null;
-  if (current === null) {
-    return <Alert severity="info" sx={{ py: 0.5 }}>{tr('Shown only when')}: <code>{question.visibleIf}</code></Alert>;
-  }
-  return (
-    <TextField
-      select
-      fullWidth
-      size="small"
-      label={tr('Show to condition')}
-      value={current}
-      onChange={(e) => onChange('visibleIf', visibleIfForCondition(e.target.value))}
-      helperText={tr('Between-participant conditions are set in Survey settings. Participants in other conditions skip this question.')}
-    >
-      <MenuItem value="">{tr('All participants')}</MenuItem>
-      {conditions.map((c) => <MenuItem key={c.id} value={c.id}>{c.label}{c.label !== c.id ? ` (${c.id})` : ''}</MenuItem>)}
-      {current && !conditions.some((c) => c.id === current) && <MenuItem value={current}>{current}</MenuItem>}
-    </TextField>
   );
 }
 
@@ -1347,7 +1321,6 @@ export default function QuestionEditor({
                 }
                 label={tr("Required — participants must answer to continue")}
               />
-              <ConditionVisibilityField question={editedQuestion} onChange={handleQuestionChange} surveyConfig={surveyConfig} />
 
               {editedQuestion.type === 'boolean' && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

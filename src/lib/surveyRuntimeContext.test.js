@@ -1,6 +1,5 @@
 import { Model } from 'survey-core';
 import {
-  conditionFromVisibleIf, visibleIfForCondition,
   applyRuntimeVariables, captureUrlParams, chooseCondition, normalizeConditions, resolveRuntimeContext, runtimeMetadata,
 } from './surveyRuntimeContext';
 import { buildResponsesWideCsv } from './responsesWideExport';
@@ -66,12 +65,4 @@ test('rating rateLabels map to native rateValues with numeric stored values', ()
   const q = normalizeBuilderQuestion({ type: 'rating', name: 'r', rateMin: 1, rateMax: 3, rateLabels: ['Low', 'Mid', 'High'] });
   expect(q.rateValues).toEqual([{ value: 1, text: 'Low' }, { value: 2, text: 'Mid' }, { value: 3, text: 'High' }]);
   expect(normalizeBuilderQuestion({ type: 'rating', name: 'r', rateLabels: ['a'] }).rateValues).toBeUndefined();
-});
-
-test('condition visibility rules round-trip', () => {
-  expect(conditionFromVisibleIf("{sp_condition} = 'less_safe'")).toBe('less_safe');
-  expect(conditionFromVisibleIf('')).toBe('');
-  expect(conditionFromVisibleIf('{age} > 18')).toBeNull();
-  expect(visibleIfForCondition('safe')).toBe("{sp_condition} = 'safe'");
-  expect(visibleIfForCondition('')).toBeUndefined();
 });

@@ -98,19 +98,6 @@ export async function resolveRuntimeContext(config, { projectId, search = '', ov
   return { condition, urlParams: captureUrlParams(config, search) };
 }
 
-const CONDITION_RULE = /^\s*\{sp_condition\}\s*=\s*'([^']+)'\s*$/;
-
-/** Condition id when visibleIf is exactly "{sp_condition} = 'id'", '' when empty, null for any other rule. */
-export function conditionFromVisibleIf(visibleIf) {
-  if (!visibleIf || !String(visibleIf).trim()) return '';
-  const m = String(visibleIf).match(CONDITION_RULE);
-  return m ? m[1] : null;
-}
-
-export function visibleIfForCondition(conditionId) {
-  return conditionId ? `{sp_condition} = '${String(conditionId).replace(/'/g, '')}'` : undefined;
-}
-
 export function applyRuntimeVariables(model, context) {
   if (!model || !context) return;
   if (context.condition) model.setVariable(CONDITION_VARIABLE, context.condition);
