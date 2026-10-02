@@ -78,6 +78,7 @@ import MediaKeywordSelection from './MediaKeywordSelection';
 import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
+import StreetLevelCard from './streetLevel/StreetLevelCard';
 import MediaPreannotatePanel from './MediaPreannotatePanel';
 import MediaPreannotateResults from './MediaPreannotateResults';
 import ConfirmDialog from '../layout/ConfirmDialog';
@@ -2014,6 +2015,13 @@ export default function ImageDataset({ currentProject, onProjectUpdate, onConfig
           </Box>
         </Box>
       </Box>
+
+      <StreetLevelCard
+        currentProject={currentProject}
+        onProjectUpdate={onProjectUpdate}
+        projectPrefix={projectPrefix}
+        disabled={!isR2Configured()}
+      />
 
       <SpatialIntelligencePanel
         currentProject={currentProject}

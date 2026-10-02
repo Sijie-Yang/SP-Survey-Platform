@@ -11,7 +11,7 @@ const R2_PUBLIC_BASE = (
   || 'https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev'
 ).replace(/\/$/, '');
 
-async function authHeaders(extra = {}) {
+export async function authHeaders(extra = {}) {
   const headers = { ...extra };
   if (!supabase) return headers;
   try {

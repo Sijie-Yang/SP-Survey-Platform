@@ -33,6 +33,7 @@ import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/han
 import { supabaseRest } from './worker-lib/supabaseUserClient.mjs';
 import { handleAdminResultsRoutes } from './worker-lib/adminResults.mjs';
 import { handleAssistantSubsidyRoutes } from './worker-lib/admin/subsidyHandlers.mjs';
+import { handleStreetLevelRoutes } from './worker-lib/streetLevel.mjs';
 import {
   handleInferenceTest,
   handleInferenceSam3,
@@ -915,6 +916,10 @@ export default {
       if (pathname === '/api/r2/image-proxy' && request.method === 'GET') {
         return await handleImageProxy(request, env);
       }
+      const streetLevelResponse = await handleStreetLevelRoutes(request, env, {
+        authorize: (req) => resolveR2User(req, env),
+      });
+      if (streetLevelResponse) return withPreviewCors(request, streetLevelResponse);
       // fal / HF inference — must live on the Worker (run_worker_first /api/*).
       // Without these, POST falls through to SPA assets and Cloudflare returns 405.
       if (pathname === '/api/inference/test' && request.method === 'POST') {

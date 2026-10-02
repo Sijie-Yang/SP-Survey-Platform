@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sp-streetlevel"
+version = "0.1.0"
+description = "Local helper that downloads street-level views for SP-Survey Platform point lists"
+requires-python = ">=3.9"
+license = { text = "CC-BY-4.0" }
+dependencies = [
+  "streetlevel>=0.12,<0.13",
+  "aiohttp>=3.9",
+  "requests>=2.31",
+  "numpy>=1.24",
+  "pillow>=10",
+  "certifi",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+sp-streetlevel = "sp_streetlevel.cli:main"
+
+[tool.setuptools]
+packages = ["sp_streetlevel"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
