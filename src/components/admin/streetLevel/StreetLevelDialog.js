@@ -11,6 +11,7 @@ import StreetLevelMap from './StreetLevelMap';
 import { useStreetLevelText } from '../../../contexts/streetLevelI18n';
 import {
   buildGoogleMapUrl, buildStreetViewUrl, extractUrls, isShortMapsUrl, parseGoogleMapsUrl,
+  viewPatchFromStreetViewUrl,
 } from '../../../lib/streetLevel/googleMapsUrl';
 import {
   gridInBounds, gridInPolygon, mergePoints, normalizePoint, pointDedupKey, pointFromParsedUrl,
@@ -85,6 +86,8 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
 
   const [downloadItems, setDownloadItems] = useState({});
   const [viewEdit, setViewEdit] = useState(null);
+  const [pointUrl, setPointUrl] = useState('');
+  const [pointUrlError, setPointUrlError] = useState('');
   const [mode, setMode] = useState('point');
   const [spacing, setSpacing] = useState(25);
   const [draft, setDraft] = useState(null);
@@ -258,6 +261,45 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
 
   const pagePoints = points.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const viewEditPoint = viewEdit ? points.find((p) => p.id === viewEdit.id) : null;
+  useEffect(() => {
+    setPointUrl('');
+    setPointUrlError('');
+  }, [viewEdit?.id]);
+
+  const applyPointUrl = async (text) => {
+    const urls = extractUrls(text);
+    if (urls.length !== 1) {
+      setPointUrlError(tx(urls.length ? 'Paste one Street View URL, not several.' : 'reason:empty'));
+      return;
+    }
+    let target = urls[0];
+    if (isShortMapsUrl(target)) {
+      try {
+        const [expanded] = await expandShortLinks([target]);
+        if (!expanded?.ok || !expanded.url) {
+          setPointUrlError(tx('reason:short-link'));
+          return;
+        }
+        target = expanded.url;
+      } catch (err) {
+        setPointUrlError(tx('Short links could not be resolved: {e}', { e: err.message }));
+        return;
+      }
+    }
+    const result = viewPatchFromStreetViewUrl(target);
+    if (!result.ok) {
+      const reason = result.reason === 'not-pano'
+        ? 'That URL is not a Street View panorama.'
+        : result.reason === 'several'
+          ? 'Paste one Street View URL, not several.'
+          : `reason:${result.reason}`;
+      setPointUrlError(tx(reason));
+      return;
+    }
+    updatePoint(viewEdit.id, result.patch);
+    setPointUrl('');
+    setPointUrlError('');
+  };
   const pageCount = Math.max(1, Math.ceil(points.length / PAGE_SIZE));
 
   const persistView = () => { if (view) commitStreetLevel({ view }); };
@@ -487,9 +529,36 @@ export default function StreetLevelDialog({ open, onClose, currentProject, onPro
           transformOrigin={{ vertical: 'top', horizontal: 'right' }}
         >
           {viewEditPoint && (
-            <Box sx={{ p: 1.5, width: 260 }} data-testid="point-view-editor">
+            <Box sx={{ p: 1.5, width: 340 }} data-testid="point-view-editor">
               <Typography variant="subtitle2">{tx('View for point #{n}', { n: points.indexOf(viewEditPoint) + 1 })}</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{tx('Leave empty to use the batch settings.')}</Typography>
+              <TextField
+                size="small"
+                fullWidth
+                label={tx('Paste a Street View URL')}
+                placeholder="https://www.google.com/maps/…"
+                value={pointUrl}
+                error={Boolean(pointUrlError)}
+                helperText={pointUrlError || tx('point-url-help')}
+                inputProps={{ 'data-testid': 'point-view-url' }}
+                onChange={(e) => { setPointUrl(e.target.value); setPointUrlError(''); }}
+                onPaste={(e) => {
+                  const text = e.clipboardData?.getData('text') || '';
+                  if (!text.trim()) return;
+                  e.preventDefault();
+                  setPointUrl(text.trim());
+                  applyPointUrl(text);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); applyPointUrl(pointUrl); }
+                }}
+              />
+              <Button size="small" sx={{ mt: 0.5, mb: 1 }} disabled={!pointUrl.trim()} onClick={() => applyPointUrl(pointUrl)}>
+                {tx('Apply this URL')}
+              </Button>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                {tx('Pano id')}: {viewEditPoint.panoId || '—'}
+              </Typography>
               <Stack direction="row" spacing={1}>
                 <NumberCell label={tx('Heading')} value={viewEditPoint.heading} min={-360} max={720} width={56}
                   placeholder={tx('Heading')} onCommit={(v) => updatePoint(viewEditPoint.id, { heading: v })} />

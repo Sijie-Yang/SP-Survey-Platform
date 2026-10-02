@@ -219,7 +219,7 @@ export default function StreetLevelDownloadPanel({
 
   const failures = useMemo(() => points
     .map((p, i) => ({ p, i, it: items[p.id] }))
-    .filter(({ it }) => it?.status === 'failed')
+    .filter(({ it }) => it?.error && (it.status === 'failed' || it.status === 'no-image'))
     .slice(0, 5), [points, items]);
   const landedCount = landed
     ? new Set(Object.values(items).flatMap((it) => it.keys || []).filter((k) => landed.has(k))).size
@@ -276,7 +276,9 @@ export default function StreetLevelDownloadPanel({
             {runState ? tx('Run: {s}', { s: tx(`status:${runState}`) }) : ''}
           </Typography>
           {failures.map(({ p, i, it }) => (
-            <Typography key={p.id} variant="caption" sx={{ display: 'block', color: 'error.main' }}>#{i + 1}: {it.error}</Typography>
+            <Typography key={p.id} variant="caption" sx={{ display: 'block', color: it.status === 'failed' ? 'error.main' : 'text.secondary' }}>
+              #{i + 1}: {it.status === 'no-image' ? `${tx('item:no-image')} — ${it.error}` : it.error}
+            </Typography>
           ))}
         </Box>
       )}
@@ -393,9 +395,18 @@ export default function StreetLevelDownloadPanel({
               )}
               <Typography variant="body2" sx={{ mt: 0.75 }}>{tx('1. Install once:')}</Typography>
               <CopyLine text={commands.install} label={tx('Copy')} />
+              {commands.installedServe && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }} data-testid="mac-venv-why">{tx('mac-venv-why')}</Typography>
+              )}
               <Typography variant="body2" sx={{ mt: 0.75 }}>{tx('2. Start it and keep the window open:')}</Typography>
               <CopyLine text={commands.serve} label={tx('Copy')} />
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }} data-testid="helper-listen">{tx('helper-listen')}</Typography>
+              {commands.installedServe && (
+                <Box data-testid="mac-already-serve" sx={{ mt: 0.75 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{tx('mac-already-serve')}</Typography>
+                  <CopyLine text={commands.installedServe} label={tx('Copy')} />
+                </Box>
+              )}
               {commands.isolatedInstall && (
                 <>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>{tx('externally-managed-help')}</Typography>

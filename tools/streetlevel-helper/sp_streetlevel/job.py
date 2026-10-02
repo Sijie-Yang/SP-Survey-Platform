@@ -178,9 +178,10 @@ async def run_job(job: Job, backend, platform, *, sleep=asyncio.sleep, clock=tim
                 await limiter.wait(0.5)
                 prefer = opts["fixed_heading"] if opts["heading_mode"] == "fixed" else None
                 return await asyncio.to_thread(backend.lookup, point, opts["radius"], opts["search_third_party"], prefer)
-            pano = await with_retry(lookup, opts["max_attempts"], sleep)
+            found = await with_retry(lookup, opts["max_attempts"], sleep)
+            pano, miss = found if isinstance(found, tuple) else (found, None)
             if pano is None:
-                item["status"] = "no-image"
+                item.update(status="no-image", error=(miss or "no pano returned")[:300])
                 continue
             item["pano_id"] = pano.id
             folder = folder_for_point(point, opts, index)
@@ -194,7 +195,15 @@ async def run_job(job: Job, backend, platform, *, sleep=asyncio.sleep, clock=tim
             elif missing:
                 async def fetch():
                     await limiter.wait(1.0)
-                    return await backend.fetch_equirect(pano, opts["zoom"])
+                    try:
+                        return await backend.fetch_equirect(pano, opts["zoom"])
+                    except (AuthError, ProviderAuthError):
+                        raise
+                    except Exception as err:
+                        message = str(err)
+                        if message.startswith("tiles failed"):
+                            raise
+                        raise RuntimeError(f"tiles failed: {message}") from err
                 equirect = await with_retry(fetch, opts["max_attempts"], sleep)
                 last_pano.update(id=pano.id, pixels=equirect)
             now = datetime.now(timezone.utc).isoformat()

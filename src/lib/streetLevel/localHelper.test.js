@@ -77,9 +77,11 @@ describe('local helper client', () => {
     const mac = helperCommands('mac', 'https://sp-survey.org');
     expect(mac.systemDeps).toBe('brew install gettext && brew install inih');
     expect(Object.keys(mac)[0]).toBe('systemDeps');
-    expect(mac.install).toBe(`python3 -m pip install --user --upgrade "${HELPER_PACKAGE}"`);
-    expect(mac.serve).toBe('python3 -m sp_streetlevel serve');
-    expect(mac.isolatedInstall).toBe(`python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install --upgrade "${HELPER_PACKAGE}"`);
+    expect(mac.install).toBe(`python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install --upgrade "${HELPER_PACKAGE}"`);
+    expect(mac.serve).toBe('~/.sp-streetlevel/bin/python -m sp_streetlevel serve');
+    expect(mac.installedServe).toBe('python3 -m sp_streetlevel serve');
+    expect(mac.isolatedInstall).toBeUndefined();
+    expect(mac.install).not.toMatch(/--user|\.local\/bin/);
     const win = helperCommands('windows', 'https://sp-survey.org');
     expect(helperCommands('linux', 'https://sp-survey.org').systemDeps).toBeUndefined();
     expect(helperCommands('linux', 'https://www.sp-survey.org').serve).toBe('python3 -m sp_streetlevel serve');
@@ -92,6 +94,8 @@ describe('local helper client', () => {
 
   it('builds the one-command fallback with batch view settings', () => {
     expect(runCommand({ projectId: 'proj_1', apiBase: 'https://sp-survey.org', capture: { preset: 'headings', headingCount: 6 } }))
+      .toBe('~/.sp-streetlevel/bin/python -m sp_streetlevel run --project proj_1 --preset headings --heading-count 6 --pitch 0 --fov 90 --zoom 3 --folder street-level --folder-mode category');
+    expect(runCommand({ projectId: 'proj_1', os: 'linux', apiBase: 'https://sp-survey.org', capture: { preset: 'headings', headingCount: 6 } }))
       .toBe('python3 -m sp_streetlevel run --project proj_1 --preset headings --heading-count 6 --pitch 0 --fov 90 --zoom 3 --folder street-level --folder-mode category');
     expect(runCommand({ projectId: 'p', os: 'windows', capture: { source: 'mapillary', headingMode: 'fixed', fixedHeading: 45 } }))
       .toBe('py -m sp_streetlevel run --project p --source mapillary --preset current --heading-mode fixed --fixed-heading 45 --pitch 0 --fov 90 --folder street-level --folder-mode category');

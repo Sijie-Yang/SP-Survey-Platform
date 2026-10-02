@@ -55,24 +55,42 @@ function originFlag(origin) {
   return ` --allow-origin ${origin}`;
 }
 
+const VENV_PYTHON = '~/.sp-streetlevel/bin/python';
+
+/** Interpreter the panel tells this OS to run. macOS uses the private venv, not conda’s python3. */
+export function pythonInvoke(os) {
+  return os === 'mac' ? VENV_PYTHON : pythonCommand(os);
+}
+
 /** Install + start commands that need nothing but Python 3.9+ (no pipx, no git, no PATH edit). */
 export function helperCommands(os, origin) {
+  const flag = originFlag(origin);
   const py = pythonCommand(os);
+  // macOS: install into ~/.sp-streetlevel first. `pip install --user` on Anaconda/conda base
+  // upgrades cryptography and breaks conda’s pyopenssl. `python3 -m sp_streetlevel serve` stays
+  // available for a copy that is already installed.
+  if (os === 'mac') {
+    return {
+      systemDeps: MAC_SYSTEM_DEPS,
+      install: `python3 -m venv ~/.sp-streetlevel && ${VENV_PYTHON} -m pip install --upgrade "${HELPER_PACKAGE}"`,
+      serve: `${VENV_PYTHON} -m sp_streetlevel serve${flag}`,
+      installedServe: `${py} -m sp_streetlevel serve${flag}`,
+    };
+  }
   const commands = {
-    ...(os === 'mac' ? { systemDeps: MAC_SYSTEM_DEPS } : {}),
     install: `${py} -m pip install --user --upgrade "${HELPER_PACKAGE}"`,
-    serve: `${py} -m sp_streetlevel serve${originFlag(origin)}`,
+    serve: `${py} -m sp_streetlevel serve${flag}`,
   };
   if (os !== 'windows') {
-    commands.isolatedInstall = `python3 -m venv ~/.sp-streetlevel && ~/.sp-streetlevel/bin/python -m pip install --upgrade "${HELPER_PACKAGE}"`;
-    commands.isolatedServe = `~/.sp-streetlevel/bin/python -m sp_streetlevel serve${originFlag(origin)}`;
+    commands.isolatedInstall = `python3 -m venv ~/.sp-streetlevel && ${VENV_PYTHON} -m pip install --upgrade "${HELPER_PACKAGE}"`;
+    commands.isolatedServe = `${VENV_PYTHON} -m sp_streetlevel serve${flag}`;
   }
   return commands;
 }
 
 export function runCommand({ projectId, apiBase, capture = {}, os = 'mac' }) {
   const c = { ...DEFAULT_CAPTURE, ...capture };
-  const parts = [`${pythonCommand(os)} -m sp_streetlevel run`, `--project ${projectId}`];
+  const parts = [`${pythonInvoke(os)} -m sp_streetlevel run`, `--project ${projectId}`];
   if (apiBase && apiBase !== 'https://sp-survey.org') parts.push(`--api ${apiBase}`);
   if (c.source !== 'google') parts.push(`--source ${c.source}`);
   parts.push(`--preset ${c.preset}`);

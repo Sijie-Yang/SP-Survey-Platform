@@ -5,6 +5,7 @@ import {
   isShortMapsUrl,
   parseGoogleMapsText,
   parseGoogleMapsUrl,
+  viewPatchFromStreetViewUrl,
 } from './googleMapsUrl';
 
 const SV = 'https://www.google.com/maps/@48.8583701,2.2944813,3a,75y,90.5h,95.3t/data=!3m6!1e1!3m4!1sAbCdEfGhIjKlMnOpQrStUv!2e0!7i16384!8i8192?entry=ttu';
@@ -99,5 +100,25 @@ describe('bulk paste and URL builders', () => {
   it('round-trips a built pano URL through the parser', () => {
     const r = parseGoogleMapsUrl(buildStreetViewUrl({ lat: 22.3, lng: 114.17, heading: 45, pitch: 10, fov: 70 }));
     expect(r).toMatchObject({ ok: true, kind: 'pano', lat: 22.3, lng: 114.17, heading: 45, pitch: 10, fov: 70 });
+  });
+});
+
+describe('viewPatchFromStreetViewUrl', () => {
+  it('replaces one point’s view and pano id from a single Street View URL', () => {
+    const result = viewPatchFromStreetViewUrl(SV);
+    expect(result.ok).toBe(true);
+    expect(result.patch).toEqual({
+      heading: 90.5,
+      pitch: 5.3,
+      fov: 75,
+      panoId: 'AbCdEfGhIjKlMnOpQrStUv',
+      sourceUrl: SV,
+    });
+  });
+
+  it('rejects several URLs and a map URL that is not a panorama', () => {
+    expect(viewPatchFromStreetViewUrl(`${SV}\nhttps://www.google.com/maps/@1,2,3a,60y/data=!3m4!1e1!3m2!1sXyZ!2e0`).reason).toBe('several');
+    expect(viewPatchFromStreetViewUrl('').reason).toBe('empty');
+    expect(viewPatchFromStreetViewUrl('https://www.google.com/maps/@51.5,-0.12,15z').reason).toBe('not-pano');
   });
 });
