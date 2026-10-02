@@ -1,10 +1,17 @@
 // Between-participant conditions (S1) and URL parameter capture (S2).
 // Both are opt-in project settings; projects without them get no variables and no metadata.
+// A question may reword itself per condition via conditionVariants: [{ condition, title, reverseCoded }].
+
+import { Serializer } from 'survey-core';
 
 export const CONDITION_VARIABLE = 'sp_condition';
 export const URL_VARIABLE_PREFIX = 'url_';
 export const URL_PARAM_MAX_LENGTH = 64;
 const NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+
+if (!Serializer.findProperty('question', 'conditionVariants')) {
+  Serializer.addProperty('question', { name: 'conditionVariants', default: null, category: 'general', visible: false });
+}
 
 export function normalizeConditions(config) {
   const list = Array.isArray(config?.conditions) ? config.conditions : [];
@@ -98,8 +105,33 @@ export async function resolveRuntimeContext(config, { projectId, search = '', ov
   return { condition, urlParams: captureUrlParams(config, search) };
 }
 
+/** Valid per-condition variants of a question (empty titles fall back to the question title). */
+export function conditionVariants(question) {
+  const list = Array.isArray(question?.conditionVariants) ? question.conditionVariants : [];
+  return list.filter((v) => v && typeof v.condition === 'string' && v.condition.trim());
+}
+
+export function conditionVariant(question, conditionId) {
+  if (!conditionId) return null;
+  return conditionVariants(question).find((v) => v.condition === conditionId) || null;
+}
+
+/** Condition ids whose answers to this question are reverse-coded in analysis. */
+export function reverseCodedConditions(question) {
+  return conditionVariants(question).filter((v) => v.reverseCoded === true).map((v) => v.condition);
+}
+
+export function applyConditionWording(model, conditionId) {
+  if (!model || !conditionId) return;
+  model.getAllQuestions(false, false, true).forEach((q) => {
+    const title = conditionVariant(q, conditionId)?.title;
+    if (typeof title === 'string' && title.trim()) q.title = title;
+  });
+}
+
 export function applyRuntimeVariables(model, context) {
   if (!model || !context) return;
+  applyConditionWording(model, context.condition);
   if (context.condition) model.setVariable(CONDITION_VARIABLE, context.condition);
   Object.entries(context.urlParams || {}).forEach(([k, v]) => model.setVariable(`${URL_VARIABLE_PREFIX}${k}`, v));
 }

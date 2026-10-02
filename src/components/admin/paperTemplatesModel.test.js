@@ -10,7 +10,7 @@ test.each(ids)('%s', (id) => {
   expect(names.filter((n) => !m.getQuestionByName(n))).toEqual([]);
   cfg.pages.flatMap((p) => p.elements).forEach((e) => {
     const q = m.getQuestionByName(e.name);
-    ['rateLabels', 'requireMediaEnded', 'annotationNotePrompt', 'trialCount', 'allowTie', 'tieLabel', 'dimensions', 'mediaFolders'].forEach((k) => {
+    ['rateLabels', 'requireMediaEnded', 'annotationNotePrompt', 'trialCount', 'allowTie', 'tieLabel', 'dimensions', 'mediaFolders', 'conditionVariants'].forEach((k) => {
       if (e[k] !== undefined && !(k === 'rateLabels' && e.type === 'rating')) expect([k, q[k] ?? q.getPropertyValue?.(k)]).toEqual([k, e[k]]);
     });
   });
@@ -22,9 +22,9 @@ test('rating labels', () => {
 });
 test('condition and url visibility', () => {
   const k = JSON.parse(fs.readFileSync('public/project_templates/2023-kang-assessing.json')).config;
-  const m = createSurveyPreviewModel(k, { condition: 'less_safe', urlParams: {} });
-  expect(m.getQuestionByName('safe').isVisible).toBe(false);
-  expect(m.getQuestionByName('less_safe').isVisible).toBe(true);
+  expect(createSurveyPreviewModel(k, { condition: 'less_safe', urlParams: {} }).getQuestionByName('safety').title).toBe('Which place looks less safe?');
+  expect(createSurveyPreviewModel(k, { condition: 'safe', urlParams: {} }).getQuestionByName('safety').title).toBe('Which place looks safe?');
+  expect(createSurveyPreviewModel(k, null).getQuestionByName('safety').title).toBe('Which place looks safe?');
   const t = JSON.parse(fs.readFileSync('public/project_templates/2023-torkko-how.json')).config;
   const a = createSurveyPreviewModel(t, { condition: null, urlParams: { site: 'S01' } });
   expect(a.getPageByName('page_in_situ').isVisible).toBe(true);

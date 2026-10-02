@@ -173,6 +173,9 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
               color="secondary"
               variant="outlined"
             />
+            {Array.isArray(question.conditionVariants) && question.conditionVariants.length > 0 && (
+              <Chip label={tr('Condition wording')} size="small" color="info" variant="outlined" />
+            )}
             {question.isRequired && (
               <Chip
                 label={tr("Required")}

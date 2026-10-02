@@ -6,6 +6,8 @@
  *         raterQuestion, groupBy, labels, citation }
  */
 
+import { reverseCodedConditions } from './surveyRuntimeContext';
+
 export const PAPER_REFERENCES = Object.freeze({
   trueskill: 'Herbrich, R., Minka, T., & Graepel, T. (2006). TrueSkill: A Bayesian skill rating system. NIPS.',
   qscore: 'Salesses, P., Schechtner, K., & Hidalgo, C. A. (2013). The collaborative image of the city. PLoS ONE, 8(7), e68400.',
@@ -40,6 +42,13 @@ export function isReverseCoded(surveyConfig, question) {
   return normalizeRecommendation(surveyConfig).items.some((item) => item.reverseCoded.includes(question?.name));
 }
 
+/** Reverse coding for analysis: a boolean, or a per-response predicate when only some conditions use reversed wording. */
+export function reverseCodingFor(surveyConfig, question) {
+  if (isReverseCoded(surveyConfig, question)) return true;
+  const reversed = new Set(reverseCodedConditions(question));
+  return reversed.size ? (row) => reversed.has(row?.survey_metadata?.condition) : false;
+}
+
 /** Questions pooled with this one after reverse-coding (e.g. "safe" and "less safe" framings). */
 export function pooledQuestions(surveyConfig, questionName) {
   const item = normalizeRecommendation(surveyConfig).items.find((it) => it.pool && it.questions.includes(questionName));
@@ -67,12 +76,22 @@ const METHOD_TEXT = {
   long_export: () => 'a long-format choice export (one row per comparison with participant covariates) for discrete choice models',
 };
 
+function questionsByName(surveyConfig) {
+  const out = {};
+  const walk = (els) => (els || []).forEach((e) => { if (e?.name) out[e.name] = e; walk(e?.elements); });
+  (surveyConfig?.pages || []).forEach((p) => walk(p.elements));
+  return out;
+}
+
 export function describeRecommendation(surveyConfig) {
   const { items } = normalizeRecommendation(surveyConfig);
+  const byName = questionsByName(surveyConfig);
   const lines = items.map((it) => {
     const text = (METHOD_TEXT[it.method] || (() => it.method))(it);
     const qs = it.questions.length ? ` for ${it.questions.map((q) => `"${q}"`).join(', ')}` : '';
-    const rev = it.reverseCoded.length ? ` Reverse-coded: ${it.reverseCoded.join(', ')}.` : '';
+    const byCondition = it.questions.flatMap((q) => reverseCodedConditions(byName[q]).map((c) => `"${q}" under condition ${c}`));
+    const rev = (it.reverseCoded.length ? ` Reverse-coded: ${it.reverseCoded.join(', ')}.` : '')
+      + (byCondition.length ? ` Answers to the reversed wording were reverse-coded (${byCondition.join('; ')}) and pooled.` : '');
     const cite = it.citation ? ` (as in ${it.citation})` : '';
     return `Scores were derived as ${text}${qs}${cite}.${rev}`;
   });

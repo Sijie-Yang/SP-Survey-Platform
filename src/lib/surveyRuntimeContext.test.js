@@ -1,5 +1,6 @@
 import { Model } from 'survey-core';
 import {
+  reverseCodedConditions,
   applyRuntimeVariables, captureUrlParams, chooseCondition, normalizeConditions, resolveRuntimeContext, runtimeMetadata,
 } from './surveyRuntimeContext';
 import { buildResponsesWideCsv } from './responsesWideExport';
@@ -65,4 +66,16 @@ test('rating rateLabels map to native rateValues with numeric stored values', ()
   const q = normalizeBuilderQuestion({ type: 'rating', name: 'r', rateMin: 1, rateMax: 3, rateLabels: ['Low', 'Mid', 'High'] });
   expect(q.rateValues).toEqual([{ value: 1, text: 'Low' }, { value: 2, text: 'Mid' }, { value: 3, text: 'High' }]);
   expect(normalizeBuilderQuestion({ type: 'rating', name: 'r', rateLabels: ['a'] }).rateValues).toBeUndefined();
+});
+
+test('conditionVariants reword a question per condition', () => {
+  const json = { pages: [{ elements: [{ type: 'text', name: 'q', title: 'Looks safe?', conditionVariants: [{ condition: 'less', title: 'Looks less safe?', reverseCoded: true }] }] }] };
+  const m = new Model(json);
+  applyRuntimeVariables(m, { condition: 'less', urlParams: {} });
+  expect(m.getQuestionByName('q').title).toBe('Looks less safe?');
+  const other = new Model(json);
+  applyRuntimeVariables(other, { condition: 'more', urlParams: {} });
+  expect(other.getQuestionByName('q').title).toBe('Looks safe?');
+  expect(reverseCodedConditions(json.pages[0].elements[0])).toEqual(['less']);
+  expect(new Model(json).toJSON().pages[0].elements[0].conditionVariants).toEqual(json.pages[0].elements[0].conditionVariants);
 });

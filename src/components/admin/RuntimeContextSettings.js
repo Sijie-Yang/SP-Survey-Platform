@@ -1,21 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { TextField } from '@mui/material';
+import { Box, Button, IconButton, Stack, TextField, Typography } from '@mui/material';
+import { Add, DeleteOutline } from '@mui/icons-material';
 import { useRegion } from '../../contexts/RegionContext';
-import { captureParamNames, normalizeConditions } from '../../lib/surveyRuntimeContext';
+import { captureParamNames } from '../../lib/surveyRuntimeContext';
 
-const conditionsToText = (config) => normalizeConditions(config)
-  .map((c) => [c.id, c.label !== c.id ? c.label : '', c.weight !== 1 ? c.weight : ''].join(' | ').replace(/( \| )+$/, ''))
-  .join('\n');
+const ID_RE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 
-export function parseConditionsText(text) {
-  const list = String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [id, label, weight] = line.split('|').map((part) => part.trim());
-    const out = { id };
-    if (label) out.label = label;
-    if (Number(weight) > 0) out.weight = Number(weight);
-    return out;
+export function conditionIdFromLabel(label, taken = []) {
+  const base = String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, 'c_$1').slice(0, 30) || 'condition';
+  let id = base;
+  for (let i = 2; taken.includes(id); i += 1) id = `${base}_${i}`;
+  return id;
+}
+
+/** Rows → stored conditions; rows without a label are dropped, ids are kept stable once assigned. */
+export function rowsToConditions(rows) {
+  const taken = [];
+  const out = rows.filter((r) => String(r.label || '').trim()).map((r) => {
+    const id = ID_RE.test(r.id || '') && !taken.includes(r.id) ? r.id : conditionIdFromLabel(r.label, taken);
+    taken.push(id);
+    const c = { id, label: r.label.trim() };
+    if (r.weight && r.weight !== 1) c.weight = r.weight;
+    return c;
   });
-  return normalizeConditions({ conditions: list }).length > 1 ? list : undefined;
+  return out.length ? out : undefined;
 }
 
 export function parseUrlParamsText(text) {
@@ -23,31 +31,65 @@ export function parseUrlParamsText(text) {
   return names.length ? names : undefined;
 }
 
+const rowsFromConfig = (config) => (Array.isArray(config?.conditions) ? config.conditions : [])
+  .map((c) => (typeof c === 'string' ? { id: c, label: c } : { id: c?.id || '', label: c?.label || c?.id || '', weight: c?.weight }));
+
 /** Project-level between-participant conditions and URL parameter allow-list. */
 export default function RuntimeContextSettings({ config, onChange }) {
   const { language } = useRegion();
   const zh = language === 'zh';
-  const [conditionsText, setConditionsText] = useState(() => conditionsToText(config));
+  const [rows, setRows] = useState(() => rowsFromConfig(config));
   const [paramsText, setParamsText] = useState(() => captureParamNames(config).join(', '));
-  useEffect(() => { setConditionsText(conditionsToText(config)); }, [config?.conditions]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setRows(rowsFromConfig(config)); }, [config?.conditions]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setParamsText(captureParamNames(config).join(', ')); }, [config?.captureUrlParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const commit = (next) => {
+    setRows(next);
+    onChange('conditions', rowsToConditions(next));
+  };
+  const named = rows.filter((r) => String(r.label || '').trim()).length;
 
   return (
     <>
-      <TextField
-        fullWidth
-        multiline
-        minRows={2}
-        variant="outlined"
-        label={zh ? '被试间实验条件（可选）' : 'Between-participant conditions (optional)'}
-        value={conditionsText}
-        onChange={(e) => setConditionsText(e.target.value)}
-        onBlur={() => onChange('conditions', parseConditionsText(conditionsText))}
-        placeholder={'more_safe | More safe\nless_safe | Less safe'}
-        helperText={zh
-          ? '每行一个：id | 显示名 | 权重。至少两个才生效。每位新参与者分到已完成人数（按权重）最少的条件；可在题目显示条件里用 {sp_condition}。'
-          : 'One per line: id | label | weight. Needs at least two. Each new participant joins the condition with the fewest completed responses relative to its weight. Use {sp_condition} in visibility rules.'}
-      />
+      <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          {zh ? '实验条件（可选）' : 'Experimental conditions (optional)'}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          {zh
+            ? '每位参与者会被随机分到其中一个条件，各条件人数自动保持平衡。添加至少两个条件后，可以在题目设置里为每个条件写不同的题干。'
+            : 'Each participant is randomly assigned to one condition, keeping the groups balanced. With two or more conditions, each question can use different wording per condition (in question settings).'}
+        </Typography>
+        <Stack gap={1}>
+          {rows.map((row, i) => (
+            <Stack key={i} direction="row" gap={1} alignItems="center">
+              <TextField
+                size="small"
+                fullWidth
+                label={zh ? `条件 ${i + 1} 名称` : `Condition ${i + 1} name`}
+                value={row.label}
+                onChange={(e) => setRows(rows.map((r, j) => (j === i ? { ...r, label: e.target.value } : r)))}
+                onBlur={() => commit(rows)}
+                placeholder={i === 0 ? (zh ? '例如：正向措辞' : 'e.g. Positive wording') : (zh ? '例如：反向措辞' : 'e.g. Negative wording')}
+                helperText={row.id ? (zh ? `数据中记为 ${row.id}` : `Recorded as ${row.id}`) : ' '}
+              />
+              <IconButton aria-label={zh ? '删除条件' : 'Remove condition'} onClick={() => commit(rows.filter((_, j) => j !== i))} sx={{ mb: 2.5 }}>
+                <DeleteOutline />
+              </IconButton>
+            </Stack>
+          ))}
+          <Box>
+            <Button size="small" startIcon={<Add />} onClick={() => setRows([...rows, { id: '', label: '' }])}>
+              {zh ? '添加条件' : 'Add condition'}
+            </Button>
+          </Box>
+          {named === 1 && (
+            <Typography variant="caption" color="warning.main">
+              {zh ? '至少需要两个条件才会分组。' : 'Add at least two conditions to enable assignment.'}
+            </Typography>
+          )}
+        </Stack>
+      </Box>
       <TextField
         fullWidth
         variant="outlined"

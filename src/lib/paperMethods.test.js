@@ -8,6 +8,7 @@ import {
   evaluativeMap, annotationNotes, samePositionParticipants, spearman,
 } from './paperMethods';
 import { computeQuestionTrueSkill } from './trueskill';
+import { reverseCodingFor } from './analysisRecommendation';
 import { fQuantile, normalQuantile, tTwoSidedP } from './statDistributions';
 import { NO_PREFERENCE } from './choiceTie';
 
@@ -253,4 +254,12 @@ test('annotationBaseImage picks the most shown map', () => {
   const row = (url) => ({ responses: { liked: { answer: { shapes: [] }, shown_images: [url] } } });
   expect(annotationBaseImage([row('a.png'), row('b.png'), row('b.png')], 'liked')).toBe('b.png');
   expect(annotationBaseImage([], 'liked')).toBe('');
+});
+
+test('per-condition reverse coding flips only that condition', () => {
+  const row = (condition) => ({ survey_metadata: { condition }, responses: { q: { answer: 'a', shown_images: ['a', 'b'] } } });
+  const rev = reverseCodingFor({}, { name: 'q', conditionVariants: [{ condition: 'less', reverseCoded: true }] });
+  const out = pairwiseOutcomes([row('more'), row('less')], 'q', { reverseCoded: rev });
+  expect(out.map((o) => o.winner)).toEqual(['a', 'b']);
+  expect(out.map((o) => o.chosenPosition)).toEqual([0, 0]);
 });

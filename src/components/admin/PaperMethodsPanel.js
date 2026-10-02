@@ -15,7 +15,8 @@ import {
   responseGroups, robustStimulusStats, samePositionParticipants, scaleScores, splitHalfReliability,
   stimulusObservations, thresholdLabels, trueSkillScores, BFI10_KEY,
 } from '../../lib/paperMethods';
-import { isReverseCoded, pooledQuestions, recommendationsForQuestion } from '../../lib/analysisRecommendation';
+import { isReverseCoded, pooledQuestions, recommendationsForQuestion, reverseCodingFor } from '../../lib/analysisRecommendation';
+import { reverseCodedConditions } from '../../lib/surveyRuntimeContext';
 
 const PAIRWISE = new Set(['imagepicker', 'mediapicker']);
 const NUMERIC = new Set(['rating', 'imagerating', 'mediarating', 'slidergroup', 'imageslidergroup', 'mediaslidergroup',
@@ -113,7 +114,7 @@ function PairwiseMethods({ question, responses, surveyConfig, zh }) {
 
   const outcomes = useMemo(() => {
     const names = pooled ? pool : [question.name];
-    return names.flatMap((name) => pairwiseOutcomes(responses, name, { reverseCoded: isReverseCoded(surveyConfig, questionsByName[name] || { name }) }));
+    return names.flatMap((name) => pairwiseOutcomes(responses, name, { reverseCoded: reverseCodingFor(surveyConfig, questionsByName[name] || { name }) }));
   }, [responses, pooled, pool, question.name, surveyConfig, questionsByName]);
 
   const options = useMemo(() => (method === 'qscore' ? { minComparisons } : { tieHandling, runs, seed: 1 }), [method, minComparisons, tieHandling, runs]);
@@ -122,7 +123,7 @@ function PairwiseMethods({ question, responses, surveyConfig, zh }) {
     if (method === 'share') {
       const names = pooled ? pool : [question.name];
       const merged = new Map();
-      names.forEach((name) => imageChoiceShares(responses, name, { reverseCoded: isReverseCoded(surveyConfig, questionsByName[name] || { name }) }).forEach((r) => {
+      names.forEach((name) => imageChoiceShares(responses, name, { reverseCoded: reverseCodingFor(surveyConfig, questionsByName[name] || { name }) }).forEach((r) => {
         const m = merged.get(r.imageKey) || { imageKey: r.imageKey, shown: 0, chosen: 0 };
         m.shown += r.shown; m.chosen += r.chosen; merged.set(r.imageKey, m);
       }));
@@ -149,7 +150,7 @@ function PairwiseMethods({ question, responses, surveyConfig, zh }) {
     image: r.imageKey, score: r.score, scaled: r.scaled ?? '', wins: r.wins ?? '', losses: r.losses ?? '', ties: r.ties ?? '',
     comparisons: r.comparisons ?? r.shown ?? '', mu_sd_across_runs: r.muSd ?? '', sigma: r.sigma ?? '', sufficient: r.sufficient ?? '', label: r.label ?? '',
   })), `${question.name}_${method}_scores.csv`);
-  const exportLong = () => csv((pooled ? pool : [question.name]).flatMap((name) => longFormatRows(responses, surveyConfig, name, { reverseCoded: isReverseCoded(surveyConfig, questionsByName[name] || { name }) })), `${question.name}_long_format.csv`);
+  const exportLong = () => csv((pooled ? pool : [question.name]).flatMap((name) => longFormatRows(responses, surveyConfig, name, { reverseCoded: reverseCodingFor(surveyConfig, questionsByName[name] || { name }) })), `${question.name}_long_format.csv`);
 
   return (
     <Stack gap={2}>
@@ -184,6 +185,7 @@ function PairwiseMethods({ question, responses, surveyConfig, zh }) {
         {pool.length > 1 && <FormControlLabel control={<Switch checked={pooled} onChange={(e) => setPooled(e.target.checked)} />} label={`${zh ? '合并' : 'Pool'} ${pool.join(' + ')}`} />}
       </Stack>
       {isReverseCoded(surveyConfig, question) && <Alert severity="info">{zh ? '本题为反向措辞：被选中的图计为输家。' : 'Reverse-coded wording: the chosen image counts as the loser.'}</Alert>}
+      {reverseCodedConditions(question).length > 0 && <Alert severity="info">{zh ? `条件 ${reverseCodedConditions(question).join('、')} 使用反向措辞：这些参与者选中的图计为输家，再与其他条件合并。可用"分组比较 → 实验条件"分别查看。` : `Condition ${reverseCodedConditions(question).join(', ')} uses reversed wording: the chosen image counts as the loser before pooling with the other conditions. Use group comparison → Condition to see them separately.`}</Alert>}
       {scale !== 'none' && <Typography variant="caption">{zh ? '最小–最大缩放只相对于当前样本，不能跨研究比较。' : 'Min–max scaling is relative to this sample and not comparable across studies.'}</Typography>}
 
       <ScoreTable rows={rows} columns={[

@@ -4,6 +4,7 @@ import ConfirmDialog from '../layout/ConfirmDialog';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import { useRegion } from '../../contexts/RegionContext';
 import { validateQuestionSettings } from '../../lib/designProtocol/validate';
+import { conditionVariants, normalizeConditions } from '../../lib/surveyRuntimeContext';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Dialog,
@@ -329,6 +330,62 @@ function TrialCountField({ question, onChange }) {
       inputProps={{ min: 1, max: TRIAL_COUNT_MAX, step: 1 }}
       sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
     />
+  );
+}
+
+const REVERSIBLE_TYPES = new Set(['imagepicker', 'mediapicker']);
+
+/** One row per experimental condition: optional reworded title and reverse coding. */
+function ConditionWordingField({ question, onChange, surveyConfig }) {
+  const { tr } = useQuestionEditorText();
+  const conditions = normalizeConditions(surveyConfig);
+  const variants = conditionVariants(question);
+  if (conditions.length < 2 && !variants.length) return null;
+  const ids = [...conditions.map((c) => c.id), ...variants.map((v) => v.condition).filter((id) => !conditions.some((c) => c.id === id))];
+  const labelOf = (id) => conditions.find((c) => c.id === id)?.label || id;
+  const reversible = REVERSIBLE_TYPES.has(question.type);
+  const update = (id, patch) => {
+    const byId = Object.fromEntries(variants.map((v) => [v.condition, v]));
+    byId[id] = { ...(byId[id] || { condition: id }), ...patch };
+    const next = ids.map((cid) => byId[cid]).filter(Boolean).map((v) => {
+      const out = { condition: v.condition };
+      if (typeof v.title === 'string' && v.title.trim()) out.title = v.title;
+      if (v.reverseCoded) out.reverseCoded = true;
+      return out;
+    }).filter((v) => v.title || v.reverseCoded);
+    onChange('conditionVariants', next.length ? next : undefined);
+  };
+  return (
+    <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{tr('Wording per condition')}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        {tr('Participants see the wording for their condition. Leave a row empty to use the question title above. Answers are saved under this one question, with the condition recorded.')}
+      </Typography>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        {ids.map((id) => {
+          const v = variants.find((x) => x.condition === id) || {};
+          return (
+            <Box key={id} sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+              <TextField
+                size="small"
+                sx={{ flex: '1 1 320px' }}
+                label={labelOf(id)}
+                value={v.title || ''}
+                placeholder={question.title || ''}
+                onChange={(e) => update(id, { title: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+              />
+              {reversible && (
+                <FormControlLabel
+                  control={<Switch size="small" checked={!!v.reverseCoded} onChange={(e) => update(id, { reverseCoded: e.target.checked })} />}
+                  label={tr('Reverse-code (wording asks for the opposite)')}
+                />
+              )}
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
   );
 }
 
@@ -1321,6 +1378,7 @@ export default function QuestionEditor({
                 }
                 label={tr("Required — participants must answer to continue")}
               />
+              <ConditionWordingField question={editedQuestion} onChange={handleQuestionChange} surveyConfig={surveyConfig} />
 
               {editedQuestion.type === 'boolean' && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

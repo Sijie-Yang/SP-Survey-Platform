@@ -122,3 +122,13 @@ test('validation explains invalid scales in Chinese and preserves duplicate IDs 
   expect(screen.getByRole('button', { name: '保存题目' })).toBeDisabled();
   expect(questionSettingErrorText('choices: duplicate ID "original_id".', 'zh')).toBe('选项中存在重复标识“original_id”。');
 });
+
+test('wording per condition edits conditionVariants on the same question', () => {
+  const surveyConfig = { conditions: [{ id: 'safe', label: '正向' }, { id: 'less_safe', label: '反向' }] };
+  render(<RegionProvider><QuestionEditor question={{ ...base, type: 'imagepicker', imageCount: 2 }} currentProject={project} surveyConfig={surveyConfig} onSave={jest.fn()} onCancel={jest.fn()} /></RegionProvider>);
+  expect(screen.getByText('按实验条件显示不同题干')).toBeInTheDocument();
+  const reversed = screen.getByLabelText('反向');
+  fireEvent.change(reversed, { target: { value: 'Which place looks less safe?' } });
+  expect(reversed).toHaveValue('Which place looks less safe?');
+  expect(screen.getAllByLabelText('反向计分（措辞是反着问的）')).toHaveLength(2);
+});

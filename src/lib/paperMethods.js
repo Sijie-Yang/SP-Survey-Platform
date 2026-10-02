@@ -120,6 +120,7 @@ export function responseUrlParam(row, name) {
 // ─── Pairwise outcomes (ties, legacy *_equal booleans, reverse coding) ───────
 
 /**
+ * reverseCoded: boolean, or (row) => boolean for per-condition wording.
  * One record per compared pair. Two-image trials keep ties; larger sets expand
  * into dependent decisive pairs (selected beats each non-selected).
  */
@@ -131,6 +132,7 @@ export function pairwiseOutcomes(responses, questionName, { reverseCoded = false
     const legacyTie = equalName && units.length === 1 && normalizeBooleanAnswer(rowAnswer(row, equalName)) === 1;
     const participant = participantKey(row, rowIndex);
     const condition = responseCondition(row);
+    const reversed = typeof reverseCoded === 'function' ? reverseCoded(row) : reverseCoded;
     units.forEach((unit) => {
       const shown = shownKeysOf(unit);
       if (shown.length < 2) return;
@@ -145,8 +147,8 @@ export function pairwiseOutcomes(responses, questionName, { reverseCoded = false
         return;
       }
       matchesFromImagePickerAnswer(unit.answer, unit.shown_images).forEach(({ winner, loser }) => {
-        const w = reverseCoded ? loser : winner;
-        const l = reverseCoded ? winner : loser;
+        const w = reversed ? loser : winner;
+        const l = reversed ? winner : loser;
         out.push({
           ...base, a: shown[0], b: shown[1], tie: false, winner: w, loser: l,
           chosenPosition: shown.length === 2 ? shown.indexOf(winner) : null,
@@ -635,6 +637,7 @@ export function imageChoiceShares(responses, questionName, { reverseCoded = fals
   const stats = new Map();
   const get = (k) => { if (!stats.has(k)) stats.set(k, { shown: 0, chosen: 0 }); return stats.get(k); };
   (responses || []).forEach((row) => {
+    const reversed = typeof reverseCoded === 'function' ? reverseCoded(row) : reverseCoded;
     expandQuestionAnswerUnits(row, questionName, { requireAnswer: true }).forEach((unit) => {
       const shown = shownKeysOf(unit);
       if (shown.length < 2) return;
@@ -642,7 +645,7 @@ export function imageChoiceShares(responses, questionName, { reverseCoded = fals
       if (isNoPreference(unit.answer)) return;
       const selected = answerToSelectedKeys(unit.answer, unit.shown_images);
       if (!selected.length) return;
-      const chosen = reverseCoded ? shown.filter((k) => !selected.includes(k)) : selected;
+      const chosen = reversed ? shown.filter((k) => !selected.includes(k)) : selected;
       chosen.forEach((k) => { get(k).chosen += 1; });
     });
   });
@@ -681,7 +684,8 @@ export function longFormatRows(responses, surveyConfig, questionName, { reverseC
   const paramNames = [...new Set((responses || []).flatMap((r) => Object.keys(r?.survey_metadata?.url_params || {})))];
   const rows = [];
   (responses || []).forEach((row, rowIndex) => {
-    const outs = pairwiseOutcomes([row], questionName, { reverseCoded });
+    const reversed = typeof reverseCoded === 'function' ? reverseCoded(row) : reverseCoded;
+    const outs = pairwiseOutcomes([row], questionName, { reverseCoded: reversed });
     const trials = row?.responses?.[questionName]?.trials;
     const extra = {};
     covariates.forEach((q) => { const v = rowAnswer(row, q.name); extra[q.name] = Array.isArray(v) ? v.join('|') : (v ?? ''); });
@@ -704,7 +708,7 @@ export function longFormatRows(responses, surveyConfig, questionName, { reverseC
         chosen_position: o.chosenPosition == null ? '' : (o.chosenPosition === 0 ? 'left' : 'right'),
         response_ms: Number.isFinite(shownAt) && Number.isFinite(answeredAt) ? answeredAt - shownAt : '',
         condition: o.condition ?? '',
-        reverse_coded: reverseCoded ? 1 : 0,
+        reverse_coded: reversed ? 1 : 0,
         ...extra,
       });
     });

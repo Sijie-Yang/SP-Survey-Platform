@@ -332,21 +332,19 @@ def kang_2023():
     return template(
         '2023-kang-assessing', 'Safety Perception and Question Framing (Stockholm)', 'Kang et al.', 2023,
         '10.1016/j.landurbplan.2023.104768',
-        'Participants are randomly assigned to one of two framings ("looks safe" or "looks less safe") and compare Stockholm street views; "less safe" answers are reverse-coded before pooling.',
+        'Participants are randomly assigned to one of two framings and compare Stockholm street views. It is one question whose wording depends on the condition ("looks safe" or "looks less safe"); "less safe" answers are reverse-coded before pooling.',
         ['The original interface was in Swedish; this template is in English only.',
          'Researchers supply their own street-view images.'],
         'Street Safety Perception', 'Tell us where you live, then compare pairs of street views.',
         [page('page_residence', 'About you', text('neighbourhood', 'Which neighbourhood do you live in?', required=True)),
          page('page_choice', None,
-              picker('safe', 'Which place looks safe?', 10, visibleIf="{sp_condition} = 'safe'"),
-              picker('less_safe', 'Which place looks less safe?', 10, visibleIf="{sp_condition} = 'less_safe'"))],
+              picker('safety', 'Which place looks safe?', 10,
+                     conditionVariants=[{'condition': 'less_safe', 'title': 'Which place looks less safe?', 'reverseCoded': True}]))],
         {'citation': 'Kang et al. 2023', 'items': [
-            {'questions': ['safe', 'less_safe'], 'method': 'trueskill_pairwise', 'tieHandling': 'exclude', 'scale': '0-10',
-             'reverseCoded': ['less_safe'], 'pool': True, 'labels': {'safe': 'Looks safe', 'less_safe': 'Looks less safe (reversed)'}},
+            {'questions': ['safety'], 'method': 'trueskill_pairwise', 'tieHandling': 'exclude', 'scale': '0-10', 'groupBy': ['condition']},
         ]},
         folders=['Stockholm'],
-        conditions=[{'id': 'safe', 'label': 'Framing: looks safe', 'weight': 1},
-                    {'id': 'less_safe', 'label': 'Framing: looks less safe', 'weight': 1}],
+        conditions=[{'id': 'safe', 'label': 'Looks safe'}, {'id': 'less_safe', 'label': 'Looks less safe'}],
     )
 
 
