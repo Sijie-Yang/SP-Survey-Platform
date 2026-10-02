@@ -26,8 +26,12 @@ export default function QuestionParticipantPreview({ question, currentProject, s
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
   const conditions = normalizeConditions(surveyConfig);
   const showConditions = conditions.length > 1 && conditionVariants(question).length > 0;
-  const [previewCondition, setPreviewCondition] = useState(conditions[0]?.id || '');
-  const activeCondition = showConditions && conditions.some((c) => c.id === previewCondition) ? previewCondition : (conditions[0]?.id || '');
+  const conditionIds = conditions.map((c) => c.id).join('|');
+  // Like a participant: each load or reset draws a random condition.
+  const activeCondition = useMemo(() => {
+    const ids = conditionIds ? conditionIds.split('|') : [];
+    return showConditions && ids.length ? ids[Math.floor(Math.random() * ids.length)] : '';
+  }, [showConditions, conditionIds, resetCount]); // eslint-disable-line react-hooks/exhaustive-deps
   const iframeRef = useRef(null);
   const sequence = useRef(0);
   // Watch the full draft so new settings (including allowTie/tieLabel) cannot be omitted.
@@ -112,11 +116,6 @@ export default function QuestionParticipantPreview({ question, currentProject, s
         <ToggleButton value="desktop"><DesktopWindowsIcon fontSize="small" sx={{ mr: 0.75 }} />{zh ? 'PC 端' : 'Desktop'}</ToggleButton>
         <ToggleButton value="mobile"><SmartphoneIcon fontSize="small" sx={{ mr: 0.75 }} />{zh ? '手机端' : 'Mobile'}</ToggleButton>
       </ToggleButtonGroup>
-      {showConditions && (
-        <ToggleButtonGroup size="small" exclusive value={activeCondition} onChange={(_, next) => next && setPreviewCondition(next)} aria-label={zh ? '预览实验条件' : 'Preview condition'}>
-          {conditions.map((c) => <ToggleButton key={c.id} value={c.id}>{c.label}</ToggleButton>)}
-        </ToggleButtonGroup>
-      )}
       <Typography variant="caption" color="text.secondary">{viewport.width} × {viewport.height} · {Math.round(scale * 100)}%</Typography>
       <Stack direction="row" spacing={0.5} sx={{ ml: 'auto' }}>
         <Button size="small" startIcon={<RestartAltIcon />} onClick={() => setResetCount(count => count + 1)}
@@ -129,6 +128,13 @@ export default function QuestionParticipantPreview({ question, currentProject, s
     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
       {zh ? '按设备实际宽度排版，缩放仅用于适应此面板；可在预览内滚动和试答。修改设置会重置试答，不保存结果。' : 'Rendered at device width, then scaled to fit. Scroll and try answers inside; editing resets preview answers. Results are not saved.'}
     </Typography>
+    {showConditions && (
+      <Typography variant="caption" color="info.main" sx={{ display: 'block', mb: 1 }}>
+        {zh
+          ? `实验条件随机抽取，本次为「${conditions.find((c) => c.id === activeCondition)?.label || activeCondition}」。点「重置预览」重新抽取。`
+          : `Condition drawn at random, like a participant: ${conditions.find((c) => c.id === activeCondition)?.label || activeCondition}. Reset preview to draw again.`}
+      </Typography>
+    )}
     {error && <Alert severity="warning" sx={{ mb: 1 }}>{error}</Alert>}
     <Box ref={setHost} sx={{ width: '100%', minWidth: 0, bgcolor: 'grey.100', borderRadius: 2, overflow: 'hidden', position: 'relative', display: error ? 'none' : 'block' }}>
       <Box sx={{ width: viewport.width * scale, height: viewport.height * scale, mx: 'auto' }}>

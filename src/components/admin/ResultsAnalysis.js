@@ -144,6 +144,7 @@ import { deleteSurveyResponse, responseRecordKey } from '../../lib/surveyRespons
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
 import PaperMethodsPanel from './PaperMethodsPanel';
+import ConditionWordingSummary from './ConditionWordingSummary';
 import { tf } from '../../contexts/adminI18n';
 import {
   adaptResponsesForSkillField,
@@ -2398,6 +2399,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.3 }}>
             {question.title || question.name}
           </Typography>
+          <ConditionWordingSummary question={question} surveyConfig={surveyConfig} responses={allResponses} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Chip
               icon={typeIcon(type)}
