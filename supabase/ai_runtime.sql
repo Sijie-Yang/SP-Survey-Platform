@@ -148,6 +148,9 @@ ALTER TABLE public.user_ai_settings
 ALTER TABLE public.user_ai_settings
   ADD COLUMN IF NOT EXISTS silicon_reasoning_effort TEXT;
 
+ALTER TABLE public.user_ai_settings
+  ADD COLUMN IF NOT EXISTS review_settings JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 ALTER TABLE public.ai_sessions
   ADD COLUMN IF NOT EXISTS reasoning_effort TEXT;
 
@@ -164,7 +167,7 @@ ALTER TABLE public.ai_sessions
 
 ALTER TABLE public.ai_sessions
   ADD CONSTRAINT ai_sessions_assistant_mode_check
-  CHECK (assistant_mode IN ('agent', 'generate', 'adjust', 'question'));
+  CHECK (assistant_mode IN ('agent', 'generate', 'adjust', 'question', 'review'));
 
 ALTER TABLE public.ai_runs
   DROP CONSTRAINT IF EXISTS ai_runs_status_check;

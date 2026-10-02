@@ -5,13 +5,15 @@ import {
 } from './applySchema.mjs';
 
 export const DEFAULT_ASSISTANT_MODE = 'agent';
-export const ASSISTANT_MODES = Object.freeze(['agent', 'generate', 'adjust', 'question']);
+export const ASSISTANT_MODES = Object.freeze(['agent', 'generate', 'adjust', 'question', 'review']);
 
 const READ_ONLY_TOOLS = new Set([
   'survey_capabilities',
   'survey_get_draft',
   'survey_validate',
   'survey_preview_urls',
+  'survey_answerability',
+  'survey_preflight',
 ]);
 
 const MODE_PROMPTS = Object.freeze({
@@ -23,6 +25,8 @@ Create a complete, usable survey. Load generate capabilities and the current dra
 Change only what the user requested and preserve every unrelated field. Use incremental survey_apply_operations operations. Use replaceConfig only when the user explicitly requests a complete redesign, while still retaining any unrelated project data that should survive the redesign.`,
   question: `Assistant mode: Question.
 Answer the user's question using read-only survey tools when useful. You cannot mutate the draft, and must not claim that you saved or changed it.`,
+  review: `Assistant mode: Review.
+A panel of reviewer roles rates the survey and comments in rounds. Reviewers are read-only. Revisions are proposed as design-protocol operations and applied only through the validated apply path.`,
 });
 
 export function normalizeAssistantMode(value) {
@@ -56,8 +60,8 @@ export function getAssistantModePolicy(value, {
   return {
     mode,
     systemPrompt: MODE_PROMPTS[mode],
-    readOnly: mode === 'question',
-    requireDraftChange: mode !== 'question' && Boolean(goalRequiresDraftChange),
+    readOnly: mode === 'question' || mode === 'review',
+    requireDraftChange: mode !== 'question' && mode !== 'review' && Boolean(goalRequiresDraftChange),
     allowReplaceConfig: mode !== 'adjust' || explicitRedesign,
     denyPublish: Boolean(denyPublish),
     responseIntent: mode === 'agent' ? null : mode,

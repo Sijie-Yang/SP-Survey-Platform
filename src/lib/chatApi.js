@@ -49,6 +49,8 @@ export async function sendChatMessage(
         onStarted: extras?.onStarted,
         onSnapshot: extras?.onSnapshot,
         editorContext: extras?.editorContext || null,
+        review: extras?.review || null,
+        language: extras?.language || null,
       });
     }
 

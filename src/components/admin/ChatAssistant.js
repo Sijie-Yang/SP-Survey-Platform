@@ -79,6 +79,8 @@ import {
   writeResultFromTools,
 } from '../../hooks/surveyAssistantUtils';
 import ChatMarkdown from './ChatMarkdown';
+import { ReviewCard, ReviewComposerOptions } from './ReviewPanel';
+import { reviewRoleEmoji, reviewRoleLabel } from '../../lib/reviewMode';
 
 function messageTools(msg) {
   const tools = msg?.tools || msg?.metadata?.tools;
@@ -127,6 +129,14 @@ function localizeLoadingStatus(status, t) {
   if (!status) return '';
   const using = String(status).match(/^Using (.+)[.…]$/);
   if (using) return (t.aiSidebarStatusUsingTool || 'Using {tool}…').replace('{tool}', using[1]);
+  const reviewRevising = String(status).match(/^Review round (\d+): revising…$/);
+  if (reviewRevising) return (t.aiReviewStatusRevising || status).replace('{round}', reviewRevising[1]);
+  const reviewRole = String(status).match(/^Review round (\d+): ([a-z]+)…$/);
+  if (reviewRole) {
+    return (t.aiReviewStatusRound || status)
+      .replace('{round}', reviewRole[1])
+      .replace('{role}', reviewRoleLabel(reviewRole[2], t));
+  }
   const step = String(status).match(/^Working on step (\d+)[.…]$/);
   if (step) return (t.aiSidebarStatusStep || 'Working on step {step}…').replace('{step}', step[1]);
   const map = {
@@ -214,6 +224,13 @@ export default function ChatAssistant({
   onClearEditorFocus,
   steerTarget = 'next-step',
   onSteerTargetChange,
+  reviewOptions = null,
+  reviewSettings = null,
+  onReviewSettingsChange,
+  reviewEstimate = null,
+  reviewApplying = '',
+  onReviewOptionsChange,
+  onApplyReview,
 }) {
   const { t } = useRegion();
   const navigate = useNavigate();
@@ -478,11 +495,12 @@ export default function ChatAssistant({
     }
   }, [currentProject?.id]);
   
+  const reviewActive = Boolean(isPlatformMode && assistantMode === 'review' && reviewSettings?.enabled !== false);
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (isLoading && userMessage.trim()) onSteerMessage?.();
-      else if (!sendBlocked && userMessage.trim()) onSendMessage();
+      else if (!sendBlocked && (userMessage.trim() || reviewActive)) onSendMessage();
     }
   };
   
@@ -518,7 +536,9 @@ export default function ChatAssistant({
     ? (t.aiSidebarSteerPlaceholder || 'Add an instruction to the running Agent…')
     : blockReason === 'no-project'
     ? t.aiSidebarSelectProject
-    : (apiKeyValid && !routeUnavailable ? t.aiSidebarComposerPlaceholder : t.aiSidebarComposerDisabled);
+    : (apiKeyValid && !routeUnavailable
+      ? (reviewActive ? (t.aiReviewPlaceholder || t.aiSidebarComposerPlaceholder) : t.aiSidebarComposerPlaceholder)
+      : t.aiSidebarComposerDisabled);
 
   const emptyTitle = t.aiSidebarEmptyTitle;
   const emptyBody = blockReason === 'no-project'
@@ -791,6 +811,7 @@ export default function ChatAssistant({
                                         >
                                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
                                             <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                                              {tool.review?.role ? `${reviewRoleEmoji(tool.review.role)} ${reviewRoleLabel(tool.review.role, t)} · ` : ''}
                                               {tool.name || t.aiSidebarToolUnknown}
                                               {tool.repeatCount > 1 ? ` ×${tool.repeatCount}` : ''}
                                             </Typography>
@@ -844,6 +865,16 @@ export default function ChatAssistant({
                                   </AccordionDetails>
                                 </Accordion>
                               )}
+                              {!isUser && msg.metadata?.review ? (
+                                <ReviewCard
+                                  review={msg.metadata.review}
+                                  runId={msg.runId || msg.metadata.review.runId}
+                                  t={t}
+                                  isLoading={isLoading}
+                                  applying={reviewApplying}
+                                  onApply={onApplyReview}
+                                />
+                              ) : null}
                               {!isUser && msg.metadata?.questionModeWriteRefused && msg.metadata?.pendingWrite ? (
                                 <Button
                                   size="small"
@@ -912,9 +943,9 @@ export default function ChatAssistant({
                                     {msg.content}
                                   </Typography>
                                 ) : null
-                              ) : (
+                              ) : (msg.metadata?.review ? null : (
                                 <ChatMarkdown>{msg.content}</ChatMarkdown>
-                              )}
+                              ))}
                             </>
                           );
                         })()}
@@ -1022,7 +1053,7 @@ export default function ChatAssistant({
                 size="small"
                 variant="text"
                 color="warning"
-                onClick={onRevertAiChange}
+                onClick={() => onRevertAiChange?.()}
                 sx={{ borderRadius: 999, textTransform: 'none' }}
               >
                 {t.aiSidebarUndo}
@@ -1055,6 +1086,15 @@ export default function ChatAssistant({
             },
           }}
         >
+          {reviewActive ? (
+            <ReviewComposerOptions
+              t={t}
+              options={reviewOptions}
+              estimate={reviewEstimate}
+              onChange={onReviewOptionsChange}
+              disabled={isLoading}
+            />
+          ) : null}
           <TextField
             fullWidth
             multiline
@@ -1100,6 +1140,9 @@ export default function ChatAssistant({
                   <MenuItem value="generate">{t.aiSidebarModeGenerate}</MenuItem>
                   <MenuItem value="adjust">{t.aiSidebarModeAdjust}</MenuItem>
                   <MenuItem value="question">{t.aiSidebarModeQuestion}</MenuItem>
+                  {reviewSettings?.enabled !== false || assistantMode === 'review' ? (
+                    <MenuItem value="review">{t.aiSidebarModeReview || 'Review'}</MenuItem>
+                  ) : null}
                 </Select>
               )}
               {isPlatformMode && modelOptions.length > 0 ? (
@@ -1184,7 +1227,7 @@ export default function ChatAssistant({
                 <IconButton
                   color={isLoading ? 'error' : 'primary'}
                   onClick={isLoading ? onCancelRun : onSendMessage}
-                  disabled={isLoading ? !onCancelRun : (sendBlocked || !userMessage.trim())}
+                  disabled={isLoading ? !onCancelRun : (sendBlocked || (!userMessage.trim() && !reviewActive))}
                   aria-label={isLoading ? (t.aiSidebarStop || 'Stop') : t.aiSidebarSend}
                   sx={{
                     width: 36,
@@ -1289,6 +1332,8 @@ export default function ChatAssistant({
         isPlatformMode={isPlatformMode}
         assistantMode={assistantMode}
         onAssistantModeChange={onAssistantModeChange}
+        reviewSettings={reviewSettings}
+        onReviewSettingsChange={onReviewSettingsChange}
         onCredentialsChange={onCredentialsChange}
         codexConnected={codexConnected}
         codexStatusLoading={codexStatusLoading}
