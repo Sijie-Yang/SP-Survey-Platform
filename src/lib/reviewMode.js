@@ -2,7 +2,7 @@
 
 export const REVIEW_ROLES = Object.freeze([
   { id: 'scientist', emoji: '🔬' },
-  { id: 'participant', emoji: '👤' },
+  { id: 'participant', emoji: '🧑' },
   { id: 'planner', emoji: '🏙️' },
   { id: 'psychologist', emoji: '🧠' },
   { id: 'analyst', emoji: '📊' },

@@ -377,6 +377,7 @@ export function ReviewCard({ review, t, runId, isLoading = false, applying = '',
 /** Per-user defaults in Assistant settings; the composer can override them for one run. */
 export function ReviewSettingsControls({ t, settings, onChange }) {
   const [status, setStatus] = React.useState('');
+  const idPrefix = React.useId();
   if (!settings) return null;
   const save = async (patch) => {
     setStatus('saving');
@@ -389,10 +390,11 @@ export function ReviewSettingsControls({ t, settings, onChange }) {
     if (!selected && settings.roles.length >= settings.maxRoles) return;
     save({ roles: selected ? settings.roles.filter((role) => role !== id) : [...settings.roles, id] });
   };
-  const field = (label, value, options, onSelect) => (
+  const field = (key, label, value, options, onSelect) => (
     <FormControl size="small" sx={{ minWidth: 150 }} disabled={!settings.enabled}>
-      <InputLabel>{label}</InputLabel>
+      <InputLabel id={`${idPrefix}-${key}`}>{label}</InputLabel>
       <Select
+        labelId={`${idPrefix}-${key}`}
         label={label}
         value={value}
         onChange={(event) => onSelect(event.target.value)}
@@ -438,14 +440,14 @@ export function ReviewSettingsControls({ t, settings, onChange }) {
           </Stack>
         </Box>
         <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap', rowGap: 1.5 }}>
-          {field(t.aiReviewMethod || 'Method', settings.method, [
+          {field('method', t.aiReviewMethod || 'Method', settings.method, [
             { value: 'linear', label: t.aiReviewMethodLinear || 'Linear individual review' },
             { value: 'group', label: t.aiReviewMethodGroup || 'Group discussion' },
           ], (method) => save({ method }))}
-          {field(t.aiReviewMaxRounds || 'Max rounds', settings.maxRounds, numbers([1, 2, 3, 4, 5]), (maxRounds) => save({ maxRounds }))}
-          {field(t.aiReviewThreshold || 'Accept at', settings.threshold, numbers([5, 6, 7, 8, 9, 10], '/10'), (threshold) => save({ threshold }))}
-          {field(t.aiReviewMaxRoles || 'Reviewer cap', settings.maxRoles, numbers([1, 2, 3, 4, 5]), (maxRoles) => save({ maxRoles, roles: settings.roles.slice(0, maxRoles) }))}
-          {field(t.aiReviewApplyMode || 'Revisions', settings.applyMode, [
+          {field('rounds', t.aiReviewMaxRounds || 'Max rounds', settings.maxRounds, numbers([1, 2, 3, 4, 5]), (maxRounds) => save({ maxRounds }))}
+          {field('threshold', t.aiReviewThreshold || 'Accept at', settings.threshold, numbers([5, 6, 7, 8, 9, 10], '/10'), (threshold) => save({ threshold }))}
+          {field('cap', t.aiReviewMaxRoles || 'Reviewer cap', settings.maxRoles, numbers([1, 2, 3, 4, 5]), (maxRoles) => save({ maxRoles, roles: settings.roles.slice(0, maxRoles) }))}
+          {field('apply', t.aiReviewApplyMode || 'Revisions', settings.applyMode, [
             { value: 'review', label: t.aiReviewApplyModeReview || 'Review only, do not apply' },
             { value: 'apply', label: t.aiReviewApplyModeApply || 'Apply each round' },
           ], (applyMode) => save({ applyMode }))}

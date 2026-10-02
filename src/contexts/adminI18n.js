@@ -1302,7 +1302,7 @@ export const adminI18n = {
     aiSettingsAdd: '添加',
     aiSettingsAdvancedTitle: '高级',
     aiSettingsAdvancedIntro: '实验性与维护功能。大多数研究无需调整。',
-    aiSettingsMultiAgent: '多智能体审查',
+    aiSettingsMultiAgent: '多智能体评审',
     aiSettingsExperimental: '实验性',
     aiSettingsMultiAgentUnavailable: '「评审」模式让多个评审角色分轮评审当前问卷并提出修订。可在此设置默认值。',
     aiSettingsMultiAgentToggle: '使用多个专家提示审查生成的问卷',
