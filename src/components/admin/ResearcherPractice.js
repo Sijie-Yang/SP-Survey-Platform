@@ -59,7 +59,7 @@ import {
 } from '../../lib/trialNavigation';
 import { enrichSurveyResponses } from '../../lib/enrichSurveyResponses';
 import { resolveSkillQuestions, syncInjectedMediaOntoSurveyModel } from '../../lib/surveyMediaInjection';
-import { resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
+import { adaptQuestionForPreviewLibrary, resolveMediaPoolForPreview } from '../../lib/previewMediaLibrary';
 import { applySurveyLocale } from '../../lib/surveyLocale';
 import { AdminPageHeader } from './AdminPageLayout';
 import { useRegion } from '../../contexts/RegionContext';
@@ -654,7 +654,10 @@ export default function ResearcherPractice({
         pages: [{ elements: [JSON.parse(JSON.stringify(selectedQuestion))] }],
       };
       await resolveSkillQuestions(questionConfig);
-      const resolvedQuestion = questionConfig.pages[0].elements[0];
+      const fromPreviewLibrary = !(currentProject?.preloadedImages || []).length && mediaPool.length > 0;
+      const resolvedQuestion = fromPreviewLibrary
+        ? adaptQuestionForPreviewLibrary(questionConfig.pages[0].elements[0], mediaPool)
+        : questionConfig.pages[0].elements[0];
       const built = buildSingleQuestionSurvey({
         question: resolvedQuestion,
         projectImages: mediaPool,

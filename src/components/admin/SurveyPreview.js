@@ -21,7 +21,7 @@ import { getTrialCount } from '../../lib/trialNavigation';
 import { applySurveyLocale } from '../../lib/surveyLocale';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
-import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
+import { adaptSurveyForPreviewLibrary, resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
 import { markGuideProgress } from '../../lib/adminGuide';
 import { applyRuntimeVariables, normalizeConditions } from '../../lib/surveyRuntimeContext';
 
@@ -97,11 +97,12 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
         registerImageMatrixWidget();
         registerAllExtendedWidgets();
         
-        const configCopy = JSON.parse(JSON.stringify(config));
+        let configCopy = JSON.parse(JSON.stringify(config));
         await resolveSkillQuestions(configCopy);
         const mediaContext = await resolvePreviewMediaContext(currentProject || {});
         const mediaPool = mediaContext.images;
         const fromPreviewLibrary = mediaContext.fromPreviewLibrary;
+        if (fromPreviewLibrary) configCopy = adaptSurveyForPreviewLibrary(configCopy, mediaPool);
         setUsingPreviewLibrary(fromPreviewLibrary);
         const folderHost = fromPreviewLibrary
           ? { ...currentProject, imageDatasetConfig: mediaContext.imageDatasetConfig, config: configCopy }

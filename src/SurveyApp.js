@@ -522,11 +522,12 @@ export default function SurveyApp() {
         if (!mediaPool.length && !adminConfig?._spPublishedVersion) {
           setLoadingMessage('Loading preview media library…');
           try {
-            const { listPreviewMedia } = await import('./lib/previewMediaLibrary');
+            const { adaptSurveyForPreviewLibrary, listPreviewMedia } = await import('./lib/previewMediaLibrary');
             const preview = await withTimeout(listPreviewMedia(), 15000, []);
             if (Array.isArray(preview) && preview.length) {
               mediaPool = preview;
               fromPreviewLibrary = true;
+              finalSurveyJson = adaptSurveyForPreviewLibrary(finalSurveyJson, mediaPool);
               console.log(`📦 Live survey: using platform preview media library (${mediaPool.length} files)`);
             }
           } catch (err) {

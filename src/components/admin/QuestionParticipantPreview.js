@@ -6,7 +6,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 import { getTrialCount } from '../../lib/trialNavigation';
 import { isCuratedMediaMode, isRandomMediaQuestion, resolveMediaFolderTags, resolveSkillQuestions } from '../../lib/surveyMediaInjection';
-import { resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
+import { adaptQuestionForPreviewLibrary, resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
 import { useRegion } from '../../contexts/RegionContext';
 import { conditionVariants, normalizeConditions, withConditionWording } from '../../lib/surveyRuntimeContext';
 import { isPreviewMessage, previewAppearance, PREVIEW_DEVICES, PREVIEW_FAILED, PREVIEW_READY, PREVIEW_RENDERED, PREVIEW_UPDATE, QUESTION_PREVIEW_PATH } from '../../lib/questionPreviewProtocol';
@@ -48,10 +48,11 @@ export default function QuestionParticipantPreview({ question, currentProject, s
     setPending(true);
     const timer = setTimeout(async () => {
       try {
-        const draft = withConditionWording(JSON.parse(questionKey), activeCondition);
+        let draft = withConditionWording(JSON.parse(questionKey), activeCondition);
         if (!draft.type) return;
         const media = await resolvePreviewMediaContext(currentProject || {});
         if (cancelled) return;
+        if (media.fromPreviewLibrary) draft = adaptQuestionForPreviewLibrary(draft, media.images);
         const questionConfig = { pages: [{ elements: [draft] }] };
         await resolveSkillQuestions(questionConfig);
         if (cancelled) return;

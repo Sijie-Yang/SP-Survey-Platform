@@ -105,3 +105,33 @@ export async function resolveMediaPoolForPreview(projectImages = []) {
   const context = await resolvePreviewMediaContext({ preloadedImages: projectImages });
   return context.images;
 }
+
+const trimFolder = (f) => String(f || '').trim().replace(/^\/+|\/+$/g, '');
+
+/**
+ * Preview-library fallback only: a project without media should still preview every
+ * question. Folder scopes the shared library does not have (e.g. a template's "clips")
+ * are dropped for individual-mode questions, and media may repeat across trials.
+ */
+export function adaptQuestionForPreviewLibrary(question, pool = []) {
+  if (!question || typeof question !== 'object' || !question.type) return question;
+  const out = { ...question, excludePreviouslyUsedImages: false };
+  const folders = Array.isArray(question.mediaFolders) ? question.mediaFolders.map(trimFolder).filter(Boolean) : [];
+  const mode = question.mediaAssignmentMode || 'individual';
+  if (folders.length && mode === 'individual') {
+    const available = (pool || []).map((e) => trimFolder(e?.folder || e?.logicalFolder));
+    const usable = folders.filter((f) => available.some((a) => a === f || a.startsWith(`${f}/`)));
+    if (usable.length) out.mediaFolders = usable;
+    else delete out.mediaFolders;
+  }
+  return out;
+}
+
+export function adaptSurveyForPreviewLibrary(config, pool = []) {
+  if (!config || !Array.isArray(config.pages)) return config;
+  const walk = (els) => (els || []).map((e) => {
+    const next = adaptQuestionForPreviewLibrary(e, pool);
+    return Array.isArray(next?.elements) ? { ...next, elements: walk(next.elements) } : next;
+  });
+  return { ...config, pages: config.pages.map((p) => ({ ...p, elements: walk(p.elements) })) };
+}
