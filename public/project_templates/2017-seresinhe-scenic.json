@@ -11,6 +11,9 @@
     "official"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": true,
+  "thumbnailUrl": null,
   "website": "https://doi.org/10.1098/rsos.170170",
   "huggingfaceDataset": null,
   "createdAt": "2026-05-04T00:00:00+00:00",

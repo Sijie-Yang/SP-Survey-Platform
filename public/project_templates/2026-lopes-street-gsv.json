@@ -16,6 +16,9 @@
     "official"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": false,
+  "thumbnailUrl": null,
   "website": "https://doi.org/10.1016/j.landurbplan.2026.105686",
   "huggingfaceDataset": null,
   "createdAt": "2026-07-15T00:00:00+00:00",
@@ -653,16 +656,6 @@
     "showPreviewBeforeComplete": "showAllQuestions"
   },
   "imageDatasetConfig": {
-    "mediaFolderTags": {
-      "bus-1": "set",
-      "bus-2": "set",
-      "car-1": "set",
-      "car-2": "set",
-      "active-1": "set",
-      "active-2": "set",
-      "active-3": "set",
-      "active-4": "set"
-    },
     "mediaFolders": [
       "active-1",
       "active-2",
@@ -672,7 +665,17 @@
       "bus-2",
       "car-1",
       "car-2"
-    ]
+    ],
+    "mediaFolderTags": {
+      "bus-1": "set",
+      "bus-2": "set",
+      "car-1": "set",
+      "car-2": "set",
+      "active-1": "set",
+      "active-2": "set",
+      "active-3": "set",
+      "active-4": "set"
+    }
   },
   "preloadedImages": [],
   "preloadedSource": null,

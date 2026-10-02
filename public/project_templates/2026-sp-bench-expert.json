@@ -12,24 +12,19 @@
     "labeling",
     "benchmark"
   ],
-  "isPinned": true,
+  "isPinned": false,
+  "isApproved": false,
+  "showOnLanding": false,
+  "thumbnailUrl": null,
   "website": "https://sp-survey.org/bench",
   "huggingfaceDataset": null,
-  "createdAt": "2026-07-22T00:00:00.000+00:00",
+  "createdAt": "2026-07-22T00:00:00+00:00",
   "config": {
-    "title": "SP-Bench — Human Expert Streetscape Labeling",
-    "description": "Expert annotation protocol for SP-Bench: Subjective–Objective Spatial Perception and Cognition in Urban Environments.",
     "logo": "",
-    "logoPosition": "right",
-    "showQuestionNumbers": "on",
-    "showProgressBar": "aboveheader",
-    "progressBarType": "questions",
-    "autoGrowComment": true,
     "pages": [
       {
         "name": "intro",
         "title": "1. Introduction & consent",
-        "description": "This protocol produces human gold labels for SP-Bench model evaluation. Judge each streetscape carefully and consistently.",
         "elements": [
           {
             "name": "intro_text",
@@ -42,35 +37,68 @@
             "type": "consent",
             "title": "I understand the task and agree to provide careful expert judgments for research use.",
             "labelTrue": "I agree",
-            "labelFalse": "I do not agree",
-            "isRequired": true
+            "isRequired": true,
+            "labelFalse": "I do not agree"
           },
           {
             "name": "expert_role",
             "type": "checkbox",
             "title": "Your expertise (select all that apply)",
-            "isRequired": true,
             "choices": [
-              { "value": "urban_planning", "text": "Urban planning / design" },
-              { "value": "architecture", "text": "Architecture" },
-              { "value": "geography_gis", "text": "Geography / GIS / remote sensing" },
-              { "value": "transport", "text": "Transport / walkability" },
-              { "value": "env_psych", "text": "Environmental psychology / perception" },
-              { "value": "cv_ml", "text": "Computer vision / ML for cities" },
-              { "value": "other", "text": "Other related field" }
-            ]
+              {
+                "text": "Urban planning / design",
+                "value": "urban_planning"
+              },
+              {
+                "text": "Architecture",
+                "value": "architecture"
+              },
+              {
+                "text": "Geography / GIS / remote sensing",
+                "value": "geography_gis"
+              },
+              {
+                "text": "Transport / walkability",
+                "value": "transport"
+              },
+              {
+                "text": "Environmental psychology / perception",
+                "value": "env_psych"
+              },
+              {
+                "text": "Computer vision / ML for cities",
+                "value": "cv_ml"
+              },
+              {
+                "text": "Other related field",
+                "value": "other"
+              }
+            ],
+            "isRequired": true
           },
           {
             "name": "expert_experience_years",
             "type": "dropdown",
             "title": "Years of relevant experience",
-            "isRequired": false,
             "choices": [
-              { "value": "0-2", "text": "0–2 years" },
-              { "value": "3-5", "text": "3–5 years" },
-              { "value": "6-10", "text": "6–10 years" },
-              { "value": "10plus", "text": "More than 10 years" }
-            ]
+              {
+                "text": "0–2 years",
+                "value": "0-2"
+              },
+              {
+                "text": "3–5 years",
+                "value": "3-5"
+              },
+              {
+                "text": "6–10 years",
+                "value": "6-10"
+              },
+              {
+                "text": "More than 10 years",
+                "value": "10plus"
+              }
+            ],
+            "isRequired": false
           },
           {
             "name": "labeling_notes",
@@ -78,26 +106,19 @@
             "title": "How to label",
             "description": "1) Upload the SP-Bench image set into this project’s Media Dataset.\n2) Each image block runs multiple trials (one scene per trial).\n3) Keep criteria stable across scenes.\n4) For gold labels, prefer a curated/fixed image order so trial i maps to the same filename across blocks when you post-process exports.\n5) Ratio sliders use 0–100 (% of image → divide by 100 for SP-Bench). Likert / enclosure use 1–7."
           }
-        ]
+        ],
+        "description": "This protocol produces human gold labels for SP-Bench model evaluation. Judge each streetscape carefully and consistently."
       },
       {
         "name": "objective_ratios",
         "title": "2. Objective — visual composition ratios",
-        "description": "SP-Bench objective continuous keys: green_view_ratio, sky_ratio (+ extended building_ratio).",
         "elements": [
           {
             "name": "sp_bench_ratios",
             "type": "imageslidergroup",
             "title": "Visual composition ratios (0–100%)",
-            "description": "Estimate the share of the image occupied by each class. Export to SP-Bench as value/100.",
-            "imageCount": 1,
-            "trialCount": 15,
-            "isRequired": true,
-            "scaleMin": 0,
             "scaleMax": 100,
-            "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "excludePreviouslyUsedImages": false,
+            "scaleMin": 0,
             "dimensions": [
               {
                 "id": "green_view_ratio",
@@ -114,28 +135,28 @@
                 "left": "0% building",
                 "right": "100% building"
               }
-            ]
+            ],
+            "imageCount": 1,
+            "isRequired": true,
+            "trialCount": 15,
+            "description": "Estimate the share of the image occupied by each class. Export to SP-Bench as value/100.",
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false
           }
-        ]
+        ],
+        "description": "SP-Bench objective continuous keys: green_view_ratio, sky_ratio (+ extended building_ratio)."
       },
       {
         "name": "subjective_likert",
         "title": "3. Objective enclosure & subjective perception (1–7)",
-        "description": "SP-Bench keys: enclosure, safety, beauty, vitality, walkability. Extended: comfort, orderliness, interestingness.",
         "elements": [
           {
             "name": "sp_bench_likert",
             "type": "imageslidergroup",
             "title": "Enclosure & perception (1–7)",
-            "description": "1 = very low / negative pole · 7 = very high / positive pole.",
-            "imageCount": 1,
-            "trialCount": 15,
-            "isRequired": true,
-            "scaleMin": 1,
             "scaleMax": 7,
-            "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "excludePreviouslyUsedImages": false,
+            "scaleMin": 1,
             "dimensions": [
               {
                 "id": "enclosure",
@@ -177,99 +198,163 @@
                 "left": "Very boring",
                 "right": "Very interesting"
               }
-            ]
+            ],
+            "imageCount": 1,
+            "isRequired": true,
+            "trialCount": 15,
+            "description": "1 = very low / negative pole · 7 = very high / positive pole.",
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "excludePreviouslyUsedImages": false
           }
-        ]
+        ],
+        "description": "SP-Bench keys: enclosure, safety, beauty, vitality, walkability. Extended: comfort, orderliness, interestingness."
       },
       {
         "name": "scene_type",
         "title": "4. Scene / street type",
-        "description": "SP-Bench key: scene_type. Select the single best matching category.",
         "elements": [
           {
             "name": "sp_bench_scene_type",
             "type": "imagecheckbox",
             "title": "Scene / street type",
-            "description": "Select exactly ONE category that best describes this scene.",
+            "choices": [
+              {
+                "text": "Residential",
+                "value": "residential"
+              },
+              {
+                "text": "Commercial",
+                "value": "commercial"
+              },
+              {
+                "text": "Mixed-use",
+                "value": "mixed"
+              },
+              {
+                "text": "Park / open green",
+                "value": "park"
+              },
+              {
+                "text": "Highway / arterial",
+                "value": "highway"
+              },
+              {
+                "text": "Alley / laneway",
+                "value": "alley"
+              },
+              {
+                "text": "Waterfront",
+                "value": "waterfront"
+              }
+            ],
             "imageCount": 1,
-            "trialCount": 15,
             "isRequired": true,
+            "trialCount": 15,
+            "description": "Select exactly ONE category that best describes this scene.",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "excludePreviouslyUsedImages": false,
-            "choices": [
-              { "value": "residential", "text": "Residential" },
-              { "value": "commercial", "text": "Commercial" },
-              { "value": "mixed", "text": "Mixed-use" },
-              { "value": "park", "text": "Park / open green" },
-              { "value": "highway", "text": "Highway / arterial" },
-              { "value": "alley", "text": "Alley / laneway" },
-              { "value": "waterfront", "text": "Waterfront" }
-            ]
+            "excludePreviouslyUsedImages": false
           }
-        ]
+        ],
+        "description": "SP-Bench key: scene_type. Select the single best matching category."
       },
       {
         "name": "cognition",
         "title": "5. Cognitive cues",
-        "description": "SP-Bench cognition group: risk_cues and affordances (multi-label).",
         "elements": [
           {
             "name": "sp_bench_risk_cues",
             "type": "imagecheckbox",
             "title": "Risk cues",
-            "description": "Select all risks that are visually suggested. Choose “none” only if no notable risk cue is present.",
+            "choices": [
+              {
+                "text": "Traffic hazard",
+                "value": "traffic"
+              },
+              {
+                "text": "Crime / social disorder cue",
+                "value": "crime"
+              },
+              {
+                "text": "Darkness / poor lighting",
+                "value": "darkness"
+              },
+              {
+                "text": "Construction / temporary hazard",
+                "value": "construction"
+              },
+              {
+                "text": "Flooding / water hazard",
+                "value": "flooding"
+              },
+              {
+                "text": "None of the above",
+                "value": "none"
+              }
+            ],
             "imageCount": 1,
-            "trialCount": 15,
             "isRequired": true,
+            "trialCount": 15,
+            "description": "Select all risks that are visually suggested. Choose “none” only if no notable risk cue is present.",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "excludePreviouslyUsedImages": false,
-            "choices": [
-              { "value": "traffic", "text": "Traffic hazard" },
-              { "value": "crime", "text": "Crime / social disorder cue" },
-              { "value": "darkness", "text": "Darkness / poor lighting" },
-              { "value": "construction", "text": "Construction / temporary hazard" },
-              { "value": "flooding", "text": "Flooding / water hazard" },
-              { "value": "none", "text": "None of the above" }
-            ]
+            "excludePreviouslyUsedImages": false
           },
           {
             "name": "sp_bench_affordances",
             "type": "imagecheckbox",
             "title": "Affordances",
-            "description": "Select all activities this streetscape clearly affords.",
+            "choices": [
+              {
+                "text": "Walk",
+                "value": "walk"
+              },
+              {
+                "text": "Sit / linger",
+                "value": "sit"
+              },
+              {
+                "text": "Cycle",
+                "value": "cycle"
+              },
+              {
+                "text": "Cross the street",
+                "value": "cross"
+              },
+              {
+                "text": "Socialize",
+                "value": "socialize"
+              },
+              {
+                "text": "Exercise / active recreation",
+                "value": "exercise"
+              }
+            ],
             "imageCount": 1,
-            "trialCount": 15,
             "isRequired": true,
+            "trialCount": 15,
+            "description": "Select all activities this streetscape clearly affords.",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "excludePreviouslyUsedImages": false,
-            "choices": [
-              { "value": "walk", "text": "Walk" },
-              { "value": "sit", "text": "Sit / linger" },
-              { "value": "cycle", "text": "Cycle" },
-              { "value": "cross", "text": "Cross the street" },
-              { "value": "socialize", "text": "Socialize" },
-              { "value": "exercise", "text": "Exercise / active recreation" }
-            ]
+            "excludePreviouslyUsedImages": false
           }
-        ]
+        ],
+        "description": "SP-Bench cognition group: risk_cues and affordances (multi-label)."
       },
       {
         "name": "pairwise",
         "title": "6. Pairwise preference",
-        "description": "Place-Pulse–style comparisons for preference modeling beyond absolute Likert scores.",
         "elements": [
           {
             "name": "sp_bench_pairwise_walk",
             "type": "imagepicker",
             "title": "Which place would you rather walk in?",
-            "description": "Select the preferred scene.",
             "imageCount": 2,
-            "trialCount": 10,
-            "multiSelect": false,
             "isRequired": false,
+            "trialCount": 10,
+            "description": "Select the preferred scene.",
+            "multiSelect": false,
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false
@@ -278,11 +363,11 @@
             "name": "sp_bench_pairwise_beauty",
             "type": "imagepicker",
             "title": "Which place looks more beautiful?",
-            "description": "Select the preferred scene.",
             "imageCount": 2,
-            "trialCount": 10,
-            "multiSelect": false,
             "isRequired": false,
+            "trialCount": 10,
+            "description": "Select the preferred scene.",
+            "multiSelect": false,
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false
@@ -291,48 +376,63 @@
             "name": "sp_bench_pairwise_safety",
             "type": "imagepicker",
             "title": "Which place looks safer?",
-            "description": "Select the preferred scene.",
             "imageCount": 2,
-            "trialCount": 10,
-            "multiSelect": false,
             "isRequired": false,
+            "trialCount": 10,
+            "description": "Select the preferred scene.",
+            "multiSelect": false,
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "excludePreviouslyUsedImages": false
           }
-        ]
+        ],
+        "description": "Place-Pulse–style comparisons for preference modeling beyond absolute Likert scores."
       },
       {
         "name": "quality_debrief",
         "title": "7. Quality & debrief",
-        "description": "Help us assess label reliability.",
         "elements": [
           {
             "name": "label_confidence",
             "type": "rating",
             "title": "Overall confidence in your labels for this session",
-            "rateMin": 1,
             "rateMax": 7,
-            "minRateDescription": "Very low",
+            "rateMin": 1,
+            "isRequired": true,
             "maxRateDescription": "Very high",
-            "isRequired": true
+            "minRateDescription": "Very low"
           },
           {
             "name": "difficult_cases",
+            "rows": 3,
             "type": "comment",
             "title": "Any scenes or dimensions that were particularly difficult?",
-            "rows": 3,
             "isRequired": false
           },
           {
             "name": "protocol_feedback",
+            "rows": 3,
             "type": "comment",
             "title": "Suggestions to improve this expert protocol",
-            "rows": 3,
             "isRequired": false
           }
-        ]
+        ],
+        "description": "Help us assess label reliability."
       }
-    ]
-  }
+    ],
+    "title": "SP-Bench — Human Expert Streetscape Labeling",
+    "description": "Expert annotation protocol for SP-Bench: Subjective–Objective Spatial Perception and Cognition in Urban Environments.",
+    "logoPosition": "right",
+    "autoGrowComment": true,
+    "progressBarType": "questions",
+    "showProgressBar": "aboveheader",
+    "showQuestionNumbers": "on"
+  },
+  "imageDatasetConfig": {
+    "mediaFolders": [],
+    "mediaFolderTags": {}
+  },
+  "preloadedImages": [],
+  "preloadedSource": null,
+  "preloadedAt": null
 }

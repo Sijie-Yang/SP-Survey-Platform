@@ -9,6 +9,9 @@
     "official"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": true,
+  "thumbnailUrl": "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev/templates/2024-liang-building/image_000032.jpg",
   "website": "https://doi.org/10.1016/j.buildenv.2024.111875",
   "huggingfaceDataset": "seshing/sp-survey-building-facades-examples",
   "createdAt": "2026-05-20T02:18:47.285+00:00",

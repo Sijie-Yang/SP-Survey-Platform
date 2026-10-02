@@ -10,6 +10,9 @@
     "official"
   ],
   "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": true,
+  "thumbnailUrl": "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev/templates/2025-quintana-specs/Abuja/7ad50ef7-aa93-4fb6-939a-cbea4eddf9b6.jpeg",
   "website": "https://arxiv.org/abs/2505.12758",
   "huggingfaceDataset": "matiasqr/specs/svi",
   "createdAt": "2026-07-12T01:17:17.431+00:00",
@@ -685,14 +688,14 @@
     "logoPosition": "right"
   },
   "imageDatasetConfig": {
-    "mediaFolderTags": {},
     "mediaFolders": [
       "Abuja",
       "Amsterdam",
       "San_Francisco",
       "Santiago",
       "Singapore"
-    ]
+    ],
+    "mediaFolderTags": {}
   },
   "preloadedImages": [],
   "preloadedSource": null,
