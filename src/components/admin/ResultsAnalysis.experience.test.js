@@ -56,6 +56,19 @@ test('admin permission errors are shown instead of falling back to local respons
   await screen.findByText(/2 \/ 2 submissions in analysis/);
 });
 
+test('collapsed question cards do not mount their analysis until expanded', async () => {
+  const picker = { name: 'safe', type: 'imagepicker', title: 'Safer?' };
+  const rows = [
+    { id: 'a', participant_id: 'p1', responses: { safe: { answer: 'https://m.example/x.jpg', shown_images: ['https://m.example/x.jpg', 'https://m.example/y.jpg'] } } },
+    { id: 'b', participant_id: 'p2', responses: { safe: { answer: 'https://m.example/y.jpg', shown_images: ['https://m.example/x.jpg', 'https://m.example/y.jpg'] } } },
+  ];
+  render(<RegionProvider><QuestionCard {...buildQuestionCardProps(picker, rows)} /></RegionProvider>);
+  expect(screen.getByText(/2 \/ 2 submissions answered/)).toBeTruthy();
+  expect(screen.queryByText(/Paper methods/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Expand analysis: safe' }));
+  expect(await screen.findByText(/Paper methods/)).toBeTruthy();
+});
+
 test('question card uses submission denominator for repeat participants', () => {
   render(<RegionProvider><QuestionCard {...buildQuestionCardProps(q, responses)} /></RegionProvider>);
   expect(screen.getByText(/2 \/ 2 submissions answered \(100%\) · 1 participants/)).toBeTruthy();
