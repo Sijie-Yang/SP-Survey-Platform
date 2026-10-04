@@ -111,3 +111,34 @@ test('renders in Chinese and auto-starts the one-time tour for a first visit', (
   fireEvent.click(screen.getByRole('button', { name: zh.guideTourSkip }));
   expect(loadGuidePrefs('researcher').tourDone).toBe(true);
 });
+
+describe('Review mode in the AI Assistant card', () => {
+  afterEach(() => {
+    delete process.env.REACT_APP_SUPABASE_URL;
+  });
+
+  test('lists Review next to the other modes when the switch is on', () => {
+    process.env.REACT_APP_SUPABASE_URL = 'https://example.supabase.co';
+    localStorage.setItem('sp-review-settings:researcher', JSON.stringify({ enabled: true }));
+    setup();
+    expect(screen.getByText(adminI18n.en.aiSidebarModeReview)).toBeInTheDocument();
+    expect(screen.getByText(adminI18n.en.guideAiReview)).toBeInTheDocument();
+  });
+
+  test('hides Review when the switch is off and follows later changes', () => {
+    process.env.REACT_APP_SUPABASE_URL = 'https://example.supabase.co';
+    localStorage.setItem('sp-review-settings:researcher', JSON.stringify({ enabled: false }));
+    setup();
+    expect(screen.queryByText(adminI18n.en.guideAiReview)).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new CustomEvent('sp-review-settings', { detail: { userId: 'researcher', settings: { enabled: true } } }));
+    });
+    expect(screen.getByText(adminI18n.en.guideAiReview)).toBeInTheDocument();
+  });
+
+  test('stays hidden in the self-hosted build path', () => {
+    localStorage.setItem('sp-review-settings:researcher', JSON.stringify({ enabled: true }));
+    setup();
+    expect(screen.queryByText(adminI18n.en.guideAiReview)).not.toBeInTheDocument();
+  });
+});

@@ -15,6 +15,8 @@ import {
   Typography,
 } from '@mui/material';
 import AutoAwesome from '@mui/icons-material/AutoAwesome';
+import useReviewSettings from '../../hooks/useReviewSettings';
+import { isPlatformMode } from '../../hooks/surveyAssistantUtils';
 import CheckCircle from '@mui/icons-material/CheckCircle';
 import Close from '@mui/icons-material/Close';
 import ExpandMore from '@mui/icons-material/ExpandMore';
@@ -296,12 +298,13 @@ function WorkflowStep({ t, step }) {
   );
 }
 
-function AssistantSection({ t, assistantEnabled, onOpenAssistant, navigate }) {
+function AssistantSection({ t, assistantEnabled, reviewEnabled = false, onOpenAssistant, navigate }) {
   const modes = [
     { label: t.aiSidebarModeAgent, body: t.guideAiAgent },
     { label: t.aiSidebarModeGenerate, body: t.guideAiGenerate },
     { label: t.aiSidebarModeAdjust, body: t.guideAiAdjust },
     { label: t.aiSidebarModeQuestion, body: t.guideAiQuestion },
+    ...(reviewEnabled ? [{ label: t.aiSidebarModeReview, body: t.guideAiReview }] : []),
   ];
   return (
     <Paper
@@ -390,6 +393,8 @@ export default function AdminIntroduction({
   const tsl = useStreetLevelText();
   const { user } = useAuth();
   const userId = user?.id || 'anonymous';
+  const reviewSettings = useReviewSettings(user?.id || null);
+  const reviewEnabled = isPlatformMode() && reviewSettings.enabled;
   const [prefs, setPrefs] = useState(() => loadGuidePrefs(userId));
   const [tourOpen, setTourOpen] = useState(false);
   const progress = useGuideProgress(currentProject?.id);
@@ -595,6 +600,7 @@ export default function AdminIntroduction({
       <AssistantSection
         t={t}
         assistantEnabled={assistantEnabled}
+        reviewEnabled={reviewEnabled}
         onOpenAssistant={onOpenAssistant}
         navigate={navigate}
       />

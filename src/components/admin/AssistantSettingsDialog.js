@@ -33,6 +33,7 @@ import {
   RestartAlt,
   Save,
 } from '@mui/icons-material';
+import { ReviewSettingsControls } from './ReviewPanel';
 import AgentsEditor from './AgentsEditor';
 import ModelsSettings from './ModelsSettings';
 import {
@@ -65,6 +66,8 @@ export default function AssistantSettingsDialog({
   newScenario,
   setNewScenario,
   onAddCustomScenario,
+  reviewSettings = null,
+  onReviewSettingsChange,
   multiAgentReviewEnabled,
   onMultiAgentReviewToggle,
   reviewMode,
@@ -184,6 +187,7 @@ export default function AssistantSettingsDialog({
                       ['generate', t.aiSidebarModeGenerate],
                       ['adjust', t.aiSidebarModeAdjust],
                       ['question', t.aiSidebarModeQuestion],
+                      ...(reviewSettings?.enabled !== false ? [['review', t.aiSidebarModeReview || 'Review']] : []),
                     ].map(([value, label]) => (
                       <MenuItem key={value} value={value}>{label}</MenuItem>
                     ))}
@@ -391,9 +395,12 @@ export default function AssistantSettingsDialog({
                   <Chip size="small" variant="outlined" label={t.aiSettingsExperimental} />
                 </Stack>
                 {isPlatformMode ? (
-                  <Typography variant="body2" color="text.secondary">
-                    {t.aiSettingsMultiAgentUnavailable}
-                  </Typography>
+                  <>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                      {t.aiSettingsMultiAgentUnavailable}
+                    </Typography>
+                    <ReviewSettingsControls t={t} settings={reviewSettings} onChange={onReviewSettingsChange} />
+                  </>
                 ) : (
                   <>
                     <FormControlLabel
