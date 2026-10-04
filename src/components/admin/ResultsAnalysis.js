@@ -1,11 +1,11 @@
 import ChoiceOutcomeSummary from './ChoiceOutcomeSummary';
-import { readAllResponsePages, responseCursorFilter } from '../../lib/responsePagination';
+import { readAllResponsePages } from '../../lib/responsePagination';
 import { recordedRevisionSelection, recordedSurveyConfig } from '../../lib/recordedSurvey';
 import { responseWithinDateRange } from '../../lib/responseIdentity';
 import { dimensionDisplayName, sliderScale } from '../../lib/sliderScale';
 import { allocationStatus } from '../../lib/allocationStats';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from '../../lib/mediaIdentity';
-import { fetchAdminResponsePage } from '../../lib/adminResults';
+import { createResponseLoadSession, fetchAdminResponsePage, fetchOwnerResponsePage } from '../../lib/adminResults';
 import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import {
   Box,
@@ -2333,11 +2333,14 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
   const exportLock = React.useRef(false);
   const type = question.type || 'text';
   const trialUnitCount = answers.length;
-  const participantCount = useMemo(() => new Set((allResponses || [])
-    .filter((row) => expandQuestionAnswerUnits(row, question.name).length > 0)
-    .map((row, i) => row.participant_id || row.id || 'row_' + i)).size, [allResponses, question.name]);
   // Answer rate is per submission; charts/stats use per-trial units in `answers`.
-  const responseCount = (allResponses || []).filter((row) => expandQuestionAnswerUnits(row, question.name).length > 0).length;
+  const { participantCount, responseCount } = useMemo(() => {
+    const answered = (allResponses || []).filter((row) => expandQuestionAnswerUnits(row, question.name).length > 0);
+    return {
+      responseCount: answered.length,
+      participantCount: new Set(answered.map((row, i) => row.participant_id || row.id || 'row_' + i)).size,
+    };
+  }, [allResponses, question.name]);
 
   const renderAnalysis = () => {
     if (type === 'skillquestion') {
@@ -2469,7 +2472,7 @@ export function QuestionCard({ question, answers, totalResponses, questionNumber
 
       {exporting && <Typography role="status" sx={{ p: 1 }}>{t.resultsPreparingExport}</Typography>}
       {exportError && <Alert severity="error" onClose={() => setExportError('')}>{exportError}</Alert>}
-      <Collapse in={expanded}>
+      <Collapse in={expanded} mountOnEnter unmountOnExit>
         <Divider />
         <CardContent>
           {answers.some((a) => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && (
@@ -2610,22 +2613,13 @@ export default function ResultsAnalysis({
     setLoadSkipped([]);
     try {
       if ((adminMode || platformSupabase) && currentProject?.id) {
-        const all = await readAllResponsePages(async (offset, after) => {
-          if (adminMode) return fetchAdminResponsePage(currentProject.id, 0, after);
-          let lastError = null;
-          for (const limit of [50, 10, 1]) {
-            let query = platformSupabase
-              .from('survey_responses').select('*').eq('project_id', currentProject.id)
-              .order('created_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false })
-              .limit(limit);
-            if (after) query = query.or(responseCursorFilter(after));
-            const { data, error: sbError } = await query;
-            if (!sbError) return data || [];
-            lastError = sbError;
-          }
-          throw lastError;
-        }, { cancelled: () => sequence !== fetchSequence.current,
-          onProgress: (loaded) => setLoadProgress({ loaded, page: Math.ceil(loaded / 50) }) });
+        const loadSession = createResponseLoadSession();
+        let pages = 0;
+        const all = await readAllResponsePages(async (offset, after) => (adminMode
+          ? fetchAdminResponsePage(currentProject.id, 0, after, loadSession)
+          : fetchOwnerResponsePage(currentProject.id, after, loadSession)), {
+          cancelled: () => sequence !== fetchSequence.current,
+          onProgress: (loaded) => setLoadProgress({ loaded, page: ++pages }) });
         const skipped = all.filter((row) => row?._unreadable);
         setResponses(all.filter((row) => !row?._unreadable));
         setLoadSkipped(skipped);
@@ -2897,6 +2891,19 @@ export default function ResultsAnalysis({
   };
 
   const selectedQuestion = allQuestions.find((q) => q.name === selectedQuestionName) || filteredQuestions[0] || null;
+
+  const questionCardProps = useMemo(() => {
+    const map = new Map();
+    if (view !== 'questions' || loading) return map;
+    for (const question of allQuestions) {
+      map.set(question.name, buildQuestionCardProps(question, filteredResponses, {
+        questionNumber: answerableNumberByName.get(question.name) ?? null,
+        surveyConfig,
+        exportResponses: filteredResponses,
+      }));
+    }
+    return map;
+  }, [view, loading, allQuestions, filteredResponses, answerableNumberByName, surveyConfig]);
 
   return (
     <ImageResolverContext.Provider value={imageNameToUrl}>
@@ -3425,11 +3432,7 @@ export default function ResultsAnalysis({
                     key={question.name}
                     defaultExpanded={compactLayout || question.name === selectedQuestionName}
                     onExplain={handleExplainQuestion}
-                    {...buildQuestionCardProps(question, filteredResponses, {
-                      questionNumber: answerableNumberByName.get(question.name) ?? null,
-                      surveyConfig,
-                      exportResponses: filteredResponses,
-                    })}
+                    {...questionCardProps.get(question.name)}
                   />
                 ))}
               </Box>

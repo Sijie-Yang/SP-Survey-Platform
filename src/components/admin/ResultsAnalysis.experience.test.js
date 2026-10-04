@@ -8,7 +8,11 @@ import { fetchAdminResponsePage } from '../../lib/adminResults';
 jest.mock('../../lib/supabase', () => ({supabase: null}));
 jest.mock('../../lib/projectManager', () => ({saveProjectFull: jest.fn()}));
 jest.mock('./ImagePerceptionPanel', () => () => null);
-jest.mock('../../lib/adminResults', () => ({ fetchAdminResponsePage: jest.fn() }));
+jest.mock('../../lib/adminResults', () => ({
+  fetchAdminResponsePage: jest.fn(),
+  fetchOwnerResponsePage: jest.fn(),
+  createResponseLoadSession: () => ({ contracts: new Map(), mode: 'auto' }),
+}));
 
 const q = {name: 'q', type: 'rating', title: 'Comfort'};
 const config = {pages: [{name: 'page', elements: [q]}]};
@@ -22,7 +26,7 @@ test('platform admin reads the selected project through the admin API without de
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', name: 'Other project' }} surveyConfig={config} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
-  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null);
+  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null, expect.any(Object));
   fireEvent.click(screen.getByRole('tab', { name: /Data/i }));
   fireEvent.click(screen.getByRole('button', { name: /Response records/i }));
   expect(screen.getAllByRole('button', {name: 'View'})).toHaveLength(2);
@@ -54,6 +58,19 @@ test('admin permission errors are shown instead of falling back to local respons
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
   await screen.findByText(/2 \/ 2 submissions in analysis/);
+});
+
+test('collapsed question cards do not mount their analysis until expanded', async () => {
+  const picker = { name: 'safe', type: 'imagepicker', title: 'Safer?' };
+  const rows = [
+    { id: 'a', participant_id: 'p1', responses: { safe: { answer: 'https://m.example/x.jpg', shown_images: ['https://m.example/x.jpg', 'https://m.example/y.jpg'] } } },
+    { id: 'b', participant_id: 'p2', responses: { safe: { answer: 'https://m.example/y.jpg', shown_images: ['https://m.example/x.jpg', 'https://m.example/y.jpg'] } } },
+  ];
+  render(<RegionProvider><QuestionCard {...buildQuestionCardProps(picker, rows)} /></RegionProvider>);
+  expect(screen.getByText(/2 \/ 2 submissions answered/)).toBeTruthy();
+  expect(screen.queryByText(/Paper methods/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Expand analysis: safe' }));
+  expect(await screen.findByText(/Paper methods/)).toBeTruthy();
 });
 
 test('question card uses submission denominator for repeat participants', () => {

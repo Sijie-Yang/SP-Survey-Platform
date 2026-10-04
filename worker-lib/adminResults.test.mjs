@@ -6,9 +6,15 @@ const env = { SUPABASE_URL: 'https://database.example', SUPABASE_ANON_KEY: 'test
 const request = (query = '?project=project-a', method = 'GET', authenticated = true) => new Request(`https://app.example/api/admin/project-responses${query}`, {
   method, headers: authenticated ? { Authorization: 'Bearer test-user' } : {},
 });
-function mockDatabase(t, { admin = true, project = true, failAdmin = false, failResponses = false, validUser = true } = {}) {
-  return t.mock.method(globalThis, 'fetch', async (url) => {
+function mockDatabase(t, { admin = true, project = true, failAdmin = false, failResponses = false, validUser = true, slimRpc = false } = {}) {
+  return t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
     const path = new URL(url).pathname;
+    if (path === '/rest/v1/rpc/survey_response_rows') {
+      if (!slimRpc) return Response.json({ code: 'PGRST202', message: 'Could not find the function' }, { status: 404 });
+      const body = JSON.parse(init.body);
+      assert.equal(body.p_project_id, 'project-a');
+      return Response.json({ rows: [{ id: 'response-a', project_id: 'project-a', responses: { q: 1 }, survey_metadata: { survey_revision: 'v1' } }], refs: ['a'.repeat(32)], contracts: body.p_known_contracts.length ? {} : { ['a'.repeat(32)]: { questions: [] } } });
+    }
     if (path === '/auth/v1/user') return Response.json(validUser ? { id: 'admin-user' } : {}, { status: validUser ? 200 : 401 });
     if (path === '/rest/v1/admins') return Response.json(failAdmin ? { message: 'private database failure' } : admin ? [{ user_id: 'admin-user' }] : [], { status: failAdmin ? 500 : 200 });
     if (path === '/rest/v1/projects') return Response.json(project ? [{ id: 'project-a' }] : []);
@@ -52,7 +58,7 @@ test('admin lookup failures fail closed and do not expose database errors', asyn
 
 test('admin access is scoped to the requested project and bounded page', async (t) => {
   const db = mockDatabase(t);
-  const result = await handleAdminResultsRoutes(request('?project=project-a&offset=1000'), env);
+  const result = await handleAdminResultsRoutes(request('?project=project-a&offset=1000&mode=legacy'), env);
   assert.equal(result.status, 200);
   assert.match(result.headers.get('cache-control') || '', /no-store/);
   assert.equal((await result.json()).responses.length, 1);
@@ -65,6 +71,26 @@ test('admin access is scoped to the requested project and bounded page', async (
   assert.equal(responseUrls[0].searchParams.get('offset'), '1000');
   assert.equal(responseUrls[0].searchParams.get('order'), 'created_at.desc.nullslast,id.desc');
   assert.ok(responseUrls.some((url) => url.searchParams.get('select') === '*'));
+});
+
+test('the slim RPC page returns each contract once and accepts known contract keys', async (t) => {
+  const db = mockDatabase(t, { slimRpc: true });
+  const first = await (await handleAdminResultsRoutes(request(), env)).json();
+  assert.equal(first.mode, 'slim');
+  assert.equal(first.responses[0]._contract_ref, 'a'.repeat(32));
+  assert.deepEqual(first.contracts, { ['a'.repeat(32)]: { questions: [] } });
+  const listUrl = db.mock.calls.map((call) => new URL(call.arguments[0])).find((url) => url.pathname === '/rest/v1/survey_responses');
+  assert.equal(listUrl.searchParams.get('limit'), '200');
+  const second = await (await handleAdminResultsRoutes(request(`?project=project-a&known=${'a'.repeat(32)}`), env)).json();
+  assert.deepEqual(second.contracts, {});
+  assert.equal((await handleAdminResultsRoutes(request('?project=project-a&known=bad;key'), env)).status, 400);
+});
+
+test('without the RPC the first page falls back to full rows', async (t) => {
+  mockDatabase(t);
+  const body = await (await handleAdminResultsRoutes(request(), env)).json();
+  assert.equal(body.mode, 'legacy');
+  assert.equal(body.responses[0].id, 'response-a');
 });
 
 test('missing projects produce a clear not-found result', async (t) => {
