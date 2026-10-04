@@ -66,6 +66,11 @@ export async function handleAdminResultsRoutes(request, env) {
     if (!projectId || !Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) {
       return fail(400, 'Invalid project or page', 'ADMIN_RESULTS_INPUT', 'input');
     }
+    const mode = ['legacy', 'slim'].includes(url.searchParams.get('mode')) ? url.searchParams.get('mode') : 'auto';
+    const knownContracts = (url.searchParams.get('known') || '').split(',').filter(Boolean);
+    if (knownContracts.length > 200 || knownContracts.some((key) => !/^(sha256:)?[0-9a-f]{32,64}$/.test(key))) {
+      return fail(400, 'Invalid project or page', 'ADMIN_RESULTS_INPUT', 'input');
+    }
 
     let projects;
     try {
@@ -79,8 +84,8 @@ export async function handleAdminResultsRoutes(request, env) {
     if (!projects?.length) return fail(404, '项目不存在或已删除。', 'ADMIN_RESULTS_PROJECT', 'project');
 
     try {
-      const page = await loadSurveyResponsePage((opts) => supabaseRest(env, opts), projectId, { after, offset });
-      return reply({ responses: page.responses, skipped: page.skipped });
+      const page = await loadSurveyResponsePage((opts) => supabaseRest(env, opts), projectId, { after, offset, mode, knownContracts });
+      return reply({ responses: page.responses, skipped: page.skipped, contracts: page.contracts, mode: page.mode });
     } catch (err) {
       return fail(500, '无法加载项目答卷，请稍后重试。', 'ADMIN_RESULTS_RESPONSE_QUERY', 'responses', {
         supabaseStatus: err?.status || null,
