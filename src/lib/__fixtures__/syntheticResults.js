@@ -8,8 +8,8 @@ function rng(seed) {
   };
 }
 
-export function syntheticSurveyConfig({ images = 120 } = {}) {
-  const urls = Array.from({ length: images }, (_, i) => `https://media.example.org/street/set_${i % 4}/img_${String(i).padStart(4, '0')}.jpg`);
+export function syntheticSurveyConfig({ images = 120, urlBase = 'https://media.example.org/street' } = {}) {
+  const urls = Array.from({ length: images }, (_, i) => `${urlBase}/set_${i % 4}/img_${String(i).padStart(4, '0')}.jpg`);
   const picker = (name, title) => ({
     name, title, type: 'imagepicker', trialCount: 12, imageCount: 2, selectedImageUrls: urls, choices: [],
   });
