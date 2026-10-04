@@ -8,7 +8,11 @@ import { fetchAdminResponsePage } from '../../lib/adminResults';
 jest.mock('../../lib/supabase', () => ({supabase: null}));
 jest.mock('../../lib/projectManager', () => ({saveProjectFull: jest.fn()}));
 jest.mock('./ImagePerceptionPanel', () => () => null);
-jest.mock('../../lib/adminResults', () => ({ fetchAdminResponsePage: jest.fn() }));
+jest.mock('../../lib/adminResults', () => ({
+  fetchAdminResponsePage: jest.fn(),
+  fetchOwnerResponsePage: jest.fn(),
+  createResponseLoadSession: () => ({ contracts: new Map(), mode: 'auto' }),
+}));
 
 const q = {name: 'q', type: 'rating', title: 'Comfort'};
 const config = {pages: [{name: 'page', elements: [q]}]};
@@ -22,7 +26,7 @@ test('platform admin reads the selected project through the admin API without de
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', name: 'Other project' }} surveyConfig={config} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
-  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null);
+  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null, expect.any(Object));
   fireEvent.click(screen.getByRole('tab', { name: /Data/i }));
   fireEvent.click(screen.getByRole('button', { name: /Response records/i }));
   expect(screen.getAllByRole('button', {name: 'View'})).toHaveLength(2);

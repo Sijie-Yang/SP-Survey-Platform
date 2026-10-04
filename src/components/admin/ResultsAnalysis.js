@@ -1,11 +1,11 @@
 import ChoiceOutcomeSummary from './ChoiceOutcomeSummary';
-import { readAllResponsePages, responseCursorFilter } from '../../lib/responsePagination';
+import { readAllResponsePages } from '../../lib/responsePagination';
 import { recordedRevisionSelection, recordedSurveyConfig } from '../../lib/recordedSurvey';
 import { responseWithinDateRange } from '../../lib/responseIdentity';
 import { dimensionDisplayName, sliderScale } from '../../lib/sliderScale';
 import { allocationStatus } from '../../lib/allocationStats';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from '../../lib/mediaIdentity';
-import { fetchAdminResponsePage } from '../../lib/adminResults';
+import { createResponseLoadSession, fetchAdminResponsePage, fetchOwnerResponsePage } from '../../lib/adminResults';
 import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import {
   Box,
@@ -2613,26 +2613,12 @@ export default function ResultsAnalysis({
     setLoadSkipped([]);
     try {
       if ((adminMode || platformSupabase) && currentProject?.id) {
-        // A page size that failed once (large rows) keeps failing; do not retry it for every page.
-        const pageLimits = [50, 10, 1];
+        const loadSession = createResponseLoadSession();
         let pages = 0;
-        const all = await readAllResponsePages(async (offset, after) => {
-          if (adminMode) return fetchAdminResponsePage(currentProject.id, 0, after);
-          let lastError = null;
-          while (pageLimits.length) {
-            let query = platformSupabase
-              .from('survey_responses').select('*').eq('project_id', currentProject.id)
-              .order('created_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false })
-              .limit(pageLimits[0]);
-            if (after) query = query.or(responseCursorFilter(after));
-            const { data, error: sbError } = await query;
-            if (!sbError) return data || [];
-            lastError = sbError;
-            if (pageLimits.length === 1) break;
-            pageLimits.shift();
-          }
-          throw lastError;
-        }, { cancelled: () => sequence !== fetchSequence.current,
+        const all = await readAllResponsePages(async (offset, after) => (adminMode
+          ? fetchAdminResponsePage(currentProject.id, 0, after, loadSession)
+          : fetchOwnerResponsePage(currentProject.id, after, loadSession)), {
+          cancelled: () => sequence !== fetchSequence.current,
           onProgress: (loaded) => setLoadProgress({ loaded, page: ++pages }) });
         const skipped = all.filter((row) => row?._unreadable);
         setResponses(all.filter((row) => !row?._unreadable));

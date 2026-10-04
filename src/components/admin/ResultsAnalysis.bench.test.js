@@ -8,7 +8,11 @@ import { syntheticResponses, syntheticSurveyConfig } from '../../lib/__fixtures_
 jest.mock('../../lib/supabase', () => ({ supabase: null }));
 jest.mock('../../lib/projectManager', () => ({ saveProjectFull: jest.fn() }));
 jest.mock('./ImagePerceptionPanel', () => () => null);
-jest.mock('../../lib/adminResults', () => ({ fetchAdminResponsePage: jest.fn() }));
+jest.mock('../../lib/adminResults', () => ({
+  fetchAdminResponsePage: jest.fn(),
+  fetchOwnerResponsePage: jest.fn(),
+  createResponseLoadSession: () => ({ contracts: new Map(), mode: 'auto' }),
+}));
 
 const N = Number(process.env.BENCH_N || 500);
 const PAGE = 40;
