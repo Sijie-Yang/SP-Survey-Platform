@@ -125,6 +125,21 @@ test('a byte budget stops the page so the next cursor can continue', async () =>
   assert.equal(page.responses[0].id, 'r1');
 });
 
+test('rows past the byte budget are not hydrated', async () => {
+  const listed = keys(40);
+  const hydratedIds = [];
+  const rest = async ({ query }) => {
+    if (isKeyQuery(query)) return listed;
+    const ids = idsIn(query);
+    hydratedIds.push(...ids);
+    return ids.map((id) => fullRow(listed.find((key) => key.id === id), { blob: 'x'.repeat(1000) }));
+  };
+  const page = await loadSurveyResponsePage(rest, 'project-a', { maxBytes: 10000 });
+  assert.ok(page.responses.length > 1 && page.responses.length < 16);
+  assert.deepEqual(page.responses.map((row) => row.id), listed.slice(0, page.responses.length).map((key) => key.id));
+  assert.equal(hydratedIds.length, 16);
+});
+
 test('generic database outages are not converted into stub rows', async () => {
   const listed = keys(1);
   const rest = async ({ query }) => {

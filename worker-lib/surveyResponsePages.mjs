@@ -142,21 +142,22 @@ export async function loadSurveyResponsePage(rest, projectId, {
     }
   };
 
-  for (let i = 0; i < keys.length; i += RESPONSE_HYDRATE_BATCH) {
-    await hydrateKeys(keys.slice(i, i + RESPONSE_HYDRATE_BATCH));
-  }
-
   const responses = [];
   let bytes = 40;
-  for (const key of keys) {
-    const row = hydrated.get(String(key.id)) || stubUnreadableRow(key, 'missing');
-    const size = rowBytes(row);
-    const usable = Number.isFinite(size) ? row : stubUnreadableRow(key, 'oversized_or_timeout');
-    const usableSize = Number.isFinite(size) ? size : rowBytes(usable);
-    if (responses.length && bytes + usableSize > maxBytes) break;
-    if (usable._unreadable) rememberSkipped(skipped, usable.id, usable._unreadableReason);
-    responses.push(usable);
-    bytes += usableSize;
+  // Rows past the byte budget are never returned, so stop hydrating once it is reached.
+  page: for (let i = 0; i < keys.length; i += RESPONSE_HYDRATE_BATCH) {
+    const batch = keys.slice(i, i + RESPONSE_HYDRATE_BATCH);
+    await hydrateKeys(batch);
+    for (const key of batch) {
+      const row = hydrated.get(String(key.id)) || stubUnreadableRow(key, 'missing');
+      const size = rowBytes(row);
+      const usable = Number.isFinite(size) ? row : stubUnreadableRow(key, 'oversized_or_timeout');
+      const usableSize = Number.isFinite(size) ? size : rowBytes(usable);
+      if (responses.length && bytes + usableSize > maxBytes) break page;
+      if (usable._unreadable) rememberSkipped(skipped, usable.id, usable._unreadableReason);
+      responses.push(usable);
+      bytes += usableSize;
+    }
   }
 
   return {
