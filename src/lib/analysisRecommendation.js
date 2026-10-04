@@ -6,7 +6,7 @@
  *         raterQuestion, groupBy, labels, citation }
  */
 
-import { reverseCodedConditions } from './surveyRuntimeContext';
+import { reverseCodedConditions } from './conditionVariants.js';
 
 export const PAPER_REFERENCES = Object.freeze({
   trueskill: 'Herbrich, R., Minka, T., & Graepel, T. (2006). TrueSkill: A Bayesian skill rating system. NIPS.',

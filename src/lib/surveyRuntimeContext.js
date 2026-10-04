@@ -3,6 +3,7 @@
 // A question may reword itself per condition via conditionVariants: [{ condition, title, reverseCoded }].
 
 import { Serializer } from 'survey-core';
+import { conditionVariants, reverseCodedConditions } from './conditionVariants.js';
 
 export const CONDITION_VARIABLE = 'sp_condition';
 export const URL_VARIABLE_PREFIX = 'url_';
@@ -106,20 +107,11 @@ export async function resolveRuntimeContext(config, { projectId, search = '', ov
   return { condition, urlParams: captureUrlParams(config, search) };
 }
 
-/** Valid per-condition variants of a question (empty titles fall back to the question title). */
-export function conditionVariants(question) {
-  const list = Array.isArray(question?.conditionVariants) ? question.conditionVariants : [];
-  return list.filter((v) => v && typeof v.condition === 'string' && v.condition.trim());
-}
+export { conditionVariants, reverseCodedConditions };
 
 export function conditionVariant(question, conditionId) {
   if (!conditionId) return null;
   return conditionVariants(question).find((v) => v.condition === conditionId) || null;
-}
-
-/** Condition ids whose answers to this question are reverse-coded in analysis. */
-export function reverseCodedConditions(question) {
-  return conditionVariants(question).filter((v) => v.reverseCoded === true).map((v) => v.condition);
 }
 
 /** Question JSON as participants in this condition see it. */
