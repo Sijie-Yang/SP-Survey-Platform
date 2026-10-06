@@ -125,6 +125,9 @@ export default function NasarLikedDemo({ language }) {
 
   useEffect(() => {
     if (!holder.current || mapRef.current || !result.ok) return undefined;
+    // jsdom has no SVGSVGElement.createSVGRect, so Leaflet's SVG renderer is
+    // null and polygon.addTo throws. Skip the map; the written guide still renders.
+    if (!L.Browser?.svg && !L.Browser?.vml) return undefined;
     const map = L.map(holder.current, { zoomControl: true, attributionControl: true });
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap',

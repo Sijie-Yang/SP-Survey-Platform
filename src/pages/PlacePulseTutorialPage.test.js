@@ -75,11 +75,16 @@ test('a delayed old template response cannot replace a newly selected guide', as
   let resolveOld;
   global.fetch.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
   const rendered = render(view());
+  // The live lookup is awaited before fetch(). Flush that microtask so the
+  // hung request is the old guide; a sync rerender aborts before fetch() runs.
+  await act(async () => { await Promise.resolve(); });
   mockDocId = '1990-nasar-evaluative';
   rendered.rerender(view());
-  await screen.findByRole('table', { name: 'Current template settings' });
+  // More than 8 questions stay inside a closed disclosure, so the table is hidden.
+  const settingsQuery = { name: 'Current template settings', hidden: true };
+  await screen.findByRole('table', settingsQuery);
   await act(async () => resolveOld({ ok: true, json: async () => templates['2013-salesses-collaborative'] }));
-  const settings = screen.getByRole('table', { name: 'Current template settings' });
+  const settings = screen.getByRole('table', settingsQuery);
   expect(within(settings).getByText('liked_areas')).toBeInTheDocument();
   expect(within(settings).queryByText('safer')).not.toBeInTheDocument();
 });
