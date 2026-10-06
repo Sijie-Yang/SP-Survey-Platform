@@ -42,10 +42,12 @@ beforeEach(() => {
 });
 afterEach(() => { localStorage.clear(); global.fetch = realFetch; });
 const view = () => <RegionProvider><DocsPage /></RegionProvider>;
+// DocsNavigation labels the sidebar landmark "SP-Wiki". "Documentation" is not a role name.
+const docsNav = () => screen.getByRole('navigation', { name: 'SP-Wiki' });
 
 test('guide ties the paper, real preview, current settings and scoring together', async () => {
   render(view());
-  expect(screen.getByRole('navigation', { name: 'Documentation' })).toBeInTheDocument();
+  expect(docsNav()).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Place Pulse 1.0' })).toBeInTheDocument();
   expect(screen.getByRole('img', { name: /actual platform survey preview/ })).toHaveAttribute('src', '/docs/research/2013-salesses-collaborative-preview.png');
   const settings = await screen.findByRole('table', { name: 'Current template settings' });
@@ -73,11 +75,16 @@ test('a delayed old template response cannot replace a newly selected guide', as
   let resolveOld;
   global.fetch.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
   const rendered = render(view());
+  // The live lookup is awaited before fetch(). Flush that microtask so the
+  // hung request is the old guide; a sync rerender aborts before fetch() runs.
+  await act(async () => { await Promise.resolve(); });
   mockDocId = '1990-nasar-evaluative';
   rendered.rerender(view());
-  await screen.findByRole('table', { name: 'Current template settings' });
+  // More than 8 questions stay inside a closed disclosure, so the table is hidden.
+  const settingsQuery = { name: 'Current template settings', hidden: true };
+  await screen.findByRole('table', settingsQuery);
   await act(async () => resolveOld({ ok: true, json: async () => templates['2013-salesses-collaborative'] }));
-  const settings = screen.getByRole('table', { name: 'Current template settings' });
+  const settings = screen.getByRole('table', settingsQuery);
   expect(within(settings).getByText('liked_areas')).toBeInTheDocument();
   expect(within(settings).queryByText('safer')).not.toBeInTheDocument();
 });
@@ -228,7 +235,7 @@ test.each(PAPER_TEMPLATE_DOCS)('$id has its full citation, sidebar shorthand and
   const citation = screen.getByRole('region', { name: 'Full paper citation' });
   expect(citation).toHaveTextContent(doc.citation);
   expect(within(citation).getByRole('link')).toHaveAttribute('href', `https://doi.org/${doc.doi}`);
-  const nav = screen.getByRole('navigation', { name: 'Documentation' });
+  const nav = docsNav();
   expect(within(nav).getByRole('link', { name: `${doc.shortCitation} ${doc.name}` })).toHaveAttribute('aria-current', 'page');
   const button = screen.getByRole('button', { name: 'Preview full template' });
   await waitFor(() => expect(button).toBeEnabled());

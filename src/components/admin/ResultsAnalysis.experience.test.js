@@ -27,7 +27,8 @@ test('platform admin reads the selected project through the admin API without de
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', name: 'Other project' }} surveyConfig={config} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
-  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null, expect.any(Object));
+  // readAllResponsePages passes the in-flight AbortSignal so a newer load can cancel this page.
+  expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null, expect.any(Object), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   expect(screen.queryByRole('tab', { name: /^Data$/i })).toBeNull();
   expect(screen.getByRole('tab', { name: /^Overview$/i }).getAttribute('aria-selected')).toBe('true');
   fireEvent.click(screen.getByRole('tab', { name: /Response records/i }));
