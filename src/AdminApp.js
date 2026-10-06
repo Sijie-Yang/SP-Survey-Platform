@@ -83,7 +83,7 @@ import {
 
 const ImageDataset = lazy(() => import('./components/admin/ImageDataset'));
 const SurveyBuilder = lazy(() => import('./components/admin/SurveyBuilder'));
-const SurveyPreview = lazy(() => import('./components/admin/SurveyPreview'));
+const FullSurveyPreview = lazy(() => import('./components/admin/FullSurveyPreview'));
 const ResultsAnalysis = lazy(() => import('./components/admin/ResultsAnalysis'));
 const ResearcherPractice = lazy(() => import('./components/admin/ResearcherPractice'));
 const SiliconSamples = lazy(() => import('./components/admin/SiliconSamples'));
@@ -1833,6 +1833,7 @@ export default function AdminApp() {
                   hideAssistant
                   onEditorSelectionChange={setEditorSelection}
                   onOpenAssistant={() => setAiSidebarOpen(true)}
+                  onOpenFullPreview={() => setPreviewOpen(true)}
                   editorCommitKey={editorCommitKey}
                 />
               ) : (
@@ -1918,20 +1919,22 @@ export default function AdminApp() {
 
       {/* Preview Dialog */}
       <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} maxWidth="lg" fullWidth>
-        <DialogTitle>
-          📋 Survey Preview - Exact Live Survey Replica
-        </DialogTitle>
+        <DialogTitle>{t.builderFullPreview}</DialogTitle>
         <DialogContent>
           <Suspense fallback={<AdminLoadingState label="Loading preview…" />}>
             {surveyConfig ? (
-              <SurveyPreview config={surveyConfig} currentProject={currentProject} />
+              <FullSurveyPreview
+                config={surveyConfig}
+                currentProject={currentProject}
+                onConfigChange={handleSurveyConfigChange}
+              />
             ) : (
               <Typography>No survey configuration available</Typography>
             )}
           </Suspense>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPreviewOpen(false)}>Close</Button>
+          <Button onClick={() => setPreviewOpen(false)}>{t.resultsClose}</Button>
         </DialogActions>
       </Dialog>
 

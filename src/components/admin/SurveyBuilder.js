@@ -43,6 +43,7 @@ import {
   Translate,
   Tune,
   PaletteOutlined,
+  Preview,
 } from '@mui/icons-material';
 import {
   DndContext,
@@ -63,6 +64,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import PageEditor from './PageEditor';
+import FullSurveyPreview from './FullSurveyPreview';
 import ConfirmDialog from '../layout/ConfirmDialog';
 import AiAssistantPanel from './AiAssistantPanel';
 import SurveyThemePreviewPanel from '../SurveyThemePreviewPanel';
@@ -265,13 +267,18 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
   );
 }
 
-export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange, onOpenAssistant, editorCommitKey = 0 }) {
+export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange, onOpenAssistant, onOpenFullPreview, editorCommitKey = 0 }) {
   const { t } = useRegion();
   const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
   const [settingsDialog, setSettingsDialog] = useState(null);
+  const [localPreviewOpen, setLocalPreviewOpen] = useState(false);
   const closeSettings = () => setSettingsDialog(null);
+  const openFullPreview = () => {
+    if (onOpenFullPreview) onOpenFullPreview();
+    else setLocalPreviewOpen(true);
+  };
 
   const reportSelection = (next) => {
     onEditorSelectionChange?.(next);
@@ -717,7 +724,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
       <AdminActionBar
         label={t.builderSurveySettings}
-        primaryAction={<Button size="small" variant="contained" startIcon={<Add />} onClick={addNewPage}>{t.builderAddPage}</Button>}
+        primaryAction={<Button size="small" variant="contained" startIcon={<Preview />} onClick={openFullPreview}>{t.builderFullPreview}</Button>}
       >
           {[
             ['basic', t.builderBasicInfo, <ArticleOutlined />],
@@ -1303,10 +1310,27 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         />
       )}
 
-      {onNextStep && (
-        <Box sx={{ mt: 2.5, display: 'flex', justifyContent: 'flex-end' }}>
+      <Box
+        data-builder-page-actions=""
+        sx={{ mt: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
+      >
+        <AdminActionButton startIcon={<Add />} onClick={addNewPage}>
+          {t.builderAddPage}
+        </AdminActionButton>
+        {onNextStep && (
           <Button size="small" onClick={onNextStep}>{t.builderNextShare}</Button>
-        </Box>
+        )}
+      </Box>
+      {localPreviewOpen && (
+        <Dialog open onClose={() => setLocalPreviewOpen(false)} maxWidth="lg" fullWidth>
+          <DialogTitle>{t.builderFullPreview}</DialogTitle>
+          <DialogContent>
+            <FullSurveyPreview config={config} currentProject={currentProject} onConfigChange={onChange} />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setLocalPreviewOpen(false)}>{t.resultsClose}</Button>
+          </DialogActions>
+        </Dialog>
       )}
       <Snackbar
         open={themeSnackbar.open}

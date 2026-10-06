@@ -40,7 +40,7 @@ export function MediaPlayer({
     return <video key={url} src={url} controls onCanPlay={onReady} onError={onError} preload={onReady ? 'auto' : 'metadata'} playsInline style={{
       display: 'block',
       width: '100%',
-      maxHeight: 480,
+      maxHeight: 'var(--sp-media-max-height, 480px)',
       borderRadius: 8,
       background: '#111'
     }} />;
@@ -54,7 +54,7 @@ export function MediaPlayer({
   return <img key={url} src={url} alt={name || 'media'} onLoad={onReady} onError={onError} style={{
     display: 'block',
     width: '100%',
-    maxHeight: 480,
+    maxHeight: 'var(--sp-media-max-height, 480px)',
     objectFit: 'contain',
     borderRadius: 8
   }} />;

@@ -1,9 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { alpha } from '@mui/material/styles';
 import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
-import { Box, Alert, CircularProgress, Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
+import { Accordion, AccordionDetails, AccordionSummary, Box, Alert, CircularProgress, Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
+import ExpandMore from '@mui/icons-material/ExpandMore';
+import ViewportLayoutFrame from '../ViewportLayoutFrame';
+import { attachPageEditor, attachQuestionEditor, bindLivePreviewEditing } from '../../lib/livePreviewEditing';
+import { applyContentWidthToModel, configForPreviewRefresh } from '../../lib/viewportLayout';
 import { convertToSurveyJS, generateCustomTheme, normalizeBuilderSurveyJson } from '../../lib/surveyStorage';
 import { themeJson } from "../../theme";
 import registerImageRankingWidget, {
@@ -30,7 +34,7 @@ export function previewSourceKey(config, currentProject) {
   const images = currentProject?.preloadedImages || [];
   const dataset = currentProject?.imageDatasetConfig || {};
   return JSON.stringify({
-    config: config || null,
+    config: configForPreviewRefresh(config || null),
     imageKeys: images.map((img) => img.key || img.url || img.name || ''),
     imageFolders: images.map((img) => img.logicalFolder || img.folder || ''),
     mediaFolderTags: dataset.mediaFolderTags || {},
@@ -38,7 +42,7 @@ export function previewSourceKey(config, currentProject) {
   });
 }
 
-export function createSurveyPreviewModel(processedConfig, runtimeContext = null) {
+export function createSurveyPreviewModel(processedConfig, runtimeContext = null, options = {}) {
   const configToUse = JSON.parse(JSON.stringify(processedConfig || {}));
   if (typeof configToUse.showQuestionNumbers === 'boolean') {
     configToUse.showQuestionNumbers = configToUse.showQuestionNumbers ? 'on' : 'off';
@@ -61,14 +65,91 @@ export function createSurveyPreviewModel(processedConfig, runtimeContext = null)
   } catch {
     // SurveyJS default styling
   }
-  model.mode = 'display';
+  model.mode = options.interactive ? 'edit' : 'display';
   try {
     model.showProgressBar = 'off';
   } catch { /* ignore */ }
   return model;
 }
 
-export default function SurveyPreview({ config, currentProject, showMediaAssignment = true }) {
+export const DEFAULT_PREVIEW_LABELS = {
+  questionText: 'Question text',
+  questionDescription: 'Question description',
+  pageTitle: 'Page title',
+  pageDescription: 'Page description',
+  moveQuestionUp: 'Move question up',
+  moveQuestionDown: 'Move question down',
+  movePageUp: 'Move page up',
+  movePageDown: 'Move page down',
+  mediaAssignment: 'Media assignment',
+};
+
+function MediaAssignmentTable({ rows }) {
+  return (
+    <TableContainer component={Paper} variant="outlined">
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ '& th': { fontWeight: 700 } }}>
+            <TableCell>Question</TableCell>
+            <TableCell>Mode</TableCell>
+            <TableCell>Set ID</TableCell>
+            <TableCell>Categories</TableCell>
+            <TableCell>Assigned files</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.questionName}>
+              <TableCell>
+                <Typography variant="body2" fontWeight={600}>{row.questionTitle}</Typography>
+                <Typography variant="caption" color="text.secondary">{row.questionName}</Typography>
+              </TableCell>
+              <TableCell>
+                <Chip
+                  size="small"
+                  label={row.mode === 'group' || row.mode === 'set' ? 'Fixed set' : row.mode === 'category' ? 'Per category' : 'Individual'}
+                  color={row.mode === 'set' || row.mode === 'group' || row.mode === 'category' ? 'primary' : 'default'}
+                  variant="outlined"
+                />
+              </TableCell>
+              <TableCell>
+                {(row.setId || row.groupId) ? (
+                  <Typography variant="body2" fontWeight={600} color="primary.main">{row.setId || row.groupId}</Typography>
+                ) : (
+                  <Typography variant="caption" color="text.secondary">—</Typography>
+                )}
+              </TableCell>
+              <TableCell>
+                {row.categories?.length ? (
+                  <Typography variant="caption">{row.categories.join(', ')}</Typography>
+                ) : (
+                  <Typography variant="caption" color="text.secondary">—</Typography>
+                )}
+              </TableCell>
+              <TableCell>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                  {row.fileNames.join(' · ') || '—'}
+                </Typography>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+export default function SurveyPreview({
+  config,
+  currentProject,
+  showMediaAssignment = true,
+  interactive = false,
+  onConfigChange = null,
+  viewport = 'desktop',
+  contentWidth = null,
+  mediaMaxHeight = null,
+  labels = DEFAULT_PREVIEW_LABELS,
+}) {
   useEffect(() => { markGuideProgress(currentProject?.id, 'preview'); }, [currentProject?.id]);
   const [processedConfig, setProcessedConfig] = useState(null);
   const [mediaAssignments, setMediaAssignments] = useState([]);
@@ -406,14 +487,59 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
   const previewCondition = conditions.length > 1
     ? (conditions.some((c) => c.id === conditionChoice) ? conditionChoice : conditions[0].id)
     : null;
-  const model = useMemo(
-    () => (processedConfig && !loading ? createSurveyPreviewModel(processedConfig, { condition: previewCondition }) : null),
-    [processedConfig, loading, previewCondition],
-  );
+  const pageRef = useRef(0);
+  const configRef = useRef(config);
+  configRef.current = config;
+  const onConfigChangeRef = useRef(onConfigChange);
+  onConfigChangeRef.current = onConfigChange;
+  const labelsRef = useRef(labels);
+  labelsRef.current = labels;
+  const canEdit = interactive && typeof onConfigChange === 'function';
+  const editorApi = useMemo(() => ({
+    getConfig: () => configRef.current,
+    onConfigChange: (next) => onConfigChangeRef.current?.(next),
+    getLabels: () => labelsRef.current,
+  }), []);
+  const model = useMemo(() => {
+    if (!processedConfig || loading) return null;
+    const created = createSurveyPreviewModel(
+      processedConfig,
+      { condition: previewCondition },
+      { interactive },
+    );
+    if (interactive) {
+      const pageCount = created.visiblePageCount || created.pageCount || 1;
+      const pageNo = Math.min(pageRef.current || 0, Math.max(0, pageCount - 1));
+      if (pageNo > 0) created.currentPageNo = pageNo;
+      created.onCurrentPageChanged.add(() => {
+        pageRef.current = created.currentPageNo || 0;
+      });
+    }
+    if (canEdit) created.__spUnbindEditors = bindLivePreviewEditing(created, editorApi);
+    return created;
+  }, [processedConfig, loading, previewCondition, interactive, canEdit, editorApi]);
 
   useEffect(() => () => {
+    model?.__spUnbindEditors?.();
     model?.dispose?.();
   }, [model]);
+
+  useEffect(() => {
+    if (!canEdit || !model) return undefined;
+    const questions = typeof model.getAllQuestions === 'function' ? model.getAllQuestions() : [];
+    questions.forEach((question) => {
+      const root = question?.react?.rootRef?.current;
+      if (root) attachQuestionEditor(root, question, editorApi);
+    });
+    const pageRoot = document.querySelector('[data-preview-mode="edit"] .sd-page');
+    if (pageRoot && model.currentPage) attachPageEditor(pageRoot, model.currentPage, editorApi);
+    return undefined;
+  }, [canEdit, model, editorApi, config, viewport, contentWidth, mediaMaxHeight]);
+
+  useEffect(() => {
+    if (!interactive || !model) return;
+    applyContentWidthToModel(model, contentWidth);
+  }, [interactive, model, contentWidth]);
 
   if (!config) {
     return (
@@ -445,23 +571,48 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
       progressChrome: progressEnabled,
     });
     
+    const mediaTable = showMediaAssignment && mediaAssignments.length > 0 ? (
+      <MediaAssignmentTable rows={mediaAssignments} />
+    ) : null;
+    const surveyBody = (
+      <Box
+        className="sp-survey-with-progress"
+        sx={interactive ? undefined : { maxWidth: 900, mx: 'auto', px: { xs: 0, sm: 2 } }}
+      >
+        <SurveyTrialNavProvider>
+          <SurveyProgressBridge
+            surveyModel={model}
+            progressEnabled={progressEnabled}
+            theme={config?.theme || null}
+          />
+          <Survey model={model} />
+        </SurveyTrialNavProvider>
+      </Box>
+    );
+
     return (
-      <Box sx={{ maxHeight: '70vh', overflow: 'auto' }}>
-        <Box sx={{ 
-          bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
-          color: 'text.primary',
-          border: '1px solid',
-          borderColor: (theme) => alpha(theme.palette.primary.main, 0.25),
-          p: 1, 
-          textAlign: 'center', 
-          mb: 2,
-          borderRadius: 1
-        }}>
-          📋 Preview Mode - This shows exactly how your survey will appear to participants
-          {usingPreviewLibrary
-            ? ' · No project media — sampling from the platform preview media library'
-            : ''}
-        </Box>
+      <Box
+        data-preview-mode={interactive ? 'edit' : 'display'}
+        data-preview-page={String((model.currentPageNo || 0) + 1)}
+        sx={{ maxHeight: interactive ? 'none' : '70vh', overflow: 'auto' }}
+      >
+        {!interactive && (
+          <Box sx={{
+            bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+            color: 'text.primary',
+            border: '1px solid',
+            borderColor: (theme) => alpha(theme.palette.primary.main, 0.25),
+            p: 1,
+            textAlign: 'center',
+            mb: 2,
+            borderRadius: 1
+          }}>
+            📋 Preview Mode - This shows exactly how your survey will appear to participants
+            {usingPreviewLibrary
+              ? ' · No project media — sampling from the platform preview media library'
+              : ''}
+          </Box>
+        )}
         {conditions.length > 1 && (
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
             <Typography variant="body2">Condition:</Typography>
@@ -479,7 +630,7 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
         {mediaErrors.map((message) => (
           <Alert key={message} severity="error" sx={{ mb: 1 }}>{message}</Alert>
         ))}
-        {showMediaAssignment && mediaAssignments.length > 0 && (
+        {!interactive && mediaTable && (
           <Box sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
             <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>
               This preview&apos;s media assignment (simulated participant draw)
@@ -487,71 +638,32 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
             <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
               Refresh preview to re-roll random sets. Set mode shows which <strong>set ID</strong> was picked per question.
             </Typography>
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow sx={{ '& th': { fontWeight: 700 } }}>
-                    <TableCell>Question</TableCell>
-                    <TableCell>Mode</TableCell>
-                    <TableCell>Set ID</TableCell>
-                    <TableCell>Categories</TableCell>
-                    <TableCell>Assigned files</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {mediaAssignments.map((row) => (
-                    <TableRow key={row.questionName}>
-                      <TableCell>
-                        <Typography variant="body2" fontWeight={600}>{row.questionTitle}</Typography>
-                        <Typography variant="caption" color="text.secondary">{row.questionName}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          size="small"
-                          label={row.mode === 'group' || row.mode === 'set' ? 'Fixed set' : row.mode === 'category' ? 'Per category' : 'Individual'}
-                          color={row.mode === 'set' || row.mode === 'group' || row.mode === 'category' ? 'primary' : 'default'}
-                          variant="outlined"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {(row.setId || row.groupId) ? (
-                          <Typography variant="body2" fontWeight={600} color="primary.main">{row.setId || row.groupId}</Typography>
-                        ) : (
-                          <Typography variant="caption" color="text.secondary">—</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {row.categories?.length ? (
-                          <Typography variant="caption">{row.categories.join(', ')}</Typography>
-                        ) : (
-                          <Typography variant="caption" color="text.secondary">—</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-                          {row.fileNames.join(' · ') || '—'}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            {mediaTable}
           </Box>
         )}
-        <Box
-          sx={{ maxWidth: 900, mx: 'auto', px: { xs: 0, sm: 2 } }}
-          className="sp-survey-with-progress"
-        >
-          <SurveyTrialNavProvider>
-            <SurveyProgressBridge
-              surveyModel={model}
-              progressEnabled={progressEnabled}
-              theme={config?.theme || null}
-            />
-            <Survey model={model} />
-          </SurveyTrialNavProvider>
-        </Box>
+        {interactive ? (
+          <ViewportLayoutFrame
+            forcedViewport={viewport}
+            contentWidth={contentWidth}
+            mediaMaxHeight={mediaMaxHeight}
+            surveyModel={model}
+          >
+            {surveyBody}
+          </ViewportLayoutFrame>
+        ) : surveyBody}
+        {interactive && mediaTable && (
+          <Accordion disableGutters elevation={0} sx={{ mt: 2, border: '1px solid', borderColor: 'divider', '&:before': { display: 'none' } }}>
+            <AccordionSummary expandIcon={<ExpandMore />}>
+              <Typography variant="body2">{labels.mediaAssignment}</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                Refresh preview to re-roll random sets. Set mode shows which set ID was picked per question.
+              </Typography>
+              {mediaTable}
+            </AccordionDetails>
+          </Accordion>
+        )}
       </Box>
     );
   } catch (error) {

@@ -1,4 +1,6 @@
 import ParticipantSurveySurface from './components/ParticipantSurveySurface';
+import ViewportLayoutFrame from './components/ViewportLayoutFrame';
+import { applyContentWidthToModel, resolvePublishedFrame } from './lib/viewportLayout';
 import { submitWithRecovery } from './lib/recoverableSubmission';
 import { handleSurveyMediaError } from './lib/mediaRecovery';
 import { surveyRevision } from './lib/surveyRevision';
@@ -63,6 +65,7 @@ function withTimeout(promise, ms, fallback) {
 
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
+  const [publishedSurveyJson, setPublishedSurveyJson] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Loading survey…');
   const [error, setError] = useState(null);
@@ -1211,6 +1214,9 @@ export default function SurveyApp() {
       window.lastSurveyLoadTime = Date.now();
       console.log('✅ Survey initialized successfully at:', new Date(window.lastSurveyLoadTime).toISOString());
       
+      const publishedFrame = resolvePublishedFrame(finalSurveyJson, window.innerWidth);
+      applyContentWidthToModel(model, publishedFrame.contentWidth);
+      setPublishedSurveyJson(finalSurveyJson);
       setSurveyModel(model);
       setSurveyPhase('active');
       setError(null);
@@ -1409,7 +1415,9 @@ export default function SurveyApp() {
                 Research annotation mode: Round {repeatProgress.current} of {repeatProgress.total}
               </Alert>
             )}
-            <Survey model={surveyModel} />
+            <ViewportLayoutFrame config={publishedSurveyJson} surveyModel={surveyModel}>
+              <Survey model={surveyModel} />
+            </ViewportLayoutFrame>
           </ParticipantSurveySurface>
         </SurveyTrialNavProvider>
       )}
