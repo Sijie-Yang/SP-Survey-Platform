@@ -32,7 +32,9 @@ test('Worker artifact is a deterministic expansion of the canonical registry', (
 });
 
 test('Worker capabilities use generated question and operation IDs', () => {
-  assert.equal(QUESTION_TYPE_IDS.length, 34);
+  // Follow the registry. mapannotation made a frozen length of 34 stale.
+  assert.equal(QUESTION_TYPE_IDS.length, Object.keys(source.questionTypes).length);
+  assert.equal(QUESTION_TYPE_IDS.includes('mapannotation'), true);
   assert.deepEqual(DESIGN_CAPABILITIES.questionTypes, QUESTION_TYPE_IDS);
   assert.deepEqual(DESIGN_CAPABILITIES.operations, OPERATION_TYPES);
   assert.equal(DESIGN_CAPABILITIES.platformSchemaHash, PLATFORM_SCHEMA_HASH);
