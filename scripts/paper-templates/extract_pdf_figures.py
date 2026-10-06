@@ -21,22 +21,26 @@ TEMPLATE_DIR = ROOT / "public" / "project_templates"
 PDF_DIR = Path("/Users/sijieyang/Documents/SP-Survey-Papers/Template Papers")
 
 # Folder the survey questions should sample. None = stills only (video study).
+# Empty string means the template root. A single bucket such as "paper" or one
+# city is not a survey category/set, so stimuli are not given a subfolder.
+# None means this template has no static stimulus images.
 STIMULUS_FOLDER = {
     "2009-ewing-measuring": None,
-    "2013-salesses-collaborative": "paper",
-    "2014-quercia-aesthetic": "paper",
-    "2014-naik-streetscore": "paper",
-    "2016-dubey-place": "paper",
-    "2017-liu-machine": "Beijing",
-    "2017-seresinhe-scenic": "paper",
-    "2019-yao-human": "paper",
-    "2021-ramirez-measuring": "PlacePulse2",
-    "2021-kruse-places": "Boston",
-    "2022-qiu-subjective": "Shanghai",
-    "2023-kang-assessing": "Stockholm",
-    "2025-danish-citizen": "Amsterdam",
-    "2026-kang-decoding": "Helsingborg",
+    "2013-salesses-collaborative": "",
+    "2014-quercia-aesthetic": "",
+    "2014-naik-streetscore": "",
+    "2016-dubey-place": "",
+    "2017-liu-machine": "",
+    "2017-seresinhe-scenic": "",
+    "2019-yao-human": "",
+    "2021-ramirez-measuring": "",
+    "2021-kruse-places": "",
+    "2022-qiu-subjective": "",
+    "2023-kang-assessing": "",
+    "2025-danish-citizen": "",
+    "2026-kang-decoding": "",
 }
+SINGLE_BUCKETS = {"paper", "Beijing", "PlacePulse2", "Boston", "Shanghai", "Stockholm", "Amsterdam", "Helsingborg"}
 
 IMAGE_QUESTION_TYPES = {
     "imagepicker",
@@ -545,7 +549,7 @@ def apply_template(template_id: str, items: list[dict]) -> None:
             figures.rmdir()
     rels = []
     for item in stimuli:
-        rel = f"{item['folder']}/{item['name']}"
+        rel = item["name"] if not item["folder"] else f"{item['folder']}/{item['name']}"
         save_jpeg(item["im"], dest / rel)
         rels.append(rel)
     if rels:
@@ -567,6 +571,16 @@ def apply_template(template_id: str, items: list[dict]) -> None:
     stimulus_n = len(stimuli)
     sample_folder = stimulus_folder if stimulus_n and stimulus_folder else None
 
+    def strip_single_bucket(el):
+        folders = el.get("mediaFolders")
+        if not isinstance(folders, list):
+            return
+        kept = [folder for folder in folders if folder not in SINGLE_BUCKETS]
+        if kept:
+            el["mediaFolders"] = kept
+        else:
+            el.pop("mediaFolders", None)
+
     # Keep only folders this template can actually fill. "clips" stays so the
     # video question still has somewhere to point.
     folders = []
@@ -575,7 +589,11 @@ def apply_template(template_id: str, items: list[dict]) -> None:
     if sample_folder and sample_folder not in folders:
         folders.append(sample_folder)
     data.setdefault("imageDatasetConfig", {})
-    data["imageDatasetConfig"]["mediaFolders"] = folders
+    strip_single_bucket(data["imageDatasetConfig"])
+    if sample_folder:
+        data["imageDatasetConfig"]["mediaFolders"] = folders
+    elif "mediaFolders" not in data["imageDatasetConfig"]:
+        data["imageDatasetConfig"]["mediaFolders"] = []
     data["description"] = patch_description(data.get("description") or "", stimulus_n, template_id)
 
     if sample_folder and stimulus_folder is not None:
@@ -590,6 +608,8 @@ def apply_template(template_id: str, items: list[dict]) -> None:
                 el["mediaFolders"] = [sample_folder]
         for page in data["config"]["pages"]:
             walk_elements(page.get("elements"), tag)
+    for page in data["config"]["pages"]:
+        walk_elements(page.get("elements"), strip_single_bucket)
 
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 

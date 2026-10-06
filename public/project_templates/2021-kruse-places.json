@@ -17,10 +17,8 @@
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "Boston"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,
@@ -70,10 +68,7 @@
               "Very playable"
             ],
             "minRateDescription": "Very unplayable",
-            "maxRateDescription": "Very playable",
-            "mediaFolders": [
-              "Boston"
-            ]
+            "maxRateDescription": "Very playable"
           }
         ]
       },

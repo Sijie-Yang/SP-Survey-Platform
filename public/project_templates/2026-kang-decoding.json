@@ -17,10 +17,8 @@
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "Helsingborg"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,
@@ -62,10 +60,7 @@
             "randomImageSelection": true,
             "isRequired": true,
             "imageCount": 2,
-            "trialCount": 10,
-            "mediaFolders": [
-              "Helsingborg"
-            ]
+            "trialCount": 10
           }
         ]
       }

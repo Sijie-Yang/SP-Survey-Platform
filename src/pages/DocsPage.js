@@ -15,6 +15,8 @@ import DocsTopicArticle, { CaseGallery, RelatedDocs, textOf } from '../component
 import { TopicLab } from '../components/docs/DocsTopicArticle';
 import ResearchAnalysisExample from '../components/docs/ResearchAnalysisExample';
 import { prefetchStudyExampleMedia } from '../components/docs/ResearchPreview';
+import { fetchPublishedTemplate } from '../lib/publishedTemplate';
+import { TemplateCoverImage, useResolvedCovers } from '../lib/templateCover';
 const TemplateDocPreview = lazy(() => import('../components/docs/TemplateDocPreview'));
 const ResearchPreview = lazy(() => import('../components/docs/ResearchPreview'));
 const sectionStyle = { scrollMarginTop: 96, pt: 4, mt: 1, borderTop: 1, borderColor: 'divider' };
@@ -31,10 +33,9 @@ function useTemplate(id) {
     if (!id) return undefined;
     const controller = new AbortController();
     setState({ id, template: null, error: false });
-    fetch(`/project_templates/${id}.json`, { signal: controller.signal })
-      .then(res => { if (!res.ok) throw new Error('Template unavailable'); return res.json(); })
-      .then(template => { if (!template.config?.pages) throw new Error('Invalid template'); if (!controller.signal.aborted) setState({ id, template, error: false }); })
-      .catch(() => { if (!controller.signal.aborted) setState({ id, template: null, error: true }); });
+    fetchPublishedTemplate(id, { signal: controller.signal })
+      .then(template => { if (!controller.signal.aborted) setState({ id, template, error: false }); })
+      .catch((error) => { if (controller.signal.aborted || error?.name === 'AbortError') return; setState({ id, template: null, error: true }); });
     return () => controller.abort();
   }, [id, retry]);
   return { ...(state.id === id ? state : { template: null, error: false }), retry: () => setRetry(n => n + 1) };
@@ -101,12 +102,6 @@ const PAIRED_PREVIEWS = {
   },
 };
 
-export function guideCoverSrc(id) {
-  if (id === '1990-nasar-evaluative') return '/project_templates/1990-nasar-evaluative-cover.svg';
-  if (id === '2009-ewing-measuring') return '/docs/research/2009-ewing-measuring-scene-a.png';
-  return `/docs/research/${id}-preview.png`;
-}
-
 function PreviewFigure({ id, guide, language, onPreview, canPreview }) {
   const zh = language === 'zh';
   const [zoom, setZoom] = useState(false);
@@ -117,7 +112,9 @@ function PreviewFigure({ id, guide, language, onPreview, canPreview }) {
     ? (zh ? `${label} 的真实问卷预览截图` : `actual survey preview for ${label}`)
     : id === '2025-yang-thermal'
       ? (zh ? '平台真实问卷预览截图，使用该模板的街景' : 'actual platform survey preview using this template’s street views')
-      : (zh ? '平台真实问卷预览截图，使用演示素材' : 'actual platform survey preview using demonstration media')}`;
+      : ['2014-quercia-aesthetic', '2014-naik-streetscore', '2016-dubey-place', '2017-liu-machine'].includes(id)
+        ? (zh ? '平台真实问卷预览截图，使用该模板附带的论文图片' : 'actual platform survey preview using this template’s paper photographs')
+        : (zh ? '平台真实问卷预览截图，使用演示素材' : 'actual platform survey preview using demonstration media')}`;
   const figure = failed
     ? <Alert severity="info">{zh ? '截图暂时不可用，仍可打开交互预览。' : 'Screenshot unavailable. The interactive preview is still available.'}</Alert>
     : <Box sx={{ display: 'grid', gridTemplateColumns: paired ? { xs: '1fr', sm: '1fr 1fr' } : '1fr', gap: 1, p: paired ? 1 : 0, bgcolor: paired ? 'background.default' : 'background.paper' }}>
@@ -139,7 +136,9 @@ function PreviewFigure({ id, guide, language, onPreview, canPreview }) {
         ? paired.caption(zh)
         : id === '2025-yang-thermal'
           ? (zh ? '图：使用平台参与者预览渲染器截取。英文模板题干，一轮比较。两张图来自该模板存放的街景，不是首页演示画面。点击截图可放大。' : 'Captured from the platform’s participant preview renderer. English template wording, one comparison. Both images are street views stored with this template, not the homepage demonstration. Click to enlarge.')
-          : (zh ? '图：使用平台参与者预览渲染器截取。保留英文模板题干，仅演示一轮；媒体为教程示例，不是原研究刺激材料。点击截图可放大。' : 'Captured from the platform’s participant preview renderer. English template wording, one demonstration trial; illustrative media, not the original study stimuli. Click to enlarge.')}
+          : ['2014-quercia-aesthetic', '2014-naik-streetscore', '2016-dubey-place', '2017-liu-machine'].includes(id)
+            ? (zh ? '图：使用平台参与者预览渲染器截取。英文模板题干，一轮。图片是随模板存放的论文 PDF 插图，不是原始完整刺激集。点击截图可放大。' : 'Captured from the platform’s participant preview renderer. English template wording, one trial. The pictures are photographs bundled with the template, cropped from the paper PDF, not the original full stimulus set. Click to enlarge.')
+            : (zh ? '图：使用平台参与者预览渲染器截取。保留英文模板题干，仅演示一轮；媒体为教程示例，不是原研究刺激材料。点击截图可放大。' : 'Captured from the platform’s participant preview renderer. English template wording, one demonstration trial; illustrative media, not the original study stimuli. Click to enlarge.')}
     </Typography>
     {zoom && <Dialog open onClose={() => setZoom(false)} maxWidth="lg" fullWidth><DialogTitle>{zh ? '问卷预览截图' : 'Survey preview screenshot'}<Button onClick={() => setZoom(false)} sx={{ float: 'right' }}>{zh ? '关闭' : 'Close'}</Button></DialogTitle><DialogContent><Box sx={{ display: 'grid', gridTemplateColumns: paired ? { xs: '1fr', md: '1fr 1fr' } : '1fr', gap: 2 }}>{shots.map((shot) => <Box key={shot.src}><Typography variant="subtitle2" sx={{ mb: 1 }}>{shot.label}</Typography><Box component="img" src={shot.src} alt={altFor(shot.label)} sx={{ width: '100%' }} /></Box>)}</Box></DialogContent></Dialog>}
   </Box>;
@@ -158,6 +157,10 @@ function guideRelated(id) {
   if (id === '2013-salesses-collaborative') return ['visual-assessment', 'question-types', 'q-score'];
   if (id === '2025-yang-thermal') return ['trueskill', 'media-sampling', 'results-export'];
   if (id === '2009-ewing-measuring') return ['icc', 'annotations-video', 'quality-reliability'];
+  if (id === '2014-quercia-aesthetic') return ['visual-assessment', 'question-types', 'quality-reliability'];
+  if (id === '2014-naik-streetscore') return ['trueskill', 'visual-assessment', 'quality-reliability'];
+  if (id === '2016-dubey-place') return ['trueskill', 'q-score', 'visual-assessment'];
+  if (id === '2017-liu-machine') return ['icc', 'question-types', 'quality-reliability'];
   return ['question-types', 'annotations-video', 'quality-reliability'];
 }
 
@@ -256,7 +259,9 @@ function GuideArticle({ doc, guide, language }) {
       <Typography variant="caption" color="text.secondary">{zh ? '原文核对：2026-10-04' : 'Source checked: 2026-10-04'}</Typography>
       <Typography variant="body2" sx={{ my: 1 }}><Box component="a" href={`https://doi.org/${doc.doi}`} target="_blank" rel="noopener noreferrer">{doc.citation}</Box></Typography>
       <Typography variant="body2" color="text.secondary">{guideText(guide.source, language)}</Typography>
-      <Typography variant="caption" color="text.secondary">{zh ? '方法解释依据原文；设置表依据当前随站点发布的模板。截图记录的是本次文档编写时的界面，交互预览从当前模板生成。' : 'Method explanations follow the source; the settings table follows the currently bundled template. Screenshots record the interface at authoring time; the live preview is generated from the current template.'}</Typography>
+      <Typography variant="caption" color="text.secondary">{template?.source === 'online'
+        ? (zh ? '方法解释依据原文。设置表和预览读取线上模板及其媒体库。截图记录的是文档编写时的界面。' : 'Method explanations follow the source. The settings table and preview read the live template and its media library. Screenshots record the interface at authoring time.')
+        : (zh ? '方法解释依据原文。线上模板暂时不可用，设置表和预览改用随站点发布的模板。截图记录的是文档编写时的界面。' : 'Method explanations follow the source. The live template is unavailable, so the settings table and preview use the copy bundled with this site. Screenshots record the interface at authoring time.')}</Typography>
     </Box>
     <RelatedDocs ids={guideRelated(doc.id)} language={language} />
     {fullPreview && template && <Suspense fallback={<CircularProgress size={24} />}><TemplateDocPreview template={template} doc={doc} language={language} onClose={() => setFullPreview(false)} /></Suspense>}
@@ -295,6 +300,8 @@ function PaperTemplatesIndex({ language }) {
   const topics = [...new Set(guides.map(([, g]) => guideText(g.topic, language)))];
   const methods = [...new Set(guides.map(([, g]) => guideText(g.method, language)))];
   useEffect(() => { setTopic(''); setMethod(''); }, [language]);
+  const guideIds = useMemo(() => PAPER_TEMPLATE_DOCS.filter(doc => RESEARCH_GUIDES[doc.id]).map(doc => doc.id), []);
+  const covers = useResolvedCovers(guideIds);
   const selected = useMemo(() => PAPER_TEMPLATE_DOCS.filter(doc => {
     const g = RESEARCH_GUIDES[doc.id];
     return (!topic || (g && guideText(g.topic, language) === topic)) && (!method || (g && guideText(g.method, language) === method))
@@ -304,7 +311,7 @@ function PaperTemplatesIndex({ language }) {
     <Typography variant="overline" color="primary.main">SP-SURVEY / DOCS</Typography>
     <Typography component="h1" sx={{ fontSize: { xs: 34, md: 50 }, fontWeight: 800, color: 'text.primary', letterSpacing: '-.04em', lineHeight: 1.2, mt: 1, mb: 2 }}>{zh ? '论文案例与模板' : 'Paper cases & templates'}</Typography>
     <Typography sx={{ fontSize: 18, lineHeight: 1.8, maxWidth: 720, color: 'text.secondary' }}>{zh ? '读懂论文如何定义感知、设计问卷和解释结果，再用 SP-Survey 搭建自己的研究。真实问卷预览与可操作的计分示例，贯穿每篇指南。' : 'Understand how papers define perception, design surveys and interpret results. Then build your own study with SP-Survey, through real survey previews and worked scoring examples.'}</Typography>
-    <Stack direction="row" gap={1} sx={{ my: 3 }}><Chip label={zh ? '4 篇图文指南' : '4 illustrated guides'} color="primary" variant="outlined" /><Chip label={zh ? `${PAPER_TEMPLATE_DOCS.length} 个论文模板` : `${PAPER_TEMPLATE_DOCS.length} paper templates`} variant="outlined" /></Stack>
+    <Stack direction="row" gap={1} sx={{ my: 3 }}><Chip label={zh ? `${Object.keys(RESEARCH_GUIDES).length} 篇图文指南` : `${Object.keys(RESEARCH_GUIDES).length} illustrated guides`} color="primary" variant="outlined" /><Chip label={zh ? `${PAPER_TEMPLATE_DOCS.length} 个论文模板` : `${PAPER_TEMPLATE_DOCS.length} paper templates`} variant="outlined" /></Stack>
     <Typography component="h2" variant="h5" fontWeight={750} sx={{ mt: 4, mb: 2 }}>{zh ? '选择一条研究路径' : 'Choose a research path'}</Typography>
     <Stack direction={{ xs: 'column', sm: 'row' }} gap={1.5} sx={{ mb: 3 }}>
       <TextField size="small" label={zh ? '搜索论文、概念或方法' : 'Search papers, concepts or methods'} value={query} onChange={e => setQuery(e.target.value)} sx={{ flex: 1 }} />
@@ -316,7 +323,7 @@ function PaperTemplatesIndex({ language }) {
       {selected.filter(d => RESEARCH_GUIDES[d.id]).map(doc => {
         const g = RESEARCH_GUIDES[doc.id];
         return <Box key={doc.id} component={RouterLink} to={`/docs/${doc.id}`} sx={{ textDecoration: 'none', color: 'inherit', bgcolor: 'background.paper', border: 1, borderColor: 'divider', borderRadius: 3, overflow: 'hidden', '&:hover': { borderColor: 'primary.main', boxShadow: 2 } }}>
-          <Box component="img" src={guideCoverSrc(doc.id)} alt={guideText(g.method, language)} sx={{ width: '100%', height: 200, objectFit: 'cover', objectPosition: doc.id === '2009-ewing-measuring' ? 'center 46%' : 'center', display: 'block', borderBottom: 1, borderColor: 'divider' }} />
+          <TemplateCoverImage candidates={covers[doc.id]} alt={doc.name} sx={{ width: '100%', height: 200, objectFit: 'cover', display: 'block', borderBottom: 1, borderColor: 'divider' }} />
           <Box sx={{ p: 2.5 }}><Typography variant="overline" color="primary.main">{doc.year} · {guideText(g.method, language)}</Typography><Typography component="h3" variant="h6" fontWeight={700}>{doc.name}</Typography><Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8, mt: 1 }}>{guideText(g.subtitle, language)}</Typography><Typography variant="body2" color="primary.main" sx={{ mt: 2 }}>{zh ? '阅读图文指南 →' : 'Read the illustrated guide →'}</Typography></Box>
         </Box>;
       })}

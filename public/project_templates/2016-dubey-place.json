@@ -32,10 +32,7 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks SAFER."
@@ -53,10 +50,7 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more LIVELY."
@@ -74,10 +68,7 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more BEAUTIFUL."
@@ -95,10 +86,7 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more WEALTHY."
@@ -116,10 +104,7 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more DEPRESSING."
@@ -137,10 +122,7 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more BORING."
@@ -159,23 +141,23 @@
                 "value": "under_18"
               },
               {
-                "text": "18\u201324",
+                "text": "18–24",
                 "value": "18_24"
               },
               {
-                "text": "25\u201334",
+                "text": "25–34",
                 "value": "25_34"
               },
               {
-                "text": "35\u201344",
+                "text": "35–44",
                 "value": "35_44"
               },
               {
-                "text": "45\u201354",
+                "text": "45–54",
                 "value": "45_54"
               },
               {
-                "text": "55\u201364",
+                "text": "55–64",
                 "value": "55_64"
               },
               {
@@ -233,7 +215,7 @@
         "description": "A few brief questions about yourself."
       }
     ],
-    "title": "Place Pulse 2.0 \u2013 Urban Perception Survey",
+    "title": "Place Pulse 2.0 – Urban Perception Survey",
     "description": "For each pair of street images, choose the one that looks more [safe / lively / beautiful / wealthy / depressing / boring]. Based on: Dubey, A., Naik, N., Parikh, D., Raskar, R., & Hidalgo, C. A. (2016). Deep learning the city: Quantifying urban perception at a global scale. ECCV 2016.",
     "logoPosition": "right",
     "autoGrowComment": true,
@@ -275,10 +257,8 @@
     }
   },
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "paper"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,

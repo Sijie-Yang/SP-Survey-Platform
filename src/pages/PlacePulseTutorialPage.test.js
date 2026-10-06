@@ -5,7 +5,8 @@ import DocsPage from './DocsPage';
 import { RegionProvider } from '../contexts/RegionContext';
 import { RESEARCH_GUIDES } from './researchGuides';
 import { PAPER_TEMPLATE_DOCS } from './paperTemplateDocs';
-import { exampleTemplateMediaPrefix, researchPreviewSnapshot } from '../components/docs/ResearchPreview';
+import { exampleTemplateMediaPrefix, libraryExampleUrls, researchPreviewSnapshot } from '../components/docs/ResearchPreview';
+jest.mock('../lib/supabase', () => ({ supabase: null }));
 import { getWikiPage, listWikiPages, wikiHistory } from '../lib/contentSubmissionStore';
 
 let mockPreviewProps;
@@ -88,13 +89,37 @@ test('guide header states the checked sample and medium', () => {
     ['2013-salesses-collaborative', ['Safety & Social Perception', 'Image · SVI', 'Pairwise Comparison', '7,872', '4,136']],
     ['2009-ewing-measuring', ['Urban Design Qualities', 'Video', 'Video + Rating Matrix', '10', '48']],
     ['2025-yang-thermal', ['Thermal Perception', 'Image · SVI', 'Pairwise Comparison', '176', '500']],
+    ['2014-quercia-aesthetic', ['Beauty, Quiet & Happiness', 'Image', 'Pairwise Comparison', '3,301', '568']],
+    ['2014-naik-streetscore', ['Perceived Safety', 'Image · SVI', 'Pairwise Comparison', '7,872', '4,109']],
+    ['2016-dubey-place', ['Six Perceptual Attributes', 'Image · SVI', 'Pairwise Comparison', '81,630', '110,988']],
+    ['2017-liu-machine', ['Facade & Street Wall', 'Image · SVI', 'Expert Rating', '8', '2,000+']],
   ];
   cases.forEach(([id, texts]) => {
     mockDocId = id;
     render(view());
-    texts.forEach((text) => expect(screen.getByText(text)).toBeInTheDocument());
+    texts.forEach((text) => expect(screen.getAllByText(text).length).toBeGreaterThan(0));
     cleanup();
   });
+});
+
+test('the four promoted guides score with their own methods', () => {
+  const ResearchAnalysisExample = require('../components/docs/ResearchAnalysisExample').default;
+  render(<ResearchAnalysisExample id="2014-quercia-aesthetic" language="en" />);
+  expect(screen.getByText('Choice share')).toBeInTheDocument();
+  expect(screen.queryByText(/0\.6 − 0\.2/)).not.toBeInTheDocument();
+  cleanup();
+  render(<ResearchAnalysisExample id="2014-naik-streetscore" language="en" />);
+  expect(screen.getByText('Scaled 0–10')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Add a tie' })).not.toBeInTheDocument();
+  cleanup();
+  render(<ResearchAnalysisExample id="2016-dubey-place" language="en" />);
+  expect(screen.getByText('TrueSkill μ')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Add a tie' })).not.toBeInTheDocument();
+  cleanup();
+  render(<ResearchAnalysisExample id="2017-liu-machine" language="en" />);
+  expect(screen.getByText('Street wall continuous: yes for images 1–3, no for image 4, so the continuous share is 3/4.')).toBeInTheDocument();
+  expect(screen.queryByText(/0\.6 − 0\.2/)).not.toBeInTheDocument();
+  cleanup();
 });
 
 test('Docs home searches concepts and keeps reference pages distinct', async () => {
@@ -123,6 +148,16 @@ test.each(Object.keys(RESEARCH_GUIDES))('%s preview uses local demonstration med
   expect(JSON.stringify(template)).toBe(before);
   if (id === '2025-yang-thermal') {
     expect(exampleTemplateMediaPrefix(template, RESEARCH_GUIDES[id].question)).toBe('templates/2025-yang-thermal/');
+    expect(libraryExampleUrls({
+      ...template,
+      preloadedImages: [
+        { url: 'https://media.example/templates/2025-yang-thermal/a.jpg', type: 'image' },
+        { url: 'https://media.example/templates/2025-yang-thermal/b.jpg', type: 'image' },
+      ],
+    }, RESEARCH_GUIDES[id].question)).toEqual([
+      'https://media.example/templates/2025-yang-thermal/a.jpg',
+      'https://media.example/templates/2025-yang-thermal/b.jpg',
+    ]);
     const study = researchPreviewSnapshot(template, RESEARCH_GUIDES[id].question, [
       'https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev/templates/2025-yang-thermal/a.jpg',
       'https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev/templates/2025-yang-thermal/b.jpg',
@@ -210,17 +245,28 @@ test.each(PAPER_TEMPLATE_DOCS)('$id has its full citation, sidebar shorthand and
 
 test('Chinese reference page labels the full preview and keeps the citation available offline', async () => {
   localStorage.setItem('sp-survey-language', 'zh');
-  mockDocId = '2014-quercia-aesthetic';
+  mockDocId = '2017-seresinhe-scenic';
   global.fetch.mockRejectedValueOnce(new Error('offline'));
   render(view());
   await screen.findByText('模板加载失败。');
-  expect(screen.getByRole('region', { name: '完整文章引用' })).toHaveTextContent('Quercia, D.');
+  expect(screen.getByRole('region', { name: '完整文章引用' })).toHaveTextContent('Seresinhe');
   expect(screen.getByRole('button', { name: '预览完整模板' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: '重试' }));
   await waitFor(() => expect(screen.getByRole('button', { name: '预览完整模板' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '预览完整模板' }));
   await screen.findByTestId('full-template-renderer');
-  expect(screen.getByRole('dialog')).toHaveAccessibleName('完整模板预览 · UrbanGems');
+  expect(screen.getByRole('dialog')).toHaveAccessibleName('完整模板预览 · Scenic Beauty of Outdoor Places');
+});
+
+test('a promoted Chinese guide stays readable when the template cannot load', async () => {
+  localStorage.setItem('sp-survey-language', 'zh');
+  mockDocId = '2014-quercia-aesthetic';
+  global.fetch.mockRejectedValueOnce(new Error('offline'));
+  render(view());
+  expect(await screen.findByText('模板未能加载；仍可阅读教程。')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '研究问题与感知概念' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: '完整文章引用' })).toHaveTextContent('Quercia, D.');
+  expect(screen.getByRole('button', { name: '试答示例题' })).toBeDisabled();
 });
 
 test('approved paper edits keep citations, the native template preview and interactive scoring', async () => {

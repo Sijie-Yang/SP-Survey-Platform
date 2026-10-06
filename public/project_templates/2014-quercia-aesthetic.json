@@ -17,10 +17,8 @@
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "paper"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,
@@ -70,10 +68,7 @@
             "randomImageSelection": true,
             "isRequired": true,
             "imageCount": 2,
-            "trialCount": 4,
-            "mediaFolders": [
-              "paper"
-            ]
+            "trialCount": 4
           }
         ]
       },
@@ -90,10 +85,7 @@
             "randomImageSelection": true,
             "isRequired": true,
             "imageCount": 2,
-            "trialCount": 3,
-            "mediaFolders": [
-              "paper"
-            ]
+            "trialCount": 3
           }
         ]
       },
@@ -110,10 +102,7 @@
             "randomImageSelection": true,
             "isRequired": true,
             "imageCount": 2,
-            "trialCount": 3,
-            "mediaFolders": [
-              "paper"
-            ]
+            "trialCount": 3
           }
         ]
       },
@@ -127,23 +116,23 @@
             "choices": [
               {
                 "value": "18_24",
-                "text": "18\u201324"
+                "text": "18–24"
               },
               {
                 "value": "25_34",
-                "text": "25\u201334"
+                "text": "25–34"
               },
               {
                 "value": "35_44",
-                "text": "35\u201344"
+                "text": "35–44"
               },
               {
                 "value": "45_54",
-                "text": "45\u201354"
+                "text": "45–54"
               },
               {
                 "value": "55_64",
-                "text": "55\u201364"
+                "text": "55–64"
               },
               {
                 "value": "65_plus",

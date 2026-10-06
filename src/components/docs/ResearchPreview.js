@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Dialog, DialogContent, DialogTitle, Stack, Typography } from '@mui/material';
 import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
+import { loadBundledMediaEntries } from '../../lib/templateCover';
 import { previewAppearance, isPreviewMessage, PREVIEW_READY, PREVIEW_UPDATE, PREVIEW_RENDERED, PREVIEW_FAILED, QUESTION_PREVIEW_PATH } from '../../lib/questionPreviewProtocol';
 
 function findExampleQuestion(template, questionName) {
@@ -19,7 +20,46 @@ export function exampleTemplateMediaPrefix(template, questionName) {
   return `templates/${template.id}/`;
 }
 
+function isStudyImage(entry) {
+  if (!entry?.url) return false;
+  if (entry.type && entry.type !== 'image') return false;
+  return !/\.(mp4|webm|mov|m4v|mp3|wav)(\?|$)/i.test(entry.url);
+}
+
+// Images already stored on the template (its media library) are the example.
+// Map, video and annotation questions keep their own demonstration media.
+export function libraryExampleUrls(template, questionName) {
+  const question = findExampleQuestion(template, questionName);
+  if (!question || ['mapannotation', 'mediamatrix', 'imageannotation'].includes(question.type)) return null;
+  const urls = (template?.preloadedImages || []).filter(isStudyImage).map((entry) => entry.url);
+  const needed = Math.max(1, Number(question.imageCount) || 2);
+  if (urls.length < Math.min(needed, 2)) return null;
+  return urls.slice(0, needed);
+}
+
+function imageLoads(url) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const finish = (ok) => { img.onload = null; img.onerror = null; resolve(ok); };
+    const timer = setTimeout(() => finish(false), 8000);
+    img.onload = () => { clearTimeout(timer); finish(true); };
+    img.onerror = () => { clearTimeout(timer); finish(false); };
+    img.src = url;
+  });
+}
+
+// The saved media library can still point at files that were moved. A pair that
+// does not load falls through to the photographs bundled beside the template.
+export async function workingExampleUrls(urls) {
+  const pair = (urls || []).filter(Boolean).slice(0, 2);
+  if (pair.length < 2) return null;
+  const ok = await Promise.all(pair.map(imageLoads));
+  return ok.every(Boolean) ? pair : null;
+}
+
 export async function loadStudyExampleMedia(template, questionName) {
+  const library = libraryExampleUrls(template, questionName);
+  if (library) return library;
   const prefix = exampleTemplateMediaPrefix(template, questionName);
   if (!prefix) return null;
   const { listImagesFromR2 } = await import('../../lib/r2');
@@ -36,6 +76,8 @@ const readyExampleMedia = new Map();
 const pendingExampleMedia = new Map();
 
 export function prefetchStudyExampleMedia(template, questionName) {
+  const library = libraryExampleUrls(template, questionName);
+  if (library) return Promise.resolve(library);
   const prefix = exampleTemplateMediaPrefix(template, questionName);
   if (!prefix) return null;
   if (readyExampleMedia.has(prefix)) return Promise.resolve(readyExampleMedia.get(prefix));
@@ -79,30 +121,46 @@ export function researchPreviewSnapshot(template, questionName, studyUrls) {
 
 export default function ResearchPreview({ template, questionName, language, onClose }) {
   const zh = language === 'zh';
-  const dataset = exampleTemplateMediaPrefix(template, questionName);
+  const libraryUrls = libraryExampleUrls(template, questionName);
+  const libraryKey = libraryUrls ? libraryUrls.join('\n') : '';
+  const dataset = libraryUrls ? 'library' : exampleTemplateMediaPrefix(template, questionName);
   const frame = useRef(null);
   const [revision, setRevision] = useState(1);
   const [mobile, setMobile] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
-  const [studyUrls, setStudyUrls] = useState(() => (dataset ? readyExampleMedia.get(dataset) || null : null));
+  const [studyUrls, setStudyUrls] = useState(null);
+  const [mediaReady, setMediaReady] = useState(false);
   useEffect(() => {
-    if (!dataset) { setStudyUrls(null); return undefined; }
-    if (readyExampleMedia.has(dataset)) { setStudyUrls(readyExampleMedia.get(dataset)); return undefined; }
     let cancelled = false;
     setError('');
-    const timeout = setTimeout(() => { if (!cancelled) setError(zh ? '该模板的街景暂时取不到，请重试。' : 'This template’s street views could not be loaded. Please retry.'); }, 20000);
-    prefetchStudyExampleMedia(template, questionName)
-      .then(urls => { if (!cancelled) { clearTimeout(timeout); setStudyUrls(urls); } })
-      .catch(() => { if (!cancelled) { clearTimeout(timeout); setError(zh ? '该模板的街景暂时取不到，请重试。' : 'This template’s street views could not be loaded. Please retry.'); } });
+    setMediaReady(false);
+    setStudyUrls(null);
+    const fail = () => { if (!cancelled) setError(zh ? '该模板的街景暂时取不到，请重试。' : 'This template’s street views could not be loaded. Please retry.'); };
+    const timeout = setTimeout(fail, 20000);
+    (async () => {
+      const library = libraryUrls ? await workingExampleUrls(libraryUrls) : null;
+      if (cancelled) return;
+      if (library) { clearTimeout(timeout); setStudyUrls(library); setMediaReady(true); return; }
+      const bundled = await workingExampleUrls((await loadBundledMediaEntries(template?.id)).map((entry) => entry.url));
+      if (cancelled) return;
+      if (bundled) { clearTimeout(timeout); setStudyUrls(bundled); setMediaReady(true); return; }
+      if (!dataset || dataset === 'library') { clearTimeout(timeout); setStudyUrls(null); setMediaReady(true); return; }
+      try {
+        const urls = await loadStudyExampleMedia({ ...template, preloadedImages: [] }, questionName);
+        if (!cancelled) { clearTimeout(timeout); setStudyUrls(urls); setMediaReady(true); }
+      } catch { clearTimeout(timeout); fail(); }
+    })();
     return () => { cancelled = true; clearTimeout(timeout); };
-  }, [dataset, template, questionName, zh]);
+    // libraryUrls is a new array whenever it is present; libraryKey is its stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset, libraryKey, template, questionName, zh]);
   const snapshot = useMemo(() => {
-    if (dataset && error) return { error };
-    if (dataset && !studyUrls) return { pending: true };
+    if (error) return { error };
+    if (!mediaReady) return { pending: true };
     try { return { payload: researchPreviewSnapshot(template, questionName, studyUrls) }; }
     catch (err) { return { error: err.message }; }
-  }, [template, questionName, dataset, studyUrls, error]);
+  }, [template, questionName, studyUrls, error, mediaReady]);
   const send = useCallback(() => {
     if (snapshot.payload) frame.current?.contentWindow?.postMessage({ type: PREVIEW_UPDATE, revision, payload: snapshot.payload }, window.location.origin);
   }, [snapshot, revision]);

@@ -17,10 +17,8 @@
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "Stockholm"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,
@@ -92,9 +90,6 @@
                 "title": "Which place looks less safe?",
                 "reverseCoded": true
               }
-            ],
-            "mediaFolders": [
-              "Stockholm"
             ]
           }
         ]

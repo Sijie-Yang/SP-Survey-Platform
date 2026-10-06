@@ -1,7 +1,7 @@
 {
   "id": "2022-qiu-subjective",
   "name": "Street Design Qualities (Shanghai)",
-  "description": "Rebuilt from the published description of Qiu et al. (2022). Raters compare Shanghai street views on four Ewing & Handy design qualities (with their definitions) and safety; scores are TrueSkill ratings scaled to 0\u20131. Differences from the original study: (1) Bundled images are photographs from the paper PDF (13 scenes), not the original full stimulus set. (2) The rater background wording is not in the paper.",
+  "description": "Rebuilt from the published description of Qiu et al. (2022). Raters compare Shanghai street views on four Ewing & Handy design qualities (with their definitions) and safety; scores are TrueSkill ratings scaled to 0–1. Differences from the original study: (1) Bundled images are photographs from the paper PDF (13 scenes), not the original full stimulus set. (2) The rater background wording is not in the paper.",
   "author": "Qiu et al.",
   "year": "2022",
   "category": "Academic Research",
@@ -17,10 +17,8 @@
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "Shanghai"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,
@@ -117,10 +115,7 @@
             "imageCount": 2,
             "trialCount": 20,
             "pairingMode": "balanced",
-            "description": "Enclosure refers to the degree to which streets and other public spaces are visually defined by buildings, walls, trees and other vertical elements. Spaces where the height of vertical elements is proportionally related to the width of the space between them have a room-like quality.",
-            "mediaFolders": [
-              "Shanghai"
-            ]
+            "description": "Enclosure refers to the degree to which streets and other public spaces are visually defined by buildings, walls, trees and other vertical elements. Spaces where the height of vertical elements is proportionally related to the width of the space between them have a room-like quality."
           }
         ]
       },
@@ -139,10 +134,7 @@
             "imageCount": 2,
             "trialCount": 20,
             "pairingMode": "balanced",
-            "description": "Human scale refers to a size, texture, and articulation of physical elements that match the size and proportions of humans and, equally important, correspond to the speed at which humans walk. Building details, pavement texture, street trees, and street furniture are all physical elements contributing to human scale.",
-            "mediaFolders": [
-              "Shanghai"
-            ]
+            "description": "Human scale refers to a size, texture, and articulation of physical elements that match the size and proportions of humans and, equally important, correspond to the speed at which humans walk. Building details, pavement texture, street trees, and street furniture are all physical elements contributing to human scale."
           }
         ]
       },
@@ -161,10 +153,7 @@
             "imageCount": 2,
             "trialCount": 20,
             "pairingMode": "balanced",
-            "description": "Complexity refers to the visual richness of a place. The complexity of a place depends on the variety of the physical environment, specifically the numbers and types of buildings, architectural diversity and ornamentation, landscape elements, street furniture, signage and human activity.",
-            "mediaFolders": [
-              "Shanghai"
-            ]
+            "description": "Complexity refers to the visual richness of a place. The complexity of a place depends on the variety of the physical environment, specifically the numbers and types of buildings, architectural diversity and ornamentation, landscape elements, street furniture, signage and human activity."
           }
         ]
       },
@@ -183,10 +172,7 @@
             "imageCount": 2,
             "trialCount": 20,
             "pairingMode": "balanced",
-            "description": "Imageability is the quality of a place that makes it distinct, recognizable and memorable. A place has high imageability when specific physical elements and their arrangement capture attention, evoke feelings and create a lasting impression.",
-            "mediaFolders": [
-              "Shanghai"
-            ]
+            "description": "Imageability is the quality of a place that makes it distinct, recognizable and memorable. A place has high imageability when specific physical elements and their arrangement capture attention, evoke feelings and create a lasting impression."
           }
         ]
       },
@@ -204,10 +190,7 @@
             "isRequired": true,
             "imageCount": 2,
             "trialCount": 20,
-            "pairingMode": "balanced",
-            "mediaFolders": [
-              "Shanghai"
-            ]
+            "pairingMode": "balanced"
           }
         ]
       }

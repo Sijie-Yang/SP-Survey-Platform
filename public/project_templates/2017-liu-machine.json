@@ -1,7 +1,7 @@
 {
   "id": "2017-liu-machine",
   "name": "Facade Quality and Street-Wall Continuity",
-  "description": "Rebuilt from the published description of Liu, Silva, Wu & Wang (2017). Trained raters score Beijing street views for facade quality (1\u20134 rubric) and street-wall continuity; an optional on-site page records the same two judgements for a site passed in the link (?site=...). Differences from the original study: (1) In the paper both judgements were made on the same image; here the two questions draw their images independently. (2) The on-site page is shown only when the link contains ?site=...; it replaces the original paper forms. (3) Bundled images are photographs from the paper PDF (7 scenes), not the original full stimulus set.",
+  "description": "Rebuilt from the published description of Liu, Silva, Wu & Wang (2017). Trained raters score Beijing street views for facade quality (1–4 rubric) and street-wall continuity; an optional on-site page records the same two judgements for a site passed in the link (?site=...). Differences from the original study: (1) In the paper both judgements were made on the same image; here the two questions draw their images independently. (2) The on-site page is shown only when the link contains ?site=...; it replaces the original paper forms. (3) Bundled images are photographs from the paper PDF (7 scenes), not the original full stimulus set.",
   "author": "Liu, Silva, Wu & Wang",
   "year": "2017",
   "category": "Academic Research",
@@ -17,10 +17,8 @@
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "Beijing"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,
@@ -119,15 +117,12 @@
             "rateMin": 1,
             "rateMax": 4,
             "rateLabels": [
-              "1 \u2013 Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
-              "2 \u2013 Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
-              "3 \u2013 Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look.",
-              "4 \u2013 Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons."
+              "1 – Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
+              "2 – Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
+              "3 – Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look.",
+              "4 – Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons."
             ],
-            "description": "4 \u2013 Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons. 3 \u2013 Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look. 2 \u2013 Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons. 1 \u2013 Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
-            "mediaFolders": [
-              "Beijing"
-            ]
+            "description": "4 – Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons. 3 – Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look. 2 – Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons. 1 – Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons."
           },
           {
             "name": "street_wall_continuity",
@@ -142,10 +137,7 @@
             "trialCount": 20,
             "labelTrue": "Continuous",
             "labelFalse": "Discontinuous",
-            "description": "Continuous: Building facades progress through the image without any interruption, blockage or significant setback, at least at the eye height. Discontinuous: There is a wide gap between two adjacent buildings; there is a significant setback of a wide building; or there is a solid wall blocking the building from the street. If the wall is carefully designed and visually attractive, it can be considered continuous.",
-            "mediaFolders": [
-              "Beijing"
-            ]
+            "description": "Continuous: Building facades progress through the image without any interruption, blockage or significant setback, at least at the eye height. Discontinuous: There is a wide gap between two adjacent buildings; there is a significant setback of a wide building; or there is a solid wall blocking the building from the street. If the wall is carefully designed and visually attractive, it can be considered continuous."
           }
         ],
         "title": "Street views"
@@ -160,12 +152,12 @@
             "rateMin": 1,
             "rateMax": 4,
             "rateLabels": [
-              "1 \u2013 Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
-              "2 \u2013 Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
-              "3 \u2013 Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look.",
-              "4 \u2013 Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons."
+              "1 – Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
+              "2 – Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
+              "3 – Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look.",
+              "4 – Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons."
             ],
-            "description": "4 \u2013 Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons. 3 \u2013 Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look. 2 \u2013 Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons. 1 \u2013 Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
+            "description": "4 – Built with high quality, fine-textured materials; high industrial precision or fine craftsmanship (components and material pieces well aligned, small gaps); well maintained without obvious cracks, breakage, corrosion, dirt and stain or messy add-ons. 3 – Built with lower quality, not very fine-textured materials; no high level of industrial precision or craftsmanship; may have a few obvious cracks, breakage, corrosion, dirt and stain or messy add-ons but generally a neat and clean look. 2 – Built with low quality, not very fine-textured materials; low-level industrial precision or craftsmanship; a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons. 1 – Built with low-quality materials, in many cases bare cement and colour plate; low-level precision, sometimes unfinished; seriously deteriorated with a lot of cracks, breakage, corrosion, dirt and stain or messy add-ons.",
             "isRequired": true
           },
           {

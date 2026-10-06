@@ -36,10 +36,7 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1,
-            "mediaFolders": [
-              "paper"
-            ]
+            "imageCount": 1
           }
         ],
         "description": "Rate the scenic beauty of the street scene shown below."
@@ -61,10 +58,7 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1,
-            "mediaFolders": [
-              "paper"
-            ]
+            "imageCount": 1
           }
         ],
         "description": "Rate the scenic beauty of the street scene shown below."
@@ -72,7 +66,7 @@
       {
         "name": "page_extension",
         "title": "Optional extension (not in original study)",
-        "description": "These items are not part of Scenic-Or-Not, which asked only for a 1\u201310 scenicness rating.",
+        "description": "These items are not part of Scenic-Or-Not, which asked only for a 1–10 scenicness rating.",
         "elements": [
           {
             "name": "scene_qualities_1",
@@ -127,10 +121,7 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1,
-            "mediaFolders": [
-              "paper"
-            ]
+            "imageCount": 1
           },
           {
             "name": "scene_qualities_2",
@@ -185,10 +176,7 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1,
-            "mediaFolders": [
-              "paper"
-            ]
+            "imageCount": 1
           },
           {
             "name": "beauty_pairwise",
@@ -199,10 +187,7 @@
             "isRequired": false,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           },
           {
             "name": "green_view_pairwise",
@@ -213,10 +198,7 @@
             "isRequired": false,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true,
-            "mediaFolders": [
-              "paper"
-            ]
+            "randomImageSelection": true
           }
         ]
       },
@@ -234,23 +216,23 @@
                 "value": "under_18"
               },
               {
-                "text": "18\u201324",
+                "text": "18–24",
                 "value": "18_24"
               },
               {
-                "text": "25\u201334",
+                "text": "25–34",
                 "value": "25_34"
               },
               {
-                "text": "35\u201344",
+                "text": "35–44",
                 "value": "35_44"
               },
               {
-                "text": "45\u201354",
+                "text": "45–54",
                 "value": "45_54"
               },
               {
-                "text": "55\u201364",
+                "text": "55–64",
                 "value": "55_64"
               },
               {
@@ -335,9 +317,7 @@
   },
   "imageDatasetConfig": {
     "mediaFolderTags": {},
-    "mediaFolders": [
-      "paper"
-    ]
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,

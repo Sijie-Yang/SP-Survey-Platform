@@ -17,10 +17,8 @@
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
-    "mediaFolders": [
-      "Amsterdam"
-    ],
-    "mediaFolderTags": {}
+    "mediaFolderTags": {},
+    "mediaFolders": []
   },
   "preloadedImages": [],
   "preloadedSource": null,
@@ -180,10 +178,7 @@
               "Great"
             ],
             "minRateDescription": "Awful",
-            "maxRateDescription": "Great",
-            "mediaFolders": [
-              "Amsterdam"
-            ]
+            "maxRateDescription": "Great"
           }
         ],
         "title": "Walkability"
@@ -212,10 +207,7 @@
               "Great"
             ],
             "minRateDescription": "Awful",
-            "maxRateDescription": "Great",
-            "mediaFolders": [
-              "Amsterdam"
-            ]
+            "maxRateDescription": "Great"
           }
         ],
         "title": "Bikeability"
@@ -244,10 +236,7 @@
               "Great"
             ],
             "minRateDescription": "Awful",
-            "maxRateDescription": "Great",
-            "mediaFolders": [
-              "Amsterdam"
-            ]
+            "maxRateDescription": "Great"
           }
         ],
         "title": "Pleasantness"
@@ -276,10 +265,7 @@
               "Great"
             ],
             "minRateDescription": "Awful",
-            "maxRateDescription": "Great",
-            "mediaFolders": [
-              "Amsterdam"
-            ]
+            "maxRateDescription": "Great"
           }
         ],
         "title": "Greenness"
@@ -308,10 +294,7 @@
               "Great"
             ],
             "minRateDescription": "Awful",
-            "maxRateDescription": "Great",
-            "mediaFolders": [
-              "Amsterdam"
-            ]
+            "maxRateDescription": "Great"
           }
         ],
         "title": "Safety"

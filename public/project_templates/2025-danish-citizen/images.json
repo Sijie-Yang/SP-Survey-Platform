@@ -2,16 +2,16 @@
   "templateId": "2025-danish-citizen",
   "source": "Photographs cropped from the paper PDF. Charts, maps and interface screenshots are not included.",
   "images": [
-    "Amsterdam/p03-01.jpg",
-    "Amsterdam/p06-03.jpg",
-    "Amsterdam/p06-04.jpg",
-    "Amsterdam/p06-05.jpg",
-    "Amsterdam/p06-06.jpg",
-    "Amsterdam/p07-08.jpg",
-    "Amsterdam/p07-10.jpg",
-    "Amsterdam/p07-11.jpg",
-    "Amsterdam/p14-15.jpg",
-    "Amsterdam/p14-16.jpg"
+    "p03-01.jpg",
+    "p06-03.jpg",
+    "p06-04.jpg",
+    "p06-05.jpg",
+    "p06-06.jpg",
+    "p07-08.jpg",
+    "p07-10.jpg",
+    "p07-11.jpg",
+    "p14-15.jpg",
+    "p14-16.jpg"
   ],
   "notes": {
     "scenes": "Photographs cropped from the paper, used as the survey stimuli."

@@ -4,6 +4,7 @@ import { Link as RouterLink } from 'react-router-dom';
 import { DOC_GROUPS, docTopic } from '../../pages/docsTopics';
 import { PAPER_TEMPLATE_DOCS } from '../../pages/paperTemplateDocs';
 import { RESEARCH_GUIDES } from '../../pages/researchGuides';
+import { TemplateCoverImage, useResolvedCovers } from '../../lib/templateCover';
 import IccLab from './IccLab';
 import ScoringLab from './ScoringLab';
 export const textOf = (value, language) => typeof value === 'string' ? value : value?.[language === 'zh' ? 'zh' : 'en'] || '';
@@ -22,9 +23,10 @@ export function RelatedDocs({ ids, language }) {
 }
 export function CaseGallery({ language, ids = Object.keys(RESEARCH_GUIDES) }) {
   const zh = language === 'zh';
+  const covers = useResolvedCovers(ids);
   return <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, my: 2 }}>
     {ids.map(id => { const g = RESEARCH_GUIDES[id]; const doc = PAPER_TEMPLATE_DOCS.find(d => d.id === id); return <Box key={id} component={RouterLink} to={`/docs/${id}`} sx={{ ...cardStyle, p: 0, overflow: 'hidden' }}>
-      <Box component="img" src={id === '1990-nasar-evaluative' ? '/project_templates/1990-nasar-evaluative-cover.svg' : id === '2009-ewing-measuring' ? '/docs/research/2009-ewing-measuring-scene-a.png' : `/docs/research/${id}-preview.png`} alt={`${textOf(g.method, language)} · ${zh ? '问卷示意图' : 'Survey schematic'}`} loading="lazy" sx={{ display: 'block', width: '100%', height: 190, objectFit: 'cover', objectPosition: id === '2009-ewing-measuring' ? 'center 46%' : 'center', borderBottom: 1, borderColor: 'divider' }} />
+      <TemplateCoverImage candidates={covers[id]} alt={doc?.name || textOf(g.method, language)} sx={{ display: 'block', width: '100%', height: 190, objectFit: 'cover', borderBottom: 1, borderColor: 'divider' }} />
       <Box sx={{ p: 2 }}><Typography variant="overline" color="text.secondary">{textOf(g.method, language)}</Typography><Typography component="h3" variant="h6" fontWeight={700}>{doc.name}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 1, lineHeight: 1.8 }}>{textOf(g.subtitle, language)}</Typography><Typography variant="body2" sx={{ mt: 1.5 }}>{zh ? '阅读案例与试答 →' : 'Read the case & try it →'}</Typography></Box>
     </Box>; })}
   </Box>;

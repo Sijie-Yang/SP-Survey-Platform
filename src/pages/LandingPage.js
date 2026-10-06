@@ -19,7 +19,8 @@ import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
 import { getBenchPublic } from '../lib/spBenchApi';
 import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
-import { filterMediaByType, inferMediaType } from '../lib/mediaUtils';
+import { filterMediaByType } from '../lib/mediaUtils';
+import { coverCandidatesForTemplate, DEFAULT_TEMPLATE_COVER, hashString, loadCoverIndex, useCoverCandidate } from '../lib/templateCover';
 import { listPreviewMedia } from '../lib/previewMediaLibrary';
 import { paperTemplateDoc } from './paperTemplateDocs';
 const CLAMP = (lines) => ({
@@ -34,42 +35,6 @@ function normalizeCategory(raw) {
   if (c.includes('ai')) return 'ai';
   if (c.includes('urban')) return 'urban';
   return 'academic';
-}
-
-/** Stable hash so the same template keeps the same fallback cover across reloads. */
-function hashString(str) {
-  let h = 0;
-  const s = String(str || '');
-  for (let i = 0; i < s.length; i += 1) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function collectImageUrls(preloadedImages) {
-  if (!Array.isArray(preloadedImages)) return [];
-  const urls = [];
-  for (const entry of preloadedImages) {
-    const url = entry?.url;
-    if (!url) continue;
-    const type = entry.type || inferMediaType(entry.name || url);
-    if (type === 'image') urls.push(url);
-  }
-  return urls;
-}
-
-const DEFAULT_COVER = '/hero/streetscape-poster.jpg';
-
-/**
- * Prefer explicit thumbnail_url → own template library → platform preview media library.
- * Same fallback chain as survey/question preview when a study has no media.
- * Picks are stable per template id so cards don’t reshuffle on every refresh.
- */
-function resolveTemplateThumb(template, previewUrls = []) {
-  if (template?.id === '1990-nasar-evaluative') return '/project_templates/1990-nasar-evaluative-cover.svg';
-  if (template?.thumbnail_url) return template.thumbnail_url;
-  const own = collectImageUrls(template?.preloaded_images || template?.preloadedImages);
-  const pool = own.length ? own : previewUrls;
-  if (!pool.length) return DEFAULT_COVER;
-  return pool[hashString(template.id || template.name) % pool.length] || DEFAULT_COVER;
 }
 
 function getStaticTemplates() {
@@ -137,6 +102,7 @@ export default function LandingPage() {
     setLoadingTemplates(true);
     try {
       const previewPoolPromise = listPreviewMedia().catch(() => []);
+      const coverIndexPromise = loadCoverIndex();
       if (supabase) {
         // Lightweight first pass — avoid downloading every template's full media catalog.
         const { data, error } = await supabase
@@ -150,18 +116,19 @@ export default function LandingPage() {
           const mediaPromise = missingIds.length
             ? supabase.from('templates').select('id, preloaded_images').in('id', missingIds)
             : Promise.resolve({ data: [] });
-          const [mediaResult, previewPool] = await Promise.all([mediaPromise, previewPoolPromise]);
+          const [mediaResult, previewPool, coverIndex] = await Promise.all([mediaPromise, previewPoolPromise, coverIndexPromise]);
           for (const row of mediaResult.data || []) {
             libraryById[row.id] = row.preloaded_images || [];
           }
           const previewUrls = filterMediaByType(previewPool, 'image')
             .map((img) => img.url)
             .filter(Boolean);
-          const normalized = data.map((tpl) => {
+          const normalized = await Promise.all(data.map(async (tpl) => {
             const withLibrary = {
               ...tpl,
               preloaded_images: libraryById[tpl.id] || [],
             };
+            const coverCandidates = await coverCandidatesForTemplate(withLibrary, previewUrls, coverIndex);
             return {
               id: tpl.id,
               name: tpl.name,
@@ -171,26 +138,27 @@ export default function LandingPage() {
               category: normalizeCategory(tpl.category),
               paper_url: tpl.paper_url,
               dataset: tpl.dataset,
-              thumbnail_url: resolveTemplateThumb(withLibrary, previewUrls),
+              thumbnail_url: coverCandidates[0],
+              coverCandidates,
               show_on_landing: tpl.show_on_landing,
             };
-          });
+          }));
           setTemplates(normalized);
           setLoadingTemplates(false);
           return;
         }
       }
-      const previewUrls = filterMediaByType(await previewPoolPromise, 'image')
-        .map((img) => img.url)
-        .filter(Boolean);
-      setTemplates(getStaticTemplates().map((tpl) => ({
-        ...tpl,
-        thumbnail_url: resolveTemplateThumb(tpl, previewUrls),
+      const [previewPool, coverIndex] = await Promise.all([previewPoolPromise, coverIndexPromise]);
+      const previewUrls = filterMediaByType(previewPool, 'image').map((img) => img.url).filter(Boolean);
+      setTemplates(await Promise.all(getStaticTemplates().map(async (tpl) => {
+        const coverCandidates = await coverCandidatesForTemplate(tpl, previewUrls, coverIndex);
+        return { ...tpl, thumbnail_url: coverCandidates[0], coverCandidates };
       })));
     } catch {
-      setTemplates(getStaticTemplates().map((tpl) => ({
-        ...tpl,
-        thumbnail_url: resolveTemplateThumb(tpl),
+      const coverIndex = await loadCoverIndex().catch(() => ({}));
+      setTemplates(await Promise.all(getStaticTemplates().map(async (tpl) => {
+        const coverCandidates = await coverCandidatesForTemplate(tpl, [], coverIndex);
+        return { ...tpl, thumbnail_url: coverCandidates[0], coverCandidates };
       })));
     } finally {
       setLoadingTemplates(false);
@@ -663,18 +631,12 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
 function TemplateCard({ template, onUse }) {
   const { t } = useRegion();
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [thumbFailed, setThumbFailed] = useState(false);
   const isAI = template.category === 'ai';
   const isUrban = template.category === 'urban';
   const chipColor = isAI ? 'primary' : isUrban ? 'warning' : 'success';
   const chipLabel = isAI ? t.landChipAi : isUrban ? t.landChipUrban : t.landChipAcademic;
-  const resolvedThumb = template.thumbnail_url || resolveTemplateThumb(template) || DEFAULT_COVER;
-  const thumb = thumbFailed ? DEFAULT_COVER : resolvedThumb;
+  const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);
   const coverPos = `${hashString(template.id) % 80}% ${hashString(`${template.id}-y`) % 80}%`;
-
-  useEffect(() => {
-    setThumbFailed(false);
-  }, [resolvedThumb]);
 
   return (
     <>
@@ -703,9 +665,7 @@ function TemplateCard({ template, onUse }) {
             component="img"
             src={thumb}
             alt=""
-            onError={() => {
-              if (thumb !== DEFAULT_COVER) setThumbFailed(true);
-            }}
+            onError={onThumbError}
             sx={{ display: 'none' }}
           />
           <Chip
