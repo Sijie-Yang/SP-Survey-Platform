@@ -42,10 +42,12 @@ beforeEach(() => {
 });
 afterEach(() => { localStorage.clear(); global.fetch = realFetch; });
 const view = () => <RegionProvider><DocsPage /></RegionProvider>;
+// DocsNavigation labels the sidebar landmark "SP-Wiki". "Documentation" is not a role name.
+const docsNav = () => screen.getByRole('navigation', { name: 'SP-Wiki' });
 
 test('guide ties the paper, real preview, current settings and scoring together', async () => {
   render(view());
-  expect(screen.getByRole('navigation', { name: 'Documentation' })).toBeInTheDocument();
+  expect(docsNav()).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Place Pulse 1.0' })).toBeInTheDocument();
   expect(screen.getByRole('img', { name: /actual platform survey preview/ })).toHaveAttribute('src', '/docs/research/2013-salesses-collaborative-preview.png');
   const settings = await screen.findByRole('table', { name: 'Current template settings' });
@@ -228,7 +230,7 @@ test.each(PAPER_TEMPLATE_DOCS)('$id has its full citation, sidebar shorthand and
   const citation = screen.getByRole('region', { name: 'Full paper citation' });
   expect(citation).toHaveTextContent(doc.citation);
   expect(within(citation).getByRole('link')).toHaveAttribute('href', `https://doi.org/${doc.doi}`);
-  const nav = screen.getByRole('navigation', { name: 'Documentation' });
+  const nav = docsNav();
   expect(within(nav).getByRole('link', { name: `${doc.shortCitation} ${doc.name}` })).toHaveAttribute('aria-current', 'page');
   const button = screen.getByRole('button', { name: 'Preview full template' });
   await waitFor(() => expect(button).toBeEnabled());

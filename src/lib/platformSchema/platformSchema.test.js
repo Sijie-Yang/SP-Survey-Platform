@@ -57,7 +57,10 @@ describe('canonical platform schema', () => {
   test('covers exactly the base types exposed by QuestionEditor', () => {
     const source = read('src/components/admin/QuestionEditor.js');
     const start = source.indexOf('const questionTypes = [');
-    const end = source.indexOf('\n  ];', start);
+    // The list is closed by ].filter(, not `];`. The old marker is gone, so a
+    // search for it scanned default choice values (tag_a, row1, "1"…"5") as types.
+    const end = source.indexOf('].filter(', start);
+    expect(end).toBeGreaterThan(start);
     const editorTypes = [...source.slice(start, end).matchAll(/\{\s*value:\s*'([^']+)'/g)]
       .map((match) => match[1]);
 

@@ -29,7 +29,7 @@ export function collectImageUrls(preloadedImages) {
 
 /**
  * Cover file, then the template's chosen thumbnail, then one image from its
- * media library, then the shared preview library.
+ * own media library, then bundled extras, then the shared preview library.
  * Picks are stable per template id.
  */
 export function resolveTemplateCover(template, {
@@ -42,11 +42,11 @@ export function resolveTemplateCover(template, {
   }
   const chosen = template?.thumbnail_url || template?.thumbnailUrl;
   if (chosen) return chosen;
-  const own = [
-    ...collectImageUrls(template?.preloaded_images || template?.preloadedImages),
-    ...extraLibraryUrls.filter(Boolean),
-  ];
-  const pool = own.length ? own : presetUrls;
+  const own = collectImageUrls(template?.preloaded_images || template?.preloadedImages);
+  const bundled = extraLibraryUrls.filter(Boolean);
+  // Keep the template's own images ahead of bundled extras. Hashing them as one
+  // pool let a bundled URL replace a stored library image (id "study" picks index 1).
+  const pool = own.length ? own : (bundled.length ? bundled : presetUrls);
   if (!pool.length) return DEFAULT_TEMPLATE_COVER;
   return pool[hashString(template?.id || template?.name) % pool.length] || DEFAULT_TEMPLATE_COVER;
 }
