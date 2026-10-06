@@ -27,7 +27,7 @@
             "type": "expression",
             "title": "Visual Assessment of Thermal Affordance (VATA). Choose the image in each pair.",
             "isRequired": false,
-            "description": "You need to pick one image in each set."
+            "description": "The first comparison is outdoor thermal comfort. The next one asks which place feels comfortable overall, and is not part of the original VATA item."
           },
           {
             "name": "thermal_comfort",
@@ -41,9 +41,21 @@
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "trialCount": 18
+          },
+          {
+            "name": "comfort",
+            "type": "imagepicker",
+            "title": "Which street view image do you perceive as a more comfortable place overall?",
+            "imageFit": "cover",
+            "imageCount": 2,
+            "isRequired": false,
+            "description": "Overall comfort, not heat alone. Choose the more comfortable place. This comparison is an optional extension and is not one of the original study indicators.",
+            "imageSource": "huggingface",
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true
           }
         ],
-        "description": "Please choose the image in which you think to have the best thermal comfort (heat comfort)."
+        "description": "First compare outdoor thermal comfort. Then compare which place feels comfortable overall; that second comparison is not part of the original study."
       },
       {
         "name": "page_1760605955438",
@@ -68,6 +80,18 @@
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
             "trialCount": 18
+          },
+          {
+            "name": "artificial_heat_sources",
+            "type": "imagepicker",
+            "title": "Which street view image do you perceive as showing more artificial heat sources, such as buildings and cars?",
+            "imageFit": "cover",
+            "imageCount": 2,
+            "isRequired": false,
+            "description": "Choose the image with more artificial heat sources (buildings, cars and similar). This comparison is an optional extension and is not one of the original study indicators.",
+            "imageSource": "huggingface",
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true
           },
           {
             "name": "sunlight_intensity",
@@ -333,37 +357,6 @@
           }
         ],
         "description": "Please choose the image in which you think to make people have following emotions most, there are six emotional types in this section."
-      },
-      {
-        "name": "page_extension",
-        "title": "Optional extension (not in original study)",
-        "description": "Not part of the 20 indicators in Yang et al. (2025).",
-        "elements": [
-          {
-            "name": "comfort",
-            "type": "imagepicker",
-            "title": "Comfort",
-            "imageFit": "cover",
-            "imageCount": 2,
-            "isRequired": false,
-            "description": "choose the most comfortable one.",
-            "imageSource": "huggingface",
-            "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
-          },
-          {
-            "name": "artificial_heat_sources",
-            "type": "imagepicker",
-            "title": "Artificial Heat Sources",
-            "imageFit": "cover",
-            "imageCount": 2,
-            "isRequired": false,
-            "description": "choose the one with most artificial heat sources (building, car...).",
-            "imageSource": "huggingface",
-            "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
-          }
-        ]
       }
     ],
     "theme": {
@@ -396,7 +389,9 @@
         {
           "questions": [
             "thermal_comfort",
+            "comfort",
             "temperature",
+            "artificial_heat_sources",
             "sunlight_intensity",
             "humidity",
             "wind_velocity",

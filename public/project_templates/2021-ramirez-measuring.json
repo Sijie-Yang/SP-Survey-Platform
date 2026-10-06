@@ -1,8 +1,8 @@
 {
   "id": "2021-ramirez-measuring",
   "name": "Heterogeneous Perception of Safety",
-  "description": "Rebuilt from the published description of Ramírez, Hurtubia, Lobel & Rossetti (2021). Participants give their demographics once and then compare Place Pulse 2.0 image pairs on safety (required) and four optional perceptions, with explicit \"equally\" answers for ordinal logit models. Differences from the original study: (1) The original allowed unlimited pairs after the demographics; this template asks 15 safety pairs and 5 pairs for each other perception (survey rounds are not available). (2) Researchers supply the Place Pulse 2.0 images.",
-  "author": "Ramírez, Hurtubia, Lobel & Rossetti",
+  "description": "Rebuilt from the published description of Ram\u00edrez, Hurtubia, Lobel & Rossetti (2021). Participants give their demographics once and then compare Place Pulse 2.0 image pairs on safety (required) and four optional perceptions, with explicit \"equally\" answers for ordinal logit models. Differences from the original study: (1) The original allowed unlimited pairs after the demographics; this template asks 15 safety pairs and 5 pairs for each other perception (survey rounds are not available). (2) Bundled images are photographs from the paper PDF (4 scenes), not the original full stimulus set.",
+  "author": "Ram\u00edrez, Hurtubia, Lobel & Rossetti",
   "year": "2021",
   "category": "Academic Research",
   "tags": [
@@ -34,7 +34,7 @@
     "showProgressBar": "aboveheader",
     "showQuestionNumbers": "off",
     "spAnalysisRecommendation": {
-      "citation": "Ramírez et al. 2021",
+      "citation": "Ram\u00edrez et al. 2021",
       "items": [
         {
           "questions": [
@@ -99,23 +99,23 @@
             "choices": [
               {
                 "value": "18_24",
-                "text": "18–24"
+                "text": "18\u201324"
               },
               {
                 "value": "25_34",
-                "text": "25–34"
+                "text": "25\u201334"
               },
               {
                 "value": "35_44",
-                "text": "35–44"
+                "text": "35\u201344"
               },
               {
                 "value": "45_54",
-                "text": "45–54"
+                "text": "45\u201354"
               },
               {
                 "value": "55_64",
-                "text": "55–64"
+                "text": "55\u201364"
               },
               {
                 "value": "65_plus",
@@ -214,7 +214,10 @@
             "imageCount": 2,
             "trialCount": 15,
             "allowTie": true,
-            "tieLabel": "Equally safe"
+            "tieLabel": "Equally safe",
+            "mediaFolders": [
+              "PlacePulse2"
+            ]
           }
         ]
       },
@@ -233,7 +236,10 @@
             "imageCount": 2,
             "trialCount": 5,
             "allowTie": true,
-            "tieLabel": "Equally walkable"
+            "tieLabel": "Equally walkable",
+            "mediaFolders": [
+              "PlacePulse2"
+            ]
           }
         ]
       },
@@ -252,7 +258,10 @@
             "imageCount": 2,
             "trialCount": 5,
             "allowTie": true,
-            "tieLabel": "Equally livable"
+            "tieLabel": "Equally livable",
+            "mediaFolders": [
+              "PlacePulse2"
+            ]
           }
         ]
       },
@@ -271,7 +280,10 @@
             "imageCount": 2,
             "trialCount": 5,
             "allowTie": true,
-            "tieLabel": "Equally beautiful"
+            "tieLabel": "Equally beautiful",
+            "mediaFolders": [
+              "PlacePulse2"
+            ]
           }
         ]
       },
@@ -290,7 +302,10 @@
             "imageCount": 2,
             "trialCount": 5,
             "allowTie": true,
-            "tieLabel": "Equally wealthy"
+            "tieLabel": "Equally wealthy",
+            "mediaFolders": [
+              "PlacePulse2"
+            ]
           }
         ]
       }

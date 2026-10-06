@@ -7,6 +7,10 @@ export const RESPONSE_HYDRATE_BATCH = 8;
 export const RESPONSE_SLIM_KEY_PAGE = 200;
 export const RESPONSE_SLIM_BATCH = 50;
 export const RESPONSE_HYDRATE_CONCURRENCY = 4;
+// Interactive results use a short page. A 50-row slim RPC of map answers
+// exceeds the database statement timeout and then starves auth.
+export const RESPONSE_INTERACTIVE_KEY_PAGE = 8;
+export const RESPONSE_INTERACTIVE_BATCH = 4;
 export const RESPONSE_PAGE_MAX_BYTES = 2_500_000;
 // Slim rows carry no contract copies, so a page of them is small and cheap to serialize.
 export const RESPONSE_SLIM_PAGE_MAX_BYTES = 8_000_000;
@@ -104,8 +108,11 @@ export async function loadSurveyResponsePage(rest, projectId, {
   mode = 'auto',
   legacyKeyLimit = RESPONSE_KEY_PAGE,
   legacyBatch = RESPONSE_HYDRATE_BATCH,
+  batchSize = null,
+  concurrency = RESPONSE_HYDRATE_CONCURRENCY,
   knownContracts = [],
   contractKey = sha256ContractKey,
+  onProgress = () => {},
 } = {}) {
   let slim = mode !== 'legacy';
   const listed = await rest({
@@ -204,17 +211,19 @@ export async function loadSurveyResponsePage(rest, projectId, {
     return out;
   };
 
+  const slimBatch = batchSize || RESPONSE_SLIM_BATCH;
+  const rowBatch = batchSize || legacyBatch;
   const probe = slim && mode === 'auto';
   if (probe) {
     try {
-      await hydrateSlim(keys.slice(0, RESPONSE_SLIM_BATCH));
+      await hydrateSlim(keys.slice(0, slimBatch));
     } catch (err) {
       if (!isMissingRpc(err)) throw err;
       slim = false;
       keys = keys.slice(0, keyLimit ?? legacyKeyLimit);
     }
   }
-  const batches = batchesOf(slim ? RESPONSE_SLIM_BATCH : legacyBatch);
+  const batches = batchesOf(slim ? slimBatch : rowBatch);
   const hydrate = slim ? hydrateSlim : hydrateFull;
   const budget = maxBytes ?? (slim ? RESPONSE_SLIM_PAGE_MAX_BYTES : RESPONSE_PAGE_MAX_BYTES);
   const firstBatchDone = probe && slim;
@@ -224,8 +233,8 @@ export async function loadSurveyResponsePage(rest, projectId, {
   let bytes = 40;
   let fetchedBytes = 0;
   // Rows past the byte budget are never returned, so stop hydrating once it is reached.
-  page: for (let wave = 0; wave < batches.length; wave += RESPONSE_HYDRATE_CONCURRENCY) {
-    const group = batches.slice(wave, wave + RESPONSE_HYDRATE_CONCURRENCY);
+  page: for (let wave = 0; wave < batches.length; wave += concurrency) {
+    const group = batches.slice(wave, wave + concurrency);
     await Promise.all(group.map((batch, i) => (firstBatchDone && wave === 0 && i === 0 ? null : hydrate(batch))));
     for (const batch of group) {
       const fullRows = [];
@@ -243,13 +252,18 @@ export async function loadSurveyResponsePage(rest, projectId, {
           throw new Error('Response page is missing a survey contract');
         }
         const rowSize = rowBytes(row) + (newContract === undefined ? 0 : rowBytes(newContract));
-        if (responses.length && (bytes + rowSize > budget || (!slim && fetchedBytes + size > maxFetchBytes))) break page;
+        if (responses.length && (bytes + rowSize > budget || (!slim && fetchedBytes + size > maxFetchBytes))) {
+          onProgress(responses.length);
+          break page;
+        }
         if (row._unreadable) rememberSkipped(skipped, row.id, row._unreadableReason);
         if (newContract !== undefined) sentContracts[ref] = newContract;
         responses.push(row);
         bytes += rowSize;
         if (Number.isFinite(size)) fetchedBytes += size;
       }
+      onProgress(responses.length);
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
     if (!slim && fetchedBytes >= maxFetchBytes) break;
   }

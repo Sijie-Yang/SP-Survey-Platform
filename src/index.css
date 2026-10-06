@@ -280,6 +280,53 @@ iframe[title="skill-question"] {
   display: none;
 }
 
+/* Keep the row-name column wide enough to show the label. A width:100% table
+   otherwise gives the leftover space to the scale columns and clips the name. */
+.sp-surveyjs-matrix table.sd-matrix__table {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+.sp-surveyjs-matrix col.sp-matrix-row-col {
+  width: 11rem;
+}
+.sp-surveyjs-matrix .sd-table__cell--row-text {
+  min-width: 9rem;
+  width: auto;
+  overflow: visible;
+  white-space: normal;
+}
+.sp-surveyjs-matrix .sp-matrix-row-label {
+  display: inline-block;
+  min-width: 8.5rem;
+  max-width: 16rem;
+  font-size: var(--sjs-font-questiontitle-size, var(--sjs-font-size, 16px));
+  line-height: 1.35;
+  font-weight: 600;
+  white-space: normal;
+  overflow: visible;
+}
+
+.sd-question__description p,
+.sd-page__description p,
+.sd-description p {
+  margin: 0 0 0.7em;
+}
+.sd-question__description p:last-child,
+.sd-page__description p:last-child,
+.sd-description p:last-child {
+  margin-bottom: 0;
+}
+.sd-question__description ul,
+.sd-question__description ol,
+.sd-page__description ul,
+.sd-page__description ol,
+.sd-description ul,
+.sd-description ol {
+  margin: 0.2em 0 0.7em;
+  padding-left: 1.25em;
+}
+
 /* Matrix radios default to near-white fill — add a clear ring so they read on light panels */
 .sd-matrix .sd-radio__decorator,
 .sd-matrix .sd-item__decorator.sd-radio__decorator {

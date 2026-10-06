@@ -46,7 +46,6 @@ import {
   Article,
   AutoAwesome,
   Close,
-  ContentCopy,
   Download,
   Upload,
   Preview,
@@ -192,6 +191,28 @@ export default function ProjectSidebar({
   const [templateSearch, setTemplateSearch] = useState('');
   const [templateCategory, setTemplateCategory] = useState('');
   const [templateSort, setTemplateSort] = useState('year_desc');
+  const [templateFiltersExpanded, setTemplateFiltersExpanded] = useState(false);
+  const [templateLimit, setTemplateLimit] = useState(5);
+
+  useEffect(() => {
+    setTemplateLimit(5);
+  }, [templateSearch, templateCategory, templateSort]);
+
+  const templateCategories = [...new Set(templates.map(template => template.category).filter(Boolean))].sort();
+  const templateQuery = templateSearch.trim().toLowerCase();
+  const filteredTemplates = templates.filter(template => {
+    const fields = [template.name, template.author, template.description, template.id, template.year, template.category,
+      ...(Array.isArray(template.tags) ? template.tags : [template.tags])];
+    return (!templateQuery || fields.some(value => String(value ?? '').toLowerCase().includes(templateQuery)))
+      && (!templateCategory || template.category === templateCategory);
+  }).sort((a, b) => {
+    const pinDiff = Number(!!b.is_pinned) - Number(!!a.is_pinned);
+    if (pinDiff) return pinDiff;
+    if (templateSort === 'name') return (a.name || '').localeCompare(b.name || '');
+    if (templateSort === 'name_desc') return (b.name || '').localeCompare(a.name || '');
+    const yearDiff = (Number(b.year) || 0) - (Number(a.year) || 0);
+    return (templateSort === 'year_asc' ? -yearDiff : yearDiff) || (a.name || '').localeCompare(b.name || '');
+  });
 
   useEffect(() => {
     // Capture current user id once (needed for pending-badge logic)
@@ -884,26 +905,6 @@ export default function ProjectSidebar({
     }
   };
 
-  // System template IDs (built-in templates that cannot be deleted)
-  const SYSTEM_TEMPLATE_IDS = [
-    'basic-survey',
-    'yang-2025',
-    'my-template',
-    'test-template',
-    '2026-sp-all',
-    '2026-sp-multitrial',
-  ];
-
-  // Check if a template is user-created (can be deleted)
-  const isUserTemplate = (template) => {
-    // Legacy format: starts with 'user_'
-    if (template.id?.startsWith('user_')) {
-      return true;
-    }
-    // New format: not in system template list
-    return !SYSTEM_TEMPLATE_IDS.includes(template.id);
-  };
-
   const getTemplateIcon = (category) => {
     switch (category) {
       case 'Academic Research':
@@ -948,286 +949,19 @@ export default function ProjectSidebar({
             </IconButton>
           </Box>
 
-          {/* Templates Section */}
-          <Box sx={{ mb: 1.5 }}>
-            <ListItemButton 
-              onClick={() => setTemplatesExpanded(!templatesExpanded)} 
-              sx={{ px: 0, py: 0.5, minHeight: 'unset' }}
-            >
-              <ListItemIcon sx={{ minWidth: 32, minHeight: 'unset' }}>
-                <Description fontSize="small" />
-              </ListItemIcon>
-              <ListItemText 
-                primary={
-                  <Typography variant="subtitle2" sx={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
-                    {t.sidebarTemplates}
-                  </Typography>
-                } 
-                sx={{ my: 0 }}
-              />
-              {templatesExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
-            </ListItemButton>
-            
-            <Collapse in={templatesExpanded} timeout="auto" unmountOnExit>
-              {/* Search / Filter / Sort controls */}
-              {templates.length > 0 && (
-                <Box sx={{ px: 1, pt: 0.5, pb: 1 }}>
-                  <TextField
-                    size="small"
-                    placeholder={t.sidebarSearchTemplates}
-                    fullWidth
-                    value={templateSearch}
-                    onChange={e => setTemplateSearch(e.target.value)}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <Search sx={{ fontSize: 16, color: 'text.secondary' }} />
-                        </InputAdornment>
-                      ),
-                      sx: { fontSize: '0.8rem' },
-                    }}
-                    sx={{ mb: 0.75 }}
-                  />
-                  <Stack direction="row" spacing={0.75}>
-                    <FormControl size="small" sx={{ flex: 1 }}>
-                      <Select
-                        value={templateCategory}
-                        onChange={e => setTemplateCategory(e.target.value)}
-                        displayEmpty
-                        renderValue={v => v || 'All Categories'}
-                        sx={{ fontSize: '0.75rem' }}
-                      >
-                        <MenuItem value=""><em>All Categories</em></MenuItem>
-                        <MenuItem value="Academic Research">Academic Research</MenuItem>
-                        <MenuItem value="Urban Theory">Urban Theory</MenuItem>
-                        <MenuItem value="AI Template">AI Template</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <FormControl size="small" sx={{ flex: 1 }}>
-                      <Select
-                        value={templateSort}
-                        onChange={e => setTemplateSort(e.target.value)}
-                        sx={{ fontSize: '0.75rem' }}
-                      >
-                        <MenuItem value="name">Name A–Z</MenuItem>
-                        <MenuItem value="name_desc">Name Z–A</MenuItem>
-                        <MenuItem value="year_desc">Newest</MenuItem>
-                        <MenuItem value="year_asc">Oldest</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Stack>
-                </Box>
-              )}
-              <List sx={{ pl: 1 }}>
-                {(() => {
-                  const q = templateSearch.toLowerCase();
-                  let list = templates.filter(t => {
-                    const matchSearch = !q || [t.name, t.author, t.description, t.id]
-                      .some(v => v?.toLowerCase().includes(q));
-                    const matchCat = !templateCategory || t.category === templateCategory;
-                    return matchSearch && matchCat;
-                  });
-                  list = [...list].sort((a, b) => {
-                    const pinDiff = Number(!!b.is_pinned) - Number(!!a.is_pinned);
-                    if (pinDiff) return pinDiff;
-                    if (templateSort === 'name')      return (a.name || '').localeCompare(b.name || '');
-                    if (templateSort === 'name_desc') return (b.name || '').localeCompare(a.name || '');
-                    if (templateSort === 'year_desc') return (b.year || '').localeCompare(a.year || '');
-                    if (templateSort === 'year_asc')  return (a.year || '').localeCompare(b.year || '');
-                    return 0;
-                  });
-                  if (list.length === 0) return (
-                    <ListItem sx={{ py: 0.5 }}>
-                      <ListItemText secondary={
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
-                          {templates.length === 0
-                            ? 'No templates found. Create one from a project.'
-                            : 'No templates match your search.'}
-                        </Typography>
-                      } />
-                    </ListItem>
-                  );
-                  return list.map((template) => (
-                    <ListItem key={template.id} disablePadding sx={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                      <ListItemButton
-                        sx={{ 
-                          borderRadius: 1, 
-                          mb: 0.25,
-                          py: 0.5,
-                          px: 1,
-                          minHeight: 'unset',
-                          '&:hover': {
-                            bgcolor: 'grey.100',
-                          },
-                          bgcolor: template.is_pinned
-                            ? 'warning.50'
-                            : isUserTemplate(template) ? 'primary.50' : 'transparent',
-                        }}
-                        onClick={() => {
-                          setSelectedTemplate(template);
-                          setNewProjectName(`${template.name} - New`);
-                          setNewProjectDescription(template.description);
-                          setError(''); // Clear any previous errors
-                          setTemplateDialog(true);
-                        }}
-                      >
-                        <ListItemIcon sx={{ minWidth: 28, minHeight: 'unset' }}>
-                          {template.is_pinned
-                            ? <PushPin sx={{ fontSize: 18, color: 'warning.main', transform: 'rotate(45deg)' }} />
-                            : getTemplateIcon(template.category)}
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
-                              <Typography variant="body2" sx={{ fontSize: '0.875rem', lineHeight: 1.3 }}>
-                                {template.name}
-                              </Typography>
-                              {template.is_pinned && (
-                                <Chip
-                                  label="Pinned"
-                                  size="small"
-                                  color="warning"
-                                  variant="outlined"
-                                  sx={{ height: 16, fontSize: '0.6rem', '& .MuiChip-label': { px: 0.5 } }}
-                                />
-                              )}
-                              {/* Show "Pending Review" badge for user's own pending templates */}
-                              {supabase && !template.is_approved && template.user_id === currentUserId && (
-                                <Chip
-                                  label="Pending Review"
-                                  size="small"
-                                  color="warning"
-                                  variant="outlined"
-                                  sx={{ height: 16, fontSize: '0.6rem', '& .MuiChip-label': { px: 0.5 } }}
-                                />
-                              )}
-                            </Box>
-                          }
-                          secondary={
-                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', lineHeight: 1.2 }}>
-                              {template.author || 'Unknown'} • {template.year}
-                            </Typography>
-                          }
-                          sx={{ my: 0 }}
-                        />
-                        <Box sx={{ display: 'flex', gap: 0.25, ml: 'auto' }}>
-                          <Tooltip title={expandedTemplateMetadata[template.id] ? "Hide Metadata" : "Show Metadata"}>
-                            <IconButton
-                              size="small"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setExpandedTemplateMetadata(prev => ({
-                                  ...prev,
-                                  [template.id]: !prev[template.id]
-                                }));
-                              }}
-                              sx={{ p: 0.25, color: 'text.secondary' }}
-                            >
-                              {expandedTemplateMetadata[template.id] ? <ExpandLess fontSize="small" /> : <InfoOutlined fontSize="small" />}
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Preview Template">
-                            <IconButton
-                              size="small"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPreviewingTemplate(template);
-                                setPreviewDialog(true);
-                              }}
-                              sx={{ p: 0.25, color: 'info.main' }}
-                            >
-                              <Preview fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Copy Template">
-                            <IconButton
-                              size="small"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedTemplate(template);
-                                setNewProjectName(`${template.name} - New`);
-                                setNewProjectDescription(template.description);
-                                setTemplateDialog(true);
-                              }}
-                              sx={{ color: 'primary.main', p: 0.25 }}
-                            >
-                              <ContentCopy fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          {/* No delete button here — template deletion is
-                              an admin-only operation handled from the
-                              Admin Dashboard. Showing a delete icon next
-                              to every "user template" in the sidebar was
-                              misleading: regular users would click it and
-                              hit an RLS rejection, and any template owner
-                              could blow away their own template without
-                              touching admin review state. */}
-                        </Box>
-                      </ListItemButton>
-                      
-                      {/* Metadata Collapse */}
-                      <Collapse in={expandedTemplateMetadata[template.id]} timeout="auto" unmountOnExit>
-                        <Box sx={{ px: 2, py: 1, bgcolor: 'grey.50', borderRadius: 1, mx: 0.5, mb: 0.5 }}>
-                          <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', mb: 0.5 }}>
-                            Metadata
-                          </Typography>
-                          {template.author && (
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                              <strong>Author:</strong> {template.author}
-                            </Typography>
-                          )}
-                          {template.year && (
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                              <strong>Year:</strong> {template.year}
-                            </Typography>
-                          )}
-                          {template.category && (
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                              <strong>Category:</strong> {template.category}
-                            </Typography>
-                          )}
-                          {template.tags && template.tags.length > 0 && (
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                              <strong>Tags:</strong> {Array.isArray(template.tags) ? template.tags.join(', ') : template.tags}
-                            </Typography>
-                          )}
-                          {template.website && (
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', wordBreak: 'break-all' }}>
-                              <strong>Website:</strong> <a href={template.website} target="_blank" rel="noopener noreferrer">{template.website}</a>
-                            </Typography>
-                          )}
-                          {template.huggingfaceDataset && (
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                              <strong>HF Dataset:</strong> {template.huggingfaceDataset}
-                            </Typography>
-                          )}
-                          {template.description && (
-                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', mt: 0.5, fontStyle: 'italic' }}>
-                              {template.description}
-                            </Typography>
-                          )}
-                        </Box>
-                      </Collapse>
-                    </ListItem>
-                  ));
-                })()}
-              </List>
-            </Collapse>
-          </Box>
-
-          <Divider sx={{ my: 1.5 }} />
-
           {/* User Projects Section */}
           <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
-              <ListItemButton 
-                onClick={() => setProjectsExpanded(!projectsExpanded)} 
+              <ListItemButton
+                onClick={() => setProjectsExpanded(!projectsExpanded)}
+                aria-expanded={projectsExpanded}
+                aria-controls="sidebar-project-list"
                 sx={{ px: 0, py: 0.5, flex: 1, minHeight: 'unset' }}
               >
                 <ListItemIcon sx={{ minWidth: 32, minHeight: 'unset' }}>
                   <Folder fontSize="small" />
                 </ListItemIcon>
-                <ListItemText 
+                <ListItemText
                   primary={
                     <Typography variant="subtitle2" sx={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
                       {tf(t.sidebarMyProjects, { n: projects.length })}
@@ -1250,7 +984,7 @@ export default function ProjectSidebar({
                   </IconButton>
                 </Tooltip>
                 <Tooltip title={t.sidebarCreateProject}>
-                  <IconButton 
+                  <IconButton
                     onClick={() => setCreateDialog(true)}
                     size="small"
                     color="primary"
@@ -1262,10 +996,10 @@ export default function ProjectSidebar({
             </Box>
 
             <Collapse in={projectsExpanded} timeout="auto" unmountOnExit>
-              <List sx={{ pl: 1 }}>
+              <List id="sidebar-project-list" disablePadding>
                 {projects.length === 0 ? (
                   <ListItem sx={{ py: 0.5 }}>
-                    <ListItemText 
+                    <ListItemText
                       primary={
                         <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic', fontSize: '0.75rem' }}>
                           {t.sidebarNoProjects}
@@ -1279,17 +1013,17 @@ export default function ProjectSidebar({
                       <ListItemButton
                         selected={activeProjectId === project.id}
                         onClick={() => handleProjectSelect(project)}
-                        sx={{ 
-                          borderRadius: 1, 
+                        sx={{
+                          borderRadius: 1,
                           mb: 0.25,
                           py: 0.5,
                           px: 1,
                           minHeight: 'unset',
                           '&.Mui-selected': {
-                            bgcolor: 'primary.light',
-                            color: 'primary.contrastText',
+                            bgcolor: 'action.selected',
+                            color: 'primary.main',
                             '&:hover': {
-                              bgcolor: 'primary.main',
+                              bgcolor: 'action.hover',
                             }
                           }
                         }}
@@ -1304,16 +1038,16 @@ export default function ProjectSidebar({
                                 {project.name}
                               </Typography>
                               {projectStates[project.id]?.hasUnsavedChanges && (
-                                <Chip 
-                                  label="*" 
-                                  size="small" 
-                                  color="error" 
-                                  sx={{ 
-                                    minWidth: 16, 
-                                    height: 16, 
+                                <Chip
+                                  label="*"
+                                  size="small"
+                                  color="error"
+                                  sx={{
+                                    minWidth: 16,
+                                    height: 16,
                                     fontSize: '0.65rem',
                                     '& .MuiChip-label': { px: 0.3 }
-                                  }} 
+                                  }}
                                 />
                               )}
                               {runningProjectIds.includes(project.id) && (
@@ -1332,12 +1066,12 @@ export default function ProjectSidebar({
                           }
                           secondary={
                             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-                              <Typography 
-                                variant="caption" 
-                                color="inherit" 
-                                sx={{ 
-                                  opacity: 0.7, 
-                                  fontSize: '0.7rem', 
+                              <Typography
+                                variant="caption"
+                                color="inherit"
+                                sx={{
+                                  opacity: 0.7,
+                                  fontSize: '0.7rem',
                                   lineHeight: 1.2,
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
@@ -1348,12 +1082,12 @@ export default function ProjectSidebar({
                               >
                                 {project.description || 'No description'}
                               </Typography>
-                              <Typography 
-                                variant="caption" 
-                                color="inherit" 
-                                sx={{ 
-                                  opacity: 0.6, 
-                                  fontSize: '0.65rem', 
+                              <Typography
+                                variant="caption"
+                                color="inherit"
+                                sx={{
+                                  opacity: 0.6,
+                                  fontSize: '0.65rem',
                                   lineHeight: 1.1
                                 }}
                               >
@@ -1390,15 +1124,15 @@ export default function ProjectSidebar({
                           </IconButton>
                         </Box>
                       </ListItemButton>
-                      
+
                       {/* Metadata Collapse */}
                       <Collapse in={expandedProjectMetadata[project.id]} timeout="auto" unmountOnExit>
-                        <Box sx={{ 
-                          px: 2, 
-                          py: 1, 
-                          bgcolor: activeProjectId === project.id ? 'primary.dark' : 'grey.50', 
-                          borderRadius: 1, 
-                          mx: 0.5, 
+                        <Box sx={{
+                          px: 2,
+                          py: 1,
+                          bgcolor: activeProjectId === project.id ? 'primary.dark' : 'action.hover',
+                          borderRadius: 1,
+                          mx: 0.5,
                           mb: 0.5,
                           color: activeProjectId === project.id ? 'primary.contrastText' : 'inherit'
                         }}>
@@ -1449,6 +1183,243 @@ export default function ProjectSidebar({
                   ))
                 )}
               </List>
+            </Collapse>
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* Templates Section */}
+          <Box sx={{ mb: 1.5 }}>
+            <ListItemButton
+              onClick={() => setTemplatesExpanded(!templatesExpanded)}
+              aria-expanded={templatesExpanded}
+              aria-controls="sidebar-template-list"
+              sx={{ px: 0, py: 0.5, minHeight: 'unset' }}
+            >
+              <ListItemIcon sx={{ minWidth: 32, minHeight: 'unset' }}>
+                <Description fontSize="small" />
+              </ListItemIcon>
+              <ListItemText
+                primary={
+                  <Typography variant="subtitle2" sx={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+                    {t.sidebarTemplates}
+                    <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontWeight: 400 }}>{templates.length}</Box>
+                  </Typography>
+                }
+                sx={{ my: 0 }}
+              />
+              {templatesExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
+            </ListItemButton>
+
+            <Collapse in={templatesExpanded} timeout="auto" unmountOnExit>
+              {templates.length > 0 && (
+                <Box sx={{ pt: 1, pb: 1.5 }}>
+                  <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center' }}>
+                    <TextField
+                      size="small"
+                      placeholder={t.sidebarSearchTemplates}
+                      fullWidth
+                      value={templateSearch}
+                      onChange={e => setTemplateSearch(e.target.value)}
+                      inputProps={{ 'aria-label': t.sidebarSearchTemplates }}
+                      InputProps={{
+                        startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment>,
+                        endAdornment: templateSearch ? (
+                          <InputAdornment position="end">
+                            <IconButton size="small" aria-label={t.sidebarClearSearch} onClick={() => setTemplateSearch('')}>
+                              <Close fontSize="small" />
+                            </IconButton>
+                          </InputAdornment>
+                        ) : null,
+                        sx: { fontSize: '0.8125rem' },
+                      }}
+                    />
+                    <Tooltip title={t.sidebarTemplateFilters} placement="top" disableInteractive>
+                      <IconButton
+                        aria-label={t.sidebarTemplateFilters}
+                        aria-expanded={templateFiltersExpanded}
+                        aria-controls="sidebar-template-filters"
+                        onClick={() => setTemplateFiltersExpanded(value => !value)}
+                        color={templateFiltersExpanded || templateCategory || templateSort !== 'year_desc' ? 'primary' : 'default'}
+                        sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
+                      >
+                        <FilterList fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <Collapse in={templateFiltersExpanded}>
+                    <Stack id="sidebar-template-filters" direction="row" spacing={1} sx={{ pt: 1.5 }}>
+                      <TextField id="sidebar-template-category" select size="small" label={t.sidebarCategory} value={templateCategory}
+                        onChange={e => setTemplateCategory(e.target.value)}
+                        SelectProps={{ displayEmpty: true }} InputLabelProps={{ shrink: true }}
+                        sx={{ flex: 1, minWidth: 0, '& .MuiSelect-select': { fontSize: '0.75rem' } }}>
+                        <MenuItem value="">{t.sidebarAllCategories}</MenuItem>
+                        {templateCategories.map(category => <MenuItem key={category} value={category}>{category}</MenuItem>)}
+                      </TextField>
+                      <TextField id="sidebar-template-sort" select size="small" label={t.sidebarSort} value={templateSort}
+                        onChange={e => setTemplateSort(e.target.value)}
+                        sx={{ flex: 1, minWidth: 0, '& .MuiSelect-select': { fontSize: '0.75rem' } }}>
+                        <MenuItem value="year_desc">{t.sidebarNewest}</MenuItem>
+                        <MenuItem value="year_asc">{t.sidebarOldest}</MenuItem>
+                        <MenuItem value="name">{t.sidebarNameAZ}</MenuItem>
+                        <MenuItem value="name_desc">{t.sidebarNameZA}</MenuItem>
+                      </TextField>
+                    </Stack>
+                  </Collapse>
+                  {templateCategory && (
+                    <Chip label={templateCategory} size="small" onDelete={() => setTemplateCategory('')} sx={{ mt: 1 }} />
+                  )}
+                </Box>
+              )}
+              <List id="sidebar-template-list" disablePadding>
+                {filteredTemplates.length === 0 ? (
+                  <ListItem sx={{ px: 1, py: 1.5 }}>
+                    <ListItemText secondary={templates.length === 0 ? t.sidebarNoTemplates : t.sidebarNoTemplateMatch} />
+                  </ListItem>
+                ) : filteredTemplates.slice(0, templateLimit).map(template => (
+                    <ListItem key={template.id} disablePadding sx={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                      <ListItemButton
+                        sx={{
+                          borderRadius: 1,
+                          mb: 0.25,
+                          py: 0.5,
+                          px: 1,
+                          minHeight: 'unset',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                          },
+                          bgcolor: 'transparent',
+                        }}
+                        onClick={() => {
+                          setSelectedTemplate(template);
+                          setNewProjectName(`${template.name} - New`);
+                          setNewProjectDescription(template.description);
+                          setError(''); // Clear any previous errors
+                          setTemplateDialog(true);
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 28, minHeight: 'unset' }}>
+                          {template.is_pinned
+                            ? <PushPin sx={{ fontSize: 18, color: 'warning.main', transform: 'rotate(45deg)' }} />
+                            : getTemplateIcon(template.category)}
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                              <Typography variant="body2" sx={{ fontSize: '0.875rem', lineHeight: 1.3 }}>
+                                {template.name}
+                              </Typography>
+                              {/* Show "Pending Review" badge for user's own pending templates */}
+                              {supabase && !template.is_approved && template.user_id === currentUserId && (
+                                <Chip
+                                  label="Pending Review"
+                                  size="small"
+                                  color="warning"
+                                  variant="outlined"
+                                  sx={{ height: 16, fontSize: '0.6rem', '& .MuiChip-label': { px: 0.5 } }}
+                                />
+                              )}
+                            </Box>
+                          }
+                          secondary={
+                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', lineHeight: 1.2 }}>
+                              {[template.author, template.year].filter(Boolean).join(' · ')}
+                            </Typography>
+                          }
+                          sx={{ my: 0 }}
+                        />
+                        <Box sx={{ display: 'flex', gap: 0.25, ml: 'auto' }}>
+                          <Tooltip title={expandedTemplateMetadata[template.id] ? "Hide Metadata" : "Show Metadata"}>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedTemplateMetadata(prev => ({
+                                  ...prev,
+                                  [template.id]: !prev[template.id]
+                                }));
+                              }}
+                              sx={{ p: 0.25, color: 'text.secondary' }}
+                            >
+                              {expandedTemplateMetadata[template.id] ? <ExpandLess fontSize="small" /> : <InfoOutlined fontSize="small" />}
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Preview Template">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPreviewingTemplate(template);
+                                setPreviewDialog(true);
+                              }}
+                              color="primary"
+                              sx={{ p: 0.25 }}
+                            >
+                              <Preview fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </ListItemButton>
+
+                      {/* Metadata Collapse */}
+                      <Collapse in={expandedTemplateMetadata[template.id]} timeout="auto" unmountOnExit>
+                        <Box sx={{ px: 2, py: 1, bgcolor: 'action.hover', borderRadius: 1, mx: 0.5, mb: 0.5 }}>
+                          <Typography variant="caption" sx={{ fontWeight: 'bold', display: 'block', mb: 0.5 }}>
+                            Metadata
+                          </Typography>
+                          {template.author && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                              <strong>Author:</strong> {template.author}
+                            </Typography>
+                          )}
+                          {template.year && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                              <strong>Year:</strong> {template.year}
+                            </Typography>
+                          )}
+                          {template.category && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                              <strong>Category:</strong> {template.category}
+                            </Typography>
+                          )}
+                          {template.tags && template.tags.length > 0 && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                              <strong>Tags:</strong> {Array.isArray(template.tags) ? template.tags.join(', ') : template.tags}
+                            </Typography>
+                          )}
+                          {template.website && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', wordBreak: 'break-all' }}>
+                              <strong>Website:</strong> <a href={template.website} target="_blank" rel="noopener noreferrer">{template.website}</a>
+                            </Typography>
+                          )}
+                          {template.huggingfaceDataset && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
+                              <strong>HF Dataset:</strong> {template.huggingfaceDataset}
+                            </Typography>
+                          )}
+                          {template.description && (
+                            <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', mt: 0.5, fontStyle: 'italic' }}>
+                              {template.description}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Collapse>
+                    </ListItem>
+                ))}
+              </List>
+              {filteredTemplates.length > 0 && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 0.5, pt: 1 }}>
+                  <Typography variant="caption" color="text.secondary" aria-live="polite">
+                    {tf(t.sidebarTemplateCount, { shown: Math.min(templateLimit, filteredTemplates.length), total: filteredTemplates.length })}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    {templateLimit > 5 && <Button size="small" onClick={() => setTemplateLimit(5)}>{t.sidebarShowLess}</Button>}
+                    {templateLimit < filteredTemplates.length && (
+                      <Button size="small" onClick={() => setTemplateLimit(limit => limit + 5)}>{t.sidebarShowMore}</Button>
+                    )}
+                  </Box>
+                </Box>
+              )}
             </Collapse>
           </Box>
         </Box>
@@ -1536,7 +1507,7 @@ export default function ProjectSidebar({
         <DialogContent>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           {selectedTemplate && (
-            <Box sx={{ mb: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+            <Box sx={{ mb: 2, p: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
                 {selectedTemplate.name}
               </Typography>

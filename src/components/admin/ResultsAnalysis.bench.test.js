@@ -44,12 +44,12 @@ run(`bench: ${N} responses`, async () => {
 
   const e0 = performance.now();
   fireEvent.click(screen.getByRole('button', { name: 'Expand analysis: safe' }));
-  await screen.findAllByText(/Paper methods/);
+  await screen.findAllByText(/TrueSkill \(pairwise/);
   log.expandPicker = performance.now() - e0;
 
   const p0 = performance.now();
-  const paper = screen.queryAllByText(/Paper methods/)[0];
-  if (paper) fireEvent.click(paper);
+  const score = screen.queryAllByRole('combobox')[0];
+  if (score) fireEvent.mouseDown(score);
   log.openPaperMethods = performance.now() - p0;
 
   // eslint-disable-next-line no-console

@@ -1,50 +1,38 @@
 import SurveyQrCode from './SurveyQrCode';
+import { isChineseLanguage, uiPair } from '../../lib/uiLanguages';
 import ParameterLinks from './ParameterLinks';
 import SurveyPreflight from './SurveyPreflight';
 import ProjectVersions from './ProjectVersions';
 import { validateSurveyConfig } from '../../lib/designProtocol/validate';
-import { getTrialCount } from '../../lib/trialNavigation';
 import { markGuideProgress } from '../../lib/adminGuide';
 import React, { useState } from 'react';
-import {
-  Box,
-  Typography,
-  Alert,
-  Button,
-  Card,
-  CardContent,
-  Divider,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
-} from '@mui/material';
-import {
-  ContentCopy,
-  Launch,
-  CheckCircle,
-  Link as LinkIcon,
-  OpenInNew,
-} from '@mui/icons-material';
-import { AdminPageHeader } from './AdminPageLayout';
+import { Box, Typography, Alert, Button, Card, Paper, Dialog, DialogTitle, DialogContent, DialogActions, CardContent, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
+import { ContentCopy, Launch, CheckCircle, Link as LinkIcon, OpenInNew, History, FactCheckOutlined, Tune, HelpOutline } from '@mui/icons-material';
+import { captureParamNames, normalizeConditions } from '../../lib/surveyRuntimeContext';
 import { useRegion } from '../../contexts/RegionContext';
-
-export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedChanges = false, onReleased }) {
-  const { t, language } = useRegion();
-  const zh = language === 'zh';
+import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
+export default function WebsiteSetup({
+  currentProject,
+  surveyConfig,
+  hasUnsavedChanges = false,
+  onReleased
+}) {
+  const {
+    t,
+    language
+  } = useRegion();
+  const zh = isChineseLanguage(language);
   const report = validateSurveyConfig(surveyConfig);
-  const questions = (surveyConfig?.pages || []).flatMap((p) => p.elements || []);
-  const answerable = questions.filter((q) => !['html', 'expression', 'image', 'mediadisplay'].includes(q.type));
-  const rounds = answerable.reduce((sum, q) => sum + getTrialCount(q), 0);
+  const questions = (surveyConfig?.pages || []).flatMap(p => p.elements || []);
+  const answerable = questions.filter(q => !['html', 'expression', 'image', 'mediadisplay'].includes(q.type));
   const issues = [...report.errors, ...report.warnings];
   const [copied, setCopied] = useState(false);
-
+  const [shareDialog, setShareDialog] = useState(null);
+  const hasParameterLinks = captureParamNames(surveyConfig).length > 0 || normalizeConditions(surveyConfig).length > 1;
+  const shareTools = [['versions', uiPair(language, 'Versions & release', '版本与发布'), <History />], ['checks', uiPair(language, 'Pre-share checks', '分享前检查'), <FactCheckOutlined />], ...(hasParameterLinks ? [['parameters', uiPair(language, 'Parameter links', '参数链接'), <Tune />]] : []), ['help', uiPair(language, 'Sharing guide', '分享指南'), <HelpOutline />]];
   const origin = window.location.origin;
-  const surveyUrl = currentProject
-    ? `${origin}/survey?project=${encodeURIComponent(currentProject.id)}`
-    : null;
-
-  const copy = async (text) => {
+  const surveyUrl = currentProject ? `${origin}/survey?project=${encodeURIComponent(currentProject.id)}` : null;
+  const copy = async text => {
     try {
       await navigator.clipboard.writeText(text);
       markGuideProgress(currentProject?.id, 'shared');
@@ -54,87 +42,91 @@ export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedC
       alert('Please copy the link manually.');
     }
   };
-
-  return (
-    <Box>
-      <AdminPageHeader
-        icon={<LinkIcon />}
-        title={t.shareTitle}
-        description={t.shareDescription}
-      />
-
-      <Card sx={{ mb: 3, border: '2px solid', borderColor: 'primary.main' }}>
-        <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <LinkIcon color="primary" />
-            {t.shareYourLink}
-          </Typography>
-
-          {surveyUrl ? (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 1fr) 232px' }, gap: 3, alignItems: 'start' }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Box
-                  sx={{
-                    p: 2,
-                    bgcolor: 'grey.50',
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    fontFamily: 'monospace',
-                    fontSize: '0.9rem',
-                    wordBreak: 'break-all',
-                    mb: 2,
-                  }}
-                >
+  return <Box>
+      <AdminPageHeader icon={<LinkIcon />} title={t.shareYourLink} description={t.shareDescription} />
+      <AdminActionBar label={t.shareYourLink} primaryAction={<Button size="small" variant="contained" startIcon={copied ? <CheckCircle /> : <ContentCopy />} disabled={!surveyUrl} onClick={() => copy(surveyUrl)} color={copied ? 'success' : 'primary'}>
+            {copied ? t.shareCopied : t.shareCopyLink}
+          </Button>}>
+        {shareTools.map(([id, label, icon]) => <AdminActionButton key={id} startIcon={icon} aria-haspopup="dialog" onClick={() => setShareDialog(id)}>{label}</AdminActionButton>)}
+        <AdminActionButton startIcon={<OpenInNew />} disabled={!surveyUrl} href={surveyUrl || undefined} onClick={() => markGuideProgress(currentProject.id, 'shared')} target="_blank" rel="noopener noreferrer">
+          {t.shareOpenSurvey}
+        </AdminActionButton>
+      </AdminActionBar>
+      <Paper variant="outlined" sx={{
+      p: {
+        xs: 2,
+        sm: 3
+      },
+      borderRadius: 1.5
+    }}>
+        <Box>
+          {surveyUrl ? <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: 'minmax(0, 1fr)',
+            md: 'minmax(0, 1fr) 232px'
+          },
+          gap: 3,
+          alignItems: 'start'
+        }}>
+              <Box sx={{
+            minWidth: 0
+          }}>
+                <Box sx={{
+              p: 2,
+              bgcolor: 'action.hover',
+              borderRadius: 1,
+              fontFamily: 'monospace',
+              fontSize: '0.9rem',
+              wordBreak: 'break-all',
+              mb: 2
+            }}>
                   {surveyUrl}
                 </Box>
 
-                <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                  <Button
-                    variant="contained"
-                    startIcon={copied ? <CheckCircle /> : <ContentCopy />}
-                    onClick={() => copy(surveyUrl)}
-                    color={copied ? 'success' : 'primary'}
-                  >
-                    {copied ? t.shareCopied : t.shareCopyLink}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<OpenInNew />}
-                    href={surveyUrl}
-                    onClick={() => markGuideProgress(currentProject.id, 'shared')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {t.shareOpenSurvey}
-                  </Button>
+                {['localhost', '127.0.0.1', '[::1]'].includes(new URL(surveyUrl).hostname) && <Alert severity="info" sx={{
+              mt: 2
+            }}>{t.shareQrLocalHint}</Alert>}
+                <Box sx={{
+              mt: 2
+            }}>
+                  {currentProject && <Typography variant="body2" color="text.secondary" sx={{
+                mt: 1
+              }}>
+                    {currentProject.releaseManaged ? zh ? `当前发布 v${currentProject.publishedVersion} · 发布新版本后更新参与者问卷。` : `Live: v${currentProject.publishedVersion} · Publish a new version to update the survey.` : uiPair(language, 'Saved changes update the live survey.', '保存后即更新参与者问卷。')}
+                  </Typography>}
+                  {(!answerable.length || issues.length > 0) && <Alert severity="warning" sx={{
+                mt: 2
+              }}>
+                    {!answerable.length && <Typography variant="body2">{uiPair(language, 'This survey has no answerable questions. Add questions before inviting participants.', '问卷还没有作答题，请先在题目设置中完善。')}</Typography>}
+                    {issues.slice(0, 5).map((issue, i) => <Typography key={i} variant="body2">{issue.message}</Typography>)}
+                  </Alert>}
+                  {hasUnsavedChanges && <Alert severity="warning" sx={{
+                mt: 2
+              }}>{uiPair(language, 'There are unsaved changes. Wait for the toolbar to show saved before sending the share link.', '当前有未保存的修改。请确认顶部显示已保存，再发送分享链接。')}</Alert>}
                 </Box>
-                {['localhost', '127.0.0.1', '[::1]'].includes(new URL(surveyUrl).hostname) && <Alert severity="info" sx={{ mt: 2 }}>{t.shareQrLocalHint}</Alert>}
               </Box>
               <SurveyQrCode key={surveyUrl} surveyUrl={surveyUrl} projectId={currentProject.id} projectName={currentProject.name} />
-            </Box>
-          ) : (
-            <Alert severity="warning">
+            </Box> : <Alert severity="warning">
               {t.shareNoProject}
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
+            </Alert>}
+        </Box>
+      </Paper>
 
-      <ParameterLinks surveyUrl={surveyUrl} surveyConfig={surveyConfig} projectId={currentProject?.id} />
-
-      <Alert severity={!answerable.length || report.errors.length ? 'warning' : 'info'} sx={{ mb: 2 }}>
-        {zh ? `${report.pageCount} 页 · ${answerable.length} 道作答题 · 共 ${rounds} 轮` : `${report.pageCount} pages · ${answerable.length} answerable questions · ${rounds} rounds`}
-        {!answerable.length && <Typography variant="body2">{zh ? '问卷还没有作答题，请先在题目设置中完善。' : 'This survey has no answerable questions. Add questions before inviting participants.'}</Typography>}
-        {issues.slice(0, 5).map((issue, i) => <Typography key={i} variant="body2">• {issue.message}</Typography>)}
-      </Alert>
-      {hasUnsavedChanges && <Alert severity="warning" sx={{ mb: 2 }}>{zh ? '当前有未保存的修改。请确认顶部显示已保存，再发送分享链接。' : 'There are unsaved changes. Wait for the toolbar to show saved before sending the share link.'}</Alert>}
-      <SurveyPreflight surveyConfig={surveyConfig} currentProject={currentProject} />
-      <ProjectVersions currentProject={currentProject} hasUnsavedChanges={hasUnsavedChanges} onReleased={onReleased} />
-
-      <Card sx={{ mb: 3 }}>
+      {shareTools.map(([id, label]) => <Dialog key={id} open={shareDialog === id} onClose={() => setShareDialog(null)} keepMounted fullWidth maxWidth="md">
+          <DialogTitle>{label}</DialogTitle>
+          <DialogContent dividers>
+            {id === 'parameters' && <ParameterLinks surveyUrl={surveyUrl} surveyConfig={surveyConfig} projectId={currentProject?.id} />}
+            {id === 'checks' && <SurveyPreflight surveyConfig={surveyConfig} currentProject={currentProject} />}
+            {id === 'versions' && <ProjectVersions currentProject={currentProject} hasUnsavedChanges={hasUnsavedChanges} onReleased={onReleased} />}
+            {id === 'help' && <>
+      <Card sx={{
+            mb: 3
+          }}>
         <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{
+                mb: 2
+              }}>
             {t.shareTips}
           </Typography>
           <List dense>
@@ -158,22 +150,28 @@ export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedC
         </CardContent>
       </Card>
 
-      <Divider sx={{ my: 3 }} />
+      <Divider sx={{
+            my: 3
+          }} />
 
       <Card>
         <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{
+                mb: 1
+              }}>
             {t.shareAdminLink}
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          <Typography variant="body2" color="text.secondary" sx={{
+                mb: 2
+              }}>
             {t.shareAdminHelp}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-            <Button
-              variant="outlined"
-              startIcon={<ContentCopy />}
-              onClick={() => copy(`${origin}/admin`)}
-            >
+          <Box sx={{
+                display: 'flex',
+                gap: 2,
+                flexWrap: 'wrap'
+              }}>
+            <Button variant="outlined" startIcon={<ContentCopy />} onClick={() => copy(`${origin}/admin`)}>
               {t.shareCopyAdmin}
             </Button>
             <Button variant="text" startIcon={<Launch />} href={`${origin}/admin`} target="_blank">
@@ -182,6 +180,9 @@ export default function WebsiteSetup({ currentProject, surveyConfig, hasUnsavedC
           </Box>
         </CardContent>
       </Card>
-    </Box>
-  );
+            </>}
+          </DialogContent>
+          <DialogActions><Button onClick={() => setShareDialog(null)}>{t.resultsClose}</Button></DialogActions>
+        </Dialog>)}
+    </Box>;
 }

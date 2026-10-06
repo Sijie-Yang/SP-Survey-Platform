@@ -1,0 +1,28 @@
+{
+  "templateId": "2014-quercia-aesthetic",
+  "source": "Photographs cropped from the paper PDF. Charts, maps and interface screenshots are not included.",
+  "images": [
+    "paper/p07-05.jpg",
+    "paper/p07-06.jpg",
+    "paper/p07-07.jpg",
+    "paper/p07-08.jpg",
+    "paper/p07-09.jpg",
+    "paper/p07-10.jpg",
+    "paper/p07-11.jpg",
+    "paper/p08-12.jpg",
+    "paper/p08-13.jpg",
+    "paper/p08-14.jpg",
+    "paper/p08-15.jpg",
+    "paper/p08-16.jpg",
+    "paper/p08-17.jpg",
+    "paper/p08-18.jpg",
+    "paper/p08-19.jpg",
+    "paper/p08-20.jpg",
+    "paper/p08-21.jpg",
+    "paper/p08-22.jpg",
+    "paper/p08-23.jpg"
+  ],
+  "notes": {
+    "scenes": "Photographs cropped from the paper, used as the survey stimuli."
+  }
+}

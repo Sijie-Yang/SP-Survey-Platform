@@ -310,6 +310,13 @@
     "minAnnotations": { "type": "integer", "minimum": 0 },
     "maxAnnotations": { "type": "integer", "minimum": 0 },
     "annotationNotePrompt": { "type": "string", "description": "When set, each new annotation asks for a short note stored as shape.note." },
+    "mapTools": { "type": "array", "items": { "type": "string", "enum": ["point", "line", "polygon", "rectangle"] } },
+    "mapLabel": { "type": "string", "description": "Name of this map layer in results, such as Impressed. Legacy values liked and disliked still mean the positive and negative sides." },
+    "mapPolarity": { "type": "string", "enum": ["positive", "negative", "single"], "description": "positive and negative are the two sides of one pair. single means this map is not compared with another map; results show overlap strength." },
+    "mapPair": { "type": "string", "description": "Pair name shared by exactly two map questions, one positive and one negative. A different name is a different pair." },
+    "cityQuestion": { "type": "string", "description": "Answer of this question selects which preset study area the map uses." },
+    "studyAreaId": { "type": "string" },
+    "studyAreas": { "type": "array", "description": "Frozen geographic study areas. Not image folders." },
     "requireMediaEnded": { "type": "boolean", "description": "Answer controls stay disabled until every video/audio has played to the end." },
     "minWatchSeconds": { "type": "number", "minimum": 0, "maximum": 600, "description": "Answer controls stay disabled until media have been shown for this many seconds." },
     "minSelectedChoices": { "type": "integer", "minimum": 0 },
@@ -360,6 +367,7 @@
     "imagematrix": { "label": "Image Matrix", "group": "image", "traits": ["stimulus", "trial", "matrix"], "fieldGroups": ["common", "stimulus"], "fields": ["rows", "columns"], "defaults": { "imageCount": 1, "rows": [], "columns": [], "imageLinks": [] } },
     "image": { "label": "Image Display (single image)", "group": "image", "traits": ["stimulus", "display"], "fieldGroups": ["common", "stimulus"], "fields": ["imageFit"], "defaults": { "imageCount": 1 } },
     "imageannotation": { "label": "Image Annotation", "group": "image", "traits": ["stimulus", "trial", "annotation"], "fieldGroups": ["common", "stimulus", "annotation"], "fields": [], "defaults": { "imageCount": 1, "allowedTools": ["point", "line", "polygon", "bbox"], "annotationLabels": [], "minAnnotations": 0, "maxAnnotations": 50 } },
+    "mapannotation": { "label": "Map Annotation", "group": "map", "traits": ["annotation", "geographic"], "fieldGroups": ["common"], "fields": ["mapTools", "mapLabel", "mapPolarity", "mapPair", "cityQuestion", "studyAreaId", "studyAreas", "minAnnotations", "maxAnnotations"], "defaults": { "mapTools": ["polygon", "rectangle", "point"], "mapLabel": "liked", "mapPolarity": "single", "minAnnotations": 0, "maxAnnotations": 5 } },
     "imageslidergroup": { "label": "Image Slider Group", "group": "image", "traits": ["stimulus", "trial", "slider"], "fieldGroups": ["common", "stimulus", "slider"], "fields": [], "defaults": { "imageCount": 1, "dimensions": [], "scaleMin": 1, "scaleMax": 7, "scaleStep": 1 } },
     "imagepointallocation": { "label": "Image Point Allocation", "group": "image", "traits": ["stimulus", "trial", "allocation"], "fieldGroups": ["common", "stimulus", "allocation"], "fields": [], "defaults": { "imageCount": 1, "choices": [], "budget": 100 } },
     "mediapicker": { "label": "Media Choice", "group": "media", "traits": ["stimulus", "media", "trial", "choice"], "fieldGroups": ["common", "choices", "stimulus", "media"], "fields": ["multiSelect", "allowTie", "tieLabel"], "defaults": { "mediaType": "any", "imageCount": 4, "multiSelect": false, "pairingMode": "random", "mediaSlots": [], "mediaPresentation": "stack" } },
@@ -410,7 +418,7 @@
       "mediaPerCategory", "mediaCategoryMode", "excludePreviouslyUsedImages", "imageSelectionMode",
       "randomImageSelection", "pairingMode", "selectedImageUrls", "mediaSlots",
       "mediaPresentation", "displayMode", "exposureSeconds", "imageFit", "numericMeasure",
-      "maxLength", "conditionVariants"
+      "maxLength", "conditionVariants", "mapTools", "mapLabel", "mapPolarity", "mapPair", "cityQuestion", "studyAreaId", "studyAreas"
     ],
     "skillConfigKeys": [
       "min", "max", "step", "rateMin", "rateMax", "scaleMin", "scaleMax", "scaleStep",

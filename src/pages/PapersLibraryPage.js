@@ -13,6 +13,7 @@ import { normalizeMetaFilters, paperMatchesMetaFilters } from '../lib/researchPa
 import PaperLibraryAnalytics from '../components/papers/PaperLibraryAnalytics';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
+import { paperTemplateDoc } from './paperTemplateDocs';
 
 const ROW_H = 56;
 const COLS = '52px minmax(0, 1fr) 64px 120px 56px';
@@ -162,6 +163,9 @@ const PapersList = memo(function PapersList({ rows }) {
                       variant="outlined"
                       label={paper.template_id}
                       title={`Linked survey template: ${paper.template_id}`}
+                      component={paperTemplateDoc(paper.template_id) ? 'a' : 'div'}
+                      href={paperTemplateDoc(paper.template_id) ? `/docs/${paper.template_id}` : undefined}
+                      clickable={!!paperTemplateDoc(paper.template_id)}
                       sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }}
                     />
                   ) : (

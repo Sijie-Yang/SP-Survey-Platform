@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import RuntimeContextSettings from './RuntimeContextSettings';
 import {
   Box,
@@ -10,28 +10,27 @@ import {
   MenuItem,
   Switch,
   FormControlLabel,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   IconButton,
   Grid,
   Divider,
   List,
   ListItem,
   ListItemText,
-  ListItemSecondaryAction,
   Chip,
   Alert,
   Paper,
   Snackbar,
-  Collapse
 } from '@mui/material';
 import { useRegion } from '../../contexts/RegionContext';
+import { UI_LANGUAGES, normalizeUiLanguage } from '../../lib/uiLanguages';
 import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
 import { parsePageRule } from '../../lib/surveyRuntimeContext';
 import {
-  ExpandMore,
   Add,
   Delete,
   Edit,
@@ -39,6 +38,11 @@ import {
   ContentCopy,
   Clear,
   Download,
+  ArticleOutlined,
+  ImageOutlined,
+  Translate,
+  Tune,
+  PaletteOutlined,
 } from '@mui/icons-material';
 import {
   DndContext,
@@ -63,7 +67,7 @@ import ConfirmDialog from '../layout/ConfirmDialog';
 import AiAssistantPanel from './AiAssistantPanel';
 import SurveyThemePreviewPanel from '../SurveyThemePreviewPanel';
 import useSurveyAssistant from '../../hooks/useSurveyAssistant';
-import { AdminPageHeader } from './AdminPageLayout';
+import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
 import {
   allocateUniqueName,
   allocateUniquePageName,
@@ -166,9 +170,12 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
       ref={setNodeRef}
       style={style}
       sx={{
-        mb: 2,
+        mb: 1.5,
+        flexWrap: 'wrap',
+        gap: 1,
+        px: 1.5,
         bgcolor: 'background.paper',
-        borderRadius: 2,
+        borderRadius: 1.5,
         border: 1,
         borderColor: 'divider',
         '&:hover': {
@@ -185,7 +192,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
           display: 'flex',
           alignItems: 'center',
           cursor: 'grab',
-          mr: 2,
+          mr: 0,
           '&:active': {
             cursor: 'grabbing',
           },
@@ -195,9 +202,10 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
       </Box>
       
       <ListItemText
+        sx={{ flex: '1 1 150px', minWidth: 0 }}
         primary={
-          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
-            <Typography variant="h6">
+          <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            <Typography variant="subtitle1" fontWeight={600} sx={{ overflowWrap: 'anywhere' }}>
               {page.title || tr('Page {number}', { number: pageIndex + 1 })}
             </Typography>
             <Chip
@@ -211,29 +219,25 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
               if (rule?.kind === 'always') return null;
               const label = !rule ? tr('Custom display rule')
                 : tr(rule.kind === 'with_param' ? 'Only links with {param}' : 'Only links without {param}', { param: rule.param });
-              return <Chip label={label} size="small" color="info" variant="outlined" />;
+              return <Chip label={label} size="small" color="primary" variant="outlined" />;
             })()}
           </Box>
         }
-        secondary={
+        secondary={page.description ? (
           <Typography variant="body2" color="text.secondary">
-            {page.description || tr('No description provided')}
+            {page.description}
           </Typography>
-        }
+        ) : null}
       />
       
-      <ListItemSecondaryAction>
+      <Box sx={{ ml: 'auto' }}>
         <Box sx={{ display: 'flex', gap: 0.5 }}>
           <IconButton
             size="small"
             color="primary"
             aria-label={tr("Edit page")}
             onClick={() => onEdit({ page, index: pageIndex })}
-            sx={{ 
-              border: 1, 
-              borderColor: 'primary.main',
-              '&:hover': { bgcolor: 'primary.light', borderColor: 'primary.dark' }
-            }}
+            sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
           >
             <Edit fontSize="small" />
           </IconButton>
@@ -242,11 +246,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
             color="primary"
             aria-label={tr("Duplicate page")}
             onClick={() => onDuplicate(pageIndex)}
-            sx={{ 
-              border: 1, 
-              borderColor: 'primary.main',
-              '&:hover': { bgcolor: 'primary.light', borderColor: 'primary.dark' }
-            }}
+            sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
           >
             <ContentCopy fontSize="small" />
           </IconButton>
@@ -255,16 +255,12 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
             color="error"
             aria-label={tr("Delete page")}
             onClick={() => onDelete(pageIndex)}
-            sx={{ 
-              border: 1, 
-              borderColor: 'error.main',
-              '&:hover': { bgcolor: 'error.light', borderColor: 'error.dark' }
-            }}
+            sx={{ color: 'text.secondary', '&:hover': { color: 'error.main' } }}
           >
             <Delete fontSize="small" />
           </IconButton>
         </Box>
-      </ListItemSecondaryAction>
+      </Box>
     </ListItem>
   );
 }
@@ -274,42 +270,14 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
+  const [settingsDialog, setSettingsDialog] = useState(null);
+  const closeSettings = () => setSettingsDialog(null);
 
   const reportSelection = (next) => {
     onEditorSelectionChange?.(next);
   };
 
-  // Collapsed-state for the rarely-used sub-sections of the Survey Settings
-  // panel. We default both to collapsed and persist the user's choice per
-  // project in localStorage so the sections stay open if they were actively
-  // editing them.
-  const displaySettingsKey = currentProject?.id
-    ? `displaySettingsCollapsed_${currentProject.id}`
-    : 'displaySettingsCollapsed_default';
-  const themeCustomizationKey = currentProject?.id
-    ? `themeCustomizationCollapsed_${currentProject.id}`
-    : 'themeCustomizationCollapsed_default';
-  const [displaySettingsCollapsed, setDisplaySettingsCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    const stored = window.localStorage.getItem(displaySettingsKey);
-    return stored === 'false' ? false : true;
-  });
-  const [themeCustomizationCollapsed, setThemeCustomizationCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    const stored = window.localStorage.getItem(themeCustomizationKey);
-    return stored === 'false' ? false : true;
-  });
   const [themeSnackbar, setThemeSnackbar] = useState({ open: false, message: '', severity: 'success' });
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(displaySettingsKey, displaySettingsCollapsed ? 'true' : 'false');
-    }
-  }, [displaySettingsCollapsed, displaySettingsKey]);
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(themeCustomizationKey, themeCustomizationCollapsed ? 'true' : 'false');
-    }
-  }, [themeCustomizationCollapsed, themeCustomizationKey]);
   
   const assistant = useSurveyAssistant({
     currentProject,
@@ -747,6 +715,29 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         description={t.builderDescription}
       />
 
+      <AdminActionBar
+        label={t.builderSurveySettings}
+        primaryAction={<Button size="small" variant="contained" startIcon={<Add />} onClick={addNewPage}>{t.builderAddPage}</Button>}
+      >
+          {[
+            ['basic', t.builderBasicInfo, <ArticleOutlined />],
+            ['logo', t.builderLogoSettings, <ImageOutlined />],
+            ['language', t.builderSurveyLanguage, <Translate />],
+            ['display', t.builderDisplaySettings, <Tune />],
+            ['theme', t.builderThemeCustomization, <PaletteOutlined />],
+          ].map(([id, label, icon]) => (
+            <AdminActionButton
+              key={id}
+              startIcon={icon}
+              aria-haspopup="dialog"
+              onClick={() => setSettingsDialog(id)}
+              sx={{ flex: { xs: '1 1 130px', sm: '0 1 auto' } }}
+            >
+              {label}
+            </AdminActionButton>
+          ))}
+      </AdminActionBar>
+
       {validationWarnings.length > 0 && (
         <Alert
           severity={duplicateQuestionIssues.length ? 'error' : 'warning'}
@@ -780,19 +771,10 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         <AiAssistantPanel assistant={assistant} />
       )}
 
-      {/* Survey Settings - Unified Panel */}
-      <Accordion defaultExpanded>
-        <AccordionSummary expandIcon={<ExpandMore />}>
-          <Typography variant="h6">{t.builderSurveySettings}</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {/* Basic Information */}
-            <Box>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-                {t.builderBasicInfo}
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Dialog open={settingsDialog === 'basic'} onClose={closeSettings} fullWidth maxWidth="sm">
+        <DialogTitle>{t.builderBasicInfo}</DialogTitle>
+        <DialogContent dividers>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
                 <TextField
                   fullWidth
                   variant="outlined"
@@ -840,16 +822,16 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
 
                 <RuntimeContextSettings config={config} onChange={handleBasicInfoChange} />
               </Box>
-            </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
 
-            <Divider />
-
-            {/* Logo Settings */}
-            <Box>
-              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mb: 2 }}>
-                {t.builderLogoSettings}
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Dialog open={settingsDialog === 'logo'} onClose={closeSettings} fullWidth maxWidth="sm">
+        <DialogTitle>{t.builderLogoSettings}</DialogTitle>
+        <DialogContent dividers>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
                 <TextField
                   fullWidth
                   label="Logo URL"
@@ -872,54 +854,40 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   </Select>
                 </FormControl>
               </Box>
-            </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
 
-            <Divider />
-
-            <FormControl size="small" sx={{ minWidth: 220 }}>
+      <Dialog open={settingsDialog === 'language'} onClose={closeSettings} fullWidth maxWidth="xs">
+        <DialogTitle>{t.builderSurveyLanguage}</DialogTitle>
+        <DialogContent dividers>
+            <FormControl fullWidth size="small" sx={{ mt: 1 }}>
               <InputLabel>{t.builderSurveyLanguage}</InputLabel>
               <Select
                 label={t.builderSurveyLanguage}
-                value={String(config.locale || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en'}
+                value={normalizeUiLanguage(config.locale || 'en')}
                 onChange={(e) => handleBasicInfoChange('locale', e.target.value)}
               >
-                <MenuItem value="en">{t.builderSurveyLanguageEn}</MenuItem>
-                <MenuItem value="zh">{t.builderSurveyLanguageZh}</MenuItem>
+                {UI_LANGUAGES.map((item) => (
+                  <MenuItem key={item.id} value={item.id}>{item.nativeName}</MenuItem>
+                ))}
               </Select>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 0.75, display: 'block' }}>
                 {t.builderSurveyLanguageHelp}
               </Typography>
             </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
 
-            <Divider />
-
-            {/* Display Settings — collapsed by default since most users
-                rarely need to toggle question numbers / progress bar. */}
-            <Box>
-              <Box
-                onClick={() => setDisplaySettingsCollapsed((c) => !c)}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  cursor: 'pointer',
-                  userSelect: 'none',
-                  mb: displaySettingsCollapsed ? 0 : 2,
-                  '&:hover': { color: 'primary.main' },
-                }}
-              >
-                <ExpandMore
-                  sx={{
-                    transition: 'transform 0.2s',
-                    transform: displaySettingsCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                  }}
-                />
-                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                  {t.builderDisplaySettings}
-                </Typography>
-              </Box>
-              <Collapse in={!displaySettingsCollapsed} timeout="auto" unmountOnExit>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <Dialog open={settingsDialog === 'display'} onClose={closeSettings} fullWidth maxWidth="sm">
+        <DialogTitle>{t.builderDisplaySettings}</DialogTitle>
+        <DialogContent dividers>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, pt: 1 }}>
                   <FormControlLabel
                     control={
                       <Switch
@@ -971,39 +939,16 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                     />
                   )}
                 </Box>
-              </Collapse>
-            </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
 
-            <Divider />
-
-            {/* Theme Customization — collapsed by default. The action
-                buttons (Import / Export / Reset) only matter once the
-                section is expanded, so we move them inside the Collapse. */}
-            <Box>
-              <Box
-                onClick={() => setThemeCustomizationCollapsed((c) => !c)}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                  cursor: 'pointer',
-                  userSelect: 'none',
-                  mb: themeCustomizationCollapsed ? 0 : 2,
-                  '&:hover': { color: 'primary.main' },
-                }}
-              >
-                <ExpandMore
-                  sx={{
-                    transition: 'transform 0.2s',
-                    transform: themeCustomizationCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                  }}
-                />
-                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                  {t.builderThemeCustomization}
-                </Typography>
-              </Box>
-              <Collapse in={!themeCustomizationCollapsed} timeout="auto" unmountOnExit>
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 2 }}>
+      <Dialog open={settingsDialog === 'theme'} onClose={closeSettings} fullWidth maxWidth="md">
+        <DialogTitle>{t.builderThemeCustomization}</DialogTitle>
+        <DialogContent dividers>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 2, pt: 1 }}>
                 <input
                   type="file"
                   accept=".json"
@@ -1282,34 +1227,13 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                   </Box>
                 </Box>
               </Box>
-              </Collapse>
-            </Box>
-          </Box>
-        </AccordionDetails>
-      </Accordion>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
 
-      {/* Pages and Questions */}
-      <Accordion defaultExpanded>
-        <AccordionSummary expandIcon={<ExpandMore />}>
-          <Typography variant="h6">{t.builderPagesQuestions}</Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {t.builderPagesHelp}
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={addNewPage}
-                size="large"
-              >
-                {t.builderAddPage}
-              </Button>
-            </Box>
-          </Box>
-
+      <Box>
           {config.pages && config.pages.length > 0 ? (
             <DndContext
               sensors={sensors}
@@ -1320,7 +1244,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                 items={config.pages.map((_, index) => `page-${index}`)}
                 strategy={verticalListSortingStrategy}
               >
-                <List sx={{ width: '100%' }}>
+                <List sx={{ width: '100%', py: 0 }}>
                   {config.pages.map((page, pageIndex) => (
                     <SortablePageItem
                       key={`page-${pageIndex}`}
@@ -1338,14 +1262,13 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
               </SortableContext>
             </DndContext>
           ) : (
-            <Box sx={{ textAlign: 'center', py: 4, bgcolor: 'grey.50', borderRadius: 2 }}>
+            <Box sx={{ textAlign: 'center', py: 4, bgcolor: 'action.hover', borderRadius: 2 }}>
               <Typography variant="body2" color="text.secondary">
                 No pages created yet. Click "Add New Page" to get started.
               </Typography>
             </Box>
           )}
-        </AccordionDetails>
-      </Accordion>
+      </Box>
 
       {/* Page Editor Dialog */}
       {selectedPage && (
@@ -1380,22 +1303,9 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         />
       )}
 
-      {/* Next Step Button */}
       {onNextStep && (
-        <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end' }}>
-          <Button
-            variant="contained"
-            color="primary"
-            size="large"
-            onClick={onNextStep}
-            sx={{
-              px: 4,
-              py: 1.5,
-              fontWeight: 600
-            }}
-          >
-            Next: Share Survey →
-          </Button>
+        <Box sx={{ mt: 2.5, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button size="small" onClick={onNextStep}>{t.builderNextShare}</Button>
         </Box>
       )}
       <Snackbar

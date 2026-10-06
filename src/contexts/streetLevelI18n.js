@@ -1,4 +1,5 @@
 import { useCallback, useContext } from 'react';
+import { isChineseLanguage, lookupPhrase } from '../lib/uiLanguages';
 import { RegionContext } from './RegionContext';
 
 // English copy for enum-style keys; plain sentences are their own English text.
@@ -258,7 +259,7 @@ const zh = {
 
 export function streetLevelText(text, language, values = {}) {
   if (typeof text !== 'string') return text;
-  const translated = (language === 'zh' ? zh[text] : undefined) ?? en[text] ?? text;
+  const translated = lookupPhrase(language, text) ?? (isChineseLanguage(language) ? zh[text] : undefined) ?? en[text] ?? text;
   return translated.replace(/\{(\w+)\}/g, (match, key) => (Object.hasOwn(values, key) ? String(values[key]) : match));
 }
 

@@ -67,6 +67,7 @@ import AdminScopedMediaLibrary from '../components/admin/AdminScopedMediaLibrary
 import ResearchDeepSearch from '../components/admin/ResearchDeepSearch';
 import SurveyDesignRequestManagement from '../components/admin/SurveyDesignRequestManagement';
 import SpBenchManagement from '../components/admin/SpBenchManagement';
+import ContentSubmissionManagement from '../components/admin/ContentSubmissionManagement';
 import NewsManagement from '../components/admin/NewsManagement';
 import SharedAssistantSubsidy from '../components/admin/SharedAssistantSubsidy';
 import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDialog';
@@ -376,6 +377,7 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
   const [hfToken, setHfToken] = useState('');
   const [falKey, setFalKey] = useState('');
   const [r2FeatureMap, setR2FeatureMap] = useState({});
+  const [imagesBoundId, setImagesBoundId] = useState(null);
   const [images, setImages] = useState([]);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [thumbBusy, setThumbBusy] = useState(false);
@@ -447,6 +449,17 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
       setThumbBusy(false);
     }
   }, [template]);
+
+  const templateId = template?.id || null;
+  if (templateId !== imagesBoundId) {
+    setImagesBoundId(templateId);
+    setImages(template?.preloadedImages || []);
+    setThumbnailUrl(template?.thumbnail_url || null);
+    setThumbError('');
+  }
+  const libraryImages = templateId && templateId === imagesBoundId
+    ? images
+    : (template?.preloadedImages || []);
 
   if (!template) return null;
 
@@ -549,8 +562,9 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
         </Accordion>
 
         <AdminScopedMediaLibrary
+          key={template.id}
           r2Prefix={templateImagePrefix(template.id)}
-          owner={{ ...template, preloadedImages: images }}
+          owner={{ ...template, preloadedImages: libraryImages }}
           allowTemplateKeys
           rootLabel="(template root)"
           userId={user?.id || 'admin'}
@@ -2583,19 +2597,50 @@ export default function AdminDashboard() {
   const [tab, setTab]           = useState(0);
   const [checking, setChecking] = useState(true);
   const [isAdmin, setIsAdmin]   = useState(false);
+  const [checkAttempt, setCheckAttempt] = useState(0);
+  const [checkError, setCheckError] = useState('');
 
   useEffect(() => {
+    let cancel = false;
+    setChecking(true);
+    setCheckError('');
+    const timer = setTimeout(() => {
+      if (cancel) return;
+      setCheckError('数据库正忙，暂时无法确认管理员身份。请稍后再试。');
+      setChecking(false);
+    }, 12000);
     checkIsAdmin().then(ok => {
+      if (cancel) return;
+      clearTimeout(timer);
       setIsAdmin(ok);
+      setCheckError('');
+      setChecking(false);
+    }).catch(() => {
+      if (cancel) return;
+      clearTimeout(timer);
+      setCheckError('数据库正忙，暂时无法确认管理员身份。请稍后再试。');
       setChecking(false);
     });
-  }, []);
+    return () => {
+      cancel = true;
+      clearTimeout(timer);
+    };
+  }, [checkAttempt]);
 
   if (checking) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
       </Box>
+    );
+  }
+
+  if (checkError) {
+    return (
+      <Container maxWidth="sm" sx={{ mt: 8 }}>
+        <Alert severity="warning">{checkError}</Alert>
+        <Button sx={{ mt: 2 }} onClick={() => setCheckAttempt((n) => n + 1)}>重试</Button>
+      </Container>
     );
   }
 
@@ -2643,6 +2688,7 @@ export default function AdminDashboard() {
           <Tab label="SP-Bench" />
           <Tab label="News" />
           <Tab label="免费模型" />
+          <Tab label="Doc / News 审核" />
         </Tabs>
       </Box>
       {tab === 0 && <TemplateManagement />}
@@ -2655,6 +2701,7 @@ export default function AdminDashboard() {
       {tab === 7 && <SpBenchManagement />}
       {tab === 8 && <NewsManagement />}
       {tab === 9 && <SharedAssistantSubsidy />}
+      {tab === 10 && <ContentSubmissionManagement />}
     </AdminShell>
   );
 }

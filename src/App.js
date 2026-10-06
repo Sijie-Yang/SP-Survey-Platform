@@ -24,6 +24,8 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const McpOAuthPage = lazy(() => import('./pages/McpOAuthPage'));
 const SpBenchPage = lazy(() => import('./pages/SpBenchPage'));
 const NewsPage = lazy(() => import('./pages/NewsPage'));
+const ContributePage = lazy(() => import('./pages/ContributePage'));
+const DocsPage = lazy(() => import('./pages/DocsPage'));
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -121,6 +123,10 @@ const router = createBrowserRouter(createRoutesFromElements(
               <>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/papers" element={<PapersLibraryPage />} />
+                <Route path="/contribute" element={<ContributePage />} />
+                <Route path="/docs" element={<DocsPage />} />
+                <Route path="/docs/:docId" element={<DocsPage />} />
+                <Route path="/tutorial" element={<Navigate to="/docs/2013-salesses-collaborative" replace />} />
                 <Route path="/news" element={<NewsPage />} />
                 <Route path="/news/:slug" element={<NewsPage />} />
                 <Route path="/request-template" element={<RequestTemplatePage />} />

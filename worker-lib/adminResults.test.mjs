@@ -65,10 +65,10 @@ test('admin access is scoped to the requested project and bounded page', async (
   const responseUrls = db.mock.calls
     .map((call) => new URL(call.arguments[0]))
     .filter((url) => url.pathname === '/rest/v1/survey_responses');
-  assert.equal(responseUrls[0].searchParams.get('project_id'), 'eq.project-a');
-  assert.equal(responseUrls[0].searchParams.get('select'), 'id,created_at,project_id');
-  assert.equal(responseUrls[0].searchParams.get('limit'), '40');
-  assert.equal(responseUrls[0].searchParams.get('offset'), '1000');
+  const listUrl = responseUrls.find((url) => url.searchParams.get('select') === 'id,created_at,project_id');
+  assert.equal(listUrl.searchParams.get('project_id'), 'eq.project-a');
+  assert.equal(listUrl.searchParams.get('limit'), '8');
+  assert.equal(listUrl.searchParams.get('offset'), '1000');
   assert.equal(responseUrls[0].searchParams.get('order'), 'created_at.desc.nullslast,id.desc');
   assert.ok(responseUrls.some((url) => url.searchParams.get('select') === '*'));
 });
@@ -79,8 +79,8 @@ test('the slim RPC page returns each contract once and accepts known contract ke
   assert.equal(first.mode, 'slim');
   assert.equal(first.responses[0]._contract_ref, 'a'.repeat(32));
   assert.deepEqual(first.contracts, { ['a'.repeat(32)]: { questions: [] } });
-  const listUrl = db.mock.calls.map((call) => new URL(call.arguments[0])).find((url) => url.pathname === '/rest/v1/survey_responses');
-  assert.equal(listUrl.searchParams.get('limit'), '200');
+  const listUrl = db.mock.calls.map((call) => new URL(call.arguments[0])).find((url) => url.pathname === '/rest/v1/survey_responses' && url.searchParams.get('limit') === '8');
+  assert.equal(listUrl.searchParams.get('limit'), '8');
   const second = await (await handleAdminResultsRoutes(request(`?project=project-a&known=${'a'.repeat(32)}`), env)).json();
   assert.deepEqual(second.contracts, {});
   assert.equal((await handleAdminResultsRoutes(request('?project=project-a&known=bad;key'), env)).status, 400);

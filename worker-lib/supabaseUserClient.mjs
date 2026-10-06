@@ -18,6 +18,7 @@ export async function supabaseRest(env, {
   body,
   prefer,
   query = '',
+  signal,
 }) {
   const root = baseUrl(env);
   if (!root) {
@@ -48,6 +49,7 @@ export async function supabaseRest(env, {
     method,
     headers,
     body: body == null ? undefined : JSON.stringify(body),
+    signal,
   });
 
   const text = await res.text();

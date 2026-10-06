@@ -1,5 +1,7 @@
+import { reportFromAnalysisResult } from './lib/resultsReportStore';
 import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useRegion } from './contexts/RegionContext';
+import { UI_LANGUAGES } from './lib/uiLanguages';
 import { tf } from './contexts/adminI18n';
 import RegionSwitcher from './components/admin/RegionSwitcher';
 import {
@@ -126,7 +128,7 @@ function TabPanel({ children, value, index, keepMounted = false, ...other }) {
       {...other}
     >
       {(active || keepMounted) && (
-        <Box sx={{ p: 3, display: active ? 'block' : 'none' }}>
+        <Box sx={{ p: { xs: 2, sm: 3 }, display: active ? 'block' : 'none' }}>
           {children}
         </Box>
       )}
@@ -571,6 +573,10 @@ export default function AdminApp() {
   };
 
   const initializeProjectSystem = async () => {
+    const slowTimer = setTimeout(() => {
+      setProjectLoading(false);
+      setSnackbar({ open: true, message: t.projectSystemTimeout, severity: 'warning' });
+    }, 15000);
     try {
       setProjectLoading(true);
       
@@ -623,6 +629,7 @@ export default function AdminApp() {
       console.error('Error initializing project system:', error);
       setSurveyConfig(demoSurveyConfig);
     } finally {
+      clearTimeout(slowTimer);
       setProjectLoading(false);
     }
   };
@@ -1273,7 +1280,7 @@ export default function AdminApp() {
 
   return (
     <ThemeProvider theme={theme}>
-    <Box sx={{ flexGrow: 1 }}>
+    <Box sx={{ flexGrow: 1, minHeight: '100vh', display: 'flow-root', bgcolor: 'background.default', color: 'text.primary' }}>
         <AppBar
           position="fixed"
           color="primary"
@@ -1587,9 +1594,11 @@ export default function AdminApp() {
           handleToolsMenuClose();
           window.open('/survey?project=' + encodeURIComponent(currentProject.id), '_blank', 'noopener,noreferrer');
         }}>{t.viewLive}</MenuItem>}
-        {compactToolbar && <MenuItem onClick={() => { setLanguage(language === 'zh' ? 'en' : 'zh'); handleToolsMenuClose(); }}>
-          {language === 'zh' ? 'Switch to English' : '切换为中文'}
-        </MenuItem>}
+        {compactToolbar && UI_LANGUAGES.map((item) => (
+          <MenuItem key={item.id} selected={language === item.id} onClick={() => { setLanguage(item.id); handleToolsMenuClose(); }}>
+            {item.nativeName}
+          </MenuItem>
+        ))}
         {compactToolbar && <MenuItem disabled>{formatSaveStatusLabel(t, saveStatus, lastSavedAt)}</MenuItem>}
         {compactToolbar && <Divider />}
         {user && (
@@ -1855,7 +1864,7 @@ export default function AdminApp() {
                   setResultsAnalyzeBusy(true);
                   openAiSidebar('assistant');
                   try {
-                    await assistant.handleSendMessage({
+                    const result = await assistant.handleSendMessage({
                       assistantMode: 'question',
                       message: [
                         'Analyze the current Results scope. Call survey_results_summary with view=overview using the provided analysisScope.',
@@ -1866,16 +1875,8 @@ export default function AdminApp() {
                         overview?.counts ? `Known counts: ${JSON.stringify(overview.counts)}` : '',
                       ].filter(Boolean).join('\n'),
                     });
-                    const last = [...(assistant.messages || [])].reverse().find((row) => row.role === 'assistant');
-                    onSaved?.({
-                      scope,
-                      overview,
-                      narrative: last?.content || '',
-                      findings: [],
-                      provider: assistant.selectedRoute,
-                      model: assistant.selectedRoute,
-                      status: 'completed',
-                    });
+                    const report = reportFromAnalysisResult(result, { scope, overview });
+                    if (report) onSaved?.(report);
                   } finally {
                     setResultsAnalyzeBusy(false);
                   }

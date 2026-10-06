@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { isChineseLanguage, lookupPhrase } from '../lib/uiLanguages';
 import { useRegion } from './RegionContext';
 const zh = {
   "Select a project to practice questions.": "请选择一个项目开始练习。",
@@ -253,5 +254,7 @@ const zh = {
   "Box: drag to draw (can overlap existing) · ✓ to confirm": "拖动绘制矩形，可与已有标注重叠；✓ 确认"
 };
 const friendly = { 'SAM3': 'Segmentation assist', 'Multi-model ablation': 'Prediction model comparison', 'Run ablation': 'Run model comparison', 'L0 only': 'Basic image features', 'Seg only': 'Semantic segmentation features', 'SAM pre-annot only': 'Researcher annotation features', 'All models': 'All features' };
-export function workflowText(text, language) { return (language === 'zh' ? zh[text] : friendly[text]) || text; }
+export function workflowText(text, language) {
+  return lookupPhrase(language, text) || (isChineseLanguage(language) ? zh[text] : friendly[text]) || text;
+}
 export function useWorkflowText() { const { language } = useRegion(); return useCallback((text) => workflowText(text, language), [language]); }

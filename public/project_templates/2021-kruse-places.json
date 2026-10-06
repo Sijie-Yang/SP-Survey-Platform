@@ -1,7 +1,7 @@
 {
   "id": "2021-kruse-places",
   "name": "Places for Play",
-  "description": "Rebuilt from the published description of Kruse, Kang, Liu, Zhang & Gao (2021). Participants rate how playable Boston street views are for children on a five-point scale. Playability is intentionally not defined, as in the paper. Differences from the original study: (1) Researchers supply their own street-view images.",
+  "description": "Rebuilt from the published description of Kruse, Kang, Liu, Zhang & Gao (2021). Participants rate how playable Boston street views are for children on a five-point scale. Playability is intentionally not defined, as in the paper. Differences from the original study: (1) Bundled images are photographs from the paper PDF (4 scenes), not the original full stimulus set.",
   "author": "Kruse, Kang, Liu, Zhang & Gao",
   "year": "2021",
   "category": "Academic Research",
@@ -70,7 +70,10 @@
               "Very playable"
             ],
             "minRateDescription": "Very unplayable",
-            "maxRateDescription": "Very playable"
+            "maxRateDescription": "Very playable",
+            "mediaFolders": [
+              "Boston"
+            ]
           }
         ]
       },

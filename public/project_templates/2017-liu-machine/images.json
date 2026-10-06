@@ -1,0 +1,16 @@
+{
+  "templateId": "2017-liu-machine",
+  "source": "Photographs cropped from the paper PDF. Charts, maps and interface screenshots are not included.",
+  "images": [
+    "Beijing/p04-03.jpg",
+    "Beijing/p04-04.jpg",
+    "Beijing/p09-10.jpg",
+    "Beijing/p09-11.jpg",
+    "Beijing/p09-12.jpg",
+    "Beijing/p09-13.jpg",
+    "Beijing/p10-15.jpg"
+  ],
+  "notes": {
+    "scenes": "Photographs cropped from the paper, used as the survey stimuli."
+  }
+}

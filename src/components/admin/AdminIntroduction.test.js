@@ -46,31 +46,45 @@ test('guide strings exist in both languages', () => {
   guideKeys.forEach((key) => expect(adminI18n.zh[key]).toBeTruthy());
 });
 
-test('new project shows quick start, empty checklist and empty-state hints', () => {
+test('new project has one actionable checklist and optional workflow help', () => {
   const en = adminI18n.en;
   const handlers = setup();
-  expect(screen.getByText(en.guideQuickTitle)).toBeInTheDocument();
+  expect(screen.queryByText(en.guideQuickTitle)).not.toBeInTheDocument();
+  expect(screen.getByText(en.guideChecklistTitle)).toBeInTheDocument();
   expect(screen.getByText('0 of 6 done')).toBeInTheDocument();
+  expect(screen.queryByTestId('guide-step-media')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: en.guideStepsTitle }));
   expect(screen.getByText(en.guideMediaEmpty)).toBeInTheDocument();
   expect(screen.getByText(en.guideBuilderEmpty)).toBeInTheDocument();
   expect(screen.getByText(en.guideShareEmpty)).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: en.guideQuick1Action }));
-  expect(handlers.onOpenProjects).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: en.resultsClose }));
+  act(() => { jest.advanceTimersByTime(300); });
+  fireEvent.click(screen.getByRole('button', { name: en.guideCheckQuestions }));
+  expect(handlers.onGoToTab).toHaveBeenLastCalledWith(2);
+  fireEvent.click(screen.getByRole('button', { name: en.guideCheckPreview }));
+  expect(handlers.onOpenPreview).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: en.guideStepsTitle }));
   fireEvent.click(within(screen.getByTestId('guide-step-share')).getByRole('button', { name: `Open ${en.tabShare}` }));
   expect(handlers.onGoToTab).toHaveBeenCalledWith(3);
+  act(() => { jest.advanceTimersByTime(300); });
+  fireEvent.click(screen.getByRole('button', { name: en.guideStepsTitle }));
   const mediaStep = within(screen.getByTestId('guide-step-media'));
   expect(mediaStep.getByText(/paste Google Street View URLs/)).toBeInTheDocument();
   fireEvent.click(mediaStep.getByRole('button', { name: 'Street-level imagery' }));
   expect(handlers.onGoToTab).toHaveBeenLastCalledWith(1);
+  act(() => { jest.advanceTimersByTime(300); });
+  fireEvent.click(screen.getByRole('button', { name: en.guideStepsTitle }));
   fireEvent.click(screen.getByRole('button', { name: `Open ${en.tabSilicon}` }));
   expect(handlers.onOpenSilicon).toHaveBeenCalled();
+  act(() => { jest.advanceTimersByTime(300); });
+  fireEvent.click(screen.getByRole('button', { name: en.guideAiTitle }));
   for (const mode of [en.aiSidebarModeAgent, en.aiSidebarModeGenerate, en.aiSidebarModeAdjust, en.aiSidebarModeQuestion]) {
     expect(screen.getByText(mode)).toBeInTheDocument();
   }
 });
 
-test('existing project ticks itself and hides the quick start once released', () => {
+test('existing project tracks progress in the same checklist', () => {
   setup({ currentProject: liveProject, surveyConfig: liveConfig });
   expect(screen.queryByText(adminI18n.en.guideQuickTitle)).not.toBeInTheDocument();
   expect(screen.getByTestId('guide-check-media')).toHaveAttribute('data-done', 'true');
@@ -104,8 +118,11 @@ test('renders in Chinese and auto-starts the one-time tour for a first visit', (
   });
   setup();
   expect(screen.getByText(zh.guideTitle)).toBeInTheDocument();
-  expect(screen.getByText(zh.guideQuickTitle)).toBeInTheDocument();
+  expect(screen.queryByText(zh.guideQuickTitle)).not.toBeInTheDocument();
+  expect(screen.getByText(zh.guideChecklistTitle)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: zh.guideStepsTitle }));
   expect(within(screen.getByTestId('guide-step-media')).getByRole('button', { name: '街景影像' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: zh.resultsClose }));
   act(() => { jest.advanceTimersByTime(800); });
   expect(screen.getByRole('dialog', { name: zh.guideTourLabel })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: zh.guideTourSkip }));
@@ -121,6 +138,7 @@ describe('Review mode in the AI Assistant card', () => {
     process.env.REACT_APP_SUPABASE_URL = 'https://example.supabase.co';
     localStorage.setItem('sp-review-settings:researcher', JSON.stringify({ enabled: true }));
     setup();
+    fireEvent.click(screen.getByRole('button', { name: adminI18n.en.guideAiTitle }));
     expect(screen.getByText(adminI18n.en.aiSidebarModeReview)).toBeInTheDocument();
     expect(screen.getByText(adminI18n.en.guideAiReview)).toBeInTheDocument();
   });
@@ -129,6 +147,7 @@ describe('Review mode in the AI Assistant card', () => {
     process.env.REACT_APP_SUPABASE_URL = 'https://example.supabase.co';
     localStorage.setItem('sp-review-settings:researcher', JSON.stringify({ enabled: false }));
     setup();
+    fireEvent.click(screen.getByRole('button', { name: adminI18n.en.guideAiTitle }));
     expect(screen.queryByText(adminI18n.en.guideAiReview)).not.toBeInTheDocument();
     act(() => {
       window.dispatchEvent(new CustomEvent('sp-review-settings', { detail: { userId: 'researcher', settings: { enabled: true } } }));
@@ -139,6 +158,7 @@ describe('Review mode in the AI Assistant card', () => {
   test('stays hidden in the self-hosted build path', () => {
     localStorage.setItem('sp-review-settings:researcher', JSON.stringify({ enabled: true }));
     setup();
+    fireEvent.click(screen.getByRole('button', { name: adminI18n.en.guideAiTitle }));
     expect(screen.queryByText(adminI18n.en.guideAiReview)).not.toBeInTheDocument();
   });
 });

@@ -356,13 +356,37 @@ describe('useSurveyAssistant', () => {
       intent: 'question',
       sessionId: 'sess-p1',
     });
+    let completion;
     await act(async () => {
-      await result.current.handleSendMessage();
+      completion = await result.current.handleSendMessage();
     });
+    expect(completion).toMatchObject({ success: true, message: 'Remembered.' });
     expect(result.current.messages.map((message) => message.content)).toEqual([
       'remember this message',
       'Remembered.',
     ]);
+  });
+
+  test.each(['cancelled', 'failed'])('returns the %s result without treating it as a completed report', async (status) => {
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await act(async () => {
+      result.current.applyCredentialStatus({
+        configuredProviders: ['openai'], directory,
+        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
+      });
+    });
+    const output = { success: false, status, error: 'Analysis did not finish.' };
+    mockSendChatMessage.mockResolvedValue(output);
+    let completion;
+    await act(async () => {
+      completion = await result.current.handleSendMessage({ message: 'Analyze current results', assistantMode: 'question' });
+    });
+    expect(completion).toEqual(output);
+    expect(result.current.isLoading).toBe(false);
   });
 
   test('persists the project mode and sends it to the hosted assistant', async () => {

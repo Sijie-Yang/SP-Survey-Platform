@@ -22,6 +22,7 @@ import registerImageRankingWidget, {
   registerAllExtendedWidgets, captureSkillPreviewAnswers,
 } from './components/SurveyCustomComponents';
 import { getBrowserId, generateCompletionCode } from './lib/browserId';
+import { applyMapTaskOrder } from './lib/mapAnnotation';
 import { countProjectResponses, fetchConditionCounts, fetchPairStats } from './lib/surveyPublicApi';
 import { applyRuntimeVariables, conditionFromUrl, hasConditions, resolveRuntimeContext, runtimeMetadata } from './lib/surveyRuntimeContext';
 import { clearMediaWatchLog, mediaWatchMetadata } from './lib/mediaWatch';
@@ -519,7 +520,11 @@ export default function SurveyApp() {
           ? projectData.preloadedImages.filter(Boolean)
           : [];
         let fromPreviewLibrary = false;
-        if (!mediaPool.length && !adminConfig?._spPublishedVersion) {
+        const needsSampledMedia = (finalSurveyJson.pages || []).some((page) => {
+          const walk = (elements) => (elements || []).some((element) => isRandomMediaQuestion(element) || walk(element.elements));
+          return walk(page.elements);
+        });
+        if (needsSampledMedia && !mediaPool.length && !adminConfig?._spPublishedVersion) {
           setLoadingMessage('Loading preview media library…');
           try {
             const { adaptSurveyForPreviewLibrary, listPreviewMedia } = await import('./lib/previewMediaLibrary');
@@ -928,6 +933,7 @@ export default function SurveyApp() {
       }
       const runtimeContext = finalSurveyJson._spRuntimeContext;
       clearMediaWatchLog();
+      finalSurveyJson = applyMapTaskOrder(finalSurveyJson, `${projectId || 'preview'}:${getBrowserId()}`);
       const model = new Model(finalSurveyJson);
       applySurveyLocale(model, finalSurveyJson);
       applyRuntimeVariables(model, runtimeContext);
@@ -1085,6 +1091,7 @@ export default function SurveyApp() {
             completion_time: new Date().toISOString(),
             completion_code: completionCode,
             browser_id: getBrowserId(),
+            map_task_order: finalSurveyJson.spMapTaskOrder?.order || null,
             user_agent: navigator.userAgent,
             screen_resolution: `${window.screen.width}x${window.screen.height}`,
             survey_version: useAdminConfig ? `2.0-admin-${projectId}` : "1.0-original",

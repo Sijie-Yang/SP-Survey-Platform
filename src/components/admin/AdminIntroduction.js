@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
 import {
   Accordion,
   AccordionDetails,
@@ -7,6 +8,10 @@ import {
   Box,
   Button,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   IconButton,
   LinearProgress,
   Paper,
@@ -31,7 +36,6 @@ import Share from '@mui/icons-material/Share';
 import TipsAndUpdates from '@mui/icons-material/TipsAndUpdates';
 import ViewQuilt from '@mui/icons-material/ViewQuilt';
 import { useNavigate } from 'react-router-dom';
-import { AdminPageHeader } from './AdminPageLayout';
 import AdminGuideTour from './AdminGuideTour';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -49,16 +53,14 @@ import {
 } from '../../lib/adminGuide';
 
 const TAB = { media: 1, builder: 2, share: 3, results: 4, practice: 5 };
-const STREET_LEVEL_OPEN = 'Open street-level panel';
+const STREET_LEVEL_OPEN = 'Street-level imagery';
 
-/** The card lives inside the lazily rendered Dataset tab, so poll briefly for its button. */
+/** Dataset loads lazily; wait for its import menu before opening the street-level panel. */
 function revealButtonByText(label, attempts = 20) {
-  const button = Array.from(document.querySelectorAll('button')).find((node) => node.textContent.trim() === label);
-  if (button) {
-    button.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    button.focus({ preventScroll: true });
-    return;
-  }
+  const item = Array.from(document.querySelectorAll('[role="menuitem"]')).find((node) => node.textContent.trim() === label);
+  if (item) { if (item.getAttribute('aria-disabled') !== 'true') item.click(); return; }
+  const trigger = document.getElementById('dataset-import-button');
+  if (trigger && trigger.getAttribute('aria-expanded') !== 'true') trigger.click();
   if (attempts > 0) setTimeout(() => revealButtonByText(label, attempts - 1), 150);
 }
 
@@ -117,7 +119,7 @@ function StepBadge({ icon, done }) {
 
 function SectionCard({ title, icon, onHide, hideLabel, children, sx }) {
   return (
-    <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 1.5, height: '100%', ...sx }}>
+    <Box sx={{ minWidth: 0, ...sx }}>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
         <Box sx={{ color: 'primary.main', display: 'inline-flex' }}>{icon}</Box>
         <Typography variant="subtitle1" fontWeight={700} sx={{ flex: 1 }}>{title}</Typography>
@@ -130,34 +132,7 @@ function SectionCard({ title, icon, onHide, hideLabel, children, sx }) {
         )}
       </Stack>
       {children}
-    </Paper>
-  );
-}
-
-function QuickStart({ t, actions }) {
-  const rows = [
-    { text: t.guideQuick1, label: t.guideQuick1Action, onClick: actions.openProjects },
-    { text: t.guideQuick2, label: tf(t.guideOpenTab, { tab: t.tabMedia }), onClick: () => actions.goTo(TAB.media) },
-    { text: t.guideQuick3, label: tf(t.guideOpenTab, { tab: t.tabBuilder }), onClick: () => actions.goTo(TAB.builder) },
-    { text: t.guideQuick4, label: t.guideQuick4Action, onClick: actions.openPreview },
-    { text: t.guideQuick5, label: tf(t.guideOpenTab, { tab: t.tabShare }), onClick: () => actions.goTo(TAB.share) },
-  ];
-  return (
-    <>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{t.guideQuickLead}</Typography>
-      <Stack component="ol" spacing={1} sx={{ m: 0, pl: 2.5 }}>
-        {rows.map((row) => (
-          <Typography key={row.text} component="li" variant="body2">
-            {row.text}{' '}
-            {row.onClick && (
-              <Button size="small" onClick={row.onClick} sx={{ textTransform: 'none', py: 0, minWidth: 0 }}>
-                {row.label}
-              </Button>
-            )}
-          </Typography>
-        ))}
-      </Stack>
-    </>
+    </Box>
   );
 }
 
@@ -201,11 +176,12 @@ function Checklist({ t, checklist, actions }) {
               key={key}
               data-testid={`guide-check-${key}`}
               data-done={done ? 'true' : 'false'}
-              sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.35 }}
+              sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, py: 0.5 }}
             >
               {done
                 ? <CheckCircle color="success" fontSize="small" aria-label={t.guideStatusDone} />
                 : <RadioButtonUnchecked color="disabled" fontSize="small" aria-label={t.guideStatusTodo} />}
+              <Box sx={{ flex: 1, minWidth: 0 }}>
               <Box
                 component="button"
                 type="button"
@@ -223,15 +199,13 @@ function Checklist({ t, checklist, actions }) {
                 {row.label}
               </Box>
               {row.detail && (
-                <Typography variant="caption" color="text.secondary" noWrap>· {row.detail}</Typography>
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.75, overflowWrap: 'anywhere' }}>· {row.detail}</Typography>
               )}
+              </Box>
             </Box>
           );
         })}
       </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-        {t.guideChecklistHint}
-      </Typography>
     </>
   );
 }
@@ -375,7 +349,7 @@ function AssistantSection({ t, assistantEnabled, reviewEnabled = false, onOpenAs
 
 /**
  * Introduction tab: step-by-step guide to the Admin workflow with
- * first-time aids (quick start, self-ticking checklist, top-bar tour).
+ * a single actionable checklist and a top-bar tour.
  */
 export default function AdminIntroduction({
   onGoToTab,
@@ -384,7 +358,6 @@ export default function AdminIntroduction({
   assistantEnabled = true,
   siliconEnabled = false,
   onOpenAssistant,
-  onOpenProjects,
   onOpenPreview,
   onOpenSilicon,
 }) {
@@ -397,6 +370,7 @@ export default function AdminIntroduction({
   const reviewEnabled = isPlatformMode() && reviewSettings.enabled;
   const [prefs, setPrefs] = useState(() => loadGuidePrefs(userId));
   const [tourOpen, setTourOpen] = useState(false);
+  const [guideDialog, setGuideDialog] = useState(null);
   const progress = useGuideProgress(currentProject?.id);
   const responseCount = useResponseCount(currentProject?.id);
 
@@ -414,8 +388,7 @@ export default function AdminIntroduction({
     updatePrefs({ tourDone: true });
   }, [updatePrefs]);
   const restartGuide = () => {
-    resetGuidePrefs(userId);
-    setPrefs(saveGuidePrefs(userId, { quickstartHidden: false }));
+    setPrefs(resetGuidePrefs(userId));
     setTourOpen(true);
   };
 
@@ -424,15 +397,12 @@ export default function AdminIntroduction({
     [currentProject, surveyConfig, progress, responseCount],
   );
   const { items } = checklist;
-  const goTo = (tab) => onGoToTab?.(tab);
+  const goTo = (tab) => { setGuideDialog(null); onGoToTab?.(tab); };
   const actions = {
     goTo,
-    openProjects: onOpenProjects,
-    openPreview: onOpenPreview || (() => goTo(TAB.practice)),
+    openPreview: () => { setGuideDialog(null); if (onOpenPreview) onOpenPreview(); else goTo(TAB.practice); },
   };
 
-  const showQuickstart = prefs.quickstartHidden === false
-    || (prefs.quickstartHidden == null && !items.published.done);
   const showChecklist = !prefs.checklistHidden;
 
   const openTabButton = (tabKey, tab, icon) => ({
@@ -478,7 +448,7 @@ export default function AdminIntroduction({
       hint: items.questions.done ? null : t.guideBuilderEmpty,
       buttons: [
         openTabButton('tabBuilder', TAB.builder),
-        ...(assistantEnabled && onOpenAssistant ? [{ label: t.guideAiOpen, onClick: onOpenAssistant, icon: <AutoAwesome /> }] : []),
+        ...(assistantEnabled && onOpenAssistant ? [{ label: t.guideAiOpen, onClick: () => { setGuideDialog(null); onOpenAssistant(); }, icon: <AutoAwesome /> }] : []),
       ],
     },
     {
@@ -492,7 +462,7 @@ export default function AdminIntroduction({
       done: items.preview.done,
       hint: items.preview.done || !items.questions.done ? null : t.guideTryEmpty,
       buttons: [
-        ...(onOpenPreview ? [{ label: t.guidePreviewAction, onClick: onOpenPreview }] : []),
+        ...(onOpenPreview ? [{ label: t.guidePreviewAction, onClick: actions.openPreview }] : []),
         openTabButton('tabPractice', TAB.practice),
       ],
     },
@@ -507,7 +477,7 @@ export default function AdminIntroduction({
       done: null,
       hint: siliconEnabled ? null : t.guideSiliconOff,
       buttons: siliconEnabled && onOpenSilicon
-        ? [{ label: tf(t.guideOpenTab, { tab: t.tabSilicon }), onClick: onOpenSilicon }]
+        ? [{ label: tf(t.guideOpenTab, { tab: t.tabSilicon }), onClick: () => { setGuideDialog(null); onOpenSilicon(); } }]
         : [],
     },
     {
@@ -536,87 +506,46 @@ export default function AdminIntroduction({
 
   return (
     <Box>
-      <AdminPageHeader
-        icon={<RocketLaunch />}
-        title={t.guideTitle}
-        description={t.guideBody}
-        actions={(
-          <>
-            {!showQuickstart && (
-              <Button size="small" onClick={() => updatePrefs({ quickstartHidden: false })} sx={{ textTransform: 'none' }}>
-                {t.guideShowQuickstart}
-              </Button>
-            )}
-            {!showChecklist && (
-              <Button size="small" onClick={() => updatePrefs({ checklistHidden: false })} sx={{ textTransform: 'none' }}>
-                {t.guideShowChecklist}
-              </Button>
-            )}
-            <Button size="small" variant="outlined" onClick={() => setTourOpen(true)} sx={{ textTransform: 'none' }}>
-              {t.guideStartTour}
-            </Button>
-          </>
-        )}
-      />
-
-      {(showQuickstart || showChecklist) && (
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', md: showQuickstart && showChecklist ? '3fr 2fr' : '1fr' },
-            gap: 2,
-            mb: 3,
-          }}
-        >
-          {showQuickstart && (
-            <SectionCard
-              title={t.guideQuickTitle}
-              icon={<RocketLaunch fontSize="small" />}
-              onHide={() => updatePrefs({ quickstartHidden: true })}
-              hideLabel={t.guideHide}
-              sx={{ bgcolor: 'background.default' }}
-            >
-              <QuickStart t={t} actions={actions} />
-            </SectionCard>
-          )}
-          {showChecklist && (
-            <SectionCard
-              title={t.guideChecklistTitle}
-              icon={<CheckCircle fontSize="small" />}
-              onHide={() => updatePrefs({ checklistHidden: true })}
-              hideLabel={t.guideHide}
-            >
-              <Checklist t={t} checklist={checklist} actions={actions} />
-            </SectionCard>
-          )}
-        </Box>
+      <AdminPageHeader icon={<RocketLaunch />} title={t.guideTitle} description={t.guideBody} />
+      <AdminActionBar
+        label={t.guideTitle}
+        primaryAction={<Button size="small" variant="contained" startIcon={<PlayCircleOutline />} onClick={() => setTourOpen(true)}>{t.guideStartTour}</Button>}
+      >
+        <AdminActionButton startIcon={<ViewQuilt />} aria-haspopup="dialog" onClick={() => setGuideDialog('workflow')}>{t.guideStepsTitle}</AdminActionButton>
+        <AdminActionButton startIcon={<AutoAwesome />} aria-haspopup="dialog" onClick={() => setGuideDialog('assistant')}>{t.guideAiTitle}</AdminActionButton>
+        <Tooltip title={t.guideRestartHint} describeChild>
+          <AdminActionButton startIcon={<RestartAlt />} onClick={restartGuide} data-tour="guide-restart">{t.guideRestart}</AdminActionButton>
+        </Tooltip>
+        {!showChecklist && <AdminActionButton onClick={() => updatePrefs({ checklistHidden: false })}>{t.guideShowChecklist}</AdminActionButton>}
+      </AdminActionBar>
+      {showChecklist && (
+        <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, borderRadius: 1.5 }}>
+          <SectionCard
+            title={t.guideChecklistTitle}
+            icon={<CheckCircle fontSize="small" />}
+            onHide={() => updatePrefs({ checklistHidden: true })}
+            hideLabel={t.guideHide}
+          >
+            <Checklist t={t} checklist={checklist} actions={actions} />
+          </SectionCard>
+        </Paper>
       )}
 
-      <Typography variant="h6" fontWeight={700} sx={{ mb: 1.5 }}>{t.guideStepsTitle}</Typography>
-      <Stack spacing={1.5} sx={{ mb: 3 }}>
-        {steps.map((step) => <WorkflowStep key={step.id} t={t} step={step} />)}
-      </Stack>
-
-      <AssistantSection
-        t={t}
-        assistantEnabled={assistantEnabled}
-        reviewEnabled={reviewEnabled}
-        onOpenAssistant={onOpenAssistant}
-        navigate={navigate}
-      />
-
-      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-        <Button
-          size="small"
-          startIcon={<RestartAlt />}
-          onClick={restartGuide}
-          data-tour="guide-restart"
-          sx={{ textTransform: 'none' }}
-        >
-          {t.guideRestart}
-        </Button>
-        <Typography variant="caption" color="text.secondary">{t.guideRestartHint}</Typography>
-      </Stack>
+      <Dialog open={guideDialog === 'workflow'} onClose={() => setGuideDialog(null)} fullWidth maxWidth="md">
+        <DialogTitle>{t.guideStepsTitle}</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.5}>{steps.map((step) => <WorkflowStep key={step.id} t={t} step={step} />)}</Stack>
+        </DialogContent>
+        <DialogActions><Button onClick={() => setGuideDialog(null)}>{t.resultsClose}</Button></DialogActions>
+      </Dialog>
+      <Dialog open={guideDialog === 'assistant'} onClose={() => setGuideDialog(null)} fullWidth maxWidth="md">
+        <DialogTitle>{t.guideAiTitle}</DialogTitle>
+        <DialogContent dividers>
+          <AssistantSection t={t} assistantEnabled={assistantEnabled} reviewEnabled={reviewEnabled}
+            onOpenAssistant={onOpenAssistant ? () => { setGuideDialog(null); onOpenAssistant(); } : null} navigate={navigate} />
+        </DialogContent>
+        <DialogActions><Button onClick={() => setGuideDialog(null)}>{t.resultsClose}</Button></DialogActions>
+      </Dialog>
 
       <AdminGuideTour open={tourOpen} onClose={closeTour} />
     </Box>

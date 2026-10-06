@@ -1,0 +1,17 @@
+{
+  "templateId": "2026-kang-decoding",
+  "source": "Photographs cropped from the paper PDF. Charts, maps and interface screenshots are not included.",
+  "images": [
+    "Helsingborg/p06-02.jpg",
+    "Helsingborg/p06-03.jpg",
+    "Helsingborg/p08-06.jpg",
+    "Helsingborg/p08-07.jpg",
+    "Helsingborg/p10-11.jpg",
+    "Helsingborg/p10-12.jpg",
+    "Helsingborg/p10-13.jpg",
+    "Helsingborg/p10-14.jpg"
+  ],
+  "notes": {
+    "scenes": "Photographs cropped from the paper, used as the survey stimuli."
+  }
+}

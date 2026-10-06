@@ -1,6 +1,6 @@
 import { Model } from 'survey-core';
 import {
-  pageRuleToVisibleIf, parsePageRule,
+  choiceRuleToVisibleIf, pageRuleToVisibleIf, parseChoiceVisibleIf, parsePageRule,
   conditionFromUrl, withConditionWording,
   reverseCodedConditions,
   applyRuntimeVariables, captureUrlParams, chooseCondition, normalizeConditions, resolveRuntimeContext, runtimeMetadata,
@@ -102,4 +102,17 @@ test('page display rules map to simple choices', () => {
   expect(parsePageRule('{age} > 18')).toBeNull();
   expect(pageRuleToVisibleIf({ kind: 'with_param', param: 'site' })).toBe('{url_site} notempty');
   expect(pageRuleToVisibleIf({ kind: 'always' })).toBeUndefined();
+});
+
+test('question display rules follow one choice', () => {
+  expect(parseChoiceVisibleIf('')).toEqual({ kind: 'always' });
+  expect(parseChoiceVisibleIf("{resident_or_visitor} = 'resident'")).toEqual({
+    kind: 'answer', question: 'resident_or_visitor', value: 'resident',
+  });
+  expect(parseChoiceVisibleIf('{city} = "knoxville"')).toEqual({
+    kind: 'answer', question: 'city', value: 'knoxville',
+  });
+  expect(parseChoiceVisibleIf("{age} > 18")).toBeNull();
+  expect(choiceRuleToVisibleIf({ kind: 'answer', question: 'city', value: 'knoxville' })).toBe("{city} = 'knoxville'");
+  expect(choiceRuleToVisibleIf({ kind: 'always' })).toBeUndefined();
 });

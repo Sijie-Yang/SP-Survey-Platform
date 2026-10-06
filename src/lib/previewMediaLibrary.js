@@ -8,6 +8,7 @@
 import { listImagesFromR2 } from './r2';
 import { loadPreviewMediaLibrary } from './previewMediaLibraryStorage';
 import { filterMediaByType, inferMediaType, normalizeMediaEntry } from './mediaUtils';
+import { isRandomMediaQuestion } from './surveyMediaInjection';
 
 /** Canonical R2 prefix (legacy name kept so existing uploads keep working). */
 export const PREVIEW_MEDIA_PREFIX = 'skill-preview/';
@@ -113,6 +114,13 @@ const trimFolder = (f) => String(f || '').trim().replace(/^\/+|\/+$/g, '');
  * question. Folder scopes the shared library does not have (e.g. a template's "clips")
  * are dropped for individual-mode questions, and media may repeat across trials.
  */
+export function surveyUsesSampledMedia(config) {
+  const walk = (elements) => (elements || []).some((element) => (
+    isRandomMediaQuestion(element) || walk(element.elements)
+  ));
+  return (config?.pages || []).some((page) => walk(page.elements));
+}
+
 export function adaptQuestionForPreviewLibrary(question, pool = []) {
   if (!question || typeof question !== 'object' || !question.type) return question;
   const out = { ...question, excludePreviouslyUsedImages: false };

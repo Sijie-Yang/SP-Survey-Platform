@@ -1,7 +1,8 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import ResultsAnalysis, { QuestionCard, buildQuestionCardProps } from './ResultsAnalysis';
 import { RegionProvider } from '../../contexts/RegionContext';
+import { createResultsReport, readResultsReport, reportStorageKey, writeResultsReport } from '../../lib/resultsReportStore';
 import { saveProjectFull } from '../../lib/projectManager';
 import { fetchAdminResponsePage } from '../../lib/adminResults';
 
@@ -27,8 +28,9 @@ test('platform admin reads the selected project through the admin API without de
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', name: 'Other project' }} surveyConfig={config} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
   expect(fetchAdminResponsePage).toHaveBeenCalledWith('other-owner-project', 0, null, expect.any(Object));
-  fireEvent.click(screen.getByRole('tab', { name: /Data/i }));
-  fireEvent.click(screen.getByRole('button', { name: /Response records/i }));
+  expect(screen.queryByRole('tab', { name: /^Data$/i })).toBeNull();
+  expect(screen.getByRole('tab', { name: /^Overview$/i }).getAttribute('aria-selected')).toBe('true');
+  fireEvent.click(screen.getByRole('tab', { name: /Response records/i }));
   expect(screen.getAllByRole('button', {name: 'View'})).toHaveLength(2);
   expect(screen.queryByRole('button', {name: 'Delete this response'})).toBeNull();
   expect(saveProjectFull).not.toHaveBeenCalled();
@@ -70,7 +72,9 @@ test('collapsed question cards do not mount their analysis until expanded', asyn
   expect(screen.getByText(/2 \/ 2 submissions answered/)).toBeTruthy();
   expect(screen.queryByText(/Paper methods/)).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Expand analysis: safe' }));
-  expect(await screen.findByText(/Paper methods/)).toBeTruthy();
+  expect(await screen.findByText(/TrueSkill \(pairwise/)).toBeTruthy();
+  expect(screen.queryByText(/Paper methods/)).toBeNull();
+  expect(screen.getByText('Coverage and reliability')).toBeTruthy();
 });
 
 test('question card uses submission denominator for repeat participants', () => {
@@ -90,12 +94,61 @@ test('filter preference does not save the survey and submission details are avai
     expect(JSON.parse(localStorage.getItem('sp-analysis-prefs:project')).includePractice).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Filters' })).toBeNull());
-    fireEvent.click(screen.getByRole('tab', { name: /Data/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Response records/i }));
+    expect(screen.queryByRole('tab', { name: /^Data$/i })).toBeNull();
+  expect(screen.getByRole('tab', { name: /^Overview$/i }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: /Response records/i }));
     fireEvent.click(screen.getAllByRole('button', {name: 'View'})[0]);
     expect(await screen.findByRole('dialog')).toBeTruthy();
     expect(screen.getByText('Not recorded (historical response)', {exact: false})).toBeTruthy();
     fireEvent.click(screen.getByRole('button', {name: 'Close'}));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   } finally { global.fetch = previousFetch; }
+});
+
+
+test('records and quality have direct tabs and do not require expanding a section', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Overview', 'Questions', 'Response records', 'Data Quality']);
+  expect(screen.queryByRole('button', { name: 'View' })).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: 'Response records' }));
+  expect(screen.getAllByRole('button', { name: 'View' })).toHaveLength(2);
+  fireEvent.click(screen.getByRole('tab', { name: 'Data Quality' }));
+  expect(screen.getByRole('button', { name: 'Export CSV' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'View' })).toBeNull();
+});
+
+test.each([['Complete report', 'completed', 'Latest analysis'], ['', 'completed', 'Incomplete analysis']])(
+  'saved report %s can be opened and deleted without deleting responses', async (narrative, status, title) => {
+    fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+    // Include the empty completed report produced by older versions.
+    localStorage.setItem(reportStorageKey('p'), JSON.stringify(createResultsReport({ narrative, status })));
+    render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode /></RegionProvider>);
+    await screen.findByText(/2 \/ 2 submissions in analysis/);
+    fireEvent.click(screen.getByRole('button', { name: 'View report' }));
+    const dialog = await screen.findByRole('dialog', { name: title });
+    expect(within(dialog).getByText(narrative || 'This analysis did not produce a complete report. Run the analysis again.')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Delete report' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete report' }));
+    await waitFor(() => expect(readResultsReport('p')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'View report' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Response records' }));
+    expect(screen.getAllByRole('button', { name: 'View' })).toHaveLength(2);
+  },
+);
+
+test('an empty or cancelled analysis cannot replace a saved report', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  const previous = createResultsReport({ narrative: 'Previous completed report' });
+  writeResultsReport('p', previous);
+  let save;
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode
+    onAnalyzeCurrent={({ onSaved }) => { save = onSaved; }} /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(within(screen.getByRole('group', { name: 'Results Analysis' })).getByRole('button', { name: 'Analyze current results' }));
+  act(() => { save({ status: 'cancelled', narrative: 'Partial output' }); save({ narrative: '' }); });
+  expect(readResultsReport('p').id).toBe(previous.id);
 });

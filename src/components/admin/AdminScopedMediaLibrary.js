@@ -15,7 +15,7 @@ import {
 } from '@mui/icons-material';
 import MediaFolderBrowser from './MediaFolderBrowser';
 import MediaKeywordSelection from './MediaKeywordSelection';
-import { mergeMediaLibraryListing, serializeMediaLibraryEntry } from '../../lib/mediaLibrarySync';
+import { imagesInLibraryPrefix, mergeMediaLibraryListing, serializeMediaLibraryEntry } from '../../lib/mediaLibrarySync';
 import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
 import { uploadFolderForFile, uploadObjectKey, pickUploadMedia } from '../../lib/mediaUploadBatch';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
@@ -153,6 +153,7 @@ export default function AdminScopedMediaLibrary({
   const folderInputRef = useRef(null);
   const suppInputRef = useRef(null);
   const persistRef = useRef(onPersist);
+  const refreshEpochRef = useRef(0);
   useEffect(() => { persistRef.current = onPersist; }, [onPersist]);
 
   const r2DeleteOptions = useMemo(
@@ -214,13 +215,20 @@ export default function AdminScopedMediaLibrary({
     }
   }, [prefix, onImagesChange]);
 
-  const refreshFromR2 = useCallback(async ({ silent = false } = {}) => {
+  const refreshFromR2 = useCallback(async ({ silent = false, epoch = null } = {}) => {
     if (!prefix || !isR2Configured()) return;
+    const requestEpoch = epoch == null ? refreshEpochRef.current : epoch;
+    const expectedPrefix = prefix;
     const startingOwner = mediaOwnerRef.current;
+    const expectedOwnerId = startingOwner?.id;
     setSyncing(true);
     if (!silent) setError('');
     try {
-      const result = await listImagesFromR2(prefix);
+      const result = await listImagesFromR2(expectedPrefix);
+      const listingIsStale = () => refreshEpochRef.current !== requestEpoch
+        || mediaOwnerRef.current !== startingOwner
+        || mediaOwnerRef.current?.id !== expectedOwnerId;
+      if (listingIsStale()) return;
       if (!result.success) {
         // List API unavailable (e.g. local CRA without Express): keep DB/saved library.
         // Do not label the library "offline" — public/static URLs are already synced.
@@ -234,9 +242,17 @@ export default function AdminScopedMediaLibrary({
         }
         throw new Error(result.error || tx("Failed to list media"));
       }
-      // A delayed listing must not overwrite a move/upload completed since it started.
-      if (mediaOwnerRef.current !== startingOwner) return;
-      const mapped = mergeMediaLibraryListing(result.images || [], startingOwner.preloadedImages, prefix);
+      // A delayed listing must not overwrite a move/upload completed since it started,
+      // and must not write one template's objects onto another.
+      if (listingIsStale()) return;
+      const listed = imagesInLibraryPrefix(result.images || [], expectedPrefix);
+      const savedCount = (startingOwner?.preloadedImages || []).length;
+      if (!listed.length && savedCount > 0) {
+        if (!silent) setInfo(tx("R2 returned no files for this library. Saved media is unchanged."));
+        return;
+      }
+      const mapped = mergeMediaLibraryListing(listed, startingOwner.preloadedImages, expectedPrefix);
+      if (listingIsStale()) return;
       // Refresh only syncs file list — keep folder tags untouched
       await persistRef.current?.({
         preloaded_images: mapped.map((img) => {
@@ -254,7 +270,7 @@ export default function AdminScopedMediaLibrary({
         preloaded_at: new Date().toISOString(),
         preloaded_source: 'r2',
       });
-      if (mediaOwnerRef.current !== startingOwner) return;
+      if (listingIsStale()) return;
       const nextOwner = {
         ...startingOwner,
         preloadedImages: mapped,
@@ -266,14 +282,15 @@ export default function AdminScopedMediaLibrary({
       onImagesChange?.(mapped);
       if (!silent) setInfo(tx("Synced {v0} file(s) from R2.", { v0: mapped.length }));
     } catch (err) {
-      if (!silent) setError(err.message || tx("Refresh failed"));
+      if (refreshEpochRef.current === requestEpoch && !silent) setError(err.message || tx("Refresh failed"));
     } finally {
-      setSyncing(false);
+      if (refreshEpochRef.current === requestEpoch) setSyncing(false);
     }
   }, [prefix, onImagesChange]);
 
   useEffect(() => {
-    if (owner?.id && prefix) refreshFromR2({ silent: true });
+    const epoch = ++refreshEpochRef.current;
+    if (owner?.id && prefix) refreshFromR2({ silent: true, epoch });
     // intentionally once per owner open
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [owner?.id, prefix]);

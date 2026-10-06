@@ -1,4 +1,5 @@
 import { useCallback, useContext } from 'react';
+import { isChineseLanguage, lookupPhrase } from '../lib/uiLanguages';
 import { RegionContext } from './RegionContext';
 
 // Editor chrome only. Never apply translations to stored question/answer values.
@@ -131,7 +132,7 @@ export const questionEditorZh = {
   "Question Title": "题干",
   "The main question text that participants will see": "参与者看到的主要问题文字",
   "Question Description (Optional)": "题目说明（可选）",
-  "Additional instructions or context for this question": "补充本题的作答说明或背景",
+  "Shown under the question. A blank line starts a new paragraph. **bold** and lines starting with - become bold and lists.": "显示在题干下方。空一行会分段；**加粗**以及以 - 开头的行会显示为加粗和列表。",
   "Participants can draw points, lines, polygons, and bounding boxes on an image from your sampling settings. Optionally define class labels, then set tools and min/max counts in the task options below.": "参与者可在抽取的图片上标注点、线、多边形和矩形框。可先定义分类标签，再在下方设置可用工具及标注数量上下限。",
   "Advanced custom task.": "高级自定义任务。",
   "Most studies only need a ready-made perception task (Pairwise Preference, Best–Worst, etc.) from the type list above. To continue here, import or create a task in": "多数研究可直接选择上方的内置交互题，例如成对偏好、最佳／最差选择。若需自定义，请先在",
@@ -145,6 +146,12 @@ export const questionEditorZh = {
   "Task instructions": "作答说明",
   "in task options below for guidance inside the interactive area.": "处填写。",
   "Required — participants must answer to continue": "必答题：参与者完成后才能继续",
+  "When to show this question": "何时显示这道题",
+  "Always show": "始终显示",
+  "Show when the answer is": "选择这个答案时显示",
+  "Choose an earlier single-choice or dropdown question. Only participants who pick the answer below see this question. Questions that stay hidden are left out of the progress bar.": "选择前面的单选题或下拉题。只有选了下面这个答案的参与者才会看到这道题。没有显示出来的题目不会出现在进度条里。",
+  "This question has a custom display rule": "这道题使用了自定义显示规则",
+  "Shows when {question} is {answer}": "当「{question}」选择「{answer}」时显示",
   "Yes label": "“是”按钮文字",
   "No label": "“否”按钮文字",
   "Yes": "是",
@@ -449,14 +456,16 @@ export const questionEditorZh = {
 
 export function questionEditorText(text, language, values = {}) {
   if (typeof text !== 'string') return text;
-  const translated = language === 'zh' ? (questionEditorZh[text.replace(/\s+/g, ' ').trim()] ?? text) : text;
+  const key = text.replace(/\s+/g, ' ').trim();
+  const translated = lookupPhrase(language, text) ?? lookupPhrase(language, key)
+    ?? (isChineseLanguage(language) ? (questionEditorZh[key] ?? text) : text);
   return translated.replace(/\{(\w+)\}/g, (match, key) => Object.hasOwn(values, key) ? String(values[key]) : match);
 }
 
 export function useQuestionEditorText() {
   const language = useContext(RegionContext)?.language || 'en';
   const tr = useCallback((text, values) => questionEditorText(text, language, values), [language]);
-  return { tr, zh: language === 'zh' };
+  return { tr, zh: isChineseLanguage(language) };
 }
 
 const settingNames = {
@@ -472,7 +481,7 @@ function settingName(path) {
   }).join('的');
 }
 export function questionSettingErrorText(message, language) {
-  if (language !== 'zh') return message;
+  if (!isChineseLanguage(language)) return message;
   const patterns = [
     [/^(.+) must be a finite number\.$/, m => `${settingName(m[1])}必须是有效数字。`],
     [/^(.+) must not exceed (.+)\.$/, m => `${settingName(m[1])}不能大于${settingName(m[2])}。`],

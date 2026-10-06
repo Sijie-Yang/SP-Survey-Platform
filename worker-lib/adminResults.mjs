@@ -1,6 +1,32 @@
 import { getUserFromBearer, jsonResponse } from './auth/supabaseJwt.mjs';
 import { supabaseRest } from './supabaseUserClient.mjs';
-import { loadSurveyResponsePage } from './surveyResponsePages.mjs';
+import { loadSurveyResponsePage, RESPONSE_INTERACTIVE_BATCH, RESPONSE_INTERACTIVE_KEY_PAGE } from './surveyResponsePages.mjs';
+
+async function countProjectResponses(env, projectId, signal) {
+  try {
+    const root = (env.SUPABASE_URL || env.REACT_APP_SUPABASE_URL || '').replace(/\/$/, '');
+    const key = env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!root || !key) return null;
+    const res = await fetch(`${root}/rest/v1/survey_responses?${new URLSearchParams({
+      project_id: `eq.${projectId}`,
+      select: 'id',
+    })}`, {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Prefer: 'count=exact',
+        Range: '0-0',
+      },
+      signal,
+    });
+    if (!res.ok) return null;
+    const header = res.headers.get('content-range') || '';
+    const total = header.includes('/') ? Number(header.split('/').pop()) : NaN;
+    return Number.isFinite(total) ? total : null;
+  } catch {
+    return null;
+  }
+}
 
 function newRequestId() {
   return globalThis.crypto?.randomUUID?.() || `admin-results-${Date.now().toString(36)}`;
@@ -84,9 +110,31 @@ export async function handleAdminResultsRoutes(request, env) {
     if (!projects?.length) return fail(404, '项目不存在或已删除。', 'ADMIN_RESULTS_PROJECT', 'project');
 
     try {
-      const page = await loadSurveyResponsePage((opts) => supabaseRest(env, opts), projectId, { after, offset, mode, knownContracts });
-      return reply({ responses: page.responses, skipped: page.skipped, contracts: page.contracts, mode: page.mode });
+      const page = await loadSurveyResponsePage((opts) => supabaseRest(env, { ...opts, signal: request.signal }), projectId, {
+        after,
+        offset,
+        mode,
+        knownContracts,
+        keyLimit: RESPONSE_INTERACTIVE_KEY_PAGE,
+        batchSize: RESPONSE_INTERACTIVE_BATCH,
+        concurrency: 1,
+      });
+      const countTimeout = new AbortController();
+      const countTimer = setTimeout(() => countTimeout.abort(), 4000);
+      let count = null;
+      try {
+        const countSignal = !after && request.signal && typeof AbortSignal.any === 'function'
+          ? AbortSignal.any([request.signal, countTimeout.signal])
+          : (after ? null : countTimeout.signal);
+        count = after ? null : await countProjectResponses(env, projectId, countSignal);
+      } finally {
+        clearTimeout(countTimer);
+      }
+      return reply({ responses: page.responses, skipped: page.skipped, contracts: page.contracts, mode: page.mode, count });
     } catch (err) {
+      if (request.signal?.aborted || err?.name === 'AbortError') {
+        return reply({ error: 'Response loading cancelled', code: 'ADMIN_RESULTS_CANCELLED', stage: 'responses' }, 499);
+      }
       return fail(500, '无法加载项目答卷，请稍后重试。', 'ADMIN_RESULTS_RESPONSE_QUERY', 'responses', {
         supabaseStatus: err?.status || null,
         supabaseCode: err?.code || null,

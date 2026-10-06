@@ -464,32 +464,104 @@ def ewing():
     )
 
 
+NASAR_AREAS = [
+    {
+        'id': 'knoxville-1990', 'revision': 1, 'cityId': 'knoxville',
+        'label': 'Knoxville preset rectangle. This is a starting study extent, not the city administrative boundary.',
+        'center': [-83.90, 35.965], 'zoom': 12,
+        'boundary': {'type': 'Polygon', 'coordinates': [[[-84.05, 35.88], [-83.75, 35.88], [-83.75, 36.05], [-84.05, 36.05], [-84.05, 35.88]]]},
+    },
+    {
+        'id': 'chattanooga-1990', 'revision': 1, 'cityId': 'chattanooga',
+        'label': 'Chattanooga preset rectangle. This is a starting study extent, not the city administrative boundary.',
+        'center': [-85.30, 35.05], 'zoom': 12,
+        'boundary': {'type': 'Polygon', 'coordinates': [[[-85.40, 34.98], [-85.20, 34.98], [-85.20, 35.12], [-85.40, 35.12], [-85.40, 34.98]]]},
+    },
+]
+
+
+def nasar_map(name, label, title):
+    return {
+        'name': name, 'type': 'mapannotation', 'title': title, 'isRequired': True,
+        'description': 'Draw each area on the map. Name the place and say why you marked it. Zero areas must be confirmed with “No area to mark”. Online drawing is a digitization of the original interviewer-made evaluative maps.',
+        'mapTools': ['polygon', 'rectangle', 'point'], 'mapLabel': label, 'cityQuestion': 'city',
+        'studyAreaId': 'knoxville-1990', 'studyAreas': NASAR_AREAS,
+        'minAnnotations': 0, 'maxAnnotations': 5,
+    }
+
+
 def nasar():
-    def markup(name, label, title):
-        return image_q(name, 'imageannotation', title, imageCount=1, mediaFolders=['map'], excludePreviouslyUsedImages=False,
-                       allowedTools=['polygon', 'point'], annotationLabels=[label], minAnnotations=0, maxAnnotations=5,
-                       annotationNotePrompt='Describe the physical features on which you base your evaluation.', isRequired=False)
-    return template(
+    # Map questions only. Do not call image_q: that helper turns on image sampling.
+    built = template(
         '1990-nasar-evaluative', 'The Evaluative Image of the City', 'Nasar', 1990, '10.1080/01944369008975742',
-        'Residents and visitors mark the areas of a city they like and dislike visually on a map and describe the features behind each judgement; the results form a composite evaluative map.',
-        ['The original used telephone and face-to-face interviews with verbal descriptions of each area; here participants draw on a map.',
-         'Upload one city map to the "map" folder; both mark-up pages show it.'],
-        'The Evaluative Image of the City', 'This survey asks which parts of the city you like and dislike visually.',
+        'Residents and visitors named up to five visually pleasant and five unpleasant areas. Interviewers turned those descriptions into personal evaluative maps. The published Knoxville sample was 160 residents and 120 visitors; Chattanooga was 60 and 60. Those counts are literature context, not quotas for a new survey.',
+        ['Participants draw the areas themselves. The original interviews used verbal descriptions, with a map as an aid in the face-to-face visitor interviews.',
+         'The live age and income bands are mutually exclusive. The published age labels leave age 20 unlabeled, and the published income bands do not state whether a boundary dollar belongs in the lower or upper band. The paper does not say whether income is personal or household, or which year it refers to.',
+         'Gender options beyond male and female, and the “prefer not to say” choices, are modern adaptations. Ethnicity uses the Black, White and Other categories reported for these US samples and should be replaced for a study elsewhere.',
+         'Years lived, familiarity, visit count and length of stay are platform extensions. They are not Table 2 columns. Education, occupation and travel mode are not included.'],
+        'The Evaluative Image of the City',
+        'You will confirm a city, describe your connection to it, and mark areas you find visually pleasant or unpleasant.',
         [page('page_intro', 'Introduction',
               {'name': 'intro', 'type': 'expression', 'title': 'About this survey',
-               'description': 'We are interested in how the city looks to you. On the next pages you will see a map of the city. Mark the areas you like and dislike visually, and tell us why.'},
-              radio('resident_or_visitor', 'Are you a resident of or a visitor to this city?', [('resident', 'Resident'), ('visitor', 'Visitor')], required=True),
-              text('years_in_city', 'How many years have you lived in the city?', inputType='number')),
-         page('page_liked', None, markup('liked_areas', 'Liked', 'Mark up to five areas in the city that you like visually.')),
-         page('page_disliked', None, markup('disliked_areas', 'Disliked', 'Mark up to five areas in the city that you dislike visually.')),
-         page('page_improvement', None,
-              {'name': 'needs_improvement', 'type': 'comment', 'title': 'Which area of the city most needs visual improvement?'})],
+               'description': 'The two map tasks use the same study extent. About half of participants see pleasant areas first. Your order stays the same if you go back or refresh. The survey does not read your location and does not ask for a home address.'},
+              radio('city', 'Which city are you evaluating?', [('knoxville', 'Knoxville'), ('chattanooga', 'Chattanooga')], required=True,
+                   description='These are the two cities in the published study. A new project can replace them with its own preset cities. Participants cannot switch to an arbitrary city.')),
+         page('page_relation', 'Your connection to the city',
+              radio('resident_or_visitor', 'What is your connection to this city?',
+                    [('resident', 'Resident'), ('visitor', 'Visitor'),
+                     ('works_or_studies', 'I work or study here but do not live here (platform extension, not in Table 2)')],
+                    required=True),
+              radio('familiarity', 'How familiar are you with this city? (platform extension)',
+                    [('low', 'Slightly familiar'), ('moderate', 'Moderately familiar'), ('high', 'Very familiar'), ('prefer_not', 'Prefer not to say')],
+                    required=False),
+              text('years_in_city', 'How many years have you lived in the city? (platform extension; not a Table 2 column)',
+                   inputType='number', visibleIf="{resident_or_visitor} = 'resident'"),
+              text('visit_count', 'About how many times have you visited? (platform extension)',
+                   inputType='number', visibleIf="{resident_or_visitor} = 'visitor'"),
+              text('stay_days', 'About how many days was your most recent stay? (platform extension)',
+                   inputType='number', visibleIf="{resident_or_visitor} = 'visitor'")),
+         page('page_liked', None, nasar_map('liked_areas', 'liked', 'Mark up to five areas you find visually pleasant.')),
+         page('page_disliked', None, nasar_map('disliked_areas', 'disliked', 'Mark up to five areas you find visually unpleasant.')),
+         page('page_improvement', 'What most needs to change',
+              radio('knoxville_improvement', 'Which element is most in need of visual improvement in Knoxville?',
+                    [('industry', 'Industry'), ('highways', 'Highways'), ('signs_billboards', 'Signs and billboards'),
+                     ('buildings', 'Buildings'), ('poles_wires', 'Utility poles and wires'), ('riverfront', 'Riverfront'),
+                     ('parking', 'Parking lots'), ('buses', 'Buses'), ('railways', 'Railways'),
+                     ('service_stations', 'Service stations')],
+                    required=False, showOtherItem=True, otherText='Other',
+                    visibleIf="{city} = 'knoxville'",
+                    description='This list follows Appendix A. A Table 1 style display may later place buses, railways and service stations under Other. The saved answer keeps the specific choice.'),
+              {'name': 'chattanooga_improvement', 'type': 'comment', 'isRequired': False,
+               'visibleIf': "{city} = 'chattanooga'",
+               'title': 'If you could change one thing, what would you change to improve the appearance of Chattanooga?'}),
+         page('page_demographics', 'About you',
+              radio('gender', 'Gender',
+                    [('male', 'Male'), ('female', 'Female'), ('self_describe', 'Prefer to self-describe (adaptation)'), ('prefer_not', 'Prefer not to say (adaptation)')],
+                    required=False,
+                    description='The published table reports Male and Female. Self-describe and prefer-not-to-say are adaptations and should be reported as such.'),
+              radio('ethnicity', 'Race / ethnicity for this US sample',
+                    [('black', 'Black'), ('white', 'White'), ('other', 'Other'), ('prefer_not', 'Prefer not to say (adaptation)')],
+                    required=False,
+                    description='Black, White and Other are the categories in Table 2 for these two US cities. Replace them when the study is elsewhere. Do not treat this list as a global classification.'),
+              radio('age_band', 'Age',
+                    [('under_21', 'Under 21'), ('21_39', '21–39'), ('40_60', '40–60'), ('61_plus', '61 or older'), ('prefer_not', 'Prefer not to say')],
+                    required=False,
+                    description='Table 2 prints Under 20, 21–39, 40–60 and Over 60, which leaves age 20 unlabeled. These live bands are mutually exclusive: 20 is included in Under 21, and 60 stays in 40–60.'),
+              radio('income', 'Income in US dollars',
+                    [('under_10000', 'Under $10,000'), ('10000_24999', '$10,000–$24,999'), ('25000_or_more', '$25,000 or more'),
+                     ('no_response', 'No response'), ('prefer_not', 'Prefer not to say (adaptation)')],
+                    required=False,
+                    description='Table 2 prints $0–$10,000, $10,000–$24,999 and Over $25,000, so the boundary dollars are ambiguous. These live bands do not overlap. The paper does not say whether the amount is personal or household, or which year it covers. Do not label it as household income from the paper.'))],
         {'citation': 'Nasar 1990', 'items': [
-            {'questions': ['liked_areas', 'disliked_areas'], 'method': 'evaluative_map',
+            {'questions': ['liked_areas', 'disliked_areas'], 'method': 'geographic_evaluative_map',
              'likedQuestion': 'liked_areas', 'dislikedQuestion': 'disliked_areas'},
         ]},
-        folders=['map'],
+        folders=(),
+        spMapTaskOrder={'valueName': 'map_task_order', 'firstPage': 'page_liked', 'secondPage': 'page_disliked'},
     )
+    built['thumbnailUrl'] = '/project_templates/1990-nasar-evaluative-cover.svg'
+    built['huggingfaceDataset'] = None
+    return built
 
 
 BUILDERS = [salesses, quercia, liu, yao, ramirez, ito, kruse, qiu, kang_2023, torkko, danish, kang_2026, ewing, nasar]

@@ -1,7 +1,7 @@
 {
   "id": "2017-seresinhe-scenic",
   "name": "Scenic Beauty of Outdoor Places",
-  "description": "Perceived scenic beauty assessment of outdoor environments using deep learning-aligned human judgments. Participants rate street scenes and outdoor places on beauty, naturalness, and green quality. Based on Seresinhe et al. (2017) using the Scenic-Or-Not dataset.",
+  "description": "Perceived scenic beauty assessment of outdoor environments using deep learning-aligned human judgments. Participants rate street scenes and outdoor places on beauty, naturalness, and green quality. Based on Seresinhe et al. (2017) using the Scenic-Or-Not dataset. Bundled images are photographs from the paper PDF (29 scenes), not the original full stimulus set.",
   "author": "Seresinhe et al.",
   "year": "2017",
   "category": "Urban Theory",
@@ -36,7 +36,10 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1
+            "imageCount": 1,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Rate the scenic beauty of the street scene shown below."
@@ -58,7 +61,10 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1
+            "imageCount": 1,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Rate the scenic beauty of the street scene shown below."
@@ -66,7 +72,7 @@
       {
         "name": "page_extension",
         "title": "Optional extension (not in original study)",
-        "description": "These items are not part of Scenic-Or-Not, which asked only for a 1–10 scenicness rating.",
+        "description": "These items are not part of Scenic-Or-Not, which asked only for a 1\u201310 scenicness rating.",
         "elements": [
           {
             "name": "scene_qualities_1",
@@ -121,7 +127,10 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1
+            "imageCount": 1,
+            "mediaFolders": [
+              "paper"
+            ]
           },
           {
             "name": "scene_qualities_2",
@@ -176,7 +185,10 @@
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
             "randomImageSelection": true,
-            "imageCount": 1
+            "imageCount": 1,
+            "mediaFolders": [
+              "paper"
+            ]
           },
           {
             "name": "beauty_pairwise",
@@ -187,7 +199,10 @@
             "isRequired": false,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           },
           {
             "name": "green_view_pairwise",
@@ -198,7 +213,10 @@
             "isRequired": false,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ]
       },
@@ -216,23 +234,23 @@
                 "value": "under_18"
               },
               {
-                "text": "18–24",
+                "text": "18\u201324",
                 "value": "18_24"
               },
               {
-                "text": "25–34",
+                "text": "25\u201334",
                 "value": "25_34"
               },
               {
-                "text": "35–44",
+                "text": "35\u201344",
                 "value": "35_44"
               },
               {
-                "text": "45–54",
+                "text": "45\u201354",
                 "value": "45_54"
               },
               {
-                "text": "55–64",
+                "text": "55\u201364",
                 "value": "55_64"
               },
               {
@@ -317,7 +335,9 @@
   },
   "imageDatasetConfig": {
     "mediaFolderTags": {},
-    "mediaFolders": []
+    "mediaFolders": [
+      "paper"
+    ]
   },
   "preloadedImages": [],
   "preloadedSource": null,

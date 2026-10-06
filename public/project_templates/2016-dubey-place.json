@@ -1,7 +1,7 @@
 {
   "id": "2016-dubey-place",
   "name": "Place Pulse 2.0 - Urban Perception (6 Dimensions)",
-  "description": "Pairwise comparison survey measuring six perceptual dimensions of street scenes: safety, liveliness, beauty, wealth, depressingness, and boringness. Replicates the crowdsourcing methodology of the Place Pulse 2.0 dataset (1.17M comparisons, 56 cities).",
+  "description": "Pairwise comparison survey measuring six perceptual dimensions of street scenes: safety, liveliness, beauty, wealth, depressingness, and boringness. Replicates the crowdsourcing methodology of the Place Pulse 2.0 dataset (1.17M comparisons, 56 cities). Bundled images are photographs from the paper PDF (62 scenes), not the original full stimulus set.",
   "author": "Dubey et al.",
   "year": "2016",
   "category": "Academic Research",
@@ -32,7 +32,10 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks SAFER."
@@ -50,7 +53,10 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more LIVELY."
@@ -68,7 +74,10 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more BEAUTIFUL."
@@ -86,7 +95,10 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more WEALTHY."
@@ -104,7 +116,10 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more DEPRESSING."
@@ -122,7 +137,10 @@
             "isRequired": true,
             "imageSource": "huggingface",
             "imageSelectionMode": "huggingface_random",
-            "randomImageSelection": true
+            "randomImageSelection": true,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ],
         "description": "Look at the two street scenes below and choose the one that looks more BORING."
@@ -141,23 +159,23 @@
                 "value": "under_18"
               },
               {
-                "text": "18–24",
+                "text": "18\u201324",
                 "value": "18_24"
               },
               {
-                "text": "25–34",
+                "text": "25\u201334",
                 "value": "25_34"
               },
               {
-                "text": "35–44",
+                "text": "35\u201344",
                 "value": "35_44"
               },
               {
-                "text": "45–54",
+                "text": "45\u201354",
                 "value": "45_54"
               },
               {
-                "text": "55–64",
+                "text": "55\u201364",
                 "value": "55_64"
               },
               {
@@ -215,7 +233,7 @@
         "description": "A few brief questions about yourself."
       }
     ],
-    "title": "Place Pulse 2.0 – Urban Perception Survey",
+    "title": "Place Pulse 2.0 \u2013 Urban Perception Survey",
     "description": "For each pair of street images, choose the one that looks more [safe / lively / beautiful / wealthy / depressing / boring]. Based on: Dubey, A., Naik, N., Parikh, D., Raskar, R., & Hidalgo, C. A. (2016). Deep learning the city: Quantifying urban perception at a global scale. ECCV 2016.",
     "logoPosition": "right",
     "autoGrowComment": true,
@@ -257,7 +275,9 @@
     }
   },
   "imageDatasetConfig": {
-    "mediaFolders": [],
+    "mediaFolders": [
+      "paper"
+    ],
     "mediaFolderTags": {}
   },
   "preloadedImages": [],

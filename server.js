@@ -23,7 +23,7 @@ const {
 } = require('./src/lib/multiAgentReview');
 
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 /** Run async tasks with bounded concurrency (used for R2 server-side copies). */
 async function asyncPool(concurrency, items, fn) {
@@ -49,8 +49,10 @@ app.use(cors({
   origin: [
     'http://localhost:3000',
     'http://localhost:3002',
+    'http://localhost:4000',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3002',
+    'http://127.0.0.1:4000',
   ],
   credentials: true
 }));
@@ -106,6 +108,13 @@ app.use(async (req, res, next) => {
     const init = { method: req.method, headers };
     const body = buildBridgeBody(req, headers);
     if (body !== undefined) init.body = body;
+    const clientGone = new AbortController();
+    const abortIfClientLeft = () => {
+      if (!res.writableEnded) clientGone.abort();
+    };
+    req.on('aborted', abortIfClientLeft);
+    res.on('close', abortIfClientLeft);
+    init.signal = clientGone.signal;
     const env = {
       ...process.env,
       APP_URL: process.env.APP_URL || 'http://localhost:3000',
@@ -2712,17 +2721,18 @@ app.get('/api/r2/list', async (req, res) => {
       return 'image';
     };
 
+    const listLimit = Math.min(Math.max(Number(req.query.limit) || 0, 0), 1000);
     const allObjects = [];
     let continuationToken;
     do {
       const result = await r2.send(new ListObjectsV2Command({
         Bucket: r2BucketName,
         Prefix: prefix,
-        MaxKeys: 1000,
+        MaxKeys: listLimit ? Math.min(1000, listLimit - allObjects.length) : 1000,
         ContinuationToken: continuationToken,
       }));
       allObjects.push(...(result.Contents || []));
-      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+      continuationToken = result.IsTruncated && (!listLimit || allObjects.length < listLimit) ? result.NextContinuationToken : undefined;
     } while (continuationToken);
 
     const images = allObjects

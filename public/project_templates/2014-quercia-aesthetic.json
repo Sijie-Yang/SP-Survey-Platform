@@ -1,7 +1,7 @@
 {
   "id": "2014-quercia-aesthetic",
   "name": "UrbanGems",
-  "description": "Rebuilt from the published description of Quercia, O'Hare & Cramer (2014). Pairwise comparisons of London street scenes on beauty, quiet and happiness, analysed as the share of times each scene was chosen. Differences from the original study: (1) The original site let participants continue after the first round of 10 pairs; this template asks one round (4 + 3 + 3 pairs). (2) The short questionnaire wording is not in the paper. (3) No sample images are bundled; researchers supply GSV and Geograph images.",
+  "description": "Rebuilt from the published description of Quercia, O'Hare & Cramer (2014). Pairwise comparisons of London street scenes on beauty, quiet and happiness, analysed as the share of times each scene was chosen. Differences from the original study: (1) The original site let participants continue after the first round of 10 pairs; this template asks one round (4 + 3 + 3 pairs). (2) The short questionnaire wording is not in the paper. (3) Bundled images are photographs from the paper PDF (19 scenes), not the original full stimulus set.",
   "author": "Quercia, O'Hare & Cramer",
   "year": "2014",
   "category": "Academic Research",
@@ -18,8 +18,7 @@
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
     "mediaFolders": [
-      "GSV",
-      "Geograph"
+      "paper"
     ],
     "mediaFolderTags": {}
   },
@@ -71,7 +70,10 @@
             "randomImageSelection": true,
             "isRequired": true,
             "imageCount": 2,
-            "trialCount": 4
+            "trialCount": 4,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ]
       },
@@ -88,7 +90,10 @@
             "randomImageSelection": true,
             "isRequired": true,
             "imageCount": 2,
-            "trialCount": 3
+            "trialCount": 3,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ]
       },
@@ -105,7 +110,10 @@
             "randomImageSelection": true,
             "isRequired": true,
             "imageCount": 2,
-            "trialCount": 3
+            "trialCount": 3,
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ]
       },
@@ -119,23 +127,23 @@
             "choices": [
               {
                 "value": "18_24",
-                "text": "18–24"
+                "text": "18\u201324"
               },
               {
                 "value": "25_34",
-                "text": "25–34"
+                "text": "25\u201334"
               },
               {
                 "value": "35_44",
-                "text": "35–44"
+                "text": "35\u201344"
               },
               {
                 "value": "45_54",
-                "text": "45–54"
+                "text": "45\u201354"
               },
               {
                 "value": "55_64",
-                "text": "55–64"
+                "text": "55\u201364"
               },
               {
                 "value": "65_plus",

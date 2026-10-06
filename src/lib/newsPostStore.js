@@ -2,6 +2,7 @@
  * Supabase store for news_posts (RLS: is_platform_admin write; public read published).
  */
 import { supabase } from './supabase';
+import { isChineseLanguage } from './uiLanguages';
 
 export const NEWS_STATUSES = ['draft', 'published', 'archived'];
 
@@ -54,6 +55,8 @@ function rowToPost(row) {
     bodyEn: row.body_en || '',
     bodyZh: row.body_zh || '',
     coverUrl: row.cover_url || '',
+    contentFormat: row.content_format || 'plain',
+    contributorName: row.contributor_name || '',
     status: row.status || 'draft',
     publishedAt: row.published_at || null,
     createdBy: row.created_by || null,
@@ -65,7 +68,7 @@ function rowToPost(row) {
 /** Pick localized fields for public UI (`language` = 'en' | 'zh'). */
 export function localizeNewsPost(post, language = 'en') {
   if (!post) return null;
-  const zh = language === 'zh';
+  const zh = isChineseLanguage(language);
   const title = (zh && post.titleZh) || post.titleEn || post.titleZh || '';
   const summary = (zh && post.summaryZh) || post.summaryEn || post.summaryZh || '';
   const body = (zh && post.bodyZh) || post.bodyEn || post.bodyZh || '';

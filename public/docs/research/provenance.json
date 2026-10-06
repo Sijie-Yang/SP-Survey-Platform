@@ -1,0 +1,58 @@
+{
+  "capturedAt": "2026-10-05T15:08:05.000Z",
+  "renderer": "src/components/admin/QuestionPreviewPage.js",
+  "reproduction": "node scripts/capture-research-docs.cjs (Playwright via NODE_PATH if needed; DOCS_BROWSER_EXECUTABLE optional)",
+  "scope": "One trial copied from each bundled template; original English wording; no responses saved. Ewing screenshots are the same rating question after playback, paused on two different scenes of the homepage video (1.2s and 7s), captured 2026-10-06. The Nasar guide shows the same map question after Knoxville and after Chattanooga are selected.",
+  "demonstrationMedia": [
+    {
+      "files": [
+        "street-a.jpg",
+        "street-b.jpg"
+      ],
+      "source": "public/hero/streetscape-loop.mp4",
+      "timesSeconds": [
+        2,
+        "min(10, duration - 0.1)"
+      ],
+      "note": "Existing platform homepage footage. Not original study stimuli. Ewing scene-a is 1.2s (commercial street) and scene-b is 7s (pedestrian street) of this same file."
+    },
+    {
+      "files": [
+        "demo-city.svg"
+      ],
+      "source": "Schematic drawn for Docs; fictional city; no geographic coordinates."
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "2013-salesses-collaborative-preview.png",
+      "template": "public/project_templates/2013-salesses-collaborative.json",
+      "templateSha256": "b0b6edc4873813d96a9dff33ea6e4bf8690c7e14f984119d27a2a55b5f8ec6a7"
+    },
+    {
+      "file": "1990-nasar-evaluative-knoxville.png",
+      "template": "public/project_templates/1990-nasar-evaluative.json",
+      "templateSha256": "cea708d89a71be94b81f47b5daa3b27c43cf69d9caf973127576c7682c03c5a6"
+    },
+    {
+      "file": "1990-nasar-evaluative-chattanooga.png",
+      "template": "public/project_templates/1990-nasar-evaluative.json",
+      "templateSha256": "cea708d89a71be94b81f47b5daa3b27c43cf69d9caf973127576c7682c03c5a6"
+    },
+    {
+      "file": "2009-ewing-measuring-scene-a.png",
+      "template": "public/project_templates/2009-ewing-measuring.json",
+      "templateSha256": "f1979806a874b7aeb1c8254d96919030460af621c7e333a79c20f95b6d231df6"
+    },
+    {
+      "file": "2009-ewing-measuring-scene-b.png",
+      "template": "public/project_templates/2009-ewing-measuring.json",
+      "templateSha256": "f1979806a874b7aeb1c8254d96919030460af621c7e333a79c20f95b6d231df6"
+    },
+    {
+      "file": "2025-yang-thermal-preview.png",
+      "template": "public/project_templates/2025-yang-thermal.json",
+      "templateSha256": "bd37b69875c99bccbc8909a7f3312ffa88ecbc6e449d55bd91201770b272381c"
+    }
+  ]
+}

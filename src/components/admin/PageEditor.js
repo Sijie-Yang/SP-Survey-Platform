@@ -52,7 +52,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import QuestionEditor from './QuestionEditor';
 import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
-import { captureParamNames, pageRuleToVisibleIf, parsePageRule } from '../../lib/surveyRuntimeContext';
+import { captureParamNames, describeChoiceVisibleIf, pageRuleToVisibleIf, parsePageRule } from '../../lib/surveyRuntimeContext';
 import { getPresetSkill } from '../../lib/presetSkills';
 
 function skillQuestionTypeLabel(question) {
@@ -64,7 +64,7 @@ function skillQuestionTypeLabel(question) {
 }
 
 // Sortable Question Item Component
-function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDuplicate }) {
+function SortableQuestionItem({ question, questionIndex, surveyQuestions = [], onEdit, onDelete, onDuplicate }) {
   const { tr } = useQuestionEditorText();
   const {
     attributes,
@@ -123,6 +123,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
       mediaslidergroup: 'Media Slider Group',
       mediapointallocation: 'Media Point Allocation',
       imageannotation: 'Image Annotation',
+      mapannotation: 'Map Annotation',
       slidergroup: 'Text Slider Group',
       imageslidergroup: 'Image Slider Group',
       pointallocation: 'Text Point Allocation',
@@ -177,7 +178,7 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
               variant="outlined"
             />
             {Array.isArray(question.conditionVariants) && question.conditionVariants.length > 0 && (
-              <Chip label={tr('Condition wording')} size="small" color="info" variant="outlined" />
+              <Chip label={tr('Condition wording')} size="small" color="primary" variant="outlined" />
             )}
             {question.isRequired && (
               <Chip
@@ -187,6 +188,14 @@ function SortableQuestionItem({ question, questionIndex, onEdit, onDelete, onDup
                 variant="outlined"
               />
             )}
+            {(() => {
+              const shown = describeChoiceVisibleIf(question.visibleIf, surveyQuestions);
+              if (shown.kind === 'answer') {
+                return <Chip label={tr('Shows when {question} is {answer}', { question: shown.question, answer: shown.answer })} size="small" color="primary" variant="outlined" />;
+              }
+              if (shown.kind === 'custom') return <Chip label={tr('This question has a custom display rule')} size="small" variant="outlined" />;
+              return null;
+            })()}
           </Box>
         }
         secondary={
@@ -488,6 +497,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
                         key={`question-${questionIndex}`}
                         question={question}
                         questionIndex={questionIndex}
+                        surveyQuestions={(surveyConfig?.pages || [{ elements: editedPage.elements }]).flatMap((item) => (item.name === editedPage.name ? editedPage.elements : item.elements) || [])}
                         onEdit={setSelectedQuestion}
                         onDuplicate={duplicateQuestion}
                         onDelete={deleteQuestion}
@@ -536,7 +546,12 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
           }}
           images={images}
           currentProject={currentProject}
-          surveyConfig={surveyConfig}
+          surveyConfig={{
+            ...(surveyConfig || {}),
+            pages: (surveyConfig?.pages || []).some((item) => item.name === editedPage.name)
+              ? (surveyConfig?.pages || []).map((item) => (item.name === editedPage.name ? editedPage : item))
+              : [...(surveyConfig?.pages || []), editedPage],
+          }}
         />
       )}
       <ConfirmDialog open={guard.open} onCancel={guard.cancel} onConfirm={guard.discard}

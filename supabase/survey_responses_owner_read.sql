@@ -19,7 +19,7 @@ CREATE POLICY "survey_responses_owner_select"
     AND EXISTS (
       SELECT 1 FROM public.projects p
       WHERE p.id = survey_responses.project_id
-        AND p.user_id = auth.uid()
+        AND p.user_id = (SELECT auth.uid())
     )
   );
 
@@ -33,7 +33,7 @@ CREATE POLICY "survey_responses_owner_delete"
     AND EXISTS (
       SELECT 1 FROM public.projects p
       WHERE p.id = survey_responses.project_id
-        AND p.user_id = auth.uid()
+        AND p.user_id = (SELECT auth.uid())
     )
   );
 

@@ -1,0 +1,21 @@
+{
+  "templateId": "2014-naik-streetscore",
+  "source": "Photographs cropped from the paper PDF. Charts, maps and interface screenshots are not included.",
+  "images": [
+    "paper/p02-01.jpg",
+    "paper/p02-02.jpg",
+    "paper/p02-03.jpg",
+    "paper/p02-05.jpg",
+    "paper/p02-06.jpg",
+    "paper/p02-07.jpg",
+    "paper/p02-08.jpg",
+    "paper/p02-09.jpg",
+    "paper/p02-10.jpg",
+    "paper/p05-12.jpg",
+    "paper/p05-13.jpg",
+    "paper/p05-14.jpg"
+  ],
+  "notes": {
+    "scenes": "Photographs cropped from the paper, used as the survey stimuli."
+  }
+}

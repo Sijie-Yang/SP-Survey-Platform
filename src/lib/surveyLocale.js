@@ -3,7 +3,8 @@
  * Stored on survey JSON as `locale`. Default is English.
  */
 
-import { adminI18n } from '../contexts/adminI18n';
+import { attachSurveyMarkdown } from './surveyMarkdown';
+import { interfaceDictionary, normalizeUiLanguage, surveyJsLocale } from './uiLanguages';
 
 export const SURVEY_UI_LANGUAGE_EN = 'en';
 export const SURVEY_UI_LANGUAGE_ZH = 'zh';
@@ -14,18 +15,15 @@ export function resolveSurveyUiLanguage(source) {
     : (source?.locale
       ?? (typeof source?.getPropertyValue === 'function' ? source.getPropertyValue('locale') : '')
       ?? '');
-  const n = String(raw || '').toLowerCase();
-  if (n.startsWith('zh')) return SURVEY_UI_LANGUAGE_ZH;
-  return SURVEY_UI_LANGUAGE_EN;
+  return normalizeUiLanguage(raw);
 }
 
 export function resolveSurveyJsLocale(source) {
-  return resolveSurveyUiLanguage(source) === SURVEY_UI_LANGUAGE_ZH ? 'zh-cn' : 'en';
+  return surveyJsLocale(resolveSurveyUiLanguage(source));
 }
 
 export function surveyUiStrings(source) {
-  const lang = resolveSurveyUiLanguage(source);
-  return adminI18n[lang] || adminI18n.en;
+  return interfaceDictionary(resolveSurveyUiLanguage(source));
 }
 
 export function applySurveyLocale(model, source) {
@@ -34,4 +32,5 @@ export function applySurveyLocale(model, source) {
   try {
     model.locale = locale;
   } catch { /* ignore */ }
+  attachSurveyMarkdown(model);
 }

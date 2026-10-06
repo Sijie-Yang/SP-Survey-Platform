@@ -141,6 +141,31 @@ export function pageRuleToVisibleIf(rule) {
   return `{url_${rule.param}} ${rule.kind === 'with_param' ? 'notempty' : 'empty'}`;
 }
 
+const CHOICE_VISIBLE_RULE = /^\s*\{([A-Za-z_][A-Za-z0-9_]*)\}\s*=\s*(?:'([^']*)'|"([^"]*)")\s*$/;
+
+/** Question visibility: always, or when one earlier choice equals a value. Null for other rules. */
+export function parseChoiceVisibleIf(visibleIf) {
+  if (!visibleIf || !String(visibleIf).trim()) return { kind: 'always' };
+  const match = String(visibleIf).match(CHOICE_VISIBLE_RULE);
+  if (!match) return null;
+  return { kind: 'answer', question: match[1], value: match[2] ?? match[3] };
+}
+
+export function choiceRuleToVisibleIf(rule) {
+  if (!rule || rule.kind === 'always' || !rule.question) return undefined;
+  return `{${rule.question}} = '${String(rule.value ?? '').replace(/'/g, "\\'")}'`;
+}
+
+export function describeChoiceVisibleIf(visibleIf, questions = []) {
+  const rule = parseChoiceVisibleIf(visibleIf);
+  if (!rule) return { kind: 'custom', text: String(visibleIf || '') };
+  if (rule.kind !== 'answer') return { kind: 'always' };
+  const source = questions.find((item) => item.name === rule.question);
+  const raw = (source?.choices || []).find((choice) => String(typeof choice === 'object' ? choice.value : choice) === String(rule.value));
+  const answer = raw == null ? rule.value : (typeof raw === 'object' ? (raw.text || raw.value) : raw);
+  return { kind: 'answer', question: source?.title || rule.question, answer: String(answer) };
+}
+
 export function applyConditionWording(model, conditionId) {
   if (!model || !conditionId) return;
   model.getAllQuestions(false, false, true).forEach((q) => {

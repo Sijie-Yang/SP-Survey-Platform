@@ -1,7 +1,7 @@
 {
   "id": "2023-kang-assessing",
   "name": "Safety Perception and Question Framing (Stockholm)",
-  "description": "Rebuilt from the published description of Kang et al. (2023). Participants are randomly assigned to one of two framings and compare Stockholm street views. It is one question whose wording depends on the condition (\"looks safe\" or \"looks less safe\"); \"less safe\" answers are reverse-coded before pooling. Differences from the original study: (1) The original interface was in Swedish; this template is in English only. (2) Researchers supply their own street-view images.",
+  "description": "Rebuilt from the published description of Kang et al. (2023). Participants are randomly assigned to one of two framings and compare Stockholm street views. It is one question whose wording depends on the condition (\"looks safe\" or \"looks less safe\"); \"less safe\" answers are reverse-coded before pooling. Differences from the original study: (1) The original interface was in Swedish; this template is in English only. (2) Bundled images are photographs from the paper PDF (2 scenes), not the original full stimulus set.",
   "author": "Kang et al.",
   "year": "2023",
   "category": "Academic Research",
@@ -92,6 +92,9 @@
                 "title": "Which place looks less safe?",
                 "reverseCoded": true
               }
+            ],
+            "mediaFolders": [
+              "Stockholm"
             ]
           }
         ]

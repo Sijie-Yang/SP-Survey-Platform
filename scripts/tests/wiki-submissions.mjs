@@ -1,0 +1,116 @@
+// Local PostgreSQL-compatible integration tests. Never connects to a remote database.
+// PGLITE_MODULE=/absolute/path/to/pglite/dist/index.js node scripts/tests/wiki-submissions.mjs
+import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import assert from 'node:assert/strict';
+const { PGlite } = await import(process.env.PGLITE_MODULE || '@electric-sql/pglite');
+const db = new PGlite();
+const alice = randomUUID(), bob = randomUUID(), admin = randomUUID();
+await db.exec(`
+CREATE ROLE anon; CREATE ROLE authenticated; CREATE SCHEMA auth;
+CREATE TABLE auth.users(id uuid PRIMARY KEY);
+CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$ SELECT nullif(current_setting('test.uid',true),'')::uuid $$;
+CREATE FUNCTION public.is_platform_admin() RETURNS boolean LANGUAGE sql AS $$ SELECT auth.uid()='${admin}'::uuid $$;
+GRANT USAGE ON SCHEMA auth TO anon,authenticated;
+INSERT INTO auth.users VALUES ('${alice}'),('${bob}'),('${admin}');
+`);
+await db.exec(await readFile('supabase/news_posts.sql', 'utf8'));
+const migration = await readFile('supabase/wiki_submissions.sql', 'utf8');
+await db.exec(migration);
+await db.exec(migration);
+// Match Supabase's existing news table grants; its RLS still governs writes.
+await db.exec('GRANT ALL ON public.news_posts TO anon,authenticated');
+const as = async (id) => {
+  await db.exec('RESET ROLE');
+  await db.query("SELECT set_config('test.uid',$1,false)", [id || '']);
+  await db.exec(`SET ROLE ${id ? 'authenticated' : 'anon'}`);
+};
+const rows = async sql => (await db.query(sql)).rows;
+const input = (extra = {}) => ({ kind: 'doc_edit', target_key: 'visual-assessment', language: 'en', title: 'Revised visual assessment', summary: 'A clearer introduction.', body: '## Revised explanation\n\nThis article has enough text for validation.', contributor_name: 'Researcher A', change_reason: 'Clarify the measurement workflow.', source_notes: 'Private editorial notes', rights_confirmed: true, base_revision: 0, base_content: { title: 'Original', summary: '', body: 'The original source.' }, ...extra });
+const save = async (id, version, data) => (await db.query('SELECT * FROM public.save_content_submission($1,$2,$3::jsonb)', [id,version,JSON.stringify(data)])).rows[0];
+const review = async (id, version, decision = 'approved', note = '') => (await db.query('SELECT * FROM public.review_content_submission($1,$2,$3,$4)',[id,version,decision,note])).rows[0];
+const denied = async (fn, code) => assert.rejects(fn, e => !code || e.code === code);
+const id = randomUUID();
+await as(null);
+await denied(() => save(id,0,input()), '42501');
+await denied(() => rows('SELECT * FROM content_submissions'), '42501');
+await as(alice);
+await denied(() => review(id,1), '42501');
+await denied(() => save(randomUUID(),0,input({ target_key: 'made-up-doc' })));
+await denied(() => save(randomUUID(),0,input({ rights_confirmed: false })), '23514');
+await denied(() => save(randomUUID(),0,input({ body: 'tiny' })), '23514');
+const first = await save(id,0,input({ user_id: bob, status: 'approved', reviewed_by: admin, version: 90 }));
+assert.equal(first.user_id, alice); assert.equal(first.status, 'pending'); assert.equal(first.version, 1);
+assert.equal((await rows('SELECT * FROM wiki_pages')).length,0);
+await denied(() => rows("UPDATE content_submissions SET status='approved'"), '42501');
+await denied(() => rows("INSERT INTO wiki_pages VALUES ('x','en','title','','body',null,'author',1,now())"), '42501');
+await as(bob);
+assert.equal((await rows('SELECT * FROM content_submissions')).length,0);
+assert.equal((await rows('SELECT * FROM content_submission_events')).length,0);
+await denied(() => save(id,1,input()), '42501');
+await denied(() => review(id,1), '42501');
+await as(admin);
+assert.equal((await rows('SELECT * FROM content_submissions')).length,1);
+await denied(() => review(id,0), '40001');
+const approved = await review(id,1);
+assert.equal(approved.published_url, '/docs/visual-assessment');
+await denied(() => review(id,1), '40001');
+await as(null);
+assert.equal((await rows('SELECT * FROM wiki_pages'))[0].revision,1);
+assert.equal((await rows('SELECT * FROM wiki_page_revisions')).length,1);
+await as(alice);
+await denied(() => save(id,2,input({base_revision:1})));
+await denied(() => save(randomUUID(),0,input()),'40001');
+const a = randomUUID(), b = randomUUID();
+await save(a,0,input({base_revision:1}));
+await as(bob);
+await save(b,0,input({base_revision:1}));
+// Owner updates after the moderator fetched v1; stale reviewer cannot publish.
+await save(b,1,input({base_revision:1,body:'New proposal after reviewer opened the first version.'}));
+await as(admin);
+await denied(() => review(b,1),'40001');
+await review(a,1);
+await denied(() => review(b,2),'40001');
+await denied(() => review(b,2,'changes_requested',''));
+await review(b,2,'changes_requested','Please merge the latest source.');
+await as(bob);
+await denied(() => save(b,3,input({base_revision:1})),'40001');
+const resubmitted = await save(b,3,input({base_revision:2,base_content:{body:'forged source'}}));
+assert.equal(resubmitted.version,4);
+assert.equal(resubmitted.base_content.body, input().body); // DB snapshot wins over client.
+assert.equal(resubmitted.review_note,'');
+await as(admin); await review(b,4);
+assert.equal((await rows('SELECT * FROM wiki_page_revisions')).length,3);
+// Both new tutorials and Chinese-only news are private until approval.
+await as(alice);
+const tutorial = randomUUID(), news = randomUUID();
+await save(tutorial,0,input({kind:'doc_new',template_id:'2013-salesses-collaborative'}));
+await save(news,0,input({kind:'news',language:'zh',title:'研究新闻测试'}));
+await as(null);
+assert.equal((await rows('SELECT * FROM news_posts')).length,0);
+await as(admin);
+await review(tutorial,1); await review(news,1);
+await denied(() => review(news,1),'40001');
+await as(null);
+const posts = await rows('SELECT * FROM news_posts');
+assert.equal(posts.length,1); assert.equal(posts[0].title_zh,'研究新闻测试');
+assert.equal(posts[0].content_format,'markdown'); assert.equal(posts[0].body_zh,input().body);
+assert.equal(posts[0].change_reason,undefined); assert.equal(posts[0].source_notes,undefined);
+assert.equal((await rows('SELECT * FROM wiki_pages')).length,2);
+await as(alice);
+await denied(() => rows("INSERT INTO news_posts(slug,title_en,status) VALUES ('bypass','Title','published')"),'42501');
+await denied(() => rows('DELETE FROM content_submission_events'),'42501');
+// Application registry and migration registry must stay in sync.
+await db.exec('RESET ROLE');
+const keys = (await rows('SELECT page_key FROM wiki_builtin_pages')).map(r => r.page_key).sort();
+const topics = await readFile('src/pages/docsTopics.js','utf8');
+const papers = await readFile('src/pages/paperTemplateDocs.js','utf8');
+const codeKeys = [...topics.matchAll(/id: '([^']+)'/g)].map(m=>m[1]);
+const groups = ['perception','foundations','survey-design','analysis','platform','contributing'];
+const paperKeys = [...papers.matchAll(/id: '([^']+)'/g)].map(m=>m[1]);
+assert.deepEqual(keys, [...codeKeys.filter(k=>!groups.includes(k)),...paperKeys].sort());
+await db.exec(migration); // Reapply after content exists, preserving all history.
+assert.equal((await rows('SELECT * FROM wiki_page_revisions')).length,4);
+assert.equal((await rows('SELECT * FROM content_submission_events')).length,13);
+await db.close();
+console.log('PASS: migration idempotence, RLS, ownership, validation, moderation, stale revisions, resubmission, atomic publication, audit history and document registry.');

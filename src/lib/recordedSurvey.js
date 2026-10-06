@@ -1,3 +1,9 @@
+function hasRecordedStudyArea(question) {
+  const raw = question?.studyAreas;
+  const areas = Array.isArray(raw) ? raw : [];
+  return areas.some((area) => area?.id && area?.boundary?.coordinates?.[0]?.length);
+}
+
 export function recordedRevisionSelection(responses, requested = '') {
   const ids = [...new Set((responses || []).map((r) => r.survey_metadata?.survey_revision || 'historical_unknown'))];
   if (requested && ids.includes(requested)) return requested;
@@ -15,7 +21,17 @@ export function recordedSurveyConfig(responses = [], currentConfig, revision = '
   // Contracts recorded before conditionVariants was a contract key: borrow the wording from the same question today.
   const questions = contract.questions.map((q) => {
     const now = current.get(q?.name);
-    return !q?.conditionVariants && now?.type === q?.type && Array.isArray(now?.conditionVariants) ? { ...q, conditionVariants: now.conditionVariants } : q;
+    if (!now || now.type !== q?.type) return q;
+    const patch = {};
+    if (!q?.conditionVariants && Array.isArray(now.conditionVariants)) patch.conditionVariants = now.conditionVariants;
+    // Study areas were omitted from contracts recorded before that key existed.
+    // Keep a recorded boundary when one is present; otherwise use the area still configured on the question.
+    if (q.type === 'mapannotation' && !hasRecordedStudyArea(q) && hasRecordedStudyArea(now)) {
+      ['studyAreas', 'studyAreaId', 'cityQuestion', 'mapTools', 'mapLabel', 'mapPolarity', 'mapPair'].forEach((key) => {
+        if (q[key] == null && now[key] != null) patch[key] = now[key];
+      });
+    }
+    return Object.keys(patch).length ? { ...q, ...patch } : q;
   });
   return { ...currentConfig, title: contract.title || currentConfig?.title, locale: contract.locale,
     pages: [{ name: 'recorded_revision', elements: questions }] };

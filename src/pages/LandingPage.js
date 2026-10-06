@@ -5,7 +5,7 @@ import {
   Avatar, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import {
-  Search, Article, Dataset, DesignServices,
+  Search, Article, MenuBook, Dataset, DesignServices,
   AutoAwesome, BarChart, CloudUpload, Share, Preview, Public, GitHub, EmojiEvents,
 } from '@mui/icons-material';
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
@@ -21,7 +21,7 @@ import { getBenchPublic } from '../lib/spBenchApi';
 import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
 import { filterMediaByType, inferMediaType } from '../lib/mediaUtils';
 import { listPreviewMedia } from '../lib/previewMediaLibrary';
-
+import { paperTemplateDoc } from './paperTemplateDocs';
 const CLAMP = (lines) => ({
   display: '-webkit-box',
   WebkitLineClamp: lines,
@@ -64,6 +64,7 @@ const DEFAULT_COVER = '/hero/streetscape-poster.jpg';
  * Picks are stable per template id so cards don’t reshuffle on every refresh.
  */
 function resolveTemplateThumb(template, previewUrls = []) {
+  if (template?.id === '1990-nasar-evaluative') return '/project_templates/1990-nasar-evaluative-cover.svg';
   if (template?.thumbnail_url) return template.thumbnail_url;
   const own = collectImageUrls(template?.preloaded_images || template?.preloadedImages);
   const pool = own.length ? own : previewUrls;
@@ -348,6 +349,21 @@ export default function LandingPage() {
               }}
             >
               {t.landStartFree}
+            </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              onClick={() => navigate('/docs')}
+              startIcon={<MenuBook />}
+              sx={{
+                color: 'white',
+                borderColor: 'rgba(255,255,255,0.55)',
+                bgcolor: 'rgba(255,255,255,0.06)',
+                backdropFilter: 'blur(8px)',
+                '&:hover': { borderColor: 'white', bgcolor: 'rgba(255,255,255,0.14)' },
+              }}
+            >
+              {t.navDocs}
             </Button>
             <Button
               variant="outlined"
@@ -723,6 +739,11 @@ function TemplateCard({ template, onUse }) {
           </Typography>
 
           <Box sx={{ display: 'flex', gap: 1, flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
+            {paperTemplateDoc(template.id) && (
+              <Button size="small" href={`/docs/${template.id}`} sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
+                {t.navDocs}
+              </Button>
+            )}
             {template.paper_url && (
               <Button size="small" startIcon={<Article />} href={template.paper_url} target="_blank" sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
                 {t.landPaper}

@@ -1,0 +1,38 @@
+{
+  "templateId": "2017-seresinhe-scenic",
+  "source": "Photographs cropped from the paper PDF. Charts, maps and interface screenshots are not included.",
+  "images": [
+    "paper/p04-01.jpg",
+    "paper/p04-02.jpg",
+    "paper/p04-03.jpg",
+    "paper/p04-04.jpg",
+    "paper/p04-05.jpg",
+    "paper/p04-06.jpg",
+    "paper/p04-07.jpg",
+    "paper/p04-08.jpg",
+    "paper/p04-09.jpg",
+    "paper/p04-10.jpg",
+    "paper/p04-11.jpg",
+    "paper/p04-12.jpg",
+    "paper/p04-13.jpg",
+    "paper/p08-15.jpg",
+    "paper/p08-16.jpg",
+    "paper/p08-17.jpg",
+    "paper/p08-18.jpg",
+    "paper/p08-19.jpg",
+    "paper/p08-20.jpg",
+    "paper/p08-21.jpg",
+    "paper/p08-22.jpg",
+    "paper/p08-23.jpg",
+    "paper/p08-24.jpg",
+    "paper/p08-25.jpg",
+    "paper/p08-26.jpg",
+    "paper/p08-27.jpg",
+    "paper/p08-28.jpg",
+    "paper/p08-29.jpg",
+    "paper/p08-30.jpg"
+  ],
+  "notes": {
+    "scenes": "Photographs cropped from the paper, used as the survey stimuli."
+  }
+}

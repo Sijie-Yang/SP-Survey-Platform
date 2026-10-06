@@ -259,7 +259,7 @@ export async function deleteImagesFromR2(keys, options = {}) {
  * @param {string} prefix - folder prefix (e.g. "userId/projectId")
  * @returns {{ success: boolean, images: Array, error?: string }}
  */
-export async function listImagesFromR2(prefix = '', { annotations = false } = {}) {
+export async function listImagesFromR2(prefix = '', { annotations = false, limit = 0 } = {}) {
   if (r2ProxyUnreachable) {
     return {
       success: false,
@@ -269,8 +269,9 @@ export async function listImagesFromR2(prefix = '', { annotations = false } = {}
     };
   }
   try {
+    const capped = Number(limit) > 0 ? `&limit=${encodeURIComponent(String(Math.min(Number(limit), 1000)))}` : '';
     const res = await fetch(
-      `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}${annotations ? '&kind=annotations' : ''}`,
+      `${SERVER_URL}/api/r2/list?prefix=${encodeURIComponent(prefix)}${annotations ? '&kind=annotations' : ''}${capped}`,
       { headers: await authHeaders() },
     );
     if (!res.ok) throw await describeNonOk(res, 'R2 list');

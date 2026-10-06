@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { RegionProvider } from '../../contexts/RegionContext';
 import SiliconSamples from './SiliconSamples';
@@ -29,6 +29,18 @@ function renderPage(surveyConfig) {
       </ThemeProvider>
     </RegionProvider>,
   );
+}
+
+async function selectResident() {
+  fireEvent.click(screen.getByRole('button', { name: /^Personas ·/ }));
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Resident' }));
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Personas' })).getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+}
+
+async function closeQuestions() {
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Questions' })).getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 }
 
 describe('SiliconSamples', () => {
@@ -71,7 +83,7 @@ describe('SiliconSamples', () => {
     renderPage({
       pages: [{ elements: [{ type: 'rating', name: 'age', title: 'Age' }] }],
     });
-    fireEvent.click(await screen.findByText('Resident'));
+    await selectResident();
     const start = screen.getByRole('button', { name: 'Run silicon pretest' });
     await waitFor(() => expect(start).toBeEnabled());
     fireEvent.click(start);
@@ -90,11 +102,36 @@ describe('SiliconSamples', () => {
     expect(agentApi.getSiliconCompare).not.toHaveBeenCalled();
   });
 
+  test('keeps persona input after a failed save and closes the dialog after a successful retry', async () => {
+    agentApi.saveSiliconPersona
+      .mockResolvedValueOnce({ success: false, error: 'Could not save persona' })
+      .mockResolvedValueOnce({ success: true });
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /^Personas ·/ }));
+    await screen.findByRole('checkbox', { name: 'Resident' });
+    fireEvent.click(screen.getByRole('button', { name: 'Add persona' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Add persona' }));
+    const save = dialog.getByRole('button', { name: 'Add persona' });
+    expect(save).toBeDisabled();
+    fireEvent.change(dialog.getByLabelText('Name'), { target: { value: 'Visitor' } });
+    fireEvent.click(save);
+    await dialog.findByText('Could not save persona');
+    expect(dialog.getByLabelText('Name')).toHaveValue('Visitor');
+    fireEvent.click(save);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add persona' })).not.toBeInTheDocument());
+    expect(screen.getByRole('dialog', { name: 'Personas' })).toBeInTheDocument();
+    expect(agentApi.saveSiliconPersona).toHaveBeenLastCalledWith({
+      projectId: 'p1', name: 'Visitor', attributes: { city: '', notes: '' },
+    });
+  });
+
   test('disables start when every supported question is deselected', async () => {
     renderPage({
       pages: [{ elements: [{ type: 'rating', name: 'age', title: 'Age' }] }],
     });
-    fireEvent.click(await screen.findByText(/age \(rating\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Questions ·/ }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Question 1 Age/ }));
+    await closeQuestions();
     const start = screen.getByRole('button', { name: 'Run silicon pretest' });
     await waitFor(() => expect(start).toBeDisabled());
   });
@@ -112,10 +149,13 @@ describe('SiliconSamples', () => {
         ],
       }],
     });
+    fireEvent.click(screen.getByRole('button', { name: /^Questions ·/ }));
     expect(await screen.findByText(/scales \(imageslidergroup\)/)).toBeInTheDocument();
     expect(screen.getByText(/Listed but not preview-accepted/)).toBeInTheDocument();
     expect(screen.getByText(/mark \(imageannotation\)/)).toBeInTheDocument();
-    fireEvent.click(await screen.findByText('Resident'));
+    expect(screen.getByRole('checkbox', { name: /Question 2 mark/ })).toBeDisabled();
+    await closeQuestions();
+    await selectResident();
     const start = screen.getByRole('button', { name: 'Run silicon pretest' });
     await waitFor(() => expect(start).toBeEnabled());
     fireEvent.click(start);
@@ -135,7 +175,9 @@ describe('SiliconSamples', () => {
       }],
     };
     const { rerender } = renderPage(first);
-    fireEvent.click(await screen.findByText(/age \(rating\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Questions ·/ }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Question 1 Age/ }));
+    await closeQuestions();
     rerender(
       <RegionProvider>
         <ThemeProvider theme={createTheme()}>
@@ -154,11 +196,31 @@ describe('SiliconSamples', () => {
         </ThemeProvider>
       </RegionProvider>,
     );
-    fireEvent.click(await screen.findByText('Resident'));
+    await selectResident();
     fireEvent.click(screen.getByRole('button', { name: 'Run silicon pretest' }));
     await waitFor(() => expect(agentApi.createSiliconRun).toHaveBeenCalledWith(expect.objectContaining({
       questionNames: ['comfort'],
     })));
+  });
+
+  test('keeps survey numbering through unsupported questions, pages and search', async () => {
+    renderPage({ pages: [
+      { elements: [{ type: 'html', name: 'intro' }, { type: 'rating', name: 'comfort', title: 'Comfort' }] },
+      { elements: [{ type: 'imageannotation', name: 'mark', title: 'Mark a place' }, { type: 'text', name: 'reason', title: 'Reason' }] },
+    ] });
+    fireEvent.click(screen.getByRole('button', { name: /^Questions ·/ }));
+    expect(await screen.findByRole('checkbox', { name: /Question 1 Comfort/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Question 2 Mark a place/ })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /Question 3 Reason/ })).toBeChecked();
+    fireEvent.change(screen.getByLabelText('Search by number or question'), { target: { value: 'Reason' } });
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    expect(screen.getByRole('checkbox', { name: /Question 3 Reason/ })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Select all supported' }));
+    await closeQuestions();
+    expect(screen.getByRole('button', { name: 'Questions · 2' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 
   test('renders an existing run status without crashing', async () => {

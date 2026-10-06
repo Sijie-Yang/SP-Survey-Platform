@@ -73,6 +73,7 @@ const METHOD_TEXT = {
   rater_agreement: () => 'inter-rater agreement (two-way random, absolute-agreement ICC(2,1) and ICC(2,k))',
   param_aggregation: (it) => `means with 95% confidence intervals per ${it.param || 'site'}`,
   evaluative_map: () => 'a composite evaluative map (share of participants marking each area as liked minus disliked)',
+  geographic_evaluative_map: () => 'a fixed-meter geographic evaluative grid (paired participants; explicit none counts, unanswered does not)',
   long_export: () => 'a long-format choice export (one row per comparison with participant covariates) for discrete choice models',
 };
 

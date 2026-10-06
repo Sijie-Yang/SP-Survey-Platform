@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { alpha } from '@mui/material/styles';
 import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
@@ -21,7 +22,7 @@ import { getTrialCount } from '../../lib/trialNavigation';
 import { applySurveyLocale } from '../../lib/surveyLocale';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge';
-import { adaptSurveyForPreviewLibrary, resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
+import { adaptSurveyForPreviewLibrary, resolvePreviewMediaContext, surveyUsesSampledMedia } from '../../lib/previewMediaLibrary';
 import { markGuideProgress } from '../../lib/adminGuide';
 import { applyRuntimeVariables, normalizeConditions } from '../../lib/surveyRuntimeContext';
 
@@ -99,7 +100,9 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
         
         let configCopy = JSON.parse(JSON.stringify(config));
         await resolveSkillQuestions(configCopy);
-        const mediaContext = await resolvePreviewMediaContext(currentProject || {});
+        const mediaContext = surveyUsesSampledMedia(configCopy)
+          ? await resolvePreviewMediaContext(currentProject || {})
+          : { images: [], fromPreviewLibrary: false };
         const mediaPool = mediaContext.images;
         const fromPreviewLibrary = mediaContext.fromPreviewLibrary;
         if (fromPreviewLibrary) configCopy = adaptSurveyForPreviewLibrary(configCopy, mediaPool);
@@ -445,8 +448,10 @@ export default function SurveyPreview({ config, currentProject, showMediaAssignm
     return (
       <Box sx={{ maxHeight: '70vh', overflow: 'auto' }}>
         <Box sx={{ 
-          bgcolor: 'info.light', 
-          color: 'info.contrastText', 
+          bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+          color: 'text.primary',
+          border: '1px solid',
+          borderColor: (theme) => alpha(theme.palette.primary.main, 0.25),
           p: 1, 
           textAlign: 'center', 
           mb: 2,

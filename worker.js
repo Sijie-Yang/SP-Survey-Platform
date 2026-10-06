@@ -175,7 +175,8 @@ function buildS3Backend(env) {
         'PUT'
       );
     },
-    async list(prefix) {
+    async list(prefix, options = {}) {
+      const maxKeys = Number(options.maxKeys) > 0 ? Math.min(Number(options.maxKeys), 1000) : 0;
       const all = [];
       let token;
       do {
@@ -183,14 +184,15 @@ function buildS3Backend(env) {
         u.searchParams.set('list-type', '2');
         if (prefix) u.searchParams.set('prefix', prefix);
         if (token) u.searchParams.set('continuation-token', token);
-        u.searchParams.set('max-keys', '1000');
+        const pageSize = maxKeys ? Math.min(1000, maxKeys - all.length) : 1000;
+        u.searchParams.set('max-keys', String(pageSize));
         const res = await ensureOk(await client.fetch(u.toString()), 'LIST');
         const xml = await res.text();
         const page = parseListXml(xml);
         all.push(...page.objects);
-        token = page.truncated ? page.cursor : undefined;
+        token = page.truncated && (!maxKeys || all.length < maxKeys) ? page.cursor : undefined;
       } while (token);
-      return all;
+      return maxKeys ? all.slice(0, maxKeys) : all;
     },
     async delete(keys) {
       for (const k of keys) {
@@ -232,11 +234,12 @@ function getR2Backend(env) {
       async put(key, body, contentType) {
         await bucket.put(key, body, { httpMetadata: { contentType } });
       },
-      async list(prefix) {
+      async list(prefix, options = {}) {
+        const maxKeys = Number(options.maxKeys) > 0 ? Math.min(Number(options.maxKeys), 1000) : 0;
         const all = [];
         let cursor;
         do {
-          const page = await bucket.list({ prefix, limit: 1000, cursor });
+          const page = await bucket.list({ prefix, limit: maxKeys ? Math.min(1000, maxKeys - all.length) : 1000, cursor });
           for (const o of page.objects) {
             all.push({
               key: o.key,
@@ -244,9 +247,9 @@ function getR2Backend(env) {
               uploaded: o.uploaded?.toISOString?.() || o.uploaded || null,
             });
           }
-          cursor = page.truncated ? page.cursor : undefined;
+          cursor = page.truncated && (!maxKeys || all.length < maxKeys) ? page.cursor : undefined;
         } while (cursor);
-        return all;
+        return maxKeys ? all.slice(0, maxKeys) : all;
       },
       async delete(keys) {
         await bucket.delete(keys);
@@ -315,7 +318,8 @@ async function handleList(request, env) {
   const url = new URL(request.url);
   const prefix = url.searchParams.get('prefix') || '';
   const publicBase = publicBaseUrl(env);
-  const objects = await backend.list(prefix);
+  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 0, 0), 1000);
+  const objects = await backend.list(prefix, limit ? { maxKeys: limit } : undefined);
   const images = objects
     .filter((o) => url.searchParams.get('kind') === 'annotations' && /\/preannotations\/$/.test(prefix) ? o.key.endsWith('.json') : MEDIA_FILE_RE.test(o.key))
     .map((o) => {
@@ -769,6 +773,13 @@ function isPreviewMediaKey(key) {
   return n === 'skill-preview' || n.startsWith(PREVIEW_MEDIA_PREFIX);
 }
 
+// Published template folders are already on the public R2 URL. The wiki example
+// lists one template id, not the whole templates/ root and not a user folder.
+function isPublicTemplateListPrefix(prefix) {
+  const n = normalizeR2Key(prefix);
+  return /^templates\/[a-z0-9][a-z0-9-]*(\/.*)?$/.test(n);
+}
+
 function assertR2KeyOwned(userId, key) {
   const normalized = normalizeR2Key(key);
   if (!normalized) return false;
@@ -853,9 +864,10 @@ export default {
         const prefix = url.searchParams.get('prefix') || '';
         const user = await resolveR2User(request, env);
         if (!user) {
-          // Public homepage / previews: allow anonymous list of skill-preview/ only.
-          // (Without this, landing template covers all fall back to the same default poster.)
-          if (prefix && isPreviewMediaKey(prefix)) {
+          // Public homepage / previews: skill-preview/ and one published template folder.
+          // (Without skill-preview/, landing covers fall back to the same default poster.
+          // Without the template folder, wiki examples cannot show that template's street views.)
+          if (prefix && (isPreviewMediaKey(prefix) || isPublicTemplateListPrefix(prefix))) {
             return await handleList(request, env);
           }
           return json({ success: false, error: 'Authentication required', code: 'UNAUTHENTICATED' }, { status: 401 });

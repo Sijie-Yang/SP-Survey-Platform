@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { restoreResponseContracts } from './slimResponses';
-import { loadSurveyResponsePage } from './responsePageLoader';
+import { loadSurveyResponsePage, RESPONSE_INTERACTIVE_BATCH, RESPONSE_INTERACTIVE_KEY_PAGE } from './responsePageLoader';
 
 const API_BASE = process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_URL || '';
 
@@ -20,7 +20,13 @@ export function createResponseLoadSession() {
   return { contracts: new Map(), mode: 'auto' };
 }
 
-export async function fetchAdminResponsePage(projectId, offset = 0, after = null, loadSession = null) {
+function perRequestSignal(parent) {
+  const timeout = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(20000) : null;
+  if (parent && timeout && typeof AbortSignal.any === 'function') return AbortSignal.any([parent, timeout]);
+  return parent || timeout || undefined;
+}
+
+export async function fetchAdminResponsePage(projectId, offset = 0, after = null, loadSession = null, { signal } = {}) {
   const { data: { session } = {} } = supabase ? await supabase.auth.getSession() : {};
   if (!session?.access_token) {
     throw new AdminResultsError('请先登录管理员账户。', { code: 'ADMIN_RESULTS_AUTH', stage: 'auth', status: 401 });
@@ -35,8 +41,10 @@ export async function fetchAdminResponsePage(projectId, offset = 0, after = null
   const response = await fetch(`${API_BASE}/api/admin/project-responses?${query}`, {
     headers: { Authorization: `Bearer ${session.access_token}` },
     cache: 'no-store',
+    signal: perRequestSignal(signal),
   });
   const data = await response.json().catch(() => ({}));
+  if (loadSession && Number.isFinite(Number(data.count))) loadSession.total = Number(data.count);
   if (!response.ok || !Array.isArray(data.responses)) {
     throw new AdminResultsError(data.error || '无法加载项目答卷，请稍后重试。', {
       code: data.code,
@@ -58,8 +66,36 @@ function restorePage({ responses, contracts: received, mode }, loadSession) {
 const SUPABASE_URL = (process.env.REACT_APP_SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
+/** Exact row count for the loading bar. Null when the count header is unavailable. */
+export async function countOwnerResponses(projectId, { signal } = {}) {
+  const { data: { session } = {} } = supabase ? await supabase.auth.getSession() : {};
+  const token = session?.access_token || SUPABASE_ANON_KEY;
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !projectId) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/survey_responses?${new URLSearchParams({
+      project_id: `eq.${projectId}`,
+      select: 'id',
+    })}`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${token}`,
+        Prefer: 'count=exact',
+        Range: '0-0',
+      },
+      cache: 'no-store',
+      signal: perRequestSignal(signal),
+    });
+    if (!res.ok) return null;
+    const header = res.headers.get('content-range') || '';
+    const total = header.includes('/') ? Number(header.split('/').pop()) : NaN;
+    return Number.isFinite(total) ? total : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Owner Results: same page loader as the admin Worker, through PostgREST with the owner's session (RLS). */
-export async function fetchOwnerResponsePage(projectId, after = null, loadSession = createResponseLoadSession()) {
+export async function fetchOwnerResponsePage(projectId, after = null, loadSession = createResponseLoadSession(), { onProgress, signal } = {}) {
   const { data: { session } = {} } = supabase ? await supabase.auth.getSession() : {};
   const token = session?.access_token || SUPABASE_ANON_KEY;
   const rest = async ({ path, method = 'GET', query = '', body }) => {
@@ -68,6 +104,7 @@ export async function fetchOwnerResponsePage(projectId, after = null, loadSessio
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: body == null ? undefined : JSON.stringify(body),
       cache: 'no-store',
+      signal: perRequestSignal(signal),
     });
     const text = await res.text();
     let data = null;
@@ -79,9 +116,16 @@ export async function fetchOwnerResponsePage(projectId, after = null, loadSessio
     }
     return data;
   };
-  // The browser has no Worker memory/subrequest limits: fall back to 50-row pages in two parallel batches.
+  // Short pages stay inside the database statement timeout and leave a connection for auth.
   const page = await loadSurveyResponsePage(rest, projectId, {
-    after, mode: loadSession.mode, knownContracts: [...loadSession.contracts.keys()], legacyKeyLimit: 50, legacyBatch: 25,
+    after,
+    mode: loadSession.mode,
+    knownContracts: [...loadSession.contracts.keys()],
+    keyLimit: RESPONSE_INTERACTIVE_KEY_PAGE,
+    legacyKeyLimit: RESPONSE_INTERACTIVE_KEY_PAGE,
+    batchSize: RESPONSE_INTERACTIVE_BATCH,
+    concurrency: 1,
+    onProgress,
   });
   return restorePage(page, loadSession);
 }

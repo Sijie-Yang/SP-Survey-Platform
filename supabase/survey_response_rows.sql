@@ -20,33 +20,65 @@ SECURITY INVOKER
 SET search_path = public
 AS $$
 DECLARE
-  r public.survey_responses%ROWTYPE;
-  v_contract JSONB;
-  v_key TEXT;
-  v_rows JSON[] := '{}';
-  v_refs TEXT[] := '{}';
-  v_contracts JSONB := '{}'::jsonb;
+  v_rows JSON;
+  v_refs JSON;
+  v_contracts JSONB;
 BEGIN
   IF p_project_id IS NULL OR p_ids IS NULL OR cardinality(p_ids) > 500 THEN
     RAISE EXCEPTION 'Invalid response page';
   END IF;
-  FOR r IN
-    SELECT * FROM public.survey_responses s
-    WHERE s.project_id = p_project_id AND s.id::text = ANY(p_ids)
-  LOOP
-    v_contract := r.survey_metadata -> 'survey_response_contract';
-    v_key := NULL;
-    IF jsonb_typeof(v_contract) = 'object' THEN
-      v_key := md5(v_contract::text);
-      r.survey_metadata := r.survey_metadata - 'survey_response_contract';
-      IF NOT (v_key = ANY(COALESCE(p_known_contracts, '{}'))) AND NOT (v_contracts ? v_key) THEN
-        v_contracts := v_contracts || jsonb_build_object(v_key, v_contract);
-      END IF;
-    END IF;
-    v_rows := array_append(v_rows, to_json(r));
-    v_refs := array_append(v_refs, v_key);
-  END LOOP;
-  RETURN json_build_object('rows', array_to_json(v_rows), 'refs', to_json(v_refs), 'contracts', v_contracts);
+  -- One pass over the requested ids. The previous loop copied the growing JSON
+  -- array once per row, which timed out once map polygons made each row large.
+  WITH picked AS (
+    SELECT
+      s AS original,
+      CASE
+        WHEN jsonb_typeof(s.survey_metadata -> 'survey_response_contract') = 'object'
+        THEN md5((s.survey_metadata -> 'survey_response_contract')::text)
+      END AS contract_key,
+      CASE
+        WHEN jsonb_typeof(s.survey_metadata -> 'survey_response_contract') = 'object'
+        THEN s.survey_metadata -> 'survey_response_contract'
+      END AS contract_json
+    FROM public.survey_responses s
+    WHERE s.project_id = p_project_id
+      AND s.id::text = ANY (p_ids)
+  ),
+  shaped AS (
+    SELECT
+      jsonb_populate_record(
+        picked.original,
+        jsonb_build_object(
+          'survey_metadata',
+          CASE
+            WHEN picked.contract_key IS NOT NULL
+            THEN (picked.original).survey_metadata - 'survey_response_contract'
+            ELSE (picked.original).survey_metadata
+          END
+        )
+      ) AS row_out,
+      picked.contract_key,
+      picked.contract_json,
+      row_number() OVER () AS ord
+    FROM picked
+  )
+  SELECT
+    coalesce(json_agg(to_json(shaped.row_out) ORDER BY shaped.ord), '[]'::json),
+    coalesce(json_agg(shaped.contract_key ORDER BY shaped.ord), '[]'::json),
+    coalesce((
+      SELECT jsonb_object_agg(c.contract_key, c.contract_json)
+      FROM (
+        SELECT DISTINCT ON (contract_key) contract_key, contract_json
+        FROM shaped
+        WHERE contract_key IS NOT NULL
+          AND NOT (contract_key = ANY (COALESCE(p_known_contracts, '{}')))
+        ORDER BY contract_key
+      ) c
+    ), '{}'::jsonb)
+  INTO v_rows, v_refs, v_contracts
+  FROM shaped;
+
+  RETURN json_build_object('rows', v_rows, 'refs', v_refs, 'contracts', v_contracts);
 END;
 $$;
 

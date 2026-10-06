@@ -1,7 +1,7 @@
 {
   "id": "2013-salesses-collaborative",
   "name": "Place Pulse 1.0",
-  "description": "Rebuilt from the published description of Salesses, Schechtner & Hidalgo (2013). Pairwise comparisons of street views from New York, Boston, Linz and Salzburg on safety, class and uniqueness, scored with Q-scores. Differences from the original study: (1) The original website allowed unlimited votes; this template asks 10 pairs per question (survey rounds with \"continue voting\" are not available). (2) Researchers supply their own street-view images (street-view terms do not allow redistribution).",
+  "description": "Rebuilt from the published description of Salesses, Schechtner & Hidalgo (2013). Pairwise comparisons of street views from New York, Boston, Linz and Salzburg on safety, class and uniqueness, scored with Q-scores. Differences from the original study: (1) The original website allowed unlimited votes; this template asks 10 pairs per question (survey rounds with \"continue voting\" are not available). (2) Bundled images are photographs from the paper PDF (7 scenes), not the original full stimulus set.",
   "author": "Salesses, Schechtner & Hidalgo",
   "year": "2013",
   "category": "Academic Research",
@@ -18,10 +18,7 @@
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {
     "mediaFolders": [
-      "New_York",
-      "Boston",
-      "Linz",
-      "Salzburg"
+      "paper"
     ],
     "mediaFolderTags": {}
   },
@@ -78,7 +75,10 @@
             "trialCount": 10,
             "pairingMode": "balanced",
             "allowTie": true,
-            "tieLabel": "Equal"
+            "tieLabel": "Equal",
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ]
       },
@@ -98,7 +98,10 @@
             "trialCount": 10,
             "pairingMode": "balanced",
             "allowTie": true,
-            "tieLabel": "Equal"
+            "tieLabel": "Equal",
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ]
       },
@@ -118,7 +121,10 @@
             "trialCount": 10,
             "pairingMode": "balanced",
             "allowTie": true,
-            "tieLabel": "Equal"
+            "tieLabel": "Equal",
+            "mediaFolders": [
+              "paper"
+            ]
           }
         ]
       }

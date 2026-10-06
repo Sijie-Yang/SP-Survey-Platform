@@ -54,16 +54,15 @@ describe('canonical platform schema', () => {
     expect(ENTITY_SCHEMAS.page.required).toEqual(['name', 'elements']);
   });
 
-  test('covers exactly the 34 base types exposed by QuestionEditor', () => {
+  test('covers exactly the base types exposed by QuestionEditor', () => {
     const source = read('src/components/admin/QuestionEditor.js');
     const start = source.indexOf('const questionTypes = [');
     const end = source.indexOf('\n  ];', start);
     const editorTypes = [...source.slice(start, end).matchAll(/\{\s*value:\s*'([^']+)'/g)]
       .map((match) => match[1]);
 
-    expect(QUESTION_TYPE_IDS).toHaveLength(34);
     expect(QUESTION_TYPE_IDS).toEqual(editorTypes);
-    expect(new Set(QUESTION_TYPE_IDS).size).toBe(34);
+    expect(new Set(QUESTION_TYPE_IDS).size).toBe(editorTypes.length);
   });
 
   test.each(QUESTION_TYPE_IDS)('%s has complete field metadata', (type) => {

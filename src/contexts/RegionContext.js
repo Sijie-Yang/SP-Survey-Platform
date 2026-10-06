@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState } from 'react';
 import { adminI18n } from './adminI18n';
+import { interfaceDictionary, normalizeUiLanguage } from '../lib/uiLanguages';
 
 export const RegionContext = createContext(null);
 
@@ -20,7 +21,7 @@ export function RegionProvider({ children }) {
     () => localStorage.getItem('sp-survey-region') || REGIONS.GLOBAL
   );
   const [language, setLanguageState] = useState(
-    () => localStorage.getItem('sp-survey-language') || LANGUAGES.EN
+    () => normalizeUiLanguage(localStorage.getItem('sp-survey-language') || LANGUAGES.EN)
   );
 
   const setRegion = (r) => {
@@ -36,12 +37,13 @@ export function RegionProvider({ children }) {
   };
 
   const setLanguage = (l) => {
-    setLanguageState(l);
-    localStorage.setItem('sp-survey-language', l);
+    const next = normalizeUiLanguage(l);
+    setLanguageState(next);
+    localStorage.setItem('sp-survey-language', next);
   };
 
   const isChinaMode = region === REGIONS.CHINA;
-  const t = i18n[language] || i18n.en;
+  const t = interfaceDictionary(language);
 
   return (
     <RegionContext.Provider value={{ region, setRegion, language, setLanguage, isChinaMode, t }}>
