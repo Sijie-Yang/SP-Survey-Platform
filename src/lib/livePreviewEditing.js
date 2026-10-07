@@ -17,7 +17,11 @@ function fill(template, vars) {
 }
 
 function bindEditable(el, { label, kind, onCommit, placeholder }) {
-  if (!el || el.dataset.spEditBound === '1') return;
+  if (!el) return;
+  if (el.dataset.spEditBound === '1') {
+    if (document.activeElement !== el) el.dataset.spEditValue = plainText(el);
+    return;
+  }
   el.dataset.spEditBound = '1';
   el.dataset.spEdit = kind;
   el.contentEditable = 'true';
@@ -34,11 +38,78 @@ function bindEditable(el, { label, kind, onCommit, placeholder }) {
   };
   el.addEventListener('blur', commit);
   el.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
+    if (event.key === 'Escape') {
+      el.textContent = el.dataset.spEditValue;
+      el.blur();
+      event.stopPropagation();
+      return;
+    }
+    if (event.key === 'Enter' && !event.isComposing) {
       event.preventDefault();
       el.blur();
     }
   });
+}
+
+// Rendered Markdown is selectable for device-specific styling, but must never
+// be serialized from textContent: that loses Markdown syntax and paragraphs.
+function descriptionClickOffset(el, event) {
+  const doc = el.ownerDocument;
+  const caret = doc.caretPositionFromPoint?.(event.clientX, event.clientY);
+  const pointRange = caret ? null : doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+  const selection = doc.getSelection();
+  const node = caret?.offsetNode || pointRange?.startContainer || selection?.focusNode;
+  const offset = caret?.offset ?? pointRange?.startOffset ?? selection?.focusOffset;
+  if (!node || !el.contains(node)) return 0;
+  const before = doc.createRange();
+  before.selectNodeContents(el);
+  before.setEnd(node, offset);
+  return before.toString().length;
+}
+
+function bindDescription(el, { label, kind, placeholder, onSelect, onEdit, editHint }) {
+  if (!el) return;
+  el.dataset.spEdit = kind;
+  el.dataset.spMarkdown = 'true';
+  el.contentEditable = 'false';
+  if (editHint) el.title = editHint;
+  el.setAttribute('role', 'textbox');
+  el.setAttribute('aria-readonly', 'true');
+  el.setAttribute('aria-multiline', 'true');
+  if (label) el.setAttribute('aria-label', label);
+  if (placeholder) el.dataset.spPlaceholder = placeholder;
+  if (!el.dataset.spMarkdownBound) {
+    el.dataset.spMarkdownBound = '1';
+    let pointerStart = null;
+    let dragged = false;
+    el.addEventListener('pointerdown', (event) => {
+      pointerStart = { x: event.clientX, y: event.clientY };
+      dragged = false;
+    });
+    el.addEventListener('pointermove', (event) => {
+      if (pointerStart && event.buttons && Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 4) dragged = true;
+    });
+    el.addEventListener('click', (event) => {
+      // A description link is content to edit in Studio, not a navigation action.
+      if (event.target.closest('a')) event.preventDefault();
+      onSelect?.();
+      const selection = el.ownerDocument.getSelection();
+      const selectedText = selection && !selection.isCollapsed && (el.contains(selection.anchorNode) || el.contains(selection.focusNode));
+      // Mouse-up after drag selection also emits a click. Keep that selection
+      // available to the text style toolbar instead of replacing it with an input.
+      // WebKit can retain a non-collapsed (even empty) range after formatting.
+      // A fresh stationary pointer click must enter editing despite that old
+      // range; only this gesture's drag/Shift selection should prevent it.
+      const selecting = dragged || (selectedText && (!pointerStart || event.shiftKey));
+      if (!selecting) onEdit?.(descriptionClickOffset(el, event));
+      pointerStart = null;
+      dragged = false;
+    });
+    el.addEventListener('dblclick', (event) => { event.preventDefault(); event.stopPropagation(); onEdit?.(); });
+    el.addEventListener('keydown', (event) => {
+      if (['Enter', 'F2'].includes(event.key) && !event.isComposing) { event.preventDefault(); event.stopPropagation(); onEdit?.(); }
+    });
+  }
 }
 
 function reorderButton(label, text, onClick, disabled) {
@@ -134,6 +205,55 @@ export function attachQuestionEditor(root, question, api) {
   if (!root || !question?.name) return;
   const labels = api.getLabels();
   const place = questionPlace(api.getConfig(), question.name);
+  // Ignore generated placeholders and nested nodes not editable by the builder.
+  if (place.index < 0) return;
+  root.dataset.spQuestionName = question.name;
+  const studio = api.getStudio?.();
+  if (studio) {
+    root.dataset.spSelected = String(studio.selection?.kind === 'question' && studio.selection.name === question.name);
+    if (!root.dataset.spSelectBound) {
+      root.dataset.spSelectBound = '1';
+      root.addEventListener('click', () => {
+        const page = api.getConfig()?.pages?.find((p) => p.elements?.some((q) => q.name === question.name));
+        api.getStudio?.()?.onSelect({ kind: 'question', name: question.name, pageName: page?.name });
+      });
+    }
+    const handle = (field, label, className, caption) => {
+      let button = root.querySelector(`[data-sp-resize="${field}"]`);
+      if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.spResize = field;
+        button.className = `sp-preview-resize ${className}`;
+        button.addEventListener('pointerdown', (event) => {
+          const page = api.getConfig()?.pages?.find((p) => p.elements?.some((q) => q.name === question.name));
+          api.getStudio?.()?.onSelect({ kind: 'question', name: question.name, pageName: page?.name });
+          api.getStudio?.()?.resize(event, field, question.name);
+        });
+        button.addEventListener('keydown', (event) => api.getStudio?.()?.resizeKey(event, field, question.name));
+        root.appendChild(button);
+      }
+      button.setAttribute('aria-label', label);
+      button.title = labels.resizeHelp || label;
+      if (button.textContent !== caption) button.textContent = caption;
+      return button;
+    };
+    handle('questionWidth', labels.resizeQuestion || 'Resize question card width', 'sp-preview-resize--width', '⋮');
+    const media = root.querySelector('.sd-image, .sp-image-gallery, .sd-imagepicker, .sp-media-player, video, canvas');
+    if (media) {
+      const button = handle('mediaMaxHeight', labels.resizeMedia || 'Resize media height', 'sp-preview-resize--media', '↕');
+      const widthButton = handle('mediaWidth', labels.resizeMediaWidth || 'Resize media width', 'sp-preview-resize--media-width', '↔');
+      const rect = root.getBoundingClientRect();
+      const mediaRect = media.getBoundingClientRect();
+      const scale = root.offsetWidth ? rect.width / root.offsetWidth : 1;
+      if (mediaRect.height && scale) {
+        button.style.top = `${(mediaRect.bottom - rect.top) / scale - 9}px`;
+        button.style.bottom = 'auto';
+        widthButton.style.top = `${(mediaRect.top + mediaRect.height / 2 - rect.top) / scale - 10}px`;
+        widthButton.style.right = `${(rect.right - mediaRect.right) / scale - 10}px`;
+      }
+    }
+  }
   const caption = questionCaption(question, place, labels);
   const title = questionTitleNode(root);
   bindEditable(title, {
@@ -147,13 +267,11 @@ export function attachQuestionEditor(root, question, api) {
   const description = root.querySelector('.sd-question__description .sv-string-viewer')
     || root.querySelector('.sd-question__description');
   if (description) {
-    bindEditable(description, {
+    bindDescription(description, {
       label: labels.questionDescription,
       kind: 'question-description',
-      onCommit: (value) => {
-        question.description = value;
-        commitConfig(api, updateQuestionText(api.getConfig(), question.name, 'description', value));
-      },
+      editHint: labels.editDescriptionHint,
+      onEdit: (start) => api.getStudio?.()?.onEditDescription?.({ kind: 'question', name: question.name, field: 'description', start }),
     });
   }
   if (root.querySelector('[data-sp-reorder="question"]')) {
@@ -175,6 +293,7 @@ export function attachQuestionEditor(root, question, api) {
 
 export function attachPageEditor(root, page, api) {
   if (!root || !page?.name) return;
+  root.dataset.spPageName = page.name;
   const labels = api.getLabels();
   let title = pageTitleNode(root);
   if (!title) {
@@ -198,13 +317,12 @@ export function attachPageEditor(root, page, api) {
   const description = root.querySelector('.sd-page__description .sv-string-viewer')
     || root.querySelector('.sd-page__description');
   if (description) {
-    bindEditable(description, {
+    bindDescription(description, {
       label: labels.pageDescription,
       kind: 'page-description',
-      onCommit: (value) => {
-        page.description = value;
-        commitConfig(api, updatePageText(api.getConfig(), page.name, 'description', value));
-      },
+      editHint: labels.editDescriptionHint,
+      onEdit: (start) => api.getStudio?.()?.onEditDescription?.({ kind: 'page', name: page.name, field: 'description', start }),
+      onSelect: () => api.getStudio?.()?.onSelect({ kind: 'page', name: page.name, pageName: page.name }),
     });
   }
   const pages = api.getConfig()?.pages || [];
@@ -250,6 +368,10 @@ export function attachSurveyHeader(container, model, api) {
   if (!container || !model) return;
   const header = container.querySelector('.sd-container-modern__title');
   if (!header) return;
+  if (!header.dataset.spHeaderSelectBound) {
+    header.dataset.spHeaderSelectBound = '1';
+    header.addEventListener('click', () => api.getStudio?.()?.onSelect({ kind: 'survey' }));
+  }
   const labels = api.getLabels();
   const title = header.querySelector('.sd-header__text .sd-title .sv-string-viewer')
     || header.querySelector('.sd-header__text .sd-title');
@@ -262,14 +384,12 @@ export function attachSurveyHeader(container, model, api) {
     },
   });
   const description = ensureSurveyDescription(header);
-  bindEditable(description, {
+  bindDescription(description, {
     label: labels.editSurveyDescription || labels.surveyDescription,
     kind: 'survey-description',
+    editHint: labels.editDescriptionHint,
+    onEdit: (start) => api.getStudio?.()?.onEditDescription?.({ kind: 'survey', name: '', field: 'description', start }),
     placeholder: labels.surveyDescription,
-    onCommit: (value) => {
-      model.description = value;
-      commitConfig(api, updateSurveyText(api.getConfig(), 'description', value));
-    },
   });
 }
 

@@ -8,7 +8,7 @@ import ExpandMore from '@mui/icons-material/ExpandMore';
 import ViewportLayoutFrame from '../ViewportLayoutFrame';
 import { attachPageEditor, attachQuestionEditor, attachSurveyHeader, bindLivePreviewEditing } from '../../lib/livePreviewEditing';
 import { applyContentWidthToModel, configForPreviewRefresh } from '../../lib/viewportLayout';
-import { convertToSurveyJS, generateCustomTheme, normalizeBuilderSurveyJson } from '../../lib/surveyStorage';
+import { generateCustomTheme, normalizeBuilderSurveyJson } from '../../lib/surveyStorage';
 import { themeJson } from "../../theme";
 import registerImageRankingWidget, {
   registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget,
@@ -42,6 +42,26 @@ export function previewSourceKey(config, currentProject) {
   });
 }
 
+// Ordering is an editing operation, not a request for another random media draw.
+export function previewPreparationKey(config, project) {
+  const source = JSON.parse(previewSourceKey(config, project));
+  const pages = source.config?.pages;
+  if (pages) {
+    source.elements = pages.flatMap((p) => p.elements || []).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    source.config.pages = pages.map(({ elements, ...page }) => page).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+  return JSON.stringify(source);
+}
+
+export function reorderPreparedPreview(prepared, config) {
+  const elements = new Map((prepared.pages || []).flatMap((p) => p.elements || []).map((q) => [q.name, q]));
+  return { ...prepared, ...config, pages: (config.pages || []).map((page) => ({
+    ...page,
+    elements: page.elements?.length ? page.elements.map((q) => ({ ...elements.get(q.name), title: q.title, description: q.description }))
+      : [{ type: 'html', name: `${page.name}_placeholder`, html: '<div style="height: 1px;"></div>' }],
+  })) };
+}
+
 export function createSurveyPreviewModel(processedConfig, runtimeContext = null, options = {}) {
   const configToUse = JSON.parse(JSON.stringify(processedConfig || {}));
   if (typeof configToUse.showQuestionNumbers === 'boolean') {
@@ -65,7 +85,7 @@ export function createSurveyPreviewModel(processedConfig, runtimeContext = null,
   } catch {
     // SurveyJS default styling
   }
-  // Previews never accept answers. Full Preview still turns pages and edits layout.
+  // Previews never accept answers. Layout Studio still turns pages and edits layout.
   model.mode = 'display';
   try {
     model.showProgressBar = 'off';
@@ -160,8 +180,13 @@ export default function SurveyPreview({
   questionWidth = null,
   mediaMaxHeight = null,
   labels = DEFAULT_PREVIEW_LABELS,
+  studio = null,
 }) {
   useEffect(() => { markGuideProgress(currentProject?.id, 'preview'); }, [currentProject?.id]);
+  const previewRef = useRef(null);
+  const studioRef = useRef(studio);
+  studioRef.current = studio;
+  const preparationRef = useRef(null);
   const [processedConfig, setProcessedConfig] = useState(null);
   const [mediaAssignments, setMediaAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -173,7 +198,13 @@ export default function SurveyPreview({
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const preparationKey = previewPreparationKey(config, currentProject);
     const processConfig = async () => {
+      if (interactive && preparationRef.current?.key === preparationKey) {
+        setProcessedConfig(reorderPreparedPreview(preparationRef.current.config, config));
+        return;
+      }
       if (!config) {
         setLoading(false);
         return;
@@ -198,6 +229,7 @@ export default function SurveyPreview({
         const mediaPool = mediaContext.images;
         const fromPreviewLibrary = mediaContext.fromPreviewLibrary;
         if (fromPreviewLibrary) configCopy = adaptSurveyForPreviewLibrary(configCopy, mediaPool);
+        if (cancelled) return;
         setUsingPreviewLibrary(fromPreviewLibrary);
         const folderHost = fromPreviewLibrary
           ? { ...currentProject, imageDatasetConfig: mediaContext.imageDatasetConfig, config: configCopy }
@@ -478,20 +510,26 @@ export default function SurveyPreview({
           }
         }
         
+        if (cancelled) return;
+        preparationRef.current = { key: preparationKey, config: configCopy };
         setMediaAssignments(mediaAssignmentLog);
         setMediaErrors(nextMediaErrors);
         setProcessedConfig(configCopy);
       } catch (error) {
+        if (cancelled) return;
         console.error('Error processing config for preview:', error);
         setMediaErrors([error.message || 'Preview could not load media.']);
         setProcessedConfig(config);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     processConfig();
-  }, [sourceKey]);
+    return () => { cancelled = true; };
+    // sourceKey deliberately ignores live text/size edits; they sync onto the model below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey, interactive]);
 
   const conditions = useMemo(() => normalizeConditions(config), [config]);
   const [conditionChoice, setConditionChoice] = useState(null);
@@ -499,6 +537,7 @@ export default function SurveyPreview({
     ? (conditions.some((c) => c.id === conditionChoice) ? conditionChoice : conditions[0].id)
     : null;
   const pageRef = useRef(0);
+  const modelGeneration = useRef(0);
   const configRef = useRef(config);
   configRef.current = config;
   const onConfigChangeRef = useRef(onConfigChange);
@@ -510,6 +549,7 @@ export default function SurveyPreview({
     getConfig: () => configRef.current,
     onConfigChange: (next) => onConfigChangeRef.current?.(next),
     getLabels: () => labelsRef.current,
+    getStudio: () => studioRef.current,
   }), []);
   const model = useMemo(() => {
     if (!processedConfig || loading) return null;
@@ -524,11 +564,35 @@ export default function SurveyPreview({
       if (pageNo > 0) created.currentPageNo = pageNo;
       created.onCurrentPageChanged.add(() => {
         pageRef.current = created.currentPageNo || 0;
+        if (previewRef.current) previewRef.current.dataset.previewPage = String(pageRef.current + 1);
+        studioRef.current?.onPageChange?.(created.currentPage?.name);
       });
     }
+    created.__spPreviewKey = ++modelGeneration.current;
     if (canEdit) created.__spUnbindEditors = bindLivePreviewEditing(created, editorApi);
     return created;
   }, [processedConfig, loading, previewCondition, interactive, canEdit, editorApi]);
+
+  useEffect(() => { studioRef.current?.onPageChange?.(model?.currentPage?.name || null); }, [model]);
+
+  useEffect(() => {
+    if (model) model.applyTheme(config?.theme ? generateCustomTheme({ theme: config.theme }) : themeJson);
+  }, [model, config?.theme]); // Theme edits keep the current sample and page.
+
+  const previewOrderRef = useRef(new WeakMap());
+  useEffect(() => {
+    if (!model || !studio?.previewOrder) return;
+    Object.entries(studio.previewOrder).forEach(([name, reversed]) => {
+      const question = model.getQuestionByName(name);
+      if (!question) return;
+      let originals = previewOrderRef.current.get(question);
+      if (!originals) {
+        originals = Object.fromEntries(['choices', 'imageLinks', 'selectedImageUrls'].filter(k => Array.isArray(question[k])).map(k => [k, [...question[k]]]));
+        previewOrderRef.current.set(question, originals);
+      }
+      Object.entries(originals).forEach(([key, values]) => { question[key] = reversed ? [...values].reverse() : [...values]; });
+    });
+  }, [model, studio?.previewOrder]);
 
   useEffect(() => () => {
     model?.__spUnbindEditors?.();
@@ -538,29 +602,71 @@ export default function SurveyPreview({
   useEffect(() => {
     if (!canEdit || !model) return undefined;
     const title = config?.title || '';
-    const description = config?.description || '';
+    // Keep the active editor mounted even while the user clears all text.
+    // The invisible placeholder lives only in this preview model, never in config.
+    const descriptionValue = (kind, name, value) => value || (studio?.editingDescription?.kind === kind && (studio.editingDescription.name || '') === name ? '\u200b' : '');
+    const description = descriptionValue('survey', '', config?.description);
     const logo = config?.logo || '';
     if ((model.title || '') !== title) model.title = title;
     if ((model.description || '') !== description) model.description = description;
     if ((model.logo || '') !== logo) model.logo = logo;
+    (config?.pages || []).forEach((page) => {
+      const livePage = model.getPageByName(page.name);
+      ['title', 'description'].forEach((field) => {
+        const value = field === 'description' ? descriptionValue('page', page.name, page[field]) : page[field] || '';
+        if (livePage && (livePage[field] || '') !== value) livePage[field] = value;
+      });
+      (page.elements || []).forEach((element) => {
+        const live = model.getQuestionByName(element.name);
+        ['title', 'description'].forEach((field) => {
+          const value = field === 'description' ? descriptionValue('question', element.name, element[field]) : element[field] || '';
+          if (live && (live[field] || '') !== value) {
+            const descriptionVisibilityChanged = field === 'description' && Boolean(live[field]) !== Boolean(value);
+            live[field] = value;
+            // SurveyJS caches description CSS when initially empty. Refresh it
+            // when adding/removing a description so styling and selection bind.
+            if (descriptionVisibilityChanged) live.updateElementCss?.(true);
+          }
+        });
+      });
+    });
     return undefined;
-  }, [canEdit, model, config]);
+  }, [canEdit, model, config, studio?.editingDescription]);
 
   useEffect(() => {
     if (!canEdit || !model) return undefined;
     let cancelled = false;
     const bind = () => {
       if (cancelled) return;
+      const previewRoot = previewRef.current;
+      // SurveyJS can replace only the description after a live text update.
+      // Its React rootRef is not available in every renderer/version.
+      const questionRoots = new Map(Array.from(previewRoot?.querySelectorAll('[data-sp-question-name]') || [], (root) => [root.dataset.spQuestionName, root]));
       const questions = typeof model.getAllQuestions === 'function' ? model.getAllQuestions() : [];
       questions.forEach((question) => {
-        const root = question?.react?.rootRef?.current;
+        const root = question?.react?.rootRef?.current || questionRoots.get(question.name);
         if (root) attachQuestionEditor(root, question, editorApi);
       });
-      const previewRoot = document.querySelector('[data-preview-mode="format"]');
       const pageRoot = previewRoot?.querySelector('.sd-page');
       if (pageRoot && model.currentPage) attachPageEditor(pageRoot, model.currentPage, editorApi);
-      if (previewRoot) attachSurveyHeader(previewRoot, model, editorApi);
+      if (previewRoot) {
+        attachSurveyHeader(previewRoot, model, editorApi);
+        previewRoot.querySelectorAll('[data-sp-edit]').forEach((node) => {
+          node.contentEditable = studioRef.current?.guides === false || node.dataset.spMarkdown === 'true' ? 'false' : 'true';
+          node.tabIndex = studioRef.current?.guides === false ? -1 : 0;
+        });
+      }
     };
+    // SurveyJS may mount a new string viewer after the scheduled render frames
+    // (notably undoing a cleared description). Bind that new node as it arrives.
+    let rebindFrame;
+    const observer = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => [...mutation.addedNodes].some((node) => node.nodeType === 1 && (node.matches('.sv-string-viewer') || node.querySelector('.sv-string-viewer'))))) {
+        cancelAnimationFrame(rebindFrame);
+        rebindFrame = requestAnimationFrame(bind);
+      }
+    });
+    if (previewRef.current) observer.observe(previewRef.current, { childList: true, subtree: true });
     bind();
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(bind);
@@ -568,8 +674,21 @@ export default function SurveyPreview({
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(rebindFrame);
+      observer.disconnect();
     };
-  }, [canEdit, model, editorApi, config, viewport, contentWidth, questionWidth, mediaMaxHeight]);
+  }, [canEdit, model, editorApi, config, viewport, contentWidth, questionWidth, mediaMaxHeight, studio]);
+
+  useEffect(() => {
+    if (!model || !studio?.selection?.pageName || studio?.editingDescription) return;
+    const page = model.getPageByName(studio.selection.pageName);
+    if (page && model.currentPage !== page) model.currentPage = page;
+    const frame = requestAnimationFrame(() => {
+      const question = model.getQuestionByName(studio.selection.name);
+      question?.react?.rootRef?.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [model, studio?.selection?.pageName, studio?.selection?.name, studio?.editingDescription]);
 
   useEffect(() => {
     if (!interactive || !model) return;
@@ -612,9 +731,9 @@ export default function SurveyPreview({
     const surveyBody = (
       <Box
         className="sp-survey-with-progress"
-        sx={interactive ? undefined : { maxWidth: 900, mx: 'auto', px: { xs: 0, sm: 2 } }}
+        sx={interactive || config?.viewportLayout ? undefined : { maxWidth: 900, mx: 'auto', px: { xs: 0, sm: 2 } }}
       >
-        <SurveyTrialNavProvider>
+        <SurveyTrialNavProvider key={model.__spPreviewKey}>
           <SurveyProgressBridge
             surveyModel={model}
             progressEnabled={progressEnabled}
@@ -627,6 +746,7 @@ export default function SurveyPreview({
 
     return (
       <Box
+        ref={previewRef}
         data-preview-mode={interactive ? 'format' : 'display'}
         data-preview-page={String((model.currentPageNo || 0) + 1)}
         sx={{ maxHeight: interactive ? 'none' : '70vh', overflow: 'auto' }}
@@ -678,6 +798,7 @@ export default function SurveyPreview({
         )}
         {interactive ? (
           <ViewportLayoutFrame
+            config={config}
             forcedViewport={viewport}
             contentWidth={contentWidth}
             questionWidth={questionWidth}
@@ -686,7 +807,11 @@ export default function SurveyPreview({
           >
             {surveyBody}
           </ViewportLayoutFrame>
-        ) : surveyBody}
+        ) : (
+          <ViewportLayoutFrame config={config} surveyModel={model}>
+            {surveyBody}
+          </ViewportLayoutFrame>
+        )}
         {interactive && mediaTable && (
           <Accordion disableGutters elevation={0} sx={{ mt: 2, border: '1px solid', borderColor: 'divider', '&:before': { display: 'none' } }}>
             <AccordionSummary expandIcon={<ExpandMore />}>

@@ -5,6 +5,7 @@ import { Survey } from 'survey-react-ui';
 import 'survey-core/defaultV2.min.css';
 import registerImageRankingWidget, { registerImageRatingWidget, registerImageBooleanWidget, registerImageMatrixWidget, registerAllExtendedWidgets } from '../SurveyCustomComponents';
 import ParticipantSurveySurface from '../ParticipantSurveySurface';
+import ViewportLayoutFrame from '../ViewportLayoutFrame';
 import SurveyProgressBridge from '../SurveyProgressBridge';
 import { SurveyTrialNavProvider } from '../../contexts/SurveyTrialNavContext';
 import { applyAdminThemeToSurveyModel } from '../../lib/surveyStorage';
@@ -67,6 +68,7 @@ export default function QuestionPreviewPage() {
         setPreview({
           model,
           theme: payload.appearance?.theme,
+          appearance: payload.appearance,
           revision: event.data.revision
         });
         setError('');
@@ -104,7 +106,9 @@ export default function QuestionPreviewPage() {
   return <SurveyTrialNavProvider key={preview.revision}>
       <ParticipantSurveySurface onErrorCapture={event => handleSurveyMediaError(event, resolveSurveyUiLanguage(preview.model))}>
         <SurveyProgressBridge surveyModel={preview.model} progressEnabled={false} theme={preview.theme} />
-        <Survey model={preview.model} />
+        <ViewportLayoutFrame config={preview.appearance} surveyModel={preview.model}>
+          <Survey model={preview.model} />
+        </ViewportLayoutFrame>
       </ParticipantSurveySurface>
     </SurveyTrialNavProvider>;
 }

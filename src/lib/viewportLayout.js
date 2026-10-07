@@ -9,13 +9,13 @@
 import { MOBILE_WIDTH } from './imagePickerLayout';
 
 export const VIEWPORT_LAYOUT_DEFAULTS = {
-  desktop: { contentWidth: 900, questionWidth: 900, mediaMaxHeight: 480 },
-  mobile: { contentWidth: 390, questionWidth: 390, mediaMaxHeight: 320 },
+  desktop: { contentWidth: 900, questionWidth: 900, mediaMaxHeight: 480, questionGap: 24, cardPadding: 32 },
+  mobile: { contentWidth: 390, questionWidth: 390, mediaMaxHeight: 320, questionGap: 16, cardPadding: 20 },
 };
 
 export const VIEWPORT_LAYOUT_LIMITS = {
-  desktop: { contentWidth: [480, 1400], questionWidth: [280, 1400], mediaMaxHeight: [80, 800] },
-  mobile: { contentWidth: [280, 480], questionWidth: [200, 480], mediaMaxHeight: [80, 800] },
+  desktop: { contentWidth: [480, 1400], questionWidth: [280, 1400], mediaMaxHeight: [80, 800], questionGap: [0, 80], cardPadding: [8, 64] },
+  mobile: { contentWidth: [280, 480], questionWidth: [200, 480], mediaMaxHeight: [80, 800], questionGap: [0, 80], cardPadding: [8, 64] },
 };
 
 function finite(value) {
@@ -44,6 +44,8 @@ export function viewportSlot(config, viewport) {
   const resolvedQuestion = questionWidth > 0 ? questionWidth : resolvedContent;
   return {
     viewport: key,
+    questionGap: saved.questionGap ?? defaults.questionGap,
+    cardPadding: saved.cardPadding ?? defaults.cardPadding,
     contentWidth: resolvedContent,
     questionWidth: Math.min(resolvedQuestion, resolvedContent),
     mediaMaxHeight: mediaMaxHeight > 0 ? mediaMaxHeight : defaults.mediaMaxHeight,
@@ -77,15 +79,19 @@ export function resolvePublishedFrame(config, viewportWidth) {
   const contentWidth = finite(saved.contentWidth);
   const questionWidth = finite(saved.questionWidth);
   const mediaMaxHeight = finite(saved.mediaMaxHeight);
-  const resolvedContent = contentWidth > 0 ? contentWidth : null;
-  const resolvedQuestion = questionWidth > 0 ? questionWidth : null;
+  // A question override is authored inside the studio's default frame. Without
+  // this fallback, SurveyJS's narrower legacy body silently caps that width.
+  const hasQuestionSizing = Object.values(saved.questions || {}).some((q) => q?.mediaLayout || ['questionWidth', 'mediaMaxHeight', 'mediaWidth'].some((field) => q?.[field] > 0));
+  const studioDefaults = hasQuestionSizing ? viewportSlot(config, viewport) : null;
+  const resolvedContent = contentWidth > 0 ? contentWidth : studioDefaults?.contentWidth || null;
+  const resolvedQuestion = questionWidth > 0 ? questionWidth : studioDefaults?.questionWidth || null;
   return {
     viewport,
     contentWidth: resolvedContent,
     questionWidth: resolvedQuestion && resolvedContent
       ? Math.min(resolvedQuestion, resolvedContent)
       : resolvedQuestion,
-    mediaMaxHeight: mediaMaxHeight > 0 ? mediaMaxHeight : null,
+    mediaMaxHeight: mediaMaxHeight > 0 ? mediaMaxHeight : studioDefaults?.mediaMaxHeight || null,
   };
 }
 
@@ -164,6 +170,7 @@ export function configForPreviewRefresh(config) {
   delete rest.title;
   delete rest.description;
   delete rest.logo;
+  delete rest.theme;
   if (!Array.isArray(rest.pages)) return rest;
   rest.pages = rest.pages.map((page) => {
     if (!page || typeof page !== 'object') return page;
@@ -182,4 +189,47 @@ export function configForPreviewRefresh(config) {
     return nextPage;
   });
   return rest;
+}
+
+/** Per-question overrides inherit the active viewport's global values. */
+export function questionLayoutSlot(config, viewport, name) {
+  const global = viewportSlot(config, viewport);
+  const saved = config?.viewportLayout?.[global.viewport]?.questions?.[name] || {};
+  return {
+    questionWidth: Math.min(global.contentWidth, saved.questionWidth > 0 ? saved.questionWidth : global.questionWidth),
+    mediaMaxHeight: saved.mediaMaxHeight > 0 ? saved.mediaMaxHeight : global.mediaMaxHeight,
+    mediaWidth: saved.mediaWidth > 0 ? saved.mediaWidth : 100,
+  };
+}
+
+export function setQuestionLayoutField(config, viewport, name, field, value) {
+  if (!['questionWidth', 'mediaMaxHeight', 'mediaWidth'].includes(field)) return config;
+  const key = viewport === 'mobile' ? 'mobile' : 'desktop';
+  const layout = config?.viewportLayout || {};
+  const slot = layout[key] || {};
+  const questions = { ...slot.questions };
+  const next = { ...questions[name] };
+  if (value == null) delete next[field];
+  else next[field] = field === 'mediaWidth' ? Math.min(100, Math.max(20, Math.round(value))) : clampLayoutValue(key, field, value);
+  if (Object.keys(next).length) questions[name] = next;
+  else delete questions[name];
+  return { ...config, viewportLayout: { ...layout, [key]: { ...slot, questions } } };
+}
+
+/** Move a top-level question, including between pages and into an empty page. */
+export function relocateQuestion(config, name, pageName, beforeName = null) {
+  const source = config?.pages?.find((p) => p.elements?.some((q) => q.name === name));
+  const target = config?.pages?.find((p) => p.name === pageName);
+  if (!source || !target || name === beforeName) return config;
+  if (beforeName && !target.elements?.some((q) => q.name === beforeName)) return config;
+  const question = source.elements.find((q) => q.name === name);
+  return { ...config, pages: config.pages.map((page) => {
+    if (page !== source && page !== target) return page;
+    const elements = (page.elements || []).filter((q) => q.name !== name);
+    if (page === target) {
+      const index = beforeName ? elements.findIndex((q) => q.name === beforeName) : elements.length;
+      elements.splice(index, 0, question);
+    }
+    return { ...page, elements };
+  }) };
 }

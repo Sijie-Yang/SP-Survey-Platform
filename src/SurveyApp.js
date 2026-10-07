@@ -1,6 +1,5 @@
 import ParticipantSurveySurface from './components/ParticipantSurveySurface';
 import ViewportLayoutFrame from './components/ViewportLayoutFrame';
-import { applyContentWidthToModel, resolvePublishedFrame } from './lib/viewportLayout';
 import { submitWithRecovery } from './lib/recoverableSubmission';
 import { handleSurveyMediaError } from './lib/mediaRecovery';
 import { surveyRevision } from './lib/surveyRevision';
@@ -1214,8 +1213,6 @@ export default function SurveyApp() {
       window.lastSurveyLoadTime = Date.now();
       console.log('✅ Survey initialized successfully at:', new Date(window.lastSurveyLoadTime).toISOString());
       
-      const publishedFrame = resolvePublishedFrame(finalSurveyJson, window.innerWidth);
-      applyContentWidthToModel(model, publishedFrame.contentWidth);
       setPublishedSurveyJson(finalSurveyJson);
       setSurveyModel(model);
       setSurveyPhase('active');
@@ -1442,7 +1439,7 @@ export default function SurveyApp() {
                 clearPendingSubmission(projectIdRef.current, resumeDialog.draft.participantId);
               }
               participantIdRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-              const { model, imageTracker } = resumeDialog;
+              const { model, imageTracker, finalSurveyJson } = resumeDialog;
               setResumeDialog(null);
               resumeChoiceRef.current = 'fresh';
               draftSavingEnabledRef.current = true;
@@ -1453,6 +1450,9 @@ export default function SurveyApp() {
               displayedMediaGroupsRef.current = {};
               displayedMediaCategoriesRef.current = {};
               setDisplayedImagesMap(imageTracker);
+              // This branch bypasses initializeSurvey's final state update. Keep
+              // the latest published layout paired with the fresh survey model.
+              setPublishedSurveyJson(finalSurveyJson);
               setSurveyModel(model);
               setSurveyPhase('active');
               setLoading(false);

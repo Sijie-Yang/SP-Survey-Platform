@@ -113,3 +113,39 @@ test('preview refresh ignores text and viewport size but keeps question order', 
   expect(configForPreviewRefresh(headed)).toEqual(configForPreviewRefresh(config));
   expect(configForPreviewRefresh(moveQuestion(config, 'q1', 1))).not.toEqual(configForPreviewRefresh(config));
 });
+
+test('single-question layout inherits defaults and resets without touching the other viewport', () => {
+  const { questionLayoutSlot, setQuestionLayoutField } = require('./viewportLayout');
+  const defaults = setViewportLayoutField(config, 'desktop', 'questionWidth', 700);
+  const changed = setQuestionLayoutField(defaults, 'desktop', 'q1', 'questionWidth', 500);
+  const mobile = setQuestionLayoutField(changed, 'mobile', 'q1', 'mediaMaxHeight', 200);
+  expect(questionLayoutSlot(mobile, 'desktop', 'q1').questionWidth).toBe(500);
+  expect(questionLayoutSlot(mobile, 'desktop', 'q2').questionWidth).toBe(700);
+  const reset = setQuestionLayoutField(mobile, 'desktop', 'q1', 'questionWidth', null);
+  expect(questionLayoutSlot(reset, 'desktop', 'q1').questionWidth).toBe(700);
+  expect(questionLayoutSlot(reset, 'mobile', 'q1').mediaMaxHeight).toBe(200);
+  expect(questionLayoutSlot(setQuestionLayoutField(config, 'desktop', 'q1', 'mediaWidth', 150), 'desktop', 'q1').mediaWidth).toBe(100);
+});
+
+test('dragging questions between pages preserves content and supports empty destinations', () => {
+  const { relocateQuestion } = require('./viewportLayout');
+  const moved = relocateQuestion(config, 'q2', 'p2', 'q3');
+  expect(moved.pages[0].elements.map((q) => q.name)).toEqual(['q1']);
+  expect(moved.pages[1].elements.map((q) => q.name)).toEqual(['q2', 'q3']);
+  expect(moved.pages[1].elements[0]).toBe(config.pages[0].elements[1]);
+  const empty = { ...config, pages: [...config.pages, { name: 'empty', elements: [] }] };
+  expect(relocateQuestion(empty, 'q1', 'empty').pages[2].elements[0].name).toBe('q1');
+  expect(relocateQuestion(config, 'q1', 'missing')).toBe(config);
+  expect(relocateQuestion(config, 'q1', 'p2', 'missing')).toBe(config);
+  expect(relocateQuestion(config, 'q1', 'p1', 'q1')).toBe(config);
+});
+
+test('editing only one card still gives the participant the same default frame as the studio', () => {
+  const { setQuestionLayoutField } = require('./viewportLayout');
+  const edited = setQuestionLayoutField(config, 'desktop', 'q1', 'questionWidth', 780);
+  expect(edited.viewportLayout.desktop.contentWidth).toBeUndefined();
+  expect(resolvePublishedFrame(edited, 1280)).toMatchObject({ contentWidth: 900, questionWidth: 900, mediaMaxHeight: 480 });
+  expect(resolvePublishedFrame(edited, 390).contentWidth).toBeNull();
+  const { convertToSurveyJS } = require('./surveyStorage');
+  expect(convertToSurveyJS(edited).viewportLayout).toEqual(edited.viewportLayout);
+});

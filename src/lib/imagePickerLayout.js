@@ -35,6 +35,7 @@
  *     roots are inserted into the document.
  */
 
+import { applyMediaLayout, resetMediaLayout } from './mediaLayoutDom';
 const ROOT_SELECTOR = '.sd-imagepicker, .sp-image-gallery, .sd-image';
 const ATTRS_TO_STRIP = ['width', 'height'];
 
@@ -51,13 +52,32 @@ const MOBILE_STACK_MAX_ITEMS = 2;
 let installed = false;
 const pendingRoots = new Set();
 let rafScheduled = false;
+let galleryResizeObserver = null;
+const observedGalleries = new WeakSet();
+const galleryWidths = new WeakMap();
+
+function observeGalleryWidth(root) {
+  if (typeof ResizeObserver === 'undefined') return;
+  if (!galleryResizeObserver) galleryResizeObserver = new ResizeObserver(entries => {
+    entries.forEach(({ target, contentRect }) => {
+      // Image positioning changes height too. Only width changes need a new
+      // packing pass; this also catches dialog/model widths settling after mount.
+      if (galleryWidths.get(target) !== contentRect.width) {
+        galleryWidths.set(target, contentRect.width);
+        scheduleRoot(target);
+      }
+    });
+  });
+  if (!observedGalleries.has(root)) { observedGalleries.add(root); galleryResizeObserver.observe(root); }
+}
 
 /** Saved preview cap from the nearest `[data-sp-viewport-layout]` host, if any. */
 export function readViewportLayoutHost(root) {
   const host = root?.closest?.('[data-sp-viewport-layout]');
   if (!host) return { viewportWidth: null, mediaMaxHeight: null };
   const viewportWidth = Number(host.getAttribute('data-sp-viewport-width'));
-  const mediaMaxHeight = Number(host.getAttribute('data-sp-media-max-height'));
+  const mediaHost = root.closest('[data-sp-media-max-height]') || host;
+  const mediaMaxHeight = Number(mediaHost.getAttribute('data-sp-media-max-height'));
   return {
     viewportWidth: viewportWidth > 0 ? viewportWidth : null,
     mediaMaxHeight: mediaMaxHeight > 0 ? mediaMaxHeight : null,
@@ -300,6 +320,8 @@ function applyVerticalLayout(items, height) {
 
 export function layoutImageGallery(root) {
   if (!root || !root.isConnected) return;
+  observeGalleryWidth(root);
+  if (!root.closest('[data-sp-media-layout]')) resetMediaLayout(root);
   const hostLayout = readViewportLayoutHost(root);
   const viewportWidth = hostLayout.viewportWidth
     ?? (typeof window !== 'undefined' ? window.innerWidth : 0);
@@ -322,6 +344,7 @@ export function layoutImageGallery(root) {
     const ar = getNaturalAR(img);
     const availableWidth = getContentWidth(root);
     if (availableWidth <= 0) return;
+    if (applyMediaLayout(root, [{ item: root, img, ar }], availableWidth)) return;
     const { maxDisplayHeight } = getLayoutTunables(availableWidth, viewportWidth, mediaMaxHeight);
     let h = ar > 0 ? availableWidth / ar : maxDisplayHeight;
     h = Math.min(maxDisplayHeight, h);
@@ -362,6 +385,7 @@ export function layoutImageGallery(root) {
   const isCustomGallery = root.classList.contains('sp-image-gallery');
   const rootWidth = getContentWidth(root);
   if (rootWidth <= 0) return;
+  if (cfg.mode !== 'vertical' && applyMediaLayout(root, allItems, rootWidth)) return;
   const stackMobile = shouldStackGalleryOnMobile(allItems.length, rootWidth, viewportWidth)
     && (isImagePicker || isCustomGallery)
     && cfg.mode !== 'vertical';
@@ -494,6 +518,11 @@ export function installImagePickerLayout() {
     const affectedRoots = new Set();
     for (const m of mutations) {
       if (m.type === 'childList') {
+        for (const node of m.removedNodes) {
+          for (const root of findGalleryRoots(node)) {
+            if (!root.isConnected) { galleryResizeObserver?.unobserve(root); observedGalleries.delete(root); galleryWidths.delete(root); }
+          }
+        }
         m.addedNodes.forEach((node) => {
           if (node.nodeType !== 1) return;
           findGalleryRoots(node).forEach((r) => affectedRoots.add(r));
