@@ -72,6 +72,12 @@ import NewsManagement from '../components/admin/NewsManagement';
 import SharedAssistantSubsidy from '../components/admin/SharedAssistantSubsidy';
 import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDialog';
 import { toAdminPreviewProject } from '../lib/adminPreviewProject';
+import {
+  coverSourceDetail,
+  describeTemplateCover,
+  resolveCoverStatuses,
+  TemplateCoverStatus,
+} from '../lib/templateCover';
 
 const projectImagePrefix = (project) => `${project.user_id}/${project.id}/`;
 const projectSurveyPath = (projectId) => `/survey?project=${encodeURIComponent(projectId)}`;
@@ -372,7 +378,7 @@ function compressImage(file, maxBytes = IMAGE_COMPRESS_TARGET_BYTES, quality = 0
   });
 }
 
-function TemplateImagesDialog({ template, open, onClose, onSaved }) {
+function TemplateImagesDialog({ template, open, onClose, onSaved, coverStatus }) {
   const { user } = useAuth();
   const [hfToken, setHfToken] = useState('');
   const [falKey, setFalKey] = useState('');
@@ -460,6 +466,21 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
   const libraryImages = templateId && templateId === imagesBoundId
     ? images
     : (template?.preloadedImages || []);
+  const landingStatus = template && coverStatus
+    ? describeTemplateCover(
+      {
+        id: template.id,
+        name: template.name,
+        thumbnail_url: thumbnailUrl,
+        preloadedImages: libraryImages,
+      },
+      {
+        coverFile: coverStatus.coverFile,
+        extraLibraryUrls: coverStatus.bundled,
+        presetUrls: coverStatus.presetUrls,
+      },
+    )
+    : null;
 
   if (!template) return null;
 
@@ -474,32 +495,16 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
       </DialogTitle>
       <DialogContent dividers>
         <Paper variant="outlined" sx={{ p: 1.5, mb: 2, display: 'flex', gap: 1.5, alignItems: 'center' }}>
-          <Box
-            sx={{
-              width: 96,
-              height: 64,
-              flexShrink: 0,
-              borderRadius: 1,
-              overflow: 'hidden',
-              bgcolor: 'grey.100',
-              backgroundImage: thumbnailUrl ? `url(${thumbnailUrl})` : 'none',
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-              border: '1px solid',
-              borderColor: 'divider',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            {!thumbnailUrl && (
-              <Typography variant="caption" color="text.secondary">无封面</Typography>
-            )}
-          </Box>
+          <TemplateCoverStatus
+            status={landingStatus}
+            testId={template.id ? `template-cover-dialog-${template.id}` : 'template-cover-dialog'}
+          />
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="subtitle2" fontWeight={700}>首页模板封面</Typography>
             <Typography variant="caption" color="text.secondary" display="block">
-              在下方勾选一张图片，点「设为首页封面」。会显示在落地页模板卡片上。
+              {landingStatus
+                ? coverSourceDetail(landingStatus)
+                : '正在读取封面。专用封面在仓库 cover_images；没有时才用这里设置的图片、模板图库或预览媒体库。'}
             </Typography>
             {thumbError && (
               <Alert severity="error" sx={{ mt: 1, py: 0 }}>{thumbError}</Alert>
@@ -507,7 +512,7 @@ function TemplateImagesDialog({ template, open, onClose, onSaved }) {
           </Box>
           {thumbnailUrl && (
             <Button size="small" disabled={thumbBusy} onClick={() => handleSetThumbnail(null)}>
-              清除
+              {landingStatus?.source === 'coverFile' ? '清除已选图片' : '清除'}
             </Button>
           )}
         </Paper>
@@ -642,6 +647,7 @@ function TemplateManagement() {
   const { user } = useAuth();
   const { t: ti } = useRegion();
   const [templates, setTemplates]         = useState([]);
+  const [coverById, setCoverById]         = useState({});
   const [loading, setLoading]             = useState(false);
   const [editTarget, setEditTarget]       = useState(null);
   const [editOpen, setEditOpen]           = useState(false);
@@ -699,6 +705,18 @@ function TemplateManagement() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!templates.length) {
+      setCoverById({});
+      return undefined;
+    }
+    resolveCoverStatuses(templates)
+      .then((next) => { if (!cancelled) setCoverById(next); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [templates]);
 
   const handleBulkFeatures = async ({ runL0 = true, runSeg = true } = {}) => {
     if (!isR2Configured()) {
@@ -1148,6 +1166,7 @@ function TemplateManagement() {
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
                 <TemplateSortLabel column="name" label="名称" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <TableCell>封面</TableCell>
                 <TemplateSortLabel column="year" label="年份" align="center" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TemplateSortLabel column="submitter" label="提交者" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <TemplateSortLabel column="category" label="分类" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
@@ -1162,7 +1181,7 @@ function TemplateManagement() {
             <TableBody>
               {sortedTemplates.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={10} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     暂无模板数据
                   </TableCell>
                 </TableRow>
@@ -1179,6 +1198,13 @@ function TemplateManagement() {
                         <Typography variant="caption" color="text.secondary">{t.id}</Typography>
                       </Box>
                     </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <TemplateCoverStatus
+                      status={coverById[t.id]}
+                      testId={`template-cover-${t.id}`}
+                      compact
+                    />
                   </TableCell>
                   <TableCell align="center">
                     <Typography variant="body2">{t.year || '—'}</Typography>
@@ -1297,6 +1323,7 @@ function TemplateManagement() {
       <TemplateImagesDialog
         template={imagesTarget}
         open={imagesOpen}
+        coverStatus={imagesTarget ? coverById[imagesTarget.id] : null}
         onClose={() => { setImagesOpen(false); setImagesTarget(null); }}
         onSaved={(opts) => { load(); if (!opts?.silent) showSnack('模板图片已更新'); }}
       />
