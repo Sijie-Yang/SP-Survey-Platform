@@ -6,7 +6,7 @@ import "survey-core/defaultV2.min.css";
 import { Accordion, AccordionDetails, AccordionSummary, Box, Alert, CircularProgress, Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
 import ExpandMore from '@mui/icons-material/ExpandMore';
 import ViewportLayoutFrame from '../ViewportLayoutFrame';
-import { attachPageEditor, attachQuestionEditor, bindLivePreviewEditing } from '../../lib/livePreviewEditing';
+import { attachPageEditor, attachQuestionEditor, attachSurveyHeader, bindLivePreviewEditing } from '../../lib/livePreviewEditing';
 import { applyContentWidthToModel, configForPreviewRefresh } from '../../lib/viewportLayout';
 import { convertToSurveyJS, generateCustomTheme, normalizeBuilderSurveyJson } from '../../lib/surveyStorage';
 import { themeJson } from "../../theme";
@@ -65,9 +65,11 @@ export function createSurveyPreviewModel(processedConfig, runtimeContext = null,
   } catch {
     // SurveyJS default styling
   }
-  model.mode = options.interactive ? 'edit' : 'display';
+  // Previews never accept answers. Full Preview still turns pages and edits layout.
+  model.mode = 'display';
   try {
     model.showProgressBar = 'off';
+    if (options.interactive) model.showPreviewBeforeComplete = false;
   } catch { /* ignore */ }
   return model;
 }
@@ -77,6 +79,14 @@ export const DEFAULT_PREVIEW_LABELS = {
   questionDescription: 'Question description',
   pageTitle: 'Page title',
   pageDescription: 'Page description',
+  surveyTitle: 'Survey title',
+  surveyDescription: 'Survey description',
+  editSurveyTitle: 'Edit survey title',
+  editSurveyDescription: 'Edit survey description',
+  moveUp: 'Move up',
+  moveDown: 'Move down',
+  reorderQuestion: 'Question {index} of {count}: {name}',
+  reorderPage: 'Page {index} of {count}: {name}',
   moveQuestionUp: 'Move question up',
   moveQuestionDown: 'Move question down',
   movePageUp: 'Move page up',
@@ -147,6 +157,7 @@ export default function SurveyPreview({
   onConfigChange = null,
   viewport = 'desktop',
   contentWidth = null,
+  questionWidth = null,
   mediaMaxHeight = null,
   labels = DEFAULT_PREVIEW_LABELS,
 }) {
@@ -526,15 +537,39 @@ export default function SurveyPreview({
 
   useEffect(() => {
     if (!canEdit || !model) return undefined;
-    const questions = typeof model.getAllQuestions === 'function' ? model.getAllQuestions() : [];
-    questions.forEach((question) => {
-      const root = question?.react?.rootRef?.current;
-      if (root) attachQuestionEditor(root, question, editorApi);
-    });
-    const pageRoot = document.querySelector('[data-preview-mode="edit"] .sd-page');
-    if (pageRoot && model.currentPage) attachPageEditor(pageRoot, model.currentPage, editorApi);
+    const title = config?.title || '';
+    const description = config?.description || '';
+    const logo = config?.logo || '';
+    if ((model.title || '') !== title) model.title = title;
+    if ((model.description || '') !== description) model.description = description;
+    if ((model.logo || '') !== logo) model.logo = logo;
     return undefined;
-  }, [canEdit, model, editorApi, config, viewport, contentWidth, mediaMaxHeight]);
+  }, [canEdit, model, config]);
+
+  useEffect(() => {
+    if (!canEdit || !model) return undefined;
+    let cancelled = false;
+    const bind = () => {
+      if (cancelled) return;
+      const questions = typeof model.getAllQuestions === 'function' ? model.getAllQuestions() : [];
+      questions.forEach((question) => {
+        const root = question?.react?.rootRef?.current;
+        if (root) attachQuestionEditor(root, question, editorApi);
+      });
+      const previewRoot = document.querySelector('[data-preview-mode="format"]');
+      const pageRoot = previewRoot?.querySelector('.sd-page');
+      if (pageRoot && model.currentPage) attachPageEditor(pageRoot, model.currentPage, editorApi);
+      if (previewRoot) attachSurveyHeader(previewRoot, model, editorApi);
+    };
+    bind();
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(bind);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [canEdit, model, editorApi, config, viewport, contentWidth, questionWidth, mediaMaxHeight]);
 
   useEffect(() => {
     if (!interactive || !model) return;
@@ -592,7 +627,7 @@ export default function SurveyPreview({
 
     return (
       <Box
-        data-preview-mode={interactive ? 'edit' : 'display'}
+        data-preview-mode={interactive ? 'format' : 'display'}
         data-preview-page={String((model.currentPageNo || 0) + 1)}
         sx={{ maxHeight: interactive ? 'none' : '70vh', overflow: 'auto' }}
       >
@@ -645,6 +680,7 @@ export default function SurveyPreview({
           <ViewportLayoutFrame
             forcedViewport={viewport}
             contentWidth={contentWidth}
+            questionWidth={questionWidth}
             mediaMaxHeight={mediaMaxHeight}
             surveyModel={model}
           >

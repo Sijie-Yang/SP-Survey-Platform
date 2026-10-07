@@ -7,6 +7,7 @@ import {
   setViewportLayoutField,
   updatePageText,
   updateQuestionText,
+  updateSurveyText,
   viewportSlot,
 } from './viewportLayout';
 
@@ -41,16 +42,19 @@ test('media size and content width are stored separately per viewport', () => {
   expect(resolvePublishedFrame(sized, 1280)).toEqual({
     viewport: 'desktop',
     contentWidth: 1040,
+    questionWidth: null,
     mediaMaxHeight: 400,
   });
   expect(resolvePublishedFrame(sized, 390)).toEqual({
     viewport: 'mobile',
     contentWidth: null,
+    questionWidth: null,
     mediaMaxHeight: 220,
   });
   expect(resolvePublishedFrame(config, 1280)).toEqual({
     viewport: 'desktop',
     contentWidth: null,
+    questionWidth: null,
     mediaMaxHeight: null,
   });
   const model = {};
@@ -77,9 +81,35 @@ test('question and page text and order are shared across viewports', () => {
   expect(updateQuestionText(titled, 'q1', 'title', 'Alpha edited')).toBe(titled);
 });
 
+test('question card width is stored per viewport and stays inside the content width', () => {
+  const desktopCard = setViewportLayoutField(config, 'desktop', 'questionWidth', 720);
+  const both = setViewportLayoutField(desktopCard, 'mobile', 'questionWidth', 300);
+  expect(both.viewportLayout.desktop).toEqual({ questionWidth: 720 });
+  expect(both.viewportLayout.mobile).toEqual({ questionWidth: 300 });
+  expect(viewportSlot(both, 'desktop').questionWidth).toBe(720);
+  expect(viewportSlot(both, 'mobile').questionWidth).toBe(300);
+  expect(resolvePublishedFrame(both, 1280).questionWidth).toBe(720);
+  const widerCard = setViewportLayoutField(
+    setViewportLayoutField(config, 'desktop', 'contentWidth', 800),
+    'desktop',
+    'questionWidth',
+    1100,
+  );
+  expect(widerCard.viewportLayout.desktop.questionWidth).toBe(1100);
+  expect(viewportSlot(widerCard, 'desktop').questionWidth).toBe(800);
+  expect(resolvePublishedFrame(widerCard, 1280)).toMatchObject({
+    contentWidth: 800,
+    questionWidth: 800,
+  });
+  expect(updateSurveyText(config, 'title', 'Renamed').title).toBe('Renamed');
+  expect(updateSurveyText(config, 'logo', 'https://example.com/logo.png').logo).toBe('https://example.com/logo.png');
+  expect(updateSurveyText(config, 'title', 'Study')).toBe(config);
+});
+
 test('preview refresh ignores text and viewport size but keeps question order', () => {
   const sized = setViewportLayoutField(config, 'desktop', 'contentWidth', 1000);
   const retitled = updateQuestionText(sized, 'q2', 'title', 'Beta edited');
-  expect(configForPreviewRefresh(retitled)).toEqual(configForPreviewRefresh(config));
+  const headed = updateSurveyText(updateSurveyText(retitled, 'title', 'Other'), 'logo', 'https://example.com/a.png');
+  expect(configForPreviewRefresh(headed)).toEqual(configForPreviewRefresh(config));
   expect(configForPreviewRefresh(moveQuestion(config, 'q1', 1))).not.toEqual(configForPreviewRefresh(config));
 });

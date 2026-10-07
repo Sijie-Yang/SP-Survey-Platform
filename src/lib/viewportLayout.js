@@ -9,13 +9,13 @@
 import { MOBILE_WIDTH } from './imagePickerLayout';
 
 export const VIEWPORT_LAYOUT_DEFAULTS = {
-  desktop: { contentWidth: 900, mediaMaxHeight: 480 },
-  mobile: { contentWidth: 390, mediaMaxHeight: 320 },
+  desktop: { contentWidth: 900, questionWidth: 900, mediaMaxHeight: 480 },
+  mobile: { contentWidth: 390, questionWidth: 390, mediaMaxHeight: 320 },
 };
 
 export const VIEWPORT_LAYOUT_LIMITS = {
-  desktop: { contentWidth: [480, 1400], mediaMaxHeight: [80, 800] },
-  mobile: { contentWidth: [280, 480], mediaMaxHeight: [80, 800] },
+  desktop: { contentWidth: [480, 1400], questionWidth: [280, 1400], mediaMaxHeight: [80, 800] },
+  mobile: { contentWidth: [280, 480], questionWidth: [200, 480], mediaMaxHeight: [80, 800] },
 };
 
 function finite(value) {
@@ -38,12 +38,17 @@ export function viewportSlot(config, viewport) {
   const saved = config?.viewportLayout?.[key] || {};
   const defaults = VIEWPORT_LAYOUT_DEFAULTS[key];
   const contentWidth = finite(saved.contentWidth);
+  const questionWidth = finite(saved.questionWidth);
   const mediaMaxHeight = finite(saved.mediaMaxHeight);
+  const resolvedContent = contentWidth > 0 ? contentWidth : defaults.contentWidth;
+  const resolvedQuestion = questionWidth > 0 ? questionWidth : resolvedContent;
   return {
     viewport: key,
-    contentWidth: contentWidth > 0 ? contentWidth : defaults.contentWidth,
+    contentWidth: resolvedContent,
+    questionWidth: Math.min(resolvedQuestion, resolvedContent),
     mediaMaxHeight: mediaMaxHeight > 0 ? mediaMaxHeight : defaults.mediaMaxHeight,
     contentWidthSaved: contentWidth > 0,
+    questionWidthSaved: questionWidth > 0,
     mediaMaxHeightSaved: mediaMaxHeight > 0,
   };
 }
@@ -68,12 +73,18 @@ export function setViewportLayoutField(config, viewport, field, value) {
 export function resolvePublishedFrame(config, viewportWidth) {
   const viewport = viewportWidth > 0 && viewportWidth < MOBILE_WIDTH ? 'mobile' : 'desktop';
   const saved = config?.viewportLayout?.[viewport];
-  if (!saved) return { viewport, contentWidth: null, mediaMaxHeight: null };
+  if (!saved) return { viewport, contentWidth: null, questionWidth: null, mediaMaxHeight: null };
   const contentWidth = finite(saved.contentWidth);
+  const questionWidth = finite(saved.questionWidth);
   const mediaMaxHeight = finite(saved.mediaMaxHeight);
+  const resolvedContent = contentWidth > 0 ? contentWidth : null;
+  const resolvedQuestion = questionWidth > 0 ? questionWidth : null;
   return {
     viewport,
-    contentWidth: contentWidth > 0 ? contentWidth : null,
+    contentWidth: resolvedContent,
+    questionWidth: resolvedQuestion && resolvedContent
+      ? Math.min(resolvedQuestion, resolvedContent)
+      : resolvedQuestion,
     mediaMaxHeight: mediaMaxHeight > 0 ? mediaMaxHeight : null,
   };
 }
@@ -82,6 +93,12 @@ export function applyContentWidthToModel(model, contentWidth) {
   if (!model || !(finite(contentWidth) > 0)) return;
   model.widthMode = 'static';
   model.width = `${Math.round(contentWidth)}px`;
+}
+
+export function updateSurveyText(config, field, value) {
+  if (!config || config[field] === value) return config;
+  if (field !== 'title' && field !== 'description' && field !== 'logo') return config;
+  return { ...config, [field]: value };
 }
 
 export function updateQuestionText(config, questionName, field, value) {
@@ -146,6 +163,7 @@ export function configForPreviewRefresh(config) {
   delete rest.viewportLayout;
   delete rest.title;
   delete rest.description;
+  delete rest.logo;
   if (!Array.isArray(rest.pages)) return rest;
   rest.pages = rest.pages.map((page) => {
     if (!page || typeof page !== 'object') return page;

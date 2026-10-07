@@ -589,6 +589,42 @@ iframe[title="skill-question"] {
   border-radius: 6px; background: #fff; color: #9b3418; cursor: pointer;
   font: inherit; line-height: 1.4; max-width: 100%;
 }
+/* Full Preview is a layout studio: answer controls stay inert, text stays editable. */
+[data-preview-mode="format"] .sd-question__content {
+  pointer-events: none;
+}
+[data-preview-mode="format"] [data-sp-edit] {
+  pointer-events: auto;
+  outline: 1px dashed rgba(25, 118, 210, 0.55);
+  outline-offset: 2px;
+  cursor: text;
+  border-radius: 2px;
+  min-height: 1em;
+}
+[data-preview-mode="format"] [data-sp-edit]:focus {
+  outline: 2px solid #1976d2;
+  background: rgba(25, 118, 210, 0.06);
+}
+[data-preview-mode="format"] [data-sp-edit]:empty::before {
+  content: attr(data-sp-placeholder);
+  color: #8b9098;
+}
+[data-preview-mode="format"] [data-sp-reorder],
+[data-preview-mode="format"] [data-sp-reorder] * {
+  pointer-events: auto;
+}
+.sp-media-player {
+  display: block;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: var(--sp-media-max-height, 480px) !important;
+  object-fit: contain !important;
+  background: transparent !important;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 @media (max-width: 600px) {
   .sp-survey-with-progress .sd-title.sd-container-modern__title { padding-top: 12px; padding-bottom: 12px; }
   .sp-survey-with-progress .sd-header__text h3 { font-size: 1.25rem; line-height: 1.4; }

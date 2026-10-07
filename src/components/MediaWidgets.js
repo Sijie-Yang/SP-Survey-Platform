@@ -28,6 +28,20 @@ export function ImageGalleryGrid({
         </Box>)}
     </Box>;
 }
+/** Height follows --sp-media-max-height; the box keeps the media's own ratio. */
+const huggedMediaStyle = {
+  display: 'block',
+  width: 'auto',
+  maxWidth: '100%',
+  height: 'auto',
+  maxHeight: 'var(--sp-media-max-height, 480px)',
+  objectFit: 'contain',
+  borderRadius: 8,
+  marginLeft: 'auto',
+  marginRight: 'auto',
+  background: 'transparent',
+};
+
 export function MediaPlayer({
   url,
   type,
@@ -37,13 +51,7 @@ export function MediaPlayer({
 }) {
   if (!url) return <Typography color="text.secondary">No media selected</Typography>;
   if (type === 'video') {
-    return <video key={url} src={url} controls onCanPlay={onReady} onError={onError} preload={onReady ? 'auto' : 'metadata'} playsInline style={{
-      display: 'block',
-      width: '100%',
-      maxHeight: 'var(--sp-media-max-height, 480px)',
-      borderRadius: 8,
-      background: '#111'
-    }} />;
+    return <video key={url} className="sp-media-player" src={url} controls onCanPlay={onReady} onError={onError} preload={onReady ? 'auto' : 'metadata'} playsInline style={huggedMediaStyle} />;
   }
   if (type === 'audio') {
     return <audio key={url} src={url} onCanPlay={onReady} onError={onError} preload={onReady ? 'auto' : 'metadata'} controls style={{
@@ -51,13 +59,7 @@ export function MediaPlayer({
       width: '100%'
     }} />;
   }
-  return <img key={url} src={url} alt={name || 'media'} onLoad={onReady} onError={onError} style={{
-    display: 'block',
-    width: '100%',
-    maxHeight: 'var(--sp-media-max-height, 480px)',
-    objectFit: 'contain',
-    borderRadius: 8
-  }} />;
+  return <img key={url} className="sp-media-player" src={url} alt={name || 'media'} onLoad={onReady} onError={onError} style={huggedMediaStyle} />;
 }
 export function MediaGallery({
   items = []
