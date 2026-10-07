@@ -1,3 +1,6 @@
+import { micromark } from 'micromark';
+import { gfm, gfmHtml } from 'micromark-extension-gfm';
+
 /**
  * Question and page descriptions are plain SurveyJS text unless markdown is
  * enabled on that localizable string. Titles already opt in; descriptions do not.
@@ -5,37 +8,12 @@
 
 const attached = new WeakSet();
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function inlineMarkdown(escaped) {
-  return escaped
-    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
-}
-
+// One safe parser for the source editor, Layout Studio and participant survey.
+// Raw HTML and unsafe URL protocols stay disabled (micromark defaults).
 export function descriptionMarkdownToHtml(text) {
   const source = String(text || '').replace(/\r\n/g, '\n').trim();
   if (!source) return '';
-  return source.split(/\n{2,}/).map((block) => {
-    const lines = block.split('\n');
-    if (lines.every((line) => /^\s*[-*]\s+\S/.test(line))) {
-      const items = lines.map((line) => `<li>${inlineMarkdown(escapeHtml(line.replace(/^\s*[-*]\s+/, '')))}</li>`).join('');
-      return `<ul>${items}</ul>`;
-    }
-    if (lines.every((line) => /^\s*\d+\.\s+\S/.test(line))) {
-      const items = lines.map((line) => `<li>${inlineMarkdown(escapeHtml(line.replace(/^\s*\d+\.\s+/, '')))}</li>`).join('');
-      return `<ol>${items}</ol>`;
-    }
-    const body = lines.map((line) => inlineMarkdown(escapeHtml(line))).join('<br>');
-    return `<p>${body}</p>`;
-  }).join('');
+  return micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()] });
 }
 
 function enableDescriptionMarkdown(element) {

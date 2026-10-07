@@ -84,6 +84,7 @@ import {
 const ImageDataset = lazy(() => import('./components/admin/ImageDataset'));
 const SurveyBuilder = lazy(() => import('./components/admin/SurveyBuilder'));
 const SurveyPreview = lazy(() => import('./components/admin/SurveyPreview'));
+const FullSurveyPreview = lazy(() => import('./components/admin/FullSurveyPreview'));
 const ResultsAnalysis = lazy(() => import('./components/admin/ResultsAnalysis'));
 const ResearcherPractice = lazy(() => import('./components/admin/ResearcherPractice'));
 const SiliconSamples = lazy(() => import('./components/admin/SiliconSamples'));
@@ -252,6 +253,7 @@ export default function AdminApp() {
   }, []);
   const [surveyConfig, setSurveyConfig] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [layoutStudioOpen, setLayoutStudioOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -1833,6 +1835,8 @@ export default function AdminApp() {
                   hideAssistant
                   onEditorSelectionChange={setEditorSelection}
                   onOpenAssistant={() => setAiSidebarOpen(true)}
+                  onOpenLayoutStudio={() => setLayoutStudioOpen(true)}
+                  onOpenPreview={() => setPreviewOpen(true)}
                   editorCommitKey={editorCommitKey}
                 />
               ) : (
@@ -1916,11 +1920,9 @@ export default function AdminApp() {
         )}
       </Container>
 
-      {/* Preview Dialog */}
+      {/* Original survey preview, shared by the toolbar and builder. */}
       <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} maxWidth="lg" fullWidth>
-        <DialogTitle>
-          📋 Survey Preview - Exact Live Survey Replica
-        </DialogTitle>
+        <DialogTitle>{t.previewSurvey}</DialogTitle>
         <DialogContent>
           <Suspense fallback={<AdminLoadingState label="Loading preview…" />}>
             {surveyConfig ? (
@@ -1931,7 +1933,31 @@ export default function AdminApp() {
           </Suspense>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPreviewOpen(false)}>Close</Button>
+          <Button onClick={() => setPreviewOpen(false)}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Layout Studio */}
+      <Dialog open={layoutStudioOpen} onClose={() => setLayoutStudioOpen(false)} className="sp-studio-dialog" maxWidth={false} fullWidth PaperProps={{ sx: { maxWidth: 'none', m: 1.5, width: 'calc(100% - 24px)', maxHeight: 'calc(100% - 24px)' } }}>
+        <DialogTitle>{t.builderLayoutStudio}</DialogTitle>
+        <DialogContent sx={{ p: 0, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+          <Suspense fallback={<AdminLoadingState label="Loading preview…" />}>
+            {surveyConfig ? (
+              <FullSurveyPreview
+                config={surveyConfig}
+                currentProject={currentProject}
+                onConfigChange={handleSurveyConfigChange}
+                onSave={() => performSave({ silent: false })}
+                saveStatus={saveStatus}
+                onOpenRelease={() => { setLayoutStudioOpen(false); setTabValue(3); }}
+              />
+            ) : (
+              <Typography>No survey configuration available</Typography>
+            )}
+          </Suspense>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLayoutStudioOpen(false)}>{t.resultsClose}</Button>
         </DialogActions>
       </Dialog>
 

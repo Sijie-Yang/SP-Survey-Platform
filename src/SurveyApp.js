@@ -1,4 +1,5 @@
 import ParticipantSurveySurface from './components/ParticipantSurveySurface';
+import ViewportLayoutFrame from './components/ViewportLayoutFrame';
 import { submitWithRecovery } from './lib/recoverableSubmission';
 import { handleSurveyMediaError } from './lib/mediaRecovery';
 import { surveyRevision } from './lib/surveyRevision';
@@ -63,6 +64,7 @@ function withTimeout(promise, ms, fallback) {
 
 export default function SurveyApp() {
   const [surveyModel, setSurveyModel] = useState(null);
+  const [publishedSurveyJson, setPublishedSurveyJson] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Loading survey…');
   const [error, setError] = useState(null);
@@ -1211,6 +1213,7 @@ export default function SurveyApp() {
       window.lastSurveyLoadTime = Date.now();
       console.log('✅ Survey initialized successfully at:', new Date(window.lastSurveyLoadTime).toISOString());
       
+      setPublishedSurveyJson(finalSurveyJson);
       setSurveyModel(model);
       setSurveyPhase('active');
       setError(null);
@@ -1409,7 +1412,9 @@ export default function SurveyApp() {
                 Research annotation mode: Round {repeatProgress.current} of {repeatProgress.total}
               </Alert>
             )}
-            <Survey model={surveyModel} />
+            <ViewportLayoutFrame config={publishedSurveyJson} surveyModel={surveyModel}>
+              <Survey model={surveyModel} />
+            </ViewportLayoutFrame>
           </ParticipantSurveySurface>
         </SurveyTrialNavProvider>
       )}
@@ -1434,7 +1439,7 @@ export default function SurveyApp() {
                 clearPendingSubmission(projectIdRef.current, resumeDialog.draft.participantId);
               }
               participantIdRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-              const { model, imageTracker } = resumeDialog;
+              const { model, imageTracker, finalSurveyJson } = resumeDialog;
               setResumeDialog(null);
               resumeChoiceRef.current = 'fresh';
               draftSavingEnabledRef.current = true;
@@ -1445,6 +1450,9 @@ export default function SurveyApp() {
               displayedMediaGroupsRef.current = {};
               displayedMediaCategoriesRef.current = {};
               setDisplayedImagesMap(imageTracker);
+              // This branch bypasses initializeSurvey's final state update. Keep
+              // the latest published layout paired with the fresh survey model.
+              setPublishedSurveyJson(finalSurveyJson);
               setSurveyModel(model);
               setSurveyPhase('active');
               setLoading(false);

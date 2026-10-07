@@ -1,3 +1,4 @@
+import DescriptionMarkdownEditor from './DescriptionMarkdownEditor';
 import useUnsavedChanges from '../../hooks/useUnsavedChanges';
 import React, { useEffect, useState, useRef } from 'react';
 import {
@@ -448,17 +449,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
                 sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
               />
               
-              <TextField
-                fullWidth
-                variant="outlined"
-                multiline
-                rows={3}
-                label={tr("Page Description")}
-                value={editedPage.description || ''}
-                onChange={(e) => handlePageChange('description', e.target.value)}
-                helperText={tr("Optional description to explain what this page is about")}
-                sx={{ '& .MuiInputLabel-root': { backgroundColor: 'white', px: 1 } }}
-              />
+              <DescriptionMarkdownEditor label={tr("Page Description")} value={editedPage.description || ''} onChange={(value) => handlePageChange('description', value)} />
               <PageVisibilityField page={editedPage} surveyConfig={surveyConfig} onChange={(v) => handlePageChange('visibleIf', v)} />
             </Box>
           </Box>

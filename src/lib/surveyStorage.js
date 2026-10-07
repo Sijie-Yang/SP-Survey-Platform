@@ -138,6 +138,7 @@ export const convertToSurveyJS = (adminConfig) => {
     description: adminConfig.description,
     logo: adminConfig.logo,
     logoPosition: adminConfig.logoPosition,
+    viewportLayout: adminConfig.viewportLayout,
     pages: adminConfig.pages?.map(page => {
       const mappedElements = page.elements?.map(element => {
         const question = normalizeBuilderQuestion(element);

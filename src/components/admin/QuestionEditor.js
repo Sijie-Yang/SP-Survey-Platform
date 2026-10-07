@@ -1,3 +1,4 @@
+import DescriptionMarkdownEditor from './DescriptionMarkdownEditor';
 import { questionSettingErrorText, useQuestionEditorText } from '../../contexts/questionEditorI18n';
 import { isChineseLanguage, uiPair } from '../../lib/uiLanguages';
 import QuestionDataPreview from './QuestionDataPreview';
@@ -1404,12 +1405,7 @@ export default function QuestionEditor({
                 }
               }} />
 
-              <TextField name="description" fullWidth variant="outlined" multiline rows={6} label={tr("Question Description (Optional)")} value={editedQuestion.description || ''} onChange={(e) => handleQuestionChange('description', e.target.value)} helperText={tr("Shown under the question. A blank line starts a new paragraph. **bold** and lines starting with - become bold and lists.")} sx={{
-                '& .MuiInputLabel-root': {
-                  backgroundColor: 'white',
-                  px: 1
-                }
-              }} />
+              <DescriptionMarkdownEditor label={tr("Question Description (Optional)")} value={editedQuestion.description || ''} onChange={(value) => handleQuestionChange('description', value)} />
 
               {editedQuestion.type === 'imageannotation' && <Alert severity="info">{tr("Participants can draw points, lines, polygons, and bounding boxes on an image from your sampling settings. Optionally define class labels, then set tools and min/max counts in the task options below.")} </Alert>}
 
