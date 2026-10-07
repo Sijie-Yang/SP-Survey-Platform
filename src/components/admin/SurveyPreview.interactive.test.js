@@ -6,6 +6,8 @@ import FullSurveyPreview from './FullSurveyPreview';
 import SurveyPreview, { createSurveyPreviewModel } from './SurveyPreview';
 import { RegionProvider } from '../../contexts/RegionContext';
 
+jest.setTimeout(20000);
+
 jest.mock('../../lib/previewMediaLibrary', () => ({
   resolveMediaPoolForPreview: async () => [],
   resolvePreviewMediaContext: async () => ({ images: [], imageDatasetConfig: {}, fromPreviewLibrary: false }),

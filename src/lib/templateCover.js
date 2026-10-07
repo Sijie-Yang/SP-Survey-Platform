@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Box } from '@mui/material';
+import { Box, Chip, Stack, Tooltip } from '@mui/material';
 import { filterMediaByType, inferMediaType } from './mediaUtils';
 import { listPreviewMedia } from './previewMediaLibrary';
 import { supabase } from './supabase';
@@ -32,23 +32,92 @@ export function collectImageUrls(preloadedImages) {
  * own media library, then bundled extras, then the shared preview library.
  * Picks are stable per template id.
  */
-export function resolveTemplateCover(template, {
+export function resolveTemplateCover(template, options) {
+  return describeTemplateCover(template, options).url;
+}
+
+export const COVER_SOURCE_LABELS = {
+  coverFile: '专用封面',
+  thumbnail: '已设封面',
+  library: '模板图库',
+  bundled: '内置图库',
+  preset: '预览图库',
+  default: '默认图',
+};
+
+export function coverFileUrl(coverFile) {
+  if (!coverFile) return '';
+  const file = String(coverFile);
+  return file.startsWith('/') ? file : `${TEMPLATE_COVER_DIR}/${file}`;
+}
+
+/** Where the landing cover comes from, in the same order as resolveTemplateCover. */
+export function describeTemplateCover(template, {
   coverFile,
   extraLibraryUrls = [],
   presetUrls = [],
 } = {}) {
-  if (coverFile) {
-    return String(coverFile).startsWith('/') ? coverFile : `${TEMPLATE_COVER_DIR}/${coverFile}`;
-  }
-  const chosen = template?.thumbnail_url || template?.thumbnailUrl;
-  if (chosen) return chosen;
+  const id = template?.id || template?.name;
   const own = collectImageUrls(template?.preloaded_images || template?.preloadedImages);
   const bundled = extraLibraryUrls.filter(Boolean);
-  // Keep the template's own images ahead of bundled extras. Hashing them as one
-  // pool let a bundled URL replace a stored library image (id "study" picks index 1).
-  const pool = own.length ? own : (bundled.length ? bundled : presetUrls);
-  if (!pool.length) return DEFAULT_TEMPLATE_COVER;
-  return pool[hashString(template?.id || template?.name) % pool.length] || DEFAULT_TEMPLATE_COVER;
+  const presets = presetUrls.filter(Boolean);
+  const stable = (urls) => (urls.length ? urls[hashString(id) % urls.length] : '');
+  const dedicated = coverFileUrl(coverFile);
+  const thumbnail = template?.thumbnail_url || template?.thumbnailUrl || '';
+  let source = 'default';
+  let url = DEFAULT_TEMPLATE_COVER;
+  if (dedicated) {
+    source = 'coverFile';
+    url = dedicated;
+  } else if (thumbnail) {
+    source = 'thumbnail';
+    url = thumbnail;
+  } else if (own.length) {
+    source = 'library';
+    url = stable(own);
+  } else if (bundled.length) {
+    // Own library stays ahead of bundled files. One shared pool let a bundled
+    // URL replace a stored library image (id "study" picks index 1).
+    source = 'bundled';
+    url = stable(bundled);
+  } else if (presets.length) {
+    source = 'preset';
+    url = stable(presets);
+  }
+  const candidates = uniqueUrls([
+    dedicated,
+    thumbnail,
+    own.length ? stable(own) : '',
+    bundled.length ? stable(bundled) : '',
+    presets.length ? stable(presets) : '',
+    DEFAULT_TEMPLATE_COVER,
+  ]);
+  return {
+    source,
+    url: url || candidates[0] || DEFAULT_TEMPLATE_COVER,
+    candidates,
+    coverFile: coverFile || '',
+  };
+}
+
+export function coverSourceDetail(status) {
+  if (!status?.source) return '';
+  if (status.source === 'coverFile') {
+    return `落地页使用仓库封面 ${coverFileUrl(status.coverFile)}。媒体库里另选的图片不会替换这张封面。`;
+  }
+  if (status.source === 'thumbnail') {
+    return '落地页使用这里设置的封面。清除后会改用模板图片库，没有图片再用预览媒体库。';
+  }
+  if (status.source === 'library') {
+    return '没有专用封面，也没有单独设置。落地页从该模板自己的图片库取一张。';
+  }
+  if (status.source === 'bundled') {
+    return '没有专用封面。落地页使用仓库里该模板自带的图片。';
+  }
+  if (status.source === 'preset') {
+    return '没有专用封面，模板自己也没有图片。落地页使用预览媒体库。';
+  }
+  return '没有可用图片。落地页使用默认封面。';
 }
 
 let coverIndexPromise;
@@ -113,22 +182,34 @@ function uniqueUrls(urls) {
   return list;
 }
 
+/** Landing cover plus the layer it came from (cover file, thumbnail, library, preset). */
+export async function resolveTemplateCoverStatus(template, presetUrls = [], coverIndex = {}) {
+  const coverFile = coverIndex?.[template?.id] || '';
+  const bundledEntries = coverFile ? [] : await loadBundledMediaEntries(template?.id);
+  const bundled = bundledEntries.map((entry) => entry.url);
+  const described = describeTemplateCover(template, {
+    coverFile,
+    extraLibraryUrls: bundled,
+    presetUrls,
+  });
+  return { ...described, bundled, presetUrls: (presetUrls || []).filter(Boolean) };
+}
+
+export async function resolveCoverStatuses(templates) {
+  const list = (templates || []).filter((template) => template?.id);
+  if (!list.length) return {};
+  const [coverIndex, presetUrls] = await Promise.all([loadCoverIndex(), loadPresetUrls()]);
+  const statuses = {};
+  await Promise.all(list.map(async (template) => {
+    statuses[template.id] = await resolveTemplateCoverStatus(template, presetUrls, coverIndex);
+  }));
+  return statuses;
+}
+
 /** Ordered covers: dedicated file, saved thumbnail, template library, bundled files, preset. */
 export async function coverCandidatesForTemplate(template, presetUrls = [], coverIndex = {}) {
-  const id = template?.id;
-  const coverFile = coverIndex?.[id];
-  const own = collectImageUrls(template?.preloaded_images || template?.preloadedImages);
-  const bundledEntries = coverFile ? [] : await loadBundledMediaEntries(id);
-  const bundled = bundledEntries.map((entry) => entry.url);
-  const stable = (urls) => (urls.length ? urls[hashString(id || template?.name) % urls.length] : '');
-  return uniqueUrls([
-    coverFile ? (String(coverFile).startsWith('/') ? coverFile : `${TEMPLATE_COVER_DIR}/${coverFile}`) : '',
-    template?.thumbnail_url || template?.thumbnailUrl || '',
-    stable(own),
-    stable(bundled),
-    stable(presetUrls),
-    DEFAULT_TEMPLATE_COVER,
-  ]);
+  const status = await resolveTemplateCoverStatus(template, presetUrls, coverIndex);
+  return status.candidates;
 }
 
 export async function resolveCovers(ids) {
@@ -163,6 +244,49 @@ export async function resolveCovers(ids) {
 export function TemplateCoverImage({ candidates, alt, sx }) {
   const { src, onError } = useCoverCandidate(candidates);
   return <Box component="img" src={src} alt={alt || ''} onError={onError} sx={sx} />;
+}
+
+export function TemplateCoverStatus({ status, testId = 'template-cover', compact = false }) {
+  const label = COVER_SOURCE_LABELS[status?.source] || '';
+  const width = compact ? 72 : 96;
+  const height = compact ? 48 : 64;
+  if (!status?.url) {
+    return (
+      <Box
+        data-testid={testId}
+        sx={{ width, height, borderRadius: 1, bgcolor: 'grey.100', flexShrink: 0 }}
+      />
+    );
+  }
+  return (
+    <Stack spacing={0.5} alignItems="flex-start" data-testid={testId} data-cover-source={status.source}>
+      <TemplateCoverImage
+        candidates={status.candidates?.length ? status.candidates : [status.url]}
+        alt={label}
+        sx={{
+          width,
+          height,
+          objectFit: 'cover',
+          borderRadius: 1,
+          bgcolor: 'grey.100',
+          border: '1px solid',
+          borderColor: 'divider',
+          display: 'block',
+        }}
+      />
+      {label && (
+        <Tooltip title={coverSourceDetail(status) || label}>
+          <Chip
+            size="small"
+            label={label}
+            color={status.source === 'coverFile' ? 'success' : status.source === 'thumbnail' ? 'primary' : 'default'}
+            variant={status.source === 'coverFile' || status.source === 'thumbnail' ? 'filled' : 'outlined'}
+            sx={{ height: 20, '& .MuiChip-label': { px: 0.75, fontSize: '0.65rem' } }}
+          />
+        </Tooltip>
+      )}
+    </Stack>
+  );
 }
 
 export function useCoverCandidate(candidates) {
