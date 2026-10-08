@@ -1054,7 +1054,8 @@ export const adminI18n = {
 
     trialDoNTimes: 'You will do this {n} times. This is {current} of {n}.',
     trialProgressCount: 'Completed {done} / {n}. {left} remaining.',
-    trialAutoAdvance: 'After you choose, the next round starts automatically.',
+    trialAutoAdvance: 'After you answer, the next round starts automatically.',
+    trialAutoAdvanceAllocation: 'The next round starts when every option is set or the points are all used. Use Next round to move on with points left.',
     trialUseNext: 'Use Next round after you answer.',
     trialLastRound: 'Last round — then continue the survey.',
     trialAllDone: 'All {n} rounds answered.',
@@ -2316,7 +2317,8 @@ export const adminI18n = {
 
     trialDoNTimes: '本题共需完成 {n} 轮。当前第 {current} / {n} 轮。',
     trialProgressCount: '已完成 {done} / {n}，剩余 {left} 轮。',
-    trialAutoAdvance: '选择后会自动进入下一轮。',
+    trialAutoAdvance: '作答后会自动进入下一轮。',
+    trialAutoAdvanceAllocation: '每个选项都设好，或点数用完后，会自动进入下一轮。若想留有剩余点数，请点「下一轮」。',
     trialUseNext: '答完后请点「下一轮」。',
     trialLastRound: '最后一轮 — 完成后即可继续问卷。',
     trialAllDone: '已完成全部 {n} 轮。',

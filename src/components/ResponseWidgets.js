@@ -1,8 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { isChineseLanguage, uiPair } from '../lib/uiLanguages';
 import { Box, Typography, Slider, TextField, Chip, Button } from '@mui/material';
+import { allocationChoiceMax, clampAllocationPoints } from '../lib/allocationStats';
 import { dimensionDisplayName, dimensionIncomplete, dimensionPoles, sliderScale } from '../lib/sliderScale';
 import { ImageGalleryGrid } from './MediaWidgets';
+import { useTrialAdvanceHold } from './trialAdvanceHold';
 
 /**
  * Slider group (semantic differential): multiple bipolar dimensions rated
@@ -23,7 +25,12 @@ export function SliderGroupContent({
   autoPersistDefaults = false
 }) {
   const zh = isChineseLanguage(language);
+  const hold = useTrialAdvanceHold();
   const current = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const currentRef = useRef(current);
+  currentRef.current = current;
+  const [active, setActive] = useState(null);
+  const activeRef = useRef(null);
   useEffect(() => {
     if (!autoPersistDefaults || readOnly || !onChange || !dimensions.length) return;
     let changed = false;
@@ -62,8 +69,9 @@ export function SliderGroupContent({
         scaleStep
       });
       const answered = typeof current[d.id] === 'number' && Number.isFinite(current[d.id]);
-      const v = answered ? current[d.id] : scale.midpoint;
-      const label = answered ? v : uiPair(language, 'Not rated', '尚未评分');
+      const dragging = active?.id === d.id;
+      const v = dragging ? active.value : (answered ? current[d.id] : scale.midpoint);
+      const label = (answered || dragging) ? v : uiPair(language, 'Not rated', '尚未评分');
       const title = dimensionDisplayName(d, index, {
         locale: zh ? 'zh' : 'en'
       });
@@ -149,10 +157,23 @@ export function SliderGroupContent({
                 {poles.right}
               </Typography>
             </Box>
-            <Slider value={Number(v)} min={scale.min} max={scale.max} step={scale.step} marks={scale.valid && (scale.max - scale.min) / scale.step <= 20} disabled={readOnly || !scale.valid} aria-label={`${title}: ${poles.left || d.id} – ${poles.right || d.id}`} onChange={(_, val) => onChange?.({
-          ...current,
-          [d.id]: val
-        })} valueLabelDisplay="auto" />
+            <Box
+              onPointerDown={() => { if (!readOnly && scale.valid) hold?.hold(); }}
+              onPointerUp={() => { if (!readOnly && scale.valid) hold?.release(); }}
+              onPointerCancel={() => { if (!readOnly && scale.valid) hold?.release(); }}
+              onKeyDown={() => { if (!readOnly && scale.valid) hold?.hold(); }}
+              onKeyUp={() => { if (!readOnly && scale.valid) hold?.release(); }}
+            >
+            <Slider value={Number(v)} min={scale.min} max={scale.max} step={scale.step} marks={scale.valid && (scale.max - scale.min) / scale.step <= 20} disabled={readOnly || !scale.valid} aria-label={`${title}: ${poles.left || d.id} – ${poles.right || d.id}`} onChange={(_, val) => {
+          activeRef.current = { id: d.id, value: val };
+          setActive({ id: d.id, value: val });
+        }} onChangeCommitted={(_, val) => {
+          const latest = activeRef.current?.id === d.id ? activeRef.current.value : val;
+          activeRef.current = null;
+          setActive((prev) => (prev?.id === d.id ? null : prev));
+          onChange?.({ ...currentRef.current, [d.id]: latest });
+        }} valueLabelDisplay="auto" />
+            </Box>
             <Box sx={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -161,12 +182,13 @@ export function SliderGroupContent({
               <Typography variant="caption" color="text.disabled">{scale.min}</Typography>
               <Typography variant="caption" color="text.disabled">{scale.max}</Typography>
             </Box>
-            {!answered && !readOnly && <Button size="small" sx={{
+            {!answered && !dragging && !readOnly && <Button size="small" sx={{
           minHeight: 44
-        }} disabled={!scale.valid} onClick={() => onChange?.({
-          ...current,
-          [d.id]: scale.midpoint
-        })}>
+        }} disabled={!scale.valid} onClick={() => {
+          activeRef.current = null;
+          setActive(null);
+          onChange?.({ ...currentRef.current, [d.id]: scale.midpoint });
+        }}>
               {zh ? `选择 ${scale.midpoint}` : `Select ${scale.midpoint}`}
             </Button>}
           </Box>;
@@ -185,22 +207,52 @@ export function PointAllocationContent({
   onChange,
   readOnly
 }) {
+  const hold = useTrialAdvanceHold();
   const current = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const currentRef = useRef(current);
+  currentRef.current = current;
+  const [drag, setDrag] = useState(null);
+  const dragRef = useRef(null);
+  const [typing, setTyping] = useState(null);
+  const typingDirty = useRef(false);
   const normalized = choices.map(c => typeof c === 'object' ? c : {
     value: c,
     text: c
   });
-  const allocated = normalized.reduce((sum, c) => sum + (Number(current[c.value]) || 0), 0);
+  const storedPoints = (key) => {
+    const n = Number(current[key]);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const draftPoints = (key) => {
+    if (drag?.key === key) return Math.max(0, Number(drag.value) || 0);
+    if (typing?.key === key) {
+      if (String(typing.text).trim() === '') return 0;
+      return clampAllocationPoints(typing.text, Number.POSITIVE_INFINITY);
+    }
+    return storedPoints(key);
+  };
+  const maxFor = (key) => {
+    const others = normalized.reduce((sum, c) => (
+      c.value === key ? sum : sum + draftPoints(c.value)
+    ), 0);
+    const mine = storedPoints(key);
+    return allocationChoiceMax(mine, budget - others - mine);
+  };
+  const allocated = normalized.reduce((sum, c) => sum + draftPoints(c.value), 0);
   const remaining = budget - allocated;
   if (!normalized.length) {
     return <Typography variant="body2" color="text.secondary">
         No options configured. Add choices in the question editor.
       </Typography>;
   }
-  const setPoints = (choiceValue, raw) => {
-    const n = Math.max(0, Math.min(budget, parseInt(raw, 10) || 0));
+  const commitPoints = (choiceValue, raw, allowNewZero = false) => {
+    const n = clampAllocationPoints(raw, maxFor(choiceValue));
+    const prev = currentRef.current;
+    const had = Object.prototype.hasOwnProperty.call(prev, choiceValue);
+    if (had && Number(prev[choiceValue]) === n) return;
+    if (!had && n === 0 && !allowNewZero) return;
     onChange?.({
-      ...current,
+      ...prev,
       [choiceValue]: n
     });
   };
@@ -209,7 +261,12 @@ export function PointAllocationContent({
     flexDirection: 'column',
     gap: 1.5
   }}>
-      {normalized.map(c => <Box key={c.value} sx={{
+      {normalized.map(c => {
+      const cap = maxFor(c.value);
+      const shown = drag?.key === c.value ? drag.value : storedPoints(c.value);
+      const stuck = cap <= 0;
+      const fieldText = typing?.key === c.value ? typing.text : String(storedPoints(c.value));
+      return <Box key={c.value} sx={{
       display: 'flex',
       flexDirection: {
         xs: 'column',
@@ -245,16 +302,49 @@ export function PointAllocationContent({
         },
         minWidth: 0
       }}>
-            <Slider value={Number(current[c.value]) || 0} min={0} max={budget} step={1} disabled={readOnly} onChange={(_, val) => setPoints(c.value, val)} sx={{
-          flex: 1,
-          maxWidth: {
-            xs: 'none',
-            sm: 260
-          }
+            <Box
+              onPointerDown={() => { if (!readOnly && !stuck) hold?.hold(); }}
+              onPointerUp={() => { if (!readOnly && !stuck) hold?.release(); }}
+              onPointerCancel={() => { if (!readOnly && !stuck) hold?.release(); }}
+              onKeyDown={() => { if (!readOnly && !stuck) hold?.hold(); }}
+              onKeyUp={() => { if (!readOnly && !stuck) hold?.release(); }}
+              sx={{ flex: 1, maxWidth: { xs: 'none', sm: 260 } }}
+            >
+            <Slider value={stuck ? 0 : shown} min={0} max={stuck ? 1 : cap} step={1} disabled={readOnly || stuck} aria-label={c.text} onChange={(_, val) => {
+          dragRef.current = { key: c.value, value: val };
+          setDrag({ key: c.value, value: val });
+        }} onChangeCommitted={(_, val) => {
+          const latest = dragRef.current?.key === c.value ? dragRef.current.value : val;
+          dragRef.current = null;
+          setDrag(null);
+          commitPoints(c.value, latest, false);
+        }} sx={{
+          flex: 1
         }} />
-            <TextField type="number" size="small" value={current[c.value] ?? 0} onChange={e => setPoints(c.value, e.target.value)} disabled={readOnly} inputProps={{
+            </Box>
+            <TextField type="number" size="small" value={fieldText} disabled={readOnly || stuck} onFocus={() => {
+          if (readOnly) return;
+          typingDirty.current = false;
+          hold?.hold();
+          setTyping({ key: c.value, text: String(storedPoints(c.value)) });
+        }} onChange={e => {
+          typingDirty.current = true;
+          const digits = String(e.target.value).replace(/[^\d]/g, '');
+          const nextText = digits === '' ? '' : String(clampAllocationPoints(digits, maxFor(c.value)));
+          setTyping({ key: c.value, text: nextText });
+        }} onBlur={() => {
+          const text = typing?.key === c.value ? typing.text : '';
+          const dirty = typingDirty.current;
+          typingDirty.current = false;
+          setTyping(null);
+          if (dirty && String(text).trim() !== '') commitPoints(c.value, text, true);
+          hold?.release();
+        }} onKeyDown={e => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }} inputProps={{
+          'aria-label': `${c.text} points`,
           min: 0,
-          max: budget,
+          max: cap,
           step: 1,
           style: {
             width: 56,
@@ -262,7 +352,8 @@ export function PointAllocationContent({
           }
         }} />
           </Box>
-        </Box>)}
+        </Box>;
+    })}
       <Box sx={{
       display: 'flex',
       justifyContent: 'flex-end',
