@@ -296,6 +296,10 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
 
   const initialPage = useRef(JSON.stringify(page));
   const pageDirty = JSON.stringify(editedPage) !== initialPage.current;
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  const onWorkspaceChangeRef = useRef(onWorkspaceChange);
+  onSelectionChangeRef.current = onSelectionChange;
+  onWorkspaceChangeRef.current = onWorkspaceChange;
   useEffect(() => {
     const selection = {
       pageName: editedPage?.name || page?.name,
@@ -304,12 +308,12 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
       pageDirty,
       dirty: pageDirty,
     };
-    onSelectionChange?.(selection);
-    onWorkspaceChange?.({
+    onSelectionChangeRef.current?.(selection);
+    onWorkspaceChangeRef.current?.({
       open: false,
       ...selection,
     });
-  }, [editedPage, page?.name, pageDirty, selectedQuestion, onSelectionChange, onWorkspaceChange]);
+  }, [editedPage, page?.name, pageDirty, selectedQuestion]);
   const guard = useUnsavedChanges(pageDirty);
   const closeEditor = () => guard.request(onCancel);
   const [confirmDialog, setConfirmDialog] = useState(null);

@@ -245,7 +245,10 @@ function StimulusCountField({
         {constraints.countLabel ? tr(constraints.countLabel) : zh ? `固定为 ${constraints.countFixed}` : `Fixed at ${constraints.countFixed}`}.
         {' '}{tr("Drawn from the project media pool for each participant.")} </Alert>;
   }
-  return <TextField fullWidth variant="outlined" type="number" label={tr(constraints.countLabel || 'Number of stimuli')} value={question.imageCount ?? constraints.defaultCount} onChange={(e) => onChange('imageCount', clampQuestionImageCount(question.type, question, e.target.value))} onFocus={(e) => e.target.select()} helperText={tr("Randomly drawn from the project media pool (or your curated list)")} inputProps={{
+  const perRoundHelper = supportsTrialCount(question.type)
+    ? "Shown together in one round. This is not how many answers are recorded in total. The number of trials sets that."
+    : "Randomly drawn from the project media pool (or your curated list)";
+  return <TextField fullWidth variant="outlined" type="number" label={tr(constraints.countLabel || 'Number of stimuli')} value={question.imageCount ?? constraints.defaultCount} onChange={(e) => onChange('imageCount', clampQuestionImageCount(question.type, question, e.target.value))} onFocus={(e) => e.target.select()} helperText={tr(perRoundHelper)} inputProps={{
     min: constraints.countMin,
     max: constraints.countMax,
     step: 1
@@ -265,7 +268,12 @@ function TrialCountField({
     zh
   } = useQuestionEditorText();
   if (!supportsTrialCount(question.type)) return null;
-  return <TextField fullWidth variant="outlined" type="number" label={tr("Number of trials (repeat this question)")} value={question.trialCount ?? 1} onChange={(e) => onChange('trialCount', clampTrialCount(e.target.value))} onFocus={(e) => e.target.select()} helperText={tr(zh ? `${clampTrialCount(question.trialCount ?? 1)} 轮作答 × 每轮 ${question.imageCount ?? 1} 个媒体。每轮保存对应素材的答案。选择题自动进入下一轮，评分和是非题可修改答案；媒体不足时可能重复。` : `${clampTrialCount(question.trialCount ?? 1)} response rounds × ${question.imageCount ?? 1} media per round. Each round records one answer for its shown set. Choice auto-advances; rating and yes/no allow review. Repeats may occur if the media pool is too small.`)} inputProps={{
+  const rounds = clampTrialCount(question.trialCount ?? 1);
+  const perRound = question.imageCount ?? 1;
+  const helper = zh
+    ? `共 ${rounds} 轮。每轮回答一次，一共记录 ${rounds} 份答案。每轮同时出示 ${perRound} 个。每轮保存这一组素材的答案。选择题自动进入下一轮，评分和是非题可修改答案；媒体不足时可能重复。`
+    : `${rounds} rounds. The participant answers once each round, so ${rounds} answers are recorded in total. Each round shows ${perRound}. Each round records one answer for its shown set. Choice auto-advances; rating and yes/no allow review. Repeats may occur if the media pool is too small.`;
+  return <TextField fullWidth variant="outlined" type="number" label={tr("Number of trials")} value={question.trialCount ?? 1} onChange={(e) => onChange('trialCount', clampTrialCount(e.target.value))} onFocus={(e) => e.target.select()} helperText={tr(helper)} inputProps={{
     min: 1,
     max: TRIAL_COUNT_MAX,
     step: 1
@@ -602,6 +610,14 @@ export default function QuestionEditor({
   });
   if (initialQuestion.type === 'ranking' && initialQuestion.isImageRanking) {
     initialQuestion.type = 'imageranking';
+  }
+  // Defaults belong in the first snapshot. An effect that writes them after paint
+  // races with typing and can flip a stored preference the participant never edited.
+  if (CURATED_STIMULUS_TYPES.includes(initialQuestion.type) && !initialQuestion.imageSelectionMode) {
+    initialQuestion.imageSelectionMode = 'huggingface_random';
+    if (initialQuestion.randomImageSelection == null) initialQuestion.randomImageSelection = true;
+    if (initialQuestion.excludePreviouslyUsedImages == null) initialQuestion.excludePreviouslyUsedImages = true;
+    if (initialQuestion.choices == null) initialQuestion.choices = [];
   }
   const [editedQuestion, setEditedQuestion] = useState(initialQuestion);
   const [taskFilter, setTaskFilter] = useState('all');
@@ -1196,20 +1212,6 @@ export default function QuestionEditor({
     }
   }, [editedQuestion.type]);
 
-  // Auto-initialize stimulus questions with random selection mode if not set
-  useEffect(() => {
-    if (CURATED_STIMULUS_TYPES.includes(editedQuestion.type)) {
-      if (!editedQuestion.imageSelectionMode) {
-        setEditedQuestion((prev) => ({
-          ...prev,
-          imageSelectionMode: 'huggingface_random',
-          randomImageSelection: true,
-          excludePreviouslyUsedImages: true,
-          choices: prev.choices || []
-        }));
-      }
-    }
-  }, [editedQuestion.type]);
   const loadImages = async () => {
     if (!isCuratedSelectionMode(editedQuestion.imageSelectionMode)) {
       return;
