@@ -439,7 +439,7 @@ export const DOC_TOPICS = [
   {
     id: 'common-questions', group: 'platform', title: p('Common questions', '常见问题'),
     summary: p('Where a hosted survey’s data lives, how long it stays available, and the first choices a researcher makes in the workspace.', '托管问卷的数据存在哪里、会保留多久，以及研究者在工作区里最先会遇到的选择。'),
-    flow: [p('Store the study', '数据放在哪里'), p('Build without extras', '不必先开额外功能'), p('Preview, then release', '先看清，再发布'), p('Read the results', '查看结果')],
+    flow: [p('Store the study', '数据放在哪里'), p('Build without extras', '不必先开额外功能'), p('Preview, then release', '先看清，再发布'), p('Share a short link', '用短链接分享'), p('Read the results', '查看结果')],
     sections: [
       s('where', p('Where does the data live?', '数据存在哪里？'), [
         p('The hosted website runs on Cloudflare. Survey designs and participant responses are stored in the project Supabase database. Media files, such as images and video, are stored in Cloudflare R2.', '托管网站运行在 Cloudflare 上。问卷设计和参与者的回答保存在项目的 Supabase 数据库中。图片、视频等媒体文件保存在 Cloudflare R2。'),
@@ -454,6 +454,10 @@ export const DOC_TOPICS = [
         p('The share link is separate from the public Live surveys page. From the project menu, choose Publish to Main Page, write a short public description, and set the online window. The listing stays pending until an administrator approves it. While that approved window is open, the card appears on Live surveys.', '分享链接和公开的「在线调查」页面是两件事。在项目菜单里选择「发布到主页」，填写简短的公开说明并设置展示时段。申请会保持待审核，直到管理员通过。在已通过的时段内，卡片会出现在「在线调查」。'),
         p('A project that was never listed stays available from its share link, without that window. If a project does have an approved listing, participants can open it only during the approved window. Ending the window closes the public card. It is not a date on which the platform deletes the survey.', '从未申请上架的项目，仍可通过分享链接打开，不受该时段限制。已经有通过审核的上架记录时，参与者只能在核准时段内打开。时段结束会关闭这张公开卡片，并不是平台按日期删除问卷。'),
       ]),
+      s('custom-link', p('Can I use a short public link?', '可以用一个简短的公开链接吗？'), [
+        p('On the Share tab, Custom link saves a short address, https://sp-survey.org/s/{slug}, using a name you choose. The original project link, /survey?project={id}, still opens the same survey.', '在「分享」页，「自定义链接」会保存一个简短地址 https://sp-survey.org/s/{slug}，名称由你设定。原来的项目链接 /survey?project={id} 仍然打开同一份问卷。'),
+        p('The name is 2–40 characters: lowercase letters, digits, and single hyphens. Names such as admin, api, s, survey, and login are reserved, and a name already used by another survey is rejected.', '名称长度为 2–40 个字符，使用小写字母、数字和单个连字符。admin、api、s、survey、login 是保留名称；已被其他问卷使用的名称也会被拒绝。'),
+      ]),
       s('street-level', p('Where do street-level images download?', '街景图片在哪里下载？'), [
         p('Street-level imagery is downloaded by a small helper on your own computer. You pick points on the map in SP-Survey, or paste Street View URLs, and the helper on that computer fetches the views. Cloudflare does not download them for you. After the download finishes, the files can be added to this project’s media library.', '街景图片由你自己电脑上的一个小工具下载。在 SP-Survey 里选地图上的点，或粘贴街景网址，然后由这台电脑上的工具去获取画面。Cloudflare 不会替你下载。下载完成后，这些文件可以加入本项目的媒体库。'),
       ]),
@@ -467,7 +471,7 @@ export const DOC_TOPICS = [
         p('Moving between workspace steps is remembered in the browser history, and the address stays on the workspace. Back returns to the previous step, such as from Builder to Dataset, instead of leaving on the first press. After those recorded steps are gone, another Back can leave the workspace.', '在工作区各步骤之间移动时，浏览器会记住这些步骤，地址仍留在工作区。按返回会回到上一步，例如从「设计」回到「媒体」，而不是第一次就离开。这些已记录的步骤走完之后，再按一次返回才会离开工作区。'),
       ]),
       s('counts', p('Where do I see the response count and how long collection has run?', '在哪里看答卷数量，以及收集进行了多久？'), [
-        p('Open Results. The overview shows Total Responses, and next to the participant and trial counts it shows the date of the responses, or a first-to-latest range when they span more than one day. On Share, each released version shows the date and time it was published. The project list shows when the project was created. The platform does not add a separate timer for how many days a survey has been up.', '打开「结果」。概览里显示答卷总数；在参与者人数和轮次旁边，会显示这些答卷的日期，跨越多天时则显示从最早到最近的日期范围。在「分享」里，每个已发布版本都会标出发布时间。项目列表显示项目的创建日期。平台不会另外给出一个「已上线多少天」的计时。'),
+        p('While a project is open, the top bar under the project name shows how long the survey has been up and how many answers are stored. After a release, that line reads “Published N days ago · N answers”. A newer survey says minutes or hours ago, or just now. If the survey has no publish time, the same line starts with Created and uses when the project was created. Results still shows Total Responses and the dates of the stored responses.', '打开一个项目时，项目名称下方的顶栏会显示问卷已上线多久，以及已保存多少份回答。发布之后，这一行写作「已发布 N 天前 · N 份回答」。更近的问卷会写成多少分钟前、多少小时前，或刚刚。如果还没有发布时间，同一行会以「创建于」开头，并使用项目的创建时间。结果页仍会显示答卷总数和这些答卷的日期。'),
       ]),
       s('templates', p('What is the difference between templates and My Projects?', '模板和「我的项目」有什么区别？'), [
         p('Project Templates are example designs you can start from, including surveys used in published research. My Projects lists the projects on your own account. Starting from a template creates your project. It does not change the shared template.', '「项目模板」是可以拿来起步的示例设计，包括已发表研究里用过的问卷。「我的项目」列出你自己账号下的项目。从模板开始会创建你的项目，不会改动那个共享模板。'),

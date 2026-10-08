@@ -5,7 +5,7 @@ const topic = docTopic('common-questions');
 test('common questions are one platform wiki topic in both languages', () => {
   expect(topic.group).toBe('platform');
   expect(topic.sections.map((section) => section.id)).toEqual([
-    'where', 'retention', 'without-ai', 'live-page', 'street-level',
+    'where', 'retention', 'without-ai', 'live-page', 'custom-link', 'street-level',
     'preview', 'home', 'back', 'counts', 'templates',
   ]);
   const en = topicSectionText(topic, 'en');
@@ -22,8 +22,11 @@ test('common questions are one platform wiki topic in both languages', () => {
   expect(en).toMatch(/Participant preview/);
   expect(en).toMatch(/Main page opens the public home/);
   expect(en).toMatch(/from Builder to Dataset/);
+  expect(en).toMatch(/https:\/\/sp-survey\.org\/s\/\{slug\}/);
+  expect(en).toMatch(/\/survey\?project=\{id\}/);
+  expect(en).toMatch(/Published N days ago · N answers/);
+  expect(en).toMatch(/starts with Created/);
   expect(en).toMatch(/Total Responses/);
-  expect(en).toMatch(/does not add a separate timer/);
   expect(en).toMatch(/My Projects/);
   expect(zh).toMatch(/Cloudflare/);
   expect(zh).toMatch(/Supabase/);
@@ -37,8 +40,11 @@ test('common questions are one platform wiki topic in both languages', () => {
   expect(zh).toMatch(/参与者预览/);
   expect(zh).toMatch(/首页/);
   expect(zh).toMatch(/从「设计」回到「媒体」/);
+  expect(zh).toMatch(/https:\/\/sp-survey\.org\/s\/\{slug\}/);
+  expect(zh).toMatch(/\/survey\?project=\{id\}/);
+  expect(zh).toMatch(/已发布 N 天前 · N 份回答/);
+  expect(zh).toMatch(/创建于/);
   expect(zh).toMatch(/答卷总数/);
-  expect(zh).toMatch(/已上线多少天/);
   expect(zh).toMatch(/我的项目/);
-  expect(`${en}\n${zh}`).not.toMatch(/GDPR|€|\$\d|own Supabase|自己的 Supabase|collaborator|协作者|custom link|自定义链接/i);
+  expect(`${en}\n${zh}`).not.toMatch(/GDPR|€|\$\d|own Supabase|自己的 Supabase|collaborator|协作者/i);
 });
