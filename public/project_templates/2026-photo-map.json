@@ -26,7 +26,7 @@
   "preloadedAt": null,
   "config": {
     "title": "这个画面在哪里？ / Where is this view?",
-    "description": "请看同一页上的固定画面，并在上海地图上标出一个点。画面和地图不会被随机拆开。 / Look at the fixed picture on this page, then place one pin on the Shanghai map. The picture and the map are not split by randomization.",
+    "description": "请看下面的画面，然后在上海地图上标出你认为它所在的位置。 / Look at the picture below, then mark where you think it is on the Shanghai map.",
     "locale": "zh",
     "logoPosition": "right",
     "showQuestionNumbers": "off",
@@ -36,14 +36,14 @@
       {
         "name": "page_photo_map",
         "title": "这个画面在哪里？ / Where is this view?",
-        "description": "画面是原创插画，每次都相同。地图范围固定在上海中心城区。请用点标出一个位置。 / The picture is an original illustration and is always the same. The map stays on central Shanghai. Mark one point.",
+        "description": "请看这张图。 / Look at this picture.",
         "questionsOrder": "initial",
         "elements": [
           {
             "name": "scene_view",
             "type": "image",
-            "title": "请看这个固定画面。 / Look at this fixed view.",
-            "description": "原创滨水插画，不是实拍照片，也不会从媒体库随机抽取。 / Original riverfront illustration, not a photograph, and not a random draw from a media library.",
+            "title": "请看这张图。 / Look at this picture.",
+            "description": "",
             "imageLink": "/project_templates/2026-photo-map/riverfront.svg",
             "imageLinks": [
               "/project_templates/2026-photo-map/riverfront.svg"
@@ -61,13 +61,13 @@
             "imageFit": "contain",
             "imageHeight": "240px",
             "imageWidth": "720px",
-            "altText": "原创滨水插画：河岸步道、拱桥和一座方塔。 Original illustration of a riverfront promenade, an arch bridge, and a square tower."
+            "altText": "河岸边的步道、一座拱桥和一座塔。 A riverside walk, an arch bridge, and a tower."
           },
           {
             "name": "photo_location",
             "type": "mapannotation",
-            "title": "请在上海地图上标出一个点，标出你认为这个画面所在的位置。 / Place one pin on the Shanghai map where you think this view is.",
-            "description": "地图已固定在上海中心城区。请选择“点 / Point”，标出一个位置。这一页上的画面和地图保持在一起，不会因随机顺序被拆到不同页面。 / The map is fixed on central Shanghai. Choose Point and mark one place. This picture and map stay together on this page.",
+            "title": "请在上海地图上标出一个点，标出你认为这张图所在的位置。 / Mark one point on the Shanghai map where you think this picture is.",
+            "description": "",
             "isRequired": true,
             "mapTools": [
               "point"
@@ -82,7 +82,7 @@
                 "id": "shanghai-photo-map",
                 "revision": 1,
                 "cityId": "shanghai",
-                "label": "上海中心城区 Shanghai. Fixed study extent for this pin task, not the city administrative boundary.",
+                "label": "上海 Shanghai",
                 "center": [
                   121.49,
                   31.23

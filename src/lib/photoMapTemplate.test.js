@@ -33,8 +33,9 @@ test('photo and map template is listed, valid, bilingual, and kept on one page',
   expect(photo.imageLink).toBe(IMAGE);
   expect(photo.imageLinks).toEqual([IMAGE]);
   expect(photo.selectedImageUrls).toEqual([IMAGE]);
-  expect(photo.title).toMatch(/请看这个固定画面/);
-  expect(photo.title).toMatch(/Look at this fixed view/);
+  expect(photo.title).toMatch(/请看这张图/);
+  expect(photo.title).toMatch(/Look at this picture/);
+  expect(photo.description).toBe('');
 
   const map = page.elements[1];
   expect(map.mapTools).toEqual(['point']);
@@ -44,10 +45,28 @@ test('photo and map template is listed, valid, bilingual, and kept on one page',
   expect(map.minAnnotations).toBe(1);
   expect(map.maxAnnotations).toBe(1);
   expect(map.studyAreas).toHaveLength(1);
-  expect(map.title).toMatch(/上海地图/);
-  expect(map.title).toMatch(/Shanghai map/);
+  expect(map.title).toMatch(/请在上海地图上标出一个点/);
+  expect(map.title).toMatch(/Mark one point on the Shanghai map/);
+  expect(map.description).toBe('');
   expect(page.title).toMatch(/这个画面在哪里/);
   expect(page.title).toMatch(/Where is this view/);
+  expect(page.description).toMatch(/请看这张图/);
+  expect(page.description).toMatch(/Look at this picture/);
+
+  const participantText = [
+    template.config.title,
+    template.config.description,
+    template.config.completedHtml,
+    page.title,
+    page.description,
+    photo.title,
+    photo.description,
+    photo.altText,
+    map.title,
+    map.description,
+    map.studyAreas[0].label,
+  ].join('\n');
+  expect(participantText).not.toMatch(/随机|random|插画|illustration|模板|template|选择“?点|Choose Point|\/ Point/i);
 
   const area = resolveStudyArea(map, null);
   expect(area.id).toBe('shanghai-photo-map');
