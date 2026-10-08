@@ -722,7 +722,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         </DialogActions>
       </Dialog>
 
-      <Dialog open={settingsDialog === 'translations'} onClose={closeSettings} fullWidth maxWidth="md">
+      <Dialog open={settingsDialog === 'translations'} onClose={closeSettings} fullWidth maxWidth="lg">
         <DialogContent dividers>
           <TranslationEditor config={config} onChange={onChange} />
         </DialogContent>

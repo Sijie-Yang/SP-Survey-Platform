@@ -47,12 +47,12 @@ import {
 } from './lib/trialNavigation';
 import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
 import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale } from './lib/surveyLocale';
-import ParticipantLanguagePicker from './components/ParticipantLanguagePicker';
 import {
+  ANSWER_LANGUAGE_QUESTION,
   applyLanguageToSurveyModel,
-  languageChoiceVisible,
-  participantLanguages,
+  isKnownSurveyLanguage,
   participantMayUseLanguage,
+  placeLanguageChoiceQuestion,
   questionLanguagesForSubmission,
   readTranslations,
   resolveParticipantLanguage,
@@ -105,8 +105,6 @@ export default function SurveyApp() {
   }, []);
   const [resumeDialog, setResumeDialog] = useState(null);
   const [completionMessage, setCompletionMessage] = useState('');
-  const [answerLanguage, setAnswerLanguage] = useState('en');
-  const [showLanguageChoice, setShowLanguageChoice] = useState(true);
   const answerLanguageRef = useRef('en');
   const questionLanguageRef = useRef({});
   const repeatSessionRef = useRef(null);
@@ -1037,10 +1035,12 @@ export default function SurveyApp() {
           : resolveParticipantLanguage(finalSurveyJson, null)
       );
       const applyChosenLanguage = (chosen) => {
+        const pageNo = model.currentPageNo;
         answerLanguageRef.current = chosen;
         applyLanguageToSurveyModel(model, finalSurveyJson, chosen);
-        applySurveyLocale(model, { locale: chosen });
-        setAnswerLanguage(chosen);
+        if (isKnownSurveyLanguage(chosen)) applySurveyLocale(model, { locale: chosen });
+        placeLanguageChoiceQuestion(model, finalSurveyJson);
+        if (model.currentPageNo !== pageNo) model.currentPageNo = pageNo;
         const sourceCompletion = finalSurveyJson.completionMessage || adminConfig?.completionMessage || '';
         setCompletionMessage(textForLanguage(
           readTranslations(finalSurveyJson),
@@ -1197,7 +1197,16 @@ export default function SurveyApp() {
       });
 
       model.onValueChanged.add((sender, options) => {
-        if (options?.name) {
+        if (options?.name === ANSWER_LANGUAGE_QUESTION) {
+          questionLanguageRef.current[options.name] = answerLanguageRef.current;
+          const requested = options.value;
+          if (finalSurveyJson && participantMayUseLanguage(finalSurveyJson, requested)) {
+            const pageNo = sender.currentPageNo;
+            const chosen = resolveParticipantLanguage(finalSurveyJson, requested);
+            if (chosen !== answerLanguageRef.current) applyChosenLanguage(chosen);
+            if (sender.currentPageNo !== pageNo) sender.currentPageNo = pageNo;
+          }
+        } else if (options?.name) {
           questionLanguageRef.current[options.name] = answerLanguageRef.current;
         }
         scheduleDraftSave(model, imageTracker, finalSurveyJson);
@@ -1219,7 +1228,6 @@ export default function SurveyApp() {
         const newPageName = sender.currentPage?.name;
         if (lastPageNameRef.current) recordPageTiming(lastPageNameRef.current);
         lastPageNameRef.current = newPageName;
-        setShowLanguageChoice(languageChoiceVisible(sender.currentPageNo));
         scheduleDraftSave(model, imageTracker, finalSurveyJson);
       });
 
@@ -1288,7 +1296,6 @@ export default function SurveyApp() {
       window.lastSurveyLoadTime = Date.now();
       console.log('✅ Survey initialized successfully at:', new Date(window.lastSurveyLoadTime).toISOString());
       
-      setShowLanguageChoice(languageChoiceVisible(model.currentPageNo));
       setPublishedSurveyJson(finalSurveyJson);
       setSurveyModel(model);
       setSurveyPhase('active');
@@ -1482,32 +1489,6 @@ export default function SurveyApp() {
           <ParticipantSurveySurface
             onErrorCapture={(e) => handleSurveyMediaError(e, participantLocale)}
           >
-            {showLanguageChoice && (
-              <ParticipantLanguagePicker
-                languages={participantLanguages(publishedSurveyJson || {})}
-                value={answerLanguage}
-                language={answerLanguage}
-                onChange={(requested) => {
-                  const json = finalSurveyJsonRef.current;
-                  if (!json || !participantMayUseLanguage(json, requested)) return;
-                  const pageNo = surveyModel?.currentPageNo || 0;
-                  const chosen = resolveParticipantLanguage(json, requested);
-                  answerLanguageRef.current = chosen;
-                  setAnswerLanguage(chosen);
-                  if (surveyModel) {
-                    applyLanguageToSurveyModel(surveyModel, json, chosen);
-                    applySurveyLocale(surveyModel, { locale: chosen });
-                    if (surveyModel.currentPageNo !== pageNo) surveyModel.currentPageNo = pageNo;
-                  }
-                  setCompletionMessage(textForLanguage(
-                    readTranslations(json),
-                    'survey.completionMessage',
-                    chosen,
-                    json.completionMessage || '',
-                  ));
-                }}
-              />
-            )}
             <SurveyProgressBridge
               surveyModel={surveyModel}
               progressEnabled={progressChromeEnabledRef.current}
@@ -1551,7 +1532,6 @@ export default function SurveyApp() {
               draftSavingEnabledRef.current = true;
               model.data = {};
               model.currentPageNo = 0;
-              setShowLanguageChoice(true);
               Object.keys(imageTracker).forEach((k) => delete imageTracker[k]);
               displayedImagesRef.current = imageTracker;
               displayedMediaGroupsRef.current = {};

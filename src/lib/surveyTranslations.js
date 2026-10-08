@@ -4,14 +4,15 @@
  * a region, or a separate survey version.
  *
  * A response records answerLanguage and questionAnswerLanguages.
- * The participant chooses a language on the first page. Those fields are
- * never written into condition.
+ * The participant answers a language question on the first page. Those fields
+ * are never written into condition.
  */
 
 import { UI_LANGUAGES, surveyJsLocale, uiPair } from './uiLanguages';
 
 export const TRANSLATION_MACHINE = 'machine';
 export const TRANSLATION_REVIEWED = 'reviewed';
+export const ANSWER_LANGUAGE_QUESTION = 'sp_answer_language';
 
 const OPTION_LISTS = [
   ['choices', 'choice'],
@@ -20,13 +21,27 @@ const OPTION_LISTS = [
   ['rateValues', 'rate'],
 ];
 
-export function strictSurveyLanguage(raw) {
+export function isKnownSurveyLanguage(raw) {
   const lower = String(raw || '').trim().toLowerCase().replace(/_/g, '-');
-  if (!lower) return '';
+  if (!lower) return false;
+  if (lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-hant') return true;
+  if (lower === 'zh' || lower === 'zh-cn' || lower === 'zh-hans') return true;
+  if (UI_LANGUAGES.some((item) => item.id.toLowerCase() === lower || item.surveyJs === lower)) return true;
+  return UI_LANGUAGES.some((item) => item.nativeName.toLowerCase() === String(raw || '').trim().toLowerCase());
+}
+
+/** Known interface languages use their id. Any other typed name is kept for the model. */
+export function strictSurveyLanguage(raw) {
+  const text = String(raw || '').trim().replace(/\s+/g, ' ').replace(/[\u0000-\u001f]/g, '');
+  if (!text) return '';
+  const lower = text.toLowerCase().replace(/_/g, '-');
   if (lower === 'zh-tw' || lower === 'zh-hk' || lower === 'zh-hant') return 'zh-TW';
   if (lower === 'zh' || lower === 'zh-cn' || lower === 'zh-hans') return 'zh';
   const found = UI_LANGUAGES.find((item) => item.id.toLowerCase() === lower || item.surveyJs === lower);
-  return found ? found.id : '';
+  if (found) return found.id;
+  const byName = UI_LANGUAGES.find((item) => item.nativeName.toLowerCase() === text.toLowerCase());
+  if (byName) return byName.id;
+  return text.slice(0, 80);
 }
 
 function languageName(id) {
@@ -128,7 +143,7 @@ export function extractTranslatableStrings(config) {
     field: 'completion',
   });
   walkElements(config?.pages, (element) => {
-    if (!element.name) return;
+    if (!element.name || element.name === ANSWER_LANGUAGE_QUESTION) return;
     const groupLabel = element.title || element.name;
     pushString(list, {
       id: questionId(element.name, 'title'),
@@ -364,9 +379,54 @@ export function deleteLanguageVersion(translations, language) {
   return next;
 }
 
-/** Language choice belongs on the first survey page and nowhere later. */
-export function languageChoiceVisible(pageNo) {
-  return Number(pageNo) === 0;
+export function languageVersionSummary(config, language) {
+  const translations = reconcileTranslations(config);
+  const code = strictSurveyLanguage(language);
+  const strings = extractTranslatableStrings(config);
+  let translatedCount = 0;
+  let needsUpdate = false;
+  strings.forEach((item) => {
+    const cell = translations.entries[item.id]?.byLanguage?.[code];
+    const text = cell && String(cell.text || '').trim();
+    if (!text) {
+      needsUpdate = true;
+      return;
+    }
+    translatedCount += 1;
+    if (cell.status !== TRANSLATION_REVIEWED) needsUpdate = true;
+  });
+  const total = strings.length;
+  return {
+    language: code,
+    name: languageName(code),
+    translated: total > 0 && translatedCount === total,
+    partial: translatedCount > 0 && translatedCount < total,
+    translatedCount,
+    total,
+    needsUpdate: total === 0 ? false : needsUpdate,
+    enabled: translations.enabledLanguages.includes(code),
+  };
+}
+
+function languageQuestionPrompt(language) {
+  const known = strictSurveyLanguage(language);
+  if (known === 'zh-TW') return '你希望用哪種語言填寫這份問卷？';
+  if (known === 'zh') return '你希望用哪种语言填写这份问卷？';
+  return 'Which language do you want to use for this survey?';
+}
+
+/** A normal radiogroup, present only when the participant has a real choice. */
+export function languageChoiceQuestion(config) {
+  const languages = participantLanguages(config);
+  if (languages.length < 2) return null;
+  const source = readTranslations(config).sourceLanguage;
+  return {
+    type: 'radiogroup',
+    name: ANSWER_LANGUAGE_QUESTION,
+    title: languageQuestionPrompt(source),
+    isRequired: true,
+    choices: languages.map((item) => ({ value: item.id, text: item.nativeName })),
+  };
 }
 
 export function textForLanguage(translations, id, language, sourceText) {
@@ -510,10 +570,20 @@ export function applyParticipantLanguage(config, language) {
   return copy;
 }
 
-/** SurveyJS stores English on the default locale. Other languages use their SurveyJS code. */
+/** SurveyJS stores English on the default locale. Other known languages use their SurveyJS code. Typed languages use their own name. */
 function surveyLocaleBucket(language) {
-  const code = surveyJsLocale(language);
-  return code === 'en' ? 'default' : code;
+  const code = strictSurveyLanguage(language);
+  if (!code) return 'default';
+  if (!isKnownSurveyLanguage(code)) return code;
+  const surveyCode = surveyJsLocale(code);
+  return surveyCode === 'en' ? 'default' : surveyCode;
+}
+
+export function participantModelLocale(language) {
+  const code = strictSurveyLanguage(language);
+  if (!code) return 'en';
+  if (!isKnownSurveyLanguage(code)) return code;
+  return surveyJsLocale(code);
 }
 
 function writeLoc(owner, locProp, language, text) {
@@ -652,9 +722,41 @@ export function applyLanguageToSurveyModel(model, config, language) {
     }
   });
   try {
-    model.locale = surveyJsLocale(lang);
+    model.locale = participantModelLocale(lang);
   } catch { /* ignore */ }
   return model;
+}
+
+/** Put the language question first on page 1. Later pages do not get a switcher. */
+export function placeLanguageChoiceQuestion(model, config) {
+  if (!model || typeof model.getQuestionByName !== 'function' || !model.pages?.length) return null;
+  const spec = languageChoiceQuestion(config);
+  const existing = model.getQuestionByName(ANSWER_LANGUAGE_QUESTION);
+  if (!spec) {
+    if (existing && typeof existing.delete === 'function') existing.delete();
+    return null;
+  }
+  const page = model.pages[0];
+  const pageNo = model.currentPageNo;
+  let question = existing;
+  if (!question) question = page.addNewQuestion('radiogroup', ANSWER_LANGUAGE_QUESTION, 0);
+  const previousValue = question.value;
+  const prompts = new Map();
+  const source = readTranslations(config).sourceLanguage;
+  prompts.set(source, languageQuestionPrompt(source));
+  spec.choices.forEach((choice) => prompts.set(choice.value, languageQuestionPrompt(choice.value)));
+  prompts.forEach((text, language) => writeLoc(question, 'locTitle', language, text));
+  question.isRequired = true;
+  question.choices = spec.choices.map((choice) => ({ value: choice.value, text: choice.text }));
+  question.choices.forEach((item, index) => {
+    const text = spec.choices[index]?.text || '';
+    prompts.forEach((_, language) => writeLoc(item, 'locText', language, text));
+  });
+  if (previousValue != null && previousValue !== '' && question.value !== previousValue) {
+    question.value = previousValue;
+  }
+  if (model.currentPageNo !== pageNo) model.currentPageNo = pageNo;
+  return question;
 }
 
 export function questionLanguagesForSubmission(questions, currentLanguage, recorded = {}) {

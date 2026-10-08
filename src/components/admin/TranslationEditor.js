@@ -1,20 +1,20 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Chip,
-  FormControl,
-  FormControlLabel,
-  InputLabel,
-  MenuItem,
-  Select,
   Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   TextField,
   Typography,
 } from '@mui/material';
 import { useRegion } from '../../contexts/RegionContext';
-import { UI_LANGUAGES, uiPair } from '../../lib/uiLanguages';
+import { uiPair } from '../../lib/uiLanguages';
 import { requestSurveyTranslations } from '../../lib/surveyTranslationApi';
 import {
   confirmAllTranslations,
@@ -22,9 +22,11 @@ import {
   deleteLanguageVersion,
   editTranslation,
   extractTranslatableStrings,
+  languageVersionSummary,
   mergeMachineTranslations,
   reconcileTranslations,
   setTranslationLanguages,
+  strictSurveyLanguage,
   stringsForMachineTranslation,
   translationAccuracyNotice,
   translationPublishFindings,
@@ -79,10 +81,20 @@ export default function TranslationEditor({ config, onChange }) {
   const { language } = useRegion();
   const live = useMemo(() => reconcileTranslations(config || {}), [config]);
   const strings = useMemo(() => extractTranslatableStrings(config || {}), [config]);
-  const [activeLanguage, setActiveLanguage] = useState(live.targetLanguages[0] || '');
+  const rows = useMemo(
+    () => live.targetLanguages.map((code) => languageVersionSummary({ ...config, translations: live }, code)),
+    [config, live],
+  );
+  const [openLanguage, setOpenLanguage] = useState('');
+  const [sourceDraft, setSourceDraft] = useState(live.sourceLanguage);
+  const [languageDraft, setLanguageDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const target = live.targetLanguages.includes(activeLanguage) ? activeLanguage : (live.targetLanguages[0] || '');
+  const target = live.targetLanguages.includes(openLanguage) ? openLanguage : '';
+
+  useEffect(() => {
+    setSourceDraft(live.sourceLanguage);
+  }, [live.sourceLanguage]);
 
   const write = (translations) => onChange({ ...config, translations });
 
@@ -95,9 +107,27 @@ export default function TranslationEditor({ config, onChange }) {
     }));
   };
 
-  const generate = async (forceIds = []) => {
-    if (!target) return;
-    const items = stringsForMachineTranslation({ ...config, translations: live }, target, { forceIds });
+  const saveSource = () => {
+    const code = strictSurveyLanguage(sourceDraft);
+    if (!code || code === live.sourceLanguage) return;
+    updateLanguages({ sourceLanguage: code });
+  };
+
+  const addLanguage = () => {
+    const code = strictSurveyLanguage(languageDraft);
+    if (!code) return;
+    if (code === live.sourceLanguage || live.targetLanguages.includes(code)) {
+      setNotice(uiPair(language, 'That language is already in the table.', '这个语言已经在表里。'));
+      return;
+    }
+    updateLanguages({ targetLanguages: [...live.targetLanguages, code] });
+    setLanguageDraft('');
+    setNotice('');
+  };
+
+  const generate = async (languageCode, forceIds = []) => {
+    if (!languageCode) return;
+    const items = stringsForMachineTranslation({ ...config, translations: live }, languageCode, { forceIds });
     if (!items.length) {
       setNotice(uiPair(language, 'Every string already has a reviewed or edited translation.', '每条文字都已有审阅过或人工改过的翻译。'));
       return;
@@ -106,7 +136,7 @@ export default function TranslationEditor({ config, onChange }) {
     setNotice('');
     const result = await requestSurveyTranslations({
       sourceLanguage: live.sourceLanguage,
-      targetLanguage: target,
+      targetLanguage: languageCode,
       items,
     });
     setBusy(false);
@@ -122,7 +152,7 @@ export default function TranslationEditor({ config, onChange }) {
       setNotice(result.error);
       return;
     }
-    write(mergeMachineTranslations(live, target, result.translations, { forceIds }));
+    write(mergeMachineTranslations(live, languageCode, result.translations, { forceIds }));
     if (result.rejected?.length) {
       setNotice(uiPair(
         language,
@@ -132,6 +162,18 @@ export default function TranslationEditor({ config, onChange }) {
     }
   };
 
+  const setEnabled = (code, checked) => {
+    const enabled = new Set(live.enabledLanguages);
+    if (checked) enabled.add(code);
+    else enabled.delete(code);
+    updateLanguages({ enabledLanguages: [...enabled] });
+  };
+
+  const removeLanguage = (code) => {
+    write(deleteLanguageVersion(live, code));
+    if (openLanguage === code) setOpenLanguage('');
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Typography variant="h6">{uiPair(language, 'Translations', '翻译')}</Typography>
@@ -139,142 +181,162 @@ export default function TranslationEditor({ config, onChange }) {
       <Typography variant="body2" color="text.secondary">
         {uiPair(
           language,
-          'One survey, one response dataset. Participants only see languages you enable here.',
-          '一份问卷，一份答卷数据。参与者只能选择你在这里启用的语言。',
+          'One survey, one response dataset. Type any language. The Assistant translates it. Participants only see languages you enable, as a question on the first page.',
+          '一份问卷，一份答卷数据。可以输入任意语言，由助手翻译。参与者只在第一页的题目里看到你启用的语言。',
         )}
       </Typography>
       {!!notice && <Alert severity="warning">{notice}</Alert>}
-      <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>{uiPair(language, 'Source language', '源语言')}</InputLabel>
-          <Select
-            label={uiPair(language, 'Source language', '源语言')}
-            value={live.sourceLanguage}
-            onChange={(event) => updateLanguages({ sourceLanguage: event.target.value })}
-          >
-            {UI_LANGUAGES.map((item) => (
-              <MenuItem key={item.id} value={item.id}>{item.nativeName}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 220 }}>
-          <InputLabel>{uiPair(language, 'Target languages', '目标语言')}</InputLabel>
-          <Select
-            multiple
-            label={uiPair(language, 'Target languages', '目标语言')}
-            value={live.targetLanguages}
-            onChange={(event) => {
-              const nextTargets = event.target.value;
-              updateLanguages({ targetLanguages: nextTargets });
-              if (!nextTargets.includes(target)) setActiveLanguage(nextTargets[0] || '');
-            }}
-            renderValue={(selected) => selected.map((id) => UI_LANGUAGES.find((item) => item.id === id)?.nativeName || id).join(', ')}
-          >
-            {UI_LANGUAGES.filter((item) => item.id !== live.sourceLanguage).map((item) => (
-              <MenuItem key={item.id} value={item.id}>{item.nativeName}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
-      {live.targetLanguages.map((code) => (
-        <FormControlLabel
-          key={code}
-          control={(
-            <Switch
-              checked={live.enabledLanguages.includes(code)}
-              onChange={(event) => {
-                const enabled = new Set(live.enabledLanguages);
-                if (event.target.checked) enabled.add(code);
-                else enabled.delete(code);
-                updateLanguages({ enabledLanguages: [...enabled] });
+      {!target && (
+        <>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <TextField
+              size="small"
+              label={uiPair(language, 'Source language', '源语言')}
+              value={sourceDraft}
+              onChange={(event) => setSourceDraft(event.target.value)}
+              onBlur={saveSource}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') saveSource();
               }}
+              helperText={uiPair(language, 'Not limited to the interface languages.', '不限于界面里已有的语言。')}
             />
-          )}
-          label={uiPair(
-            language,
-            `Participants can choose ${UI_LANGUAGES.find((item) => item.id === code)?.nativeName || code}`,
-            `参与者可以选择${UI_LANGUAGES.find((item) => item.id === code)?.nativeName || code}`,
-          )}
-        />
-      ))}
-      {!!live.targetLanguages.length && (
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel>{uiPair(language, 'Editing', '正在编辑')}</InputLabel>
-            <Select
-              label={uiPair(language, 'Editing', '正在编辑')}
-              value={target}
-              onChange={(event) => setActiveLanguage(event.target.value)}
-            >
-              {live.targetLanguages.map((code) => (
-                <MenuItem key={code} value={code}>{UI_LANGUAGES.find((item) => item.id === code)?.nativeName || code}</MenuItem>
+            <TextField
+              size="small"
+              label={uiPair(language, 'Add a language', '添加语言')}
+              value={languageDraft}
+              onChange={(event) => setLanguageDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') addLanguage();
+              }}
+              helperText={uiPair(language, 'Type any language, then add it.', '输入任意语言后添加。')}
+            />
+            <Button variant="outlined" sx={{ alignSelf: 'flex-start', mt: 0.5 }} onClick={addLanguage}>
+              {uiPair(language, 'Add language', '添加语言')}
+            </Button>
+          </Box>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>{uiPair(language, 'Language', '语言')}</TableCell>
+                <TableCell>{uiPair(language, 'Translated', '是否已翻译')}</TableCell>
+                <TableCell>{uiPair(language, 'Needs update', '是否需要更新')}</TableCell>
+                <TableCell>{uiPair(language, 'Participants can choose', '参与者可选')}</TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {rows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <Typography variant="body2" color="text.secondary">
+                      {uiPair(language, 'No languages yet. Type one above.', '还没有语言。请在上面输入。')}
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+              {rows.map((row) => (
+                <TableRow key={row.language} hover>
+                  <TableCell>{row.name}</TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      color={row.translated ? 'success' : row.partial ? 'warning' : 'default'}
+                      label={row.translated
+                        ? uiPair(language, 'Translated', '已翻译')
+                        : row.partial
+                          ? uiPair(language, 'Partly translated', '部分翻译')
+                          : uiPair(language, 'Not translated', '未翻译')}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      color={row.needsUpdate ? 'warning' : 'success'}
+                      label={row.needsUpdate
+                        ? uiPair(language, 'Needs update', '需要更新')
+                        : uiPair(language, 'Up to date', '无需更新')}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={row.enabled}
+                      onChange={(event) => setEnabled(row.language, event.target.checked)}
+                      inputProps={{ 'aria-label': row.name }}
+                    />
+                  </TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                    <Button size="small" onClick={() => setOpenLanguage(row.language)}>
+                      {uiPair(language, 'Check sentences', '检查句子')}
+                    </Button>
+                    <Button size="small" disabled={busy} onClick={() => generate(row.language, strings.map((item) => item.id))}>
+                      {uiPair(language, 'Update', '更新')}
+                    </Button>
+                    <Button size="small" color="error" disabled={busy} onClick={() => removeLanguage(row.language)}>
+                      {uiPair(language, 'Delete', '删除')}
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </Select>
-          </FormControl>
-          <Button variant="contained" disabled={busy || !target} onClick={() => generate()}>
-            {busy
-              ? uiPair(language, 'Translating…', '正在翻译…')
-              : uiPair(language, 'Generate translations', '生成翻译')}
-          </Button>
-          <Button
-            variant="outlined"
-            disabled={busy || !target}
-            onClick={() => generate(strings.map((item) => item.id))}
-          >
-            {uiPair(language, 'Update this language', '更新此语言')}
-          </Button>
-          <Button
-            color="error"
-            disabled={busy || !target}
-            onClick={() => {
-              const remaining = live.targetLanguages.filter((code) => code !== target);
-              write(deleteLanguageVersion(live, target));
-              setActiveLanguage(remaining[0] || '');
-            }}
-          >
-            {uiPair(language, 'Delete this language', '删除此语言')}
-          </Button>
-          <Button disabled={!target} onClick={() => write(confirmAllTranslations(live, target))}>
-            {uiPair(language, 'Mark all as reviewed', '全部标为已审阅')}
-          </Button>
-        </Box>
+            </TableBody>
+          </Table>
+        </>
       )}
       {!!target && (
-        <Typography variant="caption" color="text.secondary">
-          {uiPair(
-            language,
-            'Edits are saved immediately. Update regenerates this language and saves it. Delete removes it, so participants can no longer choose it on the first page.',
-            '修改会立即保存。更新会重新生成此语言并保存。删除后，参与者在第一页不能再选择它。',
-          )}
-        </Typography>
-      )}
-      {target && strings.map((item) => {
-        const cell = live.entries[item.id]?.byLanguage?.[target];
-        const status = cell?.text ? cell.status : 'missing';
-        return (
-          <Box key={item.id} sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr auto' }, alignItems: 'start' }}>
-            <TextField
-              size="small"
-              label={`${item.groupLabel} · ${fieldLabel(item.field, language)}`}
-              value={item.sourceText}
-              InputProps={{ readOnly: true }}
-            />
-            <TextField
-              key={`${target}:${item.id}`}
-              size="small"
-              label={uiPair(language, 'Translation', '译文')}
-              value={cell?.text || ''}
-              onChange={(event) => write(editTranslation(live, item.id, target, event.target.value))}
-            />
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, pt: 0.5 }}>
-              <Chip size="small" color={status === 'reviewed' ? 'success' : status === 'missing' ? 'default' : 'warning'} label={translationStatusLabel(status, language)} />
-              <Button size="small" disabled={!cell?.text || status === 'reviewed'} onClick={() => write(confirmTranslation(live, item.id, target))}>
-                {uiPair(language, 'Mark reviewed', '标为已审阅')}
-              </Button>
-            </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Button onClick={() => setOpenLanguage('')}>{uiPair(language, 'Back to languages', '返回语言列表')}</Button>
+            <Typography variant="subtitle1">{languageVersionSummary({ ...config, translations: live }, target).name}</Typography>
+            <Button variant="contained" disabled={busy} onClick={() => generate(target)}>
+              {busy
+                ? uiPair(language, 'Translating…', '正在翻译…')
+                : uiPair(language, 'Generate translations', '生成翻译')}
+            </Button>
+            <Button variant="outlined" disabled={busy} onClick={() => generate(target, strings.map((item) => item.id))}>
+              {uiPair(language, 'Update this language', '更新此语言')}
+            </Button>
+            <Button color="error" disabled={busy} onClick={() => removeLanguage(target)}>
+              {uiPair(language, 'Delete this language', '删除此语言')}
+            </Button>
+            <Button onClick={() => write(confirmAllTranslations(live, target))}>
+              {uiPair(language, 'Mark all as reviewed', '全部标为已审阅')}
+            </Button>
           </Box>
-        );
-      })}
+          <Typography variant="caption" color="text.secondary">
+            {uiPair(
+              language,
+              'Edits are saved immediately. Update regenerates this language and saves it. Delete removes it from the first-page language question.',
+              '修改会立即保存。更新会重新生成此语言并保存。删除后，第一页的语言题不再包含它。',
+            )}
+          </Typography>
+          {strings.map((item) => {
+            const cell = live.entries[item.id]?.byLanguage?.[target];
+            const status = cell?.text ? cell.status : 'missing';
+            return (
+              <Box key={item.id} sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr auto' }, alignItems: 'start' }}>
+                <TextField
+                  size="small"
+                  label={`${item.groupLabel} · ${fieldLabel(item.field, language)}`}
+                  value={item.sourceText}
+                  InputProps={{ readOnly: true }}
+                />
+                <TextField
+                  key={`${target}:${item.id}`}
+                  size="small"
+                  label={uiPair(language, 'Translation', '译文')}
+                  value={cell?.text || ''}
+                  onChange={(event) => write(editTranslation(live, item.id, target, event.target.value))}
+                />
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, pt: 0.5 }}>
+                  <Chip size="small" color={status === 'reviewed' ? 'success' : status === 'missing' ? 'default' : 'warning'} label={translationStatusLabel(status, language)} />
+                  <Button size="small" disabled={!cell?.text || status === 'reviewed'} onClick={() => write(confirmTranslation(live, item.id, target))}>
+                    {uiPair(language, 'Mark reviewed', '标为已审阅')}
+                  </Button>
+                </Box>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
     </Box>
   );
 }

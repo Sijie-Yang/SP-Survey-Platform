@@ -4,8 +4,11 @@ import {
   applyLanguageToSurveyModel,
   applyParticipantLanguage,
   confirmTranslation,
+  ANSWER_LANGUAGE_QUESTION,
   deleteLanguageVersion,
-  languageChoiceVisible,
+  languageChoiceQuestion,
+  languageVersionSummary,
+  placeLanguageChoiceQuestion,
   editTranslation,
   mergeMachineTranslations,
   participantLanguages,
@@ -251,8 +254,57 @@ describe('survey translations', () => {
     expect(participantLanguages(next).map((item) => item.id)).toEqual(['en']);
     expect(removed.entries['survey.title'].byLanguage.zh).toBeUndefined();
     expect(applyParticipantLanguage(next, 'zh').title).toBe('Hello');
-    expect(languageChoiceVisible(0)).toBe(true);
-    expect(languageChoiceVisible(1)).toBe(false);
+    expect(languageChoiceQuestion(next)).toBeNull();
+  });
+
+  test('a typed language stays paired and becomes a first-page question', () => {
+    const base = survey();
+    base.pages[0].elements.push({ type: 'text', name: 'anchor', title: 'How is the street?' });
+    base.pages.push({ name: 'page2', elements: [{ type: 'text', name: 'later', title: 'Second page' }] });
+    const config = withZh(base);
+    config.translations = setTranslationLanguages(config, {
+      sourceLanguage: 'English',
+      targetLanguages: ['简体中文', 'Kiswahili'],
+      enabledLanguages: ['en', '简体中文', 'Kiswahili'],
+    });
+    expect(config.translations.sourceLanguage).toBe('en');
+    expect(config.translations.targetLanguages).toEqual(['zh', 'Kiswahili']);
+    const titled = editTranslation(config.translations, 'survey.title', 'Kiswahili', 'Habari');
+    const next = { ...config, translations: titled };
+    expect(participantMayUseLanguage(next, 'Kiswahili')).toBe(true);
+    const summary = languageVersionSummary(next, 'Kiswahili');
+    expect(summary.partial).toBe(true);
+    expect(summary.needsUpdate).toBe(true);
+    expect(languageVersionSummary(next, 'zh').needsUpdate).toBe(true);
+    const question = languageChoiceQuestion(next);
+    expect(question.type).toBe('radiogroup');
+    expect(question.name).toBe(ANSWER_LANGUAGE_QUESTION);
+    expect(question.choices.map((choice) => choice.value)).toEqual(['en', 'zh', 'Kiswahili']);
+    const model = new Model(next);
+    model.currentPageNo = 1;
+    placeLanguageChoiceQuestion(model, next);
+    expect(model.pages[0].questions[0].name).toBe(ANSWER_LANGUAGE_QUESTION);
+    expect(model.pages[1].questions.map((item) => item.name)).toEqual(['later']);
+    expect(model.currentPageNo).toBe(1);
+    applyLanguageToSurveyModel(model, next, 'Kiswahili');
+    expect(model.title).toBe('Habari');
+    expect(model.locale).toBe('Kiswahili');
+    applyLanguageToSurveyModel(model, next, 'en');
+    expect(model.title).toBe('Hello');
+    applyLanguageToSurveyModel(model, next, 'Kiswahili');
+    expect(model.title).toBe('Habari');
+    expect(model.getQuestionByName('q1').choices[0].value).toBe('code_a');
+    const meta = surveyLanguageMetadata({
+      answerLanguage: 'Kiswahili',
+      questionAnswerLanguages: { q1: 'Kiswahili' },
+      publishedVersion: 2,
+    });
+    expect(meta.answerLanguage).toBe('Kiswahili');
+    expect(meta.condition).toBeUndefined();
+    expect(meta.region).toBeUndefined();
+    const removed = { ...next, translations: deleteLanguageVersion(next.translations, 'Kiswahili') };
+    expect(participantMayUseLanguage(removed, 'Kiswahili')).toBe(false);
+    expect(languageChoiceQuestion(removed).choices.map((choice) => choice.value)).not.toContain('Kiswahili');
   });
 
   test('the notice says translations can be inaccurate until reviewed', () => {
