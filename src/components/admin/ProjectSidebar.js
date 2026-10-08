@@ -1038,6 +1038,9 @@ export default function ProjectSidebar({
                               <Typography variant="body2" sx={{ fontSize: '0.875rem', lineHeight: 1.3 }}>
                                 {project.name}
                               </Typography>
+                              {project.accessRole === 'collaborator' && (
+                                <Chip label={t.sidebarShared} size="small" color="primary" variant="outlined" sx={{ height: 18, '& .MuiChip-label': { px: 0.6, fontSize: '0.65rem' } }} />
+                              )}
                               {projectStates[project.id]?.hasUnsavedChanges && (
                                 <Chip
                                   label="*"
@@ -1452,11 +1455,13 @@ export default function ProjectSidebar({
           <ListItemIcon><Public /></ListItemIcon>
           <ListItemText>{t.sidebarPublishMain}</ListItemText>
         </MenuItem>
-        <Divider />
-        <MenuItem onClick={handleDeleteProject} sx={{ color: 'error.main' }}>
-          <ListItemIcon><Delete color="error" /></ListItemIcon>
-          <ListItemText>{t.sidebarDelete}</ListItemText>
-        </MenuItem>
+        {menuProject?.accessRole !== 'collaborator' && <Divider />}
+        {menuProject?.accessRole !== 'collaborator' && (
+          <MenuItem onClick={handleDeleteProject} sx={{ color: 'error.main' }}>
+            <ListItemIcon><Delete color="error" /></ListItemIcon>
+            <ListItemText>{t.sidebarDelete}</ListItemText>
+          </MenuItem>
+        )}
       </Menu>
 
       {/* Create Project Dialog */}

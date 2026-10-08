@@ -33,6 +33,7 @@ import { normalizePublicSlug, publicSlugErrorCode, validatePublicSlug } from './
  */
 
 import { supabase } from './supabase';
+import { listCollaboratorProjectIds, mergeAccessibleProjects, projectInsertPayload, projectUpdatePayload } from './projectCollaborators';
 import { saveSurveyConfig, loadSurveyConfig, deleteSurveyConfig } from './surveyStorage';
 import { readStoredOwnResponse, settingsForSave, stripOwnResponseSupabase } from './ownResponseSupabase';
 import { getTemplateById } from './projectTemplates';
@@ -108,26 +109,34 @@ async function sbSaveProject(project, surveyConfig, { writer = null } = {}) {
   const config = stripOwnResponseSupabase(surveyConfig || {});
   // Legacy projects stay live on save. The release trigger protects managed
   // survey_config; participant reads always use get_survey_project.
-  const row = {
-    id: project.id,
-    user_id: userId,
+  // Update never sends user_id, so a collaborator cannot take ownership.
+  // A missing row is an insert owned by the signed-in user.
+  const patch = projectUpdatePayload({
     name: project.name,
     description: project.description || '',
-    survey_config: config,
-    survey_config_draft: config,
-    draft_updated_at: now,
-    image_dataset_config: project.imageDatasetConfig || {},
-    preloaded_images: project.preloadedImages || [],
-    preloaded_at: project.preloadedAt || null,
-    preloaded_source: project.preloadedSource || null,
-    template_id: project.templateId || null,
+    surveyConfig: config,
+    imageDatasetConfig: project.imageDatasetConfig || {},
+    preloadedImages: project.preloadedImages || [],
+    preloadedAt: project.preloadedAt || null,
+    preloadedSource: project.preloadedSource || null,
+    templateId: project.templateId || null,
     metadata: buildProjectMetadata(project, project.metadata || {}),
-    updated_at: now,
-    last_writer: writer || { source: 'human', at: now },
-  };
-
-  const { error } = await supabase.from('projects').upsert(row, { onConflict: 'id' });
+    writer: writer || { source: 'human', at: now },
+    now,
+  });
+  const { data, error } = await supabase
+    .from('projects')
+    .update(patch)
+    .eq('id', project.id)
+    .select('id,draft_updated_at');
   if (error) throw error;
+  if (Array.isArray(data) && data.length) {
+    return { draftUpdatedAt: data[0].draft_updated_at || now };
+  }
+  const { error: insertError } = await supabase
+    .from('projects')
+    .insert(projectInsertPayload(patch, { id: project.id, userId }));
+  if (insertError) throw insertError;
   return { draftUpdatedAt: now };
 }
 
@@ -165,7 +174,23 @@ async function sbListProjects() {
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
   if (error) return [];
-  return (data || []).map(rowToProject);
+  const owned = (data || []).map(rowToProject);
+  // Admins can select every project. Keep the owner filter above, then add
+  // only the rows this user was invited to.
+  let shared = [];
+  try {
+    const ids = await listCollaboratorProjectIds(userId);
+    if (ids.length) {
+      const { data: sharedRows, error: sharedError } = await supabase
+        .from('projects')
+        .select('*')
+        .in('id', ids);
+      if (!sharedError) shared = (sharedRows || []).map(rowToProject);
+    }
+  } catch {
+    shared = [];
+  }
+  return mergeAccessibleProjects(owned, shared);
 }
 
 async function sbDeleteProject(projectId) {
@@ -180,6 +205,7 @@ function rowToProject(row) {
   const meta = (row.metadata && typeof row.metadata === 'object') ? row.metadata : {};
   return {
     id: row.id,
+    userId: row.user_id || null,
     name: row.name,
     description: row.description || '',
     // created_at / updated_at are absent on the survey-RPC payload; that's

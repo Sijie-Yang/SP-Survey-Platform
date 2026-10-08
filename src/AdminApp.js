@@ -53,6 +53,7 @@ import ConfirmDialog from './components/layout/ConfirmDialog';
 import WebsiteSetup from './components/admin/WebsiteSetup';
 import AdminIntroduction from './components/admin/AdminIntroduction';
 import ProjectSidebar from './components/admin/ProjectSidebar';
+import ProjectCollaboratorsBar from './components/admin/ProjectCollaboratorsBar';
 import BackendStatus from './components/admin/BackendStatus';
 import { AdminEmptyState, AdminLoadingState } from './components/admin/AdminPageLayout';
 import OpenProjectHeader from './components/admin/ProjectSurveyAge';
@@ -667,7 +668,7 @@ export default function AdminApp() {
           const { getProjectById } = await import('./lib/projectManager');
           const latest = await getProjectById(project.id);
           if (latest) {
-            fullProject = latest;
+            fullProject = { ...latest, accessRole: project.accessRole || latest.accessRole };
             if (!fileSurveyConfig) fileSurveyConfig = latest._surveyConfig;
           }
         } else {
@@ -1476,6 +1477,15 @@ export default function AdminApp() {
                 <Preview fontSize="small" />
               </IconButton>
             </Tooltip>
+
+            {currentProject && (
+              <ProjectCollaboratorsBar
+                projectId={currentProject.id}
+                ownerUserId={currentProject.userId}
+                accessRole={currentProject.accessRole}
+                currentUserId={user?.id}
+              />
+            )}
 
             {assistantEnabled && (
               <Box sx={{ display: { xs: 'none', md: 'block' } }}>
