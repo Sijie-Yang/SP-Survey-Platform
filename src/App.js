@@ -135,6 +135,7 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/live" element={<LiveSurveysPage />} />
                 <Route path="/bench" element={<SpBenchPage />} />
                 <Route path="/survey" element={<SurveyApp />} />
+                <Route path="/s/:slug" element={<SurveyApp />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/oauth/mcp" element={<McpOAuthPage />} />
                 <Route path="/admin" element={<ProtectedAdmin />} />
