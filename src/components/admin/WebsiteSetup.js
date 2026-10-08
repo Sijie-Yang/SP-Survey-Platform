@@ -50,6 +50,10 @@ export default function WebsiteSetup({
             {copied ? t.shareCopied : t.shareCopyLink}
           </Button>}>
         {shareTools.map(([id, label, icon]) => <AdminActionButton key={id} startIcon={icon} aria-haspopup="dialog" onClick={() => setShareDialog(id)}>{label}</AdminActionButton>)}
+        <OwnResponseSupabaseCard
+          currentProject={currentProject}
+          onSaved={(ownResponseSupabase) => onProjectUpdated?.({ ownResponseSupabase })}
+        />
         <AdminActionButton startIcon={<OpenInNew />} disabled={!surveyUrl} href={surveyUrl || undefined} onClick={() => markGuideProgress(currentProject.id, 'shared')} target="_blank" rel="noopener noreferrer">
           {t.shareOpenSurvey}
         </AdminActionButton>
@@ -114,11 +118,6 @@ export default function WebsiteSetup({
             </Alert>}
         </Box>
       </Paper>
-
-      <OwnResponseSupabaseCard
-        currentProject={currentProject}
-        onSaved={(ownResponseSupabase) => onProjectUpdated?.({ ownResponseSupabase })}
-      />
 
       {shareTools.map(([id, label]) => <Dialog key={id} open={shareDialog === id} onClose={() => setShareDialog(null)} keepMounted fullWidth maxWidth="md">
           <DialogTitle>{label}</DialogTitle>

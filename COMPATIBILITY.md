@@ -164,7 +164,7 @@ Do not promise “no impact” if question names or storage ownership change.
 
 ## 11. Own Supabase responses
 
-- Optional per project, set on the Share tab. Participants insert into the researcher's Supabase with the anon public key. The platform does not copy, analyze, or sync those rows.
+- Optional per project. On the Share tab, the Response storage button (回答存储) sits with Sharing guide and Open survey and opens the form. Participants insert into the researcher's Supabase with the anon public key. The platform does not copy, analyze, or sync those rows.
 - Hosted database: run `supabase/own_response_supabase.sql` once. It adds `projects.own_response_supabase` and `get_participant_response_sink`. It does not create the researcher's table.
 - Researcher table, shown in Share and pasted into their SQL editor: `sp_survey_responses` (override the table name there). Anon may INSERT only.
 - The URL and anon key are omitted from template export, builtin template JSON, and landing template config.

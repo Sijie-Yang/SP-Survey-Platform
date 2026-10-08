@@ -36,6 +36,8 @@ test('shows the English setting, insert-only SQL, and refuses an empty URL', asy
     return { success: true, ownResponseSupabase: decided.value };
   });
   renderCard('en');
+  expect(screen.queryByText('Store responses in my Supabase')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Response storage' }));
   expect(screen.getByText('Store responses in my Supabase')).toBeInTheDocument();
   expect(screen.getByLabelText(/Anon public key/i)).toBeInTheDocument();
   const sql = screen.getByTestId('own-response-sql').textContent;
@@ -49,6 +51,7 @@ test('shows the English setting, insert-only SQL, and refuses an empty URL', asy
 
 test('shows the Chinese setting labels', () => {
   renderCard('zh');
+  fireEvent.click(screen.getByRole('button', { name: '回答存储' }));
   expect(screen.getByText('回答写入我的 Supabase')).toBeInTheDocument();
   expect(screen.getByLabelText(/anon 公钥/)).toBeInTheDocument();
   expect(screen.getByText('粘贴到你的 Supabase SQL 编辑器')).toBeInTheDocument();

@@ -3,8 +3,11 @@ import {
   Alert,
   Box,
   Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
-  Paper,
   Stack,
   Switch,
   TextField,
@@ -13,6 +16,7 @@ import {
 import { ContentCopy, Storage } from '@mui/icons-material';
 import { uiPair } from '../../lib/uiLanguages';
 import { useRegion } from '../../contexts/RegionContext';
+import { AdminActionButton } from './AdminPageLayout';
 import { saveOwnResponseSupabase } from '../../lib/projectManager';
 import {
   DEFAULT_OWN_RESPONSE_TABLE,
@@ -48,6 +52,8 @@ export default function OwnResponseSupabaseCard({ currentProject, onSaved }) {
   const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const title = uiPair(language, 'Response storage', '回答存储');
 
   useEffect(() => {
     const stored = readStoredOwnResponse(currentProject?.ownResponseSupabase);
@@ -104,17 +110,19 @@ export default function OwnResponseSupabaseCard({ currentProject, onSaved }) {
   };
 
   return (
-    <Paper
-      variant="outlined"
-      data-testid="own-response-supabase"
-      sx={{ p: { xs: 2, sm: 3 }, borderRadius: 1.5, mt: 2 }}
-    >
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
-        <Storage color="primary" fontSize="small" />
-        <Typography variant="subtitle1" fontWeight={700}>
-          {uiPair(language, 'Response storage', '回答存储')}
-        </Typography>
-      </Stack>
+    <>
+      <AdminActionButton
+        data-testid="own-response-supabase"
+        startIcon={<Storage />}
+        aria-haspopup="dialog"
+        aria-expanded={open ? 'true' : undefined}
+        onClick={() => setOpen(true)}
+      >
+        {title}
+      </AdminActionButton>
+      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle>{title}</DialogTitle>
+        <DialogContent dividers>
       <FormControlLabel
         control={(
           <Switch
@@ -230,13 +238,16 @@ export default function OwnResponseSupabaseCard({ currentProject, onSaved }) {
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       {notice && <Alert severity="success" sx={{ mt: 2 }}>{notice}</Alert>}
 
-      <Box sx={{ mt: 2 }}>
-        <Button variant="contained" onClick={save} disabled={!currentProject?.id || saving}>
-          {saving
-            ? uiPair(language, 'Saving…', '正在保存…')
-            : uiPair(language, 'Save response storage', '保存回答存储')}
-        </Button>
-      </Box>
-    </Paper>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)}>{uiPair(language, 'Close', '关闭')}</Button>
+          <Button variant="contained" onClick={save} disabled={!currentProject?.id || saving}>
+            {saving
+              ? uiPair(language, 'Saving…', '正在保存…')
+              : uiPair(language, 'Save response storage', '保存回答存储')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }
