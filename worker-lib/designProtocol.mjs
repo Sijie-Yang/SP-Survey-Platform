@@ -702,7 +702,7 @@ export const DESIGN_CAPABILITIES = {
     mediaAssignmentMode: {
       individual: 'Random N files from pool (imageCount).',
       set: 'One whole set-tagged folder; imageCount must equal folder file count. Alias: group.',
-      category: 'mediaCategoryMode=all (default): mediaPerCategory from each selected category. single: each trial randomly chooses one category with enough unused files and draws mediaPerCategory files only from it. mediaFolders scopes eligible categories.',
+      category: 'mediaCategoryMode=all (default): mediaPerCategory from each selected category. single: each trial randomly chooses one category with enough unused files and draws mediaPerCategory files only from it. sample: each trial randomly chooses enough categories to fill imageCount (one photo from each of two categories when imageCount is 2 and mediaPerCategory is 1). mediaFolders scopes eligible categories.',
     },
     mediaSlots: {
       selectionValues: ['random', 'fixed', 'set_member', 'category'],

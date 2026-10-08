@@ -8,6 +8,8 @@ export const questionEditorZh = {
   "Category selection per trial": "每轮分类抽取方式",
   "One category per trial": "每轮单个分类",
   "All selected categories per trial": "每轮多个分类（全部已选分类）",
+  "A sample of categories per trial": "每轮抽取若干分类",
+  "Each trial randomly chooses {count} categories and draws {per} file(s) from each.": "每轮随机抽取 {count} 个分类，每个分类抽取 {per} 个文件。",
   "Files per trial": "每轮抽取文件数",
   "Each trial randomly chooses one selected category and draws {count} files only from it.": "每个 trial 随机选定一个分类，仅从该分类中抽取 {count} 个文件。",
   "Select the categories eligible for each trial. Each trial uses only one of them. Clear to use all categories.": "选择每轮可用的分类；每轮只使用其中一个。清除选择即恢复全部分类。",

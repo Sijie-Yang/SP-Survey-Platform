@@ -6,15 +6,48 @@ import { validateSurveyConfig } from './designProtocol/validate';
 import { normalizeRecommendation } from './analysisRecommendation';
 import { applySurveyLocale } from './surveyLocale';
 import { pickTrialMediaSetsForQuestion } from './surveyMediaInjection';
+import { registerMediaPairingProps } from '../components/SurveyCustomComponents';
 
 const DIR = path.join(__dirname, '..', '..', 'public', 'project_templates');
 const ID = '2026-demo-cat-choice';
+const ALLOWED_LICENSE = /^(CC0( 1\.0)?|CC BY( [0-9.]+)?( [a-z]{2})?|Public domain|PDM|PD)$/i;
 
 function loadTemplate() {
   return JSON.parse(fs.readFileSync(path.join(DIR, `${ID}.json`), 'utf8'));
 }
 
-test('cat pairwise demo is a listed builtin template with bundled art', () => {
+function jpegSize(buf) {
+  if (buf[0] !== 0xff || buf[1] !== 0xd8) throw new Error('not a jpeg');
+  let i = 2;
+  while (i + 8 < buf.length) {
+    if (buf[i] !== 0xff) break;
+    const marker = buf[i + 1];
+    const len = buf.readUInt16BE(i + 2);
+    if (marker >= 0xc0 && marker <= 0xc2) {
+      return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+    }
+    i += 2 + len;
+  }
+  throw new Error('jpeg size not found');
+}
+
+function parseCredits(text) {
+  const rows = [];
+  let current = null;
+  text.split('\n').forEach((line) => {
+    const file = line.match(/^- file: (\S+)/);
+    if (file) {
+      current = { file: file[1] };
+      rows.push(current);
+      return;
+    }
+    const field = line.match(/^  (author|source|license|licenseUrl): (.*)$/);
+    if (field && current) current[field[1]] = field[2];
+  });
+  return rows;
+}
+
+test('cat pairwise demo is a listed builtin template of real breed photographs', () => {
   const index = JSON.parse(fs.readFileSync(path.join(DIR, 'index.json'), 'utf8'));
   expect(index.templates).toContain(`${ID}.json`);
 
@@ -40,37 +73,67 @@ test('cat pairwise demo is a listed builtin template with bundled art', () => {
   expect(choice).toMatchObject({
     type: 'imagepicker',
     imageCount: 2,
-    trialCount: 6,
     allowTie: false,
     multiSelect: false,
-    mediaAssignmentMode: 'individual',
-    mediaFolders: ['cats'],
+    mediaAssignmentMode: 'category',
+    mediaCategoryMode: 'sample',
+    mediaPerCategory: 1,
   });
+  expect(choice.trialCount).toBeGreaterThanOrEqual(6);
+  expect(choice.mediaFolders.length).toBeGreaterThanOrEqual(36);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(DIR, ID, 'images.json'), 'utf8'));
   expect(manifest.templateId).toBe(ID);
-  expect(manifest.images).toEqual([
-    'cats/orange-tabby.jpg',
-    'cats/black.jpg',
-    'cats/siamese.jpg',
-    'cats/calico.jpg',
-  ]);
+  expect(manifest.images.length).toBeGreaterThanOrEqual(36 * 3);
+  const byFolder = new Map();
   manifest.images.forEach((rel) => {
     const file = path.join(DIR, ID, rel);
-    expect(fs.statSync(file).size).toBeGreaterThan(1000);
+    const buf = fs.readFileSync(file);
+    expect(buf[0]).toBe(0xff);
+    expect(buf[1]).toBe(0xd8);
+    const size = jpegSize(buf);
+    expect(Math.max(size.width, size.height)).toBeLessThanOrEqual(800);
+    expect(Math.max(size.width, size.height)).toBeGreaterThanOrEqual(200);
+    const folder = rel.split('/')[0];
+    byFolder.set(folder, (byFolder.get(folder) || 0) + 1);
+    expect(manifest.notes[rel]).toMatch(/\p{Script=Han}/u);
+    expect(manifest.notes[rel]).toMatch(/[A-Za-z]/);
   });
+  expect(byFolder.size).toBeGreaterThanOrEqual(36);
+  byFolder.forEach((count) => expect(count).toBeGreaterThanOrEqual(3));
+
   const bundledUrls = manifest.images.map((rel) => `/project_templates/${ID}/${rel}`);
   expect(tpl.preloadedImages.map((img) => img.url)).toEqual(bundledUrls);
-  expect(tpl.preloadedImages.every((img) => img.folder === 'cats' && img.type === 'image')).toBe(true);
+  expect(new Set(tpl.preloadedImages.map((img) => img.folder))).toEqual(new Set(byFolder.keys()));
+  tpl.preloadedImages.forEach((img) => {
+    expect(img.type).toBe('image');
+    expect(tpl.imageDatasetConfig.mediaFolderTags[img.folder]).toBe('category');
+  });
+  expect(choice.mediaFolders.slice().sort()).toEqual([...byFolder.keys()].sort());
+
+  const html = tpl.config.pages.flatMap((page) => page.elements).find((q) => q.name === 'cat_choice_note').html;
+  Object.values(manifest.notes).forEach((note) => {
+    expect(html).toContain(note.split(' — ')[0]);
+  });
+
+  const credits = parseCredits(fs.readFileSync(path.join(DIR, ID, 'CREDITS.md'), 'utf8'));
+  expect(credits.map((row) => row.file).sort()).toEqual([...manifest.images].sort());
+  credits.forEach((row) => {
+    expect(row.author.length).toBeGreaterThan(0);
+    expect(row.source).toMatch(/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
+    expect(row.license).toMatch(ALLOWED_LICENSE);
+    expect(row.licenseUrl).toMatch(/^https?:\/\//);
+  });
 
   const covers = JSON.parse(fs.readFileSync(path.join(DIR, 'cover_images', 'index.json'), 'utf8'));
   expect(covers.covers[ID]).toBe('2026-demo-cat-choice.jpg');
   expect(fs.statSync(path.join(DIR, 'cover_images', covers.covers[ID])).size).toBeGreaterThan(1000);
 });
 
-test('six pairwise trials each draw two distinct bundled cats', () => {
+test('each trial compares two breeds and can show another photo of the same breed', () => {
   const tpl = loadTemplate();
   const choice = tpl.config.pages.flatMap((page) => page.elements).find((q) => q.name === 'cat_choice');
+  const tags = tpl.imageDatasetConfig.mediaFolderTags;
   const { trialMediaSets } = pickTrialMediaSetsForQuestion(
     tpl.preloadedImages,
     choice,
@@ -78,35 +141,38 @@ test('six pairwise trials each draw two distinct bundled cats', () => {
     new Set(),
     new Set(),
     null,
-    tpl.imageDatasetConfig.mediaFolderTags,
+    tags,
   );
-  const known = new Set(['orange-tabby.jpg', 'black.jpg', 'siamese.jpg', 'calico.jpg']);
-  expect(trialMediaSets).toHaveLength(6);
+  expect(trialMediaSets).toHaveLength(choice.trialCount);
   trialMediaSets.forEach((trial) => {
     expect(trial).toHaveLength(2);
-    const names = trial.map((img) => img.name);
-    expect(new Set(names).size).toBe(2);
-    names.forEach((name) => expect(known.has(name)).toBe(true));
-    trial.forEach((img) => expect(String(img.url)).toMatch(/^\/project_templates\/2026-demo-cat-choice\/cats\//));
+    const folders = trial.map((img) => img.folder);
+    expect(new Set(folders).size).toBe(2);
+    folders.forEach((folder) => expect(tags[folder]).toBe('category'));
   });
 
-  const seen = new Set();
+  const seen = new Map();
   for (let i = 0; i < 40; i += 1) {
     const again = pickTrialMediaSetsForQuestion(
       tpl.preloadedImages,
-      choice,
+      { ...choice, excludePreviouslyUsedImages: false },
       1,
       new Set(),
       new Set(),
       null,
-      tpl.imageDatasetConfig.mediaFolderTags,
+      tags,
     );
-    again.trialMediaSets.flat().forEach((img) => seen.add(img.name));
+    again.trialMediaSets.flat().forEach((img) => {
+      const names = seen.get(img.folder) || new Set();
+      names.add(img.name);
+      seen.set(img.folder, names);
+    });
   }
-  expect(seen).toEqual(known);
+  expect([...seen.values()].some((names) => names.size > 1)).toBe(true);
 });
 
 test('the choice trial opens in Chinese and keeps the English prompt', () => {
+  registerMediaPairingProps();
   const tpl = loadTemplate();
   const model = new Model(tpl.config);
   applySurveyLocale(model, tpl.config);
@@ -115,4 +181,5 @@ test('the choice trial opens in Chinese and keeps the English prompt', () => {
   const question = model.getQuestionByName('cat_choice');
   expect(question.title).toContain('你更喜欢哪只猫');
   expect(question.title).toContain('Which cat do you prefer');
+  expect(question.mediaCategoryMode).toBe('sample');
 });

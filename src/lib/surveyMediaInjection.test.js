@@ -81,6 +81,34 @@ describe('surveyMediaInjection set/category picking', () => {
     expect(assignment.images).toEqual([]);
   });
 
+  test('sample category mode compares two categories and can redraw a breed', () => {
+    jest.spyOn(Math, 'random').mockRestore();
+    const pool = makePool(['a', 'b', 'c'].flatMap((folder) => [1, 2, 3, 4].map((i) => ({ name: `${folder}-${i}.jpg`, folder }))));
+    const tags = { a: 'category', b: 'category', c: 'category' };
+    const question = categoryQuestion({
+      mediaCategoryMode: 'sample',
+      mediaPerCategory: 1,
+      imageCount: 2,
+      mediaFolders: ['a', 'b', 'c'],
+    });
+    expect(expectedCategoryImageCount(pool, question, tags)).toBe(2);
+    const assignment = pickRandomMediaForQuestion(pool, question, new Set(), new Set(), null, tags);
+    expect(assignment.images).toHaveLength(2);
+    expect(new Set(assignment.images.map((img) => img.folder)).size).toBe(2);
+    expect(assignment.categories).toHaveLength(2);
+
+    const seen = new Map();
+    for (let i = 0; i < 40; i += 1) {
+      const draw = pickRandomMediaForQuestion(pool, { ...question, excludePreviouslyUsedImages: false }, new Set(), new Set(), null, tags);
+      draw.images.forEach((img) => {
+        const names = seen.get(img.folder) || new Set();
+        names.add(img.name);
+        seen.set(img.folder, names);
+      });
+    }
+    expect([...seen.values()].some((names) => names.size > 1)).toBe(true);
+  });
+
   test('pickRandomMediaForQuestion category mode draws per category', () => {
     const assignment = pickRandomMediaForQuestion(
       FIXTURE_POOL,

@@ -794,7 +794,7 @@ export function registerMediaPairingProps() {
     Serializer.addProperty(typeName, {
       name: 'mediaCategoryMode',
       default: 'all',
-      choices: ['all', 'single'],
+      choices: ['all', 'single', 'sample'],
       category: 'general'
     });
     Serializer.addProperty(typeName, {
