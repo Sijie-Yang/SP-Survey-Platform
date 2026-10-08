@@ -74,6 +74,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAdminTabHistory } from './lib/adminTabHistory';
 import useSurveyAssistant from './hooks/useSurveyAssistant';
 import { useSiliconTasks } from './hooks/useSiliconTasks';
+import { useCollectingSurveyCount } from './hooks/useCollectingSurveyCount';
+import CollectingSurveysChip from './components/admin/CollectingSurveysChip';
 import AiAssistantSidebar from './components/admin/AiAssistantSidebar';
 import { isAssistantEnabled, isSiliconExperimentalEnabled } from './lib/featureFlags';
 import { persistSliderAliases } from './lib/sliderScale';
@@ -1020,6 +1022,15 @@ export default function AdminApp() {
       });
     },
   });
+  const collectingSurveyCount = useCollectingSurveyCount({
+    userId: user?.id || null,
+    refreshKey: [
+      currentProject?.id || '',
+      currentProject?.publishedVersion || 0,
+      currentProject?.publishedAt || '',
+      currentProject?.accessRole || '',
+    ].join(':'),
+  });
 
   const openTaskProject = useCallback(async (projectId) => {
     if (!projectId) return;
@@ -1544,6 +1555,10 @@ export default function AdminApp() {
                 </Tooltip>
               </Box>
             )}
+            <CollectingSurveysChip
+              count={collectingSurveyCount}
+              onClick={() => { if (!sidebarOpen) toggleProjectSidebar(); }}
+            />
             <Box sx={{ display: { xs: 'none', md: 'block' } }}>
               <RegionSwitcher />
             </Box>
@@ -1642,6 +1657,11 @@ export default function AdminApp() {
         {compactToolbar && siliconEnabled && (
           <MenuItem onClick={() => { handleToolsMenuClose(); openAiSidebar('tasks'); }}>
             {tf(t.siliconTasksBadge, { count: siliconTasks.activeCount })}
+          </MenuItem>
+        )}
+        {compactToolbar && (
+          <MenuItem onClick={() => { handleToolsMenuClose(); if (!sidebarOpen) toggleProjectSidebar(); }}>
+            {tf(t.collectingSurveysBadge, { count: collectingSurveyCount })}
           </MenuItem>
         )}
         {compactToolbar && <MenuItem disabled={!currentProject || !surveyConfig} onClick={() => {
