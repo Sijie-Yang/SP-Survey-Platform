@@ -1,0 +1,129 @@
+{
+  "id": "2026-demo-cat-choice",
+  "name": "猫咪品类二选一 Cat Category Choice",
+  "description": "非街道演示：四类原创猫咪插画（橘猫、黑猫、暹罗猫、三花猫）两两比较，强制二选一，共 6 轮，中英文字。Non-street demo: six forced pairwise trials among four original cat illustrations (orange tabby, black, Siamese, calico), with English and Chinese text.",
+  "author": "SP-Survey",
+  "year": "2026",
+  "category": "Demo",
+  "tags": [
+    "demo",
+    "cats",
+    "pairwise",
+    "bilingual",
+    "non-street",
+    "official"
+  ],
+  "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": false,
+  "thumbnailUrl": "/project_templates/cover_images/2026-demo-cat-choice.jpg",
+  "website": null,
+  "huggingfaceDataset": null,
+  "createdAt": "2026-10-08T00:00:00.000Z",
+  "config": {
+    "locale": "zh",
+    "title": "猫咪品类二选一\nCat Category Choice",
+    "description": "这是一个非街道演示。四张原创插画会两两出现，请选出你更喜欢的一只。\nThis is a non-street demo. Four original illustrations appear in pairs. Choose the cat you prefer.",
+    "logoPosition": "right",
+    "showQuestionNumbers": "off",
+    "showProgressBar": "aboveheader",
+    "progressBarType": "questions",
+    "pages": [
+      {
+        "name": "cat_choice_page",
+        "title": "二选一 Pairwise choice",
+        "description": "每一轮只出现两只猫，请选一只，不能打平。共 6 轮。\nEach trial shows two cats. Pick one. There is no tie. Six trials.",
+        "elements": [
+          {
+            "name": "cat_choice_note",
+            "type": "html",
+            "html": "<p><strong>猫咪品类 / Cat categories</strong></p><ul><li>橘猫 orange tabby</li><li>黑猫 black</li><li>暹罗猫 Siamese</li><li>三花猫 calico</li></ul><p>插画是为本演示绘制的，不是照片，也不是街景。The illustrations were drawn for this demo. They are not photographs and not street scenes.</p>"
+          },
+          {
+            "name": "cat_choice",
+            "type": "imagepicker",
+            "title": "你更喜欢哪只猫？ Which cat do you prefer?",
+            "description": "请在两只猫里选一只。Pick one of the two cats.",
+            "imageFit": "contain",
+            "imageHeight": 320,
+            "imageWidth": 320,
+            "colCount": 2,
+            "showLabel": false,
+            "multiSelect": false,
+            "allowTie": false,
+            "mediaType": "image",
+            "imageCount": 2,
+            "trialCount": 6,
+            "isRequired": true,
+            "choices": [],
+            "imageSource": "huggingface",
+            "imageSelectionMode": "huggingface_random",
+            "randomImageSelection": true,
+            "mediaAssignmentMode": "individual",
+            "mediaFolders": [
+              "cats"
+            ],
+            "excludePreviouslyUsedImages": false,
+            "pairingMode": "random"
+          }
+        ]
+      }
+    ],
+    "spAnalysisRecommendation": {
+      "citation": "Demo cat pairwise choice",
+      "items": [
+        {
+          "questions": [
+            "cat_choice"
+          ],
+          "method": "trueskill_pairwise",
+          "tieHandling": "exclude"
+        },
+        {
+          "questions": [
+            "cat_choice"
+          ],
+          "method": "choice_share"
+        }
+      ]
+    }
+  },
+  "imageDatasetConfig": {
+    "mediaFolders": [
+      "cats"
+    ],
+    "mediaFolderTags": {}
+  },
+  "preloadedImages": [
+    {
+      "url": "/project_templates/2026-demo-cat-choice/cats/orange-tabby.jpg",
+      "name": "orange-tabby.jpg",
+      "key": "builtin/2026-demo-cat-choice/cats/orange-tabby.jpg",
+      "type": "image",
+      "folder": "cats"
+    },
+    {
+      "url": "/project_templates/2026-demo-cat-choice/cats/black.jpg",
+      "name": "black.jpg",
+      "key": "builtin/2026-demo-cat-choice/cats/black.jpg",
+      "type": "image",
+      "folder": "cats"
+    },
+    {
+      "url": "/project_templates/2026-demo-cat-choice/cats/siamese.jpg",
+      "name": "siamese.jpg",
+      "key": "builtin/2026-demo-cat-choice/cats/siamese.jpg",
+      "type": "image",
+      "folder": "cats"
+    },
+    {
+      "url": "/project_templates/2026-demo-cat-choice/cats/calico.jpg",
+      "name": "calico.jpg",
+      "key": "builtin/2026-demo-cat-choice/cats/calico.jpg",
+      "type": "image",
+      "folder": "cats"
+    }
+  ],
+  "preloadedSource": "builtin",
+  "preloadedAt": "2026-10-08T00:00:00.000Z"
+}

@@ -1,5 +1,6 @@
 {
   "templates": [
+    "2026-demo-cat-choice.json",
     "2026-sp-all.json",
     "2026-jiayi-survey.json",
     "2026-user-template.json",

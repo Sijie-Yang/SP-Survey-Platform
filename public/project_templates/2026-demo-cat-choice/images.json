@@ -1,0 +1,20 @@
+{
+  "templateId": "2026-demo-cat-choice",
+  "source": "Original flat illustrations drawn for this non-street demo. Not photographs.",
+  "images": [
+    "cats/orange-tabby.jpg",
+    "cats/black.jpg",
+    "cats/siamese.jpg",
+    "cats/calico.jpg"
+  ],
+  "primary": [
+    "cats/orange-tabby.jpg",
+    "cats/black.jpg"
+  ],
+  "notes": {
+    "cats/orange-tabby.jpg": "Orange tabby / 橘猫",
+    "cats/black.jpg": "Black cat / 黑猫",
+    "cats/siamese.jpg": "Siamese / 暹罗猫",
+    "cats/calico.jpg": "Calico / 三花猫"
+  }
+}
