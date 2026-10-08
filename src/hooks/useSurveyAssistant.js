@@ -37,6 +37,7 @@ export default function useSurveyAssistant({
   onSurveyConfigChange,
   enabled = true,
   editorSelection = null,
+  editorSelectionSourceRef = null,
   hasUnsavedChanges = false,
   lastSavedConfig = null,
   onPrepareWrite = null
@@ -609,6 +610,7 @@ export default function useSurveyAssistant({
     URL.revokeObjectURL(url);
   }, []);
   const handleSendMessage = useCallback(async (override = {}) => {
+    const liveEditorSelection = editorSelectionSourceRef?.current || editorSelection;
     const sendMode = override.assistantMode || assistantMode;
     const typed = String(override.message != null ? override.message : userMessage).trim();
     const outgoing = typed || (sendMode === 'review' ? reviewDefaultMessage(language) : '');
@@ -642,7 +644,7 @@ export default function useSurveyAssistant({
       return;
     }
     const intent = classifyUserIntent(outgoing, sendMode);
-    const editorDirty = Boolean(hasUnsavedChanges || editorSelection?.dirty || editorSelection?.pageDirty);
+    const editorDirty = Boolean(hasUnsavedChanges || liveEditorSelection?.dirty || liveEditorSelection?.pageDirty);
     const prepareWrite = reviewWrites || shouldPrepareWrite({
       assistantMode: sendMode,
       message: outgoing
@@ -722,10 +724,10 @@ export default function useSurveyAssistant({
         review: sendMode === 'review' ? reviewOptions : null,
         language,
         editorContext: {
-          ...(editorSelection || {}),
-          hasUnsavedChanges: Boolean(hasUnsavedChanges || editorSelection?.dirty),
-          workingCopy: editorSelection?.workingCopy || null,
-          baseline: editorSelection?.baseline || null,
+          ...(liveEditorSelection || {}),
+          hasUnsavedChanges: Boolean(hasUnsavedChanges || liveEditorSelection?.dirty),
+          workingCopy: liveEditorSelection?.workingCopy || null,
+          baseline: liveEditorSelection?.baseline || null,
           draftUpdatedAt: currentProject?.draftUpdatedAt || null,
           projectId: request.projectId
         },
@@ -1075,7 +1077,7 @@ export default function useSurveyAssistant({
       if (inbox?.success) setInboxItems(inbox.inbox || []);
     }
     return stillCurrent() ? completedResult : undefined;
-  }, [aiSessionId, apiKeyValid, applySurveyConfig, assistantMode, assistantDirectory, contextEnabled, currentProject?.category, customPrompts, maxReviewRounds, multiAgentReviewEnabled, openaiApiKey, platformMode, refreshConversation, reviewMode, selectedEffort, selectedRoute, currentProject, editorSelection, handleAssistantModeChange, hasUnsavedChanges, language, lastSavedConfig, onPrepareWrite, reviewOptions, reviewSettings, userMessage]);
+  }, [aiSessionId, apiKeyValid, applySurveyConfig, assistantMode, assistantDirectory, contextEnabled, currentProject?.category, customPrompts, maxReviewRounds, multiAgentReviewEnabled, openaiApiKey, platformMode, refreshConversation, reviewMode, selectedEffort, selectedRoute, currentProject, editorSelection, editorSelectionSourceRef, handleAssistantModeChange, hasUnsavedChanges, language, lastSavedConfig, onPrepareWrite, reviewOptions, reviewSettings, userMessage]);
   const handleApplyReview = useCallback(async (runId, rounds = []) => {
     if (!runId || reviewApplying) return;
     const request = {
@@ -1219,15 +1221,16 @@ export default function useSurveyAssistant({
   const handleSteerMessage = useCallback(async () => {
     const content = userMessage.trim();
     if (!content || !aiSessionId || !isLoading) return;
+    const liveEditorSelection = editorSelectionSourceRef?.current || editorSelection;
     const result = await steerAiSession(aiSessionId, content, steerTarget === 'after-run' ? 'after-run' : 'next-step', {
       assistantMode,
       projectId,
       parentRunId: activeRunId || null,
       editorContext: {
-        questionName: editorSelection?.questionName || null,
-        pageName: editorSelection?.pageName || null,
-        dirty: Boolean(editorSelection?.dirty || editorSelection?.pageDirty),
-        hasUnsavedChanges: Boolean(hasUnsavedChanges || editorSelection?.dirty || editorSelection?.pageDirty)
+        questionName: liveEditorSelection?.questionName || null,
+        pageName: liveEditorSelection?.pageName || null,
+        dirty: Boolean(liveEditorSelection?.dirty || liveEditorSelection?.pageDirty),
+        hasUnsavedChanges: Boolean(hasUnsavedChanges || liveEditorSelection?.dirty || liveEditorSelection?.pageDirty)
       }
     });
     if (result?.success) {
@@ -1238,7 +1241,7 @@ export default function useSurveyAssistant({
         if (inbox?.success) setInboxItems(inbox.inbox || []);
       }
     }
-  }, [activeRunId, aiSessionId, assistantMode, editorSelection, hasUnsavedChanges, isLoading, projectId, steerTarget, userMessage]);
+  }, [activeRunId, aiSessionId, assistantMode, editorSelection, editorSelectionSourceRef, hasUnsavedChanges, isLoading, projectId, steerTarget, userMessage]);
   return {
     enabled,
     isPlatformMode: platformMode,

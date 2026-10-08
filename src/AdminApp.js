@@ -79,6 +79,7 @@ import CollectingSurveysChip from './components/admin/CollectingSurveysChip';
 import AiAssistantSidebar from './components/admin/AiAssistantSidebar';
 import { isAssistantEnabled, isSiliconExperimentalEnabled } from './lib/featureFlags';
 import { persistSliderAliases } from './lib/sliderScale';
+import { nextEditorSelectionState } from './lib/editorSelection';
 import {
   AI_SIDEBAR_ID,
   AI_SIDEBAR_WIDTH,
@@ -475,12 +476,18 @@ export default function AdminApp() {
   const [editorCommitKey, setEditorCommitKey] = useState(0);
   const currentProjectIdRef = useRef(null);
 
+  const commitEditorSelection = useCallback((nextOrUpdater) => {
+    const prev = editorSelectionRef.current;
+    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(prev) : nextOrUpdater;
+    editorSelectionRef.current = next;
+    setEditorSelection((current) => nextEditorSelectionState(current, next));
+  }, []);
+
   useEffect(() => {
     draftUpdatedAtRef.current = currentProject?.draftUpdatedAt || null;
     hasUnsavedChangesRef.current = hasUnsavedChanges;
     currentProjectIdRef.current = currentProject?.id || null;
-    editorSelectionRef.current = editorSelection;
-  }, [currentProject?.draftUpdatedAt, currentProject?.id, hasUnsavedChanges, editorSelection]);
+  }, [currentProject?.draftUpdatedAt, currentProject?.id, hasUnsavedChanges]);
 
   useEffect(() => {
     if (!isSupabaseConfigured() || !currentProject?.id) return undefined;
@@ -961,6 +968,7 @@ export default function AdminApp() {
       panel: tabValue,
       resultsScope: tabValue === 4 ? resultsScope : null,
     },
+    editorSelectionSourceRef: editorSelectionRef,
     hasUnsavedChanges,
     lastSavedConfig,
     onPrepareWrite: async (opts = {}) => {
@@ -986,7 +994,7 @@ export default function AdminApp() {
           return { ok: false, message: result.error || 'The editor working copy could not be saved.' };
         }
         setEditorCommitKey((current) => current + 1);
-        setEditorSelection((current) => current ? { ...current, dirty: false, pageDirty: false } : current);
+        commitEditorSelection((current) => current ? { ...current, dirty: false, pageDirty: false } : current);
         return { ok: true, draftUpdatedAt: result?.draftUpdatedAt, committedWorkingCopy: true };
       }
       if (!hasUnsavedChangesRef.current) return { ok: true };
@@ -1818,7 +1826,7 @@ export default function AdminApp() {
           onClose={() => setAiSidebarOpen(false)}
           assistant={{
             ...assistant,
-            onClearEditorFocus: () => setEditorSelection((prev) => (
+            onClearEditorFocus: () => commitEditorSelection((prev) => (
               prev ? { ...prev, pageName: null, questionName: null } : null
             )),
           }}
@@ -1909,7 +1917,7 @@ export default function AdminApp() {
                   currentProject={currentProject}
                   onNextStep={handleNextStep}
                   hideAssistant
-                  onEditorSelectionChange={setEditorSelection}
+                  onEditorSelectionChange={commitEditorSelection}
                   onOpenAssistant={() => setAiSidebarOpen(true)}
                   onOpenLayoutStudio={() => openOverlay('layout')}
                   onOpenPreview={() => openOverlay('preview')}

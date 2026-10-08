@@ -65,11 +65,11 @@ test('random folder scope can select specific folders and explicitly return to a
 test('annotation settings and media sampling details are Chinese', () => {
   setup({ type: 'imageannotation', imageCount: 1, mediaAssignmentMode: 'category', trialCount: 2 });
   expect(screen.getByLabelText('每个分类抽取的文件数')).toBeInTheDocument();
-  expect(screen.getByLabelText('轮次数（重复作答本题）')).toBeInTheDocument();
+  expect(screen.getByLabelText('作答轮数')).toBeInTheDocument();
   expect(screen.getByLabelText('分类标签（可选）')).toBeInTheDocument();
   expect(screen.getByLabelText('最少标注数量')).toBeInTheDocument();
   expect(screen.getByText(/将展示 1 个文件/)).toBeInTheDocument();
-  expect(screen.getByText(/2 轮作答/)).toBeInTheDocument();
+  expect(screen.getByText(/一共记录 2 份答案/)).toBeInTheDocument();
 });
 
 test('per-trial category mode updates the saved media count and switches back to legacy all-category sampling', () => {
@@ -121,6 +121,16 @@ test('validation explains invalid scales in Chinese and preserves duplicate IDs 
   expect(screen.getByRole('button', { name: '量表最小值必须小于最大值。' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '保存题目' })).toBeDisabled();
   expect(questionSettingErrorText('choices: duplicate ID "original_id".', 'zh')).toBe('选项中存在重复标识“original_id”。');
+});
+
+test('image rating labels separate images shown each round from how many answers are recorded', () => {
+  setup({ type: 'imagerating', imageCount: 2, trialCount: 5, rateMin: 1, rateMax: 5, excludePreviouslyUsedImages: false });
+  expect(screen.getByLabelText('每轮同屏展示的图片数')).toHaveValue(2);
+  expect(screen.getByLabelText('作答轮数')).toHaveValue(5);
+  expect(screen.getByText('每一轮同时出示的数量，不是一共要回答的次数。一共回答几轮，由作答轮数决定。')).toBeInTheDocument();
+  expect(screen.getByText(/一共记录 5 份答案/)).toBeInTheDocument();
+  expect(screen.getByText(/每轮同时出示 2 个/)).toBeInTheDocument();
+  expect(screen.getByRole('switch', { name: /优先不重复已展示的媒体/ })).not.toBeChecked();
 });
 
 test('wording per condition edits conditionVariants on the same question', () => {
