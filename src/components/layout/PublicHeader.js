@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { AppBar, Toolbar, Typography, Button, Box, Container, Tooltip, IconButton, Menu, MenuItem, Divider, useMediaQuery } from '@mui/material';
 import { GitHub, Star, Menu as MenuIcon } from '@mui/icons-material';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import { researcherEntryPath } from '../../lib/researcherEntry';
 import { useGithubStars } from '../../lib/useGithubStars';
 import { useRegion } from '../../contexts/RegionContext';
 import RegionSwitcher from '../admin/RegionSwitcher';
@@ -31,6 +33,9 @@ export default function PublicHeader({
   rightSlot = null
 }) {
   const location = useLocation();
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  const signedIn = !authLoading && isAuthenticated;
+  const entryPath = researcherEntryPath(signedIn);
   const githubStars = useGithubStars();
   const {
     t,
@@ -139,7 +144,7 @@ export default function PublicHeader({
           }}>{label}</Button>)}
           </Box>}
           {wideNavigation && <><RegionSwitcher variant="public" />{githubLink}</>}
-          <Button component={RouterLink} to="/login" variant="outlined" size="small" aria-current={isActive('/login') ? 'page' : undefined} sx={{
+          <Button component={RouterLink} to={entryPath} variant="outlined" size="small" aria-current={isActive(entryPath) ? 'page' : undefined} sx={{
           flexShrink: 0,
           whiteSpace: 'nowrap',
           fontWeight: 600,
@@ -147,9 +152,9 @@ export default function PublicHeader({
             xs: 12,
             sm: 13
           },
-          bgcolor: isActive('/login') ? 'action.selected' : 'transparent'
+          bgcolor: isActive(entryPath) ? 'action.selected' : 'transparent'
         }}>
-            {t.navResearcherLogin}
+            {signedIn ? t.navOpenWorkspace : t.navResearcherLogin}
           </Button>
           {!wideNavigation && <IconButton aria-label={uiPair(language, 'Open navigation menu', '打开导航菜单')} aria-controls={menuAnchor ? 'public-navigation-menu' : undefined} aria-haspopup="true" aria-expanded={!!menuAnchor} onClick={e => setMenuAnchor(e.currentTarget)} sx={{
           flexShrink: 0

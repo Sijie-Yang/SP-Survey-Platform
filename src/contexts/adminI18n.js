@@ -186,6 +186,7 @@ export const adminI18n = {
     aiClearHistoryConfirm: 'Clear',
     previewSurvey: 'Preview Survey',
     viewLive: 'Survey Link',
+    navMainPage: 'Main page',
     moreTools: 'More workspace tools',
     signedInAs: 'Signed in as',
     changeTheme: 'Change theme',
@@ -936,6 +937,7 @@ export const adminI18n = {
     navLiveSurveys: 'Live surveys',
     navSpBench: 'SP-Bench',
     navResearcherLogin: 'Researcher login',
+    navOpenWorkspace: 'Open workspace',
     footerDevelopedBy: 'Developed by',
 
     newsTitle: 'News',
@@ -1417,6 +1419,7 @@ export const adminI18n = {
     aiClearHistoryConfirm: '清空',
     previewSurvey: '预览问卷',
     viewLive: '问卷链接',
+    navMainPage: '首页',
     moreTools: '更多工作区工具',
     signedInAs: '当前登录',
     changeTheme: '切换主题',
@@ -2150,6 +2153,7 @@ export const adminI18n = {
     navLiveSurveys: '在线调查',
     navSpBench: 'SP-Bench',
     navResearcherLogin: '研究者登录',
+    navOpenWorkspace: '进入工作区',
     footerDevelopedBy: '开发团队',
 
     newsTitle: '新闻',

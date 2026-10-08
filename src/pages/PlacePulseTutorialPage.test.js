@@ -23,6 +23,9 @@ jest.mock('../components/admin/SurveyPreview', () => function MockSurveyPreview(
 let mockDocId = '2013-salesses-collaborative';
 jest.mock('../lib/useGithubStars', () => ({ useGithubStars: () => null }));
 jest.mock('../lib/spBenchApi', () => ({ getBenchPublicStatus: () => Promise.resolve({ enabled: false }) }));
+jest.mock('../contexts/AuthContext', () => ({
+  useAuth: () => ({ isAuthenticated: false, loading: false, user: null }),
+}));
 jest.mock('react-router-dom', () => ({
   useNavigate: () => jest.fn(),
   useParams: () => ({ docId: mockDocId }),
