@@ -1,0 +1,125 @@
+{
+  "id": "2026-photo-map",
+  "name": "Photo and map pin / 照片与地图标点",
+  "description": "Demo: one fixed illustration and one map pin stay on the same page. The picture is an original riverfront drawing, not a photograph, and it is not chosen at random. Participants place one point in a fixed central Shanghai study area. English and Chinese wording are both in the question text. The survey locale is Chinese. 演示：一幅固定插画和一道地图标点在同一页。画面是原创滨水插画，不是照片，也不会随机更换。参与者在固定的上海中心城区范围内标出一个点。题干同时包含中文和英文。问卷语言为中文。",
+  "author": "SP-Survey",
+  "year": "2026",
+  "category": "Demo",
+  "tags": [
+    "official",
+    "demo",
+    "map"
+  ],
+  "isPinned": false,
+  "isApproved": true,
+  "showOnLanding": false,
+  "thumbnailUrl": "/project_templates/2026-photo-map/riverfront.svg",
+  "website": null,
+  "huggingfaceDataset": null,
+  "createdAt": "2026-10-08T00:00:00+00:00",
+  "imageDatasetConfig": {
+    "mediaFolders": [],
+    "mediaFolderTags": {}
+  },
+  "preloadedImages": [],
+  "preloadedSource": null,
+  "preloadedAt": null,
+  "config": {
+    "title": "这个画面在哪里？ / Where is this view?",
+    "description": "请看同一页上的固定画面，并在上海地图上标出一个点。画面和地图不会被随机拆开。 / Look at the fixed picture on this page, then place one pin on the Shanghai map. The picture and the map are not split by randomization.",
+    "locale": "zh",
+    "logoPosition": "right",
+    "showQuestionNumbers": "off",
+    "showProgressBar": "off",
+    "completedHtml": "谢谢。 / Thank you.",
+    "pages": [
+      {
+        "name": "page_photo_map",
+        "title": "这个画面在哪里？ / Where is this view?",
+        "description": "画面是原创插画，每次都相同。地图范围固定在上海中心城区。请用点标出一个位置。 / The picture is an original illustration and is always the same. The map stays on central Shanghai. Mark one point.",
+        "questionsOrder": "initial",
+        "elements": [
+          {
+            "name": "scene_view",
+            "type": "image",
+            "title": "请看这个固定画面。 / Look at this fixed view.",
+            "description": "原创滨水插画，不是实拍照片，也不会从媒体库随机抽取。 / Original riverfront illustration, not a photograph, and not a random draw from a media library.",
+            "imageLink": "/project_templates/2026-photo-map/riverfront.svg",
+            "imageLinks": [
+              "/project_templates/2026-photo-map/riverfront.svg"
+            ],
+            "selectedImageUrls": [
+              "/project_templates/2026-photo-map/riverfront.svg"
+            ],
+            "imageNames": [
+              "riverfront.svg"
+            ],
+            "imageSelectionMode": "huggingface_manual",
+            "randomImageSelection": false,
+            "randomizeSetOrder": false,
+            "imageCount": 1,
+            "imageFit": "contain",
+            "imageHeight": "240px",
+            "imageWidth": "720px",
+            "altText": "原创滨水插画：河岸步道、拱桥和一座方塔。 Original illustration of a riverfront promenade, an arch bridge, and a square tower."
+          },
+          {
+            "name": "photo_location",
+            "type": "mapannotation",
+            "title": "请在上海地图上标出一个点，标出你认为这个画面所在的位置。 / Place one pin on the Shanghai map where you think this view is.",
+            "description": "地图已固定在上海中心城区。请选择“点 / Point”，标出一个位置。这一页上的画面和地图保持在一起，不会因随机顺序被拆到不同页面。 / The map is fixed on central Shanghai. Choose Point and mark one place. This picture and map stay together on this page.",
+            "isRequired": true,
+            "mapTools": [
+              "point"
+            ],
+            "mapLabel": "photo",
+            "mapPolarity": "single",
+            "studyAreaId": "shanghai-photo-map",
+            "minAnnotations": 1,
+            "maxAnnotations": 1,
+            "studyAreas": [
+              {
+                "id": "shanghai-photo-map",
+                "revision": 1,
+                "cityId": "shanghai",
+                "label": "上海中心城区 Shanghai. Fixed study extent for this pin task, not the city administrative boundary.",
+                "center": [
+                  121.49,
+                  31.23
+                ],
+                "zoom": 12,
+                "boundary": {
+                  "type": "Polygon",
+                  "coordinates": [
+                    [
+                      [
+                        121.42,
+                        31.18
+                      ],
+                      [
+                        121.56,
+                        31.18
+                      ],
+                      [
+                        121.56,
+                        31.28
+                      ],
+                      [
+                        121.42,
+                        31.28
+                      ],
+                      [
+                        121.42,
+                        31.18
+                      ]
+                    ]
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
