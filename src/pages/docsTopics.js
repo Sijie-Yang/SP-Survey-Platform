@@ -394,7 +394,7 @@ export const DOC_TOPICS = [
       s('collect', p('Keep collection and changes traceable', '让收集与修改可追溯'), [
         p('After release, share the participant URL or QR code and check incoming data coverage. When the design changes, retain the revision used for each response and analyze compatible versions intentionally. Record your wording and settings changes in the research methods.', '发布后分享参与者链接或二维码，并检查进入数据的覆盖。设计改变时，保留每份回答使用的版本，有意识地选择兼容版本分析。方法报告中记录题干和设置变化。'),
       ]),
-    ], related: ['study-design', 'media-sampling', 'results-export', 'paper-templates'],
+    ], related: ['study-design', 'media-sampling', 'results-export', 'paper-templates', 'common-questions'],
   },
   {
     id: 'results-export', group: 'platform', title: p('Results, exports & reproducibility', '结果、导出与可复现性'),
@@ -435,6 +435,48 @@ export const DOC_TOPICS = [
         p('Inspect media and use existing project/template materials. Results access requires the results scope. For a version-managed project, the agent’s draft save is separate from survey_publish(confirm: true), which creates the participant release. Secrets belong in the integration settings, not in survey questions or exported answers.', '检查媒体，使用已有项目或模板材料。读取结果需要对应权限。版本管理项目中，代理保存草稿与 survey_publish(confirm: true) 创建参与者发布版本是不同动作。密钥应留在集成设置中，不放进题干或导出答案。'),
       ]),
     ], related: ['question-types', 'platform-workflow', 'results-export'],
+  },
+  {
+    id: 'common-questions', group: 'platform', title: p('Common questions', '常见问题'),
+    summary: p('Where a hosted survey’s data lives, how long it stays available, and the first choices a researcher makes in the workspace.', '托管问卷的数据存在哪里、会保留多久，以及研究者在工作区里最先会遇到的选择。'),
+    flow: [p('Store the study', '数据放在哪里'), p('Build without extras', '不必先开额外功能'), p('Preview, then release', '先看清，再发布'), p('Share a short link', '用短链接分享'), p('Read the results', '查看结果')],
+    sections: [
+      s('where', p('Where does the data live?', '数据存在哪里？'), [
+        p('The hosted website runs on Cloudflare. Survey designs and participant responses are stored in the project Supabase database. Media files, such as images and video, are stored in Cloudflare R2.', '托管网站运行在 Cloudflare 上。问卷设计和参与者的回答保存在项目的 Supabase 数据库中。图片、视频等媒体文件保存在 Cloudflare R2。'),
+      ]),
+      s('retention', p('How long do a survey and its results stay up?', '问卷和结果会保留多久？'), [
+        p('There is no automatic expiry. A survey and its results stay up until the owner unpublishes the survey or deletes the project. A time window on a public Live surveys listing can close that public card. It does not delete the project or the responses already stored.', '平台没有自动到期时间。问卷和结果会一直保留，直到所有者取消发布或删除该项目。「在线调查」上的展示时段可以让那张公开卡片结束展示，但不会删除项目，也不会删除已经保存的答卷。'),
+      ]),
+      s('without-ai', p('Do I need AI to build a survey?', '必须用 AI 才能做问卷吗？'), [
+        p('No. Add pages and questions yourself in the builder. The in-browser Assistant can draft or edit a survey, and you can turn it off in Assistant settings so its sidebar is hidden. You can release a survey without using it.', '不需要。在问卷编辑器里自己添加页面和题目即可。浏览器内助手可以起草或修改问卷；也可以在助手设置里关掉它，侧栏就会隐藏。不使用助手也可以发布问卷。'),
+      ]),
+      s('live-page', p('How does a survey get onto Live surveys?', '问卷怎样出现在「在线调查」？'), [
+        p('The share link is separate from the public Live surveys page. From the project menu, choose Publish to Main Page, write a short public description, and set the online window. The listing stays pending until an administrator approves it. While that approved window is open, the card appears on Live surveys.', '分享链接和公开的「在线调查」页面是两件事。在项目菜单里选择「发布到主页」，填写简短的公开说明并设置展示时段。申请会保持待审核，直到管理员通过。在已通过的时段内，卡片会出现在「在线调查」。'),
+        p('A project that was never listed stays available from its share link, without that window. If a project does have an approved listing, participants can open it only during the approved window. Ending the window closes the public card. It is not a date on which the platform deletes the survey.', '从未申请上架的项目，仍可通过分享链接打开，不受该时段限制。已经有通过审核的上架记录时，参与者只能在核准时段内打开。时段结束会关闭这张公开卡片，并不是平台按日期删除问卷。'),
+      ]),
+      s('custom-link', p('Can I use a short public link?', '可以用一个简短的公开链接吗？'), [
+        p('On the Share tab, Custom link saves a short address, https://sp-survey.org/s/{slug}, using a name you choose. The original project link, /survey?project={id}, still opens the same survey.', '在「分享」页，「自定义链接」会保存一个简短地址 https://sp-survey.org/s/{slug}，名称由你设定。原来的项目链接 /survey?project={id} 仍然打开同一份问卷。'),
+        p('The name is 2–40 characters: lowercase letters, digits, and single hyphens. Names such as admin, api, s, survey, and login are reserved, and a name already used by another survey is rejected.', '名称长度为 2–40 个字符，使用小写字母、数字和单个连字符。admin、api、s、survey、login 是保留名称；已被其他问卷使用的名称也会被拒绝。'),
+      ]),
+      s('street-level', p('Where do street-level images download?', '街景图片在哪里下载？'), [
+        p('Street-level imagery is downloaded by a small helper on your own computer. You pick points on the map in SP-Survey, or paste Street View URLs, and the helper on that computer fetches the views. Cloudflare does not download them for you. After the download finishes, the files can be added to this project’s media library.', '街景图片由你自己电脑上的一个小工具下载。在 SP-Survey 里选地图上的点，或粘贴街景网址，然后由这台电脑上的工具去获取画面。Cloudflare 不会替你下载。下载完成后，这些文件可以加入本项目的媒体库。'),
+      ]),
+      s('preview', p('Where do I check layout, and where do I try a question?', '在哪里看版式，在哪里试一道题？'), [
+        p('Layout Studio arranges the whole survey: pages, cards, spacing and text styles. It does not record answers. While you edit one question, open Participant preview in the question editor to see that question as a participant would. The top-bar Preview Survey shows the whole survey. Practice is where you answer and inspect what was recorded.', '版式工作台用来安排整份问卷：页面、卡片、间距和文字样式。它不记录回答。编辑某一道题时，在题目编辑器里打开「参与者预览」，查看参与者会看到的这一题。顶部的「预览问卷」展示整份问卷。「试填」用来亲自作答，并查看记录下来的内容。'),
+      ]),
+      s('home', p('Can I open the public home without signing out?', '不退出登录也能打开公开首页吗？'), [
+        p('Yes. In the workspace toolbar, Main page opens the public home and keeps you signed in. On public pages, the header shows Open workspace instead of asking you to sign in again.', '可以。工作区顶部的「首页」会打开公开主页，同时保持登录。在公开页面上，页眉显示「进入工作区」，不会再要求你重新登录。'),
+      ]),
+      s('back', p('What does the browser Back button do while I am building?', '搭建问卷时，浏览器的返回按钮会怎样？'), [
+        p('Moving between workspace steps is remembered in the browser history, and the address stays on the workspace. Back returns to the previous step, such as from Builder to Dataset, instead of leaving on the first press. After those recorded steps are gone, another Back can leave the workspace.', '在工作区各步骤之间移动时，浏览器会记住这些步骤，地址仍留在工作区。按返回会回到上一步，例如从「设计」回到「媒体」，而不是第一次就离开。这些已记录的步骤走完之后，再按一次返回才会离开工作区。'),
+      ]),
+      s('counts', p('Where do I see the response count and how long collection has run?', '在哪里看答卷数量，以及收集进行了多久？'), [
+        p('While a project is open, the top bar under the project name shows how long the survey has been up and how many answers are stored. After a release, that line reads “Published N days ago · N answers”. A newer survey says minutes or hours ago, or just now. If the survey has no publish time, the same line starts with Created and uses when the project was created. Results still shows Total Responses and the dates of the stored responses.', '打开一个项目时，项目名称下方的顶栏会显示问卷已上线多久，以及已保存多少份回答。发布之后，这一行写作「已发布 N 天前 · N 份回答」。更近的问卷会写成多少分钟前、多少小时前，或刚刚。如果还没有发布时间，同一行会以「创建于」开头，并使用项目的创建时间。结果页仍会显示答卷总数和这些答卷的日期。'),
+      ]),
+      s('templates', p('What is the difference between templates and My Projects?', '模板和「我的项目」有什么区别？'), [
+        p('Project Templates are example designs you can start from, including surveys used in published research. My Projects lists the projects on your own account. Starting from a template creates your project. It does not change the shared template.', '「项目模板」是可以拿来起步的示例设计，包括已发表研究里用过的问卷。「我的项目」列出你自己账号下的项目。从模板开始会创建你的项目，不会改动那个共享模板。'),
+      ]),
+    ], related: ['platform-workflow', 'results-export', 'skills-agents', 'media-sampling'],
   },
 ];
 export const docTopic = id => DOC_TOPICS.find(topic => topic.id === id) || null;
