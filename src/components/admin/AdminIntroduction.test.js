@@ -4,19 +4,12 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import AdminIntroduction from './AdminIntroduction';
 import { RegionProvider } from '../../contexts/RegionContext';
 import { adminI18n } from '../../contexts/adminI18n';
-import { faqI18n } from '../../contexts/faqI18n';
 import { loadGuidePrefs, markGuideProgress } from '../../lib/adminGuide';
 
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'researcher' } }) }));
 jest.mock('../../lib/supabase', () => ({ supabase: null }));
 const mockNavigate = jest.fn();
-jest.mock('react-router-dom', () => {
-  const React = require('react');
-  return {
-    useNavigate: () => mockNavigate,
-    Link: React.forwardRef(({ to, children, ...rest }, ref) => React.createElement('a', { href: typeof to === 'string' ? to : '', ref, ...rest }, children)),
-  };
-}, { virtual: true });
+jest.mock('react-router-dom', () => ({ useNavigate: () => mockNavigate }), { virtual: true });
 
 const emptyProject = { id: 'p-new', preloadedImages: [], publishedVersion: 0 };
 const liveProject = { id: 'p-live', preloadedImages: [{ url: '/a.jpg' }], publishedVersion: 3 };
@@ -51,12 +44,6 @@ test('guide strings exist in both languages', () => {
   const guideKeys = Object.keys(adminI18n.en).filter((key) => key.startsWith('guide'));
   expect(guideKeys.length).toBeGreaterThan(50);
   guideKeys.forEach((key) => expect(adminI18n.zh[key]).toBeTruthy());
-});
-
-test('introduction links to the public FAQ', () => {
-  setup();
-  const link = screen.getByRole('link', { name: faqI18n.en.faqIntroLink });
-  expect(link).toHaveAttribute('href', '/faq');
 });
 
 test('new project has one actionable checklist and optional workflow help', () => {

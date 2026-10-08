@@ -217,14 +217,6 @@ export function PublicFooter() {
         }}>
             GitHub
           </Box>
-          {' · '}
-          <Box component={RouterLink} to="/faq" sx={{
-          color: 'primary.main',
-          textDecoration: 'none',
-          fontWeight: 600
-        }}>
-            {t.footerFaq}
-          </Box>
         </Typography>
       </Container>
     </Box>;
