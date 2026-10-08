@@ -7,7 +7,7 @@ import { Box, Button, Typography, Chip, TextField, CircularProgress, Alert, Icon
 import { Check, Close } from '@mui/icons-material';
 import { runSam3, instancesToPolygons } from '../lib/falInference';
 import { inferShapeTool, isPolygonTool, normalizeAllowedTools, normalizeAnnotationTool } from '../lib/annotationTools';
-import { popPolygonDraftPoint } from '../lib/annotationDraftUndo';
+import { isVertexDraft, popDraftPoint } from '../lib/annotationDraftUndo';
 import { resolveLabelColor } from '../lib/preannotateLabels';
 import { SAM_PREANNOT_MODEL, SHAPE_SOURCE_SAM_TEXT, SHAPE_SOURCE_SAM_CLICK, SHAPE_SOURCE_SAM_BOX, withShapeProvenance } from '../lib/imageFeaturesR2';
 export { inferShapeTool, normalizeAnnotationTool, annotationToolLabel } from '../lib/annotationTools';
@@ -1185,10 +1185,10 @@ export default function ImageAnnotationCanvas({
   };
   const restoreHistory = useCallback(direction => {
     const currentDraft = draftRef.current;
-    if (currentDraft && normalizeAnnotationTool(currentDraft.tool) === 'polygon') {
+    if (isVertexDraft(currentDraft)) {
       if (direction === 'undo') {
         setDrag(null);
-        setDraft(popPolygonDraftPoint(currentDraft));
+        setDraft(popDraftPoint(currentDraft));
       }
       return;
     }
@@ -1265,10 +1265,10 @@ export default function ImageAnnotationCanvas({
         }
         return;
       }
-      if (e.key === 'Backspace' && normalizeAnnotationTool(draftRef.current?.tool) === 'polygon') {
+      if (e.key === 'Backspace' && isVertexDraft(draftRef.current)) {
         e.preventDefault();
         setDrag(null);
-        setDraft(popPolygonDraftPoint(draftRef.current));
+        setDraft(popDraftPoint(draftRef.current));
         return;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1301,7 +1301,7 @@ export default function ImageAnnotationCanvas({
     const draftTool = normalizeAnnotationTool(draft?.tool);
     const activeTool = normalizeAnnotationTool(tool);
     if (draft) {
-      if (draftTool === 'line') return tx("Click to add more points \u00b7 drag vertices to edit \u00b7 \u2713 confirm \u00b7 \u2715 discard");
+      if (draftTool === 'line') return tx("Click to add more points \u00b7 Ctrl+Z or Backspace removes the last point \u00b7 drag vertices to edit \u00b7 \u2713 confirm \u00b7 \u2715 discard");
       if (draftTool === 'polygon') {
         return samMethod ? tx("SAM region draft \u00b7 drag vertices to edit \u00b7 \u2713 save as polygon \u00b7 \u2715 / Esc discard") : tx("Click to add vertices \u00b7 Ctrl+Z or Backspace removes the last point \u00b7 click first point or double-click to close \u00b7 \u2713 confirm (\u22653) \u00b7 \u2715 discards");
       }

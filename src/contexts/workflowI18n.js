@@ -238,7 +238,7 @@ const zh = {
   "Run": "开始分割",
   "Image failed to load": "图片加载失败",
   "Retry": "重试",
-  "Click to add more points · drag vertices to edit · ✓ confirm · ✕ discard": "点击添加点，拖动顶点编辑；✓ 确认，✕ 取消",
+  "Click to add more points · Ctrl+Z or Backspace removes the last point · drag vertices to edit · ✓ confirm · ✕ discard": "点击添加点；Ctrl+Z 或退格删除最后一点；拖动顶点编辑；✓ 确认，✕ 取消",
   "SAM region draft · drag vertices to edit · ✓ save as polygon · ✕ / Esc discard": "分割结果预览：拖动顶点调整；✓ 保存，✕ 或 Esc 取消",
   "Click to add vertices · Ctrl+Z or Backspace removes the last point · click first point or double-click to close · ✓ confirm (≥3) · ✕ discards": "点击添加顶点；Ctrl+Z 或退格删除最后一点；点击首点或双击闭合；至少 3 点后确认",
   "Drag body to move · handles to resize · ✓ confirm · ✕ discard": "拖动区域移动，拖动控制点调整大小；✓ 确认，✕ 取消",

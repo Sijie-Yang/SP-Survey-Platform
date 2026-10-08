@@ -98,16 +98,37 @@ test('Delete still discards a polygon draft, and a committed polygon still uses 
   restore();
 });
 
-test('Ctrl+Z still cancels an in-progress line', () => {
+test('Ctrl+Z, Undo, and Backspace remove only the last point of a line draft', () => {
   const restore = installImage();
-  render(<ImageAnnotationCanvas imageUrl="https://example.test/a.jpg" value={{ shapes: [] }} onChange={() => {}} />);
+  const onChange = jest.fn();
+  function Harness() {
+    const [value, setValue] = useState({ image: 'https://example.test/a.jpg', shapes: [] });
+    return <ImageAnnotationCanvas imageUrl={value.image} value={value} onChange={(next) => { setValue(next); onChange(next); }} />;
+  }
+  render(<Harness />);
   const canvas = readyCanvas();
   fireEvent.click(screen.getByRole('button', { name: 'Line', exact: true }));
   pointAt(canvas, 30, 30);
   pointAt(canvas, 120, 40);
+  pointAt(canvas, 80, 90);
   expect(screen.getByRole('button', { name: 'Confirm annotation' }).disabled).toBe(false);
   fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  expect(screen.getByRole('button', { name: 'Discard annotation' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Confirm annotation' }).disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Undo', exact: true }));
+  expect(screen.getByRole('button', { name: 'Confirm annotation' }).disabled).toBe(true);
+  fireEvent.keyDown(window, { key: 'Backspace' });
   expect(screen.queryByRole('button', { name: 'Discard annotation' })).toBeNull();
+  expect(onChange).not.toHaveBeenCalled();
+  pointAt(canvas, 30, 30);
+  pointAt(canvas, 120, 40);
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm annotation' }));
+  expect(onChange.mock.calls.at(-1)[0].shapes).toHaveLength(1);
+  expect(onChange.mock.calls.at(-1)[0].shapes[0].tool).toBe('line');
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  expect(onChange.mock.calls.at(-1)[0].shapes).toEqual([]);
+  fireEvent.keyDown(window, { key: 'y', ctrlKey: true });
+  expect(onChange.mock.calls.at(-1)[0].shapes).toHaveLength(1);
   restore();
 });
 
