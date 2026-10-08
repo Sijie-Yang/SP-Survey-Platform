@@ -1,4 +1,5 @@
 import { validateSurveyConfig } from './designProtocol/validate';
+import { normalizePublicSlug, publicSlugErrorCode, validatePublicSlug } from './publicSlug';
 /**
  * Project management — Supabase-first, falls back to local Express server.
  *
@@ -194,6 +195,7 @@ function rowToProject(row) {
     huggingfaceDataset: meta.huggingfaceDataset || '',
     metadata: meta,
     ownResponseSupabase: readStoredOwnResponse(row.own_response_supabase),
+    publicSlug: row.public_slug || row.publicSlug || '',
     imageDatasetConfig: row.image_dataset_config || {},
     preloadedImages: row.preloaded_images || [],
     preloadedAt: row.preloaded_at || null,
@@ -426,6 +428,65 @@ export const getParticipantProject = async (projectId) => {
   if (!data?.[0]) throw new Error('Survey not found');
   return rowToProject(data[0]);
 };
+
+async function localProjectsForSlugCheck() {
+  try {
+    const res = await fetch('http://localhost:3001/api/projects');
+    const data = await res.json();
+    const files = Array.isArray(data.files) ? data.files : [];
+    const projects = [];
+    for (const file of files) {
+      const id = String(file || '').replace(/\.json$/, '');
+      if (!id) continue;
+      const project = await localLoadProject(id);
+      if (project) projects.push(project);
+    }
+    return projects;
+  } catch {
+    return [];
+  }
+}
+
+export { publicSlugErrorCode };
+
+export async function resolveSurveySlug(rawSlug) {
+  const check = validatePublicSlug(rawSlug);
+  if (!check.ok || !check.slug) return null;
+  if (!isPlatformMode()) {
+    const projects = await localProjectsForSlugCheck();
+    return projects.find((project) => normalizePublicSlug(project.publicSlug) === check.slug)?.id || null;
+  }
+  const { data, error } = await supabase.rpc('resolve_survey_slug', { p_slug: check.slug });
+  if (error) throw error;
+  return data || null;
+}
+
+export async function setProjectPublicSlug(projectId, rawSlug) {
+  const check = validatePublicSlug(rawSlug);
+  if (!check.ok) return { success: false, code: check.code, error: check.code };
+  if (!isPlatformMode()) {
+    if (check.slug) {
+      const projects = await localProjectsForSlugCheck();
+      const taken = projects.some((project) => (
+        project.id !== projectId && normalizePublicSlug(project.publicSlug) === check.slug
+      ));
+      if (taken) return { success: false, code: 'taken', error: 'slug_taken' };
+    }
+    const saved = await updateProject(projectId, { publicSlug: check.slug });
+    if (!saved.success) return { success: false, code: 'unknown', error: saved.error || 'save failed' };
+    return { success: true, publicSlug: check.slug || null };
+  }
+  const { data, error } = await supabase.rpc('set_project_public_slug', {
+    p_project_id: projectId,
+    p_slug: check.slug,
+  });
+  if (error) {
+    const code = publicSlugErrorCode(error);
+    return { success: false, code, error: error.message || code };
+  }
+  const publicSlug = data?.publicSlug ?? data?.publicslug ?? null;
+  return { success: true, publicSlug: publicSlug || null };
+}
 
 export async function getProjectReleaseState(projectId) {
   if (!isPlatformMode()) throw new Error('Version management requires a Supabase project.');
