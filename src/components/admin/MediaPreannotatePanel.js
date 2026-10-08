@@ -7,6 +7,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { Box, Typography, Alert, CircularProgress, TextField, IconButton, Tooltip, Button, Stack, Chip, LinearProgress, FormControl, InputLabel, Select, MenuItem, Collapse } from '@mui/material';
 import { NavigateBefore, NavigateNext, AutoAwesome, Stop, Add, Delete, ExpandLess, ExpandMore, Replay } from '@mui/icons-material';
 import ImageAnnotationCanvas from '../ImageAnnotationWidget';
+import AnnotationImageScope from './AnnotationImageScope';
 import PreannotateLabelManager from './PreannotateLabelManager';
 import { loadPreannotation, DEFAULT_SAM_LABELS } from '../../lib/imageFeaturesR2';
 import { normalizeLabelDefs, labelNames, labelColorMap, remapShapeLabels, clearShapeLabel, removeShapesWithLabel, defaultLabelDefs } from '../../lib/preannotateLabels';
@@ -119,7 +120,10 @@ export default function MediaPreannotatePanel({
   hasLastBatch = false,
   onReviewFilterChange,
   onFocusReviewNext,
-  onFocusReviewPrev
+  onFocusReviewPrev,
+  annotationScope = 'all',
+  onAnnotationScopeChange = null,
+  annotationScopeChoices = null
 }) {
   const tx = useWorkflowText();
   const {
@@ -732,6 +736,7 @@ export default function MediaPreannotatePanel({
         sm: 2.5
       }
     }}>
+        {annotationScopeChoices && onAnnotationScopeChange ? <AnnotationImageScope language={language} value={annotationScope} onChange={onAnnotationScopeChange} choices={annotationScopeChoices} /> : null}
         <Stack direction="row" spacing={1} sx={{
         mb: 1
       }}>
@@ -751,7 +756,7 @@ export default function MediaPreannotatePanel({
         mb: 2
       }}>{' '}{tx("Updating labels across project images…")}{' '}</Alert>}
 
-        {!imageTotal && <Alert severity="info">{' '}{tx("No images to pre-annotate. Upload images above, or set the type filter to Image.")}{' '}</Alert>}
+        {!imageTotal && <Alert severity="info">{' '}{tx("No images for this choice. Pick All images or another folder in Annotate.")}{' '}</Alert>}
 
         {!!imageTotal && entry && <Box>
             {!String(falKey || '').trim() && <Alert severity="warning" sx={{
@@ -1094,7 +1099,7 @@ export default function MediaPreannotatePanel({
                 <Box sx={{
               width: '100%'
             }}>
-                  <ImageAnnotationCanvas key={getMediaId(entry)} readOnly={annotLoading || loadFailed || batchBusy || migrateBusy} imageUrl={entry.url} value={value} onChange={(next) => {
+                  <ImageAnnotationCanvas inputLocked={annotLoading || loadFailed || batchBusy || migrateBusy} imageUrl={entry.url} value={value} onChange={(next) => {
                 setValue(next);
                 setReviewStatus('needs_review');
               }} allowedTools={['point', 'line', 'polygon', 'bbox']} annotationLabels={names.length ? names : DEFAULT_SAM_LABELS} labelColors={colors} enableSamAssist={!!String(falKey || '').trim() && !batchBusy} falKey={falKey} projectId={projectId} maxAnnotations={500} centerContent />
