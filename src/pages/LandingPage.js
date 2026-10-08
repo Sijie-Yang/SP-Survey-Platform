@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { researcherEntryPath } from '../lib/researcherEntry';
 import { supabase } from '../lib/supabase';
+import { stripOwnResponseSupabase } from '../lib/ownResponseSupabase';
 import { projectTemplates } from '../lib/projectTemplates';
 import SurveyPreview from '../components/admin/SurveyPreview';
 import PublicHeader, { PublicFooter, GITHUB_REPO_URL } from '../components/layout/PublicHeader';
@@ -572,7 +573,7 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
             .eq('id', templateId)
             .single();
           if (!err && data?.survey_config) {
-            setConfig(data.survey_config);
+            setConfig(stripOwnResponseSupabase(data.survey_config));
             setPreloadedImages(Array.isArray(data.preloaded_images) ? data.preloaded_images : []);
             return;
           }
@@ -580,7 +581,7 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
         const res = await fetch(`/project_templates/${templateId}.json`);
         if (res.ok) {
           const tpl = await res.json();
-          setConfig(tpl.config || tpl.survey_config || null);
+          setConfig(stripOwnResponseSupabase(tpl.config || tpl.survey_config || null));
           setPreloadedImages(Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages : []);
         } else {
           setError('Preview not available for this template.');

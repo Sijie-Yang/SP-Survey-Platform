@@ -88,6 +88,7 @@ const incremental = [
   'supabase/save_project_draft_revision_id.sql',
   'supabase/silicon_background_runs.sql',
   'supabase/platform_assistant_subsidy.sql',
+  'supabase/own_response_supabase.sql',
 ];
 
 for (let repeat = 0; repeat < 2; repeat += 1) {
@@ -121,6 +122,33 @@ assert.equal(units.rows[0].name, 'silicon_answer_units');
 
 const subsidy = await db.query(`SELECT to_regclass('public.platform_assistant_subsidy') AS name`);
 assert.equal(subsidy.rows[0].name, 'platform_assistant_subsidy');
+
+const sinkCol = await db.query(`
+  SELECT column_name FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'own_response_supabase'
+`);
+assert.equal(sinkCol.rows.length, 1);
+
+function b64url(value) {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+const anonKey = `${b64url({ alg: 'none' })}.${b64url({ role: 'anon' })}.sig`;
+const serviceKey = `${b64url({ alg: 'none' })}.${b64url({ role: 'service_role' })}.sig`;
+await db.query(
+  `INSERT INTO projects (id, name, own_response_supabase) VALUES ('own', 'Own', $1::jsonb)`,
+  [JSON.stringify({ enabled: true, url: 'https://example.supabase.co', anonKey, table: 'sp_survey_responses' })],
+);
+const anonSink = (await db.query(`SELECT get_participant_response_sink('own') AS sink`)).rows[0].sink;
+assert.equal(anonSink.enabled, true);
+assert.equal(anonSink.anonKey, anonKey);
+assert.equal(anonSink.table, 'sp_survey_responses');
+await db.query(`UPDATE projects SET own_response_supabase = $1::jsonb WHERE id = 'own'`, [
+  JSON.stringify({ enabled: true, url: 'https://example.supabase.co', anonKey: serviceKey, table: 'sp_survey_responses' }),
+]);
+const refused = (await db.query(`SELECT get_participant_response_sink('own') AS sink`)).rows[0].sink;
+assert.equal(refused.enabled, true);
+assert.equal(refused.rejected, 'service_role');
+assert.equal(refused.anonKey, undefined);
 
 const fns = await db.query(`
   SELECT proname FROM pg_proc

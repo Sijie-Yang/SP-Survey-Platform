@@ -26,6 +26,7 @@ import {
   isR2Configured, listImagesFromR2, copyImagesInR2, deleteImagesFromR2, uploadImageToR2,
 } from './r2';
 import { normalizeMediaEntry, sanitizeMediaFolderConfig } from './mediaUtils';
+import { stripOwnResponseSupabase } from './ownResponseSupabase';
 import { downloadZip } from './zipDownload';
 import {
   buildBuiltinImportSnapshot,
@@ -91,7 +92,7 @@ function rowToTemplate(row) {
     website:           row.paper_url          || null,
     huggingfaceDataset: row.huggingface_dataset || row.dataset || null,
     // survey_config is the full SurveyJS config stored as JSONB
-    config:            row.survey_config      || {},
+    config:            stripOwnResponseSupabase(row.survey_config || {}),
     // Template image folder (mirrors the per-project preloadedImages contract)
     preloadedImages:   row.preloaded_images   || [],
     preloadedAt:       row.preloaded_at       || null,
@@ -99,7 +100,7 @@ function rowToTemplate(row) {
     // Folder / set / category tags (safe subset — no tokens)
     imageDatasetConfig: sanitizeMediaFolderConfig(row.image_dataset_config || {}),
     // Every stored key (agent-saved templates carry more than folder tags); builtin export only
-    imageDatasetConfigFull: row.image_dataset_config || {},
+    imageDatasetConfigFull: stripOwnResponseSupabase(row.image_dataset_config || {}),
     // Landing card cover (public media URL from template library)
     thumbnail_url:     row.thumbnail_url      || null,
     // submitter info
@@ -282,7 +283,7 @@ export async function saveTemplateToSupabase(template) {
     tags:                Array.isArray(template.tags) ? template.tags : [],
     paper_url:           template.website     || null,
     huggingface_dataset: template.huggingfaceDataset || null,
-    survey_config:       template.config      || {},
+    survey_config:       stripOwnResponseSupabase(template.config || {}),
     preloaded_images:    Array.isArray(template.preloadedImages) ? template.preloadedImages : [],
     preloaded_at:        template.preloadedAt || null,
     preloaded_source:    template.preloadedSource || null,
@@ -615,12 +616,14 @@ export function templateToBuiltinJson(template) {
     website: template?.website || null,
     huggingfaceDataset: template?.huggingfaceDataset || null,
     createdAt: template?.createdAt || new Date().toISOString(),
-    config: template?.config || {},
+    config: stripOwnResponseSupabase(template?.config || {}),
     imageDatasetConfig: normalizeTemplateImageDatasetConfig(
-      template?.imageDatasetConfigFull
-        || template?.imageDatasetConfig
-        || template?.image_dataset_config
-        || {},
+      stripOwnResponseSupabase(
+        template?.imageDatasetConfigFull
+          || template?.imageDatasetConfig
+          || template?.image_dataset_config
+          || {},
+      ),
     ),
     preloadedImages: [],
     preloadedSource: null,
@@ -1197,7 +1200,7 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport, overwriteC
           tags,
           paper_url: tpl.website || null,
           huggingface_dataset: tpl.huggingfaceDataset || null,
-          survey_config: tpl.config || {},
+          survey_config: stripOwnResponseSupabase(tpl.config || {}),
           image_dataset_config: normalizeTemplateImageDatasetConfig(
             tpl.imageDatasetConfig || tpl.image_dataset_config || {},
           ),
@@ -1234,7 +1237,7 @@ export async function seedBuiltinTemplates({ onProgress, idsToImport, overwriteC
         tags,
         paper_url:           tpl.website      || null,
         huggingface_dataset: tpl.huggingfaceDataset || null,
-        survey_config:       tpl.config       || {},
+        survey_config:       stripOwnResponseSupabase(tpl.config || {}),
         is_approved:         status.isApproved,
         show_on_landing:     status.showOnLanding,
         is_pinned:           !!(tpl.isPinned ?? tpl.is_pinned),

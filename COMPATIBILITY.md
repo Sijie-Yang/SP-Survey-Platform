@@ -162,7 +162,14 @@ Do not promise “no impact” if question names or storage ownership change.
 
 ---
 
-## 11. Agent / MCP / draft-publish
+## 11. Own Supabase responses
+
+- Optional per project, set on the Share tab. Participants insert into the researcher's Supabase with the anon public key. The platform does not copy, analyze, or sync those rows.
+- Hosted database: run `supabase/own_response_supabase.sql` once. It adds `projects.own_response_supabase` and `get_participant_response_sink`. It does not create the researcher's table.
+- Researcher table, shown in Share and pasted into their SQL editor: `sp_survey_responses` (override the table name there). Anon may INSERT only.
+- The URL and anon key are omitted from template export, builtin template JSON, and landing template config.
+
+## 12. Agent / MCP / draft-publish
 
 - Run `supabase/agent_mcp_platform.sql` and `supabase/survey_public_rpcs.sql` **before** deploying frontend that expects draft columns.
 - Participant links always load latest: `get_survey_project` returns `COALESCE(survey_config_draft, survey_config)`.

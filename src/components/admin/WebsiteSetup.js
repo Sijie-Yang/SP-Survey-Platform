@@ -11,11 +11,13 @@ import { ContentCopy, Launch, CheckCircle, Link as LinkIcon, OpenInNew, History,
 import { captureParamNames, normalizeConditions } from '../../lib/surveyRuntimeContext';
 import { useRegion } from '../../contexts/RegionContext';
 import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
+import OwnResponseSupabaseCard from './OwnResponseSupabaseCard';
 export default function WebsiteSetup({
   currentProject,
   surveyConfig,
   hasUnsavedChanges = false,
-  onReleased
+  onReleased,
+  onProjectUpdated,
 }) {
   const {
     t,
@@ -112,6 +114,11 @@ export default function WebsiteSetup({
             </Alert>}
         </Box>
       </Paper>
+
+      <OwnResponseSupabaseCard
+        currentProject={currentProject}
+        onSaved={(ownResponseSupabase) => onProjectUpdated?.({ ownResponseSupabase })}
+      />
 
       {shareTools.map(([id, label]) => <Dialog key={id} open={shareDialog === id} onClose={() => setShareDialog(null)} keepMounted fullWidth maxWidth="md">
           <DialogTitle>{label}</DialogTitle>
