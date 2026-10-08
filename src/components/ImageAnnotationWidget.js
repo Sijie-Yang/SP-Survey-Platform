@@ -7,6 +7,7 @@ import { Box, Button, Typography, Chip, TextField, CircularProgress, Alert, Icon
 import { Check, Close } from '@mui/icons-material';
 import { runSam3, instancesToPolygons } from '../lib/falInference';
 import { inferShapeTool, isPolygonTool, normalizeAllowedTools, normalizeAnnotationTool } from '../lib/annotationTools';
+import { popPolygonDraftPoint } from '../lib/annotationDraftUndo';
 import { resolveLabelColor } from '../lib/preannotateLabels';
 import { SAM_PREANNOT_MODEL, SHAPE_SOURCE_SAM_TEXT, SHAPE_SOURCE_SAM_CLICK, SHAPE_SOURCE_SAM_BOX, withShapeProvenance } from '../lib/imageFeaturesR2';
 export { inferShapeTool, normalizeAnnotationTool, annotationToolLabel } from '../lib/annotationTools';
@@ -344,6 +345,7 @@ export default function ImageAnnotationCanvas({
   /** Optional { [labelName]: '#rrggbb' } for chip/shape colors */
   labelColors = null,
   readOnly = false,
+  inputLocked = false,
   minAnnotations = 0,
   maxAnnotations = 50,
   enableSamAssist = false,
@@ -572,6 +574,7 @@ export default function ImageAnnotationCanvas({
     clearSelection();
     setDraft(null);
     setDrag(null);
+    setImgSrc(imageUrl);
     let cancelled = false;
     const probe = new window.Image();
     probe.onload = () => {
@@ -811,7 +814,7 @@ export default function ImageAnnotationCanvas({
     }
   };
   const handlePointerDown = e => {
-    if (readOnly || !dimsRef.current.w || imgError || samBusy) return;
+    if (readOnly || inputLocked || !dimsRef.current.w || imgError || samBusy) return;
     e.preventDefault();
     const pt = canvasPoint(e);
     const {
@@ -1161,7 +1164,7 @@ export default function ImageAnnotationCanvas({
     setDrag(null);
   };
   const handleClick = e => {
-    if (readOnly || !dimsRef.current.w || imgError || samBusy) return;
+    if (readOnly || inputLocked || !dimsRef.current.w || imgError || samBusy) return;
     if (!(enableSamAssist && samMethodRef.current === 'click')) return;
     if (draftRef.current) {
       setSamError('Confirm (✓) or discard (✕) the current draft first');
@@ -1172,7 +1175,7 @@ export default function ImageAnnotationCanvas({
     runSamAtPoint(pt);
   };
   const handleDoubleClick = e => {
-    if (readOnly || samBusy) return;
+    if (readOnly || inputLocked || samBusy) return;
     e.preventDefault();
     e.stopPropagation();
     const d = draftRef.current;
@@ -1181,7 +1184,15 @@ export default function ImageAnnotationCanvas({
     confirmDraft();
   };
   const restoreHistory = useCallback(direction => {
-    if (draftRef.current) {
+    const currentDraft = draftRef.current;
+    if (currentDraft && normalizeAnnotationTool(currentDraft.tool) === 'polygon') {
+      if (direction === 'undo') {
+        setDrag(null);
+        setDraft(popPolygonDraftPoint(currentDraft));
+      }
+      return;
+    }
+    if (currentDraft) {
       cancelDraft();
       return;
     }
@@ -1231,7 +1242,7 @@ export default function ImageAnnotationCanvas({
     updateSelectedLabel(allHave ? '' : lb);
   };
   useEffect(() => {
-    if (readOnly) return undefined;
+    if (readOnly || inputLocked) return undefined;
     const onKey = e => {
       const tag = (e.target?.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
@@ -1254,6 +1265,12 @@ export default function ImageAnnotationCanvas({
         }
         return;
       }
+      if (e.key === 'Backspace' && normalizeAnnotationTool(draftRef.current?.tool) === 'polygon') {
+        e.preventDefault();
+        setDrag(null);
+        setDraft(popPolygonDraftPoint(draftRef.current));
+        return;
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (draftRef.current) {
           e.preventDefault();
@@ -1269,7 +1286,7 @@ export default function ImageAnnotationCanvas({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [readOnly, confirmDraft, deleteSelected, clearSelection, restoreHistory]);
+  }, [readOnly, inputLocked, confirmDraft, deleteSelected, clearSelection, restoreHistory]);
   const selectedShapes = shapes.filter(s => selectedIds.includes(s.id));
   const selectedLabelCommon = (() => {
     if (!selectedShapes.length) return null;
@@ -1286,7 +1303,7 @@ export default function ImageAnnotationCanvas({
     if (draft) {
       if (draftTool === 'line') return tx("Click to add more points \u00b7 drag vertices to edit \u00b7 \u2713 confirm \u00b7 \u2715 discard");
       if (draftTool === 'polygon') {
-        return samMethod ? tx("SAM region draft \u00b7 drag vertices to edit \u00b7 \u2713 save as polygon \u00b7 \u2715 / Esc discard") : tx("Click to add vertices \u00b7 click first point or double-click to close \u00b7 \u2713 confirm (\u22653) \u00b7 \u2715 discard");
+        return samMethod ? tx("SAM region draft \u00b7 drag vertices to edit \u00b7 \u2713 save as polygon \u00b7 \u2715 / Esc discard") : tx("Click to add vertices \u00b7 Ctrl+Z or Backspace removes the last point \u00b7 click first point or double-click to close \u00b7 \u2713 confirm (\u22653) \u00b7 \u2715 discards");
       }
       if (draftTool === 'bbox') return tx("Drag body to move \u00b7 handles to resize \u00b7 \u2713 confirm \u00b7 \u2715 discard");
       if (draftTool === 'point') return tx("Drag to adjust \u00b7 \u2713 confirm \u00b7 \u2715 discard");
@@ -1405,10 +1422,10 @@ export default function ImageAnnotationCanvas({
           sm: 'auto'
         }
       }}>
-            <Button size="small" onClick={undo} disabled={!historyRef.current.canUndo && !draft}>{uiPair(language, 'Undo', '撤销')}</Button>
-            <Button size="small" onClick={redo} disabled={!historyRef.current.canRedo || !!draft}>{uiPair(language, 'Redo', '重做')}</Button>
-            <Button size="small" color="error" onClick={clear} disabled={!shapes.length && !draft}>{uiPair(language, 'Clear', '清空')}</Button>
-            <Button size="small" color="error" onClick={deleteSelected} disabled={!selectedIds.length || !!draft}>{uiPair(language, 'Delete', '删除')}</Button>
+            <Button size="small" onClick={undo} disabled={inputLocked || (!historyRef.current.canUndo && !draft)}>{uiPair(language, 'Undo', '撤销')}</Button>
+            <Button size="small" onClick={redo} disabled={inputLocked || !historyRef.current.canRedo || !!draft}>{uiPair(language, 'Redo', '重做')}</Button>
+            <Button size="small" color="error" onClick={clear} disabled={inputLocked || (!shapes.length && !draft)}>{uiPair(language, 'Clear', '清空')}</Button>
+            <Button size="small" color="error" onClick={deleteSelected} disabled={inputLocked || !selectedIds.length || !!draft}>{uiPair(language, 'Delete', '删除')}</Button>
           </Box>
           {(minAnnotations > 0 || maxAnnotations > 0) && <Typography variant="caption" color="text.secondary" sx={{
         alignSelf: 'center'
@@ -1566,13 +1583,13 @@ export default function ImageAnnotationCanvas({
           display: 'block',
           borderRadius: 8
         }} onLoad={redraw} onError={() => setImgError(true)} />}
-        {!imgError && <canvas ref={canvasRef} onClick={browseMode ? undefined : handleClick} onDoubleClick={browseMode ? undefined : handleDoubleClick} onPointerDown={browseMode ? undefined : handlePointerDown} onPointerMove={browseMode ? undefined : handlePointerMove} onPointerUp={browseMode ? undefined : handlePointerUp} onPointerCancel={() => setDrag(null)} style={{
+        {!imgError && <canvas ref={canvasRef} aria-label={uiPair(language, 'Annotation canvas', '标注画布')} onClick={browseMode ? undefined : handleClick} onDoubleClick={browseMode ? undefined : handleDoubleClick} onPointerDown={browseMode ? undefined : handlePointerDown} onPointerMove={browseMode ? undefined : handlePointerMove} onPointerUp={browseMode ? undefined : handlePointerUp} onPointerCancel={() => setDrag(null)} style={{
           position: 'absolute',
           top: 0,
           left: 0,
           width: '100%',
           height: '100%',
-          cursor: readOnly || browseMode ? 'grab' : 'crosshair',
+          cursor: readOnly || inputLocked || browseMode ? 'grab' : 'crosshair',
           touchAction: readOnly || browseMode ? 'auto' : 'none'
         }} />}
         {showDraftUi && confirmPos && <Box sx={{
@@ -1591,7 +1608,7 @@ export default function ImageAnnotationCanvas({
             minHeight: 44
           }
         }} onPointerDown={e => e.stopPropagation()}>
-            <IconButton color="success" aria-label="Confirm annotation" onClick={confirmDraft} disabled={!canConfirm} title={canConfirm ? 'Confirm' : 'Add more points first'}>
+            <IconButton color="success" aria-label="Confirm annotation" onClick={confirmDraft} disabled={inputLocked || !canConfirm} title={canConfirm ? 'Confirm' : 'Add more points first'}>
               <Check />
             </IconButton>
             <IconButton color="error" aria-label="Discard annotation" onClick={cancelDraft} title="Discard">
