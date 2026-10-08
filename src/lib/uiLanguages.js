@@ -6,6 +6,7 @@
  */
 
 import { adminI18n } from '../contexts/adminI18n';
+import { faqI18n } from '../contexts/faqI18n';
 import { localeChrome } from '../contexts/localeChrome';
 import { localePublic } from '../contexts/localePublic';
 import { localeAdmin, localePhrases } from '../contexts/localeBundles';
@@ -52,10 +53,11 @@ export function intlLocale(id) {
 
 export function interfaceDictionary(language) {
   const code = normalizeUiLanguage(language);
+  const faq = (code === 'zh' || code === 'zh-TW') ? faqI18n.zh : faqI18n.en;
   const overlay = { ...(localeAdmin[code] || {}), ...(localeChrome[code] || {}), ...(localePublic[code] || {}) };
-  if (code === 'zh') return { ...adminI18n.en, ...adminI18n.zh, ...overlay };
-  if (code === 'zh-TW') return { ...adminI18n.en, ...adminI18n.zh, ...overlay };
-  return { ...adminI18n.en, ...overlay };
+  if (code === 'zh') return { ...adminI18n.en, ...adminI18n.zh, ...faq, ...overlay };
+  if (code === 'zh-TW') return { ...adminI18n.en, ...adminI18n.zh, ...faq, ...overlay };
+  return { ...adminI18n.en, ...faq, ...overlay };
 }
 
 /** Inline Chinese/English label. Other languages use the phrase bundle. */

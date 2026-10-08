@@ -8,6 +8,7 @@ import {
   Box,
   Button,
   Chip,
+  Link,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -35,7 +36,7 @@ import Science from '@mui/icons-material/Science';
 import Share from '@mui/icons-material/Share';
 import TipsAndUpdates from '@mui/icons-material/TipsAndUpdates';
 import ViewQuilt from '@mui/icons-material/ViewQuilt';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import AdminGuideTour from './AdminGuideTour';
 import { useRegion } from '../../contexts/RegionContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -507,6 +508,9 @@ export default function AdminIntroduction({
   return (
     <Box>
       <AdminPageHeader icon={<RocketLaunch />} title={t.guideTitle} description={t.guideBody} />
+      <Typography variant="body2" sx={{ mt: 1.5 }}>
+        <Link component={RouterLink} to="/faq" fontWeight={600}>{t.faqIntroLink}</Link>
+      </Typography>
       <AdminActionBar
         label={t.guideTitle}
         primaryAction={<Button size="small" variant="contained" startIcon={<PlayCircleOutline />} onClick={() => setTourOpen(true)}>{t.guideStartTour}</Button>}

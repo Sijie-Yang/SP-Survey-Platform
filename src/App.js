@@ -26,6 +26,7 @@ const SpBenchPage = lazy(() => import('./pages/SpBenchPage'));
 const NewsPage = lazy(() => import('./pages/NewsPage'));
 const ContributePage = lazy(() => import('./pages/ContributePage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
+const FaqPage = lazy(() => import('./pages/FaqPage'));
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -132,6 +133,7 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/request-template" element={<RequestTemplatePage />} />
                 <Route path="/request-survey-design" element={<RequestSurveyDesignPage />} />
                 <Route path="/team" element={<TeamPage />} />
+                <Route path="/faq" element={<FaqPage />} />
                 <Route path="/live" element={<LiveSurveysPage />} />
                 <Route path="/bench" element={<SpBenchPage />} />
                 <Route path="/survey" element={<SurveyApp />} />
