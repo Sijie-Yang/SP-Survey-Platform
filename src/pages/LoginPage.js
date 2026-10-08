@@ -11,14 +11,15 @@ import {
   Tab,
   Divider,
 } from '@mui/material';
-import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link as RouterLink, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { safeInAppPath } from '../lib/researcherEntry';
 import { useAuth } from '../contexts/AuthContext';
 import { useRegion } from '../contexts/RegionContext';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
 
 export default function LoginPage() {
-  const { login, register } = useAuth();
+  const { login, register, isAuthenticated, loading: authLoading } = useAuth();
   const { t } = useRegion();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -37,14 +38,7 @@ export default function LoginPage() {
     try {
       if (tab === 0) {
         await login(email, password);
-        const next = searchParams.get('next');
-        if (next && next.startsWith('/')) {
-          const q = next.indexOf('?');
-          if (q === -1) navigate(next);
-          else navigate({ pathname: next.slice(0, q), search: next.slice(q) });
-        } else {
-          navigate('/admin');
-        }
+        navigate(safeInAppPath(searchParams.get('next')));
       } else {
         await register(email, password);
         setInfo(t.loginRegisterSuccess);
@@ -56,6 +50,18 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to={safeInAppPath(searchParams.get('next'))} replace />;
+  }
 
   return (
     <Box

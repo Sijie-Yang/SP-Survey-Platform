@@ -46,6 +46,7 @@ import {
   AutoAwesome,
   OpenInNew,
   MoreVert,
+  Home,
 } from '@mui/icons-material';
 import { themes, createCustomTheme } from './themes/themeConfig';
 import ConfirmDialog from './components/layout/ConfirmDialog';
@@ -1542,6 +1543,32 @@ export default function AdminApp() {
           <Button
             color="inherit"
             size="small"
+            startIcon={<Home />}
+            onClick={() => navigate('/')}
+            data-testid="admin-main-page"
+            sx={{
+              display: { xs: 'none', sm: 'inline-flex' },
+              mr: 0.5,
+              px: 1.25,
+              py: 0.35,
+              minWidth: 0,
+              fontWeight: 700,
+              border: '1px solid',
+              borderColor: 'rgba(255, 255, 255, 0.65)',
+              bgcolor: 'rgba(255, 255, 255, 0.12)',
+              textTransform: 'none',
+              '&:hover': {
+                borderColor: 'rgba(255, 255, 255, 0.95)',
+                bgcolor: 'rgba(255, 255, 255, 0.22)',
+              },
+            }}
+          >
+            {t.navMainPage}
+          </Button>
+
+          <Button
+            color="inherit"
+            size="small"
             startIcon={<OpenInNew />}
             onClick={() => {
               if (currentProject) {
@@ -1619,6 +1646,10 @@ export default function AdminApp() {
         ))}
         {compactToolbar && <MenuItem disabled>{formatSaveStatusLabel(t, saveStatus, lastSavedAt)}</MenuItem>}
         {compactToolbar && <Divider />}
+        <MenuItem onClick={() => { handleToolsMenuClose(); navigate('/'); }}>
+          <ListItemIcon><Home fontSize="small" /></ListItemIcon>
+          <ListItemText primary={t.navMainPage} />
+        </MenuItem>
         {user && (
           <Box sx={{ px: 2, py: 1 }}>
             <Typography variant="caption" color="text.secondary">{t.signedInAs}</Typography>

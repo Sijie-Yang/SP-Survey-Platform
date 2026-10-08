@@ -9,6 +9,8 @@ import {
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { useRegion } from '../contexts/RegionContext';
+import { useAuth } from '../contexts/AuthContext';
+import { researcherEntryPath } from '../lib/researcherEntry';
 import { tf } from '../contexts/adminI18n';
 import { isR2Configured } from '../lib/r2';
 import {
@@ -30,6 +32,8 @@ function formatBytes(n) {
 export default function RequestSurveyDesignPage() {
   const { t } = useRegion();
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  const workspacePath = researcherEntryPath(!authLoading && isAuthenticated);
   const stimLabel = {
     image: t.reqDesStimImage,
     video: t.reqDesStimVideo,
@@ -235,8 +239,8 @@ export default function RequestSurveyDesignPage() {
               </Typography>
             </Box>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-              <Button variant="contained" onClick={() => navigate('/login')}>
-                {t.reqDesStartSelf}
+              <Button variant="contained" onClick={() => navigate(workspacePath)}>
+                {workspacePath === '/admin' ? t.navOpenWorkspace : t.reqDesStartSelf}
               </Button>
               <Button variant="outlined" onClick={resetForm}>
                 {t.reqSubmitAnother}

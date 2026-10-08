@@ -10,6 +10,8 @@ import {
 } from '@mui/icons-material';
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { researcherEntryPath } from '../lib/researcherEntry';
 import { supabase } from '../lib/supabase';
 import { projectTemplates } from '../lib/projectTemplates';
 import SurveyPreview from '../components/admin/SurveyPreview';
@@ -52,6 +54,8 @@ function getStaticTemplates() {
 
 export default function LandingPage() {
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  const workspacePath = researcherEntryPath(!authLoading && isAuthenticated);
   const { t } = useRegion();
   const githubStars = useGithubStars();
   const [templates, setTemplates] = useState([]);
@@ -305,7 +309,7 @@ export default function LandingPage() {
             <Button
               variant="contained"
               size="large"
-              onClick={() => navigate('/login')}
+              onClick={() => navigate(workspacePath)}
               sx={{
                 bgcolor: 'rgba(255,255,255,0.96)',
                 color: '#0f2a22',
@@ -316,7 +320,7 @@ export default function LandingPage() {
                 '&:hover': { bgcolor: '#fff' },
               }}
             >
-              {t.landStartFree}
+              {workspacePath === '/admin' ? t.navOpenWorkspace : t.landStartFree}
             </Button>
             <Button
               variant="outlined"
@@ -499,7 +503,7 @@ export default function LandingPage() {
                   {list.length > 0 ? (
                     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
                       {list.map((tpl) => (
-                        <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate('/login')} />
+                        <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(workspacePath)} />
                       ))}
                     </Box>
                   ) : (
@@ -532,10 +536,10 @@ export default function LandingPage() {
           <Button
             variant="contained"
             size="large"
-            onClick={() => navigate('/login')}
+            onClick={() => navigate(workspacePath)}
             sx={{ bgcolor: 'white', color: 'primary.main', fontWeight: 700, px: 5, py: 1.5, '&:hover': { bgcolor: 'grey.100' } }}
           >
-            {t.landGetStarted}
+            {workspacePath === '/admin' ? t.navOpenWorkspace : t.landGetStarted}
           </Button>
         </Container>
       </Box>
