@@ -23,7 +23,7 @@
   "config": {
     "locale": "zh",
     "title": "猫咪品种二选一\nCat Breed Choice",
-    "description": "这是一个非街道演示。每一轮比较两个猫咪品种，并从该品种的照片里抽一张，所以同一品种在不同轮次里可能是不同的照片。请选出你更喜欢的一只。\nThis is a non-street demo. Each trial compares two breeds and draws one photograph from each breed, so later trials can show a different photo of a breed you already saw. Choose the cat you prefer.",
+    "description": "",
     "logoPosition": "right",
     "showQuestionNumbers": "off",
     "showProgressBar": "aboveheader",
@@ -32,18 +32,13 @@
       {
         "name": "cat_choice_page",
         "title": "二选一 Pairwise choice",
-        "description": "每一轮只出现两只猫，各来自一个品种。请选一只，不能打平。共 8 轮。\nEach trial shows two cats, one from each of two breeds. Pick one. There is no tie. 8 trials.",
+        "description": "",
         "elements": [
-          {
-            "name": "cat_choice_note",
-            "type": "html",
-            "html": "<p><strong>猫咪品种 / Cat breeds</strong></p><ul><li>波斯猫 Persian</li><li>暹罗猫 Siamese</li><li>缅因猫 Maine Coon</li><li>布偶猫 Ragdoll</li><li>英国短毛猫 British Shorthair</li><li>苏格兰折耳猫 Scottish Fold</li><li>斯芬克斯猫 Sphynx</li><li>孟加拉猫 Bengal</li><li>阿比西尼亚猫 Abyssinian</li><li>俄罗斯蓝猫 Russian Blue</li><li>挪威森林猫 Norwegian Forest</li><li>伯曼猫 Birman</li><li>东方短毛猫 Oriental Shorthair</li><li>美国短毛猫 American Shorthair</li><li>异国短毛猫 Exotic Shorthair</li><li>德文卷毛猫 Devon Rex</li><li>康沃尔卷毛猫 Cornish Rex</li><li>土耳其安哥拉猫 Turkish Angora</li><li>沙特尔猫 Chartreux</li><li>缅甸猫 Burmese</li><li>东奇尼猫 Tonkinese</li><li>马恩岛猫 Manx</li><li>日本短尾猫 Japanese Bobtail</li><li>埃及猫 Egyptian Mau</li><li>奥西猫 Ocicat</li><li>索马里猫 Somali</li><li>巴厘猫 Balinese</li><li>西伯利亚猫 Siberian</li><li>美国卷耳猫 American Curl</li><li>塞尔凯克卷毛猫 Selkirk Rex</li><li>喜马拉雅猫 Himalayan</li><li>欧洲短毛猫 European Shorthair</li><li>哈瓦那棕猫 Havana Brown</li><li>彼得秃猫 Peterbald</li><li>美国短尾猫 American Bobtail</li><li>金力克猫 Cymric</li><li>德国卷毛猫 German Rex</li><li>东方长毛猫 Oriental Longhair</li><li>皮克西博布猫 Pixiebob</li><li>英国长毛猫 British Longhair</li></ul><p>照片来自维基共享资源，许可为 CC0、公有领域或 CC BY。作者与来源见模板目录中的 CREDITS。这些是真实品种照片，不是街景。 Photographs are from Wikimedia Commons under CC0, public domain, or CC BY. Authors and source pages are listed in CREDITS. These are real breed photographs, not street scenes.</p>"
-          },
           {
             "name": "cat_choice",
             "type": "imagepicker",
             "title": "你更喜欢哪只猫？ Which cat do you prefer?",
-            "description": "请在两只猫里选一只。这两只猫来自两个不同品种。Pick one of the two cats. They are from two different breeds.",
+            "description": "请选出你更喜欢的一只。Choose the cat you prefer.",
             "imageFit": "contain",
             "imageHeight": 320,
             "imageWidth": 320,

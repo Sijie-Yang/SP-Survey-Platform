@@ -111,9 +111,24 @@ test('cat pairwise demo is a listed builtin template of real breed photographs',
   });
   expect(choice.mediaFolders.slice().sort()).toEqual([...byFolder.keys()].sort());
 
-  const html = tpl.config.pages.flatMap((page) => page.elements).find((q) => q.name === 'cat_choice_note').html;
+  const participantText = [
+    tpl.config.title,
+    tpl.config.description,
+    ...tpl.config.pages.flatMap((page) => [
+      page.title,
+      page.description,
+      ...(page.elements || []).flatMap((element) => [element.title, element.description, element.html]),
+    ]),
+  ].filter(Boolean).join('\n');
+  expect(participantText).toMatch(/你更喜欢哪只猫/);
+  expect(participantText).toMatch(/Which cat do you prefer/);
+  expect(participantText).toMatch(/请选出你更喜欢的一只/);
+  expect(participantText).toMatch(/Choose the cat you prefer/);
+  expect(participantText).not.toMatch(/演示|非街道|demo|street|folder|抽样|sampling|维基|CREDITS/i);
   Object.values(manifest.notes).forEach((note) => {
-    expect(html).toContain(note.split(' — ')[0]);
+    const [label] = note.split(' — ');
+    expect(label).toMatch(/\p{Script=Han}/u);
+    expect(label).toMatch(/[A-Za-z]/);
   });
 
   const credits = parseCredits(fs.readFileSync(path.join(DIR, ID, 'CREDITS.md'), 'utf8'));
