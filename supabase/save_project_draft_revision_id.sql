@@ -2,6 +2,35 @@
 -- Inbox SQL does not update this function. Safe to re-run.
 -- Keeps auth, FOR UPDATE, expectedDraftUpdatedAt conflict, dual-write,
 -- audit, and GRANT EXECUTE.
+-- Owners and project collaborators (supabase/project_collaborators.sql) may save.
+-- The helper below is a no-op for non-members until that table exists.
+
+CREATE OR REPLACE FUNCTION public.is_project_collaborator(p_project_id TEXT)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_member boolean;
+BEGIN
+  IF auth.uid() IS NULL OR p_project_id IS NULL THEN
+    RETURN false;
+  END IF;
+  IF to_regclass('public.project_collaborators') IS NULL THEN
+    RETURN false;
+  END IF;
+  EXECUTE
+    'SELECT EXISTS (SELECT 1 FROM public.project_collaborators WHERE project_id = $1 AND user_id = auth.uid())'
+    INTO v_member
+    USING p_project_id;
+  RETURN COALESCE(v_member, false);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.is_project_collaborator(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_project_collaborator(TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.save_project_draft(
   p_project_id TEXT,
@@ -25,7 +54,8 @@ BEGIN
 
   SELECT draft_updated_at INTO v_current
   FROM public.projects
-  WHERE id = p_project_id AND user_id = auth.uid()
+  WHERE id = p_project_id
+    AND (user_id = auth.uid() OR public.is_project_collaborator(id))
   FOR UPDATE;
 
   IF NOT FOUND THEN
@@ -51,7 +81,8 @@ BEGIN
     updated_at = v_now,
     revision_id = v_revision,
     last_writer = COALESCE(p_writer, '{}'::jsonb) || jsonb_build_object('at', v_now)
-  WHERE id = p_project_id;
+  WHERE id = p_project_id
+    AND (user_id = auth.uid() OR public.is_project_collaborator(id));
 
   PERFORM public.write_audit_event(
     'project.save',

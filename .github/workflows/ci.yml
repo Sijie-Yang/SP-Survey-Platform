@@ -54,6 +54,7 @@ jobs:
           npm install --no-save --no-audit --no-fund @electric-sql/pglite
           node scripts/tests/incremental-sql.mjs
           node scripts/tests/survey-response-rows.mjs
+          node scripts/tests/project-collaborators.mjs
 
       - name: Worker module smoke import
         run: |

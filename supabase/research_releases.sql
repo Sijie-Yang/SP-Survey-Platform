@@ -21,6 +21,35 @@ DROP TRIGGER IF EXISTS protect_released_config ON public.projects;
 CREATE TRIGGER protect_released_config BEFORE UPDATE ON public.projects
 FOR EACH ROW EXECUTE FUNCTION public.protect_released_config();
 
+-- Same helper as project_collaborators.sql / save_project_draft_revision_id.sql.
+-- False until the collaborators table exists, so owner releases keep working.
+CREATE OR REPLACE FUNCTION public.is_project_collaborator(p_project_id TEXT)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_member boolean;
+BEGIN
+  IF auth.uid() IS NULL OR p_project_id IS NULL THEN
+    RETURN false;
+  END IF;
+  IF to_regclass('public.project_collaborators') IS NULL THEN
+    RETURN false;
+  END IF;
+  EXECUTE
+    'SELECT EXISTS (SELECT 1 FROM public.project_collaborators WHERE project_id = $1 AND user_id = auth.uid())'
+    INTO v_member
+    USING p_project_id;
+  RETURN COALESCE(v_member, false);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.is_project_collaborator(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_project_collaborator(TEXT) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.release_project_version(
   p_project_id TEXT,
   p_expected_draft_updated_at TIMESTAMPTZ,
@@ -36,11 +65,19 @@ DECLARE
   v_version INTEGER;
   v_now TIMESTAMPTZ := clock_timestamp();
 BEGIN
-  v_owner := auth.uid();
-  IF auth.role() = 'service_role' THEN v_owner := p_owner; END IF;
-  IF v_owner IS NULL THEN RAISE EXCEPTION 'not authenticated'; END IF;
-  SELECT * INTO v_project FROM public.projects
-    WHERE id = p_project_id AND user_id = v_owner FOR UPDATE;
+  IF auth.role() = 'service_role' THEN
+    v_owner := p_owner;
+    IF v_owner IS NULL THEN RAISE EXCEPTION 'not authenticated'; END IF;
+    SELECT * INTO v_project FROM public.projects
+      WHERE id = p_project_id AND user_id = v_owner FOR UPDATE;
+  ELSE
+    v_owner := auth.uid();
+    IF v_owner IS NULL THEN RAISE EXCEPTION 'not authenticated'; END IF;
+    SELECT * INTO v_project FROM public.projects
+      WHERE id = p_project_id
+        AND (user_id = v_owner OR public.is_project_collaborator(id))
+      FOR UPDATE;
+  END IF;
   IF NOT FOUND THEN RAISE EXCEPTION 'project not found'; END IF;
   IF p_expected_draft_updated_at IS NULL OR
      p_expected_draft_updated_at IS DISTINCT FROM v_project.draft_updated_at THEN
@@ -91,7 +128,11 @@ CREATE OR REPLACE FUNCTION public.publish_project_config(p_project_id TEXT, p_su
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_stamp TIMESTAMPTZ;
 BEGIN
-  SELECT draft_updated_at INTO v_stamp FROM public.projects WHERE id=p_project_id AND user_id=auth.uid() FOR UPDATE;
+  SELECT draft_updated_at INTO v_stamp FROM public.projects
+    WHERE id=p_project_id AND (user_id=auth.uid() OR public.is_project_collaborator(id)) FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'project not found';
+  END IF;
   RETURN public.release_project_version(p_project_id, v_stamp, p_summary);
 END;
 $$;
@@ -99,7 +140,11 @@ CREATE OR REPLACE FUNCTION public.rollback_project_config(p_project_id TEXT, p_v
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_stamp TIMESTAMPTZ;
 BEGIN
-  SELECT draft_updated_at INTO v_stamp FROM public.projects WHERE id=p_project_id AND user_id=auth.uid() FOR UPDATE;
+  SELECT draft_updated_at INTO v_stamp FROM public.projects
+    WHERE id=p_project_id AND (user_id=auth.uid() OR public.is_project_collaborator(id)) FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'project not found';
+  END IF;
   RETURN public.release_project_version(p_project_id, v_stamp, NULL, p_version);
 END;
 $$;
