@@ -68,6 +68,7 @@ import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { checkIsAdmin } from './lib/templateManager';
 import { useNavigate } from 'react-router-dom';
+import { useAdminTabHistory } from './lib/adminTabHistory';
 import useSurveyAssistant from './hooks/useSurveyAssistant';
 import { useSiliconTasks } from './hooks/useSiliconTasks';
 import AiAssistantSidebar from './components/admin/AiAssistantSidebar';
@@ -212,7 +213,15 @@ export default function AdminApp() {
   const [toolsMenuAnchor, setToolsMenuAnchor] = useState(null);
   const theme = createCustomTheme(currentTheme);
   
-  const [tabValue, setTabValue] = useState(0);
+  const {
+    tab: tabValue,
+    overlay: adminOverlay,
+    openTab: setTabValue,
+    openOverlay,
+    closeOverlay,
+  } = useAdminTabHistory();
+  const previewOpen = adminOverlay === 'preview';
+  const layoutStudioOpen = adminOverlay === 'layout';
   const [assistantEnabled, setAssistantEnabled] = useState(() => isAssistantEnabled());
   const [siliconEnabled, setSiliconEnabled] = useState(() => isSiliconExperimentalEnabled());
   const [analysisMediaFocus, setAnalysisMediaFocus] = useState(null);
@@ -234,10 +243,10 @@ export default function AdminApp() {
     };
     window.addEventListener('sp-open-silicon-tab', openSilicon);
     return () => window.removeEventListener('sp-open-silicon-tab', openSilicon);
-  }, []);
+  }, [setTabValue]);
   useEffect(() => {
-    if (!siliconEnabled && tabValue === 6) setTabValue(0);
-  }, [siliconEnabled, tabValue]);
+    if (!siliconEnabled && tabValue === 6) setTabValue(0, { replace: true });
+  }, [siliconEnabled, tabValue, setTabValue]);
   useEffect(() => {
     const syncFlags = () => {
       setAssistantEnabled(isAssistantEnabled());
@@ -247,13 +256,11 @@ export default function AdminApp() {
     return () => window.removeEventListener('sp-feature-flags', syncFlags);
   }, []);
   useEffect(() => {
-    const openPreview = () => setPreviewOpen(true);
+    const openPreview = () => openOverlay('preview');
     window.addEventListener('sp-assistant-open-preview', openPreview);
     return () => window.removeEventListener('sp-assistant-open-preview', openPreview);
-  }, []);
+  }, [openOverlay]);
   const [surveyConfig, setSurveyConfig] = useState(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [layoutStudioOpen, setLayoutStudioOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -560,7 +567,7 @@ export default function AdminApp() {
       document.removeEventListener('visibilitychange', onFocusOrVisible);
       window.clearInterval(intervalId);
     };
-  }, [currentProject?.id]);
+  }, [currentProject?.id, setTabValue]);
 
   // Monitor projectStates changes, ensure persistence
   useEffect(() => {
@@ -618,7 +625,7 @@ export default function AdminApp() {
             // If no saved state, load from file
             const config = await loadSurveyConfig(activeProject.id);
             setSurveyConfig(config || demoSurveyConfig);
-            setTabValue(0); // Default to first tab
+            setTabValue(0, { replace: true });
           }
           // If state was restored, tabValue is already set by restoreProjectState
         } else {
@@ -827,6 +834,15 @@ export default function AdminApp() {
     console.log('🔍 Saved project state for:', currentProject.name, currentState);
   };
 
+  const saveProjectStateRef = useRef(saveCurrentProjectState);
+  saveProjectStateRef.current = saveCurrentProjectState;
+  const historyTabRef = useRef(tabValue);
+  useEffect(() => {
+    if (historyTabRef.current === tabValue) return;
+    historyTabRef.current = tabValue;
+    saveProjectStateRef.current({ tabValue, tabsVersion: ADMIN_TABS_VERSION });
+  }, [tabValue]);
+
   // Restore project state
   const restoreProjectState = (projectId, options = {}) => {
     const { onlyWhenUnsaved = false } = options;
@@ -850,7 +866,7 @@ export default function AdminApp() {
       if ((savedState.tabsVersion || 1) < ADMIN_TABS_VERSION) {
         restoredTab = Math.min(restoredTab + 1, ADMIN_TAB_MAX);
       }
-      setTabValue(restoredTab);
+      setTabValue(restoredTab, { replace: true });
       return true;
     }
     
@@ -929,7 +945,7 @@ export default function AdminApp() {
       });
       console.log('✅ Survey config saved to project state');
     }
-  }, [currentProject, tabValue]);
+  }, [currentProject, tabValue, setTabValue]);
 
   const assistant = useSurveyAssistant({
     currentProject,
@@ -981,7 +997,7 @@ export default function AdminApp() {
     if (!siliconEnabled) return;
     setTabValue(6);
     if (!wideLayout) setAiSidebarOpen(false);
-  }, [siliconEnabled, wideLayout]);
+  }, [siliconEnabled, wideLayout, setTabValue]);
 
   const siliconWatching = siliconEnabled && (
     tabValue === 6
@@ -1444,7 +1460,7 @@ export default function AdminApp() {
             <Tooltip title={t.previewSurvey}>
               <IconButton
                 color="inherit"
-                onClick={() => setPreviewOpen(true)}
+                onClick={() => openOverlay('preview')}
                 data-tour="preview"
                 disabled={!currentProject || !surveyConfig}
                 size="small"
@@ -1802,7 +1818,7 @@ export default function AdminApp() {
                 siliconEnabled={siliconEnabled}
                 onOpenAssistant={() => openAiSidebar('assistant')}
                 onOpenProjects={() => { if (!wideLayout) setAiSidebarOpen(false); setSidebarOpen(true); }}
-                onOpenPreview={surveyConfig ? () => setPreviewOpen(true) : undefined}
+                onOpenPreview={surveyConfig ? () => openOverlay('preview') : undefined}
                 onOpenSilicon={openSiliconTab}
               />
             </TabPanel>
@@ -1835,8 +1851,8 @@ export default function AdminApp() {
                   hideAssistant
                   onEditorSelectionChange={setEditorSelection}
                   onOpenAssistant={() => setAiSidebarOpen(true)}
-                  onOpenLayoutStudio={() => setLayoutStudioOpen(true)}
-                  onOpenPreview={() => setPreviewOpen(true)}
+                  onOpenLayoutStudio={() => openOverlay('layout')}
+                  onOpenPreview={() => openOverlay('preview')}
                   editorCommitKey={editorCommitKey}
                 />
               ) : (
@@ -1921,7 +1937,7 @@ export default function AdminApp() {
       </Container>
 
       {/* Original survey preview, shared by the toolbar and builder. */}
-      <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} maxWidth="lg" fullWidth>
+      <Dialog open={previewOpen} onClose={closeOverlay} maxWidth="lg" fullWidth>
         <DialogTitle>{t.previewSurvey}</DialogTitle>
         <DialogContent>
           <Suspense fallback={<AdminLoadingState label="Loading preview…" />}>
@@ -1933,12 +1949,12 @@ export default function AdminApp() {
           </Suspense>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPreviewOpen(false)}>{t.resultsClose}</Button>
+          <Button onClick={closeOverlay}>{t.resultsClose}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Layout Studio */}
-      <Dialog open={layoutStudioOpen} onClose={() => setLayoutStudioOpen(false)} className="sp-studio-dialog" maxWidth={false} fullWidth PaperProps={{ sx: { maxWidth: 'none', m: 1.5, width: 'calc(100% - 24px)', maxHeight: 'calc(100% - 24px)' } }}>
+      <Dialog open={layoutStudioOpen} onClose={closeOverlay} className="sp-studio-dialog" maxWidth={false} fullWidth PaperProps={{ sx: { maxWidth: 'none', m: 1.5, width: 'calc(100% - 24px)', maxHeight: 'calc(100% - 24px)' } }}>
         <DialogTitle>{t.builderLayoutStudio}</DialogTitle>
         <DialogContent sx={{ p: 0, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
           <Suspense fallback={<AdminLoadingState label="Loading preview…" />}>
@@ -1949,7 +1965,7 @@ export default function AdminApp() {
                 onConfigChange={handleSurveyConfigChange}
                 onSave={() => performSave({ silent: false })}
                 saveStatus={saveStatus}
-                onOpenRelease={() => { setLayoutStudioOpen(false); setTabValue(3); }}
+                onOpenRelease={() => setTabValue(3)}
               />
             ) : (
               <Typography>No survey configuration available</Typography>
@@ -1957,7 +1973,7 @@ export default function AdminApp() {
           </Suspense>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setLayoutStudioOpen(false)}>{t.resultsClose}</Button>
+          <Button onClick={closeOverlay}>{t.resultsClose}</Button>
         </DialogActions>
       </Dialog>
 
