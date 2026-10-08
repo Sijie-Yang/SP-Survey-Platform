@@ -13,11 +13,13 @@ import { ContentCopy, Launch, CheckCircle, Link as LinkIcon, OpenInNew, History,
 import { captureParamNames, normalizeConditions } from '../../lib/surveyRuntimeContext';
 import { useRegion } from '../../contexts/RegionContext';
 import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
+import OwnResponseSupabaseCard from './OwnResponseSupabaseCard';
 export default function WebsiteSetup({
   currentProject,
   surveyConfig,
   hasUnsavedChanges = false,
-  onReleased
+  onReleased,
+  onProjectUpdated,
 }) {
   const {
     t,
@@ -55,6 +57,10 @@ export default function WebsiteSetup({
             {copied ? t.shareCopied : t.shareCopyLink}
           </Button>}>
         {shareTools.map(([id, label, icon]) => <AdminActionButton key={id} startIcon={icon} aria-haspopup="dialog" onClick={() => setShareDialog(id)}>{label}</AdminActionButton>)}
+        <OwnResponseSupabaseCard
+          currentProject={currentProject}
+          onSaved={(ownResponseSupabase) => onProjectUpdated?.({ ownResponseSupabase })}
+        />
         <AdminActionButton startIcon={<OpenInNew />} disabled={!surveyUrl} href={surveyUrl || undefined} onClick={() => markGuideProgress(currentProject.id, 'shared')} target="_blank" rel="noopener noreferrer">
           {t.shareOpenSurvey}
         </AdminActionButton>

@@ -1898,6 +1898,7 @@ export default function AdminApp() {
                 hasUnsavedChanges={hasUnsavedChanges}
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
+                onProjectUpdated={(patch) => setCurrentProject((prev) => (prev ? { ...prev, ...patch } : prev))}
               />
             </TabPanel>
 

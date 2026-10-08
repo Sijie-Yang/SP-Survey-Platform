@@ -34,6 +34,7 @@ import { normalizePublicSlug, publicSlugErrorCode, validatePublicSlug } from './
 
 import { supabase } from './supabase';
 import { saveSurveyConfig, loadSurveyConfig, deleteSurveyConfig } from './surveyStorage';
+import { readStoredOwnResponse, settingsForSave, stripOwnResponseSupabase } from './ownResponseSupabase';
 import { getTemplateById } from './projectTemplates';
 import { hydrateSkillContractSnapshots } from './skillContracts';
 
@@ -104,7 +105,7 @@ function buildProjectMetadata(project, existingMeta = {}) {
 async function sbSaveProject(project, surveyConfig, { writer = null } = {}) {
   const userId = await getCurrentUserId();
   const now = new Date().toISOString();
-  const config = surveyConfig || {};
+  const config = stripOwnResponseSupabase(surveyConfig || {});
   // Legacy projects stay live on save. The release trigger protects managed
   // survey_config; participant reads always use get_survey_project.
   const row = {
@@ -193,6 +194,7 @@ function rowToProject(row) {
     website: meta.website || '',
     huggingfaceDataset: meta.huggingfaceDataset || '',
     metadata: meta,
+    ownResponseSupabase: readStoredOwnResponse(row.own_response_supabase),
     publicSlug: row.public_slug || row.publicSlug || '',
     imageDatasetConfig: row.image_dataset_config || {},
     preloadedImages: row.preloaded_images || [],
@@ -263,17 +265,18 @@ export const createProject = async (projectData) => {
 
     let surveyConfig;
     if (projectData.surveyConfig) {
-      surveyConfig = { ...projectData.surveyConfig, title: projectData.name };
+      surveyConfig = stripOwnResponseSupabase({ ...projectData.surveyConfig, title: projectData.name });
     } else if (projectData.templateId) {
       const template = getTemplateById(projectData.templateId);
       if (!template) throw new Error('Template not found');
-      surveyConfig = { ...template.config, title: projectData.name };
+      surveyConfig = stripOwnResponseSupabase({ ...template.config, title: projectData.name });
     } else {
       surveyConfig = createDefaultSurveyConfig(projectData.name);
     }
+    surveyConfig = stripOwnResponseSupabase(surveyConfig);
 
     if (isPlatformMode()) {
-      surveyConfig = await hydrateSkillContractSnapshots(surveyConfig);
+      surveyConfig = stripOwnResponseSupabase(await hydrateSkillContractSnapshots(surveyConfig));
       await sbSaveProject(project, surveyConfig);
     } else {
       await saveSurveyConfig(projectId, surveyConfig);
@@ -294,9 +297,10 @@ export const duplicateProject = async (sourceProjectId, newName, sourceProject) 
     let sourceConfig;
     if (isPlatformMode()) {
       const src = await sbLoadProject(sourceProjectId);
-      sourceConfig = src?._surveyConfig || {};
+      sourceConfig = stripOwnResponseSupabase(src?._surveyConfig || {});
     } else {
       sourceConfig = await loadSurveyConfig(sourceProjectId);
+      if (sourceConfig) sourceConfig = stripOwnResponseSupabase(sourceConfig);
     }
     if (!sourceConfig) throw new Error('Source project not found');
 
@@ -346,6 +350,24 @@ export const deleteProject = async (projectId) => {
     return { success: false, error: error.message };
   }
 };
+
+export async function saveOwnResponseSupabase(projectId, settings) {
+  const decided = settingsForSave(settings);
+  if (!decided.ok) return { success: false, error: decided.error };
+  if (!supabase) return { success: false, error: 'hosted-only' };
+  const { error } = await supabase.from('projects').update({
+    own_response_supabase: decided.value,
+    updated_at: new Date().toISOString(),
+  }).eq('id', projectId);
+  if (error) {
+    const message = String(error.message || '');
+    const missing = error.code === 'PGRST204'
+      || /own_response_supabase/i.test(message)
+      || /schema cache/i.test(message);
+    return { success: false, error: missing ? 'missing-column' : message };
+  }
+  return { success: true, ownResponseSupabase: readStoredOwnResponse(decided.value) };
+}
 
 export const updateProject = async (projectId, updates) => {
   try {
@@ -496,9 +518,9 @@ export const saveProjectFull = async (project, surveyConfig, options = {}) => {
   try {
     const validation = validateSurveyConfig(surveyConfig);
     if (!validation.valid) throw new Error(validation.errors.map((e) => `${e.path}: ${e.message}`).join(' '));
-    const frozenConfig = isPlatformMode()
+    const frozenConfig = stripOwnResponseSupabase(isPlatformMode()
       ? await hydrateSkillContractSnapshots(surveyConfig)
-      : surveyConfig;
+      : surveyConfig);
     if (isPlatformMode()) {
       const meta = await sbSaveProject(project, frozenConfig, {
         writer: options.writer || { source: 'human' },
