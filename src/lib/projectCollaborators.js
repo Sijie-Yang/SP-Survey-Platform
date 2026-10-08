@@ -3,7 +3,10 @@ import { supabase } from './supabase';
 export const PRESENCE_HEARTBEAT_MS = 25000;
 export const PRESENCE_STALE_MS = 70000;
 
-const AVATAR_COLORS = ['#1565c0', '#2e7d32', '#6a1b9a', '#ef6c00', '#00838f', '#ad1457'];
+const AVATAR_COLORS = [
+  '#1565c0', '#2e7d32', '#6a1b9a', '#ef6c00', '#00838f', '#ad1457',
+  '#4527a0', '#c62828', '#00695c', '#f9a825', '#37474f', '#5d4037',
+];
 
 export function normalizeCollaboratorEmail(value) {
   const email = String(value || '').trim().toLowerCase();
@@ -16,6 +19,27 @@ export function avatarColor(seed) {
   let hash = 0;
   for (let i = 0; i < text.length; i += 1) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+/** Colors for the people visible together. Neighbors in the stack do not share a color. */
+export function presenceColorMap(people) {
+  const used = new Set();
+  const map = new Map();
+  for (const person of people || []) {
+    if (!person?.userId || map.has(person.userId)) continue;
+    let index = 0;
+    const seed = String(person.userId);
+    for (let i = 0; i < seed.length; i += 1) index = (index * 31 + seed.charCodeAt(i)) >>> 0;
+    index %= AVATAR_COLORS.length;
+    let guard = 0;
+    while (used.has(AVATAR_COLORS[index]) && guard < AVATAR_COLORS.length) {
+      index = (index + 1) % AVATAR_COLORS.length;
+      guard += 1;
+    }
+    used.add(AVATAR_COLORS[index]);
+    map.set(person.userId, AVATAR_COLORS[index]);
+  }
+  return map;
 }
 
 export function presenceInitials(name, email) {

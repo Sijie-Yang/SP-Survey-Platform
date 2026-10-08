@@ -3,6 +3,7 @@ import {
   collaboratorErrorText,
   mergeAccessibleProjects,
   normalizeCollaboratorEmail,
+  presenceColorMap,
   presenceInitials,
   projectInsertPayload,
   projectUpdatePayload,
@@ -54,6 +55,16 @@ test('presence keeps other people seen recently and drops self and stale rows', 
     { userId: 'old', displayName: 'Old', lastSeenAt: '2026-10-08T00:00:00.000Z' },
   ], 'self', now, 30000);
   expect(rows.map((row) => row.userId)).toEqual(['lin']);
+});
+
+test('people shown together get different circle colors', () => {
+  const colors = presenceColorMap([
+    { userId: 'lin' },
+    { userId: 'wei' },
+    { userId: 'zhou' },
+  ]);
+  const values = [...colors.values()];
+  expect(new Set(values).size).toBe(3);
 });
 
 test('avatar label and known invite errors', () => {

@@ -634,6 +634,7 @@ export const adminI18n = {
     collaboratorEmail: 'Email of an existing account',
     collaboratorEmailInvalid: 'Enter a valid email address.',
     collaboratorAdd: 'Add collaborator',
+    collaboratorInviteTooltip: 'Invite a collaborator by email',
     collaboratorRemove: 'Remove {email}',
     collaboratorAdded: 'Added {email}',
     collaboratorRemoved: 'Removed collaborator',
@@ -644,6 +645,7 @@ export const adminI18n = {
     collaboratorSaveFailed: 'Could not update collaborators',
     presenceTitle: 'Also here',
     presenceOnlyYou: 'Only you have this project open',
+    presencePerson: '{name} has this project open',
 
     // Integrations
     integBackAdmin: 'Back to Admin',
@@ -1869,6 +1871,7 @@ export const adminI18n = {
     collaboratorEmail: '已有账号的邮箱',
     collaboratorEmailInvalid: '请输入有效的邮箱地址。',
     collaboratorAdd: '添加协作者',
+    collaboratorInviteTooltip: '通过邮箱邀请协作者',
     collaboratorRemove: '移除 {email}',
     collaboratorAdded: '已添加 {email}',
     collaboratorRemoved: '已移除协作者',
@@ -1879,6 +1882,7 @@ export const adminI18n = {
     collaboratorSaveFailed: '无法更新协作者',
     presenceTitle: '也在此项目',
     presenceOnlyYou: '目前只有你打开了这个项目',
+    presencePerson: '{name}正在查看此项目',
 
     integBackAdmin: '返回 Admin',
     integTitle: 'AI 与集成',

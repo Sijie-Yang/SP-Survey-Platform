@@ -1479,6 +1479,15 @@ export default function AdminApp() {
               </IconButton>
             </Tooltip>
 
+            {currentProject && (
+              <ProjectCollaboratorsBar
+                projectId={currentProject.id}
+                ownerUserId={currentProject.userId}
+                accessRole={currentProject.accessRole}
+                currentUserId={user?.id}
+              />
+            )}
+
             {assistantEnabled && (
               <Box sx={{ display: { xs: 'none', md: 'block' } }}>
                 <Tooltip title={aiSidebarOpen ? t.toggleAiSidebarOpen : t.toggleAiSidebarClosed}>
@@ -1836,12 +1845,6 @@ export default function AdminApp() {
         ) : (
           // Project content
           <Paper sx={{ width: '100%' }}>
-            <ProjectCollaboratorsBar
-              projectId={currentProject.id}
-              ownerUserId={currentProject.userId}
-              accessRole={currentProject.accessRole}
-              currentUserId={user?.id}
-            />
             <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
               <AdminWorkspaceTabs value={tabValue} onChange={handleTabChange} siliconEnabled={siliconEnabled} />
             </Box>

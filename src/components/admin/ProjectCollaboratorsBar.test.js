@@ -37,11 +37,13 @@ beforeEach(() => {
   ]);
 });
 
-test('owner sees the Chinese invite control and who else is here', async () => {
+test('owner opens the Chinese invite control from a toolbar circle', async () => {
   renderBar({ ownerUserId: 'owner', currentUserId: 'owner', accessRole: 'owner' });
-  expect(await screen.findByText('林夏')).toBeTruthy();
+  const presence = await screen.findByRole('button', { name: '林夏正在查看此项目' });
+  expect(presence).toHaveTextContent('林');
+  const invite = screen.getByRole('button', { name: '通过邮箱邀请协作者' });
+  fireEvent.click(invite);
   expect(screen.getByLabelText('已有账号的邮箱')).toBeTruthy();
-  expect(screen.getByRole('button', { name: '添加协作者' })).toBeTruthy();
   fireEvent.change(screen.getByLabelText('已有账号的邮箱'), { target: { value: 'new@example.com' } });
   addProjectCollaborator.mockResolvedValue({ userId: 'new', email: 'new@example.com', displayName: 'new' });
   fireEvent.click(screen.getByRole('button', { name: '添加协作者' }));
@@ -49,34 +51,60 @@ test('owner sees the Chinese invite control and who else is here', async () => {
   expect(await screen.findByText('已添加 new@example.com')).toBeTruthy();
 });
 
-test('a collaborator can see presence but cannot invite', async () => {
+test('a collaborator sees presence circles but not the invite circle', async () => {
   touchProjectPresence.mockResolvedValue([
     { userId: 'owner', displayName: '周宁', email: 'owner@example.com', lastSeenAt: new Date().toISOString() },
   ]);
   renderBar({ ownerUserId: 'owner', currentUserId: 'lin', accessRole: 'collaborator' });
-  expect(await screen.findByText('周宁')).toBeTruthy();
-  expect(screen.getByText('lin@example.com')).toBeTruthy();
-  expect(screen.queryByRole('button', { name: '添加协作者' })).toBeNull();
+  expect(await screen.findByRole('button', { name: '周宁正在查看此项目' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: '通过邮箱邀请协作者' })).toBeNull();
 });
 
 test('leaving the project clears presence', async () => {
   const view = renderBar({ ownerUserId: 'owner', currentUserId: 'owner' });
-  await screen.findByText('林夏');
+  await screen.findByRole('button', { name: '林夏正在查看此项目' });
   view.unmount();
   expect(clearProjectPresence).toHaveBeenCalledWith('proj_1');
 });
 
-test('preview state shows the presence row without a network call', () => {
+test('English tooltips name who is online and what the invite circle does', async () => {
+  localStorage.setItem('sp-survey-language', 'en');
+  render(
+    <RegionProvider>
+      <ProjectCollaboratorsBar
+        projectId="proj_1"
+        ownerUserId="owner"
+        currentUserId="owner"
+        previewState={{
+          collaborators: [],
+          presence: [
+            { userId: 'lin', displayName: 'Lin Xia', email: 'lin@example.com', lastSeenAt: new Date().toISOString() },
+          ],
+        }}
+      />
+    </RegionProvider>,
+  );
+  expect(screen.getByRole('button', { name: 'Lin Xia has this project open' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Invite a collaborator by email' })).toBeTruthy();
+});
+
+test('presence circles overlap with different colors and no text row', () => {
   touchProjectPresence.mockClear();
   renderBar({
     ownerUserId: 'owner',
     currentUserId: 'owner',
     previewState: {
       collaborators: [],
-      presence: [{ userId: 'lin', displayName: '林夏', email: 'lin@example.com', lastSeenAt: new Date().toISOString() }],
+      presence: [
+        { userId: 'lin', displayName: '林夏', email: 'lin@example.com', lastSeenAt: new Date().toISOString() },
+        { userId: 'wei', displayName: '魏航', email: 'wei@example.com', lastSeenAt: new Date().toISOString() },
+      ],
     },
   });
-  expect(screen.getByText('也在此项目')).toBeTruthy();
-  expect(screen.getByText('林夏')).toBeTruthy();
+  const circles = screen.getAllByTestId('presence-circle');
+  expect(circles).toHaveLength(2);
+  expect(circles[1]).toHaveStyle({ marginLeft: '-10px' });
+  expect(circles[0].getAttribute('data-color')).not.toBe(circles[1].getAttribute('data-color'));
+  expect(screen.queryByText('也在此项目')).toBeNull();
   expect(touchProjectPresence).not.toHaveBeenCalled();
 });

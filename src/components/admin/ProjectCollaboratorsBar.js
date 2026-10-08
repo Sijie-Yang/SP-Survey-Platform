@@ -1,28 +1,40 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Avatar,
   Box,
   Button,
-  Chip,
-  Stack,
+  IconButton,
+  Popover,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import { PersonAdd } from '@mui/icons-material';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
 import {
   PRESENCE_HEARTBEAT_MS,
   addProjectCollaborator,
-  avatarColor,
   clearProjectPresence,
   collaboratorErrorText,
   listProjectCollaborators,
+  presenceColorMap,
   presenceInitials,
   removeProjectCollaborator,
   touchProjectPresence,
   visiblePresence,
 } from '../../lib/projectCollaborators';
+
+const circleButtonSx = {
+  border: 1,
+  borderColor: 'rgba(255, 255, 255, 0.5)',
+  borderRadius: '50%',
+  width: 32,
+  height: 32,
+  '&:hover': {
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    bgcolor: 'rgba(255, 255, 255, 0.1)',
+  },
+};
 
 function personLabel(person) {
   return person.displayName || person.email || person.userId;
@@ -39,6 +51,7 @@ export default function ProjectCollaboratorsBar({
   const [email, setEmail] = useState('');
   const [collaborators, setCollaborators] = useState(previewState?.collaborators || []);
   const [others, setOthers] = useState(() => visiblePresence(previewState?.presence || [], currentUserId));
+  const [anchor, setAnchor] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -47,6 +60,7 @@ export default function ProjectCollaboratorsBar({
     accessRole === 'owner'
     || (accessRole !== 'collaborator' && (!ownerUserId || ownerUserId === currentUserId))
   );
+  const colors = presenceColorMap(others);
 
   const refreshCollaborators = useCallback(async () => {
     if (previewState || !projectId) return;
@@ -123,86 +137,98 @@ export default function ProjectCollaboratorsBar({
   };
 
   if (!projectId) return null;
+  if (!isOwner && others.length === 0) return null;
 
   return (
-    <Box
-      data-testid="project-collaborators"
-      sx={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        gap: 1.5,
-        px: 2,
-        py: 1,
-        borderBottom: 1,
-        borderColor: 'divider',
-        bgcolor: 'background.paper',
-      }}
-    >
-      <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap" sx={{ minWidth: 0 }}>
-        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 0.2 }}>
-          {t.presenceTitle}
-        </Typography>
-        {others.length === 0 ? (
-          <Typography variant="caption" color="text.secondary">{t.presenceOnlyYou}</Typography>
-        ) : others.map((person) => (
-          <Tooltip key={person.userId} title={person.email || personLabel(person)}>
-            <Chip
-              size="small"
-              variant="outlined"
-              label={personLabel(person)}
-              avatar={(
-                <Avatar sx={{ bgcolor: `${avatarColor(person.userId)} !important`, color: '#fff', fontSize: 11 }}>
+    <Box data-testid="project-collaborators" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      {others.length > 0 && (
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {others.map((person, index) => {
+            const label = tf(t.presencePerson, { name: personLabel(person) });
+            const color = colors.get(person.userId);
+            return (
+              <Tooltip key={person.userId} title={label}>
+                <IconButton
+                  size="small"
+                  color="inherit"
+                  aria-label={label}
+                  data-testid="presence-circle"
+                  data-color={color}
+                  sx={{
+                    ...circleButtonSx,
+                    ml: index === 0 ? 0 : '-10px',
+                    zIndex: others.length - index,
+                    bgcolor: color,
+                    color: '#fff',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    borderColor: 'rgba(255,255,255,0.85)',
+                    '&:hover': { bgcolor: color, borderColor: '#fff' },
+                  }}
+                >
                   {presenceInitials(person.displayName, person.email)}
-                </Avatar>
-              )}
-            />
-          </Tooltip>
-        ))}
-      </Stack>
-
-      {collaborators.length > 0 && (
-        <Stack direction="row" spacing={0.5} alignItems="center" useFlexGap flexWrap="wrap">
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>{t.collaboratorTitle}</Typography>
-          {collaborators.map((member) => (
-            <Chip
-              key={member.userId}
-              size="small"
-              label={member.email || personLabel(member)}
-              onDelete={isOwner ? () => onRemove(member) : undefined}
-              aria-label={member.email || personLabel(member)}
-            />
-          ))}
-        </Stack>
-      )}
-
-      {isOwner && (
-        <Box
-          component="form"
-          onSubmit={onAdd}
-          sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', ml: { md: 'auto' } }}
-        >
-          <TextField
-            size="small"
-            type="email"
-            name="collaborator-email"
-            label={t.collaboratorEmail}
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            disabled={busy}
-            sx={{ minWidth: 220 }}
-          />
-          <Button type="submit" variant="contained" size="small" disabled={busy || !email.trim()}>
-            {t.collaboratorAdd}
-          </Button>
+                </IconButton>
+              </Tooltip>
+            );
+          })}
         </Box>
       )}
 
-      {message && (
-        <Typography variant="caption" color="success.main" role="status">{message}</Typography>
-      )}
-      {error && (
-        <Typography variant="caption" color="error" role="alert">{error}</Typography>
+      {isOwner && (
+        <>
+          <Tooltip title={t.collaboratorInviteTooltip}>
+            <IconButton
+              size="small"
+              color="inherit"
+              aria-label={t.collaboratorInviteTooltip}
+              aria-expanded={Boolean(anchor)}
+              aria-haspopup="dialog"
+              onClick={(event) => setAnchor(event.currentTarget)}
+              sx={circleButtonSx}
+            >
+              <PersonAdd fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Popover
+            open={Boolean(anchor)}
+            anchorEl={anchor}
+            onClose={() => setAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          >
+            <Box component="form" onSubmit={onAdd} sx={{ p: 2, width: 320, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+              <Typography variant="subtitle2">{t.collaboratorTitle}</Typography>
+              <TextField
+                size="small"
+                type="email"
+                name="collaborator-email"
+                label={t.collaboratorEmail}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                disabled={busy}
+                autoFocus
+              />
+              <Button type="submit" variant="contained" size="small" disabled={busy || !email.trim()}>
+                {t.collaboratorAdd}
+              </Button>
+              {collaborators.map((member) => (
+                <Box key={member.userId} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+                  <Typography variant="body2" noWrap>{member.email || personLabel(member)}</Typography>
+                  <Button
+                    size="small"
+                    color="inherit"
+                    aria-label={tf(t.collaboratorRemove, { email: member.email || personLabel(member) })}
+                    onClick={() => onRemove(member)}
+                  >
+                    {t.sidebarDelete}
+                  </Button>
+                </Box>
+              ))}
+              {message && <Typography variant="caption" color="success.main" role="status">{message}</Typography>}
+              {error && <Typography variant="caption" color="error" role="alert">{error}</Typography>}
+            </Box>
+          </Popover>
+        </>
       )}
     </Box>
   );
