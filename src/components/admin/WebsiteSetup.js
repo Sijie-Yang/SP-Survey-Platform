@@ -1,11 +1,13 @@
 import SurveyQrCode from './SurveyQrCode';
+import CustomSurveyLink from './CustomSurveyLink';
+import { legacySurveyShareUrl, surveyShareUrl } from '../../lib/publicSlug';
 import { isChineseLanguage, uiPair } from '../../lib/uiLanguages';
 import ParameterLinks from './ParameterLinks';
 import SurveyPreflight from './SurveyPreflight';
 import ProjectVersions from './ProjectVersions';
 import { validateSurveyConfig } from '../../lib/designProtocol/validate';
 import { markGuideProgress } from '../../lib/adminGuide';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Typography, Alert, Button, Card, Paper, Dialog, DialogTitle, DialogContent, DialogActions, CardContent, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
 import { ContentCopy, Launch, CheckCircle, Link as LinkIcon, OpenInNew, History, FactCheckOutlined, Tune, HelpOutline } from '@mui/icons-material';
 import { captureParamNames, normalizeConditions } from '../../lib/surveyRuntimeContext';
@@ -28,10 +30,15 @@ export default function WebsiteSetup({
   const issues = [...report.errors, ...report.warnings];
   const [copied, setCopied] = useState(false);
   const [shareDialog, setShareDialog] = useState(null);
+  const [savedSlug, setSavedSlug] = useState(currentProject?.publicSlug || '');
   const hasParameterLinks = captureParamNames(surveyConfig).length > 0 || normalizeConditions(surveyConfig).length > 1;
   const shareTools = [['versions', uiPair(language, 'Versions & release', '版本与发布'), <History />], ['checks', uiPair(language, 'Pre-share checks', '分享前检查'), <FactCheckOutlined />], ...(hasParameterLinks ? [['parameters', uiPair(language, 'Parameter links', '参数链接'), <Tune />]] : []), ['help', uiPair(language, 'Sharing guide', '分享指南'), <HelpOutline />]];
   const origin = window.location.origin;
-  const surveyUrl = currentProject ? `${origin}/survey?project=${encodeURIComponent(currentProject.id)}` : null;
+  useEffect(() => {
+    setSavedSlug(currentProject?.publicSlug || '');
+  }, [currentProject?.id, currentProject?.publicSlug]);
+  const surveyUrl = currentProject ? surveyShareUrl(origin, { id: currentProject.id, publicSlug: savedSlug }) : null;
+  const legacyUrl = currentProject ? legacySurveyShareUrl(origin, currentProject.id) : null;
   const copy = async text => {
     try {
       await navigator.clipboard.writeText(text);
@@ -72,6 +79,11 @@ export default function WebsiteSetup({
               <Box sx={{
             minWidth: 0
           }}>
+                <CustomSurveyLink
+                  projectId={currentProject.id}
+                  savedSlug={savedSlug}
+                  onSaved={setSavedSlug}
+                />
                 <Box sx={{
               p: 2,
               bgcolor: 'action.hover',
@@ -83,6 +95,10 @@ export default function WebsiteSetup({
             }}>
                   {surveyUrl}
                 </Box>
+                {savedSlug && legacyUrl && legacyUrl !== surveyUrl && <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  {t.shareCustomLinkKeepId}{' '}
+                  <Box component="span" sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{legacyUrl}</Box>
+                </Typography>}
 
                 {['localhost', '127.0.0.1', '[::1]'].includes(new URL(surveyUrl).hostname) && <Alert severity="info" sx={{
               mt: 2

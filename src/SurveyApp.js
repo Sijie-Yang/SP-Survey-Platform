@@ -37,6 +37,7 @@ import {
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
 import { getProjectLiveAccess, formatLiveWindow } from './lib/liveSurveyManager';
+import { isPublicSlugPath, participantLocationKey, publicSlugFromPathname } from './lib/publicSlug';
 import { enrichSurveyResponses } from './lib/enrichSurveyResponses';
 import {
   clearTrialsAnswerStore,
@@ -122,15 +123,14 @@ export default function SurveyApp() {
   // Monitor URL changes and reinitialize when project ID changes
   useEffect(() => {
     const checkUrlChange = () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const projectId = urlParams.get('project') || 'default';
+      const locationKey = participantLocationKey(window.location);
       
-      if (currentProjectId !== projectId && currentProjectId !== null) {
-        console.log(`🔄 Project ID changed from ${currentProjectId} to ${projectId}, reloading...`);
-        setCurrentProjectId(projectId);
+      if (currentProjectId !== locationKey && currentProjectId !== null) {
+        console.log(`🔄 Survey link changed from ${currentProjectId} to ${locationKey}, reloading...`);
+        setCurrentProjectId(locationKey);
         initializeSurvey();
       } else if (currentProjectId === null) {
-        setCurrentProjectId(projectId);
+        setCurrentProjectId(locationKey);
       }
     };
 
@@ -210,7 +210,7 @@ export default function SurveyApp() {
     const handleStorageChange = (e) => {
       // Get current project ID
       const urlParams = new URLSearchParams(window.location.search);
-      const projectId = urlParams.get('project') || 'default';
+      const projectId = urlParams.get('project') || (isPublicSlugPath(window.location.pathname) ? projectIdRef.current : null) || 'default';
       
       if (e.key === `survey_config_${projectId}` && useAdminConfig) {
         if (['active', 'submitting', 'submit-error'].includes(surveyPhaseRef.current)) {
@@ -371,9 +371,16 @@ export default function SurveyApp() {
         return assignment;
       };
 
-      // Get project ID from URL parameters
+      // Project-id links stay on ?project=. Custom links are /s/{slug}.
       const urlParams = new URLSearchParams(window.location.search);
-      const projectId = urlParams.get('project') || 'default';
+      let projectId = urlParams.get('project');
+      if (!projectId && isPublicSlugPath(window.location.pathname)) {
+        const slug = publicSlugFromPathname(window.location.pathname);
+        const { resolveSurveySlug } = await import('./lib/projectManager');
+        projectId = slug ? await resolveSurveySlug(slug) : null;
+        if (!projectId) throw new Error('Survey not found');
+      }
+      if (!projectId) projectId = 'default';
       projectIdRef.current = projectId;
       
       if (!participantIdRef.current) {
@@ -1331,7 +1338,7 @@ export default function SurveyApp() {
 
   // Hide the dev panel when opened via a project survey link (participant view)
   const urlParams = new URLSearchParams(window.location.search);
-  const isParticipantView = !!urlParams.get('project');
+  const isParticipantView = !!urlParams.get('project') || isPublicSlugPath(window.location.pathname);
 
   return (
     <Box>
