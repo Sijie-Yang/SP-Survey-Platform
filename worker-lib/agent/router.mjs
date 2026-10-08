@@ -21,6 +21,7 @@ import {
   validateApiKeyWithProvider,
 } from './credentials.mjs';
 import { handleAgentChat } from './chatHandler.mjs';
+import { handleSurveyTranslate } from './translate.mjs';
 import { useAgentRuntime } from './runtime/flags.mjs';
 import { startDesignerRun } from './runtime/designerChat.mjs';
 import {
@@ -557,6 +558,17 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
       }
       const result = await handleAgentChat(env, auth.userId, { ...body, assistantMode });
       return jsonResponse({ ...result, assistantMode });
+    }
+
+    if (pathname === '/api/agent/translate' && request.method === 'POST') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Translation requires a browser session'), { status: 403 }));
+      }
+      const body = await request.json();
+      if (body?.apiKey) {
+        return errorResponse(Object.assign(new Error('Do not send apiKey in body. Store it via /api/agent/credentials/openai'), { status: 400 }));
+      }
+      return jsonResponse(await handleSurveyTranslate(env, auth.userId, body));
     }
 
     if (pathname === '/api/agent/sessions' && request.method === 'GET') {

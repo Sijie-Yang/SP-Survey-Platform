@@ -29,7 +29,7 @@ import {
   Snackbar,
 } from '@mui/material';
 import { useRegion } from '../../contexts/RegionContext';
-import { UI_LANGUAGES, normalizeUiLanguage } from '../../lib/uiLanguages';
+import { UI_LANGUAGES, normalizeUiLanguage, uiPair } from '../../lib/uiLanguages';
 import { useQuestionEditorText } from '../../contexts/questionEditorI18n';
 import { parsePageRule } from '../../lib/surveyRuntimeContext';
 import {
@@ -43,6 +43,7 @@ import {
   ArticleOutlined,
   ImageOutlined,
   Translate,
+  GTranslate,
   Tune,
   PaletteOutlined,
   Preview,
@@ -66,6 +67,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import PageEditor from './PageEditor';
+import TranslationEditor from './TranslationEditor';
 import FullSurveyPreview from './FullSurveyPreview';
 import SurveyPreview from './SurveyPreview';
 import ConfirmDialog from '../layout/ConfirmDialog';
@@ -271,7 +273,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
 }
 
 export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange, onOpenAssistant, onOpenLayoutStudio, onOpenPreview, editorCommitKey = 0 }) {
-  const { t } = useRegion();
+  const { t, language } = useRegion();
   const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
@@ -567,6 +569,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
             ['basic', t.builderBasicInfo, <ArticleOutlined />],
             ['logo', t.builderLogoSettings, <ImageOutlined />],
             ['language', t.builderSurveyLanguage, <Translate />],
+            ['translations', uiPair(language, 'Translations', '翻译'), <GTranslate />],
             ['display', t.builderDisplaySettings, <Tune />],
             ['theme', t.builderThemeCustomization, <PaletteOutlined />],
           ].map(([id, label, icon]) => (
@@ -713,6 +716,15 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
                 {t.builderSurveyLanguageHelp}
               </Typography>
             </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={settingsDialog === 'translations'} onClose={closeSettings} fullWidth maxWidth="md">
+        <DialogContent dividers>
+          <TranslationEditor config={config} onChange={onChange} />
         </DialogContent>
         <DialogActions>
           <Button onClick={closeSettings}>{t.resultsClose}</Button>
