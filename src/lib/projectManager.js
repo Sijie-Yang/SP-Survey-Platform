@@ -1,4 +1,5 @@
 import { validateSurveyConfig } from './designProtocol/validate';
+import { normalizePublicSlug, publicSlugErrorCode, validatePublicSlug } from './publicSlug';
 /**
  * Project management — Supabase-first, falls back to local Express server.
  *
@@ -34,6 +35,7 @@ import { validateSurveyConfig } from './designProtocol/validate';
 import { supabase } from './supabase';
 import { listCollaboratorProjectIds, mergeAccessibleProjects, projectInsertPayload, projectUpdatePayload } from './projectCollaborators';
 import { saveSurveyConfig, loadSurveyConfig, deleteSurveyConfig } from './surveyStorage';
+import { readStoredOwnResponse, settingsForSave, stripOwnResponseSupabase } from './ownResponseSupabase';
 import { getTemplateById } from './projectTemplates';
 import { hydrateSkillContractSnapshots } from './skillContracts';
 
@@ -104,7 +106,7 @@ function buildProjectMetadata(project, existingMeta = {}) {
 async function sbSaveProject(project, surveyConfig, { writer = null } = {}) {
   const userId = await getCurrentUserId();
   const now = new Date().toISOString();
-  const config = surveyConfig || {};
+  const config = stripOwnResponseSupabase(surveyConfig || {});
   // Legacy projects stay live on save. The release trigger protects managed
   // survey_config; participant reads always use get_survey_project.
   // Update never sends user_id, so a collaborator cannot take ownership.
@@ -218,6 +220,8 @@ function rowToProject(row) {
     website: meta.website || '',
     huggingfaceDataset: meta.huggingfaceDataset || '',
     metadata: meta,
+    ownResponseSupabase: readStoredOwnResponse(row.own_response_supabase),
+    publicSlug: row.public_slug || row.publicSlug || '',
     imageDatasetConfig: row.image_dataset_config || {},
     preloadedImages: row.preloaded_images || [],
     preloadedAt: row.preloaded_at || null,
@@ -287,17 +291,18 @@ export const createProject = async (projectData) => {
 
     let surveyConfig;
     if (projectData.surveyConfig) {
-      surveyConfig = { ...projectData.surveyConfig, title: projectData.name };
+      surveyConfig = stripOwnResponseSupabase({ ...projectData.surveyConfig, title: projectData.name });
     } else if (projectData.templateId) {
       const template = getTemplateById(projectData.templateId);
       if (!template) throw new Error('Template not found');
-      surveyConfig = { ...template.config, title: projectData.name };
+      surveyConfig = stripOwnResponseSupabase({ ...template.config, title: projectData.name });
     } else {
       surveyConfig = createDefaultSurveyConfig(projectData.name);
     }
+    surveyConfig = stripOwnResponseSupabase(surveyConfig);
 
     if (isPlatformMode()) {
-      surveyConfig = await hydrateSkillContractSnapshots(surveyConfig);
+      surveyConfig = stripOwnResponseSupabase(await hydrateSkillContractSnapshots(surveyConfig));
       await sbSaveProject(project, surveyConfig);
     } else {
       await saveSurveyConfig(projectId, surveyConfig);
@@ -318,9 +323,10 @@ export const duplicateProject = async (sourceProjectId, newName, sourceProject) 
     let sourceConfig;
     if (isPlatformMode()) {
       const src = await sbLoadProject(sourceProjectId);
-      sourceConfig = src?._surveyConfig || {};
+      sourceConfig = stripOwnResponseSupabase(src?._surveyConfig || {});
     } else {
       sourceConfig = await loadSurveyConfig(sourceProjectId);
+      if (sourceConfig) sourceConfig = stripOwnResponseSupabase(sourceConfig);
     }
     if (!sourceConfig) throw new Error('Source project not found');
 
@@ -370,6 +376,24 @@ export const deleteProject = async (projectId) => {
     return { success: false, error: error.message };
   }
 };
+
+export async function saveOwnResponseSupabase(projectId, settings) {
+  const decided = settingsForSave(settings);
+  if (!decided.ok) return { success: false, error: decided.error };
+  if (!supabase) return { success: false, error: 'hosted-only' };
+  const { error } = await supabase.from('projects').update({
+    own_response_supabase: decided.value,
+    updated_at: new Date().toISOString(),
+  }).eq('id', projectId);
+  if (error) {
+    const message = String(error.message || '');
+    const missing = error.code === 'PGRST204'
+      || /own_response_supabase/i.test(message)
+      || /schema cache/i.test(message);
+    return { success: false, error: missing ? 'missing-column' : message };
+  }
+  return { success: true, ownResponseSupabase: readStoredOwnResponse(decided.value) };
+}
 
 export const updateProject = async (projectId, updates) => {
   try {
@@ -431,6 +455,65 @@ export const getParticipantProject = async (projectId) => {
   return rowToProject(data[0]);
 };
 
+async function localProjectsForSlugCheck() {
+  try {
+    const res = await fetch('http://localhost:3001/api/projects');
+    const data = await res.json();
+    const files = Array.isArray(data.files) ? data.files : [];
+    const projects = [];
+    for (const file of files) {
+      const id = String(file || '').replace(/\.json$/, '');
+      if (!id) continue;
+      const project = await localLoadProject(id);
+      if (project) projects.push(project);
+    }
+    return projects;
+  } catch {
+    return [];
+  }
+}
+
+export { publicSlugErrorCode };
+
+export async function resolveSurveySlug(rawSlug) {
+  const check = validatePublicSlug(rawSlug);
+  if (!check.ok || !check.slug) return null;
+  if (!isPlatformMode()) {
+    const projects = await localProjectsForSlugCheck();
+    return projects.find((project) => normalizePublicSlug(project.publicSlug) === check.slug)?.id || null;
+  }
+  const { data, error } = await supabase.rpc('resolve_survey_slug', { p_slug: check.slug });
+  if (error) throw error;
+  return data || null;
+}
+
+export async function setProjectPublicSlug(projectId, rawSlug) {
+  const check = validatePublicSlug(rawSlug);
+  if (!check.ok) return { success: false, code: check.code, error: check.code };
+  if (!isPlatformMode()) {
+    if (check.slug) {
+      const projects = await localProjectsForSlugCheck();
+      const taken = projects.some((project) => (
+        project.id !== projectId && normalizePublicSlug(project.publicSlug) === check.slug
+      ));
+      if (taken) return { success: false, code: 'taken', error: 'slug_taken' };
+    }
+    const saved = await updateProject(projectId, { publicSlug: check.slug });
+    if (!saved.success) return { success: false, code: 'unknown', error: saved.error || 'save failed' };
+    return { success: true, publicSlug: check.slug || null };
+  }
+  const { data, error } = await supabase.rpc('set_project_public_slug', {
+    p_project_id: projectId,
+    p_slug: check.slug,
+  });
+  if (error) {
+    const code = publicSlugErrorCode(error);
+    return { success: false, code, error: error.message || code };
+  }
+  const publicSlug = data?.publicSlug ?? data?.publicslug ?? null;
+  return { success: true, publicSlug: publicSlug || null };
+}
+
 export async function getProjectReleaseState(projectId) {
   if (!isPlatformMode()) throw new Error('Version management requires a Supabase project.');
   const { data, error } = await supabase.from('projects')
@@ -461,9 +544,9 @@ export const saveProjectFull = async (project, surveyConfig, options = {}) => {
   try {
     const validation = validateSurveyConfig(surveyConfig);
     if (!validation.valid) throw new Error(validation.errors.map((e) => `${e.path}: ${e.message}`).join(' '));
-    const frozenConfig = isPlatformMode()
+    const frozenConfig = stripOwnResponseSupabase(isPlatformMode()
       ? await hydrateSkillContractSnapshots(surveyConfig)
-      : surveyConfig;
+      : surveyConfig);
     if (isPlatformMode()) {
       const meta = await sbSaveProject(project, frozenConfig, {
         writer: options.writer || { source: 'human' },

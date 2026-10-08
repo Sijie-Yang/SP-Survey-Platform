@@ -8,7 +8,7 @@ import { Model } from "survey-core";
 import { Survey } from "survey-react-ui";
 import "survey-core/defaultV2.min.css";
 import { Box, Alert, CircularProgress, Button, Dialog, DialogTitle, DialogContent, DialogActions, Typography } from '@mui/material';
-import { saveSurveyResponse, isSupabaseConfigured } from './lib/supabase';
+import { isSupabaseConfigured } from './lib/supabase';
 import {
   findDraftForProject, saveDraft, clearDraft, clearDraftByKey, clearAllDraftsForProject,
   findPendingSubmission, clearPendingSubmission, clearPendingByKey,
@@ -37,6 +37,7 @@ import {
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
 import { getProjectLiveAccess, formatLiveWindow } from './lib/liveSurveyManager';
+import { isPublicSlugPath, participantLocationKey, publicSlugFromPathname } from './lib/publicSlug';
 import { enrichSurveyResponses } from './lib/enrichSurveyResponses';
 import {
   clearTrialsAnswerStore,
@@ -45,7 +46,8 @@ import {
   rehydrateTrialsAnswerStoreFromSurvey,
 } from './lib/trialNavigation';
 import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
-import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale } from './lib/surveyLocale';
+import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale, resolveSurveyUiLanguage } from './lib/surveyLocale';
+import { fetchParticipantResponseSink, newResponseRowId, submitParticipantResponse } from './lib/ownResponseSupabase';
 import { tf } from './contexts/adminI18n';
 import SurveyProgressBridge, {
   normalizeShowProgressBar,
@@ -80,6 +82,8 @@ export default function SurveyApp() {
   const [liveClosedMessage, setLiveClosedMessage] = useState(null);
   const [pendingSubmission, setPendingSubmission] = useState(null);
   const [recoverySaved, setRecoverySaved] = useState(true);
+  const [submitError, setSubmitError] = useState('');
+  const responseSinkRef = useRef({ enabled: false });
   const [online, setOnline] = useState(() => navigator.onLine);
   const submissionInFlight = useRef(false);
   useEffect(() => {
@@ -122,15 +126,14 @@ export default function SurveyApp() {
   // Monitor URL changes and reinitialize when project ID changes
   useEffect(() => {
     const checkUrlChange = () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const projectId = urlParams.get('project') || 'default';
+      const locationKey = participantLocationKey(window.location);
       
-      if (currentProjectId !== projectId && currentProjectId !== null) {
-        console.log(`🔄 Project ID changed from ${currentProjectId} to ${projectId}, reloading...`);
-        setCurrentProjectId(projectId);
+      if (currentProjectId !== locationKey && currentProjectId !== null) {
+        console.log(`🔄 Survey link changed from ${currentProjectId} to ${locationKey}, reloading...`);
+        setCurrentProjectId(locationKey);
         initializeSurvey();
       } else if (currentProjectId === null) {
-        setCurrentProjectId(projectId);
+        setCurrentProjectId(locationKey);
       }
     };
 
@@ -210,7 +213,7 @@ export default function SurveyApp() {
     const handleStorageChange = (e) => {
       // Get current project ID
       const urlParams = new URLSearchParams(window.location.search);
-      const projectId = urlParams.get('project') || 'default';
+      const projectId = urlParams.get('project') || (isPublicSlugPath(window.location.pathname) ? projectIdRef.current : null) || 'default';
       
       if (e.key === `survey_config_${projectId}` && useAdminConfig) {
         if (['active', 'submitting', 'submit-error'].includes(surveyPhaseRef.current)) {
@@ -232,12 +235,16 @@ export default function SurveyApp() {
   const submitSurveyResponse = async (completeData, { isRepeatMode, repeatTotal, attemptIndex }) => {
     if (submissionInFlight.current) return;
     submissionInFlight.current = true;
+    if (responseSinkRef.current?.enabled && !completeData.own_response_row_id) {
+      completeData.own_response_row_id = newResponseRowId();
+    }
     const result = await submitWithRecovery(projectIdRef.current, completeData, {
       isRepeatMode: !!isRepeatMode, repeatTotal: repeatTotal || 1, attemptIndex: attemptIndex || 1,
-    }, saveSurveyResponse);
+    }, (payload) => submitParticipantResponse(payload, responseSinkRef.current));
     submissionInFlight.current = false;
     setRecoverySaved(result.recoverySaved);
     if (result.success) {
+      setSubmitError('');
       // Only clear drafts AFTER a successful save (including idempotent dedupe).
       discardDraftForProject(projectIdRef.current, completeData.participant_id);
       clearPendingSubmission(projectIdRef.current, completeData.participant_id);
@@ -268,6 +275,7 @@ export default function SurveyApp() {
     }
     submissionGuardRef.current = false;
     setPendingSubmission(completeData);
+    setSubmitError(result.storage === 'own-supabase' ? (result.error?.message || '') : '');
     setSurveyPhase('submit-error');
   };
 
@@ -371,10 +379,18 @@ export default function SurveyApp() {
         return assignment;
       };
 
-      // Get project ID from URL parameters
+      // Project-id links stay on ?project=. Custom links are /s/{slug}.
       const urlParams = new URLSearchParams(window.location.search);
-      const projectId = urlParams.get('project') || 'default';
+      let projectId = urlParams.get('project');
+      if (!projectId && isPublicSlugPath(window.location.pathname)) {
+        const slug = publicSlugFromPathname(window.location.pathname);
+        const { resolveSurveySlug } = await import('./lib/projectManager');
+        projectId = slug ? await resolveSurveySlug(slug) : null;
+        if (!projectId) throw new Error('Survey not found');
+      }
+      if (!projectId) projectId = 'default';
       projectIdRef.current = projectId;
+      responseSinkRef.current = await fetchParticipantResponseSink(projectId);
       
       if (!participantIdRef.current) {
         participantIdRef.current = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -1084,6 +1100,7 @@ export default function SurveyApp() {
         const completeData = {
           project_id: projectId,
           participant_id: participantId,
+          language: resolveSurveyUiLanguage(finalSurveyJson),
           responses: enrichedResponses,
           raw_responses: responses,
           displayed_images,
@@ -1276,7 +1293,11 @@ export default function SurveyApp() {
           </Typography>
         )}
         <Typography variant="caption" color="text.secondary">
-          {completionInfo.storage === 'file'
+          {completionInfo.storage === 'own-supabase'
+            ? (resolveSurveyJsLocale(participantLocale) === 'zh-cn'
+              ? '回答已写入研究者的 Supabase。'
+              : "Your response was saved in the researcher's Supabase.")
+            : completionInfo.storage === 'file'
             ? participantText.participantSavedLocally
             : participantText.participantSaved}
         </Typography>
@@ -1288,7 +1309,7 @@ export default function SurveyApp() {
     return (
       <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
         <Alert severity="error" sx={{ mb: 3, textAlign: 'left' }}>
-          {participantText.participantSaveError}
+          {submitError || participantText.participantSaveError}
         </Alert>
         {!online && <Alert severity="warning" sx={{ mb: 2 }}>{resolveSurveyJsLocale(participantLocale) === 'zh-cn' ? '网络已断开。连接恢复后，请点击重试提交。' : 'You are offline. Reconnect, then retry the submission.'}</Alert>}
         {!recoverySaved && <Alert severity="warning" sx={{ mb: 2 }}>{resolveSurveyJsLocale(participantLocale) === 'zh-cn' ? '浏览器无法保存恢复副本，请保持此页面打开，或下载答卷备份。' : 'This browser could not save a recovery copy. Keep this page open or download your answers.'}</Alert>}
@@ -1331,7 +1352,7 @@ export default function SurveyApp() {
 
   // Hide the dev panel when opened via a project survey link (participant view)
   const urlParams = new URLSearchParams(window.location.search);
-  const isParticipantView = !!urlParams.get('project');
+  const isParticipantView = !!urlParams.get('project') || isPublicSlugPath(window.location.pathname);
 
   return (
     <Box>

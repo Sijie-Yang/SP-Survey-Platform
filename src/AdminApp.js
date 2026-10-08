@@ -56,6 +56,7 @@ import ProjectSidebar from './components/admin/ProjectSidebar';
 import ProjectCollaboratorsBar from './components/admin/ProjectCollaboratorsBar';
 import BackendStatus from './components/admin/BackendStatus';
 import { AdminEmptyState, AdminLoadingState } from './components/admin/AdminPageLayout';
+import OpenProjectHeader from './components/admin/ProjectSurveyAge';
 import { isSupabaseConfigured } from './lib/supabase';
 import { loadSurveyConfig } from './lib/surveyStorage';
 import { demoSurveyConfig } from './lib/demoConfig';
@@ -1398,11 +1399,9 @@ export default function AdminApp() {
             </Box>
             
             {currentProject && (
-              <Box sx={{ ml: 2, display: { xs: 'none', md: 'flex' }, minWidth: 0, alignItems: 'center' }}>
-                <FolderOpen sx={{ mr: 1, fontSize: '1.2rem' }} />
-                <Typography variant="subtitle1" noWrap sx={{ fontWeight: 'bold', minWidth: 0 }}>
-                  {currentProject.name}
-                </Typography>
+              <Box sx={{ ml: { xs: 1, sm: 2 }, display: 'flex', minWidth: 0, flex: '1 1 140px', alignItems: 'center', overflow: 'hidden' }}>
+                <FolderOpen sx={{ mr: 1, fontSize: '1.2rem', display: { xs: 'none', sm: 'inline-flex' }, flexShrink: 0 }} />
+                <OpenProjectHeader project={currentProject} />
               </Box>
             )}
           </Box>
@@ -1909,6 +1908,7 @@ export default function AdminApp() {
                 hasUnsavedChanges={hasUnsavedChanges}
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
+                onProjectUpdated={(patch) => setCurrentProject((prev) => (prev ? { ...prev, ...patch } : prev))}
               />
             </TabPanel>
 

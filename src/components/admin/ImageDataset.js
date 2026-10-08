@@ -17,6 +17,7 @@ import MediaCategoryGuide from './MediaCategoryGuide';
 import MediaFolderBrowser from './MediaFolderBrowser';
 import MediaKeywordSelection from './MediaKeywordSelection';
 import { mediaSelectionCandidates } from '../../lib/mediaLibrarySelection';
+import { annotationFolderCounts, annotationScopeFolder, listAnnotationImages } from '../../lib/annotationScope';
 import MediaFilePreviewDialog from './MediaFilePreviewDialog';
 import SpatialIntelligencePanel from './SpatialIntelligencePanel';
 import StreetLevelCard from './streetLevel/StreetLevelCard';
@@ -279,6 +280,11 @@ export default function ImageDataset({
   const [confirmDialog, setConfirmDialog] = useState(null); // { title, message, onConfirm }
   const [currentFolder, setCurrentFolder] = useState('');
   const [selectedFolders, setSelectedFolders] = useState(() => new Set());
+  const [annotateScope, setAnnotateScope] = useState('folder:');
+  useEffect(() => {
+    if (datasetDialog === 'annotate') return;
+    setAnnotateScope(annotationScopeFolder(currentFolder || ''));
+  }, [datasetDialog, currentFolder]);
   useEffect(() => {
     setSelectedFolders(new Set());
     setSelectedMedia(new Set());
@@ -666,8 +672,24 @@ export default function ImageDataset({
     prefix: projectPrefix
   }), [currentProject?.preloadedImages, selectedFolders, currentFolder, mediaSearch, mediaFilter, projectPrefix]);
 
-  /** Images available for SAM pre-annotate (respects gallery filter/search). */
-  const preannotateImages = useMemo(() => filteredMedia.filter(m => (m.type || inferMediaType(m.name || m.url)) === 'image'), [filteredMedia]);
+  /** Gallery images follow the open folder, search, and type filter. Results stay on this list. */
+  const galleryImages = useMemo(() => filteredMedia.filter(m => (m.type || inferMediaType(m.name || m.url)) === 'image'), [filteredMedia]);
+  const annotationScopeBase = useMemo(() => ({
+    prefix: projectPrefix,
+    selectedIds: selectedMedia,
+    checkedFolders: selectedFolders
+  }), [projectPrefix, selectedMedia, selectedFolders]);
+  const annotationScopeChoices = useMemo(() => {
+    const pool = currentProject?.preloadedImages || [];
+    return {
+      allCount: listAnnotationImages(pool, 'all', annotationScopeBase).length,
+      selectedCount: listAnnotationImages(pool, 'selected', annotationScopeBase).length,
+      checkedCount: listAnnotationImages(pool, 'checked', annotationScopeBase).length,
+      folders: annotationFolderCounts(pool, projectPrefix)
+    };
+  }, [currentProject?.preloadedImages, annotationScopeBase, projectPrefix]);
+  /** Annotation screen: explicit folder / selection, not the gallery filter. */
+  const preannotateImages = useMemo(() => listAnnotationImages(currentProject?.preloadedImages, annotateScope, annotationScopeBase), [currentProject?.preloadedImages, annotateScope, annotationScopeBase]);
   const preannotateIndex = useMemo(() => {
     if (!preannotateFocusName) return 0;
     const idx = preannotateImages.findIndex(m => getMediaId(m) === preannotateFocusName || m.name === preannotateFocusName);
@@ -696,7 +718,7 @@ export default function ImageDataset({
   }, [focusRequest, currentProject?.preloadedImages, projectPrefix]);
   const preannotScrollLockRef = useRef(null); // { top: number } panel viewport top before nav
 
-  const focusMediaInGallery = useCallback(name => {
+  const focusMediaInGallery = useCallback((name, { syncSelection = true } = {}) => {
     if (!name) return;
     const panel = document.getElementById('media-preannotate-panel');
     if (panel) {
@@ -711,11 +733,12 @@ export default function ImageDataset({
     }
     setPreannotateFocusName(name);
     const focusedEntry = filteredMedia.find(m => getMediaId(m) === name || m.name === name);
-    setSelectedMedia(new Set(focusedEntry ? [getMediaId(focusedEntry)] : []));
     const idxInFiltered = filteredMedia.findIndex(m => getMediaId(m) === name || m.name === name);
     if (idxInFiltered >= 0) {
       setMediaPage(Math.floor(idxInFiltered / MEDIA_PAGE_SIZE) + 1);
     }
+    if (!syncSelection || !focusedEntry) return;
+    setSelectedMedia(new Set([getMediaId(focusedEntry)]));
   }, [filteredMedia]);
   const reviewQueueNames = useMemo(() => {
     const batch = preannotateLastBatch;
@@ -746,12 +769,12 @@ export default function ImageDataset({
     const cur = preannotateFocusName;
     let idx = reviewQueueNames.indexOf(cur);
     if (idx < 0) idx = 0;else idx = (idx + delta + reviewQueueNames.length) % reviewQueueNames.length;
-    focusMediaInGallery(reviewQueueNames[idx]);
+    focusMediaInGallery(reviewQueueNames[idx], { syncSelection: false });
   }, [reviewQueueNames, preannotateFocusName, focusMediaInGallery]);
   useEffect(() => {
     if (!preannotateReviewFilter || !reviewQueueNames.length) return;
     if (!preannotateFocusName || !reviewQueueNames.includes(preannotateFocusName)) {
-      focusMediaInGallery(reviewQueueNames[0]);
+      focusMediaInGallery(reviewQueueNames[0], { syncSelection: false });
     }
   }, [preannotateReviewFilter, reviewQueueNames, preannotateFocusName, focusMediaInGallery]);
   useLayoutEffect(() => {
@@ -2712,7 +2735,7 @@ export default function ImageDataset({
       </DatasetDialog>
 
       <DatasetDialog open={datasetDialog === 'annotate'} title={uiPair(language, 'Pre-annotate', '媒体标注')} onClose={closeDatasetDialog} closeLabel={tx('Close')} maxWidth="lg">
-        {preloadedCount > 0 ? <MediaPreannotatePanel mediaEntry={preannotateEntry} imageIndex={preannotateIndex} imageTotal={preannotateImages.length} mediaList={preannotateImages} selectedMediaIds={selectedMedia} labelDefs={currentProject?.imageDatasetConfig?.preannotateLabels || null} onLabelDefsChange={next => {
+        {preloadedCount > 0 ? <MediaPreannotatePanel mediaEntry={preannotateEntry} imageIndex={preannotateIndex} imageTotal={preannotateImages.length} mediaList={preannotateImages} annotationScope={annotateScope} onAnnotationScopeChange={setAnnotateScope} annotationScopeChoices={annotationScopeChoices} selectedMediaIds={selectedMedia} labelDefs={currentProject?.imageDatasetConfig?.preannotateLabels || null} onLabelDefsChange={next => {
         onProjectUpdate({
           ...currentProject,
           imageDatasetConfig: {
@@ -2777,7 +2800,7 @@ export default function ImageDataset({
         }
         if (preannotateIndex <= 0) return;
         const prev = preannotateImages[preannotateIndex - 1];
-        if (prev) focusMediaInGallery(getMediaId(prev));
+        if (prev) focusMediaInGallery(getMediaId(prev), { syncSelection: false });
       }} onNext={() => {
         if (preannotateReviewFilter && reviewQueueNames.length) {
           focusReviewRelative(1);
@@ -2785,7 +2808,7 @@ export default function ImageDataset({
         }
         if (preannotateIndex >= preannotateImages.length - 1) return;
         const next = preannotateImages[preannotateIndex + 1];
-        if (next) focusMediaInGallery(getMediaId(next));
+        if (next) focusMediaInGallery(getMediaId(next), { syncSelection: false });
       }} r2Prefix={projectPrefix} falKey={currentProject?.imageDatasetConfig?.falApiKey || ''} projectId={projectId || ''} onSaved={result => {
         const annotation = result?.annotation || null;
         const mediaEntry = annotation ? (currentProject?.preloadedImages || []).find(m => getMediaId(m) === annotation.media_id) || {
@@ -2833,7 +2856,7 @@ export default function ImageDataset({
       </DatasetDialog>
 
       <DatasetDialog open={datasetDialog === 'results'} title={uiPair(language, 'Pre-annotate results', '标注结果')} onClose={closeDatasetDialog} closeLabel={tx('Close')} maxWidth="lg">
-        {preloadedCount > 0 ? <MediaPreannotateResults r2Prefix={projectPrefix} mediaList={preannotateImages} featureMap={r2FeatureMap} savedPatch={preannotateSavedPatch} batchPatches={preannotateBatchPatches} /> : <Alert severity="info" sx={{
+        {preloadedCount > 0 ? <MediaPreannotateResults r2Prefix={projectPrefix} mediaList={galleryImages} featureMap={r2FeatureMap} savedPatch={preannotateSavedPatch} batchPatches={preannotateBatchPatches} /> : <Alert severity="info" sx={{
         mt: 1
       }}>{tx('Upload or import media to get started, then organize it into folders.')}</Alert>}
       </DatasetDialog>

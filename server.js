@@ -728,6 +728,22 @@ app.get('/api/responses', async (req, res) => {
       .sort()
       .reverse();
 
+    const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : '';
+    const countOnly = req.query.countOnly === '1';
+    if (countOnly) {
+      let count = 0;
+      for (const file of files) {
+        try {
+          const content = await fs.readFile(path.join(RESPONSES_PATH, file), 'utf8');
+          const row = JSON.parse(content);
+          if (!projectId || row?.project_id === projectId) count += 1;
+        } catch (e) {
+          console.error(`Error reading response file ${file}:`, e);
+        }
+      }
+      return res.json({ success: true, count });
+    }
+
     const responses = [];
     for (const file of files) {
       try {

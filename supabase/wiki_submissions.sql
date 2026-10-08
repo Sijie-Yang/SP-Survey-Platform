@@ -174,6 +174,7 @@ INSERT INTO public.wiki_builtin_pages(page_key,is_template) VALUES
 ('platform-workflow',false),
 ('results-export',false),
 ('skills-agents',false),
+('common-questions',false),
 ('1990-nasar-evaluative',true),
 ('2009-ewing-measuring',true),
 ('2013-salesses-collaborative',true),

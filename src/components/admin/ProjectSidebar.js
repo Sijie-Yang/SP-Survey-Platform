@@ -98,6 +98,7 @@ import {
   computeLiveStatus,
 } from '../../lib/liveSurveyManager';
 import { supabase } from '../../lib/supabase';
+import { stripOwnResponseSupabase } from '../../lib/ownResponseSupabase';
 import { isR2Configured, deleteImagesFromR2, listImagesFromR2, copyImagesInR2, projectR2Prefix } from '../../lib/r2';
 
 import { useRegion } from '../../contexts/RegionContext';
@@ -727,7 +728,7 @@ export default function ProjectSidebar({
 
   // Strip Supabase credentials and preloaded images from config before saving as template
   const stripSensitiveFields = (config) => {
-    const cleaned = JSON.parse(JSON.stringify(config));
+    const cleaned = stripOwnResponseSupabase(JSON.parse(JSON.stringify(config)));
     const rootRemove = [
       'preloadedImages', 'preloadedAt', 'preloadedSource', 'supabaseBucket',
       'supabaseConfig', 'imageDatasetConfig', 'supabaseUrl', 'supabaseKey',

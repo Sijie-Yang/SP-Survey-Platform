@@ -3021,6 +3021,7 @@ export default function ResultsAnalysis({
   return <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
       <AdminPageHeader icon={<Assessment />} title={t.resultsTitle} description={t.resultsDescription} />
+      {currentProject?.ownResponseSupabase?.enabled && <Alert severity="info" sx={{ mb: 2 }}>{uiPair(language, 'Responses for this project are stored in your Supabase, not on SP-Survey. This page does not copy or analyze them.', '本项目的回答写入你的 Supabase，不在 SP-Survey 上。此页不会复制或分析这些回答。')}</Alert>}
       <ResultsToolbar refreshAction={<Tooltip title={t.resultsRefresh} placement="top" disableInteractive>
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
