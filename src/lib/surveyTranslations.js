@@ -3,11 +3,12 @@
  * Language is how the wording is shown. It is not a research condition,
  * a region, or a separate survey version.
  *
- * A response records answerLanguage (and questionAnswerLanguages when the
- * participant can switch). Those fields are never written into condition.
+ * A response records answerLanguage and questionAnswerLanguages.
+ * The participant chooses a language on the first page. Those fields are
+ * never written into condition.
  */
 
-import { UI_LANGUAGES, uiPair } from './uiLanguages';
+import { UI_LANGUAGES, surveyJsLocale, uiPair } from './uiLanguages';
 
 export const TRANSLATION_MACHINE = 'machine';
 export const TRANSLATION_REVIEWED = 'reviewed';
@@ -347,6 +348,27 @@ export function stringsForMachineTranslation(config, language, { forceIds = [] }
   }).map((item) => ({ id: item.id, text: item.sourceText }));
 }
 
+/** Remove one generated language. Participants can no longer choose it. */
+export function deleteLanguageVersion(translations, language) {
+  const next = JSON.parse(JSON.stringify(translations || {}));
+  const code = strictSurveyLanguage(language);
+  if (!next.entries || !code || code === next.sourceLanguage) return next;
+  next.targetLanguages = (next.targetLanguages || []).filter((item) => item !== code);
+  next.enabledLanguages = (next.enabledLanguages || []).filter((item) => item !== code);
+  if (next.sourceLanguage && !next.enabledLanguages.includes(next.sourceLanguage)) {
+    next.enabledLanguages.unshift(next.sourceLanguage);
+  }
+  Object.values(next.entries).forEach((entry) => {
+    if (entry?.byLanguage) delete entry.byLanguage[code];
+  });
+  return next;
+}
+
+/** Language choice belongs on the first survey page and nowhere later. */
+export function languageChoiceVisible(pageNo) {
+  return Number(pageNo) === 0;
+}
+
 export function textForLanguage(translations, id, language, sourceText) {
   const source = sourceText == null ? '' : String(sourceText);
   if (!translations || !language || language === translations.sourceLanguage) return source;
@@ -488,16 +510,80 @@ export function applyParticipantLanguage(config, language) {
   return copy;
 }
 
+/** SurveyJS stores English on the default locale. Other languages use their SurveyJS code. */
+function surveyLocaleBucket(language) {
+  const code = surveyJsLocale(language);
+  return code === 'en' ? 'default' : code;
+}
+
+function writeLoc(owner, locProp, language, text) {
+  const loc = owner?.[locProp];
+  if (!loc || typeof loc.setLocaleText !== 'function') return false;
+  loc.setLocaleText(surveyLocaleBucket(language), text == null ? '' : String(text));
+  return true;
+}
+
+/**
+ * Write source text and the chosen translation into their own locale slots.
+ * Assigning `.text` would store the new wording under the previous locale, so
+ * the next switch shows the other language.
+ */
+function assignLoc(owner, locProp, plainProp, sourceLanguage, displayLanguage, sourceText, displayText) {
+  const wroteSource = writeLoc(owner, locProp, sourceLanguage, sourceText);
+  const wroteDisplay = displayLanguage === sourceLanguage
+    ? wroteSource
+    : writeLoc(owner, locProp, displayLanguage, displayText);
+  if (!wroteSource && !wroteDisplay && plainProp && owner) owner[plainProp] = displayText;
+}
+
+const LOCALIZED_FIELDS = [
+  ['title', 'locTitle'],
+  ['description', 'locDescription'],
+  ['minRateDescription', 'locMinRateDescription'],
+  ['maxRateDescription', 'locMaxRateDescription'],
+  ['labelTrue', 'locLabelTrue'],
+  ['labelFalse', 'locLabelFalse'],
+];
+
 export function applyLanguageToSurveyModel(model, config, language) {
   if (!model || !config) return model;
   const translations = readTranslations(config);
   const lang = participantMayUseLanguage(config, language)
     ? strictSurveyLanguage(language)
     : resolveParticipantLanguage(config, null);
-  if (config.title != null) model.title = textForLanguage(translations, 'survey.title', lang, config.title || '');
-  if (config.description != null) model.description = textForLanguage(translations, 'survey.description', lang, config.description || '');
+  const sourceLanguage = translations.sourceLanguage;
+  if (config.title != null) {
+    assignLoc(
+      model,
+      'locTitle',
+      'title',
+      sourceLanguage,
+      lang,
+      config.title || '',
+      textForLanguage(translations, 'survey.title', lang, config.title || ''),
+    );
+  }
+  if (config.description != null) {
+    assignLoc(
+      model,
+      'locDescription',
+      'description',
+      sourceLanguage,
+      lang,
+      config.description || '',
+      textForLanguage(translations, 'survey.description', lang, config.description || ''),
+    );
+  }
   if (config.completedHtml != null) {
-    model.completedHtml = textForLanguage(translations, 'survey.completedHtml', lang, config.completedHtml);
+    assignLoc(
+      model,
+      'locCompletedHtml',
+      'completedHtml',
+      sourceLanguage,
+      lang,
+      config.completedHtml,
+      textForLanguage(translations, 'survey.completedHtml', lang, config.completedHtml),
+    );
   }
   const sources = new Map();
   walkElements(config.pages, (element) => {
@@ -507,10 +593,18 @@ export function applyLanguageToSurveyModel(model, config, language) {
   questions.forEach((question) => {
     const source = sources.get(question.name);
     if (!source) return;
-    if (source.title != null) question.title = textForLanguage(translations, questionId(source.name, 'title'), lang, source.title);
-    if (source.description != null) {
-      question.description = textForLanguage(translations, questionId(source.name, 'description'), lang, source.description);
-    }
+    LOCALIZED_FIELDS.forEach(([field, locProp]) => {
+      if (source[field] == null) return;
+      assignLoc(
+        question,
+        locProp,
+        field,
+        sourceLanguage,
+        lang,
+        source[field],
+        textForLanguage(translations, questionId(source.name, field), lang, source[field]),
+      );
+    });
     OPTION_LISTS.forEach(([key, kind]) => {
       const live = question[key];
       const original = source[key];
@@ -519,17 +613,17 @@ export function applyLanguageToSurveyModel(model, config, language) {
         if (!item || typeof item !== 'object') return;
         const value = item.value ?? optionValue(original[index], index);
         const fromSource = original.find((candidate, candidateIndex) => optionValue(candidate, candidateIndex) === value) || original[index];
-        item.text = textForLanguage(
-          translations,
-          optionId(source.name, kind, value),
+        const sourceText = optionText(fromSource);
+        assignLoc(
+          item,
+          'locText',
+          'text',
+          sourceLanguage,
           lang,
-          optionText(fromSource),
+          sourceText,
+          textForLanguage(translations, optionId(source.name, kind, value), lang, sourceText),
         );
       });
-    });
-    ['minRateDescription', 'maxRateDescription', 'labelTrue', 'labelFalse'].forEach((field) => {
-      if (source[field] == null) return;
-      question[field] = textForLanguage(translations, questionId(source.name, field), lang, source[field]);
     });
     if (Array.isArray(source.dimensions) && Array.isArray(question.dimensions)) {
       question.dimensions = source.dimensions.map((dimension, index) => {
@@ -557,6 +651,9 @@ export function applyLanguageToSurveyModel(model, config, language) {
       });
     }
   });
+  try {
+    model.locale = surveyJsLocale(lang);
+  } catch { /* ignore */ }
   return model;
 }
 

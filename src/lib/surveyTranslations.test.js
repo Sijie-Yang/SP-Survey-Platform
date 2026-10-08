@@ -4,17 +4,21 @@ import {
   applyLanguageToSurveyModel,
   applyParticipantLanguage,
   confirmTranslation,
+  deleteLanguageVersion,
+  languageChoiceVisible,
   editTranslation,
   mergeMachineTranslations,
   participantLanguages,
   participantMayUseLanguage,
   reconcileTranslations,
   resolveParticipantLanguage,
+  setTranslationLanguages,
   surveyLanguageMetadata,
   translationAccuracyNotice,
   translationPublishFindings,
 } from './surveyTranslations';
 import { requestSurveyTranslations } from './surveyTranslationApi';
+import { applySurveyLocale } from './surveyLocale';
 
 function survey() {
   return {
@@ -173,6 +177,82 @@ describe('survey translations', () => {
     expect(result.configured).toBe(false);
     expect(result.translations).toEqual({});
     expect(post).not.toHaveBeenCalled();
+  });
+
+  test('repeated language switches keep the source and each translation paired', () => {
+    const base = survey();
+    base.pages[0].elements.push({ type: 'text', name: 'anchor', title: 'Stay on this page' });
+    base.pages.push({ name: 'page2', elements: [{ type: 'text', name: 'q3', title: 'Second page' }] });
+    const config = withZh(base);
+    config.translations = setTranslationLanguages(config, {
+      sourceLanguage: 'en',
+      targetLanguages: ['zh', 'ja'],
+      enabledLanguages: ['en', 'zh', 'ja'],
+    });
+    const model = new Model(config);
+    model.currentPageNo = 1;
+    expect(model.currentPage.name).toBe('page2');
+    const sequence = ['zh', 'en', 'zh', 'en', 'ja', 'en', 'zh', 'ja', 'en'];
+    sequence.forEach((lang) => {
+      applyLanguageToSurveyModel(model, config, lang);
+      applySurveyLocale(model, { locale: lang });
+      const question = model.getQuestionByName('q1');
+      if (lang === 'zh') {
+        expect(model.title).toBe('你好');
+        expect(question.choices[0].text).toBe('苹果');
+      } else if (lang === 'ja') {
+        expect(model.title).toBe('こんにちは');
+        expect(question.choices[0].text).toBe('Apple');
+      } else {
+        expect(model.title).toBe('Hello');
+        expect(question.choices[0].text).toBe('Apple');
+      }
+      expect(question.choices[0].value).toBe('code_a');
+      expect(question.visibleIf).toBe('{other} = 1');
+      expect(config.title).toBe('Hello');
+      expect(model.currentPageNo).toBe(1);
+      expect(model.currentPage.name).toBe('page2');
+    });
+  });
+
+  test('editor language switches keep each translation with its language', () => {
+    const config = withZh(survey());
+    const edited = editTranslation(config.translations, 'survey.description', 'ja', '説明');
+    const switched = setTranslationLanguages(
+      { ...config, translations: edited },
+      { sourceLanguage: 'en', targetLanguages: ['ja', 'zh'], enabledLanguages: ['en', 'zh', 'ja'] },
+    );
+    expect(switched.entries['survey.title'].byLanguage.zh.text).toBe('你好');
+    expect(switched.entries['survey.title'].byLanguage.ja.text).toBe('こんにちは');
+    expect(switched.entries['survey.description'].byLanguage.ja.text).toBe('説明');
+    const back = setTranslationLanguages(
+      { ...survey(), translations: switched },
+      { sourceLanguage: 'zh', targetLanguages: ['en', 'ja'], enabledLanguages: ['zh', 'ja'] },
+    );
+    expect(back.sourceLanguage).toBe('zh');
+    expect(back.entries['survey.title'].byLanguage.ja.text).toBe('こんにちは');
+    expect(back.targetLanguages).not.toContain('zh');
+  });
+
+  test('update can replace a generated language and delete removes that choice', () => {
+    const config = withZh(survey());
+    config.translations = confirmTranslation(config.translations, 'survey.title', 'zh');
+    const updated = mergeMachineTranslations(
+      config.translations,
+      'zh',
+      { 'survey.title': '更新后的标题' },
+      { forceIds: ['survey.title'] },
+    );
+    expect(updated.entries['survey.title'].byLanguage.zh.text).toBe('更新后的标题');
+    expect(updated.entries['survey.title'].byLanguage.zh.status).toBe('machine');
+    const removed = deleteLanguageVersion(updated, 'zh');
+    const next = { ...config, translations: removed };
+    expect(participantMayUseLanguage(next, 'zh')).toBe(false);
+    expect(participantLanguages(next).map((item) => item.id)).toEqual(['en']);
+    expect(removed.entries['survey.title'].byLanguage.zh).toBeUndefined();
+    expect(applyParticipantLanguage(next, 'zh').title).toBe('Hello');
+    expect(languageChoiceVisible(0)).toBe(true);
+    expect(languageChoiceVisible(1)).toBe(false);
   });
 
   test('the notice says translations can be inaccurate until reviewed', () => {

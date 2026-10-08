@@ -19,6 +19,7 @@ import { requestSurveyTranslations } from '../../lib/surveyTranslationApi';
 import {
   confirmAllTranslations,
   confirmTranslation,
+  deleteLanguageVersion,
   editTranslation,
   extractTranslatableStrings,
   mergeMachineTranslations,
@@ -215,10 +216,37 @@ export default function TranslationEditor({ config, onChange }) {
               ? uiPair(language, 'Translating…', '正在翻译…')
               : uiPair(language, 'Generate translations', '生成翻译')}
           </Button>
+          <Button
+            variant="outlined"
+            disabled={busy || !target}
+            onClick={() => generate(strings.map((item) => item.id))}
+          >
+            {uiPair(language, 'Update this language', '更新此语言')}
+          </Button>
+          <Button
+            color="error"
+            disabled={busy || !target}
+            onClick={() => {
+              const remaining = live.targetLanguages.filter((code) => code !== target);
+              write(deleteLanguageVersion(live, target));
+              setActiveLanguage(remaining[0] || '');
+            }}
+          >
+            {uiPair(language, 'Delete this language', '删除此语言')}
+          </Button>
           <Button disabled={!target} onClick={() => write(confirmAllTranslations(live, target))}>
             {uiPair(language, 'Mark all as reviewed', '全部标为已审阅')}
           </Button>
         </Box>
+      )}
+      {!!target && (
+        <Typography variant="caption" color="text.secondary">
+          {uiPair(
+            language,
+            'Edits are saved immediately. Update regenerates this language and saves it. Delete removes it, so participants can no longer choose it on the first page.',
+            '修改会立即保存。更新会重新生成此语言并保存。删除后，参与者在第一页不能再选择它。',
+          )}
+        </Typography>
       )}
       {target && strings.map((item) => {
         const cell = live.entries[item.id]?.byLanguage?.[target];
@@ -232,6 +260,7 @@ export default function TranslationEditor({ config, onChange }) {
               InputProps={{ readOnly: true }}
             />
             <TextField
+              key={`${target}:${item.id}`}
               size="small"
               label={uiPair(language, 'Translation', '译文')}
               value={cell?.text || ''}
