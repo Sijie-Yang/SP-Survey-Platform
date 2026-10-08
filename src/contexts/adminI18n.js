@@ -210,6 +210,21 @@ export const adminI18n = {
     saveStatusMinsAgo: 'Auto-saved {n}m ago',
     saveStatusAllSaved: 'All changes saved',
 
+    // Open project header: time up and stored answers
+    surveyAgePublished: 'Published {when} · {count}',
+    surveyAgeCreated: 'Created {when} · {count}',
+    surveyAgeAnswer: '{n} answer',
+    surveyAgeAnswers: '{n} answers',
+    surveyAgeAnswersUnknown: 'answers unavailable',
+    surveyAgeCountLoading: '…',
+    surveyAgeWhenJustNow: 'just now',
+    surveyAgeWhenMinute: '{n} minute ago',
+    surveyAgeWhenMinutes: '{n} minutes ago',
+    surveyAgeWhenHour: '{n} hour ago',
+    surveyAgeWhenHours: '{n} hours ago',
+    surveyAgeWhenDay: '{n} day ago',
+    surveyAgeWhenDays: '{n} days ago',
+
     // Introduction / getting-started guide
     openSurveyBuilder: 'Open Survey Builder',
     guideTitle: 'Get started with SP-Survey',
@@ -1442,6 +1457,21 @@ export const adminI18n = {
     saveStatusSecsAgo: '{n} 秒前自动保存',
     saveStatusMinsAgo: '{n} 分钟前自动保存',
     saveStatusAllSaved: '全部已保存',
+
+    // Open project header: time up and stored answers
+    surveyAgePublished: '已发布 {when} · {count}',
+    surveyAgeCreated: '创建于 {when} · {count}',
+    surveyAgeAnswer: '{n} 份回答',
+    surveyAgeAnswers: '{n} 份回答',
+    surveyAgeAnswersUnknown: '回答数暂不可用',
+    surveyAgeCountLoading: '…',
+    surveyAgeWhenJustNow: '刚刚',
+    surveyAgeWhenMinute: '{n} 分钟前',
+    surveyAgeWhenMinutes: '{n} 分钟前',
+    surveyAgeWhenHour: '{n} 小时前',
+    surveyAgeWhenHours: '{n} 小时前',
+    surveyAgeWhenDay: '{n} 天前',
+    surveyAgeWhenDays: '{n} 天前',
 
     openSurveyBuilder: '打开问卷构建',
     guideTitle: '快速上手 SP-Survey',
