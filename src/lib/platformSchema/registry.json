@@ -280,7 +280,7 @@
     "mediaAssignmentMode": { "type": "string", "enum": ["individual", "set", "group", "category"] },
     "mediaFolders": { "type": "array", "items": { "type": "string" } },
     "mediaPerCategory": { "type": "integer", "minimum": 1 },
-    "mediaCategoryMode": { "type": "string", "enum": ["all", "single"] },
+    "mediaCategoryMode": { "type": "string", "enum": ["all", "single", "sample"] },
     "pairingMode": { "type": "string", "enum": ["random", "balanced", "adaptive", "uncertain", "high_sigma"] },
     "randomizeSetOrder": { "type": "boolean", "description": "Set mode: shuffle the order of the set's media for each participant (randomised left/right positions)." },
     "assignedMediaSetId": { "type": "string" },

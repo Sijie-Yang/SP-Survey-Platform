@@ -430,6 +430,24 @@ export function usesSingleCategoryPerTrial(element) {
   return usesCategoryMediaAssignment(element) && element?.mediaCategoryMode === 'single';
 }
 
+/** Each trial draws imageCount files split across that many category folders. */
+export function usesSampledCategoriesPerTrial(element) {
+  return usesCategoryMediaAssignment(element) && element?.mediaCategoryMode === 'sample';
+}
+
+/**
+ * How many category folders a sample-mode trial should use.
+ * imageCount 2 and mediaPerCategory 1 means two categories (one file each).
+ */
+export function categorySampleCount(element, eligibleCount = Infinity) {
+  const per = getMediaPerCategory(element);
+  const raw = Number(element?.imageCount);
+  const fromImageCount = Number.isFinite(raw) && raw > 0 ? Math.floor(raw / per) : 2;
+  const wanted = Math.max(1, fromImageCount || 2);
+  const cap = Number.isFinite(eligibleCount) ? eligibleCount : wanted;
+  return Math.max(0, Math.min(wanted, cap));
+}
+
 /** How many files to draw from each tagged category folder (question setting). */
 export function getMediaPerCategory(element) {
   const n = parseInt(element?.mediaPerCategory, 10);
@@ -447,7 +465,12 @@ export function expectedCategoryImageCount(pool, element, folderTags = {}) {
     scopeFolders: element?.mediaFolders,
   });
   if (!labels.length) return null;
-  return (usesSingleCategoryPerTrial(element) ? 1 : labels.length) * getMediaPerCategory(element);
+  const folders = usesSingleCategoryPerTrial(element)
+    ? 1
+    : usesSampledCategoriesPerTrial(element)
+      ? categorySampleCount(element, labels.length)
+      : labels.length;
+  return folders * getMediaPerCategory(element);
 }
 
 /** Human-readable gap for preview/admin. Never invent a substitute pool. */
@@ -478,10 +501,13 @@ export function describeMediaAssignmentFailure(element, pool, folderTags = {}, a
       return `Question "${name}"${title}: no matching category. Needed ${needed}. Tagged categories: ${available.join(', ') || 'none'}.`;
     }
     const counts = labels.map((cat) => `${cat} (have ${(byCategory.get(cat) || []).length}, need ${perCategory})`);
-    if (usesSingleCategoryPerTrial(element)) {
+    if (usesSingleCategoryPerTrial(element) || usesSampledCategoriesPerTrial(element)) {
       const eligible = labels.filter((cat) => (byCategory.get(cat) || []).length >= perCategory);
-      if (!eligible.length) {
-        return `Question "${name}"${title}: no specified category has ${perCategory} image(s). ${counts.join('; ')}.`;
+      const needed = usesSampledCategoriesPerTrial(element)
+        ? categorySampleCount(element)
+        : 1;
+      if (eligible.length < needed) {
+        return `Question "${name}"${title}: need ${needed} categor${needed === 1 ? 'y' : 'ies'} with ${perCategory} image(s); ${eligible.length} can supply a full draw. ${counts.join('; ')}.`;
       }
     } else {
       const short = labels.filter((cat) => (byCategory.get(cat) || []).length < perCategory);
@@ -518,13 +544,17 @@ function pickOnePerCategory(pool, element, globallyUsedImageKeys, folderTags = {
   const images = [];
   const assignedCategories = [];
 
-  if (usesSingleCategoryPerTrial(element)) {
+  if (usesSingleCategoryPerTrial(element) || usesSampledCategoriesPerTrial(element)) {
     // Choose among categories that can supply a complete trial after exclusions.
     // Never fill a short category using files from another category.
     const eligible = categories.filter((cat) => (byCategory.get(cat) || []).filter((img) => (
       !excludeUsed || !globallyUsedImageKeys?.has(getImageKey(img))
     )).length >= perCategory);
-    categories = eligible.length ? [eligible[Math.floor(Math.random() * eligible.length)]] : [];
+    const take = usesSampledCategoriesPerTrial(element)
+      ? categorySampleCount(element, eligible.length)
+      : 1;
+    const shuffled = [...eligible].sort(() => 0.5 - Math.random());
+    categories = shuffled.slice(0, take);
   }
 
   for (const cat of categories) {

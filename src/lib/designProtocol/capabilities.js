@@ -79,11 +79,11 @@ export const DESIGN_CAPABILITIES = {
         },
       },
       category: {
-        meaning: 'mediaCategoryMode=all (default): draw mediaPerCategory files from each selected category. single: each trial randomly selects one eligible category and draws mediaPerCategory files only from it. Eligible categories must have enough unused files for a complete trial.',
+        meaning: 'mediaCategoryMode=all (default): draw mediaPerCategory files from each selected category. single: each trial randomly selects one eligible category and draws mediaPerCategory files only from it. sample: each trial randomly selects enough eligible categories to fill imageCount (imageCount / mediaPerCategory, at least one) and draws mediaPerCategory files from each, so imageCount 2 compares two categories. Eligible categories must have enough unused files for a complete trial.',
         fields: {
           mediaAssignmentMode: 'category',
           mediaPerCategory: 1,
-          mediaCategoryMode: 'all | single (per trial)',
+          mediaCategoryMode: 'all | single (per trial) | sample (imageCount categories per trial)',
           mediaFolders: 'optional subset of category-tagged folders',
         },
       },
