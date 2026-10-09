@@ -46,7 +46,19 @@ import {
   rehydrateTrialsAnswerStoreFromSurvey,
 } from './lib/trialNavigation';
 import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
-import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale, resolveSurveyUiLanguage } from './lib/surveyLocale';
+import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale } from './lib/surveyLocale';
+import {
+  ANSWER_LANGUAGE_QUESTION,
+  applyAnswerLanguageChrome,
+  applyLanguageToSurveyModel,
+  participantMayUseLanguage,
+  placeLanguageChoiceQuestion,
+  questionLanguagesForSubmission,
+  readTranslations,
+  resolveParticipantLanguage,
+  surveyLanguageMetadata,
+  textForLanguage,
+} from './lib/surveyTranslations';
 import { fetchParticipantResponseSink, newResponseRowId, submitParticipantResponse } from './lib/ownResponseSupabase';
 import { tf } from './contexts/adminI18n';
 import SurveyProgressBridge, {
@@ -93,6 +105,8 @@ export default function SurveyApp() {
   }, []);
   const [resumeDialog, setResumeDialog] = useState(null);
   const [completionMessage, setCompletionMessage] = useState('');
+  const answerLanguageRef = useRef('en');
+  const questionLanguageRef = useRef({});
   const repeatSessionRef = useRef(null);
   const repeatParticipantRef = useRef(null);
   const repeatAttemptRef = useRef(1);
@@ -172,6 +186,8 @@ export default function SurveyApp() {
           displayedMediaGroups: { ...(displayedMediaGroupsRef.current || {}) },
           displayedMediaCategories: { ...(displayedMediaCategoriesRef.current || {}) },
           finalSurveyJson: JSON.parse(JSON.stringify(finalSurveyJsonRef.current)),
+          answerLanguage: answerLanguageRef.current,
+          questionAnswerLanguages: { ...questionLanguageRef.current },
         });
       } catch (err) {
         console.warn('flushDraftNow failed:', err?.message || err);
@@ -304,6 +320,8 @@ export default function SurveyApp() {
         displayedMediaGroups: { ...(displayedMediaGroupsRef.current || {}) },
         displayedMediaCategories: { ...(displayedMediaCategoriesRef.current || {}) },
         finalSurveyJson: JSON.parse(JSON.stringify(finalSurveyJson)),
+        answerLanguage: answerLanguageRef.current,
+        questionAnswerLanguages: { ...questionLanguageRef.current },
       });
     }, 800);
   };
@@ -1011,6 +1029,29 @@ export default function SurveyApp() {
         }
       }
 
+      const chooseAnswerLanguage = (requested) => (
+        participantMayUseLanguage(finalSurveyJson, requested)
+          ? resolveParticipantLanguage(finalSurveyJson, requested)
+          : resolveParticipantLanguage(finalSurveyJson, null)
+      );
+      const applyChosenLanguage = (chosen) => {
+        const pageNo = model.currentPageNo;
+        answerLanguageRef.current = chosen;
+        applyLanguageToSurveyModel(model, finalSurveyJson, chosen);
+        applyAnswerLanguageChrome(model, finalSurveyJson, chosen);
+        placeLanguageChoiceQuestion(model, finalSurveyJson);
+        if (model.currentPageNo !== pageNo) model.currentPageNo = pageNo;
+        const sourceCompletion = finalSurveyJson.completionMessage || adminConfig?.completionMessage || '';
+        setCompletionMessage(textForLanguage(
+          readTranslations(finalSurveyJson),
+          'survey.completionMessage',
+          chosen,
+          sourceCompletion,
+        ));
+      };
+      questionLanguageRef.current = {};
+      applyChosenLanguage(chooseAnswerLanguage(urlParams.get('lang')));
+
       // Repeat annotation mode setup
       const urlRepeat = parseInt(urlParams.get('repeat') || '0', 10);
       const repeatCfg = finalSurveyJson?.repeatConfig || {};
@@ -1100,7 +1141,7 @@ export default function SurveyApp() {
         const completeData = {
           project_id: projectId,
           participant_id: participantId,
-          language: resolveSurveyUiLanguage(finalSurveyJson),
+          language: answerLanguageRef.current,
           responses: enrichedResponses,
           raw_responses: responses,
           displayed_images,
@@ -1124,6 +1165,15 @@ export default function SurveyApp() {
               page_seconds: { ...pageTimingRef.current },
             },
             ...runtimeMetadata(runtimeContext),
+            ...surveyLanguageMetadata({
+              answerLanguage: answerLanguageRef.current,
+              questionAnswerLanguages: questionLanguagesForSubmission(
+                survey.getAllQuestions(),
+                answerLanguageRef.current,
+                questionLanguageRef.current,
+              ),
+              publishedVersion: finalSurveyJson._spPublishedVersion || null,
+            }),
             ...mediaWatchMetadata(),
             ...(isRepeatMode ? {
               session_id: repeatSessionRef.current,
@@ -1146,7 +1196,19 @@ export default function SurveyApp() {
         await submitSurveyResponse(completeData, { isRepeatMode, repeatTotal, attemptIndex });
       });
 
-      model.onValueChanged.add(() => {
+      model.onValueChanged.add((sender, options) => {
+        if (options?.name === ANSWER_LANGUAGE_QUESTION) {
+          questionLanguageRef.current[options.name] = answerLanguageRef.current;
+          const requested = options.value;
+          if (finalSurveyJson && participantMayUseLanguage(finalSurveyJson, requested)) {
+            const pageNo = sender.currentPageNo;
+            const chosen = resolveParticipantLanguage(finalSurveyJson, requested);
+            if (chosen !== answerLanguageRef.current) applyChosenLanguage(chosen);
+            if (sender.currentPageNo !== pageNo) sender.currentPageNo = pageNo;
+          }
+        } else if (options?.name) {
+          questionLanguageRef.current[options.name] = answerLanguageRef.current;
+        }
         scheduleDraftSave(model, imageTracker, finalSurveyJson);
       });
 
@@ -1211,6 +1273,10 @@ export default function SurveyApp() {
         if (draftToApply.participantId) {
           participantIdRef.current = draftToApply.participantId;
         }
+        if (draftToApply.questionAnswerLanguages) {
+          questionLanguageRef.current = { ...draftToApply.questionAnswerLanguages };
+        }
+        applyChosenLanguage(chooseAnswerLanguage(draftToApply.answerLanguage || urlParams.get('lang')));
       }
       resumeChoiceRef.current = null;
 

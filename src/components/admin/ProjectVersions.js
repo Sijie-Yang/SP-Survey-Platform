@@ -7,6 +7,7 @@ import { getProjectReleaseState, getProjectReleaseVersions, releaseProjectVersio
 import { compareRelease, publicMediaConfig, sameReleaseValue } from '../../lib/releaseComparison';
 import { validateSurveyConfig } from '../../lib/designProtocol/validate';
 import { runSurveyPreflight } from '../../lib/surveyPreflight';
+import { TranslationPublishNotice } from './TranslationEditor';
 export default function ProjectVersions({
   currentProject,
   hasUnsavedChanges,
@@ -152,6 +153,7 @@ export default function ProjectVersions({
       {validation.errors.length > 0 && <Alert severity="warning" sx={{
         my: 1
       }}>{uiPair(language, 'Fix draft configuration errors in Survey Builder before releasing.', '草稿存在配置错误，请先在题目设置中修复。')}</Alert>}
+      <TranslationPublishNotice config={config} language={language} />
       <Button variant="contained" disabled={busy || loading || hasUnsavedChanges || !dirty || !validation.valid} sx={{
         my: 2,
         minHeight: 44
@@ -200,6 +202,7 @@ export default function ProjectVersions({
           {!!review?.version && <Typography variant="body2">{uiPair(language, 'Restoring also replaces the current draft and media organization.', '恢复还会替换当前草稿和媒体分类。')}</Typography>}
         </Alert>
         {review?.version && state ? showDiff(compareRelease(config, review.config, state.preloaded_images || [], review.media_snapshot?.preloadedImages || [])) : diff && showDiff(diff)}
+        <TranslationPublishNotice config={review?.version ? review.config : config} language={language} />
         <TextField fullWidth multiline minRows={2} label={uiPair(language, 'Release note', '版本说明')} value={summary} onChange={e => setSummary(e.target.value)} sx={{
           mt: 2
         }} />

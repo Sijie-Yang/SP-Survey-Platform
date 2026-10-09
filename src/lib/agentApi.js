@@ -87,6 +87,13 @@ export async function getCredentialStatus() {
   return agentFetch('/api/agent/credentials/status');
 }
 
+export async function translateSurveyText(body) {
+  return agentFetch('/api/agent/translate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function storeOpenAiCredential(apiKey) {
   return agentFetch('/api/agent/credentials/openai', {
     method: 'POST',
