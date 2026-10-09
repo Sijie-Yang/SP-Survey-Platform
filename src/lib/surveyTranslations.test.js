@@ -1,9 +1,12 @@
-import { Model } from 'survey-core';
+import { Model, surveyLocalization } from 'survey-core';
+import 'survey-core/survey.i18n';
 import {
   acceptModelTranslations,
+  applyAnswerLanguageChrome,
   applyLanguageToSurveyModel,
   applyParticipantLanguage,
   confirmTranslation,
+  ANSWER_LANGUAGE_PAGE,
   ANSWER_LANGUAGE_QUESTION,
   deleteLanguageVersion,
   languageChoiceQuestion,
@@ -17,11 +20,12 @@ import {
   resolveParticipantLanguage,
   setTranslationLanguages,
   surveyLanguageMetadata,
+  systemChromeNote,
   translationAccuracyNotice,
   translationPublishFindings,
 } from './surveyTranslations';
 import { requestSurveyTranslations } from './surveyTranslationApi';
-import { applySurveyLocale } from './surveyLocale';
+import { applySurveyLocale, surveyUiStrings } from './surveyLocale';
 
 function survey() {
   return {
@@ -283,9 +287,14 @@ describe('survey translations', () => {
     const model = new Model(next);
     model.currentPageNo = 1;
     placeLanguageChoiceQuestion(model, next);
-    expect(model.pages[0].questions[0].name).toBe(ANSWER_LANGUAGE_QUESTION);
-    expect(model.pages[1].questions.map((item) => item.name)).toEqual(['later']);
-    expect(model.currentPageNo).toBe(1);
+    expect(model.pages[0].name).toBe(ANSWER_LANGUAGE_PAGE);
+    expect(model.pages[0].questions.map((item) => item.name)).toEqual([ANSWER_LANGUAGE_QUESTION]);
+    expect(model.pages[1].questions.map((item) => item.name)).not.toContain(ANSWER_LANGUAGE_QUESTION);
+    expect(model.pages[1].questions.map((item) => item.name)).toContain('anchor');
+    expect(model.pages[2].questions.map((item) => item.name)).toEqual(['later']);
+    expect(model.currentPage.name).toBe('page2');
+    placeLanguageChoiceQuestion(model, next);
+    expect(model.pages.filter((page) => page.name === ANSWER_LANGUAGE_PAGE)).toHaveLength(1);
     applyLanguageToSurveyModel(model, next, 'Kiswahili');
     expect(model.title).toBe('Habari');
     expect(model.locale).toBe('Kiswahili');
@@ -305,6 +314,50 @@ describe('survey translations', () => {
     const removed = { ...next, translations: deleteLanguageVersion(next.translations, 'Kiswahili') };
     expect(participantMayUseLanguage(removed, 'Kiswahili')).toBe(false);
     expect(languageChoiceQuestion(removed).choices.map((choice) => choice.value)).not.toContain('Kiswahili');
+    placeLanguageChoiceQuestion(model, removed);
+    expect(model.pages[0].name).toBe(ANSWER_LANGUAGE_PAGE);
+    expect(model.pages[0].questions.map((item) => item.name)).toEqual([ANSWER_LANGUAGE_QUESTION]);
+    expect(model.getQuestionByName(ANSWER_LANGUAGE_QUESTION).choices.map((choice) => choice.value)).not.toContain('Kiswahili');
+    const single = { ...removed, translations: deleteLanguageVersion(removed.translations, 'zh') };
+    placeLanguageChoiceQuestion(model, single);
+    expect(model.getPageByName(ANSWER_LANGUAGE_PAGE)).toBeFalsy();
+    expect(model.getQuestionByName(ANSWER_LANGUAGE_QUESTION)).toBeFalsy();
+    expect(model.pages[0].name).toBe('page1');
+  });
+
+  test('a custom language keeps buttons and progress in the source language', () => {
+    const base = survey();
+    base.title = '街道感受';
+    const config = withZh(base);
+    config.translations = setTranslationLanguages(config, {
+      sourceLanguage: 'zh',
+      targetLanguages: ['Kiswahili', 'ja'],
+      enabledLanguages: ['zh', 'Kiswahili', 'ja'],
+    });
+    const titled = editTranslation(config.translations, 'survey.title', 'Kiswahili', 'Habari');
+    const next = { ...config, translations: titled };
+    expect(languageVersionSummary(next, 'Kiswahili').hasUiPack).toBe(false);
+    expect(languageVersionSummary(next, 'zh').hasUiPack).toBe(true);
+    expect(systemChromeNote('zh')).toContain('源语言');
+    expect(systemChromeNote('zh')).toContain('按钮');
+    expect(systemChromeNote('en')).toContain('source language');
+    const model = new Model(next);
+    applyLanguageToSurveyModel(model, next, 'Kiswahili');
+    applyAnswerLanguageChrome(model, next, 'Kiswahili');
+    expect(model.locale).toBe('Kiswahili');
+    expect(model.title).toBe('Habari');
+    expect(model.pageNextText).toBe('下一页');
+    expect(surveyLocalization.getString('requiredError', model.locale)).toBe('请填写此问题');
+    expect(surveyUiStrings(model).trialNextRound).toBe('下一轮');
+    applyLanguageToSurveyModel(model, next, 'ja');
+    applyAnswerLanguageChrome(model, next, 'ja');
+    expect(model.pageNextText).toBe('次へ');
+    expect(surveyUiStrings(model).trialNextRound).toBe('次の回');
+    applyLanguageToSurveyModel(model, next, 'Kiswahili');
+    applyAnswerLanguageChrome(model, next, 'Kiswahili');
+    expect(model.title).toBe('Habari');
+    expect(model.pageNextText).toBe('下一页');
+    expect(model.getQuestionByName('q1').choices[0].value).toBe('code_a');
   });
 
   test('the notice says translations can be inaccurate until reviewed', () => {

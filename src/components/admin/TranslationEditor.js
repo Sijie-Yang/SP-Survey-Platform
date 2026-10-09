@@ -28,6 +28,8 @@ import {
   setTranslationLanguages,
   strictSurveyLanguage,
   stringsForMachineTranslation,
+  systemChromeNote,
+  systemChromeRowNote,
   translationAccuracyNotice,
   translationPublishFindings,
   translationStatusLabel,
@@ -181,8 +183,8 @@ export default function TranslationEditor({ config, onChange }) {
       <Typography variant="body2" color="text.secondary">
         {uiPair(
           language,
-          'One survey, one response dataset. Type any language. The Assistant translates it. Participants only see languages you enable, as a question on the first page.',
-          '一份问卷，一份答卷数据。可以输入任意语言，由助手翻译。参与者只在第一页的题目里看到你启用的语言。',
+          'One survey, one response dataset. Type any language. The Assistant translates the survey wording. Participants choose a language on its own first page. Later pages have no language switcher.',
+          '一份问卷，一份答卷数据。可以输入任意语言，由助手翻译问卷文字。参与者在单独的第一页选择语言。后面的页面没有语言切换。',
         )}
       </Typography>
       {!!notice && <Alert severity="warning">{notice}</Alert>}
@@ -225,6 +227,11 @@ export default function TranslationEditor({ config, onChange }) {
               </TableRow>
             </TableHead>
             <TableBody>
+              <TableRow>
+                <TableCell colSpan={5}>
+                  <Typography variant="body2">{systemChromeNote(language)}</Typography>
+                </TableCell>
+              </TableRow>
               {rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5}>
@@ -236,7 +243,14 @@ export default function TranslationEditor({ config, onChange }) {
               )}
               {rows.map((row) => (
                 <TableRow key={row.language} hover>
-                  <TableCell>{row.name}</TableCell>
+                  <TableCell>
+                    {row.name}
+                    {!row.hasUiPack && (
+                      <Typography variant="caption" display="block" color="text.secondary">
+                        {systemChromeRowNote(language, live.sourceLanguage)}
+                      </Typography>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       size="small"

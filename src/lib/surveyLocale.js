@@ -10,6 +10,10 @@ export const SURVEY_UI_LANGUAGE_EN = 'en';
 export const SURVEY_UI_LANGUAGE_ZH = 'zh';
 
 export function resolveSurveyUiLanguage(source) {
+  if (source && typeof source.getPropertyValue === 'function') {
+    const chrome = source.getPropertyValue('spChromeLanguage');
+    if (chrome) return normalizeUiLanguage(chrome);
+  }
   const raw = typeof source === 'string'
     ? source
     : (source?.locale

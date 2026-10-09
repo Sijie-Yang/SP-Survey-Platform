@@ -4,15 +4,19 @@
  * a region, or a separate survey version.
  *
  * A response records answerLanguage and questionAnswerLanguages.
- * The participant answers a language question on the first page. Those fields
+ * The participant answers a language question on its own first page. Those fields
  * are never written into condition.
  */
 
+import { surveyLocalization } from 'survey-core';
 import { UI_LANGUAGES, surveyJsLocale, uiPair } from './uiLanguages';
+import { applySurveyLocale } from './surveyLocale';
+import { attachSurveyMarkdown } from './surveyMarkdown';
 
 export const TRANSLATION_MACHINE = 'machine';
 export const TRANSLATION_REVIEWED = 'reviewed';
 export const ANSWER_LANGUAGE_QUESTION = 'sp_answer_language';
+export const ANSWER_LANGUAGE_PAGE = 'sp_answer_language_page';
 
 const OPTION_LISTS = [
   ['choices', 'choice'],
@@ -405,7 +409,34 @@ export function languageVersionSummary(config, language) {
     total,
     needsUpdate: total === 0 ? false : needsUpdate,
     enabled: translations.enabledLanguages.includes(code),
+    hasUiPack: isKnownSurveyLanguage(code),
   };
+}
+
+/** Survey chrome for a language the site does not ship: the source language, or English when the source has no pack either. */
+export function chromeLanguageFor(config, answerLanguage) {
+  const translations = readTranslations(config || {});
+  const answer = strictSurveyLanguage(answerLanguage) || translations.sourceLanguage;
+  if (isKnownSurveyLanguage(answer)) return answer;
+  if (isKnownSurveyLanguage(translations.sourceLanguage)) return translations.sourceLanguage;
+  return 'en';
+}
+
+export function systemChromeNote(uiLanguage) {
+  return uiPair(
+    uiLanguage,
+    'The model translates the title, description, questions, and choices only. Buttons, validation, progress, and other system prompts stay in the source language when a language has no built-in interface.',
+    '模型只翻译标题、说明、题目和选项。没有内置界面的语言，按钮、校验、进度和其他系统提示仍使用源语言。',
+  );
+}
+
+export function systemChromeRowNote(uiLanguage, sourceLanguage) {
+  const name = languageName(strictSurveyLanguage(sourceLanguage) || sourceLanguage);
+  return uiPair(
+    uiLanguage,
+    `Buttons and system prompts stay in ${name}.`,
+    `按钮和系统提示仍使用${name}。`,
+  );
 }
 
 function languageQuestionPrompt(language) {
@@ -727,24 +758,75 @@ export function applyLanguageToSurveyModel(model, config, language) {
   return model;
 }
 
-/** Put the language question first on page 1. Later pages do not get a switcher. */
+function installSourceChromePack(localeName, chromeLanguage) {
+  const packId = surveyJsLocale(chromeLanguage);
+  const sourcePack = surveyLocalization.locales[packId] || surveyLocalization.locales.en;
+  if (!sourcePack || !localeName) return;
+  const copy = {};
+  Object.keys(sourcePack).forEach((key) => {
+    copy[key] = sourcePack[key];
+  });
+  surveyLocalization.locales[localeName] = copy;
+}
+
+/**
+ * Known languages use their built-in SurveyJS interface.
+ * A typed language keeps survey content in its own locale slot and reuses the
+ * source language for buttons, validation, progress, and other system prompts.
+ */
+export function applyAnswerLanguageChrome(model, config, language) {
+  if (!model) return;
+  const answer = strictSurveyLanguage(language);
+  const chrome = chromeLanguageFor(config, answer);
+  if (typeof model.setPropertyValue === 'function') {
+    model.setPropertyValue('spChromeLanguage', chrome);
+  }
+  if (answer && !isKnownSurveyLanguage(answer)) {
+    installSourceChromePack(answer, chrome);
+    try { model.locale = participantModelLocale(answer); } catch { /* ignore */ }
+    attachSurveyMarkdown(model);
+    return;
+  }
+  if (answer) applySurveyLocale(model, { locale: answer });
+}
+
+/** The language question is the only question on the first page. Later pages have no switcher. */
 export function placeLanguageChoiceQuestion(model, config) {
-  if (!model || typeof model.getQuestionByName !== 'function' || !model.pages?.length) return null;
+  if (!model || typeof model.getQuestionByName !== 'function' || typeof model.addNewPage !== 'function') return null;
   const spec = languageChoiceQuestion(config);
   const existing = model.getQuestionByName(ANSWER_LANGUAGE_QUESTION);
+  const languagePage = typeof model.getPageByName === 'function' ? model.getPageByName(ANSWER_LANGUAGE_PAGE) : null;
   if (!spec) {
     if (existing && typeof existing.delete === 'function') existing.delete();
+    if (languagePage && typeof model.removePage === 'function') model.removePage(languagePage);
     return null;
   }
-  const page = model.pages[0];
-  const pageNo = model.currentPageNo;
-  let question = existing;
-  if (!question) question = page.addNewQuestion('radiogroup', ANSWER_LANGUAGE_QUESTION, 0);
+  let page = languagePage;
+  if (!page) page = model.addNewPage(ANSWER_LANGUAGE_PAGE, 0);
+  else if (model.pages[0] !== page) {
+    const index = model.pages.indexOf(page);
+    if (index > 0) {
+      model.pages.splice(index, 1);
+      model.pages.splice(0, 0, page);
+    }
+  }
+  (page.questions || []).slice().forEach((item) => {
+    if (item?.name !== ANSWER_LANGUAGE_QUESTION && typeof item.delete === 'function') item.delete();
+  });
+  let question = model.getQuestionByName(ANSWER_LANGUAGE_QUESTION);
+  if (question && question.page !== page) {
+    question.delete();
+    question = null;
+  }
+  if (!question) question = page.addNewQuestion('radiogroup', ANSWER_LANGUAGE_QUESTION);
   const previousValue = question.value;
   const prompts = new Map();
   const source = readTranslations(config).sourceLanguage;
+  const promptFor = (language) => (
+    isKnownSurveyLanguage(language) ? languageQuestionPrompt(language) : languageQuestionPrompt(source)
+  );
   prompts.set(source, languageQuestionPrompt(source));
-  spec.choices.forEach((choice) => prompts.set(choice.value, languageQuestionPrompt(choice.value)));
+  spec.choices.forEach((choice) => prompts.set(choice.value, promptFor(choice.value)));
   prompts.forEach((text, language) => writeLoc(question, 'locTitle', language, text));
   question.isRequired = true;
   question.choices = spec.choices.map((choice) => ({ value: choice.value, text: choice.text }));
@@ -755,7 +837,6 @@ export function placeLanguageChoiceQuestion(model, config) {
   if (previousValue != null && previousValue !== '' && question.value !== previousValue) {
     question.value = previousValue;
   }
-  if (model.currentPageNo !== pageNo) model.currentPageNo = pageNo;
   return question;
 }
 

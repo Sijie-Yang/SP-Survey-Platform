@@ -49,8 +49,8 @@ import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
 import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale } from './lib/surveyLocale';
 import {
   ANSWER_LANGUAGE_QUESTION,
+  applyAnswerLanguageChrome,
   applyLanguageToSurveyModel,
-  isKnownSurveyLanguage,
   participantMayUseLanguage,
   placeLanguageChoiceQuestion,
   questionLanguagesForSubmission,
@@ -1038,7 +1038,7 @@ export default function SurveyApp() {
         const pageNo = model.currentPageNo;
         answerLanguageRef.current = chosen;
         applyLanguageToSurveyModel(model, finalSurveyJson, chosen);
-        if (isKnownSurveyLanguage(chosen)) applySurveyLocale(model, { locale: chosen });
+        applyAnswerLanguageChrome(model, finalSurveyJson, chosen);
         placeLanguageChoiceQuestion(model, finalSurveyJson);
         if (model.currentPageNo !== pageNo) model.currentPageNo = pageNo;
         const sourceCompletion = finalSurveyJson.completionMessage || adminConfig?.completionMessage || '';
