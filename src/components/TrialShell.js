@@ -26,7 +26,11 @@ import {
   persistTrialsAnswer,
   trialHasAnswer,
   canAutoAdvanceTrial,
+  isCompositeAutoAdvance,
+  questionTypeName,
+  trialReadyForAutoAdvance,
 } from '../lib/trialNavigation';
+import { TrialAdvanceHoldProvider } from './trialAdvanceHold';
 
 /** Prefer pre-sampled trialMediaSets; synthesize from image/media stimulus for preview. */
 function resolveTrialMediaSets(question, trialCount) {
@@ -275,7 +279,19 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
   const indexRef = useRef(index);
   const goToRef = useRef(() => {});
   const autoAdvanceTimerRef = useRef(null);
+  const holdAutoAdvanceRef = useRef(false);
+  const scheduleAutoAdvanceRef = useRef(() => {});
   const shellRef = useRef(null);
+  const holdApi = useMemo(() => ({
+    hold() {
+      holdAutoAdvanceRef.current = true;
+      window.clearTimeout(autoAdvanceTimerRef.current);
+    },
+    release() {
+      holdAutoAdvanceRef.current = false;
+      scheduleAutoAdvanceRef.current();
+    },
+  }), []);
   answersRef.current = answers;
   indexRef.current = index;
 
@@ -368,7 +384,6 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
       const raw = question.value;
       if (isTrialsAnswer(raw)) return;
       const trialIndex = indexRef.current;
-      const wasUnanswered = !trialHasAnswer(answersRef.current?.trials?.[trialIndex], question);
       const set = trialMediaSets[trialIndex] || [];
       const normalized = normalizeTrialsAnswer(answersRef.current, trialCount);
       const next = { ...normalized, trials: [...normalized.trials] };
@@ -376,6 +391,7 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
         ? [...raw]
         : (raw && typeof raw === 'object' ? { ...raw } : raw);
       const previous = normalized.trials[trialIndex] || {};
+      const wasReady = trialReadyForAutoAdvance(previous, question);
       next.trials[trialIndex] = {
         ...(question.trialMediaContexts?.[trialIndex] || question.jsonObj?.trialMediaContexts?.[trialIndex] || {}),
         value: storedValue,
@@ -385,25 +401,30 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
         answered_at: new Date().toISOString(),
       };
       persistAnswers(next, trialIndex);
-      if (!trialHasAnswer(next.trials[trialIndex], question)) {
+      const nowReady = trialReadyForAutoAdvance(next.trials[trialIndex], question);
+      if (!nowReady || holdAutoAdvanceRef.current) {
         window.clearTimeout(autoAdvanceTimerRef.current);
-      }
-      if (
-        wasUnanswered
-        && canAutoAdvanceTrial(question)
-        && trialHasAnswer(next.trials[trialIndex], question)
-        && trialIndex < trialCount - 1
-      ) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
-        autoAdvanceTimerRef.current = window.setTimeout(() => {
-          if (indexRef.current === trialIndex
-            && !questionMediaFailed(question)
-            && trialHasAnswer(answersRef.current?.trials?.[trialIndex], question)) {
-            goToRef.current(trialIndex + 1);
-          }
-        }, 500);
+      } else if (!wasReady || isCompositeAutoAdvance(question)) {
+        scheduleAutoAdvance(trialIndex);
       }
     };
+
+    const scheduleAutoAdvance = (trialIndex) => {
+      const ready = trialReadyForAutoAdvance(answersRef.current?.trials?.[trialIndex], question);
+      if (!ready || holdAutoAdvanceRef.current || trialIndex >= trialCount - 1) {
+        if (!ready || holdAutoAdvanceRef.current) window.clearTimeout(autoAdvanceTimerRef.current);
+        return;
+      }
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = window.setTimeout(() => {
+        if (holdAutoAdvanceRef.current) return;
+        if (indexRef.current !== trialIndex) return;
+        if (questionMediaFailed(question)) return;
+        if (!trialReadyForAutoAdvance(answersRef.current?.trials?.[trialIndex], question)) return;
+        goToRef.current(trialIndex + 1);
+      }, 500);
+    };
+    scheduleAutoAdvanceRef.current = () => scheduleAutoAdvance(indexRef.current);
 
     const survey = question.survey;
     const onSurveyValue = (_sender, options) => {
@@ -564,6 +585,9 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
   const complete = allTrialsAnswered(answers, trialCount, question);
   const onLastTrial = index >= trialCount - 1;
   const autoAdvance = canAutoAdvanceTrial(question);
+  const advanceHint = ['imagepointallocation', 'mediapointallocation'].includes(questionTypeName(question))
+    ? (t.trialAutoAdvanceAllocation || t.trialAutoAdvance)
+    : t.trialAutoAdvance;
   const groups = Math.ceil(trialCount / TRIAL_DOT_GROUP_SIZE);
   const groupStart = groupIdx * TRIAL_DOT_GROUP_SIZE;
   const groupEnd = Math.min(trialCount, groupStart + TRIAL_DOT_GROUP_SIZE);
@@ -597,7 +621,7 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
         {!complete && (
           <Typography variant="caption" display="block" sx={{ mt: 0.25 }}>
             {autoAdvance && !onLastTrial
-              ? t.trialAutoAdvance
+              ? advanceHint
               : onLastTrial
                 ? t.trialLastRound
                 : t.trialUseNext}
@@ -681,11 +705,13 @@ function TrialShellInner({ question, Inner, trialCount, nav, ...rest }) {
         sx={{ mb: 1.5 }}
       >
         <MediaWatchGate question={question} trialIndex={index}>
-          <Inner
-            question={question}
-            trialStimulusMedia={trialMediaSets[index] || []}
-            {...rest}
-          />
+          <TrialAdvanceHoldProvider value={holdApi}>
+            <Inner
+              question={question}
+              trialStimulusMedia={trialMediaSets[index] || []}
+              {...rest}
+            />
+          </TrialAdvanceHoldProvider>
         </MediaWatchGate>
       </Box>
 
