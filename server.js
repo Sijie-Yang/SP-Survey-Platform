@@ -2941,11 +2941,15 @@ app.get('/api/r2/image-proxy', async (req, res) => {
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       return res.status(400).json({ success: false, error: 'Only http(s) URLs allowed' });
     }
-    const allowedHost = r2PublicUrl ? new URL(r2PublicUrl).host : null;
-    if (allowedHost && parsed.host !== allowedHost) {
+    const allowedHosts = [r2PublicUrl, ...String(process.env.R2_LEGACY_PUBLIC_URLS || '').split(',')]
+      .map((u) => String(u || '').trim())
+      .filter(Boolean)
+      .map((u) => { try { return new URL(u).host; } catch { return ''; } })
+      .filter(Boolean);
+    if (allowedHosts.length && !allowedHosts.includes(parsed.host)) {
       return res.status(403).json({
         success: false,
-        error: `Proxy only allows images from ${allowedHost}`,
+        error: `Proxy only allows images from ${allowedHosts.join(', ')}`,
       });
     }
     const upstream = await fetch(rawUrl);

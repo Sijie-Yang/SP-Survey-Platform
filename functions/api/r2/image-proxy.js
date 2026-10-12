@@ -18,15 +18,16 @@ export const onRequestGet = async ({ request, env }) => {
       return json({ success: false, error: 'Only http(s) URLs allowed' }, { status: 400 });
     }
 
-    const base = publicBaseUrl(env);
-    if (base) {
-      const allowedHost = new URL(base).host;
-      if (parsed.host !== allowedHost) {
-        return json({
-          success: false,
-          error: `Proxy only allows images from ${allowedHost}`,
-        }, { status: 403 });
-      }
+    const allowedHosts = [publicBaseUrl(env), ...String(env.R2_LEGACY_PUBLIC_URLS || '').split(',')]
+      .map((u) => String(u || '').trim())
+      .filter(Boolean)
+      .map((u) => { try { return new URL(u).host; } catch { return ''; } })
+      .filter(Boolean);
+    if (allowedHosts.length && !allowedHosts.includes(parsed.host)) {
+      return json({
+        success: false,
+        error: `Proxy only allows images from ${allowedHosts.join(', ')}`,
+      }, { status: 403 });
     }
 
     const upstream = await fetch(rawUrl);

@@ -8,8 +8,13 @@ const SERVER_URL =
   process.env.REACT_APP_SERVER_URL || '';
 const R2_PUBLIC_BASE = (
   process.env.REACT_APP_R2_PUBLIC_URL
-  || 'https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev'
+  || 'https://media.sp-survey.org'
 ).replace(/\/$/, '');
+// Same bucket under earlier public hosts. Stored media URLs keep these forever.
+const R2_LEGACY_PUBLIC_BASES = (
+  process.env.REACT_APP_R2_LEGACY_PUBLIC_URLS
+  ?? 'https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev'
+).split(',').map((u) => u.trim().replace(/\/$/, '')).filter((u) => u && u !== R2_PUBLIC_BASE);
 
 export async function authHeaders(extra = {}) {
   const headers = { ...extra };
@@ -78,9 +83,12 @@ export function projectR2Prefix(userId, projectId) {
 export function r2KeyFromUrl(url) {
   const base = getR2PublicBase();
   if (!url || !base) return null;
-  const prefix = `${base}/`;
-  if (!String(url).startsWith(prefix)) return null;
-  return String(url).slice(prefix.length).split('?')[0];
+  const text = String(url);
+  for (const candidate of [base, ...R2_LEGACY_PUBLIC_BASES]) {
+    const prefix = `${candidate}/`;
+    if (text.startsWith(prefix)) return text.slice(prefix.length).split('?')[0];
+  }
+  return null;
 }
 
 export function isTemplateR2Key(key) {

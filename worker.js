@@ -123,6 +123,13 @@ function parseListXml(xml) {
 
 const publicBaseUrl = (env) => String(env.R2_PUBLIC_URL || '').replace(/\/$/, '');
 
+/** Hosts serving this bucket: the current public URL plus any legacy ones (e.g. r2.dev). */
+const publicMediaHosts = (env) => [env.R2_PUBLIC_URL, ...String(env.R2_LEGACY_PUBLIC_URLS || '').split(',')]
+  .map((u) => String(u || '').trim())
+  .filter(Boolean)
+  .map((u) => { try { return new URL(u).host; } catch { return ''; } })
+  .filter(Boolean);
+
 const R2_COPY_CONCURRENCY = 32;
 
 async function asyncPool(concurrency, items, fn) {
@@ -498,12 +505,9 @@ async function handleImageProxy(request, env) {
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     return json({ success: false, error: 'Only http(s) URLs allowed' }, { status: 400 });
   }
-  const base = publicBaseUrl(env);
-  if (base) {
-    const allowedHost = new URL(base).host;
-    if (parsed.host !== allowedHost) {
-      return json({ success: false, error: `Proxy only allows images from ${allowedHost}` }, { status: 403 });
-    }
+  const allowedHosts = publicMediaHosts(env);
+  if (allowedHosts.length && !allowedHosts.includes(parsed.host)) {
+    return json({ success: false, error: `Proxy only allows images from ${allowedHosts.join(', ')}` }, { status: 403 });
   }
   const upstream = await fetch(rawUrl);
   if (!upstream.ok) {

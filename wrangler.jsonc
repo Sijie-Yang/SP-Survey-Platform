@@ -34,7 +34,9 @@
   // must stay as Cloudflare Secrets / `wrangler secret put`.
   "vars": {
     "R2_BUCKET_NAME": "survey-images",
-    "R2_PUBLIC_URL":  "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev",
+    "R2_PUBLIC_URL":  "https://media.sp-survey.org",
+    // Older uploads stored full URLs on the r2.dev host; keep accepting them.
+    "R2_LEGACY_PUBLIC_URLS": "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev",
     "R2_ACCOUNT_ID":  "ed9b50b0f51b87ab562fbd1e47e0a6b5",
     "APP_URL": "https://sp-survey.org",
     "MCP_RESOURCE": "https://sp-survey.org/mcp",
