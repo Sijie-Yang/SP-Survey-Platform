@@ -613,22 +613,36 @@ export default function QuestionEditor({
   const {
     tr
   } = useQuestionEditorText();
-  // Convert ranking with isImageRanking back to imageranking for editing
-  const initialQuestion = normalizeSliderQuestion({
-    ...question
+  // The first snapshot is computed once; recomputing it on every keystroke
+  // was wasted work (and the dirty check already compares against a ref).
+  const [initialQuestion] = useState(() => {
+    // Convert ranking with isImageRanking back to imageranking for editing
+    const initialQuestion = normalizeSliderQuestion({
+      ...question
+    });
+    if (initialQuestion.type === 'ranking' && initialQuestion.isImageRanking) {
+      initialQuestion.type = 'imageranking';
+    }
+    // Defaults belong in the first snapshot. An effect that writes them after paint
+    // races with typing and can flip a stored preference the participant never edited.
+    if (CURATED_STIMULUS_TYPES.includes(initialQuestion.type) && !initialQuestion.imageSelectionMode) {
+      initialQuestion.imageSelectionMode = 'huggingface_random';
+      if (initialQuestion.randomImageSelection == null) initialQuestion.randomImageSelection = true;
+      if (initialQuestion.excludePreviouslyUsedImages == null) initialQuestion.excludePreviouslyUsedImages = true;
+      if (initialQuestion.choices == null) initialQuestion.choices = [];
+    }
+    return initialQuestion;
   });
-  if (initialQuestion.type === 'ranking' && initialQuestion.isImageRanking) {
-    initialQuestion.type = 'imageranking';
-  }
-  // Defaults belong in the first snapshot. An effect that writes them after paint
-  // races with typing and can flip a stored preference the participant never edited.
-  if (CURATED_STIMULUS_TYPES.includes(initialQuestion.type) && !initialQuestion.imageSelectionMode) {
-    initialQuestion.imageSelectionMode = 'huggingface_random';
-    if (initialQuestion.randomImageSelection == null) initialQuestion.randomImageSelection = true;
-    if (initialQuestion.excludePreviouslyUsedImages == null) initialQuestion.excludePreviouslyUsedImages = true;
-    if (initialQuestion.choices == null) initialQuestion.choices = [];
-  }
-  const [editedQuestion, setEditedQuestion] = useState(initialQuestion);
+  const [editedQuestion, setEditedQuestionState] = useState(initialQuestion);
+  // Handlers build the next question from this ref, not the render closure, so
+  // two changes fired back-to-back (e.g. applying a media preset) can't drop
+  // each other's fields.
+  const editedQuestionRef = useRef(initialQuestion);
+  const setEditedQuestion = React.useCallback((next) => {
+    const value = typeof next === 'function' ? next(editedQuestionRef.current) : next;
+    editedQuestionRef.current = value;
+    setEditedQuestionState(value);
+  }, []);
   const [taskFilter, setTaskFilter] = useState('all');
   const [newChoice, setNewChoice] = useState('');
   // Draft string so trailing commas stay while typing (array join would strip them).
@@ -871,6 +885,7 @@ export default function QuestionEditor({
     label: 'Advanced · custom tasks'
   }];
   const handleQuestionChange = (field, value) => {
+    const editedQuestion = editedQuestionRef.current;
     if (field === 'visibleIf' && (value == null || value === '')) {
       const next = {
         ...editedQuestion

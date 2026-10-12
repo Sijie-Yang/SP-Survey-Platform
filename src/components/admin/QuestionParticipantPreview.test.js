@@ -5,14 +5,18 @@ import QuestionParticipantPreview from './QuestionParticipantPreview';
 import { RegionProvider } from '../../contexts/RegionContext';
 import { PREVIEW_READY, PREVIEW_RENDERED, PREVIEW_UPDATE } from '../../lib/questionPreviewProtocol';
 
-jest.mock('../../lib/previewMediaLibrary', () => ({
-  resolveMediaPoolForPreview: async (media) => media,
-  resolvePreviewMediaContext: async (project) => ({
+jest.mock('../../lib/previewMediaLibrary', () => {
+  const resolvePreviewMediaContext = async (project) => ({
     images: project?.preloadedImages || [],
     imageDatasetConfig: project?.imageDatasetConfig || {},
     fromPreviewLibrary: false,
-  }),
-}));
+  });
+  return {
+    resolveMediaPoolForPreview: async (media) => media,
+    resolvePreviewMediaContext,
+    resolvePreviewMediaContextCached: resolvePreviewMediaContext,
+  };
+});
 jest.mock('../../lib/surveyMediaInjection', () => ({ ...jest.requireActual('../../lib/surveyMediaInjection'), resolveSkillQuestions: async () => {} }));
 const project = { preloadedImages: ['left', 'right'].flatMap(folder => [1, 2, 3, 4].map(i => ({ url: `/${folder}/${i}.jpg`, name: `${folder}-${i}.jpg`, folder, type: 'image' }))) };
 const config = { viewportLayout: { desktop: { questions: { pair: { fontSize: 24 } }, textStyles: { legacy: { fieldStyle: { italic: true } } } } }, locale: 'zh', theme: { primaryColor: '#123456' }, secretNotNeededInFrame: 'excluded' };

@@ -5,7 +5,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, Typography } from '@mui/material';
 import AdminScopedMediaLibrary from './AdminScopedMediaLibrary';
-import { PREVIEW_MEDIA_PREFIX } from '../../lib/previewMediaLibrary';
+import { invalidatePreviewMediaCache, PREVIEW_MEDIA_PREFIX } from '../../lib/previewMediaLibrary';
 import { formatMediaMb, MAX_AV_MEDIA_BYTES } from '../../lib/mediaUtils';
 import { loadPreviewMediaLibrary, savePreviewMediaLibrary, withLegacyPreviewConfig } from '../../lib/previewMediaLibraryStorage';
 
@@ -49,6 +49,7 @@ export default function PreviewMediaLibraryManagement() {
     const sequence = loadSequence.current;
     try {
       const next = await savePreviewMediaLibrary(ownerRef.current, payload);
+      invalidatePreviewMediaCache();
       if (sequence !== loadSequence.current) return;
       ownerRef.current = next;
       setOwner(next);
