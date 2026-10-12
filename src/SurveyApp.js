@@ -46,7 +46,8 @@ import {
   rehydrateTrialsAnswerStoreFromSurvey,
 } from './lib/trialNavigation';
 import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
-import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale } from './lib/surveyLocale';
+import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale, resolveSurveyUiLanguage } from './lib/surveyLocale';
+import { loadLocaleBundle } from './lib/uiLanguages';
 import {
   ANSWER_LANGUAGE_QUESTION,
   applyAnswerLanguageChrome,
@@ -970,6 +971,21 @@ export default function SurveyApp() {
       const runtimeContext = finalSurveyJson._spRuntimeContext;
       clearMediaWatchLog();
       finalSurveyJson = applyMapTaskOrder(finalSurveyJson, `${projectId || 'preview'}:${getBrowserId()}`);
+      // UI strings for extra languages are code-split; fetch the ones this
+      // survey can show before building the model (bounded so it never blocks).
+      {
+        const surveyLanguages = new Set([resolveSurveyUiLanguage(finalSurveyJson)]);
+        try {
+          const translations = readTranslations(finalSurveyJson);
+          (translations.enabledLanguages || []).forEach((code) => surveyLanguages.add(code));
+          if (translations.sourceLanguage) surveyLanguages.add(translations.sourceLanguage);
+        } catch { /* untranslated survey */ }
+        await withTimeout(
+          Promise.all([...surveyLanguages].map((code) => loadLocaleBundle(code).catch(() => {}))),
+          4000,
+          null,
+        );
+      }
       const model = new Model(finalSurveyJson);
       applySurveyLocale(model, finalSurveyJson);
       applyRuntimeVariables(model, runtimeContext);

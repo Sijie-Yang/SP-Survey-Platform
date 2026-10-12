@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import {
   Box, Container, Typography, Button, Card, CardContent,
   Chip, TextField, InputAdornment, CircularProgress, Divider,
@@ -15,7 +15,6 @@ import { researcherEntryPath } from '../lib/researcherEntry';
 import { supabase } from '../lib/supabase';
 import { stripOwnResponseSupabase } from '../lib/ownResponseSupabase';
 import { projectTemplates } from '../lib/projectTemplates';
-import SurveyPreview from '../components/admin/SurveyPreview';
 import PublicHeader, { PublicFooter, GITHUB_REPO_URL } from '../components/layout/PublicHeader';
 import { useGithubStars } from '../lib/useGithubStars';
 import { useRegion } from '../contexts/RegionContext';
@@ -26,6 +25,9 @@ import { filterMediaByType } from '../lib/mediaUtils';
 import { coverCandidatesForTemplate, DEFAULT_TEMPLATE_COVER, hashString, loadCoverIndex, useCoverCandidate } from '../lib/templateCover';
 import { listPreviewMedia } from '../lib/previewMediaLibrary';
 import { paperTemplateDoc } from './paperTemplateDocs';
+
+// SurveyJS is heavy and only needed when a template preview is opened.
+const SurveyPreview = lazy(() => import('../components/admin/SurveyPreview'));
 const CLAMP = (lines) => ({
   display: '-webkit-box',
   WebkitLineClamp: lines,
@@ -64,7 +66,8 @@ export default function LandingPage() {
   const [search, setSearch] = useState('');
   const [onlineLiveCount, setOnlineLiveCount] = useState(0);
   const [benchSummary, setBenchSummary] = useState(null);
-  const [heroScroll, setHeroScroll] = useState(0);
+  const heroBgRef = useRef(null);
+  const heroContentRef = useRef(null);
 
   useEffect(() => {
     loadTemplates();
@@ -89,10 +92,30 @@ export default function LandingPage() {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (reduce) return undefined;
     let raf = 0;
+    // Write the parallax straight to the DOM: setting state here re-rendered
+    // the whole landing page (and generated new CSS classes) every frame.
+    let last = -1;
+    const apply = (y) => {
+      if (y === last) return;
+      last = y;
+      const bg = heroBgRef.current;
+      const content = heroContentRef.current;
+      if (bg) {
+        // Avoid transform on first paint — Safari often refuses muted autoplay
+        // inside a transformed ancestor until a later navigation/gesture.
+        bg.style.transform = y > 0 ? `translateY(${y * 0.22}px) scale(${1 + y * 0.00025})` : '';
+        bg.style.opacity = y > 0 ? String(Math.max(0.55, 1 - y / 420)) : '';
+        bg.style.willChange = y > 0 ? 'transform, opacity' : '';
+      }
+      if (content) {
+        content.style.opacity = String(Math.max(0.75, 1 - y / 520));
+        content.style.transform = `translateY(${y * 0.08}px)`;
+      }
+    };
     const onScroll = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        setHeroScroll(Math.min(220, Math.max(0, window.scrollY)));
+        apply(Math.min(220, Math.max(0, window.scrollY)));
       });
     };
     onScroll();
@@ -230,31 +253,22 @@ export default function LandingPage() {
         }}
       >
         <Box
+          ref={heroBgRef}
           sx={{
             position: 'absolute',
             inset: 0,
-            // Avoid transform on first paint — Safari often refuses muted autoplay
-            // inside a transformed ancestor until a later navigation/gesture.
-            ...(heroScroll > 0
-              ? {
-                  transform: `translateY(${heroScroll * 0.22}px) scale(${1 + heroScroll * 0.00025})`,
-                  opacity: Math.max(0.55, 1 - heroScroll / 420),
-                  willChange: 'transform, opacity',
-                }
-              : null),
           }}
         >
           <StreetscapeAtmosphere />
         </Box>
         <Container
+          ref={heroContentRef}
           maxWidth="md"
           sx={{
             position: 'relative',
             zIndex: 1,
             py: { xs: 6, md: 10 },
             px: { xs: 2.5, sm: 3 },
-            opacity: Math.max(0.75, 1 - heroScroll / 520),
-            transform: `translateY(${heroScroll * 0.08}px)`,
           }}
         >
           <Box
@@ -615,6 +629,7 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
           </Box>
         )}
         {config && !loading && (
+          <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>}>
           <SurveyPreview
             config={config}
             currentProject={{
@@ -624,6 +639,7 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
             }}
             showMediaAssignment={false}
           />
+          </Suspense>
         )}
       </DialogContent>
       <DialogActions>

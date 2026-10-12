@@ -8,7 +8,9 @@
 import { adminI18n } from '../contexts/adminI18n';
 import { localeChrome } from '../contexts/localeChrome';
 import { localePublic } from '../contexts/localePublic';
-import { localeAdmin, localePhrases } from '../contexts/localeBundles';
+import { localeAdmin, localePhrases, loadLocaleBundle } from '../contexts/localeBundles';
+
+export { loadLocaleBundle };
 
 export const UI_LANGUAGES = [
   { id: 'en', nativeName: 'English', short: 'EN', surveyJs: 'en', intl: 'en-US', priority: 0 },
@@ -50,12 +52,25 @@ export function intlLocale(id) {
   return uiLanguageById(id).intl;
 }
 
+// Merging the dictionaries copies thousands of keys, so build each one once
+// (per language, and again only after its lazy bundle arrives).
+const dictionaryCache = new Map();
+
 export function interfaceDictionary(language) {
   const code = normalizeUiLanguage(language);
-  const overlay = { ...(localeAdmin[code] || {}), ...(localeChrome[code] || {}), ...(localePublic[code] || {}) };
-  if (code === 'zh') return { ...adminI18n.en, ...adminI18n.zh, ...overlay };
-  if (code === 'zh-TW') return { ...adminI18n.en, ...adminI18n.zh, ...overlay };
-  return { ...adminI18n.en, ...overlay };
+  const bundle = localeAdmin[code];
+  const cached = dictionaryCache.get(code);
+  if (cached && cached.bundle === bundle) return cached.dict;
+  if (bundle === undefined && code !== 'en' && code !== 'zh') {
+    loadLocaleBundle(code).catch(() => {});
+  }
+  const overlay = { ...(bundle || {}), ...(localeChrome[code] || {}), ...(localePublic[code] || {}) };
+  let dict;
+  if (code === 'zh') dict = { ...adminI18n.en, ...adminI18n.zh, ...overlay };
+  else if (code === 'zh-TW') dict = { ...adminI18n.en, ...adminI18n.zh, ...overlay };
+  else dict = { ...adminI18n.en, ...overlay };
+  dictionaryCache.set(code, { bundle, dict });
+  return dict;
 }
 
 /** Inline Chinese/English label. Other languages use the phrase bundle. */
@@ -69,7 +84,10 @@ export function lookupPhrase(language, text) {
   const code = normalizeUiLanguage(language);
   if (code === 'en' || code === 'zh') return undefined;
   const table = localePhrases[code];
-  if (!table) return undefined;
+  if (!table) {
+    loadLocaleBundle(code).catch(() => {});
+    return undefined;
+  }
   if (Object.hasOwn(table, text)) return table[text];
   const trimmed = text.replace(/\s+/g, ' ').trim();
   if (trimmed !== text && Object.hasOwn(table, trimmed)) return table[trimmed];
