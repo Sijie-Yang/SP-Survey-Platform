@@ -386,6 +386,7 @@ export default function ImageAnnotationCanvas({
   });
   const [imgError, setImgError] = useState(false);
   const [imgSrc, setImgSrc] = useState(imageUrl);
+  const [pendingHeight, setPendingHeight] = useState(0);
   /** Multi-select: ids of highlighted shapes (Select mode + SAM Text batch). */
   const [selectedIds, setSelectedIds] = useState([]);
   // Empty string = None (no label on newly confirmed shapes).
@@ -488,9 +489,11 @@ export default function ImageAnnotationCanvas({
     const ctx = canvas.getContext('2d');
     const w = img.clientWidth;
     const h = img.clientHeight;
-    canvas.width = w;
-    canvas.height = h;
-    setDims({
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    // Keep the same object when the size is unchanged so ResizeObserver
+    // callbacks don't trigger an extra render on every redraw.
+    setDims(prev => prev.w === w && prev.h === h ? prev : {
       w,
       h
     });
@@ -559,13 +562,18 @@ export default function ImageAnnotationCanvas({
       }
     }
   }, [shapes, draft, selectedIds, activeLabel, labelColors]);
+  const redrawRef = useRef(redraw);
+  redrawRef.current = redraw;
   useEffect(() => {
     redraw();
-    const ro = new ResizeObserver(redraw);
-    if (containerRef.current) ro.observe(containerRef.current);
+  }, [redraw]);
+  // Observe only the image: the toolbar above it reflows on every hint/count
+  // change, and re-subscribing on each shape edit caused redundant redraws.
+  useEffect(() => {
+    const ro = new ResizeObserver(() => redrawRef.current());
     if (imgRef.current) ro.observe(imgRef.current);
     return () => ro.disconnect();
-  }, [redraw, imageUrl, zoom]);
+  }, [imgSrc, imgError, zoom]);
   useEffect(() => {
     if (!imageUrl) return undefined;
     historyRef.current.reset();
@@ -574,6 +582,10 @@ export default function ImageAnnotationCanvas({
     clearSelection();
     setDraft(null);
     setDrag(null);
+    // Hold the previous image's height until the new one loads so the
+    // annotation box (and the dialog around it) doesn't collapse and bounce.
+    const prevH = imgRef.current?.clientHeight || 0;
+    if (prevH > 0) setPendingHeight(prevH);
     setImgSrc(imageUrl);
     let cancelled = false;
     const probe = new window.Image();
@@ -1557,12 +1569,14 @@ export default function ImageAnnotationCanvas({
       width: '100%',
       overflow: 'auto',
       maxHeight: '75vh',
-      overscrollBehavior: 'contain'
+      overscrollBehavior: 'contain',
+      scrollbarGutter: 'stable'
     }}>
       <Box sx={{
         position: 'relative',
         display: 'block',
         width: `${zoom * 100}%`,
+        minHeight: pendingHeight && !imgError ? pendingHeight : undefined,
         mx: centerContent ? 'auto' : undefined
       }}>
         {imgError ? <Box sx={{
@@ -1582,7 +1596,13 @@ export default function ImageAnnotationCanvas({
           width: '100%',
           display: 'block',
           borderRadius: 8
-        }} onLoad={redraw} onError={() => setImgError(true)} />}
+        }} onLoad={() => {
+          setPendingHeight(0);
+          redraw();
+        }} onError={() => {
+          setPendingHeight(0);
+          setImgError(true);
+        }} />}
         {!imgError && <canvas ref={canvasRef} aria-label={uiPair(language, 'Annotation canvas', '标注画布')} onClick={browseMode ? undefined : handleClick} onDoubleClick={browseMode ? undefined : handleDoubleClick} onPointerDown={browseMode ? undefined : handlePointerDown} onPointerMove={browseMode ? undefined : handlePointerMove} onPointerUp={browseMode ? undefined : handlePointerUp} onPointerCancel={() => setDrag(null)} style={{
           position: 'absolute',
           top: 0,
