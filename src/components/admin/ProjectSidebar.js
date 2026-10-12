@@ -183,6 +183,14 @@ export default function ProjectSidebar({
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuProject, setMenuProject] = useState(null);
   const [templatesExpanded, setTemplatesExpanded] = useState(true);
+  // Once the researcher has their own projects, start with templates folded
+  // so "My Projects" is what they see first (they can still expand it).
+  const autoCollapsedTemplatesRef = React.useRef(false);
+  useEffect(() => {
+    if (autoCollapsedTemplatesRef.current || projects.length === 0) return;
+    autoCollapsedTemplatesRef.current = true;
+    setTemplatesExpanded(false);
+  }, [projects.length]);
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [expandedTemplateMetadata, setExpandedTemplateMetadata] = useState({});
   const [expandedProjectMetadata, setExpandedProjectMetadata] = useState({});
