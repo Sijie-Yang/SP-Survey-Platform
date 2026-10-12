@@ -57,6 +57,45 @@ export async function resolvePreviewMediaContext(project = {}) {
       fromPreviewLibrary: false,
     };
   }
+  return fetchSharedPreviewContext();
+}
+
+/**
+ * Same as resolvePreviewMediaContext, but reuses the shared-library lookup for
+ * a short while. For live editor previews that rebuild on every edit.
+ */
+export function resolvePreviewMediaContextCached(project = {}) {
+  const projectImages = Array.isArray(project.preloadedImages) ? project.preloadedImages : [];
+  if (projectImages.length > 0) return resolvePreviewMediaContext(project);
+  return loadSharedPreviewContext();
+}
+
+// The shared library rarely changes; the question preview asks for it on every
+// edit, so reuse one lookup for a short while instead of hitting Supabase/R2.
+const SHARED_PREVIEW_TTL_MS = 30_000;
+let sharedPreviewCache = null; // { at, promise }
+
+function loadSharedPreviewContext() {
+  const now = Date.now();
+  if (sharedPreviewCache && now - sharedPreviewCache.at < SHARED_PREVIEW_TTL_MS) {
+    return sharedPreviewCache.promise;
+  }
+  const promise = fetchSharedPreviewContext();
+  sharedPreviewCache = { at: now, promise };
+  promise.then((ctx) => {
+    if (!ctx.images.length && sharedPreviewCache?.promise === promise) sharedPreviewCache = null;
+  }, () => {
+    if (sharedPreviewCache?.promise === promise) sharedPreviewCache = null;
+  });
+  return promise;
+}
+
+/** Drop the cached shared preview library (e.g. after editing it). */
+export function invalidatePreviewMediaCache() {
+  sharedPreviewCache = null;
+}
+
+async function fetchSharedPreviewContext() {
   try {
     const saved = await loadPreviewMediaLibrary();
     if (saved.revision > 0) {

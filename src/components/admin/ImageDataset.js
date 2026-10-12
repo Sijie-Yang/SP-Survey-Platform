@@ -133,7 +133,13 @@ function DatasetDialog({
   closeLabel,
   keepMounted = false
 }) {
-  return <Dialog open={open} onClose={onClose} fullWidth maxWidth={maxWidth} keepMounted={keepMounted}>
+  // Pin to the top so content height changes (e.g. switching images) don't
+  // re-center the dialog and make it bounce.
+  return <Dialog open={open} onClose={onClose} fullWidth maxWidth={maxWidth} keepMounted={keepMounted} sx={{
+    '& .MuiDialog-container': {
+      alignItems: 'flex-start'
+    }
+  }}>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent dividers>{children}</DialogContent>
       <DialogActions>

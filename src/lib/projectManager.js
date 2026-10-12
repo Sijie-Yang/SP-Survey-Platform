@@ -446,6 +446,26 @@ export const getProjectById = async (projectId) => {
   }
 };
 
+/**
+ * Cheap change check for the editor's remote-draft poll: returns the draft
+ * timestamp without downloading the survey config and media list. Returns
+ * undefined when it can't tell (callers then load the full project).
+ */
+export const getProjectDraftStamp = async (projectId) => {
+  if (!isPlatformMode()) return undefined;
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('draft_updated_at,updated_at')
+      .eq('id', projectId)
+      .maybeSingle();
+    if (error || !data) return undefined;
+    return data.draft_updated_at || data.updated_at || null;
+  } catch {
+    return undefined;
+  }
+};
+
 // The participant link must use the released view even when the owner is signed in.
 export const getParticipantProject = async (projectId) => {
   if (!isPlatformMode()) return localLoadProject(projectId);

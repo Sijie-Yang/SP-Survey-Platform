@@ -267,6 +267,9 @@ export default function AdminApp() {
     return () => window.removeEventListener('sp-assistant-open-preview', openPreview);
   }, [openOverlay]);
   const [surveyConfig, setSurveyConfig] = useState(null);
+  // Latest config for async code (e.g. to notice edits made while a save is in flight).
+  const surveyConfigRef = useRef(null);
+  surveyConfigRef.current = surveyConfig;
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -422,14 +425,8 @@ export default function AdminApp() {
     
     // Check survey config changes
     if (surveyConfig && lastSavedConfig) {
-      const configChanged = JSON.stringify(surveyConfig) !== JSON.stringify(lastSavedConfig);
-      console.log('🔍 Checking survey config for changes:', {
-        hasConfig: !!surveyConfig,
-        hasLastSaved: !!lastSavedConfig,
-        configChanged,
-        surveyTitle: surveyConfig?.title,
-        lastSavedTitle: lastSavedConfig?.title
-      });
+      const configChanged = surveyConfig !== lastSavedConfig
+        && JSON.stringify(surveyConfig) !== JSON.stringify(lastSavedConfig);
       hasChanges = hasChanges || configChanged;
     }
     
@@ -528,9 +525,18 @@ export default function AdminApp() {
       if (!projectId || remoteSyncInFlightRef.current || saveInFlightRef.current) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
 
+      // The open page/question editor keeps its edits in local state, so
+      // hasUnsavedChanges is still false while typing there. Don't swap the
+      // config underneath it (that's what made fields "change on their own").
+      const selection = editorSelectionRef.current;
+      if (selection?.dirty || selection?.pageDirty) return;
+
       remoteSyncInFlightRef.current = true;
       try {
-        const { getProjectById } = await import('./lib/projectManager');
+        const { getProjectById, getProjectDraftStamp } = await import('./lib/projectManager');
+        // Poll just the timestamp; only download the whole project when it moved.
+        const stamp = await getProjectDraftStamp(projectId);
+        if (stamp !== undefined && (!stamp || stamp === draftUpdatedAtRef.current)) return;
         const latest = await getProjectById(projectId);
         if (!latest || currentProjectIdRef.current !== projectId) return;
 
@@ -1191,6 +1197,7 @@ export default function AdminApp() {
 
     saveInFlightRef.current = true;
     setSaveStatus('saving');
+    const configAtStart = surveyConfigRef.current;
 
     try {
       const projectToSave = {
@@ -1215,25 +1222,37 @@ export default function AdminApp() {
         draftUpdatedAtRef.current = savedProject.draftUpdatedAt || null;
 
         const savedConfig = JSON.parse(JSON.stringify(latestSurveyConfig));
+        // If the researcher kept editing during the network round trip, keep
+        // their newer config instead of rolling it back to the saved snapshot;
+        // the dirty check then schedules another autosave for those edits.
+        const editedDuringSave = !overrideConfig && surveyConfigRef.current !== configAtStart;
         setLastSavedConfig(savedConfig);
-        setSurveyConfig(latestSurveyConfig);
-        setHasUnsavedChanges(false);
+        if (!editedDuringSave) {
+          setSurveyConfig(latestSurveyConfig);
+          setHasUnsavedChanges(false);
+        }
         setHasUnsavedImageDatasetChanges(false);
         setLatestImageDatasetConfig(null);
-        setSaveStatus('saved');
+        setSaveStatus(editedDuringSave ? 'unsaved' : 'saved');
         setLastSavedAt(Date.now());
 
-        const newStates = { ...projectStates };
-        if (newStates[currentProject.id]) {
-          newStates[currentProject.id] = {
-            ...newStates[currentProject.id],
-            hasUnsavedChanges: false,
-            surveyConfig: latestSurveyConfig,
-            lastSavedConfig: savedConfig,
+        const projectId = currentProject.id;
+        setProjectStates((prev) => {
+          if (!prev[projectId]) return prev;
+          const next = {
+            ...prev,
+            [projectId]: editedDuringSave
+              ? { ...prev[projectId], lastSavedConfig: savedConfig }
+              : {
+                ...prev[projectId],
+                hasUnsavedChanges: false,
+                surveyConfig: latestSurveyConfig,
+                lastSavedConfig: savedConfig,
+              },
           };
-          setProjectStates(newStates);
-          saveProjectStatesToStorage(newStates);
-        }
+          saveProjectStatesToStorage(next);
+          return next;
+        });
 
         if (!silent) {
           setSnackbar({

@@ -7,7 +7,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { buildSingleQuestionSurvey } from '../../lib/singleQuestionSurvey';
 import { getTrialCount } from '../../lib/trialNavigation';
 import { isCuratedMediaMode, isRandomMediaQuestion, resolveMediaFolderTags, resolveSkillQuestions } from '../../lib/surveyMediaInjection';
-import { adaptQuestionForPreviewLibrary, resolvePreviewMediaContext } from '../../lib/previewMediaLibrary';
+import { adaptQuestionForPreviewLibrary, resolvePreviewMediaContextCached } from '../../lib/previewMediaLibrary';
 import { useRegion } from '../../contexts/RegionContext';
 import { conditionVariants, normalizeConditions, withConditionWording } from '../../lib/surveyRuntimeContext';
 import { isPreviewMessage, previewAppearance, PREVIEW_DEVICES, PREVIEW_FAILED, PREVIEW_READY, PREVIEW_RENDERED, PREVIEW_UPDATE, QUESTION_PREVIEW_PATH } from '../../lib/questionPreviewProtocol';
@@ -43,20 +43,32 @@ export default function QuestionParticipantPreview({
   const sequence = useRef(0);
   // Watch the full draft so new settings (including allowTie/tieLabel) cannot be omitted.
   const questionKey = JSON.stringify(question || {});
-  const mediaSourceKey = JSON.stringify({
-    images: (currentProject?.preloadedImages || []).map(img => img.key || img.url || img.logicalFolder || img.folder || ''),
-    tags: currentProject?.imageDatasetConfig || {}
-  });
+  const preloadedImages = currentProject?.preloadedImages;
+  const imageDatasetConfig = currentProject?.imageDatasetConfig;
+  const mediaSourceKey = useMemo(() => JSON.stringify({
+    images: (preloadedImages || []).map(img => img.key || img.url || img.logicalFolder || img.folder || ''),
+    tags: imageDatasetConfig || {}
+  }), [preloadedImages, imageDatasetConfig]);
+  // Read the latest project inside the effect without rebuilding whenever
+  // its object identity changes (autosave/polls replace it often).
+  const projectRef = useRef(currentProject);
+  projectRef.current = currentProject;
+  const builtOnce = useRef(false);
   const appearanceKey = JSON.stringify(previewAppearance(surveyConfig || currentProject?.config, currentProject?.theme));
   const appearance = useMemo(() => JSON.parse(appearanceKey), [appearanceKey]);
   useEffect(() => {
     let cancelled = false;
     setPending(true);
+    // Build right away the first time, then debounce while the researcher types:
+    // each build creates a fresh SurveyJS model in the preview frame.
+    const delay = builtOnce.current ? 350 : 0;
+    builtOnce.current = true;
     const timer = setTimeout(async () => {
+      const currentProject = projectRef.current;
       try {
         let draft = withConditionWording(JSON.parse(questionKey), activeCondition);
         if (!draft.type) return;
-        const media = await resolvePreviewMediaContext(currentProject || {});
+        const media = await resolvePreviewMediaContextCached(currentProject || {});
         if (cancelled) return;
         if (media.fromPreviewLibrary) draft = adaptQuestionForPreviewLibrary(draft, media.images);
         const questionConfig = {
@@ -103,12 +115,12 @@ export default function QuestionParticipantPreview({
           setPending(false);
         }
       }
-    }, 0);
+    }, delay);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [questionKey, mediaSourceKey, currentProject, appearance, zh, resetCount, activeCondition]);
+  }, [questionKey, mediaSourceKey, currentProject?.id, appearance, zh, resetCount, activeCondition]);
   const sendSnapshot = useCallback(() => {
     if (snapshot) iframeRef.current?.contentWindow?.postMessage({
       type: PREVIEW_UPDATE,

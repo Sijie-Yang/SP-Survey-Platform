@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { adminI18n } from './adminI18n';
 import { interfaceDictionary, normalizeUiLanguage } from '../lib/uiLanguages';
+import { onLocaleBundleLoaded } from './localeBundles';
 
 export const RegionContext = createContext(null);
 
@@ -42,11 +43,22 @@ export function RegionProvider({ children }) {
     localStorage.setItem('sp-survey-language', next);
   };
 
+  // Re-render once a lazily loaded language bundle arrives (UI or survey language).
+  const [bundleVersion, setBundleVersion] = useState(0);
+  useEffect(() => onLocaleBundleLoaded(() => setBundleVersion((n) => n + 1)), []);
+
   const isChinaMode = region === REGIONS.CHINA;
-  const t = interfaceDictionary(language);
+  const t = useMemo(() => interfaceDictionary(language), [language, bundleVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A stable value keeps every useRegion() consumer from re-rendering when
+  // the provider's parent re-renders.
+  const value = useMemo(
+    () => ({ region, setRegion, language, setLanguage, isChinaMode, t, bundleVersion }),
+    [region, language, isChinaMode, t, bundleVersion], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   return (
-    <RegionContext.Provider value={{ region, setRegion, language, setLanguage, isChinaMode, t }}>
+    <RegionContext.Provider value={value}>
       {children}
     </RegionContext.Provider>
   );

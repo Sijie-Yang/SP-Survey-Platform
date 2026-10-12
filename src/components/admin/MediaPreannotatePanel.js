@@ -1084,7 +1084,7 @@ export default function MediaPreannotatePanel({
             gridColumn: '1 / -1',
             gridRow: 2,
             minWidth: 0,
-            minHeight: annotLoading ? 160 : 0,
+            minHeight: 160,
             position: 'relative',
             borderRadius: 1.5,
             bgcolor: 'background.paper',

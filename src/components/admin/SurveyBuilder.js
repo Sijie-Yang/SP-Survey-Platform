@@ -1,6 +1,6 @@
 import { applySurveyThemePreset, matchesSurveyThemePreset, SURVEY_THEME_OPTIONS, SURVEY_THEME_PRESETS } from '../../lib/surveyThemePresets';
 import DescriptionMarkdownEditor from './DescriptionMarkdownEditor';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import RuntimeContextSettings from './RuntimeContextSettings';
 import {
   Box,
@@ -492,10 +492,9 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
   };
 
 
-  const getSurveyValidationWarnings = (cfg) => getSurveyValidationWarningStrings(cfg);
 
-  const validationWarnings = getSurveyValidationWarnings(config);
-  const duplicateQuestionIssues = findDuplicateQuestionNames(config);
+  const validationWarnings = useMemo(() => getSurveyValidationWarningStrings(config), [config]);
+  const duplicateQuestionIssues = useMemo(() => findDuplicateQuestionNames(config), [config]);
 
   const handleRepairDuplicateQuestionNames = async () => {
     const { config: fixed, renames, remainingDuplicates } = repairDuplicateQuestionNames(config);
