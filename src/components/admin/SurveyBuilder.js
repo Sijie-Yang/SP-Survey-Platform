@@ -72,6 +72,7 @@ import FullSurveyPreview from './FullSurveyPreview';
 import SurveyPreview from './SurveyPreview';
 import ConfirmDialog from '../layout/ConfirmDialog';
 import AiAssistantPanel from './AiAssistantPanel';
+import SpSchemePanel from './SpSchemePanel';
 import SurveyThemePreviewPanel from '../SurveyThemePreviewPanel';
 import useSurveyAssistant from '../../hooks/useSurveyAssistant';
 import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
@@ -84,6 +85,9 @@ import {
 } from '../../lib/questionNames';
 // Old API functions removed - now using chatApi.js
 import { getSurveyValidationWarningStrings } from '../../lib/designProtocol';
+
+// Loaded on demand so the Builder does not pull the Skill library client until an import runs.
+const saveImportedSkill = async (skill) => (await import('../../lib/skillManager')).saveSkill(skill);
 
 /** Compact color picker row for Theme Customization */
 function ThemeColorField({ label, hint, value, onChange }) {
@@ -554,6 +558,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         title={t.builderTitle}
         description={t.builderDescription}
       />
+
+      <SpSchemePanel config={config} onChange={onChange} saveSkill={saveImportedSkill} />
 
       <AdminActionBar
         label={t.builderSurveySettings}
