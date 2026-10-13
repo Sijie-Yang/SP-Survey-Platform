@@ -210,17 +210,19 @@ export function buildSpSchemeText() {
   const rules = DESIGN_CAPABILITIES.rules.filter((rule) => !MCP_ONLY_RULE.test(rule));
   return `# SP-Scheme ${SP_SCHEME_VERSION} — design an SP-Survey study
 
-You are helping a researcher design a perception survey for SP-Survey (https://sp-survey.org). The researcher may not be technical. You may invent any interface and interaction, but how images are randomised, how questions are described and how answers are recorded MUST follow this scheme, otherwise the platform rejects the upload.
+You are helping a researcher design a perception survey for SP-Survey (https://sp-survey.org). The researcher may not be technical. The interface is yours to design: participants will see exactly the interactions you build and the researcher approves, not a standard form. Only how images are randomised, how questions are described and how answers are recorded MUST follow this scheme, otherwise the platform rejects the upload.
 
 ## 0. Workflow — follow these steps in order
 
 **Step 1 · Understand the study.** Ask briefly for what you need: research question, what participants judge, language, how many images each person sees, roughly how long it should take. Suggest a design in plain language before writing code.
 
 **Step 2 · Build a clickable prototype and let the researcher try it.** Make ONE self-contained HTML page called \`preview.html\` and show it in your preview / canvas / artifact view (or tell the researcher to open it in a browser). It walks through the whole survey page by page with Next/Back buttons:
-- native questions (section 4) as simple look-alike mock-ups;
-- each custom interaction (section 5) working for real, using placeholder images;
+- every question with a designed look or interaction (image comparisons, sliders, sorting, slides, games…) is a custom interaction (section 5): write it as its own \`interactions/<ref>.html\` file first, then embed that same file in preview.html (for example as an \`<iframe srcdoc>\`), working for real with placeholder images. What the researcher tries must be the very code that ships;
+- plain form questions (consent, demographics, open text) may use native types (section 4), shown as simple mock-ups;
 - under each question, the exact JSON that would be recorded, so the researcher can see what data they will get.
 Ask the researcher to click through it on a phone-sized and a desktop-sized window. Change it until they say they are happy. Do NOT produce the package before the researcher confirms.
+
+**Ship what was approved.** When packing, every question that has its own interface in the prototype MUST become a custom interaction whose HTML is exactly what the researcher tried. Never swap it for a native question type or a built-in task (\`preset_*\`) at packing time, even if one looks similar: the researcher approved your design, and custom interactions get the same platform analysis as the result family they record (for example \`pairwiseChoice\` gets the same TrueSkill ranking as the built-in A/B task). Use native types or built-in tasks only for plain form questions, or when the researcher explicitly asks for the standard platform version.
 
 **Step 3 · Pack it as a zip.** When the researcher confirms, build \`<study-name>.zip\`:
 
@@ -265,7 +267,7 @@ ${rules.map((rule) => `- ${rule}`).join('\n')}
 
 ## 4. Native question types
 
-Prefer a native type whenever it fits; it gets full analysis, export and Silicon Sample support.
+Native types render in the platform's standard form style. Use them for consent, demographics and other plain form questions, or when the researcher explicitly wants the standard version. They are not a replacement for an interface you designed in the prototype.
 
 ${questionCatalogLines()}
 
@@ -273,9 +275,9 @@ Built-in interactive tasks (use \`"type": "skillquestion"\` with this \`skillId\
 
 ${presetLines()}
 
-## 5. Custom interactions (any interface you can imagine)
+## 5. Custom interactions (the default for anything you designed)
 
-When no native type fits, write a self-contained HTML file \`interactions/<ref>.html\` and reference it from a question with \`"type": "skillquestion", "skillId": "custom:<ref>"\`. Slides, drag-and-drop, timed exposure, canvas, animation and games are all fine.
+For every question with its own designed interface, write a self-contained HTML file \`interactions/<ref>.html\` and reference it from a question with \`"type": "skillquestion", "skillId": "custom:<ref>"\`. Slides, drag-and-drop, timed exposure, canvas, animation and games are all fine.
 
 Each entry in \`customInteractions\`:
 
@@ -332,11 +334,12 @@ ${EXAMPLE_INTERACTION_HTML.trim()}
 ## 7. Self-check before packing
 
 1. The researcher has tried the prototype and confirmed.
-2. sp-scheme.json is valid JSON with \`format\`, \`spScheme\`, \`survey.pages\`.
-3. Question names are unique; every \`custom:<ref>\` has a matching \`customInteractions[].ref\` and file, and every interaction is used.
-4. No media URLs in sp-scheme.json; media questions use platform sampling.
-5. Every interaction calls \`SPSkill.setAnswer({...})\`, uses \`spskill-init\` or \`SPSkill.getConfig/getImages\`, has one resultSchema field from the list, and a matching exampleAnswer.
-6. No external scripts, network calls or credentials.
+2. Every question that has its own interface in the prototype is packed as a custom interaction with that same HTML, not replaced by a native type or \`preset_*\` task.
+3. sp-scheme.json is valid JSON with \`format\`, \`spScheme\`, \`survey.pages\`.
+4. Question names are unique; every \`custom:<ref>\` has a matching \`customInteractions[].ref\` and file, and every interaction is used.
+5. No media URLs in sp-scheme.json; media questions use platform sampling.
+6. Every interaction calls \`SPSkill.setAnswer({...})\`, uses \`spskill-init\` or \`SPSkill.getConfig/getImages\`, has one resultSchema field from the list, and a matching exampleAnswer.
+7. No external scripts, network calls or credentials.
 `;
 }
 

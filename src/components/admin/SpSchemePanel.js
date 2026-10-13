@@ -241,6 +241,12 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
                   </Typography>
                 ) : null}
               </Alert>
+              {upload?.hasPreview && summary && !summary.customInteractionCount ? (
+                <Alert severity="warning" data-testid="sp-scheme-no-custom">
+                  {L('This package has a prototype but no custom interactions, so participants will see the standard platform questions, not the interface you tried. If that is not what you want, ask the model: "Pack every question that has its own interface in the prototype as a custom interaction with the same HTML, as SP-Scheme requires."',
+                    '这个包附带了原型，但没有任何自定义交互，参与者看到的会是平台的标准题型，而不是你试玩过的界面。如果这不是你想要的，可以对大模型说："按 SP-Scheme 的要求，把原型里有自己界面的题都打包成自定义交互，用同一份 HTML。"')}
+                </Alert>
+              ) : null}
               {report.errors.length ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
               {report.warnings.length ? <Box><Typography variant="subtitle2" color="warning.main">{L('Warnings', '提醒')}</Typography><IssueList items={report.warnings} /></Box> : null}
               {summary ? (

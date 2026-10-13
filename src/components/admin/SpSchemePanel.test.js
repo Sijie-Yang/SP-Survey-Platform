@@ -3,6 +3,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SpSchemePanel from './SpSchemePanel';
 import { RegionProvider } from '../../contexts/RegionContext';
+import { strToU8, zipSync } from 'fflate';
 import { buildExampleZip } from '../../lib/spScheme';
 
 function renderPanel(props = {}) {
@@ -48,4 +49,16 @@ test('an uploaded zip is checked and imported only after it passes', async () =>
   const next = onChange.mock.calls[0][0];
   expect(next.pages[1].elements[0].skillId).toBe('skill_saved_1');
   expect(next.theme.primaryColor).toBe('#111111');
+});
+
+test('warns when a prototype was packed without its custom interactions', async () => {
+  renderPanel();
+  const manifest = {
+    format: 'sp-scheme-package',
+    spScheme: '1.0',
+    survey: { title: 'High street', pages: [{ name: 'p1', elements: [{ type: 'skillquestion', name: 'ab', skillId: 'preset_image_preference_forced', imageCount: 2, skillConfig: { mediaCount: 2, mediaType: 'image' } }] }] },
+  };
+  const zip = zipSync({ 'sp-scheme.json': strToU8(JSON.stringify(manifest)), 'preview.html': strToU8('<html></html>') });
+  fireEvent.change(screen.getByTestId('sp-scheme-file'), { target: { files: [new File([zip], 'hs.zip')] } });
+  expect(await screen.findByTestId('sp-scheme-no-custom')).toBeInTheDocument();
 });

@@ -21,6 +21,8 @@ describe('SP-Scheme text', () => {
     expect(text.indexOf('Build a clickable prototype')).toBeLessThan(text.indexOf('Pack it as a zip'));
     expect(text).toContain('interactions/<ref>.html');
     expect(text).toContain(SP_PREVIEW_SHIM);
+    expect(text).toContain('Ship what was approved');
+    expect(text).not.toContain('Prefer a native type whenever it fits');
   });
 
   test('carries the package format, sampling rules, result families and SDK contract', () => {
