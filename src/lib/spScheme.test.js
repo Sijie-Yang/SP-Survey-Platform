@@ -1,45 +1,42 @@
 import { strToU8, zipSync } from 'fflate';
 import {
-  SP_PREVIEW_SHIM,
   SP_SCHEME_EXAMPLE_PACKAGE,
+  SP_SITE_PREVIEW_SHIM,
   applySpSchemePackage,
+  buildExampleSite,
   buildExampleZip,
   buildSpSchemeText,
   parseSpSchemePackage,
   readSpSchemeUpload,
-  stripPreviewShim,
   validateSpSchemePackage,
 } from './spScheme';
 
-// The example package with its interaction file inlined, as the zip reader produces it.
-const examplePkg = () => readSpSchemeUpload(buildExampleZip()).pkg;
 const messages = (list) => list.map((item) => item.message).join('\n');
+const check = (read) => validateSpSchemePackage(read.pkg, { siteHtml: read.siteHtml });
 
 describe('SP-Scheme text', () => {
-  test('asks for a tested prototype before the zip', () => {
+  test('asks for one page, tried by the researcher, handed over unchanged', () => {
     const text = buildSpSchemeText();
-    expect(text.indexOf('Build a clickable prototype')).toBeLessThan(text.indexOf('Pack it as a zip'));
-    expect(text).toContain('interactions/<ref>.html');
-    expect(text).toContain(SP_PREVIEW_SHIM);
-    expect(text).toContain('Ship what was approved');
-    expect(text).not.toContain('Prefer a native type whenever it fits');
+    expect(text).toContain('ONE web page, `index.html`');
+    expect(text.indexOf('let the researcher try it')).toBeLessThan(text.indexOf('Hand over the same page'));
+    expect(text).toContain(SP_SITE_PREVIEW_SHIM);
+    expect(text).toContain('SPSite.answer');
+    expect(text).toContain('SPSite.complete()');
+    expect(text).not.toMatch(/customInteractions|SPSkill|skill_save/);
   });
 
-  test('carries the package format, sampling rules, result families and SDK contract', () => {
+  test('carries sampling rules and native answer shapes', () => {
     const text = buildSpSchemeText();
-    expect(text).toContain('"format": "sp-scheme-package"');
     expect(text).toContain('huggingface_random');
-    expect(text).toContain('SPSkill.setAnswer');
-    expect(text).toContain('pairwiseChoice');
     expect(text).toContain('`imageslidergroup`');
-    expect(text).toContain('preset_best_worst_choice');
+    expect(text).toContain('`sliders`: an object { <dimension id>: number }');
     expect(text).not.toMatch(/expectedDraftUpdatedAt/);
   });
 });
 
 describe('parseSpSchemePackage', () => {
   test('accepts a model reply wrapped in a json fence', () => {
-    const reply = `Here is your study:\n\`\`\`json\n${JSON.stringify(examplePkg())}\n\`\`\`\nGood luck!`;
+    const reply = `Here is your study:\n\`\`\`json\n${JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE)}\n\`\`\`\nGood luck!`;
     expect(parseSpSchemePackage(reply).format).toBe('sp-scheme-package');
   });
 
@@ -49,117 +46,112 @@ describe('parseSpSchemePackage', () => {
 });
 
 describe('readSpSchemeUpload', () => {
-  test('reads a zip whose files sit inside a folder and inlines interaction files', () => {
-    const { pkg, fromZip, files } = readSpSchemeUpload(buildExampleZip());
-    expect(fromZip).toBe(true);
-    expect(files).toContain('interactions/safety_duel.html');
-    expect(pkg.customInteractions[0].sourceHtml).toContain('SPSkill.setAnswer');
+  test('reads a bare index.html and its embedded survey', () => {
+    const read = readSpSchemeUpload(strToU8(buildExampleSite()));
+    expect(read.siteHtml).toContain('SPSite.onReady');
+    expect(read.pkg.survey.pages).toHaveLength(3);
+    expect(read.manifestSource).toBe('embedded');
   });
 
-  test('flags a missing interaction file and a preview page', () => {
+  test('reads a zip nested in a folder and inlines local assets', () => {
+    const page = buildExampleSite().replace('</head>', '<link rel="stylesheet" href="css/site.css"><script src="./app.js"></script></head>');
     const zip = zipSync({
-      'sp-scheme.json': strToU8(JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE)),
-      'preview.html': strToU8('<html></html>'),
-      '__MACOSX/._sp-scheme.json': strToU8('junk'),
+      'study/index.html': strToU8(page),
+      'study/css/site.css': strToU8('body{color:red}'),
+      'study/app.js': strToU8('window.x=1'),
+      '__MACOSX/._index.html': strToU8('junk'),
     });
     const read = readSpSchemeUpload(zip);
-    expect(read.hasPreview).toBe(true);
-    const report = validateSpSchemePackage(read.pkg);
-    expect(messages(report.errors)).toContain('interactions/safety_duel.html is not in the zip');
+    expect(read.fromZip).toBe(true);
+    expect(read.siteFile).toBe('index.html');
+    expect(read.siteHtml).toContain('<style>body{color:red}</style>');
+    expect(read.siteHtml).toContain('<script>window.x=1</script>');
+    expect(check(read).ok).toBe(true);
   });
 
-  test('a bare manifest with file references asks for the zip', () => {
+  test('a bare sp-scheme.json imports with the standard look and says so', () => {
     const read = readSpSchemeUpload(strToU8(JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE)));
-    expect(read.fromZip).toBe(false);
-    expect(messages(validateSpSchemePackage(read.pkg).errors)).toContain('upload the whole zip');
+    const report = check(read);
+    expect(report.ok).toBe(true);
+    expect(report.site).toBeNull();
+    expect(messages(report.warnings)).toContain('No index.html');
   });
 
-  test('rejects a zip without sp-scheme.json', () => {
-    expect(() => readSpSchemeUpload(zipSync({ 'a.html': strToU8('x') }))).toThrow('no sp-scheme.json');
-  });
-});
-
-describe('preview shim', () => {
-  test('is removed before saving', () => {
-    const html = `<head>${SP_PREVIEW_SHIM}</head><body>x</body>`;
-    expect(stripPreviewShim(html)).toBe('<head></head><body>x</body>');
+  test('rejects a zip with neither page nor manifest', () => {
+    expect(() => readSpSchemeUpload(zipSync({ 'a.txt': strToU8('x') }))).toThrow('neither index.html nor sp-scheme.json');
   });
 });
 
 describe('validateSpSchemePackage', () => {
-  test('the documented example passes', () => {
-    const report = validateSpSchemePackage(examplePkg());
+  test('the example page passes and keeps the page without the preview shim', () => {
+    const report = check(readSpSchemeUpload(buildExampleZip()));
     expect(messages(report.errors)).toBe('');
-    expect(report.ok).toBe(true);
-    expect(report.summary).toMatchObject({ pageCount: 2, questionCount: 3, customInteractionCount: 1 });
-    const duel = report.survey.pages[1].elements[0];
-    expect(duel.skillId).toBe('skill_pkg_safety_duel');
-    expect(duel.skillResultSchema[0].type).toBe('pairwiseChoice');
+    expect(report.summary).toMatchObject({ pageCount: 3, questionCount: 3, hasSite: true });
+    expect(report.site.html).toContain('SPSite.complete');
+    expect(report.site.html).not.toContain('sp-site-preview');
+    expect(report.site.id).toMatch(/^site-[0-9a-f]{16}$/);
   });
 
-  test('rejects a missing custom interaction reference', () => {
-    const pkg = examplePkg();
-    pkg.survey.pages[1].elements[0].skillId = 'custom:nope';
-    const report = validateSpSchemePackage(pkg);
-    expect(report.ok).toBe(false);
-    expect(messages(report.errors)).toContain('no customInteractions entry for "custom:nope"');
+  test('a page without the embedded survey is rejected', () => {
+    const report = validateSpSchemePackage(null, { siteHtml: '<html><body>hi</body></html>' });
+    expect(messages(report.errors)).toContain('id="sp-scheme"');
+  });
+
+  test('old packages with custom interactions are told to rebuild', () => {
+    const pkg = { ...SP_SCHEME_EXAMPLE_PACKAGE, spScheme: '1.0', customInteractions: [{ ref: 'x' }] };
+    const text = messages(validateSpSchemePackage(pkg).errors);
+    expect(text).toContain('SP-Scheme 1.0');
+    expect(text).toContain('no longer uses per-question custom interactions');
+  });
+
+  test('a page cannot declare skill questions', () => {
+    const pkg = JSON.parse(JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE));
+    pkg.survey.pages[1].elements[0] = { type: 'skillquestion', name: 'safety_duel', skillId: 'preset_image_preference_forced', imageCount: 2 };
+    const report = validateSpSchemePackage(pkg, { siteHtml: buildExampleSite() });
+    expect(messages(report.errors)).toContain('declare this question with a native type');
   });
 
   test('rejects invented media URLs on randomly sampled questions', () => {
-    const pkg = examplePkg();
-    pkg.survey.pages[1].elements[1].choices = [{ value: 'https://example.com/a.jpg' }];
-    const report = validateSpSchemePackage(pkg);
-    expect(messages(report.errors)).toContain('media URLs are not allowed');
-  });
-
-  test('rejects inline HTML on a question', () => {
-    const pkg = examplePkg();
-    pkg.survey.pages[1].elements[0].skillHtml = '<div></div>';
-    expect(messages(validateSpSchemePackage(pkg).errors)).toContain('put HTML in customInteractions');
-  });
-
-  test('applies the Skill save contract to custom interactions', () => {
-    const pkg = examplePkg();
-    pkg.customInteractions[0].resultSchema = [{ key: 'x', type: 'madeUpFamily' }];
-    pkg.customInteractions[0].sourceHtml = '<div>no sdk</div>';
-    const text = messages(validateSpSchemePackage(pkg).errors);
-    expect(text).toContain('SPSkill.setAnswer');
-    expect(text).toContain('madeUpFamily');
+    const pkg = JSON.parse(JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE));
+    pkg.survey.pages[1].elements[0].choices = [{ value: 'https://example.com/a.jpg' }];
+    expect(messages(validateSpSchemePackage(pkg, { siteHtml: buildExampleSite() }).errors)).toContain('media URLs are not allowed');
   });
 
   test('rejects duplicate question names and credentials', () => {
-    const pkg = examplePkg();
-    pkg.survey.pages[1].elements[1].name = 'safety_duel';
+    const pkg = JSON.parse(JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE));
+    pkg.survey.pages[2].elements[0].name = 'safety_duel';
     pkg.survey.falApiKey = 'secret';
     const text = messages(validateSpSchemePackage(pkg).errors);
     expect(text).toContain('Duplicate question name');
     expect(text).toContain('credential');
   });
 
-  test('rejects unknown built-in tasks', () => {
-    const pkg = examplePkg();
-    pkg.survey.pages[1].elements[0].skillId = 'preset_does_not_exist';
-    expect(messages(validateSpSchemePackage(pkg).errors)).toContain('unknown built-in task');
+  test('a page that never records answers is rejected', () => {
+    const html = buildExampleSite().replace(/SPSite\.answer\(/g, 'record(');
+    const report = validateSpSchemePackage(SP_SCHEME_EXAMPLE_PACKAGE, { siteHtml: html });
+    expect(messages(report.errors)).toContain('never calls SPSite.answer');
   });
 });
 
 describe('applySpSchemePackage', () => {
-  test('saves custom interactions and rewrites placeholders to library ids', async () => {
-    const report = validateSpSchemePackage(examplePkg());
-    const saveSkill = jest.fn(async (skill) => ({ skill: { ...skill, id: 'skill_123_abc', revision: 1 } }));
-    const config = await applySpSchemePackage(report, { saveSkill, baseConfig: { theme: { primaryColor: '#123456' }, logo: 'x' } });
-    expect(saveSkill).toHaveBeenCalledTimes(1);
-    expect(saveSkill.mock.calls[0][0].sourceHtml).toContain('SPSkill.setAnswer');
-    expect(saveSkill.mock.calls[0][0].sourceHtml).not.toContain('sp-preview-shim');
-    expect(saveSkill.mock.calls[0][0].file).toBeUndefined();
-    const duel = config.pages[1].elements[0];
-    expect(duel).toMatchObject({ skillId: 'skill_123_abc', skillRevision: 1, skillContractVersion: 1 });
+  test('stores the page on the config and keeps project settings', () => {
+    const report = check(readSpSchemeUpload(buildExampleZip()));
+    const config = applySpSchemePackage(report, { baseConfig: { theme: { primaryColor: '#123456' }, logo: 'x' } });
+    expect(config.spSite).toMatchObject({ id: report.site.id, version: '1.0' });
+    expect(config.spSite.html).toBe(report.site.html);
     expect(config.theme.primaryColor).toBe('#123456');
     expect(config.logo).toBe('x');
     expect(config.title).toBe('Street perception study');
+    expect(config.pages[0].elements[0].type).toBe('boolean');
   });
 
-  test('refuses an invalid report', async () => {
-    await expect(applySpSchemePackage({ ok: false }, { saveSkill: jest.fn() })).rejects.toThrow('Fix the package');
+  test('importing without a page removes an earlier one', () => {
+    const report = check(readSpSchemeUpload(strToU8(JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE))));
+    const config = applySpSchemePackage(report, { baseConfig: { spSite: { html: '<html></html>' } } });
+    expect(config.spSite).toBeUndefined();
+  });
+
+  test('refuses an invalid report', () => {
+    expect(() => applySpSchemePackage({ ok: false })).toThrow('Fix the package');
   });
 });

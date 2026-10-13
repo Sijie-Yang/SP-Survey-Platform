@@ -1,205 +1,356 @@
 /**
- * SP-Scheme: a copyable context document that lets any external LLM design an
- * SP-Survey study, plus the validator/importer for the package it returns.
+ * SP-Scheme: a copyable context document that lets any external LLM build a
+ * whole SP-Survey study as one web page (the "site"), plus the reader and
+ * validator for what it returns.
  *
- * The LLM may invent any interaction, but stimuli, question wording and answer
- * recording must follow the platform contract so Results Analysis, export and
- * Silicon Samples keep working. Pure module except applySpSchemePackage, which
- * receives its save function from the caller.
+ * The LLM owns every pixel of the site. The platform keeps owning the data:
+ * the embedded survey JSON declares each recorded question with a native type,
+ * the platform draws the media for each participant, and the site records
+ * answers only through SPSite (see spSite.js), which validates them against
+ * those native types. Responses, analysis and export therefore stay unchanged.
  */
 
 import { DESIGN_CAPABILITIES } from './designProtocol/capabilities';
-import { listGenerationContracts, listPresetSkillContracts } from './designProtocol/generationContracts';
+import { listGenerationContracts } from './designProtocol/generationContracts';
 import { findSecretFields } from './designProtocol/secrets';
 import { postProcessAiConfig, normalizeBuilderSurveyJson } from './designProtocol/normalize';
 import { validateSurveyConfig } from './designProtocol/validate';
-import { prepareSkillForSave } from './skillHtmlValidate';
-import { NATIVE_SKILL_RESULT_TYPE_IDS, skillResultTypesCatalogText } from './skillResultTypes';
 import { getPresetSkill } from './presetSkills';
 import { questionHasTrait } from './platformSchema';
+import {
+  ANSWER_SHAPES,
+  SP_SITE_SCRIPT_HOSTS,
+  SP_SITE_VERSION,
+  SITE_SHIM_END,
+  SITE_SHIM_START,
+  answerKindOf,
+  checkSiteHtml,
+  extractEmbeddedScheme,
+  stripSitePreviewShim,
+  utf8Bytes,
+} from './spSite';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 
-export const SP_SCHEME_VERSION = '1.0';
+export const SP_SCHEME_VERSION = '2.0';
 export const SP_SCHEME_FORMAT = 'sp-scheme-package';
-const CUSTOM_PREFIX = 'custom:';
-const PLACEHOLDER_PREFIX = 'skill_pkg_';
-const REF_RE = /^[a-z][a-z0-9_]{1,47}$/;
 
-// Agent/MCP-only rules (draft concurrency, publishing tools) do not apply to a pasted package.
-const MCP_ONLY_RULE = /expectedDraftUpdatedAt|survey_publish|Publish to Main Page|deterministic operations|media_import_from_template|skill_list/;
-
-const PREVIEW_SHIM_START = '<!-- sp-preview-shim:start -->';
-const PREVIEW_SHIM_END = '<!-- sp-preview-shim:end -->';
+// Agent/MCP-only rules and per-question HTML (Skill) rules do not apply to a site.
+const SITE_IRRELEVANT_RULE = /expectedDraftUpdatedAt|survey_publish|Publish to Main Page|deterministic operations|media_import_from_template|media_upload|skill/i;
 
 /**
- * Lets an interaction run on its own in a model's preview (Claude artifact,
- * ChatGPT canvas, a local browser): placeholder images, demo config, and an
- * on-screen readout of what SPSkill.setAnswer would record. Removed on import;
- * the platform SDK replaces it at runtime.
+ * Lets the site run on its own in a model's preview (Claude artifact, ChatGPT
+ * canvas, a local browser): builds the questions from the embedded
+ * <script id="sp-scheme"> JSON with placeholder images, and shows what would be
+ * recorded. Removed on import; on the platform SPSite already exists.
  */
-export const SP_PREVIEW_SHIM = `${PREVIEW_SHIM_START}
+export const SP_SITE_PREVIEW_SHIM = `${SITE_SHIM_START}
 <script>
 (function () {
-  if (window.SPSkill) return;
-  var cfg = window.SP_PREVIEW_CONFIG || {};
-  var n = Number(cfg.mediaCount) || 4;
-  var colors = ['#8fb3d9', '#d9a38f', '#9fd98f', '#d9cf8f', '#b38fd9', '#8fd9cf'];
-  var images = [];
-  for (var i = 0; i < n; i += 1) {
-    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420"><rect width="640" height="420" fill="' + colors[i % colors.length] + '"/><text x="320" y="225" font-size="44" text-anchor="middle" fill="#222" font-family="sans-serif">Image ' + (i + 1) + '</text></svg>';
-    images.push({ name: 'image_' + (i + 1) + '.jpg', url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), type: 'image' });
+  if (window.SPSite) return;
+  var KIND = { text: 'text', comment: 'text', number: 'number', rating: 'rating', imagerating: 'rating', mediarating: 'rating',
+    boolean: 'boolean', consent: 'boolean', imageboolean: 'boolean', mediaboolean: 'boolean',
+    radiogroup: 'choice', dropdown: 'choice', imagepicker: 'choice', mediapicker: 'choice',
+    checkbox: 'multiChoice', imagecheckbox: 'multiChoice', mediacheckbox: 'multiChoice',
+    ranking: 'ranking', imageranking: 'ranking', mediaranking: 'ranking',
+    slidergroup: 'sliders', imageslidergroup: 'sliders', mediaslidergroup: 'sliders',
+    matrix: 'matrix', imagematrix: 'matrix', mediamatrix: 'matrix',
+    pointallocation: 'allocation', imagepointallocation: 'allocation', mediapointallocation: 'allocation',
+    imageannotation: 'annotation', html: 'display', expression: 'display', image: 'display', mediadisplay: 'display' };
+  var MEDIA_CHOICE = { imagepicker: 'image_', imageranking: 'image_', mediaranking: 'image_', mediapicker: 'media_' };
+  var COLORS = ['#8fb3d9', '#d9a38f', '#9fd98f', '#d9cf8f', '#b38fd9', '#8fd9cf'];
+  var questions = [], survey = {}, answers = {}, ready = false, waiters = [], lang = 'en', drawn = 0;
+  function text(v) { if (v == null) return ''; if (typeof v === 'object') return String(v[lang] || v['default'] || ''); return String(v); }
+  function items(list) {
+    return (list || []).map(function (c) {
+      if (c && typeof c === 'object') return { value: String(c.value != null ? c.value : c.text), text: text(c.text != null ? c.text : c.value) };
+      return { value: String(c), text: String(c) };
+    });
   }
-  var value = null;
-  function show(v) {
-    var box = document.getElementById('sp-preview-answer');
+  function image(label) {
+    drawn += 1;
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420"><rect width="640" height="420" fill="' + COLORS[drawn % COLORS.length] + '"/><text x="320" y="225" font-size="40" text-anchor="middle" fill="#222" font-family="sans-serif">' + label + '</text></svg>';
+    return { url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), name: 'placeholder_' + drawn + '.jpg', type: 'image' };
+  }
+  function build(scheme) {
+    var s = (scheme && scheme.survey) || scheme || {};
+    lang = s.locale || 'en';
+    survey = { title: text(s.title), description: text(s.description), language: lang, preview: true };
+    (s.pages || []).forEach(function (page) {
+      (page.elements || []).forEach(function (el) {
+        if (!el || !el.name) return;
+        var kind = (el.type === 'text' && el.inputType === 'number') ? 'number' : (KIND[el.type] || 'unsupported');
+        var q = { name: el.name, page: page.name || null, type: el.type, kind: kind, title: text(el.title) || el.name,
+          description: text(el.description), required: !!el.isRequired, trialCount: Math.max(1, Math.floor(Number(el.trialCount) || 1)) };
+        if (kind === 'number') { q.min = el.min != null ? el.min : null; q.max = el.max != null ? el.max : null; }
+        if (kind === 'rating') { q.rateMin = Number(el.rateMin != null ? el.rateMin : 1); q.rateMax = Number(el.rateMax != null ? el.rateMax : 5); if (el.rateValues) q.rateValues = items(el.rateValues); q.minLabel = text(el.minRateDescription); q.maxLabel = text(el.maxRateDescription); }
+        if (kind === 'boolean') { q.labelTrue = text(el.labelTrue); q.labelFalse = text(el.labelFalse); }
+        if (kind === 'sliders') q.dimensions = (el.dimensions || []).map(function (d) { return { id: String(d.id), label: text(d.label), left: text(d.left), right: text(d.right), min: d.min != null ? d.min : (el.scaleMin != null ? el.scaleMin : 1), max: d.max != null ? d.max : (el.scaleMax != null ? el.scaleMax : 7), step: d.step != null ? d.step : (el.scaleStep || 1) }; });
+        if (kind === 'matrix') { q.rows = items(el.rows); q.columns = items(el.columns); }
+        if (kind === 'allocation') q.budget = Number(el.budget != null ? el.budget : 100);
+        if (kind === 'annotation') { q.tools = el.allowedTools || ['point', 'line', 'polygon', 'bbox']; q.labels = items(el.annotationLabels).map(function (l) { return l.text; }); q.minShapes = el.minAnnotations || 0; q.maxShapes = el.maxAnnotations || 50; }
+        var media = /^(image|media)/.test(el.type) ? Number(el.imageCount) || (MEDIA_CHOICE[el.type] ? 4 : 1) : 0;
+        function draw(t) { var m = []; for (var i = 0; i < media; i += 1) m.push(image((q.trialCount > 1 ? 'Trial ' + (t + 1) + ' · ' : '') + 'Image ' + (i + 1))); return m; }
+        function choicesFor(m) {
+          var list;
+          if (MEDIA_CHOICE[el.type]) list = m.map(function (x, i) { return { value: MEDIA_CHOICE[el.type] + i, text: x.name, imageUrl: x.url }; });
+          else if (/^(choice|multiChoice|ranking|allocation)$/.test(kind)) list = items(el.choices);
+          if (list && el.allowTie && el.tieLabel) list.push({ value: String(el.tieLabel), text: String(el.tieLabel), tie: true });
+          return list;
+        }
+        if (q.trialCount > 1) {
+          q.trials = [];
+          for (var t = 0; t < q.trialCount; t += 1) { var m = draw(t); q.trials.push({ media: m, choices: choicesFor(m) }); }
+        } else {
+          q.media = draw(0);
+          var c = choicesFor(q.media);
+          if (c) q.choices = c;
+        }
+        questions.push(q);
+      });
+    });
+  }
+  function find(name) { for (var i = 0; i < questions.length; i += 1) if (questions[i].name === name) return questions[i]; return null; }
+  function panel() {
+    var box = document.getElementById('sp-preview-data');
     if (!box) {
-      box = document.createElement('pre');
-      box.id = 'sp-preview-answer';
-      box.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;max-height:30vh;overflow:auto;margin:0;padding:8px;background:#111;color:#9f9;font:12px monospace;border-radius:6px;opacity:.92;z-index:99999';
+      box = document.createElement('details');
+      box.id = 'sp-preview-data';
+      box.style.cssText = 'position:fixed;right:8px;bottom:8px;max-width:min(420px,90vw);max-height:45vh;overflow:auto;background:#111;color:#9f9;font:12px monospace;border-radius:6px;padding:6px 10px;opacity:.92;z-index:2147483647';
+      box.innerHTML = '<summary style="cursor:pointer;color:#fff">SP-Scheme preview · recorded data</summary><pre style="margin:6px 0 0;white-space:pre-wrap"></pre>';
       document.body.appendChild(box);
     }
-    box.textContent = 'Recorded answer (preview): ' + JSON.stringify(v, null, 2);
+    box.querySelector('pre').textContent = JSON.stringify(answers, null, 2);
+    return box;
   }
-  window.SPSkill = {
-    __spPreview: true,
-    getConfig: function () { return cfg; },
-    getImages: function () { return images; },
-    getValue: function () { return value; },
-    setAnswer: function (v) { value = v; show(v); },
-    ready: function () {}
+  function done(result) { return Promise.resolve(result); }
+  window.SPSite = {
+    version: 'preview',
+    platform: false,
+    onReady: function (cb) { if (ready) cb({ questions: questions, survey: survey, answers: answers }); else waiters.push(cb); },
+    getQuestions: function () { return questions; },
+    getQuestion: find,
+    getSurvey: function () { return survey; },
+    getAnswers: function () { return answers; },
+    answer: function (name, value, options) {
+      var q = find(name);
+      if (!q) { console.warn('[SPSite preview] unknown question', name); return done({ ok: false, error: 'Unknown question "' + name + '"' }); }
+      if (q.trialCount > 1) {
+        var t = options && options.trial;
+        if (typeof t !== 'number' || t < 0 || t >= q.trialCount) return done({ ok: false, error: name + ' repeats ' + q.trialCount + ' times: pass { trial: 0…' + (q.trialCount - 1) + ' }' });
+        var cur = answers[name] || { trials: [] };
+        while (cur.trials.length < q.trialCount) cur.trials.push({ value: null, shown_images: [] });
+        cur.trials[t] = { value: value == null ? null : value, shown_images: value == null ? [] : q.trials[t].media.map(function (m) { return m.url.slice(0, 40) + '…'; }) };
+        answers[name] = cur;
+      } else if (value == null) { delete answers[name]; } else { answers[name] = value; }
+      panel();
+      return done({ ok: true });
+    },
+    complete: function () {
+      var missing = questions.filter(function (q) {
+        if (!q.required || q.kind === 'display') return false;
+        var v = answers[q.name];
+        if (q.trialCount > 1) return !v || v.trials.some(function (x) { return x.value == null; });
+        return v == null || v === '' || (typeof v === 'object' && !Object.keys(v).length);
+      }).map(function (q) { return q.name; });
+      if (missing.length) return done({ ok: false, missing: missing, error: 'Required questions are unanswered: ' + missing.join(', ') });
+      var box = panel();
+      box.open = true;
+      box.querySelector('summary').textContent = 'Preview finished · on SP-Survey these answers are submitted now';
+      return done({ ok: true });
+    }
   };
-  setTimeout(function () {
-    if (!window.SPSkill || !window.SPSkill.__spPreview) return;
-    document.dispatchEvent(new CustomEvent('spskill-init', { detail: { config: cfg, images: images, value: null }, bubbles: true }));
-  }, 300);
+  function start() {
+    var node = document.getElementById('sp-scheme');
+    try { build(JSON.parse(node ? node.textContent : '{}')); } catch (err) { console.error('[SPSite preview] invalid sp-scheme JSON', err); }
+    ready = true;
+    var d = { questions: questions, survey: survey, answers: answers };
+    waiters.splice(0).forEach(function (cb) { cb(d); });
+    document.dispatchEvent(new CustomEvent('spsite-ready', { detail: d }));
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else setTimeout(start, 0);
 })();
 </script>
-${PREVIEW_SHIM_END}`;
+${SITE_SHIM_END}`;
 
-const EXAMPLE_INTERACTION_HTML = `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<script>window.SP_PREVIEW_CONFIG = { prompt: 'Tap the safer street', mediaCount: 2 };</script>
-${'__SHIM__'}
-<style>body{font-family:sans-serif;margin:0;padding:8px}#row{display:flex;gap:8px}button{flex:1;padding:0;border:3px solid transparent;border-radius:8px;background:none}button[aria-pressed=true]{border-color:#1976d2}img{width:100%;display:block;border-radius:6px}</style>
-</head><body>
-<div id="app"><p id="p"></p><div id="row"></div></div>
-<script>
-document.addEventListener('spskill-init', function (e) {
-  var cfg = e.detail.config || {};
-  var imgs = (e.detail.images || []).slice(0, 2);
-  var urls = imgs.map(function (m) { return m.url; });
-  document.getElementById('p').textContent = cfg.prompt || '';
-  var row = document.getElementById('row');
-  row.innerHTML = '';
-  imgs.forEach(function (m) {
-    var b = document.createElement('button');
-    b.type = 'button';
-    b.setAttribute('aria-pressed', 'false');
-    var i = document.createElement('img');
-    i.src = m.url;
-    i.alt = m.name || 'street';
-    b.appendChild(i);
-    b.onclick = function () {
-      row.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', String(x === b)); });
-      SPSkill.setAnswer({ choice: { shownUrls: urls, winner: m.url } });
-    };
-    row.appendChild(b);
-  });
-});
-</script>
-</body></html>
-`.replace('__SHIM__', SP_PREVIEW_SHIM);
-
-const EXAMPLE_PACKAGE = {
-  format: SP_SCHEME_FORMAT,
-  spScheme: SP_SCHEME_VERSION,
-  survey: {
-    title: 'Street perception study',
-    description: 'You will see street images and answer a few questions. About 5 minutes.',
-    locale: 'en',
-    pages: [
-      {
-        name: 'consent_page',
-        title: 'Consent',
-        elements: [
-          { type: 'consent', name: 'consent', title: 'I agree to take part in this study', isRequired: true },
-        ],
-      },
-      {
-        name: 'swipe_page',
-        title: 'Which street feels safer?',
-        description: 'Tap the street that feels safer to walk alone at night.',
-        elements: [
-          {
-            type: 'skillquestion',
-            name: 'safety_duel',
-            title: 'Which street feels safer?',
-            skillId: 'custom:safety_duel',
-            skillConfig: { prompt: 'Tap the safer street', mediaCount: 2, mediaType: 'image' },
-            imageCount: 2,
-            imageSelectionMode: 'huggingface_random',
-            randomImageSelection: true,
-            excludePreviouslyUsedImages: true,
-            trialCount: 5,
-            isRequired: true,
-          },
-          {
-            type: 'imageslidergroup',
-            name: 'scene_scales',
-            title: 'Rate this street',
-            imageCount: 1,
-            imageSelectionMode: 'huggingface_random',
-            randomImageSelection: true,
-            scaleMin: 1,
-            scaleMax: 7,
-            dimensions: [
-              { id: 'safety', label: 'Safety', left: 'Very unsafe', right: 'Very safe' },
-              { id: 'lively', label: 'Liveliness', left: 'Dull', right: 'Lively' },
-            ],
-          },
-        ],
-      },
-    ],
-  },
-  customInteractions: [
+const EXAMPLE_SURVEY = {
+  title: 'Street perception study',
+  description: 'You will compare street images and rate one scene. About 3 minutes.',
+  locale: 'en',
+  pages: [
     {
-      ref: 'safety_duel',
-      name: 'Safety duel',
-      description: 'Two streets side by side; tap the one that feels safer.',
-      file: 'interactions/safety_duel.html',
-      configSchema: [{ key: 'prompt', label: 'Instruction', type: 'string' }],
-      defaultConfig: { prompt: 'Tap the safer street', mediaCount: 2, mediaType: 'image' },
-      resultSchema: [{ key: 'choice', label: 'Chosen street', type: 'pairwiseChoice' }],
-      exampleAnswer: {
-        choice: { shownUrls: ['https://media.example/a.jpg', 'https://media.example/b.jpg'], winner: 'https://media.example/a.jpg' },
-      },
+      name: 'welcome',
+      elements: [
+        { type: 'consent', name: 'consent', title: 'I agree to take part in this study', isRequired: true },
+      ],
+    },
+    {
+      name: 'duel',
+      elements: [
+        {
+          type: 'imagepicker',
+          name: 'safety_duel',
+          title: 'Which street feels safer to walk alone at night?',
+          imageCount: 2,
+          trialCount: 3,
+          imageSelectionMode: 'huggingface_random',
+          randomImageSelection: true,
+          excludePreviouslyUsedImages: true,
+          choices: [],
+          isRequired: true,
+        },
+      ],
+    },
+    {
+      name: 'scales',
+      elements: [
+        {
+          type: 'imageslidergroup',
+          name: 'scene_scales',
+          title: 'How does this street feel?',
+          imageCount: 1,
+          imageSelectionMode: 'huggingface_random',
+          randomImageSelection: true,
+          excludePreviouslyUsedImages: true,
+          scaleMin: 1,
+          scaleMax: 7,
+          dimensions: [
+            { id: 'safety', label: 'Safety', left: 'Very unsafe', right: 'Very safe' },
+            { id: 'lively', label: 'Liveliness', left: 'Dull', right: 'Lively' },
+          ],
+          isRequired: true,
+        },
+      ],
     },
   ],
 };
+
+const EXAMPLE_PACKAGE = { format: SP_SCHEME_FORMAT, spScheme: SP_SCHEME_VERSION, survey: EXAMPLE_SURVEY };
+
+const EXAMPLE_SITE_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Street perception study</title>
+<script type="application/json" id="sp-scheme">
+${JSON.stringify(EXAMPLE_PACKAGE, null, 2)}
+</script>
+__SHIM__
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1, h2 { line-height: 1.25; }
+  .duel { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .duel button { padding: 0; border: 4px solid transparent; border-radius: 12px; background: none; cursor: pointer; }
+  .duel button:hover, .duel button:focus-visible { border-color: #38bdf8; outline: none; }
+  img { width: 100%; display: block; border-radius: 8px; }
+  .btn { margin-top: 16px; padding: 12px 20px; border: 0; border-radius: 999px; background: #38bdf8; color: #0f172a; font-size: 16px; font-weight: 700; cursor: pointer; }
+  .scale { margin: 18px 0; }
+  .scale input { width: 100%; }
+  .poles { display: flex; justify-content: space-between; font-size: 13px; opacity: .8; }
+  .error { color: #fca5a5; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<main id="app"><p>Loading…</p></main>
+<script>
+SPSite.onReady(function (ctx) {
+  var app = document.getElementById('app');
+  var esc = function (s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
+  var screens = [welcome, duel, scales];
+  var screen = 0;
+  var trial = 0;
+  function next() { screen += 1; trial = 0; if (screen < screens.length) screens[screen](); }
+
+  function welcome() {
+    var q = SPSite.getQuestion('consent');
+    app.innerHTML = '<h1>' + esc(ctx.survey.title) + '</h1><p>' + esc(ctx.survey.description) + '</p>'
+      + '<label><input type="checkbox" id="agree"> ' + esc(q.title) + '</label><br>'
+      + '<button class="btn" id="go">Start</button><p class="error" id="err"></p>';
+    document.getElementById('go').onclick = function () {
+      if (!document.getElementById('agree').checked) { document.getElementById('err').textContent = 'Please agree to continue.'; return; }
+      SPSite.answer('consent', true).then(function (r) { if (r.ok) next(); });
+    };
+  }
+
+  function duel() {
+    var q = SPSite.getQuestion('safety_duel');
+    var round = q.trials[trial];
+    app.innerHTML = '<h2>' + esc(q.title) + '</h2><p>Round ' + (trial + 1) + ' of ' + q.trialCount + '</p><div class="duel"></div>';
+    round.choices.forEach(function (choice, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.innerHTML = '<img alt="Street ' + (i + 1) + '" src="' + choice.imageUrl + '">';
+      b.onclick = function () {
+        SPSite.answer('safety_duel', choice.value, { trial: trial }).then(function (r) {
+          if (!r.ok) return;
+          trial += 1;
+          if (trial < q.trialCount) duel(); else next();
+        });
+      };
+      app.querySelector('.duel').appendChild(b);
+    });
+  }
+
+  function scales() {
+    var q = SPSite.getQuestion('scene_scales');
+    var values = {};
+    app.innerHTML = '<h2>' + esc(q.title) + '</h2><img alt="Street" src="' + q.media[0].url + '"><div id="dims"></div>'
+      + '<button class="btn" id="finish">Finish</button><p class="error" id="err"></p>';
+    q.dimensions.forEach(function (d) {
+      var mid = Math.round((d.min + d.max) / 2);
+      values[d.id] = mid;
+      var row = document.createElement('div');
+      row.className = 'scale';
+      row.innerHTML = '<strong>' + esc(d.label) + '</strong><input type="range" min="' + d.min + '" max="' + d.max + '" step="' + d.step + '" value="' + mid + '">'
+        + '<div class="poles"><span>' + esc(d.left) + '</span><span>' + esc(d.right) + '</span></div>';
+      row.querySelector('input').oninput = function (e) { values[d.id] = Number(e.target.value); };
+      document.getElementById('dims').appendChild(row);
+    });
+    document.getElementById('finish').onclick = function () {
+      SPSite.answer('scene_scales', values)
+        .then(function (r) { if (!r.ok) throw new Error(r.error); return SPSite.complete(); })
+        .then(function (r) {
+          if (!r.ok) { document.getElementById('err').textContent = r.error; return; }
+          app.innerHTML = '<h2>Submitting…</h2>';
+        })
+        .catch(function (err) { document.getElementById('err').textContent = err.message; });
+    };
+  }
+
+  welcome();
+});
+</script>
+</body>
+</html>
+`.replace('__SHIM__', SP_SITE_PREVIEW_SHIM);
 
 function compactJson(value) {
   return JSON.stringify(value);
 }
 
 function questionCatalogLines() {
-  return listGenerationContracts().map((c) => {
-    const required = (c.requiredFields || []).filter((f) => !['type', 'name'].includes(f));
-    const parts = [
-      `- \`${c.type}\` — ${c.useWhen || c.label || c.type}`,
-      `answer: ${c.answerShape || 'unknown'}`,
-      c.media?.stimulus ? 'media: drawn by the platform' : null,
-      required.length ? `required: ${required.join(', ')}` : null,
-    ].filter(Boolean);
-    const example = c.minimumExample ? `\n  example: \`${compactJson(c.minimumExample)}\`` : '';
-    return parts.join(' · ') + example;
-  }).join('\n');
+  return listGenerationContracts()
+    .filter((c) => {
+      const kind = answerKindOf({ type: c.type });
+      return kind !== 'unsupported' || c.type === 'number';
+    })
+    .map((c) => {
+      const kind = answerKindOf({ type: c.type });
+      const required = (c.requiredFields || []).filter((f) => !['type', 'name'].includes(f));
+      const parts = [
+        `- \`${c.type}\` — ${c.useWhen || c.label || c.type}`,
+        kind === 'display' ? 'shows content, records nothing' : `kind \`${kind}\``,
+        c.media?.stimulus ? 'media drawn by the platform' : null,
+        required.length ? `required: ${required.join(', ')}` : null,
+      ].filter(Boolean);
+      const example = c.minimumExample ? `\n  example: \`${compactJson(c.minimumExample)}\`` : '';
+      return parts.join(' · ') + example;
+    }).join('\n');
 }
 
-function presetLines() {
-  return listPresetSkillContracts().map((p) => (
-    `- \`${p.skillId}\` — ${p.useWhen}; answer family ${p.answerShape}; set imageCount=${p.imageCount}; `
-    + `skillConfig keys: ${Object.keys(p.skillConfig || {}).join(', ')}`
-  )).join('\n');
+function answerShapeLines() {
+  return Object.entries(ANSWER_SHAPES).map(([kind, shape]) => `- \`${kind}\`: ${shape}`).join('\n');
 }
 
 /**
@@ -207,169 +358,200 @@ function presetLines() {
  * follows it precisely; participant-facing text follows `survey.locale`.
  */
 export function buildSpSchemeText() {
-  const rules = DESIGN_CAPABILITIES.rules.filter((rule) => !MCP_ONLY_RULE.test(rule));
-  return `# SP-Scheme ${SP_SCHEME_VERSION} — design an SP-Survey study
+  const rules = DESIGN_CAPABILITIES.rules.filter((rule) => !SITE_IRRELEVANT_RULE.test(rule));
+  return `# SP-Scheme ${SP_SCHEME_VERSION} — build an SP-Survey study as your own web page
 
-You are helping a researcher design a perception survey for SP-Survey (https://sp-survey.org). The researcher may not be technical. The interface is yours to design: participants will see exactly the interactions you build and the researcher approves, not a standard form. Only how images are randomised, how questions are described and how answers are recorded MUST follow this scheme, otherwise the platform rejects the upload.
+You are helping a researcher build a perception survey for SP-Survey (https://sp-survey.org). The researcher may not be technical.
+
+You design the whole participant experience as ONE web page, \`index.html\`: welcome and consent, every task, page flow, visuals, animation, wording. Participants open the survey link and get exactly this page; the researcher's Builder preview shows exactly this page too. There is no platform form style to fit into.
+
+The platform keeps three things, and the upload is rejected if they are broken:
+1. **Stimuli.** The platform draws the images / videos / audio for each participant from the researcher's media pool and hands them to your page. You never choose, invent or hard-code media URLs.
+2. **Question description.** Every answer you record belongs to a question declared in the survey JSON embedded in the page (section 1), with a native type that fixes the answer format.
+3. **Answer recording.** You record answers only with \`SPSite.answer(...)\` and finish with \`SPSite.complete()\` (section 4). The platform checks every value, stores it, and handles submission and the thank-you screen.
 
 ## 0. Workflow — follow these steps in order
 
 **Step 1 · Understand the study.** Ask briefly for what you need: research question, what participants judge, language, how many images each person sees, roughly how long it should take. Suggest a design in plain language before writing code.
 
-**Step 2 · Build a clickable prototype and let the researcher try it.** Make ONE self-contained HTML page called \`preview.html\` and show it in your preview / canvas / artifact view (or tell the researcher to open it in a browser). It walks through the whole survey page by page with Next/Back buttons:
-- every question with a designed look or interaction (image comparisons, sliders, sorting, slides, games…) is a custom interaction (section 5): write it as its own \`interactions/<ref>.html\` file first, then embed that same file in preview.html (for example as an \`<iframe srcdoc>\`), working for real with placeholder images. What the researcher tries must be the very code that ships;
-- plain form questions (consent, demographics, open text) may use native types (section 4), shown as simple mock-ups;
-- under each question, the exact JSON that would be recorded, so the researcher can see what data they will get.
-Ask the researcher to click through it on a phone-sized and a desktop-sized window. Change it until they say they are happy. Do NOT produce the package before the researcher confirms.
+**Step 2 · Build index.html and let the researcher try it.** Write the page with the embedded survey JSON (section 1) and the preview shim (section 5), and show it in your preview / canvas / artifact view (or tell the researcher to save it and open it in a browser). The shim fills in placeholder images and shows the recorded data in a small panel, so the page works fully before it reaches the platform. Ask the researcher to click through it on a phone-sized and a desktop-sized window. Change it until they say they are happy. Do NOT hand over the final file before the researcher confirms.
 
-**Ship what was approved.** When packing, every question that has its own interface in the prototype MUST become a custom interaction whose HTML is exactly what the researcher tried. Never swap it for a native question type or a built-in task (\`preset_*\`) at packing time, even if one looks similar: the researcher approved your design, and custom interactions get the same platform analysis as the result family they record (for example \`pairwiseChoice\` gets the same TrueSkill ranking as the built-in A/B task). Use native types or built-in tasks only for plain form questions, or when the researcher explicitly asks for the standard platform version.
+**Step 3 · Hand over the same page.** The file the researcher approved IS the deliverable; do not rebuild or simplify it. Prefer a single self-contained \`index.html\` (inline CSS and JS). If you produced extra local files (CSS, JS, small images such as a logo), put them with index.html in a zip; the platform inlines them.
+If you cannot make files, give the whole page in one \`\`\`html code block and tell the researcher: "save this as index.html".
+Then tell them: in SP-Survey open Survey Builder → SP-Scheme → Upload, choose index.html (or the zip), read the check report, and click Import. If the report lists problems, the researcher will paste them back to you; return a corrected page.
 
-**Step 3 · Pack it as a zip.** When the researcher confirms, build \`<study-name>.zip\`:
+## 1. The embedded survey JSON
 
-\`\`\`
-<study-name>.zip
-├── sp-scheme.json            ← the survey and the list of custom interactions (section 1)
-├── interactions/<ref>.html   ← one file per custom interaction (section 5)
-└── preview.html              ← the prototype from step 2 (kept for reference, not imported)
-\`\`\`
+Put this block inside \`<head>\`, before the preview shim:
 
-If you can run code, create the zip and give the researcher the download. If you cannot, give each file in its own code block with its file name, and tell the researcher: "make a folder, save these files into it with exactly these names, then compress the folder to a zip". Then tell them: in SP-Survey open Survey Builder → SP-Scheme → Upload package, choose the zip, read the check report, and click Import. The Builder checks the format and lists anything to fix; if it reports problems, the researcher will paste the list back to you, and you return a corrected zip.
-
-## 1. sp-scheme.json
-
-\`\`\`json
+\`\`\`html
+<script type="application/json" id="sp-scheme">
 {
   "format": "${SP_SCHEME_FORMAT}",
   "spScheme": "${SP_SCHEME_VERSION}",
-  "survey": { "title": "...", "description": "...", "locale": "en | zh", "pages": [ { "name": "...", "title": "...", "description": "...", "elements": [ /* questions */ ] } ] },
-  "customInteractions": [ /* optional, see section 5 */ ]
+  "survey": {
+    "title": "...", "description": "...", "locale": "en | zh",
+    "pages": [ { "name": "...", "elements": [ /* one entry per recorded question */ ] } ]
+  }
 }
+</script>
 \`\`\`
 
-- Every question has a unique, stable \`name\` (lowercase, letters/digits/underscores). Choice, row, column and dimension ids must be unique within their question.
-- Put the wording participants see in \`title\` and optional \`description\` (Markdown allowed) of pages and questions, in the survey's \`locale\` language.
-- Start with a \`consent\` question when the study collects data from people.
+- One element per thing you record, with a native \`type\` from section 3. The type decides the answer format and the analysis the researcher gets; your page decides how it looks. For example a two-image "tap the safer street" game is an \`imagepicker\` with \`imageCount: 2\` (analysed with TrueSkill rankings), a swipe-left/right card is an \`imageboolean\`, a drag-to-sort board is an \`imageranking\`, a set of dials is an \`imageslidergroup\`.
+- Every element has a unique, stable \`name\` (lowercase letters, digits, underscores). Choice, row, column and dimension ids must be unique within their question.
+- \`title\` / \`description\` hold the wording, in the survey's \`locale\` language; your page may show them or its own text.
+- Pages group questions for the researcher's overview only; your page decides the real flow.
+- Start with a \`consent\` question when the study collects data from people, and mark questions the participant must answer with \`"isRequired": true\`.
 - Do not include API keys, tokens, Supabase settings or any credential.
 
 ## 2. Stimuli and randomisation (platform-owned)
 
-Images, videos and audio come from the researcher's project media pool. The platform draws them for each participant and records exactly what was shown. You never write media URLs into sp-scheme.json; placeholder images exist only in the preview.
+Images, videos and audio come from the researcher's project media pool. The platform draws them for each participant, records exactly what was shown, and passes them to your page as \`question.media\` (or \`question.trials[i].media\`). Show only these; placeholders exist only in your preview.
 
-- Default for every media question: \`"imageSelectionMode": "huggingface_random", "randomImageSelection": true, "excludePreviouslyUsedImages": true\` and leave \`choices\` empty.
-- \`imageCount\` = how many files are drawn per presentation. \`trialCount\` = how many times the question repeats with a fresh draw (each trial is recorded separately).
+- Default for every media question: \`"imageSelectionMode": "huggingface_random", "randomImageSelection": true, "excludePreviouslyUsedImages": true\` and \`"choices": []\`.
+- \`imageCount\` = how many files are drawn per presentation. \`trialCount\` = how many rounds the question repeats, each with a fresh draw; each round is recorded separately, so loop over \`question.trials\` in your page rather than declaring many similar questions.
 - \`mediaAssignmentMode\`: \`individual\` (random files, default), \`set\` (one whole folder tagged set; imageCount must equal the folder size) or \`category\` (folders tagged category). \`mediaFolders\` optionally limits eligible folders.
 - If the researcher must curate specific files, use \`"imageSelectionMode": "huggingface_manual"\` and tell them to pick the files in the Builder after import.
 - Remind the researcher to upload their images to the project's Media Dataset before publishing.
 
-## 3. Platform rules
+Platform rules:
 
 ${rules.map((rule) => `- ${rule}`).join('\n')}
 
-## 4. Native question types
-
-Native types render in the platform's standard form style. Use them for consent, demographics and other plain form questions, or when the researcher explicitly wants the standard version. They are not a replacement for an interface you designed in the prototype.
+## 3. Native question types
 
 ${questionCatalogLines()}
 
-Built-in interactive tasks (use \`"type": "skillquestion"\` with this \`skillId\`):
+Answer value for each kind (what you pass to \`SPSite.answer\`):
 
-${presetLines()}
+${answerShapeLines()}
 
-## 5. Custom interactions (the default for anything you designed)
+For \`choice\` / \`multiChoice\` / \`ranking\` / \`allocation\`, the allowed values are exactly \`question.choices[].value\` (per round: \`question.trials[i].choices\`). For image and media choice types those choices ARE the drawn files: each has \`value\` (\`image_0\`, \`image_1\`, … or \`media_0\`, …) and \`imageUrl\`; record the \`value\`, never the URL.
 
-For every question with its own designed interface, write a self-contained HTML file \`interactions/<ref>.html\` and reference it from a question with \`"type": "skillquestion", "skillId": "custom:<ref>"\`. Slides, drag-and-drop, timed exposure, canvas, animation and games are all fine.
+## 4. SPSite — the only way to record answers
 
-Each entry in \`customInteractions\`:
+On the platform \`window.SPSite\` exists before your scripts run. Use it like this:
 
-\`\`\`json
-{
-  "ref": "lowercase_id",
-  "name": "Short name",
-  "description": "What the participant does",
-  "file": "interactions/lowercase_id.html",
-  "configSchema": [{ "key": "prompt", "label": "Instruction", "type": "string" }],
-  "defaultConfig": { "prompt": "...", "mediaCount": 2, "mediaType": "image" },
-  "resultSchema": [{ "key": "answer_key", "label": "What is recorded", "type": "<one result family>" }],
-  "exampleAnswer": { "answer_key": "<a valid value>" }
-}
+\`\`\`js
+SPSite.onReady(function (ctx) {
+  // ctx.questions: array of question objects (below); ctx.survey: { title, description, language }
+  // ctx.answers: answers already recorded (after a participant resumes); start your UI here
+});
+SPSite.getQuestion('safety_duel');            // one question object
+SPSite.answer('rate_scene', 5);                // returns a Promise of { ok, error }
+SPSite.answer('safety_duel', 'image_1', { trial: 2 });  // repeated question: round index 0…trialCount-1
+SPSite.answer('rate_scene', null);             // clear an answer
+SPSite.complete();                             // Promise of { ok, missing, error }
 \`\`\`
 
-(When you cannot make files at all, you may put the HTML in a \`"sourceHtml"\` string instead of \`"file"\` and deliver sp-scheme.json alone.)
+A question object: \`{ name, type, kind, answerShape, title, description, required, trialCount, media: [{ url, name, type }], choices: [{ value, text, imageUrl? }], trials: [{ media, choices }] /* when trialCount > 1 */ }\` plus, by kind, \`min/max\`, \`rateMin/rateMax/rateValues/minLabel/maxLabel\`, \`labelTrue/labelFalse\`, \`dimensions: [{ id, label, left, right, min, max, step }]\`, \`rows/columns\`, \`budget\`, \`tools/labels/minShapes/maxShapes\`. \`media[].type\` is \`image\`, \`video\` or \`audio\`.
 
-Runtime contract:
+- Call \`SPSite.answer\` whenever an answer is made or changed. Check \`ok\`; on \`ok: false\` show \`error\` and let the participant fix it (it means the value did not fit the question).
+- Call \`SPSite.complete()\` once at the end. On \`ok: true\` the platform submits and shows its thank-you screen, so show only a short "Submitting…" state. On \`ok: false\`, \`missing\` lists required questions still unanswered; take the participant back to them.
+- Record timing or extra behaviour only through declared questions (for example a \`number\` question for a reaction time in milliseconds).
 
-- Initialise from \`document.addEventListener("spskill-init", e => { e.detail.config; e.detail.images })\` or \`SPSkill.getConfig()\` / \`SPSkill.getImages()\`. Images arrive as \`[{ name, url, type }]\`, already drawn by the platform; show only these.
-- Record the answer with \`SPSkill.setAnswer({ <answer_key>: value })\` — always an object whose single key is the resultSchema key. Call it again whenever the answer changes. Never use parent.postMessage directly.
-- The interaction runs in a sandboxed iframe with no network: no fetch/XHR, no CDN scripts or fonts, no forms, no nested frames, no camera or microphone. Inline all CSS and JS. Put content inside \`<div id="app">\` so height is measured.
-- Make it work on a phone (≥360px wide) and by keyboard; give images alt text.
-- One question records one answer. For repeated rounds use \`trialCount\` on the question instead of looping inside the HTML.
-- No \`analysisHtml\`; analysis is done by the platform.
+Runtime limits on the platform (the page runs full-screen in a sandboxed frame):
+- No network: \`fetch\`, XHR, WebSocket and form posts are blocked; nothing leaves the page except through SPSite.
+- Scripts must be inline or loaded from ${SP_SITE_SCRIPT_HOSTS.join(', ')}; styles may also use Google Fonts. Images and media load over https only (the platform's), or data: URLs for your own decoration.
+- \`localStorage\` works only in memory for the session; do not rely on it.
+- No navigation to other pages, no new windows for survey content, no iframes, no camera or microphone.
+- Make it work on a phone (≥360px wide) and by keyboard; give images alt text; keep the file under 3 MB.
 
-**Preview shim.** So the interaction also runs in your preview and in a plain browser, paste this block unchanged inside \`<head>\` of every interaction file (and of preview.html if it embeds interactions). Optionally set \`window.SP_PREVIEW_CONFIG = { ... }\` in a script just before it to try a config. It supplies placeholder images and shows the recorded answer on screen. The platform removes it on import and supplies the real SDK and images:
+## 5. Preview shim
+
+Paste this block unchanged inside \`<head>\`, right after the embedded survey JSON. It provides SPSite with placeholder images in your preview and in a plain browser, and shows the recorded data. The platform removes it on import and supplies the real SPSite and media:
 
 \`\`\`html
-${SP_PREVIEW_SHIM}
+${SP_SITE_PREVIEW_SHIM}
 \`\`\`
 
-\`resultSchema\` must contain exactly ONE field whose \`type\` is one of these result families (declare its \`min\`/\`max\`, \`options\`, \`rows\`/\`columns\`, \`dimensions\` or \`budget\` as the family needs). \`exampleAnswer\` must satisfy it:
-
-${skillResultTypesCatalogText({ nativeOnly: true })}
-
-The question that uses a custom interaction sets \`imageCount\` (and \`skillConfig.mediaCount\`) to the number of media it needs, plus the media sampling fields from section 2. Its \`skillConfig\` overrides \`defaultConfig\`.
-
-## 6. Example
-
-sp-scheme.json:
-
-\`\`\`json
-${JSON.stringify(EXAMPLE_PACKAGE, null, 2)}
-\`\`\`
-
-interactions/safety_duel.html:
+## 6. Example index.html
 
 \`\`\`html
-${EXAMPLE_INTERACTION_HTML.trim()}
+${EXAMPLE_SITE_HTML.trim()}
 \`\`\`
 
-## 7. Self-check before packing
+## 7. Self-check before handing over
 
-1. The researcher has tried the prototype and confirmed.
-2. Every question that has its own interface in the prototype is packed as a custom interaction with that same HTML, not replaced by a native type or \`preset_*\` task.
-3. sp-scheme.json is valid JSON with \`format\`, \`spScheme\`, \`survey.pages\`.
-4. Question names are unique; every \`custom:<ref>\` has a matching \`customInteractions[].ref\` and file, and every interaction is used.
-5. No media URLs in sp-scheme.json; media questions use platform sampling.
-6. Every interaction calls \`SPSkill.setAnswer({...})\`, uses \`spskill-init\` or \`SPSkill.getConfig/getImages\`, has one resultSchema field from the list, and a matching exampleAnswer.
-7. No external scripts, network calls or credentials.
+1. The researcher has tried the page and confirmed; you are handing over that same page.
+2. index.html contains the \`<script type="application/json" id="sp-scheme">\` block with \`format\`, \`spScheme\`, \`survey.pages\`, and the preview shim right after it.
+3. Every recorded answer has a declared question with a native type; names are unique; required questions have \`isRequired: true\`.
+4. No media URLs in the JSON or the page; every image or clip participants judge comes from \`question.media\` / \`question.trials[i].media\`.
+5. Every answer goes through \`SPSite.answer(name, value)\` (with \`{ trial }\` for repeated questions) in the shape of its kind, and the end calls \`SPSite.complete()\`.
+6. No network calls, external scripts outside the allowed hosts, or credentials.
 `;
-}
-
-/** Remove the preview-only shim before the HTML is validated or saved. */
-export function stripPreviewShim(html) {
-  const text = String(html || '');
-  const start = text.indexOf(PREVIEW_SHIM_START);
-  if (start < 0) return text;
-  const end = text.indexOf(PREVIEW_SHIM_END, start);
-  if (end < 0) return text;
-  return stripPreviewShim(text.slice(0, start) + text.slice(end + PREVIEW_SHIM_END.length));
 }
 
 const MAX_ZIP_BYTES = 10 * 1024 * 1024;
 const MAX_UNZIPPED_BYTES = 25 * 1024 * 1024;
 const MANIFEST_NAME = 'sp-scheme.json';
+const ASSET_MIME = { css: 'text/css', js: 'text/javascript', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 
 function isZipBytes(bytes) {
   return bytes?.length > 3 && bytes[0] === 0x50 && bytes[1] === 0x4b;
 }
 
+function looksLikeHtml(text) {
+  return /^\s*(<!doctype html|<html\b|<head\b|<body\b|<!--)/i.test(text) || (/<script\b/i.test(text) && !/^\s*[{[`]/.test(text));
+}
+
+function toBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+function resolvePath(base, ref) {
+  if (/^(https?:|data:|blob:|\/\/|#)/i.test(ref)) return null;
+  const parts = (base + ref.split(/[?#]/)[0]).split('/');
+  const out = [];
+  parts.forEach((part) => {
+    if (part === '..') out.pop();
+    else if (part && part !== '.') out.push(part);
+  });
+  return out.join('/');
+}
+
+/** Inline local CSS, JS and small images that sit next to index.html in the zip. */
+function inlineLocalAssets(html, entries, base) {
+  const inlined = [];
+  const read = (ref) => {
+    const path = resolvePath(base, ref);
+    const data = path != null ? entries[path] : null;
+    if (data) inlined.push(path);
+    return data;
+  };
+  let out = html.replace(/<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi, (tag) => {
+    const href = tag.match(/href=["']([^"']+)["']/i)?.[1];
+    const data = href && read(href);
+    return data ? `<style>${strFromU8(data)}</style>` : tag;
+  });
+  out = out.replace(/<script\b([^>]*)\bsrc=["']([^"']+)["']([^>]*)>\s*<\/script>/gi, (tag, before, src, after) => {
+    const data = read(src);
+    return data ? `<script${`${before}${after}`.replace(/\s+$/, '')}>${strFromU8(data).replace(/<\/script/gi, '<\\/script')}</script>` : tag;
+  });
+  out = out.replace(/(<img\b[^>]*\bsrc=)["']([^"']+)["']/gi, (match, prefix, src) => {
+    const ext = src.split(/[?#]/)[0].split('.').pop().toLowerCase();
+    const data = ASSET_MIME[ext]?.startsWith('image/') ? read(src) : null;
+    return data ? `${prefix}"data:${ASSET_MIME[ext]};base64,${toBase64(data)}"` : match;
+  });
+  return { html: out, inlined };
+}
+
 /**
- * Read an uploaded package: a .zip (sp-scheme.json + interactions/*.html) or a
- * bare sp-scheme.json / model reply. Interaction files are inlined as sourceHtml.
+ * Read an uploaded package: index.html on its own, a .zip holding it (plus
+ * optional sp-scheme.json and local assets), or a bare sp-scheme.json.
  * @param {Uint8Array} bytes
- * @returns {{ pkg: object, files: string[], hasPreview: boolean, fromZip: boolean }}
+ * @returns {{ pkg: object|null, siteHtml: string|null, siteFile: string|null, files: string[], fromZip: boolean, manifestSource: string|null }}
  */
 export function readSpSchemeUpload(bytes) {
   if (!isZipBytes(bytes)) {
-    return { pkg: parseSpSchemePackage(strFromU8(bytes)), files: [], hasPreview: false, fromZip: false };
+    const text = strFromU8(bytes);
+    if (looksLikeHtml(text)) {
+      const pkg = extractEmbeddedScheme(text);
+      return { pkg, siteHtml: text, siteFile: 'index.html', files: [], fromZip: false, manifestSource: pkg ? 'embedded' : null };
+    }
+    return { pkg: parseSpSchemePackage(text), siteHtml: null, siteFile: null, files: [], fromZip: false, manifestSource: 'json' };
   }
   if (bytes.length > MAX_ZIP_BYTES) throw new Error('The zip is larger than 10 MB. Media files do not belong in the package; upload them to the Media Dataset.');
   let total = 0;
@@ -380,39 +562,50 @@ export function readSpSchemeUpload(bytes) {
         if (file.name.endsWith('/') || /(^|\/)(__MACOSX|\.DS_Store)/.test(file.name)) return false;
         total += file.originalSize || 0;
         if (total > MAX_UNZIPPED_BYTES) throw new Error('The zip expands to more than 25 MB.');
-        return /\.(json|html?|md|txt)$/i.test(file.name);
+        return /\.(json|html?|md|txt|css|js|svg|png|jpe?g|gif|webp)$/i.test(file.name);
       },
     });
   } catch (err) {
     throw new Error(/25 MB/.test(err.message) ? err.message : 'The zip could not be opened.');
   }
   const names = Object.keys(entries);
-  // Zipping a folder nests everything one level down; find the manifest wherever it is.
-  const manifest = names
-    .filter((name) => name.split('/').pop().toLowerCase() === MANIFEST_NAME)
-    .sort((a, b) => a.split('/').length - b.split('/').length)[0];
-  if (!manifest) throw new Error(`The zip has no ${MANIFEST_NAME}.`);
-  const root = manifest.slice(0, manifest.length - MANIFEST_NAME.length);
-  const pkg = parseSpSchemePackage(strFromU8(entries[manifest]));
-  const relative = names.filter((name) => name.startsWith(root)).map((name) => name.slice(root.length));
-  if (Array.isArray(pkg?.customInteractions)) {
-    pkg.customInteractions = pkg.customInteractions.map((item) => {
-      if (!item || typeof item !== 'object' || !item.file || item.sourceHtml) return item;
-      const path = String(item.file).replace(/^\.?\//, '');
-      const data = entries[root + path];
-      return data ? { ...item, sourceHtml: strFromU8(data) } : { ...item, missingFile: path };
-    });
+  const shallowest = (list) => list.sort((a, b) => a.split('/').length - b.split('/').length)[0];
+  const sitePath = shallowest(names.filter((name) => /^index\.html?$/i.test(name.split('/').pop())))
+    || (() => {
+      const pages = names.filter((name) => /\.html?$/i.test(name) && !/^preview\.html?$/i.test(name.split('/').pop()));
+      return pages.length === 1 ? pages[0] : null;
+    })();
+  const manifestPath = shallowest(names.filter((name) => name.split('/').pop().toLowerCase() === MANIFEST_NAME));
+  if (!sitePath && !manifestPath) throw new Error('The zip has neither index.html nor sp-scheme.json.');
+  const root = (sitePath || manifestPath).replace(/[^/]*$/, '');
+  let siteHtml = null;
+  if (sitePath) {
+    const { html } = inlineLocalAssets(strFromU8(entries[sitePath]), entries, sitePath.replace(/[^/]*$/, ''));
+    siteHtml = html;
   }
-  return { pkg, files: relative, hasPreview: relative.some((name) => /^preview\.html?$/i.test(name)), fromZip: true };
+  const embedded = siteHtml ? extractEmbeddedScheme(siteHtml) : null;
+  const pkg = manifestPath ? parseSpSchemePackage(strFromU8(entries[manifestPath])) : embedded;
+  if (manifestPath && embedded && !embedded.__invalid) {
+    pkg.__embeddedNames = schemeQuestionNames(embedded);
+  }
+  return {
+    pkg,
+    siteHtml,
+    siteFile: sitePath ? sitePath.slice(root.length) : null,
+    files: names.filter((name) => name.startsWith(root)).map((name) => name.slice(root.length)),
+    fromZip: true,
+    manifestSource: manifestPath ? 'json' : (embedded ? 'embedded' : null),
+  };
+}
+
+/** The example page, ready to upload. */
+export function buildExampleSite() {
+  return EXAMPLE_SITE_HTML;
 }
 
 /** A ready-made example zip for researchers to try the upload flow. */
 export function buildExampleZip() {
-  const manifest = JSON.stringify(EXAMPLE_PACKAGE, null, 2);
-  return zipSync({
-    'street-perception-example/sp-scheme.json': strToU8(manifest),
-    'street-perception-example/interactions/safety_duel.html': strToU8(EXAMPLE_INTERACTION_HTML),
-  });
+  return zipSync({ 'street-perception-example/index.html': strToU8(EXAMPLE_SITE_HTML) });
 }
 
 /** Accepts raw JSON or a model reply that wraps the JSON in a ```json fence. */
@@ -447,6 +640,10 @@ function allQuestions(survey) {
   return out;
 }
 
+function schemeQuestionNames(pkg) {
+  return allQuestions(pkg?.survey || pkg).map(({ element }) => element.name).filter(Boolean).sort();
+}
+
 const URL_RE = /^(https?:|data:|blob:)/i;
 function mentionsUrl(value) {
   if (typeof value === 'string') return URL_RE.test(value.trim());
@@ -461,25 +658,47 @@ function issue(list, path, message) {
   list.push({ path, message });
 }
 
+/** Short stable id for an imported site, recorded with every response. */
+export function siteId(html) {
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  for (let i = 0; i < html.length; i += 1) {
+    const c = html.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c, 0x5bd1e995) >>> 0;
+  }
+  return `site-${a.toString(16).padStart(8, '0')}${b.toString(16).padStart(8, '0')}`;
+}
+
 /**
  * Check a package against the platform contract without saving anything.
- * @returns {{ ok, errors, warnings, survey, interactions, summary }}
- *   survey: normalized survey with custom refs replaced by placeholders.
+ * @param {object|null} pkg survey package (from sp-scheme.json or the page's embedded JSON)
+ * @param {{ siteHtml?: string|null }} options the uploaded page, if any
+ * @returns {{ ok, errors, warnings, survey, site, summary }}
  */
-export function validateSpSchemePackage(pkg) {
+export function validateSpSchemePackage(pkg, { siteHtml = null } = {}) {
   const errors = [];
   const warnings = [];
-  const empty = { ok: false, errors, warnings, survey: null, interactions: [], summary: null };
+  const empty = { ok: false, errors, warnings, survey: null, site: null, summary: null };
 
+  if (pkg?.__invalid) {
+    issue(errors, 'sp-scheme', 'The <script id="sp-scheme"> block in index.html is not valid JSON.');
+    return empty;
+  }
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) {
-    issue(errors, '', 'The package must be a JSON object.');
+    issue(errors, '', siteHtml
+      ? 'index.html has no <script type="application/json" id="sp-scheme"> block describing the questions.'
+      : 'The package must be a JSON object.');
     return empty;
   }
   if (pkg.format !== SP_SCHEME_FORMAT) {
     issue(warnings, 'format', `Expected "format": "${SP_SCHEME_FORMAT}".`);
   }
   if (pkg.spScheme && String(pkg.spScheme).split('.')[0] !== SP_SCHEME_VERSION.split('.')[0]) {
-    issue(errors, 'spScheme', `This package targets SP-Scheme ${pkg.spScheme}; the platform accepts ${SP_SCHEME_VERSION}.`);
+    issue(errors, 'spScheme', `This package was made with SP-Scheme ${pkg.spScheme}. Copy the current SP-Scheme (${SP_SCHEME_VERSION}) from the Builder and ask the model to rebuild the page with it.`);
+  }
+  if (Array.isArray(pkg.customInteractions) && pkg.customInteractions.length) {
+    issue(errors, 'customInteractions', 'SP-Scheme no longer uses per-question custom interactions: build the whole survey as one index.html page and record answers with SPSite.answer.');
   }
   const secretPaths = findSecretFields(pkg);
   if (secretPaths.length) {
@@ -491,81 +710,24 @@ export function validateSpSchemePackage(pkg) {
     return empty;
   }
 
-  // Custom interactions: each must pass the same save-time contract as the Skill editor.
-  const interactions = [];
-  const byRef = new Map();
-  const rawInteractions = pkg.customInteractions ?? [];
-  if (!Array.isArray(rawInteractions)) {
-    issue(errors, 'customInteractions', 'customInteractions must be an array.');
-  } else {
-    rawInteractions.forEach((raw, index) => {
-      const path = `customInteractions[${index}]`;
-      const ref = String(raw?.ref || '').trim();
-      if (!REF_RE.test(ref)) {
-        issue(errors, `${path}.ref`, 'ref must be 2–48 lowercase letters, digits or underscores, starting with a letter.');
-        return;
-      }
-      if (byRef.has(ref)) {
-        issue(errors, `${path}.ref`, `Duplicate ref "${ref}".`);
-        return;
-      }
-      if (raw.missingFile) {
-        issue(errors, `${path}.file`, `${ref}: ${raw.missingFile} is not in the zip.`);
-      } else if (raw.file && !raw.sourceHtml) {
-        issue(errors, `${path}.file`, `${ref}: upload the whole zip so ${raw.file} can be read.`);
-      }
-      const { file: _file, missingFile: _missing, ...fields } = raw;
-      const sourceHtml = stripPreviewShim(raw.sourceHtml || raw.source_html || '');
-      const prepared = prepareSkillForSave({ ...fields, sourceHtml, contractVersion: 1 });
-      prepared.errors.forEach((message) => issue(errors, path, `${ref}: ${message}`));
-      prepared.warnings.forEach((message) => issue(warnings, path, `${ref}: ${message}`));
-      const entry = {
-        ref,
-        placeholderId: `${PLACEHOLDER_PREFIX}${ref}`,
-        ok: prepared.ok,
-        skill: {
-          ...prepared.skill,
-          name: String(raw.name || ref),
-          description: String(raw.description || ''),
-        },
-        usedBy: [],
-      };
-      delete entry.skill.ref;
-      byRef.set(ref, entry);
-      interactions.push(entry);
-    });
-  }
-
   const working = JSON.parse(JSON.stringify(survey));
+  const hasSite = Boolean(siteHtml && String(siteHtml).trim());
   allQuestions(working).forEach(({ element, path }) => {
     const label = element.name || path;
     if (element.skillHtml || element.sourceHtml) {
-      issue(errors, `${path}.skillHtml`, `${label}: put HTML in customInteractions and reference it with skillId "custom:<ref>".`);
+      issue(errors, `${path}.skillHtml`, `${label}: HTML belongs in index.html, not on a question.`);
     }
     if (element.type === 'skillquestion') {
       const sid = String(element.skillId || '');
-      if (sid.startsWith(CUSTOM_PREFIX)) {
-        const entry = byRef.get(sid.slice(CUSTOM_PREFIX.length));
-        if (!entry) {
-          issue(errors, `${path}.skillId`, `${label}: no customInteractions entry for "${sid}".`);
-        } else {
-          entry.usedBy.push(element.name);
-          element.skillId = entry.placeholderId;
-          element.skillRevision = 1;
-          element.skillContractVersion = 1;
-          element.skillResultSchema = entry.skill.resultSchema;
-          if (element.imageCount == null && element.skillConfig?.mediaCount == null
-            && entry.skill.defaultConfig?.mediaCount != null) {
-            element.imageCount = Number(entry.skill.defaultConfig.mediaCount) || 1;
-          }
-        }
-      } else if (sid.startsWith('preset_')) {
-        if (!getPresetSkill(sid)) issue(errors, `${path}.skillId`, `${label}: unknown built-in task "${sid}".`);
-      } else if (sid.startsWith('skill_')) {
-        issue(warnings, `${path}.skillId`, `${label}: "${sid}" must already exist in your interaction library.`);
-      } else {
-        issue(errors, `${path}.skillId`, `${label}: skillId must be "custom:<ref>" or a built-in "preset_*" id.`);
+      if (hasSite) {
+        issue(errors, `${path}.type`, `${label}: your page draws the interface, so declare this question with a native type (for a two-image choice use imagepicker with imageCount 2) instead of skillquestion.`);
+      } else if (sid.startsWith('custom:')) {
+        issue(errors, `${path}.skillId`, `${label}: custom interactions are no longer supported; build the survey as index.html.`);
+      } else if (sid.startsWith('preset_') && !getPresetSkill(sid)) {
+        issue(errors, `${path}.skillId`, `${label}: unknown built-in task "${sid}".`);
       }
+    } else if (hasSite && element.name && answerKindOf(element) === 'unsupported') {
+      issue(errors, `${path}.type`, `${label}: type "${element.type}" cannot be answered from a page; pick a type from SP-Scheme section 3.`);
     }
     if (questionHasTrait(element.type, 'stimulus') || element.type === 'skillquestion') {
       const manual = element.imageSelectionMode === 'huggingface_manual';
@@ -580,9 +742,6 @@ export function validateSpSchemePackage(pkg) {
       }
     }
   });
-  interactions.filter((entry) => !entry.usedBy.length).forEach((entry) => {
-    issue(warnings, 'customInteractions', `${entry.ref}: not used by any question and will not be imported.`);
-  });
 
   const normalized = normalizeBuilderSurveyJson(postProcessAiConfig(working));
   const report = validateSurveyConfig(normalized);
@@ -590,6 +749,24 @@ export function validateSpSchemePackage(pkg) {
   report.warnings.forEach((item) => issue(warnings, `survey.${String(item.path || '').replace(/^surveyConfig\.?/, '')}`, item.message));
 
   const questions = allQuestions(normalized);
+  const names = questions.map(({ element }) => element.name).filter(Boolean);
+  let site = null;
+  if (hasSite) {
+    const html = stripSitePreviewShim(siteHtml);
+    const answerable = questions
+      .filter(({ element }) => element.name && !['display', 'unsupported'].includes(answerKindOf(element)))
+      .map(({ element }) => element.name);
+    const checked = checkSiteHtml(html, answerable);
+    checked.errors.forEach((message) => issue(errors, 'index.html', message));
+    checked.warnings.forEach((message) => issue(warnings, 'index.html', message));
+    if (pkg.__embeddedNames && pkg.__embeddedNames.join(',') !== [...names].sort().join(',')) {
+      issue(warnings, 'index.html', 'The questions embedded in index.html differ from sp-scheme.json; sp-scheme.json is used.');
+    }
+    site = { html, bytes: utf8Bytes(html), id: siteId(html) };
+  } else {
+    issue(warnings, 'index.html', 'No index.html in the upload, so participants will see the platform\'s standard question style. Upload the page the model built to use its interface.');
+  }
+
   const types = {};
   questions.forEach(({ element }) => { types[element.type] = (types[element.type] || 0) + 1; });
   return {
@@ -597,53 +774,41 @@ export function validateSpSchemePackage(pkg) {
     errors,
     warnings,
     survey: normalized,
-    interactions: interactions.filter((entry) => entry.usedBy.length),
+    site,
     summary: {
       title: normalized.title || '',
       pageCount: normalized.pages.length,
       questionCount: questions.length,
-      customInteractionCount: interactions.filter((entry) => entry.usedBy.length).length,
+      hasSite: Boolean(site),
+      siteBytes: site?.bytes || 0,
       types,
     },
   };
 }
 
 /**
- * Save the package's custom interactions to the user's library and return the
- * survey config to load into the Builder. Call only with a validated report.
+ * Return the survey config to load into the Builder. Call only with a
+ * validated report. The site (if any) is stored on the config as `spSite`.
  * @param {object} report validateSpSchemePackage result with ok=true
- * @param {{ saveSkill: (skill) => Promise<{skill:{id,revision}}>, baseConfig?: object }} deps
+ * @param {{ baseConfig?: object }} deps
  */
-export async function applySpSchemePackage(report, { saveSkill, baseConfig = {} }) {
+export function applySpSchemePackage(report, { baseConfig = {} } = {}) {
   if (!report?.ok) throw new Error('Fix the package errors before importing.');
-  const saved = new Map();
-  for (const entry of report.interactions) {
-    const result = await saveSkill(entry.skill);
-    const skill = result?.skill;
-    if (!skill?.id) throw new Error(`Could not save custom interaction "${entry.ref}".`);
-    saved.set(entry.placeholderId, {
-      id: skill.id,
-      revision: Number(skill.revision || skill.currentRevision || 1),
-      resultSchema: skill.resultSchema || entry.skill.resultSchema,
-    });
-  }
   const survey = JSON.parse(JSON.stringify(report.survey));
-  allQuestions(survey).forEach(({ element }) => {
-    const hit = element.type === 'skillquestion' && saved.get(element.skillId);
-    if (!hit) return;
-    element.skillId = hit.id;
-    element.skillRevision = hit.revision;
-    element.skillContractVersion = 1;
-    element.skillResultSchema = hit.resultSchema;
-  });
+  const importedAt = new Date().toISOString();
   // Keep project-level settings the package does not describe (theme, logo, runtime context).
-  return {
+  const next = {
     ...baseConfig,
     ...survey,
     theme: survey.theme || baseConfig.theme,
-    spScheme: { version: SP_SCHEME_VERSION, importedAt: new Date().toISOString() },
+    spScheme: { version: SP_SCHEME_VERSION, importedAt },
   };
+  if (report.site) {
+    next.spSite = { html: report.site.html, id: report.site.id, version: SP_SITE_VERSION, importedAt };
+  } else {
+    delete next.spSite;
+  }
+  return next;
 }
 
-export const SP_SCHEME_RESULT_FAMILIES = NATIVE_SKILL_RESULT_TYPE_IDS;
 export const SP_SCHEME_EXAMPLE_PACKAGE = EXAMPLE_PACKAGE;

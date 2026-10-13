@@ -29,6 +29,7 @@ import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge
 import { adaptSurveyForPreviewLibrary, resolvePreviewMediaContext, surveyUsesSampledMedia } from '../../lib/previewMediaLibrary';
 import { markGuideProgress } from '../../lib/adminGuide';
 import { applyRuntimeVariables, normalizeConditions } from '../../lib/surveyRuntimeContext';
+import SpSitePreview from './SpSitePreview';
 
 export function previewSourceKey(config, currentProject) {
   const images = currentProject?.preloadedImages || [];
@@ -708,6 +709,15 @@ export default function SurveyPreview({
       <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
         <CircularProgress />
       </Box>
+    );
+  }
+
+  if (config.spSite?.html && processedConfig) {
+    return (
+      <SpSitePreview
+        config={{ ...processedConfig, spSite: config.spSite }}
+        viewport={interactive ? viewport : 'desktop'}
+      />
     );
   }
 

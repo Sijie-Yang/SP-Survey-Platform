@@ -46,6 +46,7 @@ import {
   rehydrateTrialsAnswerStoreFromSurvey,
 } from './lib/trialNavigation';
 import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
+import SpSiteSurvey from './components/SpSiteSurvey';
 import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale, resolveSurveyUiLanguage } from './lib/surveyLocale';
 import { loadLocaleBundle } from './lib/uiLanguages';
 import {
@@ -1175,6 +1176,7 @@ export default function SurveyApp() {
             survey_revision: revision.id,
             survey_response_contract: revision.contract,
             published_version: finalSurveyJson._spPublishedVersion || null,
+            ...(finalSurveyJson.spSite ? { sp_site: { id: finalSurveyJson.spSite.id || null, version: finalSurveyJson.spSite.version || null } } : {}),
             survey_draft_updated_at: resumeDraft?.finalSurveyJson ? null : projectData?.draftUpdatedAt || null,
             timing: {
               total_seconds: totalSeconds,
@@ -1500,7 +1502,15 @@ export default function SurveyApp() {
       </Box>
       )}
       
-      {surveyModel && surveyPhase === 'active' && (
+      {surveyModel && surveyPhase === 'active' && publishedSurveyJson?.spSite?.html && (
+        <SpSiteSurvey
+          model={surveyModel}
+          surveyJson={publishedSurveyJson}
+          language={answerLanguageRef.current}
+        />
+      )}
+
+      {surveyModel && surveyPhase === 'active' && !publishedSurveyJson?.spSite?.html && (
         <SurveyTrialNavProvider>
           <ParticipantSurveySurface
             onErrorCapture={(e) => handleSurveyMediaError(e, participantLocale)}

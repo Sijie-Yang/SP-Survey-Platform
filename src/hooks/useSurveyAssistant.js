@@ -5,6 +5,7 @@ import { getWorkingMemory } from '../lib/workingMemory';
 import { getSessionLearning } from '../lib/sessionLearning';
 import { sendChatMessage, validateChatApiKey, triggerMultiAgentReviewStream } from '../lib/chatApi';
 import { postProcessAiConfig } from '../lib/designProtocol';
+import { withoutSiteHtml } from '../lib/spSite';
 import { runSurveyQualityChecks } from '../lib/surveyQualityChecks';
 import { answerAiRunApproval, applyAgentReview, archiveAiSession, estimateAgentReview, cancelAiRun, discardAiInbox, listAiInbox, listAiRunApprovals, steerAiSession } from '../lib/agentApi';
 import { loadSurveyConfigForProject } from '../lib/projectManager';
@@ -518,6 +519,9 @@ export default function useSurveyAssistant({
     })) {
       return false;
     }
+    // The assistant never sees or rewrites an SP-Scheme page; keep it across its edits.
+    const site = surveyConfigRef.current?.spSite;
+    if (site?.html && nextConfig && !nextConfig.spSite?.html) nextConfig = { ...nextConfig, spSite: site };
     if (Object.keys(metadata).length) onChangeRef.current?.(nextConfig, metadata);else onChangeRef.current?.(nextConfig);
     return true;
   }, []);
@@ -714,7 +718,7 @@ export default function useSurveyAssistant({
         }, ...apiHistory];
       }
       const researchContext = request.projectId ? JSON.parse(window.localStorage.getItem(`researchContext_${request.projectId}`) || '{}') : {};
-      const result = completedResult = await sendChatMessage(currentUserMessage, surveyConfigRef.current, enrichedHistory, openaiApiKey, platformMode ? false : multiAgentReviewEnabled, reviewMode, customPrompts, researchContext, {
+      const result = completedResult = await sendChatMessage(currentUserMessage, withoutSiteHtml(surveyConfigRef.current), enrichedHistory, openaiApiKey, platformMode ? false : multiAgentReviewEnabled, reviewMode, customPrompts, researchContext, {
         projectId: request.projectId,
         sessionId: aiSessionId || null,
         provider: routeProvider || null,

@@ -86,9 +86,6 @@ import {
 // Old API functions removed - now using chatApi.js
 import { getSurveyValidationWarningStrings } from '../../lib/designProtocol';
 
-// Loaded on demand so the Builder does not pull the Skill library client until an import runs.
-const saveImportedSkill = async (skill) => (await import('../../lib/skillManager')).saveSkill(skill);
-
 /** Compact color picker row for Theme Customization */
 function ThemeColorField({ label, hint, value, onChange }) {
   return (
@@ -559,7 +556,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         description={t.builderDescription}
       />
 
-      <SpSchemePanel config={config} onChange={onChange} saveSkill={saveImportedSkill} />
+      <SpSchemePanel config={config} onChange={onChange} />
 
       <AdminActionBar
         label={t.builderSurveySettings}

@@ -12,7 +12,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { AutoAwesome, ContentCopy, Download, FactCheck, FolderZip, UploadFile } from '@mui/icons-material';
+import { AutoAwesome, ContentCopy, Download, FactCheck, FolderZip, UploadFile, Web } from '@mui/icons-material';
 import { strToU8 } from 'fflate';
 import { useRegion } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
@@ -59,11 +59,15 @@ function IssueList({ items, max = 8 }) {
   );
 }
 
+function formatKb(bytes) {
+  return `${Math.max(1, Math.round((bytes || 0) / 1024))} KB`;
+}
+
 /**
  * SP-Scheme: copy the platform contract to any external LLM, then upload the
- * package it produces. Nothing is saved until the researcher confirms import.
+ * page it builds. Nothing changes until the researcher confirms import.
  */
-export default function SpSchemePanel({ config, onChange, saveSkill }) {
+export default function SpSchemePanel({ config, onChange }) {
   const { language } = useRegion();
   const L = (en, zh) => uiPair(language, en, zh);
   const schemeText = useMemo(() => buildSpSchemeText(), []);
@@ -93,7 +97,7 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
     try {
       const read = readSpSchemeUpload(bytes);
       setUpload({ name, ...read });
-      setReport(validateSpSchemePackage(read.pkg));
+      setReport(validateSpSchemePackage(read.pkg, { siteHtml: read.siteHtml }));
     } catch (err) {
       setParseError(err.message);
     }
@@ -121,13 +125,18 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
   const doImport = async () => {
     setImporting(true);
     try {
-      const next = await applySpSchemePackage(report, { saveSkill, baseConfig: config });
+      const next = applySpSchemePackage(report, { baseConfig: config });
       onChange(next);
       setOpen(false);
       setReport(null);
       setPasted('');
       setUpload(null);
-      setNotice({ severity: 'success', text: L('Imported into the Builder. Review it, preview, then Save.', '已导入 Builder。检查并预览后再点保存。') });
+      setNotice({
+        severity: 'success',
+        text: next.spSite
+          ? L('Imported. Preview and the survey link now use the page the model built. Check it in Preview, then Save.', '已导入。预览和问卷链接现在都使用大模型做的页面。请在预览里确认后点保存。')
+          : L('Imported into the Builder. Review it, preview, then Save.', '已导入 Builder。检查并预览后再点保存。'),
+      });
     } catch (err) {
       setParseError(err.message || String(err));
     } finally {
@@ -136,6 +145,12 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
   };
 
   const hasQuestions = (config?.pages || []).some((p) => (p.elements || []).length);
+  const activeSite = config?.spSite?.html ? config.spSite : null;
+  const removeSite = () => {
+    const { spSite: _site, ...rest } = config;
+    onChange(rest);
+    setNotice({ severity: 'info', text: L('The model-built page was removed; the survey uses the standard platform style again. Save to apply.', '已移除大模型页面，问卷恢复平台标准样式。点保存后生效。') });
+  };
   const summary = report?.summary;
 
   return (
@@ -165,10 +180,10 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
           {L('Copy SP-Scheme and paste it into ChatGPT, Claude, Gemini or any model, then describe your study. It tells the model how media is randomised, how questions are described and how answers are recorded.', '复制 SP-Scheme，发给 ChatGPT、Claude、Gemini 等任意大模型，再描述你的研究。它告诉大模型平台如何随机抽图、如何描述题目、如何记录答案。')}
         </Typography>
         <Typography component="li" variant="body2">
-          {L('The model first builds a clickable prototype. Try every page and interaction in its preview and ask for changes until you are happy.', '大模型会先做一个可点击的原型。在它的预览里把每一页、每个交互都试一遍，不满意就让它改。')}
+          {L('The model builds the whole survey as one web page, any design you like. Try it in the model\'s preview and ask for changes until you are happy.', '大模型会把整份问卷做成一个网页，样式和交互随你定。在它的预览里试一遍，不满意就让它改。')}
         </Typography>
         <Typography component="li" variant="body2">
-          {L('When you are happy, ask it to pack the study as a zip and upload it here. The Builder checks the format before anything is imported; if it lists problems, paste them back to the model.', '满意后让它打包成 zip，在这里上传。Builder 会先检查格式，通过后才导入；如果列出问题，把问题发回给大模型修改即可。')}
+          {L('Upload that same index.html (or its zip) here. After the check passes and you import, Preview and the survey link both show that page; the platform still draws the images and records the answers.', '把同一个 index.html（或它的 zip）上传到这里。检查通过并导入后，预览和问卷链接都直接使用这个页面；抽图和记录答案仍由平台负责。')}
         </Typography>
       </Box>
 
@@ -179,31 +194,43 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
         <Button variant="outlined" startIcon={<Download />} onClick={() => downloadText(`sp-scheme-${SP_SCHEME_VERSION}.md`, schemeText, 'text/markdown')}>
           {L('Download .md', '下载 .md')}
         </Button>
-        <input ref={fileRef} type="file" accept=".zip,.json,.txt,.md,application/zip,application/json" hidden onChange={onFile} data-testid="sp-scheme-file" />
+        <input ref={fileRef} type="file" accept=".html,.htm,.zip,.json,.txt,.md,text/html,application/zip,application/json" hidden onChange={onFile} data-testid="sp-scheme-file" />
         <Button variant="contained" color="secondary" startIcon={<UploadFile />} onClick={() => fileRef.current?.click()}>
-          {L('Upload zip', '上传 zip 包')}
+          {L('Upload index.html / zip', '上传 index.html / zip')}
         </Button>
         <Button variant="text" startIcon={<FolderZip />} onClick={() => downloadBytes('sp-scheme-example.zip', buildExampleZip(), 'application/zip')}>
-          {L('Example zip', '示例 zip')}
+          {L('Example', '示例')}
         </Button>
         <Button variant="text" startIcon={<FactCheck />} onClick={() => { setUpload(null); setReport(null); setParseError(''); setOpen(true); }}>
-          {L('Paste JSON', '粘贴 JSON')}
+          {L('Paste code', '粘贴代码')}
         </Button>
       </Box>
+
+      {activeSite ? (
+        <Alert
+          severity="success"
+          icon={<Web />}
+          sx={{ mt: 1.5 }}
+          data-testid="sp-site-active"
+          action={<Button color="inherit" size="small" onClick={removeSite}>{L('Remove', '移除')}</Button>}
+        >
+          {L(`This survey runs on the page built with SP-Scheme (${formatKb(activeSite.html.length)}). Preview and the survey link show it; editing questions here changes what it records.`,
+            `这份问卷使用 SP-Scheme 导入的大模型页面（${formatKb(activeSite.html.length)}）。预览和问卷链接都显示这个页面；在这里修改题目会改变它记录的内容。`)}
+        </Alert>
+      ) : null}
 
       {notice ? <Alert severity={notice.severity} sx={{ mt: 1.5 }} onClose={() => setNotice(null)}>{notice.text}</Alert> : null}
 
       <Dialog open={open} onClose={closeDialog} fullWidth maxWidth="md">
-        <DialogTitle>{L('Check an SP-Scheme package', '检查 SP-Scheme 问卷包')}</DialogTitle>
+        <DialogTitle>{L('Check an SP-Scheme upload', '检查 SP-Scheme 上传')}</DialogTitle>
         <DialogContent dividers>
-          {upload?.fromZip ? (
+          {upload?.name ? (
             <Alert severity="info" sx={{ mb: 2 }}>
-              {upload.name ? `${upload.name} · ` : ''}
-              {L(`${upload.files.length} file(s) read.`, `已读取 ${upload.files.length} 个文件。`)}
-              {upload.hasPreview ? ` ${L('preview.html is kept as your reference and is not imported; check the result in Preview after import.', 'preview.html 只作参考，不会导入；导入后请用平台的预览再确认一次。')}` : ''}
+              {upload.name}
+              {upload.fromZip ? ` · ${L(`${upload.files.length} file(s) read.`, `已读取 ${upload.files.length} 个文件。`)}` : ''}
             </Alert>
           ) : null}
-          {!upload?.fromZip ? (
+          {!upload?.name ? (
           <TextField
             fullWidth
             multiline
@@ -211,11 +238,11 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
             maxRows={14}
             value={pasted}
             onChange={(e) => { setPasted(e.target.value); setReport(null); setParseError(''); }}
-            placeholder={L('Paste sp-scheme.json here when the model could not make a zip (a ```json block is fine). Interactions must then be inline as sourceHtml.', '大模型做不了 zip 时，可以把 sp-scheme.json 粘贴到这里（带 ```json 代码块也可以），此时交互要以 sourceHtml 内嵌。')}
+            placeholder={L('Paste the whole index.html the model gave you (or a sp-scheme.json).', '把大模型给你的完整 index.html 代码粘贴到这里（也可以是 sp-scheme.json）。')}
             inputProps={{ 'aria-label': 'SP-Scheme package', style: { fontFamily: 'monospace', fontSize: 12 } }}
           />
           ) : null}
-          {!upload?.fromZip ? (
+          {!upload?.name ? (
           <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
             <Button variant="outlined" size="small" startIcon={<FactCheck />} onClick={() => check(strToU8(pasted))} disabled={!pasted.trim()}>
               {L('Check format', '检查格式')}
@@ -236,15 +263,14 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
                 {summary ? (
                   <Typography variant="body2" sx={{ mt: 0.5 }}>
                     {summary.title ? `「${summary.title}」 · ` : ''}
-                    {L(`${summary.pageCount} pages · ${summary.questionCount} questions · ${summary.customInteractionCount} custom interactions`,
-                      `${summary.pageCount} 页 · ${summary.questionCount} 题 · ${summary.customInteractionCount} 个自定义交互`)}
+                    {L(`${summary.pageCount} pages · ${summary.questionCount} questions`, `${summary.pageCount} 页 · ${summary.questionCount} 题`)}
                   </Typography>
                 ) : null}
               </Alert>
-              {upload?.hasPreview && summary && !summary.customInteractionCount ? (
-                <Alert severity="warning" data-testid="sp-scheme-no-custom">
-                  {L('This package has a prototype but no custom interactions, so participants will see the standard platform questions, not the interface you tried. If that is not what you want, ask the model: "Pack every question that has its own interface in the prototype as a custom interaction with the same HTML, as SP-Scheme requires."',
-                    '这个包附带了原型，但没有任何自定义交互，参与者看到的会是平台的标准题型，而不是你试玩过的界面。如果这不是你想要的，可以对大模型说："按 SP-Scheme 的要求，把原型里有自己界面的题都打包成自定义交互，用同一份 HTML。"')}
+              {summary?.hasSite ? (
+                <Alert severity="info" icon={<Web />} data-testid="sp-scheme-site">
+                  {L(`Includes the page the model built (${upload?.siteFile || 'index.html'}, ${formatKb(summary.siteBytes)}). After import, Preview and the survey link show this page.`,
+                    `包含大模型做的页面（${upload?.siteFile || 'index.html'}，${formatKb(summary.siteBytes)}）。导入后，预览和问卷链接都直接显示这个页面。`)}
                 </Alert>
               ) : null}
               {report.errors.length ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
@@ -256,7 +282,7 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
               ) : null}
               {report.ok && hasQuestions ? (
                 <Alert severity="warning">
-                  {L('Importing replaces the current pages and questions. Theme and logo are kept. Collected responses are not changed; publish only after reviewing.', '导入会替换当前的页面和题目，主题和 Logo 保留。已收集的答卷不受影响；请检查后再发布。')}
+                  {L('Importing replaces the current pages, questions and page design. Theme and logo are kept. Collected responses are not changed; publish only after reviewing.', '导入会替换当前的页面、题目和页面设计，主题和 Logo 保留。已收集的答卷不受影响；请检查后再发布。')}
                 </Alert>
               ) : null}
             </Box>
