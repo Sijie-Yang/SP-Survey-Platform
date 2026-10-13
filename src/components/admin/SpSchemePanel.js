@@ -12,19 +12,31 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { AutoAwesome, ContentCopy, Download, FactCheck, UploadFile } from '@mui/icons-material';
+import { AutoAwesome, ContentCopy, Download, FactCheck, FolderZip, UploadFile } from '@mui/icons-material';
+import { strToU8 } from 'fflate';
 import { useRegion } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
 import {
   SP_SCHEME_VERSION,
   applySpSchemePackage,
+  buildExampleZip,
   buildSpSchemeText,
-  parseSpSchemePackage,
+  readSpSchemeUpload,
   validateSpSchemePackage,
 } from '../../lib/spScheme';
 
 function downloadText(filename, text, type) {
   const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBytes(filename, bytes, type) {
+  const blob = new Blob([bytes], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -62,6 +74,7 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
   const [report, setReport] = useState(null);
   const [parseError, setParseError] = useState('');
   const [importing, setImporting] = useState(false);
+  const [upload, setUpload] = useState(null);
 
   const copyScheme = async () => {
     try {
@@ -73,11 +86,14 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
     }
   };
 
-  const check = (text) => {
+  const check = (bytes, name = '') => {
     setReport(null);
     setParseError('');
+    setUpload(null);
     try {
-      setReport(validateSpSchemePackage(parseSpSchemePackage(text)));
+      const read = readSpSchemeUpload(bytes);
+      setUpload({ name, ...read });
+      setReport(validateSpSchemePackage(read.pkg));
     } catch (err) {
       setParseError(err.message);
     }
@@ -89,12 +105,12 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = String(e.target.result || '');
-      setPasted(text);
+      const bytes = new Uint8Array(e.target.result);
+      setPasted('');
       setOpen(true);
-      check(text);
+      check(bytes, file.name);
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const closeDialog = () => {
@@ -110,6 +126,7 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
       setOpen(false);
       setReport(null);
       setPasted('');
+      setUpload(null);
       setNotice({ severity: 'success', text: L('Imported into the Builder. Review it, preview, then Save.', '已导入 Builder。检查并预览后再点保存。') });
     } catch (err) {
       setParseError(err.message || String(err));
@@ -145,13 +162,13 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
 
       <Box component="ol" sx={{ m: '8px 0 12px', pl: 2.5, color: 'text.secondary', '& li': { mb: 0.25 } }}>
         <Typography component="li" variant="body2">
-          {L('Copy SP-Scheme. It tells the model how media is randomised, how questions are described and how answers are recorded.', '复制 SP-Scheme。它告诉大模型平台如何随机抽图、如何描述题目、如何记录答案。')}
+          {L('Copy SP-Scheme and paste it into ChatGPT, Claude, Gemini or any model, then describe your study. It tells the model how media is randomised, how questions are described and how answers are recorded.', '复制 SP-Scheme，发给 ChatGPT、Claude、Gemini 等任意大模型，再描述你的研究。它告诉大模型平台如何随机抽图、如何描述题目、如何记录答案。')}
         </Typography>
         <Typography component="li" variant="body2">
-          {L('Paste it into ChatGPT, Claude, Gemini or any model with your study idea. Interfaces and interactions are up to the model.', '连同你的研究想法发给 ChatGPT、Claude、Gemini 等任意模型。界面和交互由模型自由发挥。')}
+          {L('The model first builds a clickable prototype. Try every page and interaction in its preview and ask for changes until you are happy.', '大模型会先做一个可点击的原型。在它的预览里把每一页、每个交互都试一遍，不满意就让它改。')}
         </Typography>
         <Typography component="li" variant="body2">
-          {L('Upload the JSON package it returns. The Builder checks it against the platform format before anything is imported.', '上传模型返回的 JSON 包。Builder 会先按平台格式检查，通过后才导入。')}
+          {L('When you are happy, ask it to pack the study as a zip and upload it here. The Builder checks the format before anything is imported; if it lists problems, paste them back to the model.', '满意后让它打包成 zip，在这里上传。Builder 会先检查格式，通过后才导入；如果列出问题，把问题发回给大模型修改即可。')}
         </Typography>
       </Box>
 
@@ -162,12 +179,15 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
         <Button variant="outlined" startIcon={<Download />} onClick={() => downloadText(`sp-scheme-${SP_SCHEME_VERSION}.md`, schemeText, 'text/markdown')}>
           {L('Download .md', '下载 .md')}
         </Button>
-        <input ref={fileRef} type="file" accept=".json,.txt,.md,application/json" hidden onChange={onFile} data-testid="sp-scheme-file" />
-        <Button variant="outlined" startIcon={<UploadFile />} onClick={() => fileRef.current?.click()}>
-          {L('Upload package', '上传问卷包')}
+        <input ref={fileRef} type="file" accept=".zip,.json,.txt,.md,application/zip,application/json" hidden onChange={onFile} data-testid="sp-scheme-file" />
+        <Button variant="contained" color="secondary" startIcon={<UploadFile />} onClick={() => fileRef.current?.click()}>
+          {L('Upload zip', '上传 zip 包')}
         </Button>
-        <Button variant="text" startIcon={<FactCheck />} onClick={() => setOpen(true)}>
-          {L('Paste and check', '粘贴并检查')}
+        <Button variant="text" startIcon={<FolderZip />} onClick={() => downloadBytes('sp-scheme-example.zip', buildExampleZip(), 'application/zip')}>
+          {L('Example zip', '示例 zip')}
+        </Button>
+        <Button variant="text" startIcon={<FactCheck />} onClick={() => { setUpload(null); setReport(null); setParseError(''); setOpen(true); }}>
+          {L('Paste JSON', '粘贴 JSON')}
         </Button>
       </Box>
 
@@ -176,6 +196,14 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
       <Dialog open={open} onClose={closeDialog} fullWidth maxWidth="md">
         <DialogTitle>{L('Check an SP-Scheme package', '检查 SP-Scheme 问卷包')}</DialogTitle>
         <DialogContent dividers>
+          {upload?.fromZip ? (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {upload.name ? `${upload.name} · ` : ''}
+              {L(`${upload.files.length} file(s) read.`, `已读取 ${upload.files.length} 个文件。`)}
+              {upload.hasPreview ? ` ${L('preview.html is kept as your reference and is not imported; check the result in Preview after import.', 'preview.html 只作参考，不会导入；导入后请用平台的预览再确认一次。')}` : ''}
+            </Alert>
+          ) : null}
+          {!upload?.fromZip ? (
           <TextField
             fullWidth
             multiline
@@ -183,14 +211,17 @@ export default function SpSchemePanel({ config, onChange, saveSkill }) {
             maxRows={14}
             value={pasted}
             onChange={(e) => { setPasted(e.target.value); setReport(null); setParseError(''); }}
-            placeholder={L('Paste the model\'s JSON (a ```json block is fine) or upload the file.', '粘贴大模型输出的 JSON（带 ```json 代码块也可以），或上传文件。')}
+            placeholder={L('Paste sp-scheme.json here when the model could not make a zip (a ```json block is fine). Interactions must then be inline as sourceHtml.', '大模型做不了 zip 时，可以把 sp-scheme.json 粘贴到这里（带 ```json 代码块也可以），此时交互要以 sourceHtml 内嵌。')}
             inputProps={{ 'aria-label': 'SP-Scheme package', style: { fontFamily: 'monospace', fontSize: 12 } }}
           />
+          ) : null}
+          {!upload?.fromZip ? (
           <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
-            <Button variant="outlined" size="small" startIcon={<FactCheck />} onClick={() => check(pasted)} disabled={!pasted.trim()}>
+            <Button variant="outlined" size="small" startIcon={<FactCheck />} onClick={() => check(strToU8(pasted))} disabled={!pasted.trim()}>
               {L('Check format', '检查格式')}
             </Button>
           </Box>
+          ) : null}
 
           {parseError ? <Alert severity="error" sx={{ mt: 2 }}>{parseError}</Alert> : null}
 

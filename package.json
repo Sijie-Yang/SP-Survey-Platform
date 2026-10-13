@@ -21,6 +21,7 @@
     "concurrently": "^9.2.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "fflate": "^0.8.2",
     "fs-extra": "^11.3.2",
     "leaflet": "^1.9.4",
     "mdast-util-from-markdown": "^2.0.3",

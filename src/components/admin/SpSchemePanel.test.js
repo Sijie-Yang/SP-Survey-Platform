@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SpSchemePanel from './SpSchemePanel';
 import { RegionProvider } from '../../contexts/RegionContext';
-import { SP_SCHEME_EXAMPLE_PACKAGE } from '../../lib/spScheme';
+import { buildExampleZip } from '../../lib/spScheme';
 
 function renderPanel(props = {}) {
   const onChange = jest.fn();
@@ -25,24 +25,26 @@ test('copies the scheme to the clipboard', async () => {
   expect(writeText.mock.calls[0][0]).toContain('sp-scheme-package');
 });
 
-test('checks a pasted package and imports it only after it passes', async () => {
-  const { onChange, saveSkill } = renderPanel();
-  fireEvent.click(screen.getByRole('button', { name: /Paste and check|粘贴并检查/ }));
-  const box = screen.getByLabelText('SP-Scheme package');
-  const importButton = screen.getByRole('button', { name: /Import into Builder|导入 Builder/ });
-
-  fireEvent.change(box, { target: { value: '{"format":"sp-scheme-package","survey":{"pages":[{"name":"p","elements":[{"type":"skillquestion","name":"q","skillId":"custom:missing"}]}]}}' } });
+test('pasted JSON is checked and blocked when it has problems', async () => {
+  renderPanel();
+  fireEvent.click(screen.getByRole('button', { name: /Paste JSON|粘贴 JSON/ }));
+  fireEvent.change(screen.getByLabelText('SP-Scheme package'), { target: { value: '{"format":"sp-scheme-package","survey":{"pages":[{"name":"p","elements":[{"type":"skillquestion","name":"q","skillId":"custom:missing"}]}]}}' } });
   fireEvent.click(screen.getByRole('button', { name: /Check format|检查格式/ }));
   expect(await screen.findByText(/no customInteractions entry/)).toBeInTheDocument();
-  expect(importButton).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Import into Builder|导入 Builder/ })).toBeDisabled();
+});
 
-  fireEvent.change(box, { target: { value: `\`\`\`json\n${JSON.stringify(SP_SCHEME_EXAMPLE_PACKAGE)}\n\`\`\`` } });
-  fireEvent.click(screen.getByRole('button', { name: /Check format|检查格式/ }));
+test('an uploaded zip is checked and imported only after it passes', async () => {
+  const { onChange, saveSkill } = renderPanel();
+  const file = new File([buildExampleZip()], 'study.zip', { type: 'application/zip' });
+  fireEvent.change(screen.getByTestId('sp-scheme-file'), { target: { files: [file] } });
   expect(await screen.findByText(/Format aligned|格式与平台对齐/)).toBeInTheDocument();
-  fireEvent.click(importButton);
+  expect(screen.getByText(/file\(s\) read|个文件/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Import into Builder|导入 Builder/ }));
 
   await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
   expect(saveSkill).toHaveBeenCalledTimes(1);
+  expect(saveSkill.mock.calls[0][0].sourceHtml).not.toContain('sp-preview-shim');
   const next = onChange.mock.calls[0][0];
   expect(next.pages[1].elements[0].skillId).toBe('skill_saved_1');
   expect(next.theme.primaryColor).toBe('#111111');
