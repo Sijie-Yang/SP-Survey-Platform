@@ -32,6 +32,7 @@ import {
   utf8Bytes,
 } from './spSite';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
+import { MEDIA_FILE_RE } from './mediaUtils';
 
 export const SP_SCHEME_VERSION = '2.0';
 export const SP_SCHEME_FORMAT = 'sp-scheme-package';
@@ -487,8 +488,9 @@ ${EXAMPLE_SITE_HTML.trim()}
 `;
 }
 
-const MAX_ZIP_BYTES = 10 * 1024 * 1024;
-const MAX_UNZIPPED_BYTES = 25 * 1024 * 1024;
+// Project zips may carry their stimulus images (uploaded to the media library on import).
+const MAX_ZIP_BYTES = 200 * 1024 * 1024;
+const MAX_UNZIPPED_BYTES = 300 * 1024 * 1024;
 const MANIFEST_NAME = 'sp-scheme.json';
 const ASSET_MIME = { css: 'text/css', js: 'text/javascript', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 
@@ -543,7 +545,7 @@ function inlineLocalAssets(html, entries, base) {
   return { html: out, inlined };
 }
 
-const DATA_FILE_RE = /\.(json|csv|tsv|txt|md)$/i;
+const DATA_FILE_RE = /\.(json|csv|tsv|txt|md|py)$/i;
 const DATA_FILE_MAX = 60000;
 const DATA_TOTAL_MAX = 150000;
 
@@ -564,6 +566,28 @@ function readDataFiles(entries, skip = []) {
     .filter(Boolean);
 }
 
+/** The folder every entry sits in, if the zip wraps its content in one. */
+function commonTopFolder(names) {
+  const first = names[0]?.split('/');
+  if (!first || first.length < 2) return '';
+  return names.every((name) => name.startsWith(`${first[0]}/`)) ? `${first[0]}/` : '';
+}
+
+/**
+ * Media in the zip that the page does not embed: the study's stimuli. They are
+ * uploaded to the project's media library on import; paths drop the zip's
+ * wrapping folder ("images/IMG0279.jpg").
+ */
+function readMediaFiles(entries, inlined = []) {
+  const names = Object.keys(entries);
+  const top = commonTopFolder(names);
+  return names
+    .filter((name) => MEDIA_FILE_RE.test(name) && !inlined.includes(name) && !name.split('/').pop().startsWith('._'))
+    .filter((name) => entries[name]?.length)
+    .sort()
+    .map((name) => ({ path: name.slice(top.length), bytes: entries[name], size: entries[name].length }));
+}
+
 /**
  * Read an uploaded package: index.html on its own, a .zip holding it (plus
  * optional sp-scheme.json and local assets), or a bare sp-scheme.json.
@@ -579,7 +603,7 @@ export function readSpSchemeUpload(bytes) {
     }
     return { pkg: parseSpSchemePackage(text), siteHtml: null, siteFile: null, files: [], fromZip: false, manifestSource: 'json' };
   }
-  if (bytes.length > MAX_ZIP_BYTES) throw new Error('The zip is larger than 10 MB. Media files do not belong in the package; upload them to the Media Dataset.');
+  if (bytes.length > MAX_ZIP_BYTES) throw new Error('The zip is larger than 200 MB. Upload large media to the Media Dataset first and leave it out of the zip.');
   let total = 0;
   let entries;
   try {
@@ -587,12 +611,12 @@ export function readSpSchemeUpload(bytes) {
       filter: (file) => {
         if (file.name.endsWith('/') || /(^|\/)(__MACOSX|\.DS_Store)/.test(file.name)) return false;
         total += file.originalSize || 0;
-        if (total > MAX_UNZIPPED_BYTES) throw new Error('The zip expands to more than 25 MB.');
-        return /\.(json|html?|md|txt|csv|tsv|css|js|svg|png|jpe?g|gif|webp)$/i.test(file.name);
+        if (total > MAX_UNZIPPED_BYTES) throw new Error('The zip expands to more than 300 MB.');
+        return /\.(json|html?|md|txt|csv|tsv|py|css|js|svg)$/i.test(file.name) || MEDIA_FILE_RE.test(file.name);
       },
     });
   } catch (err) {
-    throw new Error(/25 MB/.test(err.message) ? err.message : 'The zip could not be opened.');
+    throw new Error(/300 MB/.test(err.message) ? err.message : 'The zip could not be opened.');
   }
   const names = Object.keys(entries);
   const shallowest = (list) => list.sort((a, b) => a.split('/').length - b.split('/').length)[0];
@@ -605,9 +629,9 @@ export function readSpSchemeUpload(bytes) {
   if (!sitePath && !manifestPath) throw new Error('The zip has neither index.html nor sp-scheme.json.');
   const root = (sitePath || manifestPath).replace(/[^/]*$/, '');
   let siteHtml = null;
+  let inlined = [];
   if (sitePath) {
-    const { html } = inlineLocalAssets(strFromU8(entries[sitePath]), entries, sitePath.replace(/[^/]*$/, ''));
-    siteHtml = html;
+    ({ html: siteHtml, inlined } = inlineLocalAssets(strFromU8(entries[sitePath]), entries, sitePath.replace(/[^/]*$/, '')));
   }
   const embedded = siteHtml ? extractEmbeddedScheme(siteHtml) : null;
   const pkg = manifestPath ? parseSpSchemePackage(strFromU8(entries[manifestPath])) : embedded;
@@ -620,6 +644,7 @@ export function readSpSchemeUpload(bytes) {
     siteFile: sitePath ? sitePath.slice(root.length) : null,
     files: names.filter((name) => name.startsWith(root)).map((name) => name.slice(root.length)),
     dataFiles: readDataFiles(entries, [sitePath, manifestPath]),
+    mediaFiles: readMediaFiles(entries, inlined),
     fromZip: true,
     manifestSource: manifestPath ? 'json' : (embedded ? 'embedded' : null),
   };

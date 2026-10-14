@@ -59,7 +59,7 @@ function insertBeforeBodyClose(html, block) {
  * Apply one model answer to the page the model saw (data URIs tokenized).
  * @returns {{ html: string, pkg: object, problems: string[] }}
  */
-export function applyConversion(tokenizedHtml, result, tokens = []) {
+export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles = [], mediaBase = '' } = {}) {
   const problems = [];
   let html = stripSitePreviewShim(String(tokenizedHtml || ''));
   (result?.replacements || []).forEach(({ find, replace }, i) => {
@@ -81,6 +81,11 @@ export function applyConversion(tokenizedHtml, result, tokens = []) {
   (survey?.pages || []).forEach((page, i) => {
     if (page && typeof page === 'object' && !page.name) page.name = `page${i + 1}`;
   });
+  const mediaPlan = mediaFiles.length ? planMediaUpload(mediaFiles, result?.mediaGroups, mediaBase) : null;
+  if (mediaPlan) {
+    problems.push(...mediaPlan.problems);
+    problems.push(...linkQuestionFolders(survey, mediaPlan));
+  }
   const pkg = { format: SP_SCHEME_FORMAT, spScheme: SP_SCHEME_VERSION, survey };
   html = insertAfterHeadOpen(html, `\n<script type="application/json" id="sp-scheme">\n${escapeJsonForScript(pkg)}\n</script>\n`);
   const adapter = String(result?.adapterScript || '').trim();
@@ -89,7 +94,95 @@ export function applyConversion(tokenizedHtml, result, tokens = []) {
   } else {
     problems.push('adapterScript is empty: the page must record answers with SPSite.answer and finish with SPSite.complete().');
   }
-  return { html: restoreDataUris(html, tokens), pkg, problems };
+  return { html: restoreDataUris(html, tokens), pkg, problems, mediaPlan };
+}
+
+const FOLDER_RE = /^[a-z0-9_-]+(\/[a-z0-9_-]+)*$/i;
+
+function dirOf(path) {
+  const i = path.lastIndexOf('/');
+  return i > 0 ? path.slice(0, i) : 'files';
+}
+
+/** A short media-library folder for an import ("sp-scheme/retail_validation_r10_mac"). */
+export function importMediaBase(name) {
+  const stem = String(name || 'import').replace(/\.[a-z0-9]+$/i, '').replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase();
+  return `sp-scheme/${stem.slice(0, 60) || 'import'}`;
+}
+
+/**
+ * Where each stimulus file from the zip goes in the media library: the model's
+ * groups first, then the file's own folder.
+ * @returns {{ files: { path, folder }[], folders: Map<string, { full, count }>, problems: string[] }}
+ */
+export function planMediaUpload(mediaFiles, groups = [], base = '') {
+  const problems = [];
+  const known = new Set(mediaFiles.map((f) => f.path));
+  const byBase = new Map();
+  mediaFiles.forEach((f) => {
+    const name = f.path.split('/').pop();
+    byBase.set(name, byBase.has(name) ? null : f.path);
+  });
+  const assigned = new Map();
+  (groups || []).forEach((group, gi) => {
+    const folder = String(group.folder || '').replace(/^\/+|\/+$/g, '');
+    if (!FOLDER_RE.test(folder)) {
+      problems.push(`mediaGroups[${gi}].folder "${group.folder}" is not a short relative folder name of letters, digits, _ and -.`);
+      return;
+    }
+    const missing = [];
+    (group.files || []).forEach((file) => {
+      const path = known.has(file) ? file : byBase.get(String(file).split('/').pop());
+      if (!path) { missing.push(file); return; }
+      if (!assigned.has(path)) assigned.set(path, folder);
+    });
+    if (missing.length) {
+      problems.push(`mediaGroups[${gi}] lists ${missing.length} file(s) that are not in MEDIA FILES, e.g. ${missing.slice(0, 3).join(', ')}.`);
+    }
+  });
+  const folders = new Map();
+  const files = mediaFiles.map((f) => {
+    const rel = assigned.get(f.path) || dirOf(f.path).replace(/[^a-z0-9_/-]+/gi, '_');
+    const full = base ? `${base}/${rel}` : rel;
+    const entry = folders.get(rel) || { full, count: 0 };
+    entry.count += 1;
+    folders.set(rel, entry);
+    return { ...f, folder: full };
+  });
+  return { files, folders, problems };
+}
+
+function eachElement(survey, fn) {
+  const walk = (elements) => (elements || []).forEach((el) => {
+    if (!el || typeof el !== 'object') return;
+    fn(el);
+    walk(el.elements);
+  });
+  (survey?.pages || []).forEach((page) => walk(page?.elements));
+}
+
+/** Point questions at the uploaded folders; report folders that will be empty or too small. */
+function linkQuestionFolders(survey, plan) {
+  const problems = [];
+  eachElement(survey, (el) => {
+    if (!Array.isArray(el.mediaFolders) || !el.mediaFolders.length) return;
+    let available = 0;
+    el.mediaFolders = el.mediaFolders.map((folder) => {
+      const rel = String(folder || '').replace(/^\/+|\/+$/g, '');
+      const hit = plan.folders.get(rel);
+      if (!hit) {
+        problems.push(`${el.name}: mediaFolders "${folder}" has no files; use one of: ${[...plan.folders.keys()].join(', ')}.`);
+        return folder;
+      }
+      available += hit.count;
+      return hit.full;
+    });
+    const needed = (Number(el.trialCount) || 1) * (Number(el.imageCount) || 1);
+    if (available && el.excludePreviouslyUsedImages !== false && needed > available) {
+      problems.push(`${el.name}: shows ${needed} files without repeats but its folders hold only ${available}; lower trialCount or imageCount.`);
+    }
+  });
+  return problems;
 }
 
 /**
@@ -115,7 +208,11 @@ export function candidateHosts(html, result) {
  * Convert a page with the Assistant model, retrying with the validation
  * errors. `request` posts to /api/agent/sp-scheme/convert.
  */
-export async function convertSurveyHtml(originalHtml, { request, notes = '', dataFiles = [], onProgress } = {}) {
+export async function convertSurveyHtml(originalHtml, {
+  request, notes = '', dataFiles = [], mediaFiles: givenMedia = [], mediaBase = '', fetchMedia = null, onProgress,
+} = {}) {
+  let mediaFiles = givenMedia;
+  let mediaRoundUsed = false;
   const source = stripSitePreviewShim(String(originalHtml || ''));
   const tokenized = tokenizeDataUris(source);
   if (tokenized.html.length > CONVERT_MAX_HTML_CHARS) {
@@ -125,13 +222,16 @@ export async function convertSurveyHtml(originalHtml, { request, notes = '', dat
   let previous = null;
   let feedback = [];
   let last = null;
-  for (let round = 0; round <= CONVERT_FIX_ROUNDS; round += 1) {
+  // One extra round when the page's stimuli are downloaded after the first answer.
+  const lastRound = CONVERT_FIX_ROUNDS + (fetchMedia ? 1 : 0);
+  for (let round = 0; round <= lastRound; round += 1) {
     onProgress?.({ round, stage: 'model', fixing: round > 0, feedback });
-    const response = await request({ html: tokenized.html, reference, notes, dataFiles, previous, feedback });
+    const response = await request({ html: tokenized.html, reference, notes, dataFiles, mediaFiles: mediaFiles.map((f) => f.path), previous, feedback });
+    if (response?.success === false) throw new Error(response.error || 'The conversion request failed.');
     const result = response?.result;
     if (!result) throw new Error('The model returned nothing usable.');
     onProgress?.({ round, stage: 'check', fixing: round > 0, feedback });
-    const applied = applyConversion(tokenized.html, result, tokenized.tokens);
+    const applied = applyConversion(tokenized.html, result, tokenized.tokens, { mediaFiles, mediaBase });
     const hosts = candidateHosts(applied.html, result);
     // Validate as if every candidate domain were allowed; the researcher then
     // chooses which ones to allow and the import re-checks that choice.
@@ -140,7 +240,28 @@ export async function convertSurveyHtml(originalHtml, { request, notes = '', dat
       allowedHosts: hosts.map((h) => h.host),
     });
     const problems = [...applied.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
-    last = { html: applied.html, pkg: applied.pkg, report, problems, hosts, result, rounds: round + 1, provider: response.provider, model: response.model };
+    last = { html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems, hosts, result, rounds: round + 1, provider: response.provider, model: response.model };
+    if (fetchMedia && !mediaRoundUsed && !mediaFiles.length && result.originalImages?.length && round < lastRound) {
+      // A page from the web: bring its stimuli into the media library and let
+      // the model draw them like the files of a project zip.
+      mediaRoundUsed = true;
+      onProgress?.({ round, stage: 'media', total: result.originalImages.length, feedback });
+      const total = result.originalImages.length;
+      const shown = feedback;
+      const progress = (done) => onProgress?.({ round, stage: 'media', done, total, feedback: shown });
+      // eslint-disable-next-line no-await-in-loop
+      const got = await fetchMedia(result.originalImages.map((img) => img.url), progress);
+      if (got.files.length) {
+        mediaFiles = got.files;
+        previous = result;
+        feedback = [
+          `The page's ${got.files.length} stimulus files were downloaded and are now MEDIA FILES (listed below). Put them in mediaGroups, draw them with mediaFolders, and leave originalImages empty.`,
+          ...(got.failed.length ? [`${got.failed.length} file(s) could not be downloaded: ${got.failed.slice(0, 3).join(', ')}.`] : []),
+          ...problems.slice(0, 28),
+        ];
+        continue; // eslint-disable-line no-continue
+      }
+    }
     if (!problems.length) return { ...last, ok: true };
     previous = result;
     feedback = problems.slice(0, 30);

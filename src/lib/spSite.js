@@ -465,8 +465,11 @@ export const SP_SITE_SDK_SOURCE = `
   // Requests to hosts the researcher did not allow never leave the page. Submissions
   // (fetch/XHR/beacon/form posts) are handed to SPSite.onSubmit handlers instead, so a
   // converted survey can map its old "send results" payload onto SPSite.answer.
+  // An imported page keeps a <base href> to its original site; otherwise relative
+  // URLs belong to the page itself, which has no server here.
+  function pageBase() { return /^https?:/.test(document.baseURI) ? document.baseURI : 'https://invalid.local/'; }
   function hostAllowed(url) {
-    try { return allowedHosts.indexOf(new URL(url, 'https://invalid.local/').host) >= 0; } catch (e) { return false; }
+    try { return allowedHosts.indexOf(new URL(url, pageBase()).host) >= 0; } catch (e) { return false; }
   }
   function parseBody(body) {
     if (body == null) return null;
@@ -502,7 +505,10 @@ export const SP_SITE_SDK_SOURCE = `
   });
   // Same-page paths stay relative ("/api/state?x=1"); other hosts keep their full URL.
   function absolute(url) {
-    try { var u = new URL(url, 'https://invalid.local/'); return u.host === 'invalid.local' ? u.pathname + u.search : u.href; } catch (e) { return String(url || ''); }
+    try {
+      var base = new URL(pageBase()), u = new URL(url, base);
+      return u.host === base.host ? u.pathname + u.search : u.href;
+    } catch (e) { return String(url || ''); }
   }
   function answerRequest(req) {
     return adaptersReady.then(function () {

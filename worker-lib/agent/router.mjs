@@ -23,6 +23,7 @@ import {
 import { handleAgentChat } from './chatHandler.mjs';
 import { handleSurveyTranslate } from './translate.mjs';
 import { handleSpSchemeConvert } from './spSchemeConvert.mjs';
+import { handleSpSchemeFetchMedia, handleSpSchemeFetchPage } from './spSchemeFetchPage.mjs';
 import { useAgentRuntime } from './runtime/flags.mjs';
 import { startDesignerRun } from './runtime/designerChat.mjs';
 import {
@@ -578,6 +579,15 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
       }
       const body = await request.json();
       return jsonResponse(await handleSpSchemeConvert(env, auth.userId, body));
+    }
+
+    if ((pathname === '/api/agent/sp-scheme/fetch-page' || pathname === '/api/agent/sp-scheme/fetch-media') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Page import requires a browser session'), { status: 403 }));
+      }
+      const body = await request.json();
+      if (pathname.endsWith('/fetch-media')) return await handleSpSchemeFetchMedia(body);
+      return jsonResponse(await handleSpSchemeFetchPage(body));
     }
 
     if (pathname === '/api/agent/sessions' && request.method === 'GET') {

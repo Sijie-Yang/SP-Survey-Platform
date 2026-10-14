@@ -273,7 +273,7 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
   );
 }
 
-export default function SurveyBuilder({ config, onChange, currentProject, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange, onOpenAssistant, onOpenLayoutStudio, onOpenPreview, editorCommitKey = 0 }) {
+export default function SurveyBuilder({ config, onChange, currentProject, onProjectUpdate = null, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange, onOpenAssistant, onOpenLayoutStudio, onOpenPreview, editorCommitKey = 0 }) {
   const { t, language } = useRegion();
   const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -556,7 +556,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onNext
         description={t.builderDescription}
       />
 
-      <SpSchemePanel config={config} onChange={onChange} />
+      <SpSchemePanel config={config} onChange={onChange} currentProject={currentProject} onProjectUpdate={onProjectUpdate} />
 
       <AdminActionBar
         label={t.builderSurveySettings}

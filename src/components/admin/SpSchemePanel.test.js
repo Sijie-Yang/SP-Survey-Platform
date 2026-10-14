@@ -4,10 +4,12 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import SpSchemePanel from './SpSchemePanel';
 import { RegionProvider } from '../../contexts/RegionContext';
 import { buildExampleSite, buildExampleZip } from '../../lib/spScheme';
-import { convertSurveyPage } from '../../lib/agentApi';
+import { convertSurveyPage, fetchSurveyPage, fetchSurveyPageMedia } from '../../lib/agentApi';
 import { LEGACY_SURVEY_CONVERSION, LEGACY_SURVEY_HTML } from '../../lib/__fixtures__/legacySurvey';
 
-jest.mock('../../lib/agentApi', () => ({ convertSurveyPage: jest.fn() }));
+jest.mock('../../lib/agentApi', () => ({ convertSurveyPage: jest.fn(), fetchSurveyPage: jest.fn(), fetchSurveyPageMedia: jest.fn() }));
+jest.mock('../../contexts/AuthContext', () => ({ useOptionalAuth: () => ({ user: { id: 'u1' } }) }));
+jest.mock('../../lib/r2', () => ({ uploadImageToR2: jest.fn() }));
 
 function renderPanel(props = {}) {
   const onChange = jest.fn();
@@ -120,4 +122,34 @@ test('dropping the page with its config sends the config to the model', async ()
   expect(convertSurveyPage.mock.calls[0][0].dataFiles).toEqual([
     expect.objectContaining({ name: 'config.json', text: '{"tasks":[{"id":"safety"}]}' }),
   ]);
+});
+
+test('a survey link is fetched, its stimuli downloaded and planned for the media library', async () => {
+  const pageHtml = '<!doctype html><html><head><base href="https://lab.github.io/rating/"></head><body><img id="a"><img id="b"><button id="go">Next</button><script>fetch("https://script.google.com/macros/s/x/exec",{method:"POST",body:"{}"});</script></body></html>';
+  fetchSurveyPage.mockResolvedValue({ success: true, html: pageHtml, url: 'https://lab.github.io/rating/', host: 'lab.github.io', dataFiles: [] });
+  fetchSurveyPageMedia.mockImplementation(async () => new Blob(['JPEG'], { type: 'image/jpeg' }));
+  const originalFetch = global.fetch;
+  global.fetch = jest.fn(() => Promise.reject(new TypeError('CORS')));
+  const pair = {
+    type: 'imagepicker', name: 'pick', title: 'Which looks more similar?', imageCount: 2, trialCount: 1, isRequired: true,
+    imageSelectionMode: 'huggingface_random', randomImageSelection: true,
+  };
+  const adapter = "SPSite.onReady(function(){}); SPSite.onSubmit(function(){ SPSite.answer('pick','image_0').then(function(){ return SPSite.complete(); }); });";
+  convertSurveyPage
+    .mockResolvedValueOnce({ result: { survey: { pages: [{ elements: [pair] }] }, adapterScript: adapter, originalImages: [{ url: 'img/1.jpg' }, { url: 'img/2.jpg' }] } })
+    .mockResolvedValueOnce({ result: { survey: { pages: [{ elements: [{ ...pair, mediaFolders: ['pairs'] }] }] }, adapterScript: adapter, mediaGroups: [{ folder: 'pairs', files: ['rating/img/1.jpg', 'rating/img/2.jpg'] }] } });
+  try {
+    renderPanel({ currentProject: { id: 'p1' }, onProjectUpdate: jest.fn() });
+    fireEvent.click(screen.getByRole('button', { name: /Paste code|粘贴代码/ }));
+    fireEvent.change(screen.getByLabelText('Survey web address'), { target: { value: 'https://lab.github.io/rating/' } });
+    fireEvent.click(screen.getByTestId('sp-scheme-fetch-url'));
+    expect(await screen.findByTestId('sp-scheme-hosts')).toHaveTextContent('lab.github.io');
+    fireEvent.click(await screen.findByTestId('sp-scheme-convert'));
+    expect(await screen.findByTestId('sp-scheme-converted')).toHaveTextContent(/Converted by the model|已由模型转换/);
+    expect(fetchSurveyPageMedia).toHaveBeenCalledTimes(2);
+    expect(convertSurveyPage.mock.calls[1][0].mediaFiles).toEqual(['rating/img/1.jpg', 'rating/img/2.jpg']);
+    expect(screen.getByTestId('sp-scheme-media-plan')).toHaveTextContent('sp-scheme/lab_github_io_rating/pairs · 2');
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

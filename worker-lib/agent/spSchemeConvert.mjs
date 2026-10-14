@@ -12,6 +12,7 @@ const MAX_HTML_CHARS = 200000;
 const MAX_REFERENCE_CHARS = 80000;
 const MAX_PREVIOUS_CHARS = 200000;
 const MAX_DATA_CHARS = 150000;
+const MAX_MEDIA_FILES = 3000;
 
 function extractJson(text) {
   if (!text) return null;
@@ -45,7 +46,8 @@ The page will run inside SP-Survey with window.SPSite already defined before any
   "replacements": [ { "find": "exact text copied from the page", "replace": "new text" } ],
   "externalHosts": [ { "host": "api.example.com", "why": "loads the question list" } ],
   "originalImages": [ { "url": "https://...", "note": "stimulus for q3" } ],
-  "notes": [ "short sentence for the researcher" ]
+  "notes": [ "short sentence for the researcher" ],
+  "mediaGroups": [ { "folder": "occupancy_activity", "files": [ "images/IMG0279.jpg" ] } ]
 }
 
 Rules:
@@ -63,7 +65,8 @@ Rules:
 5. externalHosts: every host the page needs at run time for loading things (questions, config, scripts or styles not on cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, cdn.tailwindcss.com, esm.sh or Google Fonts). Hosts that only received the results do not need to be listed, because results go through SPSite.
 6. Remove any secret (API key, token, password) you find with a replacement and say so in notes.
 7. DATA FILES (config, question lists, CSV) that came with the page tell you the real tasks, wording, options and images; use them instead of guessing. When the page loads its wording from a server and no data file gives it, keep the structure the code implies, write the most likely wording, and say in notes exactly what was guessed.
-8. If FEEDBACK is given, it lists problems with your PREVIOUS answer after it was applied and checked. Return a complete corrected JSON, not a diff.`;
+8. MEDIA FILES, when given, are the study's own stimulus files that came with the page; the platform uploads them to the project's media library on import. Do not list them in originalImages. Put them in folders with mediaGroups so each question can draw from its own folder: follow how the page or its data files assign images (for example one folder per task, using exactly the files the data assigns to that task); files you leave out of every group keep the folder of their path (images/IMG0279.jpg -> folder "images"). Folder names are short relative paths of [a-z0-9_-/]. Each question that shows these files sets "mediaFolders": ["<folder>"] with platform sampling, "imageCount" files per round and, when every file in the folder is shown once, "trialCount" equal to the number of files in that folder. Use the file name (question.trials[t].media[0].name, e.g. "IMG0279.jpg") wherever the page needs an image id.
+9. If FEEDBACK is given, it lists problems with your PREVIOUS answer after it was applied and checked. Return a complete corrected JSON, not a diff.`;
 
 function clip(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
@@ -101,9 +104,13 @@ export function normalizeConvertRequest(body) {
       return { name: file.name.slice(0, 200), text };
     })
     .filter((file) => file.text);
+  const mediaFiles = (Array.isArray(body?.mediaFiles) ? body.mediaFiles : [])
+    .filter((path) => typeof path === 'string' && path && path.length <= 300)
+    .slice(0, MAX_MEDIA_FILES);
   return {
     html,
     dataFiles,
+    mediaFiles,
     reference: clip(body?.reference, MAX_REFERENCE_CHARS),
     notes: clip(body?.notes, 2000),
     feedback,
@@ -135,6 +142,13 @@ export function normalizeConvertResult(parsed) {
       .slice(0, 200)
       .map((item) => ({ url: item.url.slice(0, 2000), note: clip(item.note, 200) })),
     notes: list(parsed.notes).filter((item) => typeof item === 'string').slice(0, 12).map((item) => item.slice(0, 400)),
+    mediaGroups: list(parsed.mediaGroups)
+      .filter((group) => group && typeof group.folder === 'string' && Array.isArray(group.files))
+      .slice(0, 50)
+      .map((group) => ({
+        folder: group.folder.slice(0, 120),
+        files: group.files.filter((file) => typeof file === 'string').slice(0, MAX_MEDIA_FILES).map((file) => file.slice(0, 300)),
+      })),
   };
 }
 
@@ -169,6 +183,7 @@ export async function handleSpSchemeConvert(env, userId, body, deps = {}) {
   if (input.notes) parts.push(`RESEARCHER NOTES\n${input.notes}`);
   parts.push(`PAGE (index.html)\n${input.html}`);
   input.dataFiles.forEach((file) => parts.push(`DATA FILE ${file.name}\n${file.text}`));
+  if (input.mediaFiles.length) parts.push(`MEDIA FILES (${input.mediaFiles.length})\n${input.mediaFiles.join('\n')}`);
   if (input.previous) parts.push(`PREVIOUS\n${input.previous}`);
   if (input.feedback.length) parts.push(`FEEDBACK\n- ${input.feedback.join('\n- ')}`);
 
