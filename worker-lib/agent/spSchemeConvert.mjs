@@ -36,38 +36,28 @@ function extractJson(text) {
   }
 }
 
-export const CONVERT_SYSTEM_PROMPT = `You convert an existing survey web page so it runs on SP-Survey without losing its design.
-The REFERENCE (SP-Scheme) explains native question types, answer shapes and the SPSite API. Follow it exactly.
+export const CONVERT_SYSTEM_PROMPT = `You connect an existing survey web page to SP-Survey. The platform has already done the rest:
+- The page runs exactly as it is, in a sandbox, with window.SPSite defined before any page script. You do not edit the page.
+- The study's files (MEDIA FILES) are in the project's media library, in the upload's own folders (images/IMG0279.jpg -> folder "images"). Any same-site URL that ends in a known file name ("/image/IMG0279?x=1", "logo.png") is mapped to that file automatically.
+- Every request the page sends that nobody answers is recorded as it is, so no data is lost.
 
-The page will run inside SP-Survey with window.SPSite already defined before any page script. You do NOT rewrite the page. You return JSON only, no prose:
+Your only job is the data interface. Return JSON only, no prose:
 {
-  "survey": { "title": "...", "description": "...", "pages": [ { "name": "page1", "elements": [ ... ] } ] },
-  "adapterScript": "JavaScript run at the end of <body>",
-  "replacements": [ { "find": "exact text copied from the page", "replace": "new text" } ],
-  "externalHosts": [ { "host": "api.example.com", "why": "loads the question list" } ],
-  "originalImages": [ { "url": "https://...", "note": "stimulus for q3" } ],
-  "notes": [ "short sentence for the researcher" ],
-  "mediaGroups": [ { "folder": "occupancy_activity", "files": [ "images/IMG0279.jpg" ] } ]
+  "survey": { "title": "...", "mediaFolders": ["images"], "pages": [ { "name": "page1", "elements": [ ... ] } ] },
+  "adapterScript": "JavaScript",
+  "notes": [ "short sentence for the researcher" ]
 }
 
-Rules:
-1. survey: declare every answer the page collects as a question (unique snake_case name, title = the wording on the page, choices with the page's own values, isRequired where the page requires it). Use a native type from the REFERENCE when the page's value fits its answer shape exactly (the researcher then gets the platform's analysis); when nothing fits, declare "type": "custom" and pass the page's own value as is (any JSON; stored and exported, not analysed). A single image rated on a few labelled options (for example 0/1/2 with a text label each) fits imagerating exactly: imageCount 1, rateMin and rateMax covering the values, rateLabels one label per value; use it, not custom. Never force a value into a native type it does not fit, and never leave out something the page records. Display-only text needs no question. Never put URLs, HTML or credentials in the survey.
-2. Images or clips that participants judge (stimuli): declare them on an image/media question type with platform sampling (no URLs) and, in the adapter, put question.media[i].url (or question.trials[t].media) into the page's existing <img>/<video> elements inside SPSite.onReady. When there are no MEDIA FILES, list the page's original stimulus URLs in originalImages so the researcher can upload them to the media pool; when MEDIA FILES are given they are uploaded already, so leave originalImages empty. Logos and decoration stay as they are.
-3. adapterScript connects the page to SPSite without changing its look:
-   - Prefer listening to the page's own inputs (change/click) and calling SPSite.answer(name, value) with the value shape from the REFERENCE.
-   - The page's old way of sending results (fetch/XMLHttpRequest/sendBeacon POST, form submit, Google Forms, Apps Script, Firebase, Supabase, Formspree, etc.) is intercepted by the platform: it never leaves the page, the call resolves as a success, and the payload arrives in SPSite.onSubmit(function (item) { item.kind, item.url, item.method, item.data }). Use onSubmit to map any remaining fields onto SPSite.answer, then call SPSite.complete(). Await every SPSite.answer before complete.
-   - When the page ends (its last submit or thank-you step) call SPSite.complete() exactly once.
-   - Pages that expect their own server (relative URLs such as fetch('/api/state'), '/api/save', '/image/<id>'): the page has no server on SP-Survey. Emulate it with SPSite.onRequest(function (req) { ... }) where req = { url (path + query for same-page URLs, full URL otherwise), method, data, headers }. Return { json: ... } (or { status, json }) to answer; return nothing to leave the request blocked. Build every response from SPSite.getQuestions(): for example answer the page's "state/config" request with its tasks, options and image list made from the questions and question.trials[t].media, and its "save" request by calling SPSite.answer(...) (return the shape the page expects, e.g. { answer: { value } }), and its "complete/finish" request by awaiting SPSite.complete(). Answer heartbeat/ping requests with { json: { ok: true } }. Handlers may return a Promise.
-   - Images the page loads by URL from its own server (img.src = '/image/' + id) do not exist on SP-Survey: use a replacement so the page takes the URL from the question media instead (for example keep a map id -> media url built in onRequest).
-   - adapterScript runs inside its own function scope, after the page's scripts: its names never clash with the page's globals, and it can still read and set the page's global variables by name. A function that replaced page code calls must be put on window (window.spImageUrl = function (...) {...}).
-   - The page's own scripts start before adapterScript runs; requests they make at start-up wait until onRequest handlers are registered, so register them at the top level of adapterScript (not inside onReady). Every handler must settle quickly: SPSite.getQuestions() is available synchronously, so never wait for window "load", a timer, a user action or any event that may already have fired. A request left unanswered for 15 s fails, and the platform loads the converted page once to check this; problems it finds come back as FEEDBACK lines starting "When the page loads:".
-   - Use plain ES2017 that runs in a browser, no imports. Keep it under 300 lines.
-4. replacements: only when the adapter cannot do the job (for example removing a hard-coded API key, or a script that would break). Each "find" must be copied exactly from the page and be unique. Never replace large blocks. Strings like data:sp-token/3 stand for embedded images; keep them unchanged.
-5. externalHosts: every host the page needs at run time for loading things (questions, config, scripts or styles not on cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, cdn.tailwindcss.com, esm.sh or Google Fonts). Hosts that only received the results do not need to be listed, because results go through SPSite.
-6. Remove any secret (API key, token, password) you find with a replacement and say so in notes.
-7. DATA FILES (config, question lists, CSV) that came with the page tell you the real tasks, wording, options and images; use them instead of guessing. When the page loads its wording from a server and no data file gives it, keep the structure the code implies, write the most likely wording, and say in notes exactly what was guessed.
-8. MEDIA FILES, when given, are the study's own files that came with the page (stimuli, logos); the platform uploads them to the project's media library on import, in folders that mirror the zip exactly (images/IMG0279.jpg -> folder "images", app/logo.png -> folder "app"). You do not regroup them (mediaGroups may stay empty). KEEP THE PAGE'S OWN DRAWING LOGIC: in the adapter replace the page's source of its image list (its config, data file or server answer) with SPSite.getMedia("<folder>") -> [{ url, name, type }] for the zip folder, and apply the page's own assignment (for example config.json's image-to-task mapping, matched by file name) to those files, so its sampling, grouping, pairing and ordering stay as they are. Record each answer with SPSite.answer(name, value, { key: <the page's item id>, shown: [<file names shown>] }); do not set trialCount or per-question mediaFolders for such questions. Only when the page has no drawing logic of its own (a fixed list), use platform drawing instead: "mediaFolders": ["<zip folder>"] on the question, "imageCount" per round and "trialCount" rounds, reading question.trials[t].media. Same-site URLs the page builds from a file name ("/image/" + id, "/logo.png") are mapped by the platform to the uploaded file of that name, so they may stay.
-9. If FEEDBACK is given, it lists problems with your PREVIOUS answer after it was applied and checked. Return a complete corrected JSON, not a diff.`;
+survey: one element per answer the page records (unique snake_case name, title = the page's wording). Use a type from the REFERENCE when the value fits its answer shape exactly; otherwise "type": "custom" (any JSON, stored as is, not analysed). Rating one image on a few labelled options is "imagerating" with "imageCount": 1, "rateMin"/"rateMax" covering the values and "rateLabels". Do not set mediaFolders, imageCount draws or trialCount on questions: the page keeps its own image logic. survey.mediaFolders lists the MEDIA FILES folders the page shows images from.
+
+adapterScript stands in for the page's own server (see its server code and DATA FILES) and does nothing else:
+- SPSite.onRequest(function (req) { ... }) answers the page's requests; req = { url (path + query), method, data, headers }. Return { json: ... } in exactly the shape the page's code reads, or nothing to leave it unanswered. Register it at the top level, never inside a callback. Every handler returns at once or a Promise that settles quickly.
+- Build lists of images from SPSite.getMedia("<folder>") -> [{ url, name, type }] combined with the page's own config (its task list, image assignment, order rules), so the page's randomisation stays its own. Image ids are file names without extension.
+- When the page saves an answer, call SPSite.answer(name, value, { key: <item id>, shown: [<file name shown>] }) and return what the page expects; when it finishes, await SPSite.complete().
+- A page with no server that posts its results elsewhere: SPSite.onSubmit(function (item) { item.url, item.method, item.data }) maps the payload to SPSite.answer, then SPSite.complete().
+- Plain ES2017, no imports, no DOM changes, under 200 lines. Never include secrets.
+
+If the page needs no server and records nothing you can map, return an empty pages list and an empty adapterScript: the platform then records what the page sends.`;
 
 function clip(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
@@ -198,7 +188,7 @@ export async function handleSpSchemeConvert(env, userId, body, deps = {}) {
     compat: modelRecord?.compat,
     extra: checked.route.headers,
     temperature: 0.1,
-    maxTokens: Math.min(Number(modelRecord?.maxTokens) || 8192, 16384),
+    maxTokens: Math.min(Number(modelRecord?.maxTokens) || 8192, 8192),
     messages: [
       { role: 'system', content: CONVERT_SYSTEM_PROMPT },
       { role: 'user', content: parts.join('\n\n') },

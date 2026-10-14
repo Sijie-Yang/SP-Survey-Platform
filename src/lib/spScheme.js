@@ -919,7 +919,10 @@ export const SP_SCHEME_EXAMPLE_PACKAGE = EXAMPLE_PACKAGE;
 
 /** Sections 1-4 of SP-Scheme (rules, types, SPSite API): the reference for page conversion. */
 export function buildConvertReference() {
+  // Only the question types, answer shapes and the SPSite API: the rest of
+  // SP-Scheme is about designing a page from scratch, which conversion does not do.
   const text = buildSpSchemeText();
+  const from = text.indexOf('## 3.');
   const cut = text.indexOf('## 5.');
-  return cut > 0 ? text.slice(0, cut).trim() : text;
+  return from >= 0 && cut > from ? text.slice(from, cut).trim() : text;
 }

@@ -145,7 +145,7 @@ test('a survey link is fetched, its stimuli downloaded and planned for the media
     fireEvent.click(screen.getByTestId('sp-scheme-fetch-url'));
     expect(await screen.findByTestId('sp-scheme-hosts')).toHaveTextContent('lab.github.io');
     fireEvent.click(await screen.findByTestId('sp-scheme-convert'));
-    expect(await screen.findByTestId('sp-scheme-converted')).toHaveTextContent(/Converted by the model|已由模型转换/);
+    expect(await screen.findByTestId('sp-scheme-converted')).toHaveTextContent(/Converted:|已转换/);
     expect(fetchSurveyPageMedia).toHaveBeenCalledTimes(2);
     expect(convertSurveyPage.mock.calls[1][0].mediaFiles).toEqual(['rating/img/1.jpg', 'rating/img/2.jpg']);
     expect(screen.getByTestId('sp-scheme-media-plan')).toHaveTextContent('rating/img · 2');

@@ -29,9 +29,8 @@ import {
 } from '../../lib/spScheme';
 import { externalHostsIn, extractEmbeddedScheme } from '../../lib/spSite';
 import { convertSurveyPage, fetchSurveyPage, fetchSurveyPageMedia } from '../../lib/agentApi';
-import { CONVERT_FIX_ROUNDS, CONVERT_START_FIX_ROUNDS, convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
+import { convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
 import { downloadPageMedia, uploadPlannedMedia } from '../../lib/spSchemeMediaImport';
-import { smokeTestSite } from '../../lib/spSiteSmoke';
 import { uploadImageToR2 } from '../../lib/r2';
 import { useOptionalAuth } from '../../contexts/AuthContext';
 
@@ -89,39 +88,26 @@ function ConvertProgress({ state, L }) {
     const id = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(id);
   }, []);
-  const rounds = 1 + Math.max(0, state.maxRounds || 0);
   const inStage = (now - stageAt.current) / 1000;
   // Each round (first pass, then each fix) fills the bar again.
   const value = state.stage === 'model'
     ? 90 * (1 - Math.exp(-inStage / (MODEL_STAGE_SECONDS / 2)))
     : (state.stage === 'media' ? Math.round(((state.done || 0) / Math.max(1, state.total || 1)) * 100) : 96);
   const elapsed = Math.round((now - startedAt.current) / 1000);
+  const modelDone = state.stage === 'check';
   const steps = [
-    { key: 'read', label: L('Read the page', '读取页面'), done: true },
-    { key: 'model', label: L('Model maps questions and submission to the platform', '模型把题目和提交接到平台'), done: state.stage !== 'model' || state.round > 0, active: state.stage === 'model' && state.round === 0 },
-    { key: 'check', label: L('Apply changes and check', '应用修改并检查'), done: state.round > 0 || state.stage === 'media' || state.stage === 'run', active: state.stage === 'check' && state.round === 0 },
-  ];
-  if (state.stage === 'run') {
-    steps.push({ key: 'run', label: L('Open the page once to check it starts', '试运行一次，确认页面能正常启动'), done: false, active: true });
-  }
-  if (state.stage === 'media' || state.mediaDone) {
-    steps.push({
-      key: 'media',
+    { key: 'read', label: L('Keep the page as it is', '页面原样保留'), done: true },
+    { key: 'files', label: L('Media files into the library, same folders as the upload', '图片按原文件夹放进媒体库'), done: true },
+    {
+      key: 'model',
       label: state.stage === 'media'
         ? L(`Download the page's stimulus images (${state.done || 0} / ${state.total || 0})`, `下载页面里的刺激图（${state.done || 0} / ${state.total || 0}）`)
-        : L('Downloaded the page\'s stimulus images', '已下载页面里的刺激图'),
-      done: state.stage !== 'media',
-      active: state.stage === 'media',
-    });
-  }
-  if (state.round > 0 && state.stage !== 'media') {
-    steps.push({
-      key: 'fix',
-      label: L(`Fix ${state.feedback?.length || 0} problem(s) (round ${state.round} of ${rounds - 1})`, `修正 ${state.feedback?.length || 0} 个问题（第 ${state.round}/${rounds - 1} 轮）`),
-      done: false,
-      active: true,
-    });
-  }
+        : L('Model writes the data interface (one call)', '模型写数据接口（只调用一次）'),
+      done: modelDone,
+      active: !modelDone,
+    },
+    { key: 'check', label: L('Questions that fit a platform type use it; the rest are recorded as they are', '对得上平台题型的用平台，其余原样记录'), done: false, active: modelDone },
+  ];
   return (
     <Box data-testid="sp-scheme-convert-progress">
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -252,7 +238,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     const source = upload?.originalHtml || upload?.siteHtml;
     if (!source) return;
     setParseError('');
-    setConverting({ round: 0, stage: 'model', maxRounds: CONVERT_FIX_ROUNDS + CONVERT_START_FIX_ROUNDS + (upload?.sourceUrl ? 1 : 0) });
+    setConverting({ round: 0, stage: 'model' });
     try {
       const out = await convertSurveyHtml(source, {
         request: convertSurveyPage,
@@ -260,13 +246,11 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         dataFiles: upload?.dataFiles || [],
         mediaFiles: upload?.mediaFiles || [],
         mediaBase: importMediaBase(upload?.sourceUrl ? `${upload.sourceHost}${new URL(upload.sourceUrl).pathname}` : upload?.name),
-        smokeTest: smokeTestSite,
         fetchMedia: upload?.sourceUrl
           ? (urls, progress) => downloadPageMedia(urls, upload.sourceUrl, { fetchViaServer: fetchSurveyPageMedia, onProgress: progress })
           : null,
         onProgress: (p) => setConverting((prev) => ({
           ...p,
-          maxRounds: CONVERT_FIX_ROUNDS + CONVERT_START_FIX_ROUNDS + (upload?.sourceUrl ? 1 : 0),
           mediaDone: Boolean(prev?.mediaDone || (prev?.stage === 'media' && p.stage !== 'media')),
         })),
       });
@@ -280,6 +264,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         usedRaw: useRaw,
         startProblems: chosen.startProblems || [],
         rounds: out.rounds,
+        failure: out.failure || '',
         problems: out.problems,
         degraded: out.degraded || [],
         notes: useRaw ? [] : (out.result?.notes || []),
@@ -588,14 +573,15 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                 </Alert>
               ) : null}
               {conversion ? (
-                <Alert severity={conversion.startProblems?.length || conversion.usedRaw || !conversion.ok ? 'warning' : 'success'} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
+                <Alert severity={conversion.usedRaw ? 'warning' : 'success'} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
                   {conversion.usedRaw && L(
-                    'The questions the model declared could not be used, so the page is imported as it is: the platform records what the page sends and analyses nothing. You can convert again or send the problems below to another model.',
-                    '模型声明的题目用不了，已改为按原样导入：平台只原样记录页面发出的数据，不做任何分析。也可以再转换一次，或把下面的问题发给其他大模型。',
+                    'The model\'s data interface could not be used, so the page is imported as it is: the platform records everything the page sends and analyses nothing. You can convert again.',
+                    '模型写的数据接口用不了，已按原样导入：平台原样记录页面发出的所有数据，不做分析。可以再转换一次。',
                   )}
-                  {!conversion.usedRaw && (conversion.ok
-                    ? L('Converted by the model: the original design is kept, and its questions and submission now go through the platform. Try it in Preview after import.', '已由模型转换：保留原设计，题目和提交改由平台记录。导入后请在预览里试一遍。')
-                    : L(`The model could not fix everything in ${conversion.rounds} rounds. You can convert again, or send the errors below to another model.`, `模型在 ${conversion.rounds} 轮内没能修完所有问题。可以再转换一次，或把下面的错误发给其他大模型。`))}
+                  {conversion.usedRaw && conversion.failure ? (
+                    <Typography variant="caption" component="div" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>{conversion.failure}</Typography>
+                  ) : null}
+                  {!conversion.usedRaw && L('Converted: the page is kept as it is, and the model connected its data to the platform. Try it in Preview after import.', '已转换：页面原样保留，模型把它的数据接到了平台。导入后请在预览里试一遍。')}
                   {conversion.degraded?.length ? (
                     <Box sx={{ mt: 0.5 }} data-testid="sp-scheme-degraded">
                       <Typography variant="body2" sx={{ fontWeight: 600 }}>

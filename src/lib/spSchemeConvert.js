@@ -10,7 +10,6 @@
 
 import { buildConvertReference, SP_SCHEME_FORMAT, SP_SCHEME_VERSION, validateSpSchemePackage } from './spScheme';
 import { externalHostsIn, normalizeAllowedHosts, stripSitePreviewShim } from './spSite';
-import { smokeMedia, smokeQuestions } from './spSiteSmoke';
 
 export const CONVERT_MAX_HTML_CHARS = 200000;
 
@@ -75,12 +74,9 @@ export function rawConversionResult(result = null, { keepAdapter = false } = {})
     notes: ['Imported as it is: no questions declared, the platform records the requests the page sends and does not analyse them.'],
   };
 }
-// The model gets one pass. Questions it gets wrong are recorded as they are
-// (custom) rather than sent back for fixing; set this above 0 to allow fix rounds.
+// One model call, never sent back for fixing.
 export const CONVERT_FIX_ROUNDS = 0;
-// A page that does not start (a script error, a request its adapter never
-// answers) cannot be used at all, so that one problem goes back to the model once.
-export const CONVERT_START_FIX_ROUNDS = 1;
+export const CONVERT_START_FIX_ROUNDS = 0;
 
 const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=\s]{200,}/gi;
 const TOKEN_RE = /data:sp-token\/(\d+)/g;
@@ -312,125 +308,97 @@ export function candidateHosts(html, result) {
 }
 
 /**
- * Convert a page with the Assistant model, retrying with the validation
- * errors. `request` posts to /api/agent/sp-scheme/convert.
+ * Convert a page in four fixed steps, with one model call:
+ *   1. the page stays as it is (no patches); 2. its files go to the media
+ *   library in the upload's own folders and same-site image URLs are mapped
+ *   to them by file name; 3. the model writes the data interface once
+ *   (SPSite.onRequest / onSubmit standing in for the page's server) and
+ *   declares the questions; 4. questions that fit a platform type are
+ *   analysed, the rest are recorded as they are (custom).
+ * Nothing is sent back for fixing. When the model's answer cannot be used at
+ * all, the page is imported as it is and the platform records what it sends.
+ * `request` posts to /api/agent/sp-scheme/convert.
  */
 export async function convertSurveyHtml(originalHtml, {
-  request, notes = '', dataFiles = [], mediaFiles: givenMedia = [], mediaBase = '', fetchMedia = null, smokeTest = null, onProgress,
+  request, notes = '', dataFiles = [], mediaFiles: givenMedia = [], mediaBase = '', fetchMedia = null, onProgress,
 } = {}) {
   let mediaFiles = givenMedia;
-  let mediaRoundUsed = false;
   const source = stripSitePreviewShim(String(originalHtml || ''));
   const tokenized = tokenizeDataUris(source);
   if (tokenized.html.length > CONVERT_MAX_HTML_CHARS) {
     throw new Error(`The page is too long to convert automatically (${tokenized.html.length} characters; the limit is ${CONVERT_MAX_HTML_CHARS}).`);
   }
   const reference = buildConvertReference();
-  let previous = null;
-  let feedback = [];
-  let last = null;
-  // One extra round when the page's stimuli are downloaded after the first answer.
-  let lastRound = CONVERT_FIX_ROUNDS + (fetchMedia ? 1 : 0);
-  let startFixes = 0;
-  let startFallback = null; // a version that passed the checks but did not start
-  const startCheck = async (html, pkg, mediaPlan, hostList) => {
-    // Load the page once, the way participants get it, and report errors or
-    // requests it never answers. This is shown to the researcher, not fixed.
-    if (!smokeTest) return [];
-    onProgress?.({ round: lastRound, stage: 'run', fixing: false, feedback });
-    const run = await smokeTest(html, {
-      questions: smokeQuestions(pkg?.survey, mediaPlan),
-      media: smokeMedia(pkg?.survey, mediaPlan),
-      allowedHosts: hostList.map((h) => h.host),
-    });
-    return run?.problems || [];
-  };
-  for (let round = 0; round <= lastRound; round += 1) {
-    onProgress?.({ round, stage: 'model', fixing: round > 0, feedback });
-    const response = await request({ html: tokenized.html, reference, notes, dataFiles, mediaFiles: mediaFiles.map((f) => f.path), previous, feedback });
+  const ask = async (extra = {}) => {
+    const response = await request({ html: tokenized.html, reference, notes, dataFiles, mediaFiles: mediaFiles.map((f) => f.path), previous: null, feedback: [], ...extra });
     if (response?.success === false) throw new Error(response.error || 'The conversion request failed.');
-    const result = response?.result;
-    if (!result) throw new Error('The model returned nothing usable.');
-    onProgress?.({ round, stage: 'check', fixing: round > 0, feedback });
+    if (!response?.result) throw new Error('The model returned nothing usable.');
+    return response;
+  };
+  const check = (result) => {
     const applied = applyConversion(tokenized.html, result, tokenized.tokens, { mediaFiles, mediaBase });
     const hosts = candidateHosts(applied.html, result);
     // Validate as if every candidate domain were allowed; the researcher then
     // chooses which ones to allow and the import re-checks that choice.
-    const report = validateSpSchemePackage(applied.pkg, {
-      siteHtml: applied.html,
-      allowedHosts: hosts.map((h) => h.host),
-    });
-    const problems = [...applied.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
-    last = { html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems, hosts, result, rounds: round + 1, provider: response.provider, model: response.model };
-    if (fetchMedia && !mediaRoundUsed && !mediaFiles.length && result.originalImages?.length && round < lastRound) {
-      // A page from the web: bring its stimuli into the media library and let
-      // the model draw them like the files of a project zip.
-      mediaRoundUsed = true;
-      onProgress?.({ round, stage: 'media', total: result.originalImages.length, feedback });
-      const total = result.originalImages.length;
-      const shown = feedback;
-      const progress = (done) => onProgress?.({ round, stage: 'media', done, total, feedback: shown });
-      // eslint-disable-next-line no-await-in-loop
-      const got = await fetchMedia(result.originalImages.map((img) => img.url), progress);
-      if (got.files.length) {
-        mediaFiles = got.files;
-        previous = result;
-        feedback = [
-          `The page's ${got.files.length} stimulus files were downloaded and are now MEDIA FILES (listed below). They are uploaded in folders mirroring their paths; have the page draw them with SPSite.getMedia("<folder>") (or mediaFolders when the page has no drawing logic of its own), and leave originalImages empty.`,
-          ...(got.failed.length ? [`${got.failed.length} file(s) could not be downloaded: ${got.failed.slice(0, 3).join(', ')}.`] : []),
-          ...problems.slice(0, 28),
-        ];
-        continue; // eslint-disable-line no-continue
-      }
-    }
-    if (!problems.length) {
-      // eslint-disable-next-line no-await-in-loop
-      const startProblems = await startCheck(applied.html, applied.pkg, applied.mediaPlan, hosts);
-      if (startProblems.length && startFixes < CONVERT_START_FIX_ROUNDS) {
-        startFixes += 1;
-        lastRound += 1;
-        previous = result;
-        feedback = startProblems.slice(0, 30).map((p) => `When the page loads: ${p}`);
-        startFallback = { ...last, ok: true, startProblems };
-        continue; // eslint-disable-line no-continue
-      }
-      return { ...last, ok: true, startProblems };
-    }
-    previous = result;
-    feedback = problems.slice(0, 30);
-  }
-  // The fix for a page that did not start broke the checks: keep the version
-  // that passed them (its start problems are shown to the researcher).
-  if (startFallback) return startFallback;
-  // Questions the checks still reject are recorded as they are (custom) so the
-  // page can be imported with every other question analysed as usual.
-  const rejected = degradeRejectedQuestions(last.result?.survey, last.report?.errors || [], last.problems);
-  if (rejected.degraded.length) {
-    const result = { ...last.result, survey: rejected.survey };
-    const applied = applyConversion(tokenized.html, result, tokenized.tokens, { mediaFiles, mediaBase });
-    const hosts = candidateHosts(applied.html, result);
     const report = validateSpSchemePackage(applied.pkg, { siteHtml: applied.html, allowedHosts: hosts.map((h) => h.host) });
     const problems = [...applied.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
-    if (!problems.length) {
-      const startProblems = await startCheck(applied.html, applied.pkg, applied.mediaPlan, hosts);
-      return { ...last, html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems: [], hosts, result, ok: true, degraded: rejected.degraded, startProblems };
+    return { html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems, hosts, result };
+  };
+
+  let response = null;
+  let failure = '';
+  try {
+    onProgress?.({ round: 0, stage: 'model' });
+    response = await ask();
+    // A page from the web: its stimuli are downloaded once and the model is
+    // told their names, exactly as for the files of a zip.
+    const images = response.result.originalImages || [];
+    if (fetchMedia && !mediaFiles.length && images.length) {
+      onProgress?.({ round: 0, stage: 'media', total: images.length });
+      const got = await fetchMedia(images.map((img) => img.url), (done) => onProgress?.({ round: 0, stage: 'media', done, total: images.length }));
+      if (got.files.length) {
+        mediaFiles = got.files;
+        onProgress?.({ round: 1, stage: 'model' });
+        response = await ask();
+      }
+    }
+  } catch (err) {
+    failure = err?.message || String(err);
+  }
+
+  if (response) {
+    onProgress?.({ round: 0, stage: 'check' });
+    const meta = { rounds: 1, provider: response.provider, model: response.model };
+    const first = check(response.result);
+    if (!first.problems.length) return { ...first, ...meta, ok: true, degraded: [] };
+    // Questions the checks reject are recorded as they are (custom); every
+    // other question keeps the platform's analysis.
+    const rejected = degradeRejectedQuestions(response.result.survey, first.report?.errors || [], first.problems);
+    if (rejected.degraded.length) {
+      const second = check({ ...response.result, survey: rejected.survey });
+      if (!second.problems.length) return { ...second, ...meta, ok: true, degraded: rejected.degraded };
+      failure = second.problems.slice(0, 3).join(' ');
+    } else {
+      failure = first.problems.slice(0, 3).join(' ');
     }
   }
-  // The questions the model declared cannot be used: offer the page as it is
-  // (raw records), keeping the model's adapter when it still passes the checks
-  // (it may be what answers the page's own server requests), else without it.
-  const hostList = last.hosts.map((h) => h.host);
-  let raw = null;
-  for (const rawResult of [rawConversionResult(last?.result, { keepAdapter: true }), rawConversionResult(last?.result)]) {
-    const candidate = applyConversion(tokenized.html, rawResult, tokenized.tokens, { mediaFiles, mediaBase });
-    const report = validateSpSchemePackage(candidate.pkg, { siteHtml: candidate.html, allowedHosts: hostList });
-    const problems = [...candidate.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
-    if (!problems.length) {
-      // eslint-disable-next-line no-await-in-loop
-      const startProblems = await startCheck(candidate.html, candidate.pkg, candidate.mediaPlan, last.hosts);
-      raw = { html: candidate.html, pkg: candidate.pkg, mediaPlan: candidate.mediaPlan, report, result: rawResult, startProblems };
-      break;
-    }
+
+  // Nothing usable from the model: the page as it is, raw records.
+  // The model's adapter is kept when it still passes the checks: it may be
+  // what answers the page's own server requests.
+  let rawResult = rawConversionResult(response?.result, { keepAdapter: true });
+  let raw = check(rawResult);
+  if (raw.problems.length) {
+    rawResult = rawConversionResult(response?.result);
+    raw = check(rawResult);
   }
-  return { ...last, ok: false, raw };
+  return {
+    ...raw,
+    rounds: response ? 1 : 0,
+    model: response?.model,
+    ok: false,
+    failure,
+    problems: failure ? [failure] : [],
+    raw: raw.problems.length ? null : { html: raw.html, pkg: raw.pkg, mediaPlan: raw.mediaPlan, report: raw.report, result: rawResult, startProblems: [] },
+  };
 }
