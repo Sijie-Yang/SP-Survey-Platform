@@ -388,9 +388,9 @@ You are helping a researcher build a perception survey for SP-Survey (https://sp
 
 You design the whole participant experience as ONE web page, \`index.html\`: welcome and consent, every task, page flow, visuals, animation, wording. Participants open the survey link and get exactly this page; the researcher's Builder preview shows exactly this page too. There is no platform form style to fit into.
 
-The platform keeps three things, and the upload is rejected if they are broken:
-1. **Stimuli.** The platform draws the images / videos / audio for each participant from the researcher's media pool and hands them to your page. You never choose, invent or hard-code media URLs.
-2. **Question description.** Every answer you record belongs to a question declared in the survey JSON embedded in the page (section 1), with a native type that fixes the answer format.
+The platform takes care of three things; how much of your data it can analyse depends on how closely you follow them (the Builder and the Results page say so plainly):
+1. **Stimuli.** Images / videos / audio come from the researcher's media pool: either the platform draws them for each participant and hands them to your page, or your page reads whole folders with \`SPSite.getMedia(folder)\` and keeps its own randomisation (section 2). You never choose, invent or hard-code media URLs.
+2. **Question description.** Every answer you record belongs to a question declared in the survey JSON embedded in the page (section 1). A native type (section 3) gets the platform's analysis; an answer no native type fits is declared \`custom\` and is stored and exported as is, not analysed.
 3. **Answer recording.** You record answers only with \`SPSite.answer(...)\` and finish with \`SPSite.complete()\` (section 4). The platform checks every value, stores it, and handles submission and the thank-you screen.
 
 ## 0. Workflow — follow these steps in order
@@ -433,7 +433,7 @@ Images, videos and audio come from the researcher's project media pool; you neve
 
 **A. Platform draws (default when you design the page from scratch).** The platform draws the files for each participant, records exactly what was shown, and passes them to your page as \`question.media\` (or \`question.trials[i].media\`). Show only these; placeholders exist only in your preview.
 
-**B. Your page draws (default when a page already has its own randomisation).** Declare the folders at the survey level, \`"mediaFolders": ["task_a", "task_b"]\`, and read them with \`SPSite.getMedia('task_a')\` → \`[{ url, name, type }]\` (the whole folder). Keep the page's own logic for sampling, grouping, pairing and ordering, and record each answer with \`SPSite.answer(name, value, { key, shown })\`: \`shown\` lists the file names shown for that answer and \`key\` (for example the image id) makes a later answer replace an earlier one for the same item. The platform then records what was shown exactly like in A.
+**B. Your page draws (default when a page already has its own randomisation).** Declare the folders at the survey level by their names in the media library (the same as the folders of the researcher's zip, for example \`"mediaFolders": ["images"]\`), and read them with \`SPSite.getMedia('task_a')\` → \`[{ url, name, type }]\` (the whole folder). Keep the page's own logic for sampling, grouping, pairing and ordering, and record each answer with \`SPSite.answer(name, value, { key, shown })\`: \`shown\` lists the file names shown for that answer and \`key\` (for example the image id) makes a later answer replace an earlier one for the same item. The platform then records what was shown exactly like in A.
 
 Settings for A:
 - Default for every media question: \`"imageSelectionMode": "huggingface_random", "randomImageSelection": true, "excludePreviouslyUsedImages": true\` and \`"choices": []\`.
@@ -507,11 +507,11 @@ ${EXAMPLE_SITE_HTML.trim()}
 
 1. The researcher has tried the page and confirmed; you are handing over that same page.
 2. index.html contains the \`<script type="application/json" id="sp-scheme">\` block with \`format\`, \`spScheme\`, \`survey.pages\`, and the preview shim right after it.
-3. Every recorded answer has a declared question with a native type; names are unique; required questions have \`isRequired: true\`.
-4. No media URLs in the JSON or the page; every image or clip participants judge comes from \`question.media\` / \`question.trials[i].media\`.
+3. Every recorded answer has a declared question (a native type when the value fits, otherwise \`custom\`); names are unique; required questions have \`isRequired: true\`.
+4. No media URLs in the JSON or the page; every image or clip participants judge comes from \`question.media\` / \`question.trials[i].media\` or from \`SPSite.getMedia(folder)\`.
 5. Every answer goes through \`SPSite.answer(name, value)\` (with \`{ trial }\` for platform-drawn rounds, or \`{ key, shown }\` when the page draws media itself) in the shape of its kind, and the end calls \`SPSite.complete()\`.
 6. Questions the platform cannot analyse are declared as \`custom\`, not squeezed into a native type.
-6. No network calls, external scripts outside the allowed hosts, or credentials.
+7. No network calls, external scripts outside the allowed hosts, or credentials.
 `;
 }
 
