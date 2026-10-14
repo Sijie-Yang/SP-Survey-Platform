@@ -283,7 +283,8 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         problems: out.problems,
         degraded: out.degraded || [],
         notes: useRaw ? [] : (out.result?.notes || []),
-        originalImages: useRaw ? [] : (out.result?.originalImages || []),
+        // Files that came with the upload are uploaded on import, so there is nothing to ask for.
+        originalImages: useRaw || chosen.mediaPlan?.files?.length ? [] : (out.result?.originalImages || []),
         mediaPlan: chosen.mediaPlan,
         model: out.model,
       });
