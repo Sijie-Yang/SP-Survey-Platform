@@ -137,7 +137,7 @@ test('a survey link is fetched, its stimuli downloaded and planned for the media
   const adapter = "SPSite.onReady(function(){}); SPSite.onSubmit(function(){ SPSite.answer('pick','image_0').then(function(){ return SPSite.complete(); }); });";
   convertSurveyPage
     .mockResolvedValueOnce({ result: { survey: { pages: [{ elements: [pair] }] }, adapterScript: adapter, originalImages: [{ url: 'img/1.jpg' }, { url: 'img/2.jpg' }] } })
-    .mockResolvedValueOnce({ result: { survey: { pages: [{ elements: [{ ...pair, mediaFolders: ['pairs'] }] }] }, adapterScript: adapter, mediaGroups: [{ folder: 'pairs', files: ['rating/img/1.jpg', 'rating/img/2.jpg'] }] } });
+    .mockResolvedValueOnce({ result: { survey: { pages: [{ elements: [{ ...pair, mediaFolders: ['rating/img'] }] }] }, adapterScript: adapter } });
   try {
     renderPanel({ currentProject: { id: 'p1' }, onProjectUpdate: jest.fn() });
     fireEvent.click(screen.getByRole('button', { name: /Paste code|粘贴代码/ }));
@@ -148,7 +148,7 @@ test('a survey link is fetched, its stimuli downloaded and planned for the media
     expect(await screen.findByTestId('sp-scheme-converted')).toHaveTextContent(/Converted by the model|已由模型转换/);
     expect(fetchSurveyPageMedia).toHaveBeenCalledTimes(2);
     expect(convertSurveyPage.mock.calls[1][0].mediaFiles).toEqual(['rating/img/1.jpg', 'rating/img/2.jpg']);
-    expect(screen.getByTestId('sp-scheme-media-plan')).toHaveTextContent('sp-scheme/lab_github_io_rating/pairs · 2');
+    expect(screen.getByTestId('sp-scheme-media-plan')).toHaveTextContent('sp-scheme/lab_github_io_rating/rating/img · 2');
   } finally {
     global.fetch = originalFetch;
   }

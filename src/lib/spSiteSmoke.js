@@ -67,7 +67,7 @@ export function smokeMedia(survey, mediaPlan = null) {
  * report what goes wrong while it starts: script errors, failed requests, and
  * requests its adapter never answers (a page stuck on "Loading…").
  *
- * @returns {Promise<{ ran: boolean, problems: string[] }>}
+ * @returns {Promise<{ ran: boolean, problems: string[], warnings: string[] }>}
  */
 export function smokeTestSite(html, {
   questions = [], media = {}, survey = {}, allowedHosts = [], waitMs = 3500, maxWaitMs = 9000,
@@ -84,6 +84,7 @@ export function smokeTestSite(html, {
       position: 'fixed', left: '-12000px', top: '0', width: '1024px', height: '768px', border: '0', visibility: 'hidden',
     });
     const problems = [];
+    const warnings = [];
     const pending = new Map();
     let heard = false;
     const started = Date.now();
@@ -92,7 +93,10 @@ export function smokeTestSite(html, {
       const data = event.data;
       if (event.source !== frame.contentWindow || !data || data.source !== 'sp-site') return;
       heard = true;
-      if (data.type === 'problem') add(String(data.message || ''));
+      // A file that does not load (a logo the page's server used to serve) is
+      // worth showing but does not stop the page; script errors and stuck requests do.
+      if (data.type === 'problem' && data.kind === 'resource') { if (!warnings.includes(data.message)) warnings.push(String(data.message || '')); }
+      else if (data.type === 'problem') add(String(data.message || ''));
       else if (data.type === 'net' && data.phase === 'start') pending.set(data.id, `${data.method} ${data.url}`);
       else if (data.type === 'net' && data.phase === 'end') pending.delete(data.id);
       else if (data.type === 'answer' || data.type === 'complete') {
@@ -104,7 +108,7 @@ export function smokeTestSite(html, {
       frame.remove();
       const seconds = Math.round((Date.now() - started) / 1000);
       pending.forEach((label) => add(`${label} was still waiting after ${seconds} s: the SPSite.onRequest handler never answered it, so the page stays stuck (for example on "Loading…").`));
-      resolve({ ran: heard, problems });
+      resolve({ ran: heard, problems, warnings });
     };
     const check = () => {
       const elapsed = Date.now() - started;

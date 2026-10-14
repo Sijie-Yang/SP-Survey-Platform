@@ -15,13 +15,58 @@ import { smokeMedia, smokeQuestions } from './spSiteSmoke';
 export const CONVERT_MAX_HTML_CHARS = 200000;
 
 /**
+ * Questions the checks rejected are kept as records instead of dropped: their
+ * type becomes "custom" (any value, stored as is, not analysed), so the page
+ * still runs and the researcher analyses those answers from the export.
+ * @returns {{ survey: object, degraded: { name: string, reason: string }[] }}
+ */
+export function degradeRejectedQuestions(survey, errors = [], problems = []) {
+  const out = JSON.parse(JSON.stringify(survey || { pages: [] }));
+  const degraded = [];
+  const byName = new Map();
+  const walk = (elements) => (elements || []).forEach((el, i, list) => {
+    if (!el || typeof el !== 'object') return;
+    if (el.name) byName.set(el.name, { el, list, i });
+    walk(el.elements);
+  });
+  (out.pages || []).forEach((page) => walk(page?.elements));
+  const degrade = (name, reason) => {
+    const hit = byName.get(name);
+    if (!hit || hit.el.type === 'custom' || degraded.some((d) => d.name === name)) return;
+    const { el, list, i } = hit;
+    list[i] = { type: 'custom', name: el.name, ...(el.title ? { title: el.title } : {}), ...(el.description ? { description: el.description } : {}), ...(el.isRequired ? { isRequired: true } : {}) };
+    degraded.push({ name, reason });
+  };
+  const elementAt = (path) => {
+    const page = /survey\.pages\[(\d+)\]/.exec(path);
+    if (!page) return null;
+    let list = out.pages?.[Number(page[1])]?.elements;
+    let el = null;
+    for (const m of path.slice(page.index + page[0].length).matchAll(/\.elements\[(\d+)\]/g)) {
+      el = list?.[Number(m[1])] || null;
+      list = el?.elements;
+    }
+    return el;
+  };
+  errors.forEach((e) => {
+    const el = elementAt(String(e.path || ''));
+    if (el?.name) degrade(el.name, e.message);
+  });
+  problems.forEach((text) => {
+    const m = /^([\w.-]+): /.exec(String(text));
+    if (m && byName.has(m[1])) degrade(m[1], text);
+  });
+  return { survey: out, degraded };
+}
+
+/**
  * The page as it is, with no questions declared: the platform keeps every
  * request it sends and the researcher analyses the export. Used when the
  * model's conversion cannot be made to pass, and offered as a choice.
  */
 export function rawConversionResult(result = null) {
   return {
-    survey: { pages: [], mediaFolders: (result?.mediaGroups || []).map((g) => g.folder).filter(Boolean) },
+    survey: { pages: [] },
     adapterScript: '',
     replacements: [],
     externalHosts: result?.externalHosts || [],
@@ -99,9 +144,14 @@ export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles
   (survey?.pages || []).forEach((page, i) => {
     if (page && typeof page === 'object' && !page.name) page.name = `page${i + 1}`;
   });
-  const mediaPlan = mediaFiles.length ? planMediaUpload(mediaFiles, result?.mediaGroups, mediaBase) : null;
+  // The media library mirrors the zip's own folders; the page applies its own
+  // assignment (its config) to them, so the model does not regroup files.
+  const mediaPlan = mediaFiles.length ? planMediaUpload(mediaFiles, [], mediaBase) : null;
   if (mediaPlan) {
     problems.push(...mediaPlan.problems);
+    if (survey && !(Array.isArray(survey.mediaFolders) && survey.mediaFolders.length)) {
+      survey.mediaFolders = [...mediaPlan.folders.keys()];
+    }
     problems.push(...linkQuestionFolders(survey, mediaPlan));
   }
   const pkg = { format: SP_SCHEME_FORMAT, spScheme: SP_SCHEME_VERSION, survey };
@@ -282,7 +332,7 @@ export async function convertSurveyHtml(originalHtml, {
         mediaFiles = got.files;
         previous = result;
         feedback = [
-          `The page's ${got.files.length} stimulus files were downloaded and are now MEDIA FILES (listed below). Put them in mediaGroups, draw them with mediaFolders, and leave originalImages empty.`,
+          `The page's ${got.files.length} stimulus files were downloaded and are now MEDIA FILES (listed below). They are uploaded in folders mirroring their paths; have the page draw them with SPSite.getMedia("<folder>") (or mediaFolders when the page has no drawing logic of its own), and leave originalImages empty.`,
           ...(got.failed.length ? [`${got.failed.length} file(s) could not be downloaded: ${got.failed.slice(0, 3).join(', ')}.`] : []),
           ...problems.slice(0, 28),
         ];
@@ -305,14 +355,43 @@ export async function convertSurveyHtml(originalHtml, {
     previous = result;
     feedback = problems.slice(0, 30);
   }
-  // Nothing the model produced passes: offer the page as it is (raw records).
+  // Questions the checks still reject are recorded as they are (custom) so the
+  // page can be imported with every other question analysed as usual.
+  const rejected = degradeRejectedQuestions(last.result?.survey, last.report?.errors || [], last.problems);
+  if (rejected.degraded.length) {
+    const result = { ...last.result, survey: rejected.survey };
+    const applied = applyConversion(tokenized.html, result, tokenized.tokens, { mediaFiles, mediaBase });
+    const hosts = candidateHosts(applied.html, result);
+    const report = validateSpSchemePackage(applied.pkg, { siteHtml: applied.html, allowedHosts: hosts.map((h) => h.host) });
+    const problems = [...applied.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
+    if (!problems.length && smokeTest) {
+      onProgress?.({ round: lastRound, stage: 'run', fixing: false, feedback });
+      const run = await smokeTest(applied.html, {
+        questions: smokeQuestions(applied.pkg?.survey, applied.mediaPlan),
+        media: smokeMedia(applied.pkg?.survey, applied.mediaPlan),
+        allowedHosts: hosts.map((h) => h.host),
+      });
+      (run?.problems || []).forEach((p) => problems.push(`When the page loads: ${p}`));
+    }
+    if (!problems.length) {
+      return { ...last, html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems: [], hosts, result, ok: true, degraded: rejected.degraded };
+    }
+  }
+  // Nothing the model produced runs: offer the page as it is (raw records).
   const rawResult = rawConversionResult(last?.result);
   const raw = applyConversion(tokenized.html, rawResult, tokenized.tokens, { mediaFiles, mediaBase });
   const rawReport = validateSpSchemePackage(raw.pkg, { siteHtml: raw.html, allowedHosts: last.hosts.map((h) => h.host) });
   const rawProblems = [...raw.problems, ...rawReport.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
+  let startProblems = [];
+  if (!rawProblems.length && smokeTest) {
+    // Does the page at least start without its adapter? If not, say so.
+    onProgress?.({ round: lastRound, stage: 'run', fixing: false, feedback });
+    const run = await smokeTest(raw.html, { media: smokeMedia(raw.pkg?.survey, raw.mediaPlan), allowedHosts: last.hosts.map((h) => h.host) });
+    startProblems = run?.problems || [];
+  }
   return {
     ...last,
     ok: false,
-    raw: rawProblems.length ? null : { html: raw.html, pkg: raw.pkg, mediaPlan: raw.mediaPlan, report: rawReport, result: rawResult },
+    raw: rawProblems.length ? null : { html: raw.html, pkg: raw.pkg, mediaPlan: raw.mediaPlan, report: rawReport, result: rawResult, startProblems },
   };
 }

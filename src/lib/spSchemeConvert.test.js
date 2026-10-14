@@ -68,17 +68,24 @@ test('when no round passes, the page is offered as it is (raw records)', async (
   expect(out.raw.html).not.toContain('data-sp-adapter');
 });
 
-test('survey-level mediaFolders are pointed at the uploaded folders', () => {
-  const result = {
-    survey: { pages: [], mediaFolders: ['task_a'] },
-    adapterScript: '',
-    replacements: [],
-    mediaGroups: [{ folder: 'task_a', files: ['img/1.jpg'] }],
-  };
-  const out = applyConversion('<html><head></head><body></body></html>', result, [], {
-    mediaFiles: [{ path: 'img/1.jpg', bytes: new Uint8Array([1]) }],
-    mediaBase: 'sp-scheme/study',
-  });
-  expect(out.problems).toEqual([]);
-  expect(out.pkg.survey.mediaFolders).toEqual(['sp-scheme/study/task_a']);
+test('the media library mirrors the zip folders and the page may draw from all of them', () => {
+  const files = [{ path: 'img/1.jpg', bytes: new Uint8Array([1]) }, { path: 'app/logo.png', bytes: new Uint8Array([1]) }];
+  const declared = applyConversion('<html><head></head><body></body></html>', { survey: { pages: [], mediaFolders: ['img'] }, adapterScript: '', replacements: [], mediaGroups: [{ folder: 'task_a', files: ['img/1.jpg'] }] }, [], { mediaFiles: files, mediaBase: 'sp-scheme/study' });
+  expect(declared.problems).toEqual([]);
+  expect(declared.pkg.survey.mediaFolders).toEqual(['sp-scheme/study/img']);
+  expect([...declared.mediaPlan.folders.keys()].sort()).toEqual(['app', 'img']);
+  const implicit = applyConversion('<html><head></head><body></body></html>', { survey: { pages: [] }, adapterScript: '', replacements: [] }, [], { mediaFiles: files, mediaBase: 'sp-scheme/study' });
+  expect(implicit.pkg.survey.mediaFolders.sort()).toEqual(['sp-scheme/study/app', 'sp-scheme/study/img']);
+});
+
+test('questions the checks reject are recorded as custom instead of failing the conversion', async () => {
+  const bad = JSON.parse(JSON.stringify(LEGACY_SURVEY_CONVERSION));
+  bad.survey.pages[0].elements.push({ type: 'imagepicker', name: 'single', title: 'One image', imageCount: 1 });
+  const request = jest.fn(async () => ({ success: true, result: bad }));
+  const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request });
+  expect(out.ok).toBe(true);
+  expect(out.degraded).toEqual([{ name: 'single', reason: expect.stringMatching(/imagerating with imageCount 1/) }]);
+  const single = out.pkg.survey.pages[0].elements.find((el) => el.name === 'single');
+  expect(single).toEqual({ type: 'custom', name: 'single', title: 'One image' });
+  expect(out.report.summary.match).toBe('partial');
 });

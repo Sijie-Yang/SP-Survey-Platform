@@ -271,36 +271,33 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         })),
       });
       const ticked = out.hosts.filter((h) => h.needed).map((h) => h.host);
+      // What the model could not convert is imported as it is: the platform
+      // records what the page sends and analyses nothing.
+      const useRaw = !out.ok && Boolean(out.raw);
+      const chosen = useRaw ? out.raw : out;
       setConversion({
-        ok: out.ok,
+        ok: out.ok || useRaw,
+        usedRaw: useRaw,
+        startProblems: useRaw ? out.raw.startProblems || [] : [],
         rounds: out.rounds,
         problems: out.problems,
-        notes: out.result?.notes || [],
-        originalImages: out.result?.originalImages || [],
-        mediaPlan: out.mediaPlan,
+        degraded: out.degraded || [],
+        notes: useRaw ? [] : (out.result?.notes || []),
+        originalImages: useRaw ? [] : (out.result?.originalImages || []),
+        mediaPlan: chosen.mediaPlan,
         model: out.model,
-        raw: out.raw || null,
       });
       const allHosts = withSourceHost(out.hosts, upload);
       if (upload?.sourceHost && !ticked.includes(upload.sourceHost)) ticked.push(upload.sourceHost);
       setHosts(allHosts);
       setAllowed(ticked);
-      setUpload((prev) => ({ ...prev, originalHtml: source, siteHtml: out.html, pkg: out.pkg, converted: true }));
-      revalidate(out.pkg, out.html, ticked);
+      setUpload((prev) => ({ ...prev, originalHtml: source, siteHtml: chosen.html, pkg: chosen.pkg, converted: true }));
+      revalidate(chosen.pkg, chosen.html, ticked);
     } catch (err) {
       setParseError(err?.message || String(err));
     } finally {
       setConverting(null);
     }
-  };
-
-  // The page unchanged, with no questions: the platform records what it sends.
-  const useRawConversion = () => {
-    const raw = conversion?.raw;
-    if (!raw) return;
-    setConversion((prev) => ({ ...prev, ok: true, raw: null, usedRaw: true, problems: [], mediaPlan: raw.mediaPlan, notes: raw.result.notes || [] }));
-    setUpload((prev) => ({ ...prev, siteHtml: raw.html, pkg: raw.pkg, converted: true }));
-    revalidate(raw.pkg, raw.html, allowed);
   };
 
   // One file is read as is; several (index.html plus its config or CSV files) are
@@ -590,10 +587,30 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                 </Alert>
               ) : null}
               {conversion ? (
-                <Alert severity={conversion.ok ? 'success' : 'warning'} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
-                  {conversion.ok
+                <Alert severity={conversion.usedRaw ? (conversion.startProblems?.length ? 'error' : 'warning') : (conversion.ok ? 'success' : 'warning')} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
+                  {conversion.usedRaw && L(
+                    `The model could not convert this page in ${conversion.rounds} rounds, so it is imported as it is: the platform records what the page sends and analyses nothing. You can convert again or send the problems below to another model.`,
+                    `模型在 ${conversion.rounds} 轮内没能转换好这个页面，已改为按原样导入：平台只原样记录页面发出的数据，不做任何分析。也可以再转换一次，或把下面的问题发给其他大模型。`,
+                  )}
+                  {!conversion.usedRaw && (conversion.ok
                     ? L('Converted by the model: the original design is kept, and its questions and submission now go through the platform. Try it in Preview after import.', '已由模型转换：保留原设计，题目和提交改由平台记录。导入后请在预览里试一遍。')
-                    : L(`The model could not fix everything in ${conversion.rounds} rounds. You can convert again, send the errors below to another model${conversion.raw ? ', or import the page as it is (the platform then only records what it sends and analyses nothing)' : ''}.`, `模型在 ${conversion.rounds} 轮内没能修完所有问题。可以再转换一次，把下面的错误发给其他大模型${conversion.raw ? '，或者按原样导入（平台只原样记录页面发出的数据，不做任何分析）' : ''}。`)}
+                    : L(`The model could not fix everything in ${conversion.rounds} rounds. You can convert again, or send the errors below to another model.`, `模型在 ${conversion.rounds} 轮内没能修完所有问题。可以再转换一次，或把下面的错误发给其他大模型。`))}
+                  {conversion.degraded?.length ? (
+                    <Box sx={{ mt: 0.5 }} data-testid="sp-scheme-degraded">
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {L(`${conversion.degraded.length} question(s) do not fit a platform type and are recorded as the page sends them (custom); analyse those from the export:`, `${conversion.degraded.length} 道题对不上平台题型，按页面自己的格式原样记录（custom），这些题请导出后自行分析：`)}
+                      </Typography>
+                      <Box component="ul" sx={{ m: '2px 0 0', pl: 2.5 }}>
+                        {conversion.degraded.map((d) => <Typography component="li" variant="body2" key={d.name}>{d.name}: {d.reason}</Typography>)}
+                      </Box>
+                    </Box>
+                  ) : null}
+                  {conversion.usedRaw && conversion.startProblems?.length ? (
+                    <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }} data-testid="sp-scheme-raw-start">
+                      {L('But the page does not start on its own (it needs its original server), so participants would be stuck:', '但这个页面自己启动不了（它需要原来的服务器），参与者会卡住：')}
+                      {' '}{conversion.startProblems.slice(0, 3).join(' ')}
+                    </Typography>
+                  ) : null}
                   {conversion.notes.length ? (
                     <Box component="ul" sx={{ m: '4px 0 0', pl: 2.5 }}>
                       {conversion.notes.map((n, i) => <Typography component="li" variant="body2" key={i}>{n}</Typography>)}
@@ -602,11 +619,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                   <Button size="small" startIcon={<Download />} sx={{ mt: 0.5 }} onClick={() => downloadText('index.sp-scheme.html', upload.siteHtml, 'text/html')}>
                     {L('Download converted page', '下载转换后的页面')}
                   </Button>
-                  {!conversion.ok && conversion.raw ? (
-                    <Button size="small" variant="outlined" color="warning" sx={{ mt: 0.5, ml: 1 }} data-testid="sp-scheme-use-raw" onClick={useRawConversion}>
-                      {L('Import as it is (record only)', '按原样导入（只记录，不分析）')}
-                    </Button>
-                  ) : null}
+
                 </Alert>
               ) : null}
               {conversion?.originalImages?.length ? (
