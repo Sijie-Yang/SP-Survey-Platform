@@ -94,14 +94,6 @@ export async function countOwnerResponses(projectId, { signal } = {}) {
   }
 }
 
-const OWNER_KEY_LIMIT_MAX = 64;
-/** Double the page while a page takes under 1.5 s; halve it (not below the start) past 5 s. */
-export function nextOwnerKeyLimit(keyLimit, elapsedMs) {
-  if (elapsedMs < 1500) return Math.min(OWNER_KEY_LIMIT_MAX, keyLimit * 2);
-  if (elapsedMs > 5000) return Math.max(RESPONSE_INTERACTIVE_KEY_PAGE, Math.floor(keyLimit / 2));
-  return keyLimit;
-}
-
 /** Owner Results: same page loader as the admin Worker, through PostgREST with the owner's session (RLS). */
 export async function fetchOwnerResponsePage(projectId, after = null, loadSession = createResponseLoadSession(), { onProgress, signal } = {}) {
   const { data: { session } = {} } = supabase ? await supabase.auth.getSession() : {};
@@ -124,20 +116,16 @@ export async function fetchOwnerResponsePage(projectId, after = null, loadSessio
     }
     return data;
   };
-  // Start with a short page (inside the database statement timeout, leaving a
-  // connection for auth), then grow it while pages come back quickly.
-  const keyLimit = loadSession.keyLimit || RESPONSE_INTERACTIVE_KEY_PAGE;
-  const started = Date.now();
+  // Short pages stay inside the database statement timeout and leave a connection for auth.
   const page = await loadSurveyResponsePage(rest, projectId, {
     after,
     mode: loadSession.mode,
     knownContracts: [...loadSession.contracts.keys()],
-    keyLimit,
-    legacyKeyLimit: keyLimit,
-    batchSize: Math.max(RESPONSE_INTERACTIVE_BATCH, keyLimit / 2),
+    keyLimit: RESPONSE_INTERACTIVE_KEY_PAGE,
+    legacyKeyLimit: RESPONSE_INTERACTIVE_KEY_PAGE,
+    batchSize: RESPONSE_INTERACTIVE_BATCH,
     concurrency: 1,
     onProgress,
   });
-  loadSession.keyLimit = nextOwnerKeyLimit(keyLimit, Date.now() - started);
   return restorePage(page, loadSession);
 }

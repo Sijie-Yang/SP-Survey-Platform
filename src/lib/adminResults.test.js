@@ -72,12 +72,3 @@ test('owner results fall back to full rows when the RPC is not installed', async
   expect(await fetchOwnerResponsePage('p', page[1], session)).toEqual([]);
   expect(fetchMock.mock.calls.slice(calls).some(([url]) => String(url).includes('/rpc/'))).toBe(false);
 });
-
-test('owner pages start short and grow while they come back quickly', () => {
-  const { nextOwnerKeyLimit } = require('./adminResults');
-  expect(nextOwnerKeyLimit(8, 400)).toBe(16);
-  expect(nextOwnerKeyLimit(64, 400)).toBe(64);
-  expect(nextOwnerKeyLimit(32, 3000)).toBe(32);
-  expect(nextOwnerKeyLimit(32, 8000)).toBe(16);
-  expect(nextOwnerKeyLimit(8, 8000)).toBe(8);
-});
