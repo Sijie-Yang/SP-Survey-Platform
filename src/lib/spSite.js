@@ -173,6 +173,11 @@ export function buildSiteQuestions(surveyJson, { language } = {}) {
       q.rateMin = Number(element.rateMin ?? 1);
       q.rateMax = Number(element.rateMax ?? element.rateCount ?? 5);
       if (Array.isArray(element.rateValues) && element.rateValues.length) q.rateValues = itemList(element.rateValues, lang);
+      else if (Array.isArray(element.rateLabels) && element.rateLabels.length) {
+        // One label per scale point (rateMin, rateMin + step, …); the answer stays numeric.
+        const step = Number(element.rateStep) || 1;
+        q.rateValues = element.rateLabels.map((label, i) => ({ value: q.rateMin + i * step, text: localText(label, lang) }));
+      }
       if (element.minRateDescription) q.minLabel = localText(element.minRateDescription, lang);
       if (element.maxRateDescription) q.maxLabel = localText(element.maxRateDescription, lang);
     }

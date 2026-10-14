@@ -155,3 +155,10 @@ describe('applySpSchemePackage', () => {
     expect(() => applySpSchemePackage({ ok: false })).toThrow('Fix the package');
   });
 });
+
+test('an imagepicker that shows one image is rejected with the rating type to use', () => {
+  const report = validateSpSchemePackage({ format: 'sp-scheme', spScheme: '2.0', survey: { pages: [{ name: 'p', elements: [
+    { type: 'imagepicker', name: 'state', imageCount: 1 },
+  ] }] } });
+  expect(report.errors.map((e) => e.message).join(' ')).toMatch(/imagerating with imageCount 1/);
+});

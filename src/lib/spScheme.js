@@ -85,7 +85,7 @@ export const SP_SITE_PREVIEW_SHIM = `${SITE_SHIM_START}
         var q = { name: el.name, page: page.name || null, type: el.type, kind: kind, title: text(el.title) || el.name,
           description: text(el.description), required: !!el.isRequired, trialCount: Math.max(1, Math.floor(Number(el.trialCount) || 1)) };
         if (kind === 'number') { q.min = el.min != null ? el.min : null; q.max = el.max != null ? el.max : null; }
-        if (kind === 'rating') { q.rateMin = Number(el.rateMin != null ? el.rateMin : 1); q.rateMax = Number(el.rateMax != null ? el.rateMax : 5); if (el.rateValues) q.rateValues = items(el.rateValues); q.minLabel = text(el.minRateDescription); q.maxLabel = text(el.maxRateDescription); }
+        if (kind === 'rating') { q.rateMin = Number(el.rateMin != null ? el.rateMin : 1); q.rateMax = Number(el.rateMax != null ? el.rateMax : 5); if (el.rateValues) q.rateValues = items(el.rateValues); else if (el.rateLabels) q.rateValues = el.rateLabels.map(function (t, i) { return { value: q.rateMin + i * (Number(el.rateStep) || 1), text: text(t) }; }); q.minLabel = text(el.minRateDescription); q.maxLabel = text(el.maxRateDescription); }
         if (kind === 'boolean') { q.labelTrue = text(el.labelTrue); q.labelFalse = text(el.labelFalse); }
         if (kind === 'sliders') q.dimensions = (el.dimensions || []).map(function (d) { return { id: String(d.id), label: text(d.label), left: text(d.left), right: text(d.right), min: d.min != null ? d.min : (el.scaleMin != null ? el.scaleMin : 1), max: d.max != null ? d.max : (el.scaleMax != null ? el.scaleMax : 7), step: d.step != null ? d.step : (el.scaleStep || 1) }; });
         if (kind === 'matrix') { q.rows = items(el.rows); q.columns = items(el.columns); }
@@ -403,7 +403,7 @@ Put this block inside \`<head>\`, before the preview shim:
 </script>
 \`\`\`
 
-- One element per thing you record, with a native \`type\` from section 3. The type decides the answer format and the analysis the researcher gets; your page decides how it looks. For example a two-image "tap the safer street" game is an \`imagepicker\` with \`imageCount: 2\` (analysed with TrueSkill rankings), a swipe-left/right card is an \`imageboolean\`, a drag-to-sort board is an \`imageranking\`, a set of dials is an \`imageslidergroup\`.
+- One element per thing you record, with a native \`type\` from section 3. The type decides the answer format and the analysis the researcher gets; your page decides how it looks. For example a two-image "tap the safer street" game is an \`imagepicker\` with \`imageCount: 2\` (analysed with TrueSkill rankings), a swipe-left/right card is an \`imageboolean\`, a drag-to-sort board is an \`imageranking\`, a set of dials is an \`imageslidergroup\`. Rating one image on a few labelled options ("clean / minor issues / vacant") is an \`imagerating\` with \`imageCount: 1\`, \`rateMin\`/\`rateMax\` and \`rateLabels\` (one label per option); an \`imagepicker\` is only for choosing between two or more images.
 - Every element has a unique, stable \`name\` (lowercase letters, digits, underscores). Choice, row, column and dimension ids must be unique within their question.
 - \`title\` / \`description\` hold the wording, in the survey's \`locale\` language; your page may show them or its own text.
 - Pages group questions for the researcher's overview only; your page decides the real flow.
@@ -782,7 +782,7 @@ export function validateSpSchemePackage(pkg, { siteHtml = null, allowedHosts = [
       issue(errors, `${path}.type`, `${label}: type "${element.type}" cannot be answered from a page; pick a type from SP-Scheme section 3.`);
     }
     if ((element.type === 'imagepicker' || element.type === 'mediapicker') && Number(element.imageCount ?? 2) < 2) {
-      issue(errors, `${path}.type`, `${label}: ${element.type} asks the participant to choose between images, but it shows only ${Number(element.imageCount) || 1}. To rate one image with answer options, use radiogroup (text options) or imagerating (a scale) with imageCount 1.`);
+      issue(errors, `${path}.type`, `${label}: ${element.type} asks the participant to choose between images, but it shows only ${Number(element.imageCount) || 1}. To rate one image on a few labelled options, use imagerating with imageCount 1, rateMin/rateMax covering the options and rateLabels (one label per option).`);
     }
     if (questionHasTrait(element.type, 'stimulus') || element.type === 'skillquestion') {
       const manual = element.imageSelectionMode === 'huggingface_manual';
