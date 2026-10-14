@@ -11,13 +11,15 @@ const VIEWPORT_WIDTH = { mobile: 390, tablet: 820 };
  * Builder preview of an SP-Scheme site: the same page participants get, with
  * media drawn the same way. Answers are checked and shown, never submitted.
  */
-export default function SpSitePreview({ config, viewport = 'desktop', height = '78vh' }) {
+export default function SpSitePreview({ config: baseConfig, spSite, viewport = 'desktop', height = '78vh' }) {
   const language = useContext(RegionContext)?.language || 'en';
   const L = (en, zh) => uiPair(language, en, zh);
-  const questions = useMemo(() => buildSiteQuestions(config), [config]);
+  // Memoized so media are drawn once per preview run, not on every render.
+  const config = useMemo(() => ({ ...baseConfig, spSite: spSite || baseConfig?.spSite }), [baseConfig, spSite]);
+  const [run, setRun] = useState(0);
+  const questions = useMemo(() => buildSiteQuestions(config), [config, run]); // eslint-disable-line react-hooks/exhaustive-deps
   const [answers, setAnswers] = useState({});
   const [completed, setCompleted] = useState(false);
-  const [run, setRun] = useState(0);
   const width = VIEWPORT_WIDTH[viewport] || '100%';
 
   const restart = () => {
@@ -38,6 +40,7 @@ export default function SpSitePreview({ config, viewport = 'desktop', height = '
         <SpSiteFrame
           key={run}
           html={config.spSite.html}
+          allowedHosts={config.spSite.allowedHosts || []}
           questions={questions}
           survey={{ title: config.title || '', description: config.description || '', language: config.locale || 'en', preview: true }}
           onAnswer={(name, stored) => setAnswers((prev) => {

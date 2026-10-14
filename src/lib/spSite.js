@@ -429,26 +429,15 @@ const CDN_HOSTS = [
   'https://esm.sh',
 ];
 
-/** Content-Security-Policy for the site: no network calls, media over https only. */
-export const SP_SITE_CSP = [
-  "default-src 'none'",
-  `script-src 'unsafe-inline' 'unsafe-eval' ${CDN_HOSTS.join(' ')}`,
-  `style-src 'unsafe-inline' https://fonts.googleapis.com ${CDN_HOSTS.join(' ')}`,
-  `font-src data: https://fonts.gstatic.com ${CDN_HOSTS.join(' ')}`,
-  'img-src https: data: blob:',
-  'media-src https: data: blob:',
-  "connect-src 'none'",
-  "form-action 'none'",
-  "frame-src 'none'",
-  "worker-src blob:",
-].join('; ');
-
 export const SP_SITE_SCRIPT_HOSTS = CDN_HOSTS;
 
 /** Runs first inside the site: defines window.SPSite and talks to the platform. */
 export const SP_SITE_SDK_SOURCE = `
 (function () {
+  var boot = window.__SP_SITE_BOOT__ || null;
   var questions = [], survey = {}, answers = {}, ready = false, waiters = [], pending = {}, seq = 0;
+  var allowedHosts = (boot && boot.allowedHosts) || [];
+  var submitHandlers = [], submitQueue = [];
   function post(msg) { window.parent.postMessage(Object.assign({ source: 'sp-site' }, msg), '*'); }
   function call(type, payload) {
     return new Promise(function (resolve) {
@@ -472,19 +461,102 @@ export const SP_SITE_SDK_SOURCE = `
       try { Object.defineProperty(window, key, { value: store, configurable: true }); } catch (e2) { /* keep native */ }
     }
   });
+
+  // Requests to hosts the researcher did not allow never leave the page. Submissions
+  // (fetch/XHR/beacon/form posts) are handed to SPSite.onSubmit handlers instead, so a
+  // converted survey can map its old "send results" payload onto SPSite.answer.
+  function hostAllowed(url) {
+    try { return allowedHosts.indexOf(new URL(url, 'https://invalid.local/').host) >= 0; } catch (e) { return false; }
+  }
+  function parseBody(body) {
+    if (body == null) return null;
+    if (typeof body === 'string') {
+      try { return JSON.parse(body); } catch (e) { /* not JSON */ }
+      if (/^[^=&\\s]+=[^&]*(&[^=&\\s]+=[^&]*)*$/.test(body)) {
+        var out = {}; new URLSearchParams(body).forEach(function (v, k) { out[k] = v; }); return out;
+      }
+      return body;
+    }
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      var fd = {}; body.forEach(function (v, k) { fd[k] = typeof v === 'string' ? v : '[file]'; }); return fd;
+    }
+    if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+      var sp = {}; body.forEach(function (v, k) { sp[k] = v; }); return sp;
+    }
+    return body;
+  }
+  function dispatch(item) {
+    if (!submitHandlers.length) { submitQueue.push(item); console.warn('[SPSite] captured a ' + item.method + ' to ' + item.url + '; register SPSite.onSubmit to record it'); return; }
+    submitHandlers.forEach(function (fn) { try { fn(item); } catch (err) { console.error(err); } });
+  }
+  function capture(kind, url, method, body) {
+    dispatch({ kind: kind, url: String(url || ''), method: String(method || 'POST').toUpperCase(), data: parseBody(body) });
+  }
+  var nativeFetch = window.fetch && window.fetch.bind(window);
+  if (nativeFetch) {
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || String(input);
+      var method = (init && init.method) || (input && input.method) || 'GET';
+      if (hostAllowed(url)) return nativeFetch(input, init);
+      if (/^(GET|HEAD)$/i.test(method)) return Promise.reject(new TypeError('SP-Survey blocked a request to ' + url));
+      capture('fetch', url, method, init && init.body);
+      return Promise.resolve(new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    };
+  }
+  if (window.XMLHttpRequest) {
+    var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url) { this.__sp = { method: method, url: url }; return open.apply(this, arguments); };
+    XMLHttpRequest.prototype.send = function (body) {
+      var info = this.__sp || {};
+      if (hostAllowed(info.url) || /^(GET|HEAD)$/i.test(info.method || 'GET')) return send.apply(this, arguments);
+      capture('xhr', info.url, info.method, body);
+      var xhr = this;
+      ['readyState', 'status', 'responseText', 'response'].forEach(function (k) {
+        Object.defineProperty(xhr, k, { configurable: true, value: { readyState: 4, status: 200, responseText: '{"ok":true}', response: '{"ok":true}' }[k] });
+      });
+      setTimeout(function () {
+        ['readystatechange', 'load', 'loadend'].forEach(function (type) {
+          var ev = new Event(type); xhr.dispatchEvent(ev);
+          if (typeof xhr['on' + type] === 'function') xhr['on' + type](ev);
+        });
+      }, 0);
+    };
+  }
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon = function (url, data) { if (!hostAllowed(url)) capture('beacon', url, 'POST', data); return true; };
+  }
+  function formData(form) { var out = {}; new FormData(form).forEach(function (v, k) { out[k] = typeof v === 'string' ? v : '[file]'; }); return out; }
+  HTMLFormElement.prototype.submit = function () {
+    dispatch({ kind: 'form', url: String(this.action || ''), method: String(this.method || 'GET').toUpperCase(), data: formData(this) });
+  };
+  window.addEventListener('submit', function (e) {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    var form = e.target;
+    dispatch({ kind: 'form', url: String(form.action || ''), method: String(form.method || 'GET').toUpperCase(), data: formData(form) });
+  });
+
   function detail() { return { questions: questions, survey: survey, answers: answers }; }
   function fire() {
     var d = detail();
     waiters.splice(0).forEach(function (cb) { try { cb(d); } catch (err) { console.error(err); } });
     document.dispatchEvent(new CustomEvent('spsite-ready', { detail: d }));
   }
+  function whenDom(fn) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn); else fn(); }
+  if (boot) {
+    // Questions and media are known before the page's own scripts run.
+    questions = boot.questions || []; survey = boot.survey || {}; answers = boot.answers || {};
+    ready = true;
+    whenDom(fire);
+  }
   window.addEventListener('message', function (e) {
     var d = e.data;
     if (e.source !== window.parent || !d || d.source !== 'sp-site-host') return;
     if (d.type === 'init') {
+      if (ready) return;
       questions = d.questions || []; survey = d.survey || {}; answers = d.answers || {};
       ready = true;
-      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fire); else fire();
+      whenDom(fire);
     } else if (d.type === 'result' && pending[d.requestId]) {
       var resolve = pending[d.requestId];
       delete pending[d.requestId];
@@ -496,13 +568,18 @@ export const SP_SITE_SDK_SOURCE = `
   window.SPSite = {
     version: '${SP_SITE_VERSION}',
     platform: true,
+    allowedHosts: allowedHosts.slice(),
     onReady: function (cb) { if (ready) cb(detail()); else waiters.push(cb); },
     getQuestions: function () { return questions; },
     getQuestion: function (name) { for (var i = 0; i < questions.length; i += 1) if (questions[i].name === name) return questions[i]; return null; },
     getSurvey: function () { return survey; },
     getAnswers: function () { return answers; },
     answer: function (name, value, options) { return call('answer', { name: name, value: value === undefined ? null : value, trial: options && options.trial }); },
-    complete: function () { return call('complete', {}); }
+    complete: function () { return call('complete', {}); },
+    onSubmit: function (fn) {
+      submitHandlers.push(fn);
+      submitQueue.splice(0).forEach(function (item) { try { fn(item); } catch (err) { console.error(err); } });
+    }
   };
   post({ type: 'hello' });
 })();
@@ -512,10 +589,43 @@ function escapeScript(text) {
   return String(text).replace(/<\/script/gi, '<\\/script');
 }
 
-/** Insert the CSP and SDK at the top of <head> so they run before the site's code. */
-export function prepareSiteDocument(html) {
+const HOST_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/i;
+
+/** Hostnames a researcher may allow (no schemes, paths or wildcards). */
+export function normalizeAllowedHosts(hosts) {
+  return [...new Set((Array.isArray(hosts) ? hosts : [])
+    .map((h) => String(h || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+    .filter((h) => HOST_RE.test(h)))].slice(0, 20);
+}
+
+/** CSP for one site; allowed hosts may serve scripts, styles, fonts and data. */
+export function buildSiteCsp(allowedHosts = []) {
+  const extra = normalizeAllowedHosts(allowedHosts).map((h) => `https://${h}`);
+  const hosts = [...CDN_HOSTS, ...extra].join(' ');
+  return [
+    "default-src 'none'",
+    `script-src 'unsafe-inline' 'unsafe-eval' ${hosts}`,
+    `style-src 'unsafe-inline' https://fonts.googleapis.com ${hosts}`,
+    `font-src data: https://fonts.gstatic.com ${hosts}`,
+    'img-src https: data: blob:',
+    'media-src https: data: blob:',
+    extra.length ? `connect-src ${extra.join(' ')}` : "connect-src 'none'",
+    "form-action 'none'",
+    "frame-src 'none'",
+    'worker-src blob:',
+  ].join('; ');
+}
+
+/**
+ * Insert the CSP, the start-up data and the SDK at the top of <head> so they
+ * run before the site's own code.
+ */
+export function prepareSiteDocument(html, { boot = null, allowedHosts = [] } = {}) {
   const source = stripSitePreviewShim(html);
-  const inject = `<meta http-equiv="Content-Security-Policy" content="${SP_SITE_CSP}">`
+  const hosts = normalizeAllowedHosts(allowedHosts);
+  const bootData = boot ? { ...boot, allowedHosts: hosts } : (hosts.length ? { allowedHosts: hosts } : null);
+  const inject = `<meta http-equiv="Content-Security-Policy" content="${buildSiteCsp(hosts)}">`
+    + (bootData ? `<script>window.__SP_SITE_BOOT__=${JSON.stringify(bootData).replace(/</g, '\\u003c')};</script>` : '')
     + `<script>${escapeScript(SP_SITE_SDK_SOURCE)}</script>`;
   const head = source.match(/<head\b[^>]*>/i);
   if (head) return source.slice(0, head.index + head[0].length) + inject + source.slice(head.index + head[0].length);
@@ -559,7 +669,8 @@ export function extractEmbeddedScheme(html) {
  * Static checks on an uploaded site.
  * @returns {{ errors: string[], warnings: string[] }}
  */
-export function checkSiteHtml(html, questionNames = []) {
+export function checkSiteHtml(html, questionNames = [], { allowedHosts = [] } = {}) {
+  const hosts = normalizeAllowedHosts(allowedHosts);
   const errors = [];
   const warnings = [];
   const text = stripSitePreviewShim(html);
@@ -570,12 +681,15 @@ export function checkSiteHtml(html, questionNames = []) {
   if (!/SPSite\.complete\s*\(/.test(text)) errors.push('index.html never calls SPSite.complete(), so participants could not submit.');
   if (/SPSkill\./.test(text)) errors.push('index.html uses the old SPSkill API; use SPSite instead.');
   if (/\b(fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|navigator\.sendBeacon)/.test(text)) {
-    warnings.push('index.html makes network calls; they are blocked on the platform. Answers must go through SPSite.answer.');
+    warnings.push(hosts.length
+      ? `index.html makes network calls; only ${hosts.join(', ')} can be reached, and data sent elsewhere is handed to SPSite.onSubmit instead.`
+      : 'index.html makes network calls; they are blocked on the platform. Answers must go through SPSite.answer.');
   }
   const scriptSrc = [...text.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]);
-  const blocked = scriptSrc.filter((src) => !CDN_HOSTS.some((host) => src.startsWith(`${host}/`) || src === host));
+  const scriptHosts = [...CDN_HOSTS, ...hosts.map((h) => `https://${h}`)];
+  const blocked = scriptSrc.filter((src) => !scriptHosts.some((host) => src.startsWith(`${host}/`) || src === host));
   if (blocked.length) {
-    errors.push(`Scripts must be inline or come from ${CDN_HOSTS.join(', ')}: ${blocked.slice(0, 3).join(', ')}.`);
+    errors.push(`Scripts must be inline or come from ${CDN_HOSTS.join(', ')} or an allowed domain: ${blocked.slice(0, 3).join(', ')}.`);
   }
   if (!/getQuestions\s*\(|getQuestion\s*\(|spsite-ready|onReady\s*\(/.test(text)) {
     errors.push('index.html never reads the questions from SPSite (SPSite.onReady / getQuestions), so it cannot show the media the platform drew.');
@@ -592,4 +706,25 @@ export function withoutSiteHtml(config) {
   if (!config?.spSite?.html) return config;
   const { html, ...meta } = config.spSite;
   return { ...config, spSite: { ...meta, note: 'Participant page built with SP-Scheme; kept by the platform and not editable here.' } };
+}
+
+/** External hosts a page loads from or talks to, excluding the built-in CDNs and data: URLs. */
+export function externalHostsIn(html) {
+  const builtIn = new Set(CDN_HOSTS.map((h) => new URL(h).host).concat(['fonts.googleapis.com', 'fonts.gstatic.com']));
+  const found = new Map();
+  const add = (url, kind) => {
+    try {
+      const { host, protocol } = new URL(url);
+      if (!/^https?:$/.test(protocol) || builtIn.has(host)) return;
+      const entry = found.get(host) || { host, kinds: new Set() };
+      entry.kinds.add(kind);
+      found.set(host, entry);
+    } catch { /* relative or invalid */ }
+  };
+  const text = String(html || '');
+  for (const m of text.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)) add(m[1], 'script');
+  for (const m of text.matchAll(/<link\b[^>]*\bhref=["']([^"']+)["']/gi)) add(m[1], 'style');
+  for (const m of text.matchAll(/\b(?:fetch|open|sendBeacon|axios\.\w+|\$\.(?:ajax|get|post|getJSON))\s*\(\s*(?:['"]\w+['"]\s*,\s*)?['"`](https?:\/\/[^'"`\s]+)/g)) add(m[1], 'request');
+  for (const m of text.matchAll(/['"`](https?:\/\/[^'"`\s]+\/(?:tiles?|api|v\d+)\/[^'"`\s]*)['"`]/gi)) add(m[1], 'request');
+  return [...found.values()].map((e) => ({ host: e.host, kinds: [...e.kinds] }));
 }

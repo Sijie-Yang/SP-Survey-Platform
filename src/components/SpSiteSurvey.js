@@ -41,6 +41,7 @@ export default function SpSiteSurvey({ model, surveyJson, language }) {
     <div style={{ position: 'fixed', inset: 0, zIndex: 1, background: '#fff' }} data-testid="sp-site-survey">
       <SpSiteFrame
         html={surveyJson.spSite.html}
+        allowedHosts={surveyJson.spSite.allowedHosts || []}
         questions={questions}
         survey={{
           title: model.title || surveyJson.title || '',

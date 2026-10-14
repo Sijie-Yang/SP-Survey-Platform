@@ -25,7 +25,9 @@ import {
   SITE_SHIM_START,
   answerKindOf,
   checkSiteHtml,
+  externalHostsIn,
   extractEmbeddedScheme,
+  normalizeAllowedHosts,
   stripSitePreviewShim,
   utf8Bytes,
 } from './spSite';
@@ -131,6 +133,8 @@ export const SP_SITE_PREVIEW_SHIM = `${SITE_SHIM_START}
     getQuestion: find,
     getSurvey: function () { return survey; },
     getAnswers: function () { return answers; },
+    allowedHosts: [],
+    onSubmit: function () { /* the platform hands intercepted result posts here */ },
     answer: function (name, value, options) {
       var q = find(name);
       if (!q) { console.warn('[SPSite preview] unknown question', name); return done({ ok: false, error: 'Unknown question "' + name + '"' }); }
@@ -451,7 +455,7 @@ A question object: \`{ name, type, kind, answerShape, title, description, requir
 - Record timing or extra behaviour only through declared questions (for example a \`number\` question for a reaction time in milliseconds).
 
 Runtime limits on the platform (the page runs full-screen in a sandboxed frame):
-- No network: \`fetch\`, XHR, WebSocket and form posts are blocked; nothing leaves the page except through SPSite.
+- No network: \`fetch\`, XHR, WebSocket and form posts are blocked; nothing leaves the page except through SPSite. A researcher can allow named domains in the Builder (\`SPSite.allowedHosts\`) for pages that must load something at run time. Posts to any other host are not sent: they resolve as a success and their payload is passed to \`SPSite.onSubmit(function (item) { /* item.kind, item.url, item.method, item.data */ })\`, so an older page's "send results" call can be mapped onto \`SPSite.answer\`.
 - Scripts must be inline or loaded from ${SP_SITE_SCRIPT_HOSTS.join(', ')}; styles may also use Google Fonts. Images and media load over https only (the platform's), or data: URLs for your own decoration.
 - \`localStorage\` works only in memory for the session; do not rely on it.
 - No navigation to other pages, no new windows for survey content, no iframes, no camera or microphone.
@@ -676,7 +680,7 @@ export function siteId(html) {
  * @param {{ siteHtml?: string|null }} options the uploaded page, if any
  * @returns {{ ok, errors, warnings, survey, site, summary }}
  */
-export function validateSpSchemePackage(pkg, { siteHtml = null } = {}) {
+export function validateSpSchemePackage(pkg, { siteHtml = null, allowedHosts = [] } = {}) {
   const errors = [];
   const warnings = [];
   const empty = { ok: false, errors, warnings, survey: null, site: null, summary: null };
@@ -756,13 +760,14 @@ export function validateSpSchemePackage(pkg, { siteHtml = null } = {}) {
     const answerable = questions
       .filter(({ element }) => element.name && !['display', 'unsupported'].includes(answerKindOf(element)))
       .map(({ element }) => element.name);
-    const checked = checkSiteHtml(html, answerable);
+    const hosts = normalizeAllowedHosts(allowedHosts);
+    const checked = checkSiteHtml(html, answerable, { allowedHosts: hosts });
     checked.errors.forEach((message) => issue(errors, 'index.html', message));
     checked.warnings.forEach((message) => issue(warnings, 'index.html', message));
     if (pkg.__embeddedNames && pkg.__embeddedNames.join(',') !== [...names].sort().join(',')) {
       issue(warnings, 'index.html', 'The questions embedded in index.html differ from sp-scheme.json; sp-scheme.json is used.');
     }
-    site = { html, bytes: utf8Bytes(html), id: siteId(html) };
+    site = { html, bytes: utf8Bytes(html), id: siteId(html), allowedHosts: hosts, externalHosts: externalHostsIn(html) };
   } else {
     issue(warnings, 'index.html', 'No index.html in the upload, so participants will see the platform\'s standard question style. Upload the page the model built to use its interface.');
   }
@@ -805,6 +810,8 @@ export function applySpSchemePackage(report, { baseConfig = {} } = {}) {
   };
   if (report.site) {
     next.spSite = { html: report.site.html, id: report.site.id, version: SP_SITE_VERSION, importedAt };
+    // Domains the researcher allowed this page to reach; recorded with the survey.
+    if (report.site.allowedHosts?.length) next.spSite.allowedHosts = [...report.site.allowedHosts];
   } else {
     delete next.spSite;
   }
@@ -812,3 +819,10 @@ export function applySpSchemePackage(report, { baseConfig = {} } = {}) {
 }
 
 export const SP_SCHEME_EXAMPLE_PACKAGE = EXAMPLE_PACKAGE;
+
+/** Sections 1-4 of SP-Scheme (rules, types, SPSite API): the reference for page conversion. */
+export function buildConvertReference() {
+  const text = buildSpSchemeText();
+  const cut = text.indexOf('## 5.');
+  return cut > 0 ? text.slice(0, cut).trim() : text;
+}

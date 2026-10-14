@@ -16,9 +16,20 @@ SP-Scheme lets a researcher build a whole survey with any external LLM (ChatGPT,
 
 ## Runtime (`src/lib/spSite.js`, `SpSiteFrame`, `SpSiteSurvey`, `SpSitePreview`)
 
-- `SurveyApp` loads and draws media exactly as before and builds the SurveyJS model, but when `spSite.html` exists it renders the page full-screen in a sandboxed iframe (`allow-scripts allow-forms allow-modals allow-popups`, no same-origin) instead of `<Survey>`. A CSP is injected first in `<head>`: no `connect-src`, scripts inline or from jsDelivr / cdnjs / unpkg / Tailwind CDN / esm.sh, images and media over https or data:.
+- `SurveyApp` loads and draws media exactly as before and builds the SurveyJS model, but when `spSite.html` exists it renders the page full-screen in a sandboxed iframe (`allow-scripts allow-forms allow-modals allow-popups`, no same-origin) instead of `<Survey>`. A CSP is injected first in `<head>`: no `connect-src` except allowed domains, scripts inline or from jsDelivr / cdnjs / unpkg / Tailwind CDN / esm.sh, images and media over https or data:.
 - The injected SDK defines `window.SPSite` (`onReady`, `getQuestions`, `getQuestion`, `getSurvey`, `getAnswers`, `answer(name, value, { trial })`, `complete()`) and an in-memory `localStorage`.
 - `buildSiteQuestions` sends each question with its wording, the media drawn for this participant (per trial for `trialCount > 1`) and the exact allowed values (for image choice types, `image_N` / `media_N` with `imageUrl`).
 - Every answer is validated per native answer kind (`validateSiteAnswer`) before it reaches the model; trials are stored as `{ trials: [{ value, shown_images, shown_media_ids }] }` through the trials store, as `TrialShell` does. `complete()` checks required questions, then calls `model.doComplete()`, so submission, enrichment and the response contract are unchanged. Responses carry `survey_metadata.sp_site = { id, version }`.
 - Builder preview shows the same page with the same media draw and a live panel of recorded answers; nothing is submitted.
 - Participant drafts store the page metadata only; resume re-attaches the page from the current config. The Builder AI assistant does not receive the page and keeps it across its edits.
+
+## Converting an existing survey page
+
+Any survey page can be uploaded, including a complete hand-made one that loads data from or posts results to its own server (fetch, XHR, form posts, Google Forms, Apps Script, …). When the page has no SP-Scheme block, the check dialog offers **Convert with the free model**:
+
+1. `src/lib/spSchemeConvert.js` replaces long embedded `data:` images with short tokens and sends the page and SP-Scheme sections 1–4 to `POST /api/agent/sp-scheme/convert` (`worker-lib/agent/spSchemeConvert.mjs`). The worker uses the Assistant model, which falls back to the free (subsidized) route, with a fixed conversion prompt.
+2. The model does not rewrite the page. It returns the questions as native types, an `adapterScript`, exact `find`/`replace` patches, the domains the page needs, the original stimulus image URLs and short notes.
+3. The browser applies the patches, embeds the questions, adds the adapter before `</body>` and runs the normal SP-Scheme validation. Problems (a patch that does not match, a validation error) are sent back to the model for up to two fix rounds.
+4. The dialog lists the original images (to upload to the Media Dataset, since stimuli are drawn by the platform) and the domains the page uses. The researcher ticks only the domains it must load from; scripts, styles and data from them are allowed (`spSite.allowedHosts`, also recorded in each response's `survey_metadata.sp_site.allowed_hosts`). The import re-checks the page against that choice.
+
+At run time the SDK keeps every request to a domain that is not allowed inside the page: a GET fails, while a POST, `sendBeacon` or form submission resolves as a success and its payload goes to `SPSite.onSubmit(item)` (`{ kind, url, method, data }`), where the adapter maps it onto `SPSite.answer` and calls `SPSite.complete()`. The page keeps its own design and thank-you step; results are recorded only by SP-Survey.

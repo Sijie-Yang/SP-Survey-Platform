@@ -1,0 +1,148 @@
+/**
+ * Convert an existing survey page (any HTML survey, including ones that post
+ * results to their own server) into an SP-Scheme site.
+ *
+ * The Assistant model returns native questions, an adapter script and exact
+ * find/replace patches (see worker-lib/agent/spSchemeConvert.mjs). They are
+ * applied here and the result goes through the same validation as an
+ * uploaded SP-Scheme page; failures are sent back to the model for a fix.
+ */
+
+import { buildConvertReference, SP_SCHEME_FORMAT, SP_SCHEME_VERSION, validateSpSchemePackage } from './spScheme';
+import { externalHostsIn, normalizeAllowedHosts, stripSitePreviewShim } from './spSite';
+
+export const CONVERT_MAX_HTML_CHARS = 200000;
+export const CONVERT_FIX_ROUNDS = 2;
+
+const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=\s]{200,}/gi;
+const TOKEN_RE = /data:sp-token\/(\d+)/g;
+
+/** Long embedded images waste the model's context; swap them for short tokens. */
+export function tokenizeDataUris(html) {
+  const tokens = [];
+  const out = String(html || '').replace(DATA_URI_RE, (match) => {
+    tokens.push(match);
+    return `data:sp-token/${tokens.length - 1}`;
+  });
+  return { html: out, tokens };
+}
+
+export function restoreDataUris(text, tokens = []) {
+  return String(text || '').replace(TOKEN_RE, (match, i) => tokens[Number(i)] ?? match);
+}
+
+function escapeJsonForScript(value) {
+  return JSON.stringify(value, null, 2).replace(/</g, '\\u003c');
+}
+
+function escapeScriptText(text) {
+  return String(text).replace(/<\/script/gi, '<\\/script');
+}
+
+function insertAfterHeadOpen(html, block) {
+  const head = html.match(/<head\b[^>]*>/i);
+  if (head) return html.slice(0, head.index + head[0].length) + block + html.slice(head.index + head[0].length);
+  const htmlTag = html.match(/<html\b[^>]*>/i);
+  if (htmlTag) {
+    const at = htmlTag.index + htmlTag[0].length;
+    return `${html.slice(0, at)}<head>${block}</head>${html.slice(at)}`;
+  }
+  return block + html;
+}
+
+function insertBeforeBodyClose(html, block) {
+  const at = html.search(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i);
+  return at >= 0 ? html.slice(0, at) + block + html.slice(at) : html + block;
+}
+
+/**
+ * Apply one model answer to the page the model saw (data URIs tokenized).
+ * @returns {{ html: string, pkg: object, problems: string[] }}
+ */
+export function applyConversion(tokenizedHtml, result, tokens = []) {
+  const problems = [];
+  let html = stripSitePreviewShim(String(tokenizedHtml || ''));
+  (result?.replacements || []).forEach(({ find, replace }, i) => {
+    const at = html.indexOf(find);
+    if (at < 0) {
+      problems.push(`replacements[${i}].find was not found in the page; copy it exactly or drop it: ${JSON.stringify(find.slice(0, 120))}`);
+      return;
+    }
+    if (html.indexOf(find, at + find.length) >= 0) {
+      problems.push(`replacements[${i}].find occurs more than once; make it unique: ${JSON.stringify(find.slice(0, 120))}`);
+      return;
+    }
+    html = html.slice(0, at) + replace + html.slice(at + find.length);
+  });
+  // An old embedded block would shadow the converted questions.
+  html = html.replace(/<script\b[^>]*\bid=["']sp-scheme["'][^>]*>[\s\S]*?<\/script>/gi, '');
+  const survey = result?.survey ? JSON.parse(JSON.stringify(result.survey)) : null;
+  // Models often leave out page names; they carry no meaning for a site.
+  (survey?.pages || []).forEach((page, i) => {
+    if (page && typeof page === 'object' && !page.name) page.name = `page${i + 1}`;
+  });
+  const pkg = { format: SP_SCHEME_FORMAT, spScheme: SP_SCHEME_VERSION, survey };
+  html = insertAfterHeadOpen(html, `\n<script type="application/json" id="sp-scheme">\n${escapeJsonForScript(pkg)}\n</script>\n`);
+  const adapter = String(result?.adapterScript || '').trim();
+  if (adapter) {
+    html = insertBeforeBodyClose(html, `\n<script data-sp-adapter>\n${escapeScriptText(adapter)}\n</script>\n`);
+  } else {
+    problems.push('adapterScript is empty: the page must record answers with SPSite.answer and finish with SPSite.complete().');
+  }
+  return { html: restoreDataUris(html, tokens), pkg, problems };
+}
+
+/**
+ * Domains the page references plus the ones the model says it needs.
+ * `needed` marks hosts the page loads code, styles or data from; hosts that
+ * only received results are not needed, because results go through SPSite.
+ */
+export function candidateHosts(html, result) {
+  const found = new Map();
+  externalHostsIn(html).forEach(({ host, kinds }) => {
+    found.set(host, { host, why: kinds.join(', '), needed: kinds.some((k) => k !== 'request') });
+  });
+  (result?.externalHosts || []).forEach(({ host, why }) => {
+    const [clean] = normalizeAllowedHosts([host]);
+    if (!clean) return;
+    const entry = found.get(clean) || { host: clean, why: '' };
+    found.set(clean, { ...entry, why: why || entry.why, needed: true });
+  });
+  return [...found.values()];
+}
+
+/**
+ * Convert a page with the Assistant model, retrying with the validation
+ * errors. `request` posts to /api/agent/sp-scheme/convert.
+ */
+export async function convertSurveyHtml(originalHtml, { request, notes = '', onProgress } = {}) {
+  const source = stripSitePreviewShim(String(originalHtml || ''));
+  const tokenized = tokenizeDataUris(source);
+  if (tokenized.html.length > CONVERT_MAX_HTML_CHARS) {
+    throw new Error(`The page is too long to convert automatically (${tokenized.html.length} characters; the limit is ${CONVERT_MAX_HTML_CHARS}).`);
+  }
+  const reference = buildConvertReference();
+  let previous = null;
+  let feedback = [];
+  let last = null;
+  for (let round = 0; round <= CONVERT_FIX_ROUNDS; round += 1) {
+    onProgress?.({ round, fixing: round > 0, feedback });
+    const response = await request({ html: tokenized.html, reference, notes, previous, feedback });
+    const result = response?.result;
+    if (!result) throw new Error('The model returned nothing usable.');
+    const applied = applyConversion(tokenized.html, result, tokenized.tokens);
+    const hosts = candidateHosts(applied.html, result);
+    // Validate as if every candidate domain were allowed; the researcher then
+    // chooses which ones to allow and the import re-checks that choice.
+    const report = validateSpSchemePackage(applied.pkg, {
+      siteHtml: applied.html,
+      allowedHosts: hosts.map((h) => h.host),
+    });
+    const problems = [...applied.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
+    last = { html: applied.html, pkg: applied.pkg, report, problems, hosts, result, rounds: round + 1, provider: response.provider, model: response.model };
+    if (!problems.length) return { ...last, ok: true };
+    previous = result;
+    feedback = problems.slice(0, 30);
+  }
+  return { ...last, ok: false };
+}

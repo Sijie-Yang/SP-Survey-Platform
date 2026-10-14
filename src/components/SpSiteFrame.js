@@ -14,13 +14,23 @@ export default function SpSiteFrame({
   onAnswer,
   onComplete,
   title = 'Survey',
+  allowedHosts = [],
   style,
 }) {
   const frameRef = useRef(null);
   const answersRef = useRef({ ...initialAnswers });
   const latest = useRef({});
   latest.current = { questions, survey, onAnswer, onComplete };
-  const srcDoc = useMemo(() => prepareSiteDocument(html), [html]);
+  // Questions and answers are embedded as boot data so the page can read them
+  // synchronously; the key keeps the iframe from reloading on equal props.
+  const bootKey = JSON.stringify({ questions, survey, answers: initialAnswers, allowedHosts });
+  const srcDoc = useMemo(() => {
+    const boot = JSON.parse(bootKey);
+    return prepareSiteDocument(html, {
+      boot: { questions: boot.questions || [], survey: boot.survey || {}, answers: boot.answers || {} },
+      allowedHosts: boot.allowedHosts,
+    });
+  }, [html, bootKey]);
 
   useEffect(() => {
     const byName = () => new Map((latest.current.questions || []).map((q) => [q.name, q]));

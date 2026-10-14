@@ -4,6 +4,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SpSchemePanel from './SpSchemePanel';
 import { RegionProvider } from '../../contexts/RegionContext';
 import { buildExampleSite, buildExampleZip } from '../../lib/spScheme';
+import { convertSurveyPage } from '../../lib/agentApi';
+import { LEGACY_SURVEY_CONVERSION, LEGACY_SURVEY_HTML } from '../../lib/__fixtures__/legacySurvey';
+
+jest.mock('../../lib/agentApi', () => ({ convertSurveyPage: jest.fn() }));
 
 function renderPanel(props = {}) {
   const onChange = jest.fn();
@@ -53,4 +57,38 @@ test('shows the active page and can remove it', () => {
   expect(screen.getByTestId('sp-site-active')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /Remove|移除/ }));
   expect(onChange.mock.calls[0][0].spSite).toBeUndefined();
+});
+
+test('converts an ordinary survey page with the model, then imports it with the ticked domains', async () => {
+  convertSurveyPage.mockResolvedValue({ result: LEGACY_SURVEY_CONVERSION, model: 'free' });
+  const { onChange } = renderPanel();
+  const file = new File([LEGACY_SURVEY_HTML], 'survey.html', { type: 'text/html' });
+  fireEvent.change(screen.getByTestId('sp-scheme-file'), { target: { files: [file] } });
+  fireEvent.click(await screen.findByTestId('sp-scheme-convert'));
+
+  expect(await screen.findByTestId('sp-scheme-converted')).toBeInTheDocument();
+  expect(screen.getByText(/Format aligned|格式与平台对齐/)).toBeInTheDocument();
+  expect(screen.getByTestId('sp-scheme-original-images')).toHaveTextContent('street_01.jpg');
+  const hosts = screen.getByTestId('sp-scheme-hosts');
+  expect(hosts).toHaveTextContent('cdn.legacy-lab.org');
+  expect(hosts).toHaveTextContent('api.legacy-lab.org');
+
+  fireEvent.click(screen.getByRole('button', { name: /Import into Builder|导入 Builder/ }));
+  await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+  const next = onChange.mock.calls[0][0];
+  expect(next.spSite.allowedHosts).toEqual(['cdn.legacy-lab.org']);
+  expect(next.spSite.html).toContain('data-sp-adapter');
+  expect(next.pages[0].elements.map((e) => e.name)).toEqual(['safety', 'comment']);
+});
+
+test('unticking a domain the page loads its script from blocks the import', async () => {
+  convertSurveyPage.mockResolvedValue({ result: LEGACY_SURVEY_CONVERSION, model: 'free' });
+  renderPanel();
+  const file = new File([LEGACY_SURVEY_HTML], 'survey.html', { type: 'text/html' });
+  fireEvent.change(screen.getByTestId('sp-scheme-file'), { target: { files: [file] } });
+  fireEvent.click(await screen.findByTestId('sp-scheme-convert'));
+  await screen.findByTestId('sp-scheme-converted');
+  fireEvent.click(screen.getByRole('checkbox', { name: /cdn\.legacy-lab\.org/ }));
+  expect(await screen.findByText(/Scripts must be inline/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Import into Builder|导入 Builder/ })).toBeDisabled();
 });

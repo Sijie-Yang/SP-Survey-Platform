@@ -715,7 +715,8 @@ export default function SurveyPreview({
   if (config.spSite?.html && processedConfig) {
     return (
       <SpSitePreview
-        config={{ ...processedConfig, spSite: config.spSite }}
+        config={processedConfig}
+        spSite={config.spSite}
         viewport={interactive ? viewport : 'desktop'}
       />
     );
