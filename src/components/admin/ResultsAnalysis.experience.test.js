@@ -191,3 +191,19 @@ test('a custom question on a page built to SP-Scheme is greyed and marked analys
   expect(screen.getByTestId('custom-record-analysis')).toBeTruthy();
   expect(screen.getByText('Analyse yourself')).toBeTruthy();
 });
+
+test('an advanced custom task is greyed and marked analyse yourself, a built-in interactive question is named', () => {
+  const task = { name: 'k', type: 'skillquestion', skillId: 'skill_abc', title: 'My task' };
+  const rows = [{ id: 'one', participant_id: 'p1', responses: { k: { answer: { v: 1 } } } }];
+  const { unmount } = render(<RegionProvider><QuestionCard question={task} answers={[{ answer: { v: 1 } }]} totalResponses={1} questionNumber={1}
+    allResponses={rows} surveyConfig={{ pages: [{ name: 'p', elements: [task] }] }} defaultExpanded /></RegionProvider>);
+  expect(screen.getByText('Advanced custom task')).toBeTruthy();
+  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/advanced custom task/);
+  unmount();
+  const preset = { ...task, skillId: 'preset_image_preference_forced' };
+  render(<RegionProvider><QuestionCard question={preset} answers={[]} totalResponses={1} questionNumber={1}
+    allResponses={rows} surveyConfig={{ pages: [{ name: 'p', elements: [preset] }] }} /></RegionProvider>);
+  expect(screen.getByText(/^Interactive · /)).toBeTruthy();
+  expect(screen.queryByText('Analyse yourself')).toBeNull();
+});

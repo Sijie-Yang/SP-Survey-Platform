@@ -1718,7 +1718,7 @@ function renderNativeQuestionAnalysisBody(question, answers, allResponses, surve
  * A question an SP-Scheme page records in its own format: the platform keeps
  * the values and exports them, and says plainly that it does not analyse them.
  */
-function CustomRecordAnalysis({ question, answers, allResponses, site = false }) {
+function CustomRecordAnalysis({ question, answers, allResponses, site = false, task = false }) {
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
   const records = (answers || []).filter((a) => a !== undefined && a !== null);
@@ -1727,7 +1727,9 @@ function CustomRecordAnalysis({ question, answers, allResponses, site = false })
   });
   return <Box data-testid="custom-record-analysis">
       <Alert severity="warning" sx={{ mb: 1.5 }}>
-        {site ? (zh
+        {task ? (zh
+          ? `这是高级自定义任务：交互由你自己的 HTML 定义，平台不知道它的含义，所以不做分析也不做统计。回答已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
+          : `This is an advanced custom task: its interaction is your own HTML, so the platform does not know what the answers mean and does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : site ? (zh
           ? `这份问卷是在线转换导入的页面，题目由模型识别，可能与页面实际含义不符，所以平台不分析也不统计。答案已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
           : `This survey is a page converted online. Its questions were identified by a model and may not match what the page really asks, so the platform does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : zh
           ? `这道题由页面按自己的格式记录（custom），平台不做任何分析，也不做统计。请导出 CSV 或 JSON 后自行处理。共 ${records.length} 条记录。`
@@ -2367,8 +2369,14 @@ export function QuestionCard({
   // A page converted online: its questions are the model's reading of the page, so nothing is analysed.
   // A page built to SP-Scheme declares its own questions and is analysed as usual.
   const siteSurvey = Boolean(surveyConfig?.spSite?.convertedFrom);
-  // A custom question is recorded as the page sends it and analysed by the researcher.
-  const unanalysed = siteSurvey || type === 'custom';
+  // An advanced custom task (a skill question that is not a built-in preset) is the researcher's own HTML.
+  const customTask = type === 'skillquestion' && !String(question.skillId || '').startsWith('preset_');
+  const presetSkill = type === 'skillquestion' && !customTask ? getPresetSkill(question.skillId) : null;
+  // A custom question or task is recorded as sent and analysed by the researcher.
+  const unanalysed = siteSurvey || type === 'custom' || customTask;
+  const zh = isChineseLanguage(language);
+  const typeLabel = customTask ? (zh ? '高级自定义任务' : 'Advanced custom task')
+    : presetSkill ? `${zh ? '交互题' : 'Interactive'} · ${presetSkill.builderLabel || presetSkill.name}` : type;
   const trialUnitCount = answers.length;
   // Answer rate is per submission; charts/stats use per-trial units in `answers`.
   const {
@@ -2382,6 +2390,9 @@ export function QuestionCard({
     };
   }, [allResponses, question.name]);
   const renderAnalysis = () => {
+    if (customTask) {
+      return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} task />;
+    }
     if (type === 'skillquestion') {
       return <SkillQuestionAnalysis question={question} answers={answers} allResponses={allResponses} surveyConfig={surveyConfig} />;
     }
@@ -2455,7 +2466,7 @@ export function QuestionCard({
           alignItems: 'center',
           gap: 1
         }}>
-            <Chip icon={typeIcon(type)} label={type} size="small" variant="outlined" sx={{
+            <Chip icon={typeIcon(type)} label={typeLabel} size="small" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />
             {unanalysed && !displayOnly && <Chip label={isChineseLanguage(language) ? '自行分析' : 'Analyse yourself'} size="small" variant="outlined" sx={{
