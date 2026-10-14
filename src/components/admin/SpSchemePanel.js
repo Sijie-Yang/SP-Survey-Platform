@@ -177,13 +177,13 @@ export default function SpSchemePanel({ config, onChange }) {
 
       <Box component="ol" sx={{ m: '8px 0 12px', pl: 2.5, color: 'text.secondary', '& li': { mb: 0.25 } }}>
         <Typography component="li" variant="body2">
-          {L('Copy SP-Scheme and paste it into ChatGPT, Claude, Gemini or any model, then describe your study. It tells the model how media is randomised, how questions are described and how answers are recorded.', '复制 SP-Scheme，发给 ChatGPT、Claude、Gemini 等任意大模型，再描述你的研究。它告诉大模型平台如何随机抽图、如何描述题目、如何记录答案。')}
+          {L('Copy SP-Scheme into any LLM and describe your study.', '复制 SP-Scheme 发给任意大模型，并描述你的研究。')}
         </Typography>
         <Typography component="li" variant="body2">
-          {L('The model builds the whole survey as one web page, any design you like. Try it in the model\'s preview and ask for changes until you are happy.', '大模型会把整份问卷做成一个网页，样式和交互随你定。在它的预览里试一遍，不满意就让它改。')}
+          {L('Let it build the survey as a web page and refine it until you are happy.', '让它把问卷做成网页，试到满意为止。')}
         </Typography>
         <Typography component="li" variant="body2">
-          {L('Upload that same index.html (or its zip) here. After the check passes and you import, Preview and the survey link both show that page; the platform still draws the images and records the answers.', '把同一个 index.html（或它的 zip）上传到这里。检查通过并导入后，预览和问卷链接都直接使用这个页面；抽图和记录答案仍由平台负责。')}
+          {L('Upload its index.html here to go live; the platform handles images and answers.', '上传它的 index.html 即可上线，抽图和记录答案由平台负责。')}
         </Typography>
       </Box>
 
