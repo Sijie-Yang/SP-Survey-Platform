@@ -183,3 +183,11 @@ test('a page converted online exports one ZIP of its answers', async () => {
   fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
   expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['All answers (ZIP)']);
 });
+
+test('a custom question on a page built to SP-Scheme is greyed and marked analyse yourself', () => {
+  const custom = { name: 'c', type: 'custom', title: 'Custom' };
+  render(<RegionProvider><QuestionCard question={custom} answers={[{ a: 1 }]} totalResponses={1} questionNumber={1}
+    allResponses={[{ id: 'one', participant_id: 'p1', responses: { c: { a: 1 } } }]} surveyConfig={{ pages: [{ name: 'p', elements: [custom] }], spSite: { html: '<html></html>' } }} defaultExpanded /></RegionProvider>);
+  expect(screen.getByTestId('custom-record-analysis')).toBeTruthy();
+  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+});

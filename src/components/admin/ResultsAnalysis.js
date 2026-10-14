@@ -2367,6 +2367,8 @@ export function QuestionCard({
   // A page converted online: its questions are the model's reading of the page, so nothing is analysed.
   // A page built to SP-Scheme declares its own questions and is analysed as usual.
   const siteSurvey = Boolean(surveyConfig?.spSite?.convertedFrom);
+  // A custom question is recorded as the page sends it and analysed by the researcher.
+  const unanalysed = siteSurvey || type === 'custom';
   const trialUnitCount = answers.length;
   // Answer rate is per submission; charts/stats use per-trial units in `answers`.
   const {
@@ -2405,9 +2407,9 @@ export function QuestionCard({
   const responseRate = pct(responseCount, totalResponses);
   const displayOnly = isDisplayOnlyQuestion(question);
   const canExport = !displayOnly && responseCount > 0;
-  return <Card variant="outlined" data-site-unanalysed={siteSurvey || undefined} sx={{
+  return <Card variant="outlined" data-site-unanalysed={unanalysed || undefined} sx={{
     mb: 2,
-    ...(siteSurvey ? { bgcolor: 'grey.50', color: 'text.secondary' } : null)
+    ...(unanalysed ? { bgcolor: 'grey.50', color: 'text.secondary' } : null)
   }}>
       <Box sx={{
       display: 'flex',
@@ -2422,8 +2424,8 @@ export function QuestionCard({
         width: 32,
         height: 32,
         borderRadius: '50%',
-        bgcolor: displayOnly || siteSurvey ? 'grey.300' : 'primary.main',
-        color: displayOnly || siteSurvey ? 'text.secondary' : 'white',
+        bgcolor: displayOnly || unanalysed ? 'grey.300' : 'primary.main',
+        color: displayOnly || unanalysed ? 'text.secondary' : 'white',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -2456,7 +2458,7 @@ export function QuestionCard({
             <Chip icon={typeIcon(type)} label={type} size="small" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />
-            {siteSurvey && !displayOnly && <Chip label={isChineseLanguage(language) ? '自行分析' : 'Analyse yourself'} size="small" variant="outlined" sx={{
+            {unanalysed && !displayOnly && <Chip label={isChineseLanguage(language) ? '自行分析' : 'Analyse yourself'} size="small" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />}
             {question.isAttentionCheck && <Chip label="Attention check" size="small" color="warning" variant="outlined" sx={{
@@ -2476,7 +2478,7 @@ export function QuestionCard({
           </Box>
         </Box>
 
-        {onExplain && !siteSurvey && <Button size="small" variant="outlined" sx={{
+        {onExplain && !unanalysed && <Button size="small" variant="outlined" sx={{
         mr: 1,
         flexShrink: 0
       }} onClick={e => {
@@ -2523,13 +2525,13 @@ export function QuestionCard({
       <Collapse in={expanded} mountOnEnter unmountOnExit>
         <Divider />
         <CardContent>
-          {!siteSurvey && answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
+          {!unanalysed && answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
           mb: 2
         }}>{t.resultsGroupExplanation}</Alert>}
-          {!siteSurvey && <AttentionCheckPassRate question={question} allResponses={allResponses} />}
+          {!unanalysed && <AttentionCheckPassRate question={question} allResponses={allResponses} />}
           {responseCount === 0 && !isDisplayOnlyQuestion(question) ? <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography> : <>
               {renderAnalysis()}
-              {responseCount > 0 && !siteSurvey && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
+              {responseCount > 0 && !unanalysed && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
             </>}
         </CardContent>
       </Collapse>
