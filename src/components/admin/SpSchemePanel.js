@@ -31,6 +31,7 @@ import { externalHostsIn, extractEmbeddedScheme } from '../../lib/spSite';
 import { convertSurveyPage, fetchSurveyPage, fetchSurveyPageMedia } from '../../lib/agentApi';
 import { CONVERT_FIX_ROUNDS, convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
 import { downloadPageMedia, uploadPlannedMedia } from '../../lib/spSchemeMediaImport';
+import { smokeTestSite } from '../../lib/spSiteSmoke';
 import { uploadImageToR2 } from '../../lib/r2';
 import { useOptionalAuth } from '../../contexts/AuthContext';
 
@@ -98,8 +99,11 @@ function ConvertProgress({ state, L }) {
   const steps = [
     { key: 'read', label: L('Read the page', '读取页面'), done: true },
     { key: 'model', label: L('Model maps questions and submission to the platform', '模型把题目和提交接到平台'), done: state.stage !== 'model' || state.round > 0, active: state.stage === 'model' && state.round === 0 },
-    { key: 'check', label: L('Apply changes and check', '应用修改并检查'), done: state.round > 0 || state.stage === 'media', active: state.stage === 'check' && state.round === 0 },
+    { key: 'check', label: L('Apply changes and check', '应用修改并检查'), done: state.round > 0 || state.stage === 'media' || state.stage === 'run', active: state.stage === 'check' && state.round === 0 },
   ];
+  if (state.stage === 'run') {
+    steps.push({ key: 'run', label: L('Open the page once to check it starts', '试运行一次，确认页面能正常启动'), done: false, active: true });
+  }
   if (state.stage === 'media' || state.mediaDone) {
     steps.push({
       key: 'media',
@@ -256,6 +260,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         dataFiles: upload?.dataFiles || [],
         mediaFiles: upload?.mediaFiles || [],
         mediaBase: importMediaBase(upload?.sourceUrl ? `${upload.sourceHost}${new URL(upload.sourceUrl).pathname}` : upload?.name),
+        smokeTest: smokeTestSite,
         fetchMedia: upload?.sourceUrl
           ? (urls, progress) => downloadPageMedia(urls, upload.sourceUrl, { fetchViaServer: fetchSurveyPageMedia, onProgress: progress })
           : null,

@@ -42,3 +42,15 @@ test('retries with the validation errors until the page passes', async () => {
   expect(request.mock.calls[1][0].previous).toBe(broken);
   expect(request.mock.calls[0][0].reference).toContain('SPSite');
 });
+
+test('a page that fails when it loads goes back to the model', async () => {
+  const request = jest.fn(async () => ({ success: true, result: LEGACY_SURVEY_CONVERSION }));
+  const smokeTest = jest.fn()
+    .mockResolvedValueOnce({ ran: true, problems: ['GET /api/state was still waiting after 9 s'] })
+    .mockResolvedValueOnce({ ran: true, problems: [] });
+  const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request, smokeTest });
+  expect(out.ok).toBe(true);
+  expect(out.rounds).toBe(2);
+  expect(request.mock.calls[1][0].feedback).toEqual(['When the page loads: GET /api/state was still waiting after 9 s']);
+  expect(smokeTest.mock.calls[0][1].questions.map((q) => q.name)).toContain('safety');
+});

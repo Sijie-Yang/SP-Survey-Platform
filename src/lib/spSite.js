@@ -439,6 +439,28 @@ export const SP_SITE_SDK_SOURCE = `
   var allowedHosts = (boot && boot.allowedHosts) || [];
   var submitHandlers = [], submitQueue = [];
   function post(msg) { window.parent.postMessage(Object.assign({ source: 'sp-site' }, msg), '*'); }
+  // Script errors and failed requests go to the platform (shown in the Builder
+  // preview, and fed back to the model when a page is converted).
+  var problemCount = 0, seenProblems = {};
+  function problem(kind, message) {
+    var text = String(message || '').slice(0, 400);
+    if (!text || seenProblems[text] || problemCount >= 20) return;
+    seenProblems[text] = true; problemCount += 1;
+    post({ type: 'problem', kind: kind, message: text });
+  }
+  window.addEventListener('error', function (e) {
+    var el = e && e.target;
+    if (el && el !== window && el.tagName) {
+      var src = el.currentSrc || el.src || el.href;
+      if (src && !/^data:/.test(src)) problem('resource', 'Could not load ' + String(src).slice(0, 200));
+      return;
+    }
+    if (e && e.message) problem('script', e.message + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    problem('script', 'Unhandled promise rejection: ' + String(r && r.message || r));
+  });
   function call(type, payload) {
     return new Promise(function (resolve) {
       seq += 1;
@@ -510,14 +532,44 @@ export const SP_SITE_SDK_SOURCE = `
       return u.host === base.host ? u.pathname + u.search : u.href;
     } catch (e) { return String(url || ''); }
   }
+  // A request the adapter never answers would leave the page waiting forever
+  // (for example stuck on "Loading…"); it fails after a while instead, and the
+  // platform hears about it so the Builder can show what went wrong.
+  var netSeq = 0, REQUEST_TIMEOUT_MS = 15000;
   function answerRequest(req) {
-    return adaptersReady.then(function () {
+    var id = (netSeq += 1), timer = null, label = req.method + ' ' + req.url;
+    post({ type: 'net', phase: 'start', id: id, method: req.method, url: req.url });
+    var work = adaptersReady.then(function () {
       for (var i = 0; i < requestHandlers.length; i += 1) {
         var out;
-        try { out = requestHandlers[i](req); } catch (err) { console.error('[SPSite] onRequest handler failed', err); return Promise.resolve({ status: 500, json: { error: String(err && err.message || err) } }); }
+        try { out = requestHandlers[i](req); } catch (err) { console.error('[SPSite] onRequest handler failed', err); return { status: 500, json: { error: String(err && err.message || err) } }; }
         if (out !== undefined) return Promise.resolve(out).then(function (r) { return r === undefined || r === null ? { status: 200, json: { ok: true } } : r; });
       }
       return undefined;
+    });
+    var timeout = new Promise(function (resolve) {
+      timer = setTimeout(function () {
+        var message = label + ' got no answer within ' + (REQUEST_TIMEOUT_MS / 1000) + ' s: the SPSite.onRequest handler never finished.';
+        console.error('[SPSite] ' + message);
+        problem('request', message);
+        resolve({ status: 504, json: { error: message } });
+      }, REQUEST_TIMEOUT_MS);
+    });
+    return Promise.race([work, timeout]).then(function (r) {
+      clearTimeout(timer);
+      var status = r === undefined ? 0 : responseParts(r).status;
+      post({ type: 'net', phase: 'end', id: id, status: status });
+      if (r === undefined && /^(GET|HEAD)$/.test(req.method)) {
+        problem('request', label + ' was blocked: no SPSite.onRequest handler answered it and its domain is not allowed.');
+      } else if (status >= 400 && status !== 504) {
+        problem('request', label + ' answered ' + status + ': ' + responseParts(r).body.slice(0, 200));
+      }
+      return r;
+    }, function (err) {
+      clearTimeout(timer);
+      post({ type: 'net', phase: 'end', id: id, status: 0 });
+      problem('request', label + ' failed: ' + String(err && err.message || err));
+      throw err;
     });
   }
   function responseParts(r) {

@@ -10,6 +10,7 @@
 
 import { buildConvertReference, SP_SCHEME_FORMAT, SP_SCHEME_VERSION, validateSpSchemePackage } from './spScheme';
 import { externalHostsIn, normalizeAllowedHosts, stripSitePreviewShim } from './spSite';
+import { smokeQuestions } from './spSiteSmoke';
 
 export const CONVERT_MAX_HTML_CHARS = 200000;
 export const CONVERT_FIX_ROUNDS = 2;
@@ -209,7 +210,7 @@ export function candidateHosts(html, result) {
  * errors. `request` posts to /api/agent/sp-scheme/convert.
  */
 export async function convertSurveyHtml(originalHtml, {
-  request, notes = '', dataFiles = [], mediaFiles: givenMedia = [], mediaBase = '', fetchMedia = null, onProgress,
+  request, notes = '', dataFiles = [], mediaFiles: givenMedia = [], mediaBase = '', fetchMedia = null, smokeTest = null, onProgress,
 } = {}) {
   let mediaFiles = givenMedia;
   let mediaRoundUsed = false;
@@ -261,6 +262,17 @@ export async function convertSurveyHtml(originalHtml, {
         ];
         continue; // eslint-disable-line no-continue
       }
+    }
+    if (!problems.length && smokeTest && !(fetchMedia && !mediaRoundUsed && !mediaFiles.length && result.originalImages?.length)) {
+      // The package is well formed; now load the page once, the way
+      // participants get it, and catch errors or requests it never answers.
+      onProgress?.({ round, stage: 'run', fixing: round > 0, feedback });
+      // eslint-disable-next-line no-await-in-loop
+      const run = await smokeTest(applied.html, {
+        questions: smokeQuestions(applied.pkg?.survey, applied.mediaPlan),
+        allowedHosts: hosts.map((h) => h.host),
+      });
+      (run?.problems || []).forEach((p) => problems.push(`When the page loads: ${p}`));
     }
     if (!problems.length) return { ...last, ok: true };
     previous = result;

@@ -20,11 +20,13 @@ export default function SpSitePreview({ config: baseConfig, spSite, viewport = '
   const questions = useMemo(() => buildSiteQuestions(config), [config, run]); // eslint-disable-line react-hooks/exhaustive-deps
   const [answers, setAnswers] = useState({});
   const [completed, setCompleted] = useState(false);
+  const [problems, setProblems] = useState([]);
   const width = VIEWPORT_WIDTH[viewport] || '100%';
 
   const restart = () => {
     setAnswers({});
     setCompleted(false);
+    setProblems([]);
     setRun((n) => n + 1);
   };
 
@@ -36,6 +38,19 @@ export default function SpSitePreview({ config: baseConfig, spSite, viewport = '
           '这份问卷使用 SP-Scheme 导入的大模型设计界面。参与者看到的就是这个页面；图片由平台抽取，答案按下方格式记录。预览不会提交数据。',
         )}
       </Alert>
+      {problems.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 1.5 }} data-testid="sp-site-problems">
+          <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            {L(
+              'The page reported problems. If it is stuck, convert it again or send these lines back to the model that built it.',
+              '页面报告了以下问题。如果页面卡住，请重新转换，或把这些内容发回给生成页面的模型修正。',
+            )}
+          </Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2.5, fontSize: 13, wordBreak: 'break-word' }}>
+            {problems.map((p) => <li key={p.message}>{p.message}</li>)}
+          </Box>
+        </Alert>
+      )}
       <Box sx={{ width, maxWidth: '100%', height, mx: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
         <SpSiteFrame
           key={run}
@@ -50,6 +65,7 @@ export default function SpSitePreview({ config: baseConfig, spSite, viewport = '
             return next;
           })}
           onComplete={() => setCompleted(true)}
+          onProblem={(p) => setProblems((prev) => (prev.some((x) => x.message === p.message) ? prev : [...prev, p].slice(-20)))}
           title={config.title || 'Survey preview'}
         />
       </Box>
