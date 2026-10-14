@@ -30,32 +30,28 @@ test('hosts the page loads from are needed; result endpoints are not', () => {
   expect(byHost['api.legacy-lab.org']).toBe(false);
 });
 
-test('retries with the validation errors until the page passes', async () => {
+test('the model gets one pass: what it gets wrong is not sent back for fixing', async () => {
   const broken = { ...LEGACY_SURVEY_CONVERSION, adapterScript: 'SPSite.onReady(function () {});' };
   const request = jest.fn()
     .mockResolvedValueOnce({ result: broken, model: 'm' })
     .mockResolvedValueOnce({ result: LEGACY_SURVEY_CONVERSION, model: 'm' });
   const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request });
-  expect(out.ok).toBe(true);
-  expect(out.rounds).toBe(2);
-  expect(request.mock.calls[1][0].feedback.join(' ')).toMatch(/SPSite\.answer/);
-  expect(request.mock.calls[1][0].previous).toBe(broken);
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(out.rounds).toBe(1);
   expect(request.mock.calls[0][0].reference).toContain('SPSite');
 });
 
-test('a page that fails when it loads goes back to the model', async () => {
+test('a page that fails when it loads is reported, not sent back to the model', async () => {
   const request = jest.fn(async () => ({ success: true, result: LEGACY_SURVEY_CONVERSION }));
-  const smokeTest = jest.fn()
-    .mockResolvedValueOnce({ ran: true, problems: ['GET /api/state was still waiting after 9 s'] })
-    .mockResolvedValueOnce({ ran: true, problems: [] });
+  const smokeTest = jest.fn().mockResolvedValueOnce({ ran: true, problems: ['GET /api/state was still waiting after 9 s'] });
   const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request, smokeTest });
   expect(out.ok).toBe(true);
-  expect(out.rounds).toBe(2);
-  expect(request.mock.calls[1][0].feedback).toEqual(['When the page loads: GET /api/state was still waiting after 9 s']);
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(out.startProblems).toEqual(['GET /api/state was still waiting after 9 s']);
   expect(smokeTest.mock.calls[0][1].questions.map((q) => q.name)).toContain('safety');
 });
 
-test('when no round passes, the page is offered as it is (raw records)', async () => {
+test('when the declared questions cannot be used, the page is offered as it is (raw records)', async () => {
   const broken = { ...LEGACY_SURVEY_CONVERSION, adapterScript: '' };
   const request = jest.fn(async () => ({ success: true, result: broken }));
   const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request });
@@ -66,6 +62,16 @@ test('when no round passes, the page is offered as it is (raw records)', async (
   expect(out.raw.report.summary.match).toBe('none');
   expect(out.raw.html).toContain('id="sp-scheme"');
   expect(out.raw.html).not.toContain('data-sp-adapter');
+});
+
+test('the raw page keeps an adapter that still runs, so the page\'s own server requests stay answered', async () => {
+  const bad = JSON.parse(JSON.stringify(LEGACY_SURVEY_CONVERSION));
+  bad.survey.pages[0].elements.push({ type: 'text', name: 'safety' }); // duplicate name: not a per-question problem
+  const request = jest.fn(async () => ({ success: true, result: bad }));
+  const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request });
+  expect(out.ok).toBe(false);
+  expect(out.raw.pkg.survey.pages).toEqual([]);
+  expect(out.raw.html).toContain('data-sp-adapter');
 });
 
 test('the media library mirrors the zip folders and the page may draw from all of them', () => {

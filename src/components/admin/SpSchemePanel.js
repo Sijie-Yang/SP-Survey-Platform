@@ -278,7 +278,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
       setConversion({
         ok: out.ok || useRaw,
         usedRaw: useRaw,
-        startProblems: useRaw ? out.raw.startProblems || [] : [],
+        startProblems: chosen.startProblems || [],
         rounds: out.rounds,
         problems: out.problems,
         degraded: out.degraded || [],
@@ -587,10 +587,10 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                 </Alert>
               ) : null}
               {conversion ? (
-                <Alert severity={conversion.usedRaw ? (conversion.startProblems?.length ? 'error' : 'warning') : (conversion.ok ? 'success' : 'warning')} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
+                <Alert severity={conversion.startProblems?.length || conversion.usedRaw || !conversion.ok ? 'warning' : 'success'} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
                   {conversion.usedRaw && L(
-                    `The model could not convert this page in ${conversion.rounds} rounds, so it is imported as it is: the platform records what the page sends and analyses nothing. You can convert again or send the problems below to another model.`,
-                    `模型在 ${conversion.rounds} 轮内没能转换好这个页面，已改为按原样导入：平台只原样记录页面发出的数据，不做任何分析。也可以再转换一次，或把下面的问题发给其他大模型。`,
+                    'The questions the model declared could not be used, so the page is imported as it is: the platform records what the page sends and analyses nothing. You can convert again or send the problems below to another model.',
+                    '模型声明的题目用不了，已改为按原样导入：平台只原样记录页面发出的数据，不做任何分析。也可以再转换一次，或把下面的问题发给其他大模型。',
                   )}
                   {!conversion.usedRaw && (conversion.ok
                     ? L('Converted by the model: the original design is kept, and its questions and submission now go through the platform. Try it in Preview after import.', '已由模型转换：保留原设计，题目和提交改由平台记录。导入后请在预览里试一遍。')
@@ -605,9 +605,9 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                       </Box>
                     </Box>
                   ) : null}
-                  {conversion.usedRaw && conversion.startProblems?.length ? (
+                  {conversion.startProblems?.length ? (
                     <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }} data-testid="sp-scheme-raw-start">
-                      {L('But the page does not start on its own (it needs its original server), so participants would be stuck:', '但这个页面自己启动不了（它需要原来的服务器），参与者会卡住：')}
+                      {L('When the page was opened for a test it reported problems; check it in Preview after import, and convert again if participants would get stuck:', '试开这个页面时它报告了问题；导入后请在预览里确认，如果参与者会卡住就再转换一次：')}
                       {' '}{conversion.startProblems.slice(0, 3).join(' ')}
                     </Typography>
                   ) : null}

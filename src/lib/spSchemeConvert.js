@@ -64,18 +64,20 @@ export function degradeRejectedQuestions(survey, errors = [], problems = []) {
  * request it sends and the researcher analyses the export. Used when the
  * model's conversion cannot be made to pass, and offered as a choice.
  */
-export function rawConversionResult(result = null) {
+export function rawConversionResult(result = null, { keepAdapter = false } = {}) {
   return {
-    survey: { pages: [] },
-    adapterScript: '',
-    replacements: [],
+    survey: { pages: [], ...(result?.survey?.mediaFolders ? { mediaFolders: result.survey.mediaFolders } : {}) },
+    adapterScript: keepAdapter ? String(result?.adapterScript || '') : '',
+    replacements: keepAdapter ? (result?.replacements || []) : [],
     externalHosts: result?.externalHosts || [],
     originalImages: result?.originalImages || [],
     mediaGroups: result?.mediaGroups || [],
     notes: ['Imported as it is: no questions declared, the platform records the requests the page sends and does not analyse them.'],
   };
 }
-export const CONVERT_FIX_ROUNDS = 2;
+// The model gets one pass. Questions it gets wrong are recorded as they are
+// (custom) rather than sent back for fixing; set this above 0 to allow fix rounds.
+export const CONVERT_FIX_ROUNDS = 0;
 
 const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=\s]{200,}/gi;
 const TOKEN_RE = /data:sp-token\/(\d+)/g;
@@ -301,6 +303,18 @@ export async function convertSurveyHtml(originalHtml, {
   let last = null;
   // One extra round when the page's stimuli are downloaded after the first answer.
   const lastRound = CONVERT_FIX_ROUNDS + (fetchMedia ? 1 : 0);
+  const startCheck = async (html, pkg, mediaPlan, hostList) => {
+    // Load the page once, the way participants get it, and report errors or
+    // requests it never answers. This is shown to the researcher, not fixed.
+    if (!smokeTest) return [];
+    onProgress?.({ round: lastRound, stage: 'run', fixing: false, feedback });
+    const run = await smokeTest(html, {
+      questions: smokeQuestions(pkg?.survey, mediaPlan),
+      media: smokeMedia(pkg?.survey, mediaPlan),
+      allowedHosts: hostList.map((h) => h.host),
+    });
+    return run?.problems || [];
+  };
   for (let round = 0; round <= lastRound; round += 1) {
     onProgress?.({ round, stage: 'model', fixing: round > 0, feedback });
     const response = await request({ html: tokenized.html, reference, notes, dataFiles, mediaFiles: mediaFiles.map((f) => f.path), previous, feedback });
@@ -339,19 +353,11 @@ export async function convertSurveyHtml(originalHtml, {
         continue; // eslint-disable-line no-continue
       }
     }
-    if (!problems.length && smokeTest && !(fetchMedia && !mediaRoundUsed && !mediaFiles.length && result.originalImages?.length)) {
-      // The package is well formed; now load the page once, the way
-      // participants get it, and catch errors or requests it never answers.
-      onProgress?.({ round, stage: 'run', fixing: round > 0, feedback });
+    if (!problems.length) {
       // eslint-disable-next-line no-await-in-loop
-      const run = await smokeTest(applied.html, {
-        questions: smokeQuestions(applied.pkg?.survey, applied.mediaPlan),
-        media: smokeMedia(applied.pkg?.survey, applied.mediaPlan),
-        allowedHosts: hosts.map((h) => h.host),
-      });
-      (run?.problems || []).forEach((p) => problems.push(`When the page loads: ${p}`));
+      const startProblems = await startCheck(applied.html, applied.pkg, applied.mediaPlan, hosts);
+      return { ...last, ok: true, startProblems };
     }
-    if (!problems.length) return { ...last, ok: true };
     previous = result;
     feedback = problems.slice(0, 30);
   }
@@ -364,34 +370,26 @@ export async function convertSurveyHtml(originalHtml, {
     const hosts = candidateHosts(applied.html, result);
     const report = validateSpSchemePackage(applied.pkg, { siteHtml: applied.html, allowedHosts: hosts.map((h) => h.host) });
     const problems = [...applied.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
-    if (!problems.length && smokeTest) {
-      onProgress?.({ round: lastRound, stage: 'run', fixing: false, feedback });
-      const run = await smokeTest(applied.html, {
-        questions: smokeQuestions(applied.pkg?.survey, applied.mediaPlan),
-        media: smokeMedia(applied.pkg?.survey, applied.mediaPlan),
-        allowedHosts: hosts.map((h) => h.host),
-      });
-      (run?.problems || []).forEach((p) => problems.push(`When the page loads: ${p}`));
-    }
     if (!problems.length) {
-      return { ...last, html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems: [], hosts, result, ok: true, degraded: rejected.degraded };
+      const startProblems = await startCheck(applied.html, applied.pkg, applied.mediaPlan, hosts);
+      return { ...last, html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems: [], hosts, result, ok: true, degraded: rejected.degraded, startProblems };
     }
   }
-  // Nothing the model produced runs: offer the page as it is (raw records).
-  const rawResult = rawConversionResult(last?.result);
-  const raw = applyConversion(tokenized.html, rawResult, tokenized.tokens, { mediaFiles, mediaBase });
-  const rawReport = validateSpSchemePackage(raw.pkg, { siteHtml: raw.html, allowedHosts: last.hosts.map((h) => h.host) });
-  const rawProblems = [...raw.problems, ...rawReport.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
-  let startProblems = [];
-  if (!rawProblems.length && smokeTest) {
-    // Does the page at least start without its adapter? If not, say so.
-    onProgress?.({ round: lastRound, stage: 'run', fixing: false, feedback });
-    const run = await smokeTest(raw.html, { media: smokeMedia(raw.pkg?.survey, raw.mediaPlan), allowedHosts: last.hosts.map((h) => h.host) });
-    startProblems = run?.problems || [];
+  // The questions the model declared cannot be used: offer the page as it is
+  // (raw records), keeping the model's adapter when it still passes the checks
+  // (it may be what answers the page's own server requests), else without it.
+  const hostList = last.hosts.map((h) => h.host);
+  let raw = null;
+  for (const rawResult of [rawConversionResult(last?.result, { keepAdapter: true }), rawConversionResult(last?.result)]) {
+    const candidate = applyConversion(tokenized.html, rawResult, tokenized.tokens, { mediaFiles, mediaBase });
+    const report = validateSpSchemePackage(candidate.pkg, { siteHtml: candidate.html, allowedHosts: hostList });
+    const problems = [...candidate.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
+    if (!problems.length) {
+      // eslint-disable-next-line no-await-in-loop
+      const startProblems = await startCheck(candidate.html, candidate.pkg, candidate.mediaPlan, last.hosts);
+      raw = { html: candidate.html, pkg: candidate.pkg, mediaPlan: candidate.mediaPlan, report, result: rawResult, startProblems };
+      break;
+    }
   }
-  return {
-    ...last,
-    ok: false,
-    raw: rawProblems.length ? null : { html: raw.html, pkg: raw.pkg, mediaPlan: raw.mediaPlan, report: rawReport, result: rawResult, startProblems },
-  };
+  return { ...last, ok: false, raw };
 }
