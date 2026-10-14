@@ -1728,8 +1728,8 @@ function CustomRecordAnalysis({ question, answers, allResponses, site = false })
   return <Box data-testid="custom-record-analysis">
       <Alert severity="warning" sx={{ mb: 1.5 }}>
         {site ? (zh
-          ? `这份问卷是上传的 SP-Scheme 页面，题目由模型识别，可能与页面实际含义不符，所以平台不分析也不统计。答案已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
-          : `This survey is an uploaded SP-Scheme page. Its questions were identified by a model and may not match what the page really asks, so the platform does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : zh
+          ? `这份问卷是在线转换导入的页面，题目由模型识别，可能与页面实际含义不符，所以平台不分析也不统计。答案已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
+          : `This survey is a page converted online. Its questions were identified by a model and may not match what the page really asks, so the platform does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : zh
           ? `这道题由页面按自己的格式记录（custom），平台不做任何分析，也不做统计。请导出 CSV 或 JSON 后自行处理。共 ${records.length} 条记录。`
           : `This question is recorded in the page's own format (custom). The platform does not analyse or summarise it; export the CSV or JSON and process it yourself. ${records.length} record(s).`}
       </Alert>
@@ -2364,8 +2364,9 @@ export function QuestionCard({
   const [exporting, setExporting] = useState(false);
   const exportLock = React.useRef(false);
   const type = question.type || 'text';
-  // An uploaded SP-Scheme page: its questions are a model's reading of the page, so nothing is analysed.
-  const siteSurvey = Boolean(surveyConfig?.spSite?.html);
+  // A page converted online: its questions are the model's reading of the page, so nothing is analysed.
+  // A page built to SP-Scheme declares its own questions and is analysed as usual.
+  const siteSurvey = Boolean(surveyConfig?.spSite?.convertedFrom);
   const trialUnitCount = answers.length;
   // Answer rate is per submission; charts/stats use per-trial units in `answers`.
   const {
@@ -2948,6 +2949,7 @@ export default function ResultsAnalysis({
   }), [currentProject?.id, dataSource, siliconRunId, revisionFilter, dateFrom, dateTo, timezone, sessionFilter, includePractice, excludeFlagged, demographicFilters]);
   // SP-Scheme pages: say how much of the data the platform can analyse.
   const siteMatch = useMemo(() => (surveyConfig?.spSite?.html ? siteMatchLevel(surveyConfig) : null), [surveyConfig]);
+  const siteConverted = Boolean(surveyConfig?.spSite?.convertedFrom);
   const siteCapturedCount = useMemo(() => (responses || []).reduce((n, row) => {
     const list = row?.responses?.[SP_SITE_REQUESTS_KEY];
     return n + (Array.isArray(list) ? list.length : Number(row?.survey_metadata?.sp_site?.captured_requests) || 0);
@@ -3064,7 +3066,7 @@ export default function ResultsAnalysis({
   const exportBlocked = exporting || loading || !filteredResponses.length;
   // Two choices only: the answers table, or everything in one ZIP. An uploaded
   // SP-Scheme page is not analysed, so it gets a single ZIP of its answers.
-  const exportItems = siteMatch ? [{
+  const exportItems = siteConverted ? [{
     id: 'site',
     label: t.resultsExportSiteAnswers,
     disabled: exportBlocked,
@@ -3113,7 +3115,7 @@ export default function ResultsAnalysis({
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
         </IconButton>
-      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={handleAnalyze} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={exportItems} exportHelp={siteMatch ? t.resultsExportSiteHelp : undefined} />
+      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={handleAnalyze} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={exportItems} exportHelp={siteConverted ? t.resultsExportSiteHelp : undefined} />
       <Paper variant="outlined" sx={{
         p: {
           xs: 1.5,
@@ -3218,12 +3220,24 @@ export default function ResultsAnalysis({
           Research sessions: {sessionStats.length} ({sessionStats.map(([sid, s]) => `${sid.slice(-6)}: ${s.count} rounds`).join(', ')})
         </Alert>}
 
-      {siteMatch && <Alert severity="warning" sx={{
+      {siteMatch && <Alert severity={!siteConverted && siteMatch.level === 'full' ? 'info' : 'warning'} sx={{
             mb: 2
           }} data-testid="results-site-match">
-          {isChineseLanguage(language)
-            ? `这份问卷是上传的 SP-Scheme 页面，题目由模型识别，未必准确，所以平台不做分析，题目都以灰色显示。答案已原样记录${siteMatch.level === 'none' ? `（页面发出的请求共 ${siteCapturedCount} 条，在导出的 __sp_requests 里）` : ''}，请导出 CSV 或 JSON 后自行分析。`
-            : `This survey is an uploaded SP-Scheme page. Its questions were identified by a model and may be inaccurate, so the platform analyses nothing and shows them greyed out. Answers are recorded as sent${siteMatch.level === 'none' ? ` (${siteCapturedCount} page requests, under __sp_requests in the export)` : ''}; export the CSV or JSON and analyse them yourself.`}
+          {siteConverted && (isChineseLanguage(language)
+            ? `这份问卷是在线转换导入的页面，题目由模型识别，未必准确，所以平台不做分析，题目都以灰色显示。答案已原样记录，请导出 CSV 或 JSON 后自行分析。`
+            : `This survey is a page converted online. Its questions were identified by a model and may be inaccurate, so the platform analyses nothing and shows them greyed out. Answers are recorded as sent; export the CSV or JSON and analyse them yourself.`)}
+          {!siteConverted && siteMatch.level === 'full' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面；全部 ${siteMatch.total} 道题都是平台题型，下面的分析适用。`
+            : `This survey is an SP-Scheme page; all ${siteMatch.total} questions use platform types, so the analysis below applies.`)}
+          {!siteConverted && siteMatch.level === 'partial' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面：${siteMatch.native} 道题可以分析；另外 ${siteMatch.custom} 道题按页面自己的格式原样记录（custom），平台不分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page: ${siteMatch.native} question(s) are analysed below; ${siteMatch.custom} are recorded in the page's own format (custom) and are not analysed. Export them and process them yourself.`)}
+          {!siteConverted && siteMatch.level === 'custom' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面，全部 ${siteMatch.total} 道题按页面自己的格式原样记录（custom）。平台不做任何分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page and all ${siteMatch.total} questions are recorded in the page's own format (custom). Nothing is analysed here; export the data and process it yourself.`)}
+          {!siteConverted && siteMatch.level === 'none' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面，没有声明任何题目。平台只原样记录页面发出的请求（共 ${siteCapturedCount} 条，在导出的 __sp_requests 里），不做任何分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page with no questions declared. The platform only records the requests the page sent (${siteCapturedCount} in total, under __sp_requests in the export) and analyses nothing; export the data and process it yourself.`)}
         </Alert>}
 
       {/* Overview metrics */}

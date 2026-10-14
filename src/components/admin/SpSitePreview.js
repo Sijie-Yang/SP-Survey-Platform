@@ -25,6 +25,7 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
   const [captured, setCaptured] = useState([]);
   const media = useMemo(() => siteMediaFolders(mediaPool, config), [mediaPool, config]);
   const match = useMemo(() => siteMatchLevel(config), [config]);
+  const converted = Boolean(config?.spSite?.convertedFrom);
   const width = VIEWPORT_WIDTH[viewport] || '100%';
 
   const restart = () => {
@@ -37,20 +38,24 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
 
   return (
     <Box data-testid="sp-site-preview">
-      <Alert severity={match.level === 'full' ? 'info' : 'warning'} sx={{ mb: 1.5 }} data-testid="sp-site-match">
-        {match.level === 'full' && L(
+      <Alert severity={!converted && match.level === 'full' ? 'info' : 'warning'} sx={{ mb: 1.5 }} data-testid="sp-site-match">
+        {converted && L(
+          'This page was converted online. Participants see exactly this page; every answer is recorded as sent and nothing is analysed, so export the results and analyse them yourself. Nothing is submitted from the preview.',
+          '这个页面由模型在线转换导入。参与者看到的就是这个页面；所有回答原样记录，平台不做分析，请导出结果后自行分析。预览不会提交数据。',
+        )}
+        {!converted && match.level === 'full' && L(
           `This page was imported with SP-Scheme. Participants see exactly this page; all ${match.total} questions use platform types and can be analysed on the Results page. Nothing is submitted from the preview.`,
           `这个页面由 SP-Scheme 导入。参与者看到的就是这个页面；全部 ${match.total} 道题都是平台题型，可在结果页分析。预览不会提交数据。`,
         )}
-        {match.level === 'partial' && L(
+        {!converted && match.level === 'partial' && L(
           `This page was imported with SP-Scheme. ${match.native} question(s) use platform types and can be analysed; ${match.custom} are recorded as the page sends them (type "custom") and must be analysed by you from the export.`,
           `这个页面由 SP-Scheme 导入。${match.native} 道题是平台题型，可以分析；另外 ${match.custom} 道题按页面自己的格式原样记录（custom），平台不分析，需要你导出后自行处理。`,
         )}
-        {match.level === 'custom' && L(
+        {!converted && match.level === 'custom' && L(
           `This page was imported with SP-Scheme. All ${match.total} questions are recorded as the page sends them (type "custom"): the platform stores and exports them but does not analyse them.`,
           `这个页面由 SP-Scheme 导入。全部 ${match.total} 道题按页面自己的格式原样记录（custom）：平台只保存和导出，不做分析，需要你自行处理。`,
         )}
-        {match.level === 'none' && L(
+        {!converted && match.level === 'none' && L(
           'This page declares no questions. The platform records every request the page sends, as it is, and exports it; nothing is analysed. Participants finish with the bar under the page, or when the page sends its own "finish" request.',
           '这个页面没有声明任何题目。平台会原样记录页面发出的每个请求并导出，不做任何分析。参与者通过页面下方的提交栏完成，或者页面自己发出“完成”请求时自动完成。',
         )}

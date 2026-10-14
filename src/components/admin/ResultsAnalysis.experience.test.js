@@ -154,11 +154,18 @@ test('an empty or cancelled analysis cannot replace a saved report', async () =>
   expect(readResultsReport('p').id).toBe(previous.id);
 });
 
-test('an uploaded SP-Scheme page shows its questions greyed out and unanalysed', () => {
+test('a page converted online shows its questions greyed out and unanalysed', () => {
+  render(<RegionProvider><QuestionCard question={q} answers={[1, 5]} totalResponses={2} questionNumber={1}
+    allResponses={responses} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} defaultExpanded /></RegionProvider>);
+  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/converted online/);
+  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+});
+
+test('a page built to SP-Scheme keeps the platform analysis', () => {
   render(<RegionProvider><QuestionCard question={q} answers={[1, 5]} totalResponses={2} questionNumber={1}
     allResponses={responses} surveyConfig={{ ...config, spSite: { html: '<html></html>' } }} defaultExpanded /></RegionProvider>);
-  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/uploaded SP-Scheme page/);
-  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+  expect(screen.queryByTestId('custom-record-analysis')).toBeNull();
+  expect(screen.queryByText('Analyse yourself')).toBeNull();
 });
 
 test('the export menu offers two clear choices', async () => {
@@ -169,9 +176,9 @@ test('the export menu offers two clear choices', async () => {
   expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Answers table (CSV)', 'Full analysis pack (ZIP)']);
 });
 
-test('an SP-Scheme page exports one ZIP of its answers', async () => {
+test('a page converted online exports one ZIP of its answers', async () => {
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
-  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={{ ...config, spSite: { html: '<html></html>' } }} adminMode /></RegionProvider>);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
   fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
   expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['All answers (ZIP)']);

@@ -106,7 +106,7 @@ function ConvertProgress({ state, L }) {
       done: modelDone,
       active: !modelDone,
     },
-    { key: 'check', label: L('Questions that fit a platform type use it; the rest are recorded as they are', '对得上平台题型的用平台，其余原样记录'), done: false, active: modelDone },
+    { key: 'check', label: L('Connect the data interface; every answer is recorded as sent', '接上数据接口，所有回答原样记录'), done: false, active: modelDone },
   ];
   return (
     <Box data-testid="sp-scheme-convert-progress">
@@ -556,7 +556,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                   </Typography>
                 ) : null}
               </Alert>
-              {summary?.hasSite && report.ok ? (
+              {summary?.hasSite && report.ok && !upload?.converted ? (
                 <Alert severity={summary.match === 'full' ? 'success' : 'warning'} data-testid="sp-scheme-match">
                   <Typography variant="subtitle2">
                     {summary.match === 'full' && L(`All ${summary.nativeCount} questions use platform types: results can be analysed on the Results page.`, `全部 ${summary.nativeCount} 道题都是平台题型：结果可以在结果页分析。`)}
@@ -581,17 +581,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                   {conversion.usedRaw && conversion.failure ? (
                     <Typography variant="caption" component="div" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>{conversion.failure}</Typography>
                   ) : null}
-                  {!conversion.usedRaw && L('Converted: the page is kept as it is, and the model connected its data to the platform. Try it in Preview after import.', '已转换：页面原样保留，模型把它的数据接到了平台。导入后请在预览里试一遍。')}
-                  {conversion.degraded?.length ? (
-                    <Box sx={{ mt: 0.5 }} data-testid="sp-scheme-degraded">
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        {L(`${conversion.degraded.length} question(s) do not fit a platform type and are recorded as the page sends them (custom); analyse those from the export:`, `${conversion.degraded.length} 道题对不上平台题型，按页面自己的格式原样记录（custom），这些题请导出后自行分析：`)}
-                      </Typography>
-                      <Box component="ul" sx={{ m: '2px 0 0', pl: 2.5 }}>
-                        {conversion.degraded.map((d) => <Typography component="li" variant="body2" key={d.name}>{d.name}: {d.reason}</Typography>)}
-                      </Box>
-                    </Box>
-                  ) : null}
+                  {!conversion.usedRaw && L('Converted: the page is kept as it is and every answer is recorded. The platform does not analyse a converted survey; export the results and analyse them yourself. Try it in Preview after import.', '已转换成功：页面原样保留，所有回答都会记录。转换导入的问卷平台不做分析，请导出结果后自行分析。导入后请在预览里试一遍。')}
                   {conversion.startProblems?.length ? (
                     <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }} data-testid="sp-scheme-raw-start">
                       {L('When the page was opened for a test it reported problems; check it in Preview after import, and convert again if participants would get stuck:', '试开这个页面时它报告了问题；导入后请在预览里确认，如果参与者会卡住就再转换一次：')}
