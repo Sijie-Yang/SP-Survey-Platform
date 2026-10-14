@@ -14,6 +14,25 @@ const MAX_PREVIOUS_CHARS = 200000;
 const MAX_DATA_CHARS = 150000;
 const MAX_MEDIA_FILES = 3000;
 
+/**
+ * The model's answer: a json block with the questions and a javascript block
+ * with the adapter. Code is kept out of JSON because small models often break
+ * its escaping. An answer that is one JSON object (adapterScript inside) still
+ * works.
+ */
+export function parseConvertAnswer(text) {
+  const raw = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  const blocks = [...raw.matchAll(/```([a-z]*)[^\n]*\n([\s\S]*?)(?:```|$)/gi)].map((m) => ({ lang: m[1].toLowerCase(), body: m[2] }));
+  const code = blocks.find((b) => /^(javascript|js)$/.test(b.lang));
+  const jsonBlock = blocks.find((b) => b.lang === 'json') || blocks.find((b) => !b.lang && /^\s*\{/.test(b.body));
+  let parsed = extractJson(jsonBlock ? jsonBlock.body : raw);
+  if (!parsed && code) parsed = extractJson(raw.slice(0, raw.indexOf(code.body)));
+  if (!parsed) return null;
+  if (code && code.body.trim()) parsed.adapterScript = code.body.trim();
+  if (parsed.survey && !Array.isArray(parsed.survey.pages)) parsed.survey.pages = [];
+  return parsed;
+}
+
 function extractJson(text) {
   if (!text) return null;
   const raw = String(text).trim();
@@ -41,12 +60,14 @@ export const CONVERT_SYSTEM_PROMPT = `You connect an existing survey web page to
 - The study's files (MEDIA FILES) are in the project's media library, in the upload's own folders (images/IMG0279.jpg -> folder "images"). Any same-site URL that ends in a known file name ("/image/IMG0279?x=1", "logo.png") is mapped to that file automatically.
 - Every request the page sends that nobody answers is recorded as it is, so no data is lost.
 
-Your only job is the data interface. Return JSON only, no prose:
-{
-  "survey": { "title": "...", "mediaFolders": ["images"], "pages": [ { "name": "page1", "elements": [ ... ] } ] },
-  "adapterScript": "JavaScript",
-  "notes": [ "short sentence for the researcher" ]
-}
+Your only job is the data interface. Reply with exactly two fenced blocks and nothing else. First the questions as JSON (no code inside it):
+\`\`\`json
+{ "survey": { "title": "...", "mediaFolders": ["<folder>"], "pages": [ { "name": "page1", "elements": [ ... ] } ] }, "notes": [ "short sentence for the researcher" ] }
+\`\`\`
+Then the adapterScript as plain JavaScript (not inside JSON, no escaping):
+\`\`\`javascript
+// adapterScript
+\`\`\`
 
 survey: one element per answer the page records (unique snake_case name, title = the page's wording). Use a type from the REFERENCE when the value fits its answer shape exactly; otherwise "type": "custom" (any JSON, stored as is, not analysed). Rating one image on a few labelled options is "imagerating" with "imageCount": 1, "rateMin"/"rateMax" covering the values and "rateLabels". Do not set mediaFolders, imageCount draws or trialCount on questions: the page keeps its own image logic. survey.mediaFolders lists the MEDIA FILES folders the page shows images from.
 
@@ -59,7 +80,7 @@ adapterScript stands in for the page's own server (see its server code and DATA 
 - A page with no server that posts its results elsewhere: SPSite.onSubmit(function (item) { item.url, item.method, item.data }) maps the payload to SPSite.answer, then SPSite.complete().
 - Plain ES2017, no imports, no DOM changes, under 200 lines. Never include secrets.
 
-If the page needs no server and records nothing you can map, return an empty pages list and an empty adapterScript: the platform then records what the page sends.`;
+If the page needs no server and records nothing you can map, return an empty pages list and an empty javascript block: the platform then records what the page sends.`;
 
 function clip(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
@@ -190,15 +211,16 @@ export async function handleSpSchemeConvert(env, userId, body, deps = {}) {
     compat: modelRecord?.compat,
     extra: checked.route.headers,
     temperature: 0.1,
-    maxTokens: Math.min(Number(modelRecord?.maxTokens) || 8192, 8192),
+    maxTokens: Math.min(Number(modelRecord?.maxTokens) || 8192, 16384),
     messages: [
       { role: 'system', content: CONVERT_SYSTEM_PROMPT },
       { role: 'user', content: parts.join('\n\n') },
     ],
   });
-  const converted = normalizeConvertResult(extractJson(result?.content));
+  const converted = normalizeConvertResult(parseConvertAnswer(result?.content));
   if (!converted) {
-    throw Object.assign(new Error('The model did not return a usable conversion. Try again, or convert the page with SP-Scheme in another model.'), {
+    const head = String(result?.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    throw Object.assign(new Error(`The model did not return a usable conversion${head ? ` (it began: "${head}")` : ' (its answer was empty)'}.`), {
       status: 502,
       code: 'CONVERT_UNPARSEABLE',
     });

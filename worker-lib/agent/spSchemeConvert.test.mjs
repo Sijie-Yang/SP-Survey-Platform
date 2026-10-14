@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
-import { handleSpSchemeConvert, normalizeConvertResult } from './spSchemeConvert.mjs';
+import { parseConvertAnswer, handleSpSchemeConvert, normalizeConvertResult } from './spSchemeConvert.mjs';
 
 const settings = async () => ({ assistant_provider: 'deepseek', assistant_model: 'deepseek-v4-pro' });
 
@@ -60,5 +60,17 @@ describe('SP-Scheme page conversion', () => {
     assert.match(user, /REFERENCE \(SP-Scheme\)\nREF/);
     assert.match(user, /<form id="f"><\/form>/);
     assert.match(user, /FEEDBACK\n- age is missing/);
+  });
+
+  it('reads questions as JSON and the adapter as a separate code block, even with broken-looking code', () => {
+    const answer = '<think>plan</think>Here you go:\n```json\n{"survey":{"pages":[{"elements":[{"type":"custom","name":"a"}]}]},"notes":[]}\n```\n```javascript\nvar s = "say \\"hi\\"\n";\nSPSite.onRequest(function (r) { return { json: { ok: true } }; });\n```';
+    const parsed = parseConvertAnswer(answer);
+    assert.equal(parsed.survey.pages[0].elements[0].name, 'a');
+    assert.match(parsed.adapterScript, /SPSite\.onRequest/);
+    assert.match(parsed.adapterScript, /say/);
+    const legacy = parseConvertAnswer('{"survey":{"pages":[]},"adapterScript":"x()"}');
+    assert.equal(legacy.adapterScript, 'x()');
+    const truncated = parseConvertAnswer('```json\n{"survey":{"pages":[]}}\n```\n```javascript\nSPSite.onRequest(function () {});');
+    assert.match(truncated.adapterScript, /onRequest/);
   });
 });
