@@ -88,3 +88,6 @@ export const useAuth = () => {
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 };
+
+/** Auth state when available; null outside an AuthProvider (embedded views, tests). */
+export const useOptionalAuth = () => useContext(AuthContext);

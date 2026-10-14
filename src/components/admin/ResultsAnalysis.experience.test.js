@@ -153,3 +153,57 @@ test('an empty or cancelled analysis cannot replace a saved report', async () =>
   act(() => { save({ status: 'cancelled', narrative: 'Partial output' }); save({ narrative: '' }); });
   expect(readResultsReport('p').id).toBe(previous.id);
 });
+
+test('a page converted online shows its questions greyed out and unanalysed', () => {
+  render(<RegionProvider><QuestionCard question={q} answers={[1, 5]} totalResponses={2} questionNumber={1}
+    allResponses={responses} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} defaultExpanded /></RegionProvider>);
+  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/converted online/);
+  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+});
+
+test('a page built to SP-Scheme keeps the platform analysis', () => {
+  render(<RegionProvider><QuestionCard question={q} answers={[1, 5]} totalResponses={2} questionNumber={1}
+    allResponses={responses} surveyConfig={{ ...config, spSite: { html: '<html></html>' } }} defaultExpanded /></RegionProvider>);
+  expect(screen.queryByTestId('custom-record-analysis')).toBeNull();
+  expect(screen.queryByText('Analyse yourself')).toBeNull();
+});
+
+test('the export menu offers two clear choices', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
+  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Answers table (CSV)', 'Full analysis pack (ZIP)']);
+});
+
+test('a page converted online exports one ZIP of its answers', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
+  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['All answers (ZIP)']);
+});
+
+test('a custom question on a page built to SP-Scheme is greyed and marked analyse yourself', () => {
+  const custom = { name: 'c', type: 'custom', title: 'Custom' };
+  render(<RegionProvider><QuestionCard question={custom} answers={[{ a: 1 }]} totalResponses={1} questionNumber={1}
+    allResponses={[{ id: 'one', participant_id: 'p1', responses: { c: { a: 1 } } }]} surveyConfig={{ pages: [{ name: 'p', elements: [custom] }], spSite: { html: '<html></html>' } }} defaultExpanded /></RegionProvider>);
+  expect(screen.getByTestId('custom-record-analysis')).toBeTruthy();
+  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+});
+
+test('an advanced custom task is greyed and marked analyse yourself, a built-in interactive question is named', () => {
+  const task = { name: 'k', type: 'skillquestion', skillId: 'skill_abc', title: 'My task' };
+  const rows = [{ id: 'one', participant_id: 'p1', responses: { k: { answer: { v: 1 } } } }];
+  const { unmount } = render(<RegionProvider><QuestionCard question={task} answers={[{ answer: { v: 1 } }]} totalResponses={1} questionNumber={1}
+    allResponses={rows} surveyConfig={{ pages: [{ name: 'p', elements: [task] }] }} defaultExpanded /></RegionProvider>);
+  expect(screen.getByText('Advanced custom task')).toBeTruthy();
+  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/advanced custom task/);
+  unmount();
+  const preset = { ...task, skillId: 'preset_image_preference_forced' };
+  render(<RegionProvider><QuestionCard question={preset} answers={[]} totalResponses={1} questionNumber={1}
+    allResponses={rows} surveyConfig={{ pages: [{ name: 'p', elements: [preset] }] }} /></RegionProvider>);
+  expect(screen.getByText(/^Interactive · /)).toBeTruthy();
+  expect(screen.queryByText('Analyse yourself')).toBeNull();
+});

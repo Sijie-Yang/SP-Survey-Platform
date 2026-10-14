@@ -29,6 +29,7 @@ import SurveyProgressBridge, { isProgressEnabled } from '../SurveyProgressBridge
 import { adaptSurveyForPreviewLibrary, resolvePreviewMediaContext, surveyUsesSampledMedia } from '../../lib/previewMediaLibrary';
 import { markGuideProgress } from '../../lib/adminGuide';
 import { applyRuntimeVariables, normalizeConditions } from '../../lib/surveyRuntimeContext';
+import SpSitePreview from './SpSitePreview';
 
 export function previewSourceKey(config, currentProject) {
   const images = currentProject?.preloadedImages || [];
@@ -192,6 +193,7 @@ export default function SurveyPreview({
   const [loading, setLoading] = useState(true);
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
   const [mediaErrors, setMediaErrors] = useState([]);
+  const [siteMediaPool, setSiteMediaPool] = useState([]);
   const sourceKey = useMemo(
     () => previewSourceKey(config, currentProject),
     [config, currentProject],
@@ -223,10 +225,11 @@ export default function SurveyPreview({
         
         let configCopy = JSON.parse(JSON.stringify(config));
         await resolveSkillQuestions(configCopy);
-        const mediaContext = surveyUsesSampledMedia(configCopy)
+        const mediaContext = surveyUsesSampledMedia(configCopy) || configCopy.spSite?.html
           ? await resolvePreviewMediaContext(currentProject || {})
           : { images: [], fromPreviewLibrary: false };
         const mediaPool = mediaContext.images;
+        if (!cancelled) setSiteMediaPool(mediaPool);
         const fromPreviewLibrary = mediaContext.fromPreviewLibrary;
         if (fromPreviewLibrary) configCopy = adaptSurveyForPreviewLibrary(configCopy, mediaPool);
         if (cancelled) return;
@@ -708,6 +711,17 @@ export default function SurveyPreview({
       <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
         <CircularProgress />
       </Box>
+    );
+  }
+
+  if (config.spSite?.html && processedConfig) {
+    return (
+      <SpSitePreview
+        config={processedConfig}
+        spSite={config.spSite}
+        mediaPool={siteMediaPool}
+        viewport={interactive ? viewport : 'desktop'}
+      />
     );
   }
 

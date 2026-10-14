@@ -71,6 +71,9 @@ function subKeysFor(q) {
 /**
  * Build UTF-8 BOM CSV string (one row per response).
  */
+/** Response key where an SP-Scheme page's unmapped requests are kept (see SpSiteSurvey). */
+export const SP_RAW_REQUESTS_KEY = '__sp_requests';
+
 export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
   if (!responses?.length) {
     return objectsToCsv([
@@ -122,6 +125,8 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
 
   const hasCondition = responses.some((row) => row.survey_metadata?.condition != null);
   const urlParamNames = [...new Set(responses.flatMap((row) => Object.keys(row.survey_metadata?.url_params || {})))].sort();
+  // Requests an SP-Scheme page sent that no question mapped: kept raw, as JSON.
+  const hasRawRequests = responses.some((row) => Array.isArray(row.responses?.[SP_RAW_REQUESTS_KEY]) && row.responses[SP_RAW_REQUESTS_KEY].length);
   const headers = [
     'participant_id',
     'created_at',
@@ -134,6 +139,7 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     ...(hasCondition ? ['condition'] : []),
     ...urlParamNames.map((n) => `url_${n}`),
     ...headerCols,
+    ...(hasRawRequests ? [SP_RAW_REQUESTS_KEY] : []),
   ];
 
   const objects = responses.map((row) => {
@@ -152,6 +158,10 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     };
     if (hasCondition) obj.condition = row.survey_metadata?.condition ?? '';
     urlParamNames.forEach((n) => { obj[`url_${n}`] = row.survey_metadata?.url_params?.[n] ?? ''; });
+    if (hasRawRequests) {
+      const raw = row.responses?.[SP_RAW_REQUESTS_KEY];
+      obj[SP_RAW_REQUESTS_KEY] = Array.isArray(raw) && raw.length ? JSON.stringify(raw) : '';
+    }
 
     for (const q of questions) {
       const qName = q.name;

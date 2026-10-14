@@ -94,6 +94,38 @@ export async function translateSurveyText(body) {
   });
 }
 
+/** Ask the Assistant model to adapt an existing survey page to SP-Scheme. */
+export async function convertSurveyPage(body) {
+  return agentFetch('/api/agent/sp-scheme/convert', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Fetch a published survey page on the server (no CORS), with its same-site scripts inlined. */
+export async function fetchSurveyPage(url) {
+  return agentFetch('/api/agent/sp-scheme/fetch-page', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+}
+
+/** Download one media file from an imported page's own site, as a Blob. */
+export async function fetchSurveyPageMedia(url, pageUrl) {
+  const token = await getAccessToken();
+  const res = await fetch(`${API_BASE}/api/agent/sp-scheme/fetch-media`, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ url, pageUrl }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || res.statusText);
+  }
+  return res.blob();
+}
+
 export async function storeOpenAiCredential(apiKey) {
   return agentFetch('/api/agent/credentials/openai', {
     method: 'POST',

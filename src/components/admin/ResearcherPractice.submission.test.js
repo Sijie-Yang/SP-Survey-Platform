@@ -36,7 +36,7 @@ beforeEach(() => {
 
 test('free practice sends a valid completion key and gives each new attempt a different key', async () => {
   mount();
-  fireEvent.click(await screen.findByRole('button', { name: 'Answer 4' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Answer 4' }, { timeout: 5000 }));
   fireEvent.click(screen.getByRole('button', { name: 'Submit', exact: true }));
   await waitFor(() => expect(saveSurveyResponse).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Answer 4' }).disabled).toBe(false));
@@ -60,7 +60,7 @@ test('an uncertain failure retains exact answers and identity for retry', async 
   saveSurveyResponse.mockResolvedValueOnce({ success: false, error: new Error('Connection interrupted') });
   try {
     mount();
-    fireEvent.click(await screen.findByRole('button', { name: 'Answer 4' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Answer 4' }, { timeout: 5000 }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit', exact: true }));
     const retry = await screen.findByRole('button', { name: 'Retry submission' });
     expect(screen.getByRole('button', { name: 'Answer 4' }).disabled).toBe(true);

@@ -22,6 +22,8 @@ import {
 } from './credentials.mjs';
 import { handleAgentChat } from './chatHandler.mjs';
 import { handleSurveyTranslate } from './translate.mjs';
+import { handleSpSchemeConvert } from './spSchemeConvert.mjs';
+import { handleSpSchemeFetchMedia, handleSpSchemeFetchPage } from './spSchemeFetchPage.mjs';
 import { useAgentRuntime } from './runtime/flags.mjs';
 import { startDesignerRun } from './runtime/designerChat.mjs';
 import {
@@ -569,6 +571,23 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
         return errorResponse(Object.assign(new Error('Do not send apiKey in body. Store it via /api/agent/credentials/openai'), { status: 400 }));
       }
       return jsonResponse(await handleSurveyTranslate(env, auth.userId, body));
+    }
+
+    if (pathname === '/api/agent/sp-scheme/convert' && request.method === 'POST') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Conversion requires a browser session'), { status: 403 }));
+      }
+      const body = await request.json();
+      return jsonResponse(await handleSpSchemeConvert(env, auth.userId, body));
+    }
+
+    if ((pathname === '/api/agent/sp-scheme/fetch-page' || pathname === '/api/agent/sp-scheme/fetch-media') && request.method === 'POST') {
+      if (auth.kind !== 'supabase') {
+        return errorResponse(Object.assign(new Error('Page import requires a browser session'), { status: 403 }));
+      }
+      const body = await request.json();
+      if (pathname.endsWith('/fetch-media')) return await handleSpSchemeFetchMedia(body);
+      return jsonResponse(await handleSpSchemeFetchPage(body));
     }
 
     if (pathname === '/api/agent/sessions' && request.method === 'GET') {

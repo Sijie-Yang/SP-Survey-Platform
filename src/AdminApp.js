@@ -1934,6 +1934,7 @@ export default function AdminApp() {
                   config={surveyConfig} 
                   onChange={handleSurveyConfigChange}
                   currentProject={currentProject}
+                  onProjectUpdate={handleProjectUpdate}
                   onNextStep={handleNextStep}
                   hideAssistant
                   onEditorSelectionChange={commitEditorSelection}

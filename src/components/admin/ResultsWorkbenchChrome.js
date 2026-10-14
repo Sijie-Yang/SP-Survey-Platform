@@ -133,6 +133,7 @@ export function ResultsToolbar({
   analyzeDisabled,
   analyzeBusy,
   exportItems,
+  exportHelp,
   refreshAction,
 }) {
   const [anchor, setAnchor] = React.useState(null);
@@ -154,7 +155,7 @@ export function ResultsToolbar({
       </AdminActionBar>
       <Menu id="results-export-menu" anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)} MenuListProps={{ 'aria-labelledby': 'results-export-button' }}>
         <Box component="li" role="presentation" sx={{ px: 2, py: 1, maxWidth: 300 }}>
-          <Typography variant="caption" color="text.secondary">{t.resultsExportHelp}</Typography>
+          <Typography variant="caption" color="text.secondary">{exportHelp || t.resultsExportHelp}</Typography>
         </Box>
         {exportItems.map((item) => (
           <MenuItem key={item.id} disabled={item.disabled} onClick={() => { setAnchor(null); item.onClick(); }}>

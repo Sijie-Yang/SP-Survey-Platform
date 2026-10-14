@@ -18,12 +18,13 @@ import { ImageResolverContext } from './imageResolverContext';
 import { summarizeQuality, QUALITY_FLAG_LABELS, attentionCheckQuestionStats } from '../../lib/quality';
 import { computeQuestionIrr } from '../../lib/reliability';
 import { expandQuestionAnswerUnits, normalizeBooleanAnswer } from '../../lib/responseAnswerUnits';
+import { siteMatchLevel } from '../../lib/spSite';
+import { SP_SITE_REQUESTS_KEY } from '../SpSiteSurvey';
 import { supportsTrialCount } from '../../lib/questionTypeConstraints';
 import { computeTrueSkillFromMatches, matchesFromOrderedRanking, attachMatchCategory, splitsTrueSkillByCategory, trueSkillBoards } from '../../lib/trueskill';
 import { average, pct, wilsonCI } from '../../lib/stats';
 import { computeBordaScores, kendallW, interpretKendallW } from '../../lib/rankingStats';
 import { wordFrequency, textLengthStats } from '../../lib/textStats';
-import { generateMethodsText, downloadTextFile } from '../../lib/methodsExport';
 import { createAnalysisScope, defaultAnalysisTimezone } from '../../lib/analysisScope';
 import { rowMatchesDemographicFilters, listStudyAreas, resolveEvaluativeMapPair } from '../../lib/mapAnnotation';
 import DemographicFilterBar from './DemographicFilterBar';
@@ -33,7 +34,7 @@ import { createResultsReport, deleteResultsReport, readResultsReport, reportStal
 import { ResultsFilterForm, ResultsFilterShell, ResultsReportCard, ResultsScopeChips, ResultsToolbar, ResultsViewTabs } from './ResultsWorkbenchChrome';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { buildResponsesWideCsv, downloadResponsesWideCsv } from '../../lib/responsesWideExport';
-import { downloadQuestionExportZip, downloadResultsExportZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
+import { downloadQuestionExportZip, downloadResultsExportZip, downloadSiteResultsZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
 import { DensityHistogramChart, DescriptiveStatsLine, SemanticProfileChart, WordFrequencyChart } from './analysisCharts';
 import { getPresetSkillAnalysis } from './skillAnalysis';
 import { TrueSkillMuChart, TrueSkillTable, TrueSkillBoardStack, TRUESKILL_SORT_COLUMNS, RANKING_EXTRA_COLUMNS } from './trueSkillAnalysisUi';
@@ -1713,6 +1714,34 @@ function renderNativeQuestionAnalysisBody(question, answers, allResponses, surve
   return null;
 }
 
+/**
+ * A question an SP-Scheme page records in its own format: the platform keeps
+ * the values and exports them, and says plainly that it does not analyse them.
+ */
+function CustomRecordAnalysis({ question, answers, allResponses, site = false, task = false }) {
+  const { language } = useRegion();
+  const zh = isChineseLanguage(language);
+  const records = (answers || []).filter((a) => a !== undefined && a !== null);
+  const sample = records.slice(0, 5).map((a) => {
+    try { return JSON.stringify(a); } catch { return String(a); }
+  });
+  return <Box data-testid="custom-record-analysis">
+      <Alert severity="warning" sx={{ mb: 1.5 }}>
+        {task ? (zh
+          ? `这是高级自定义任务：交互由你自己的 HTML 定义，平台不知道它的含义，所以不做分析也不做统计。回答已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
+          : `This is an advanced custom task: its interaction is your own HTML, so the platform does not know what the answers mean and does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : site ? (zh
+          ? `这份问卷是在线转换导入的页面，题目由模型识别，可能与页面实际含义不符，所以平台不分析也不统计。答案已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
+          : `This survey is a page converted online. Its questions were identified by a model and may not match what the page really asks, so the platform does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : zh
+          ? `这道题由页面按自己的格式记录（custom），平台不做任何分析，也不做统计。请导出 CSV 或 JSON 后自行处理。共 ${records.length} 条记录。`
+          : `This question is recorded in the page's own format (custom). The platform does not analyse or summarise it; export the CSV or JSON and process it yourself. ${records.length} record(s).`}
+      </Alert>
+      {sample.length > 0 && <Box component="pre" sx={{ m: 0, p: 1, bgcolor: 'grey.50', border: '1px solid', borderColor: 'divider', borderRadius: 1, fontSize: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {sample.join('\n')}
+          {records.length > sample.length ? `\n… ${records.length - sample.length} more` : ''}
+        </Box>}
+    </Box>;
+}
+
 /** Render an adapted Skill field through the same chart components as its native question type. */
 function NativeSkillFieldAnalysis({
   sourceQuestion,
@@ -2329,13 +2358,25 @@ export function QuestionCard({
   defaultExpanded = false
 }) {
   const {
-    t
+    t,
+    language
   } = useRegion();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [exportError, setExportError] = useState('');
   const [exporting, setExporting] = useState(false);
   const exportLock = React.useRef(false);
   const type = question.type || 'text';
+  // A page converted online: its questions are the model's reading of the page, so nothing is analysed.
+  // A page built to SP-Scheme declares its own questions and is analysed as usual.
+  const siteSurvey = Boolean(surveyConfig?.spSite?.convertedFrom);
+  // An advanced custom task (a skill question that is not a built-in preset) is the researcher's own HTML.
+  const customTask = type === 'skillquestion' && !String(question.skillId || '').startsWith('preset_');
+  const presetSkill = type === 'skillquestion' && !customTask ? getPresetSkill(question.skillId) : null;
+  // A custom question or task is recorded as sent and analysed by the researcher.
+  const unanalysed = siteSurvey || type === 'custom' || customTask;
+  const zh = isChineseLanguage(language);
+  const typeLabel = customTask ? (zh ? '高级自定义任务' : 'Advanced custom task')
+    : presetSkill ? `${zh ? '交互题' : 'Interactive'} · ${presetSkill.builderLabel || presetSkill.name}` : type;
   const trialUnitCount = answers.length;
   // Answer rate is per submission; charts/stats use per-trial units in `answers`.
   const {
@@ -2349,12 +2390,18 @@ export function QuestionCard({
     };
   }, [allResponses, question.name]);
   const renderAnalysis = () => {
+    if (customTask) {
+      return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} task />;
+    }
     if (type === 'skillquestion') {
       return <SkillQuestionAnalysis question={question} answers={answers} allResponses={allResponses} surveyConfig={surveyConfig} />;
     }
     if (type === 'mapannotation') {
       const questions = (surveyConfig?.pages || []).flatMap(page => page.elements || []);
       return <GeographicEvaluativePanel question={question} responses={allResponses || []} surveyConfig={surveyConfig} questions={questions} />;
+    }
+    if (type === 'custom' || (siteSurvey && !isDisplayOnlyQuestion(question))) {
+      return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} site={siteSurvey} />;
     }
     const nativeBody = renderNativeQuestionAnalysisBody(question, answers, allResponses, surveyConfig);
     if (nativeBody) return nativeBody;
@@ -2371,8 +2418,9 @@ export function QuestionCard({
   const responseRate = pct(responseCount, totalResponses);
   const displayOnly = isDisplayOnlyQuestion(question);
   const canExport = !displayOnly && responseCount > 0;
-  return <Card variant="outlined" sx={{
-    mb: 2
+  return <Card variant="outlined" data-site-unanalysed={unanalysed || undefined} sx={{
+    mb: 2,
+    ...(unanalysed ? { bgcolor: 'grey.50', color: 'text.secondary' } : null)
   }}>
       <Box sx={{
       display: 'flex',
@@ -2387,8 +2435,8 @@ export function QuestionCard({
         width: 32,
         height: 32,
         borderRadius: '50%',
-        bgcolor: displayOnly ? 'grey.300' : 'primary.main',
-        color: displayOnly ? 'text.secondary' : 'white',
+        bgcolor: displayOnly || unanalysed ? 'grey.300' : 'primary.main',
+        color: displayOnly || unanalysed ? 'text.secondary' : 'white',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -2418,9 +2466,12 @@ export function QuestionCard({
           alignItems: 'center',
           gap: 1
         }}>
-            <Chip icon={typeIcon(type)} label={type} size="small" variant="outlined" sx={{
+            <Chip icon={typeIcon(type)} label={typeLabel} size="small" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />
+            {unanalysed && !displayOnly && <Chip label={isChineseLanguage(language) ? '自行分析' : 'Analyse yourself'} size="small" variant="outlined" sx={{
+            fontSize: '0.7rem'
+          }} />}
             {question.isAttentionCheck && <Chip label="Attention check" size="small" color="warning" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />}
@@ -2438,7 +2489,7 @@ export function QuestionCard({
           </Box>
         </Box>
 
-        {onExplain && <Button size="small" variant="outlined" sx={{
+        {onExplain && !unanalysed && <Button size="small" variant="outlined" sx={{
         mr: 1,
         flexShrink: 0
       }} onClick={e => {
@@ -2485,13 +2536,13 @@ export function QuestionCard({
       <Collapse in={expanded} mountOnEnter unmountOnExit>
         <Divider />
         <CardContent>
-          {answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
+          {!unanalysed && answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
           mb: 2
         }}>{t.resultsGroupExplanation}</Alert>}
-          <AttentionCheckPassRate question={question} allResponses={allResponses} />
+          {!unanalysed && <AttentionCheckPassRate question={question} allResponses={allResponses} />}
           {responseCount === 0 && !isDisplayOnlyQuestion(question) ? <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography> : <>
               {renderAnalysis()}
-              {responseCount > 0 && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
+              {responseCount > 0 && !unanalysed && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
             </>}
         </CardContent>
       </Collapse>
@@ -2909,6 +2960,13 @@ export default function ResultsAnalysis({
     excludeFlagged,
     demographicFilters
   }), [currentProject?.id, dataSource, siliconRunId, revisionFilter, dateFrom, dateTo, timezone, sessionFilter, includePractice, excludeFlagged, demographicFilters]);
+  // SP-Scheme pages: say how much of the data the platform can analyse.
+  const siteMatch = useMemo(() => (surveyConfig?.spSite?.html ? siteMatchLevel(surveyConfig) : null), [surveyConfig]);
+  const siteConverted = Boolean(surveyConfig?.spSite?.convertedFrom);
+  const siteCapturedCount = useMemo(() => (responses || []).reduce((n, row) => {
+    const list = row?.responses?.[SP_SITE_REQUESTS_KEY];
+    return n + (Array.isArray(list) ? list.length : Number(row?.survey_metadata?.sp_site?.captured_requests) || 0);
+  }, 0), [responses]);
   const workbenchOverview = useMemo(() => computeResultsOverview({
     scope: analysisScope,
     rows: filteredResponses,
@@ -3018,6 +3076,50 @@ export default function ResultsAnalysis({
     };
   }, [heavyQuestionPrep, allQuestions, filteredResponses, answerableNumberByName, surveyConfig]);
   const readyQuestionCards = heavyQuestionPrep ? preparedCards : questionCardProps;
+  const exportBlocked = exporting || loading || !filteredResponses.length;
+  // Two choices only: the answers table, or everything in one ZIP. An uploaded
+  // SP-Scheme page is not analysed, so it gets a single ZIP of its answers.
+  const exportItems = siteConverted ? [{
+    id: 'site',
+    label: t.resultsExportSiteAnswers,
+    disabled: exportBlocked,
+    onClick: () => runExport(() => downloadSiteResultsZip({
+      project: currentProject,
+      filteredResponses,
+      wideCsv: buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)
+    }))
+  }] : [{
+    id: 'csv',
+    label: t.resultsExportTable,
+    disabled: exportBlocked,
+    onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))
+  }, {
+    id: 'bundle',
+    label: t.resultsExportBundle,
+    disabled: exportBlocked || !surveyConfig,
+    onClick: () => runExport(() => {
+      const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
+      downloadResultsExportZip({
+        project: currentProject,
+        surveyConfig,
+        questions: allQuestions,
+        filteredResponses,
+        dateFilteredResponses,
+        excludeFlagged,
+        wideCsv,
+        report: savedReport || null,
+        filters: {
+          date_from: dateFrom || null,
+          date_to: dateTo || null,
+          session_id: sessionFilter || null,
+          survey_revision: revisionFilter || null,
+          include_practice: includePractice,
+          exclude_flagged: excludeFlagged,
+          data_source: dataSource
+        }
+      });
+    })
+  }];
   return <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
       <AdminPageHeader icon={<Assessment />} title={t.resultsTitle} description={t.resultsDescription} />
@@ -3026,65 +3128,7 @@ export default function ResultsAnalysis({
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
         </IconButton>
-      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={handleAnalyze} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={[{
-        id: 'report',
-        label: t.resultsExportReport,
-        disabled: !savedReport,
-        onClick: () => downloadTextFile(JSON.stringify(savedReport, null, 2), `results_report_${currentProject?.id || 'survey'}.json`)
-      }, {
-        id: 'summary',
-        label: t.resultsExportSummary,
-        disabled: exporting || loading || !filteredResponses.length,
-        onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))
-      }, {
-        id: 'raw',
-        label: t.resultsExportRaw,
-        disabled: exporting || loading || !filteredResponses.length,
-        onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))
-      }, {
-        id: 'bundle',
-        label: t.resultsExportBundle,
-        disabled: exporting || loading || !filteredResponses.length || !surveyConfig,
-        onClick: () => runExport(() => {
-          const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
-          downloadResultsExportZip({
-            project: currentProject,
-            surveyConfig,
-            questions: allQuestions,
-            filteredResponses,
-            dateFilteredResponses,
-            excludeFlagged,
-            wideCsv,
-            filters: {
-              date_from: dateFrom || null,
-              date_to: dateTo || null,
-              session_id: sessionFilter || null,
-              survey_revision: revisionFilter || null,
-              include_practice: includePractice,
-              exclude_flagged: excludeFlagged,
-              data_source: dataSource
-            }
-          });
-        })
-      }, {
-        id: 'methods',
-        label: t.resultsExportMethods,
-        disabled: exporting || loading || !filteredResponses.length || !surveyConfig,
-        onClick: () => runExport(() => {
-          const {
-            methodsText,
-            bibtex
-          } = generateMethodsText({
-            project: currentProject,
-            surveyConfig,
-            responses: dateFilteredResponses,
-            templateMeta: currentProject?.templateMeta || null,
-            excludeFlagged
-          });
-          downloadTextFile(methodsText, `methods_${currentProject?.id || 'survey'}.txt`);
-          if (bibtex) downloadTextFile(bibtex, `references_${currentProject?.id || 'survey'}.bib`);
-        })
-      }]} />
+      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={handleAnalyze} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={exportItems} exportHelp={siteConverted ? t.resultsExportSiteHelp : undefined} />
       <Paper variant="outlined" sx={{
         p: {
           xs: 1.5,
@@ -3187,6 +3231,26 @@ export default function ResultsAnalysis({
             mb: 2
           }}>
           Research sessions: {sessionStats.length} ({sessionStats.map(([sid, s]) => `${sid.slice(-6)}: ${s.count} rounds`).join(', ')})
+        </Alert>}
+
+      {siteMatch && <Alert severity={!siteConverted && siteMatch.level === 'full' ? 'info' : 'warning'} sx={{
+            mb: 2
+          }} data-testid="results-site-match">
+          {siteConverted && (isChineseLanguage(language)
+            ? `这份问卷是在线转换导入的页面，题目由模型识别，未必准确，所以平台不做分析，题目都以灰色显示。答案已原样记录，请导出 CSV 或 JSON 后自行分析。`
+            : `This survey is a page converted online. Its questions were identified by a model and may be inaccurate, so the platform analyses nothing and shows them greyed out. Answers are recorded as sent; export the CSV or JSON and analyse them yourself.`)}
+          {!siteConverted && siteMatch.level === 'full' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面；全部 ${siteMatch.total} 道题都是平台题型，下面的分析适用。`
+            : `This survey is an SP-Scheme page; all ${siteMatch.total} questions use platform types, so the analysis below applies.`)}
+          {!siteConverted && siteMatch.level === 'partial' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面：${siteMatch.native} 道题可以分析；另外 ${siteMatch.custom} 道题按页面自己的格式原样记录（custom），平台不分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page: ${siteMatch.native} question(s) are analysed below; ${siteMatch.custom} are recorded in the page's own format (custom) and are not analysed. Export them and process them yourself.`)}
+          {!siteConverted && siteMatch.level === 'custom' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面，全部 ${siteMatch.total} 道题按页面自己的格式原样记录（custom）。平台不做任何分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page and all ${siteMatch.total} questions are recorded in the page's own format (custom). Nothing is analysed here; export the data and process it yourself.`)}
+          {!siteConverted && siteMatch.level === 'none' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面，没有声明任何题目。平台只原样记录页面发出的请求（共 ${siteCapturedCount} 条，在导出的 __sp_requests 里），不做任何分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page with no questions declared. The platform only records the requests the page sent (${siteCapturedCount} in total, under __sp_requests in the export) and analyses nothing; export the data and process it yourself.`)}
         </Alert>}
 
       {/* Overview metrics */}

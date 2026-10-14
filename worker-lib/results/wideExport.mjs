@@ -132,6 +132,9 @@ function qualityFlags(row, surveyConfig, allResponses) {
 /**
  * Build UTF-8 BOM CSV string (one row per response).
  */
+/** Response key where an SP-Scheme page's unmapped requests are kept. */
+const SP_RAW_REQUESTS_KEY = '__sp_requests';
+
 export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
   const identity = [
     'participant_id',
@@ -182,7 +185,9 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     }
   }
 
-  const headers = [...identity, ...headerCols];
+  // Requests an SP-Scheme page sent that no question mapped: kept raw, as JSON.
+  const hasRawRequests = responses.some((row) => Array.isArray(row.responses?.[SP_RAW_REQUESTS_KEY]) && row.responses[SP_RAW_REQUESTS_KEY].length);
+  const headers = [...identity, ...headerCols, ...(hasRawRequests ? [SP_RAW_REQUESTS_KEY] : [])];
   const objects = responses.map((row) => {
     const flags = surveyConfig ? qualityFlags(row, surveyConfig, responses) : [];
     const obj = {
@@ -194,6 +199,10 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
       practice_mode: row.survey_metadata?.practice_mode ? 'true' : 'false',
       quality_flags: flags.join('|'),
     };
+    if (hasRawRequests) {
+      const raw = row.responses?.[SP_RAW_REQUESTS_KEY];
+      obj[SP_RAW_REQUESTS_KEY] = Array.isArray(raw) && raw.length ? JSON.stringify(raw) : '';
+    }
 
     for (const q of questions) {
       if (!q?.name) continue;
