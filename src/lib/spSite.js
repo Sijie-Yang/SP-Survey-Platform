@@ -691,9 +691,12 @@ export const SP_SITE_SDK_SOURCE = `
     });
   }
   function responseParts(r) {
-    var isRaw = r && typeof r === 'object' && ('status' in r || 'json' in r || 'body' in r);
-    var status = isRaw && r.status ? r.status : 200;
-    var body = isRaw ? ('json' in r ? JSON.stringify(r.json) : (r.body == null ? '' : String(r.body))) : JSON.stringify(r);
+    // A response wrapper is { json } or { body } (with optional status/contentType),
+    // or a bare numeric status. Anything else is data, even if it has a 'status' field.
+    var isRaw = !!r && typeof r === 'object' && !Array.isArray(r) && ('json' in r || 'body' in r || (typeof r.status === 'number' && Object.keys(r).length === 1));
+    var status = isRaw && typeof r.status === 'number' && r.status >= 200 && r.status <= 599 ? r.status : 200;
+    var raw = isRaw && !('json' in r) ? r.body : undefined;
+    var body = isRaw ? ('json' in r ? JSON.stringify(r.json) : (raw == null ? '' : typeof raw === 'string' ? raw : JSON.stringify(raw))) : JSON.stringify(r);
     var type = isRaw && !('json' in r) && r.contentType ? r.contentType : 'application/json';
     return { status: status, body: body, type: type };
   }
@@ -713,7 +716,7 @@ export const SP_SITE_SDK_SOURCE = `
       if (hostAllowed(url)) return nativeFetch(input, init);
       var req = { kind: 'fetch', url: absolute(url), method: method, data: parseBody(init && init.body), headers: headersOf(init) };
       return answerRequest(req).then(function (r) {
-        if (r !== undefined) { var p = responseParts(r); return new Response(p.body, { status: p.status, headers: { 'Content-Type': p.type } }); }
+        if (r !== undefined) { var p = responseParts(r); return new Response(/^(204|205|304)$/.test(String(p.status)) ? null : p.body, { status: p.status, headers: { 'Content-Type': p.type } }); }
         if (/^(GET|HEAD)$/.test(method)) throw new TypeError('SP-Survey blocked a request to ' + url);
         dispatch(req);
         return new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } });
