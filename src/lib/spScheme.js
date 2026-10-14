@@ -781,6 +781,9 @@ export function validateSpSchemePackage(pkg, { siteHtml = null, allowedHosts = [
     } else if (hasSite && element.name && answerKindOf(element) === 'unsupported') {
       issue(errors, `${path}.type`, `${label}: type "${element.type}" cannot be answered from a page; pick a type from SP-Scheme section 3.`);
     }
+    if ((element.type === 'imagepicker' || element.type === 'mediapicker') && Number(element.imageCount ?? 2) < 2) {
+      issue(errors, `${path}.type`, `${label}: ${element.type} asks the participant to choose between images, but it shows only ${Number(element.imageCount) || 1}. To rate one image with answer options, use radiogroup (text options) or imagerating (a scale) with imageCount 1.`);
+    }
     if (questionHasTrait(element.type, 'stimulus') || element.type === 'skillquestion') {
       const manual = element.imageSelectionMode === 'huggingface_manual';
       const urlFields = ['choices', 'imageLinks', 'selectedImageUrls', 'annotationImageUrl']

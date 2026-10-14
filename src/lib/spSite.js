@@ -641,6 +641,70 @@ export const SP_SITE_SDK_SOURCE = `
     dispatch({ kind: 'form', url: String(form.action || ''), method: String(form.method || 'GET').toUpperCase(), data: formData(form) });
   });
 
+  // A page that loaded images from its own server ("/image/101?session=…") has no
+  // such server here: a same-site image URL naming a drawn file (by file name, or
+  // name without extension, in its path or query) shows that file instead.
+  var mediaByKey = {};
+  function indexMedia() {
+    mediaByKey = {};
+    function add(url, name) {
+      if (!url || !name) return;
+      var n = String(name).toLowerCase();
+      mediaByKey[n] = url;
+      mediaByKey[n.replace(/\.[a-z0-9]+$/, '')] = url;
+    }
+    function addMedia(m) { if (m) add(m.url, m.name); }
+    questions.forEach(function (q) {
+      (q.media || []).forEach(addMedia);
+      (q.trials || []).forEach(function (t) { (t.media || []).forEach(addMedia); });
+    });
+  }
+  function mappedMedia(value) {
+    if (typeof value !== 'string' || !value || /^(data|blob):/i.test(value)) return null;
+    var u, base;
+    try { u = new URL(value, document.baseURI); base = new URL(document.baseURI); } catch (e) { return null; }
+    if (u.host !== base.host) return null;
+    var parts = u.pathname.split('/').filter(Boolean).reverse();
+    u.searchParams.forEach(function (v) { parts.push(v); });
+    for (var i = 0; i < parts.length; i += 1) {
+      var key;
+      try { key = decodeURIComponent(parts[i]).toLowerCase(); } catch (e) { key = parts[i].toLowerCase(); }
+      if (mediaByKey[key]) return mediaByKey[key];
+    }
+    return null;
+  }
+  [window.HTMLImageElement, window.HTMLSourceElement, window.HTMLMediaElement].forEach(function (Type) {
+    var desc = Type && Object.getOwnPropertyDescriptor(Type.prototype, 'src');
+    if (!desc || !desc.set) return;
+    Object.defineProperty(Type.prototype, 'src', {
+      configurable: true,
+      enumerable: desc.enumerable,
+      get: desc.get,
+      set: function (v) { desc.set.call(this, mappedMedia(String(v)) || v); }
+    });
+  });
+  var setAttr = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name, value) {
+    if (String(name).toLowerCase() === 'src' && /^(IMG|SOURCE|VIDEO|AUDIO)$/.test(this.tagName)) {
+      return setAttr.call(this, name, mappedMedia(String(value)) || value);
+    }
+    return setAttr.apply(this, arguments);
+  };
+  function remapTree(root) {
+    if (!root || !root.querySelectorAll) return;
+    var list = [root].concat(Array.prototype.slice.call(root.querySelectorAll('img[src],source[src],video[src],audio[src]')));
+    list.forEach(function (el) {
+      if (!/^(IMG|SOURCE|VIDEO|AUDIO)$/.test(el.tagName || '')) return;
+      var mapped = mappedMedia(el.getAttribute('src'));
+      if (mapped) setAttr.call(el, 'src', mapped);
+    });
+  }
+  if (window.MutationObserver) {
+    new MutationObserver(function (records) {
+      records.forEach(function (r) { Array.prototype.forEach.call(r.addedNodes || [], remapTree); });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
   function detail() { return { questions: questions, survey: survey, answers: answers }; }
   function fire() {
     var d = detail();
@@ -651,6 +715,7 @@ export const SP_SITE_SDK_SOURCE = `
   if (boot) {
     // Questions and media are known before the page's own scripts run.
     questions = boot.questions || []; survey = boot.survey || {}; answers = boot.answers || {};
+    indexMedia();
     ready = true;
     whenDom(fire);
   }
@@ -660,6 +725,7 @@ export const SP_SITE_SDK_SOURCE = `
     if (d.type === 'init') {
       if (ready) return;
       questions = d.questions || []; survey = d.survey || {}; answers = d.answers || {};
+      indexMedia();
       ready = true;
       whenDom(fire);
     } else if (d.type === 'result' && pending[d.requestId]) {
