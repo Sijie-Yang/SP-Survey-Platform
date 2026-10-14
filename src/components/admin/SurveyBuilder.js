@@ -275,6 +275,8 @@ function SortablePageItem({ page, pageIndex, onEdit, onDelete, onDuplicate }) {
 
 export default function SurveyBuilder({ config, onChange, currentProject, onProjectUpdate = null, onNextStep, onRepairComplete, hideAssistant = false, onEditorSelectionChange, onOpenAssistant, onOpenLayoutStudio, onOpenPreview, editorCommitKey = 0 }) {
   const { t, language } = useRegion();
+  // A survey that is an uploaded page (SP-Scheme) is defined by that page.
+  const siteLocked = Boolean(config?.spSite?.html);
   const { tr } = useQuestionEditorText();
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [selectedPage, setSelectedPage] = useState(null);
@@ -1083,7 +1085,17 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
         </DialogActions>
       </Dialog>
 
-      <Box>
+      {siteLocked ? (
+        <Alert severity="info" sx={{ mb: 1.5 }} data-testid="builder-site-locked">
+          {uiPair(language,
+            'This survey is the uploaded page: its pages and questions come from that page and cannot be edited here. To edit them, remove the uploaded page in SP-Scheme above.',
+            '这份问卷就是上传的页面：页面和题目都由它决定，这里不能编辑。要编辑，请先在上方 SP-Scheme 里移除上传的页面。')}
+        </Alert>
+      ) : null}
+      <Box
+        aria-disabled={siteLocked || undefined}
+        sx={siteLocked ? { opacity: 0.5, pointerEvents: 'none', userSelect: 'none', filter: 'grayscale(1)' } : undefined}
+      >
           {config.pages && config.pages.length > 0 ? (
             <DndContext
               sensors={sensors}
@@ -1157,7 +1169,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
         data-builder-page-actions=""
         sx={{ mt: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
       >
-        <AdminActionButton startIcon={<Add />} onClick={addNewPage}>
+        <AdminActionButton startIcon={<Add />} onClick={addNewPage} disabled={siteLocked}>
           {t.builderAddPage}
         </AdminActionButton>
         {onNextStep && (

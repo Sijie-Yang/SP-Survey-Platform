@@ -153,3 +153,10 @@ test('an empty or cancelled analysis cannot replace a saved report', async () =>
   act(() => { save({ status: 'cancelled', narrative: 'Partial output' }); save({ narrative: '' }); });
   expect(readResultsReport('p').id).toBe(previous.id);
 });
+
+test('an uploaded SP-Scheme page shows its questions greyed out and unanalysed', () => {
+  render(<RegionProvider><QuestionCard question={q} answers={[1, 5]} totalResponses={2} questionNumber={1}
+    allResponses={responses} surveyConfig={{ ...config, spSite: { html: '<html></html>' } }} defaultExpanded /></RegionProvider>);
+  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/uploaded SP-Scheme page/);
+  expect(screen.getByText('Analyse yourself')).toBeTruthy();
+});

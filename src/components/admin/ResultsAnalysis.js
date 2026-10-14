@@ -1719,7 +1719,7 @@ function renderNativeQuestionAnalysisBody(question, answers, allResponses, surve
  * A question an SP-Scheme page records in its own format: the platform keeps
  * the values and exports them, and says plainly that it does not analyse them.
  */
-function CustomRecordAnalysis({ question, answers, allResponses }) {
+function CustomRecordAnalysis({ question, answers, allResponses, site = false }) {
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
   const records = (answers || []).filter((a) => a !== undefined && a !== null);
@@ -1728,7 +1728,9 @@ function CustomRecordAnalysis({ question, answers, allResponses }) {
   });
   return <Box data-testid="custom-record-analysis">
       <Alert severity="warning" sx={{ mb: 1.5 }}>
-        {zh
+        {site ? (zh
+          ? `这份问卷是上传的 SP-Scheme 页面，题目由模型识别，可能与页面实际含义不符，所以平台不分析也不统计。答案已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
+          : `This survey is an uploaded SP-Scheme page. Its questions were identified by a model and may not match what the page really asks, so the platform does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : zh
           ? `这道题由页面按自己的格式记录（custom），平台不做任何分析，也不做统计。请导出 CSV 或 JSON 后自行处理。共 ${records.length} 条记录。`
           : `This question is recorded in the page's own format (custom). The platform does not analyse or summarise it; export the CSV or JSON and process it yourself. ${records.length} record(s).`}
       </Alert>
@@ -2355,13 +2357,16 @@ export function QuestionCard({
   defaultExpanded = false
 }) {
   const {
-    t
+    t,
+    language
   } = useRegion();
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [exportError, setExportError] = useState('');
   const [exporting, setExporting] = useState(false);
   const exportLock = React.useRef(false);
   const type = question.type || 'text';
+  // An uploaded SP-Scheme page: its questions are a model's reading of the page, so nothing is analysed.
+  const siteSurvey = Boolean(surveyConfig?.spSite?.html);
   const trialUnitCount = answers.length;
   // Answer rate is per submission; charts/stats use per-trial units in `answers`.
   const {
@@ -2382,8 +2387,8 @@ export function QuestionCard({
       const questions = (surveyConfig?.pages || []).flatMap(page => page.elements || []);
       return <GeographicEvaluativePanel question={question} responses={allResponses || []} surveyConfig={surveyConfig} questions={questions} />;
     }
-    if (type === 'custom') {
-      return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} />;
+    if (type === 'custom' || (siteSurvey && !isDisplayOnlyQuestion(question))) {
+      return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} site={siteSurvey} />;
     }
     const nativeBody = renderNativeQuestionAnalysisBody(question, answers, allResponses, surveyConfig);
     if (nativeBody) return nativeBody;
@@ -2400,8 +2405,9 @@ export function QuestionCard({
   const responseRate = pct(responseCount, totalResponses);
   const displayOnly = isDisplayOnlyQuestion(question);
   const canExport = !displayOnly && responseCount > 0;
-  return <Card variant="outlined" sx={{
-    mb: 2
+  return <Card variant="outlined" data-site-unanalysed={siteSurvey || undefined} sx={{
+    mb: 2,
+    ...(siteSurvey ? { bgcolor: 'grey.50', color: 'text.secondary' } : null)
   }}>
       <Box sx={{
       display: 'flex',
@@ -2416,8 +2422,8 @@ export function QuestionCard({
         width: 32,
         height: 32,
         borderRadius: '50%',
-        bgcolor: displayOnly ? 'grey.300' : 'primary.main',
-        color: displayOnly ? 'text.secondary' : 'white',
+        bgcolor: displayOnly || siteSurvey ? 'grey.300' : 'primary.main',
+        color: displayOnly || siteSurvey ? 'text.secondary' : 'white',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -2450,6 +2456,9 @@ export function QuestionCard({
             <Chip icon={typeIcon(type)} label={type} size="small" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />
+            {siteSurvey && !displayOnly && <Chip label={isChineseLanguage(language) ? '自行分析' : 'Analyse yourself'} size="small" variant="outlined" sx={{
+            fontSize: '0.7rem'
+          }} />}
             {question.isAttentionCheck && <Chip label="Attention check" size="small" color="warning" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />}
@@ -2467,7 +2476,7 @@ export function QuestionCard({
           </Box>
         </Box>
 
-        {onExplain && <Button size="small" variant="outlined" sx={{
+        {onExplain && !siteSurvey && <Button size="small" variant="outlined" sx={{
         mr: 1,
         flexShrink: 0
       }} onClick={e => {
@@ -2514,13 +2523,13 @@ export function QuestionCard({
       <Collapse in={expanded} mountOnEnter unmountOnExit>
         <Divider />
         <CardContent>
-          {answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
+          {!siteSurvey && answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
           mb: 2
         }}>{t.resultsGroupExplanation}</Alert>}
-          <AttentionCheckPassRate question={question} allResponses={allResponses} />
+          {!siteSurvey && <AttentionCheckPassRate question={question} allResponses={allResponses} />}
           {responseCount === 0 && !isDisplayOnlyQuestion(question) ? <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography> : <>
               {renderAnalysis()}
-              {responseCount > 0 && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
+              {responseCount > 0 && !siteSurvey && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
             </>}
         </CardContent>
       </Collapse>
@@ -3224,21 +3233,12 @@ export default function ResultsAnalysis({
           Research sessions: {sessionStats.length} ({sessionStats.map(([sid, s]) => `${sid.slice(-6)}: ${s.count} rounds`).join(', ')})
         </Alert>}
 
-      {siteMatch && view === 'overview' && <Alert severity={siteMatch.level === 'full' ? 'info' : 'warning'} sx={{
+      {siteMatch && <Alert severity="warning" sx={{
             mb: 2
           }} data-testid="results-site-match">
-          {siteMatch.level === 'full' && (isChineseLanguage(language)
-            ? `这份问卷是 SP-Scheme 页面；全部 ${siteMatch.total} 道题都是平台题型，下面的分析适用。`
-            : `This survey is an SP-Scheme page; all ${siteMatch.total} questions use platform types, so the analysis below applies.`)}
-          {siteMatch.level === 'partial' && (isChineseLanguage(language)
-            ? `这份问卷是 SP-Scheme 页面：${siteMatch.native} 道题可以分析；另外 ${siteMatch.custom} 道题按页面自己的格式原样记录（custom），平台不分析，请导出后自行处理。`
-            : `This survey is an SP-Scheme page: ${siteMatch.native} question(s) are analysed below; ${siteMatch.custom} are recorded in the page's own format (custom) and are not analysed. Export them and process them yourself.`)}
-          {siteMatch.level === 'custom' && (isChineseLanguage(language)
-            ? `这份问卷是 SP-Scheme 页面，全部 ${siteMatch.total} 道题按页面自己的格式原样记录（custom）。平台不做任何分析，请导出后自行处理。`
-            : `This survey is an SP-Scheme page and all ${siteMatch.total} questions are recorded in the page's own format (custom). Nothing is analysed here; export the data and process it yourself.`)}
-          {siteMatch.level === 'none' && (isChineseLanguage(language)
-            ? `这份问卷是 SP-Scheme 页面，没有声明任何题目。平台只原样记录页面发出的请求（共 ${siteCapturedCount} 条，在导出的 __sp_requests 里），不做任何分析，请导出后自行处理。`
-            : `This survey is an SP-Scheme page with no questions declared. The platform only records the requests the page sent (${siteCapturedCount} in total, under __sp_requests in the export) and analyses nothing; export the data and process it yourself.`)}
+          {isChineseLanguage(language)
+            ? `这份问卷是上传的 SP-Scheme 页面，题目由模型识别，未必准确，所以平台不做分析，题目都以灰色显示。答案已原样记录${siteMatch.level === 'none' ? `（页面发出的请求共 ${siteCapturedCount} 条，在导出的 __sp_requests 里）` : ''}，请导出 CSV 或 JSON 后自行分析。`
+            : `This survey is an uploaded SP-Scheme page. Its questions were identified by a model and may be inaccurate, so the platform analyses nothing and shows them greyed out. Answers are recorded as sent${siteMatch.level === 'none' ? ` (${siteCapturedCount} page requests, under __sp_requests in the export)` : ''}; export the CSV or JSON and analyse them yourself.`}
         </Alert>}
 
       {/* Overview metrics */}
