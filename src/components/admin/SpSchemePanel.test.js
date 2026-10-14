@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import SpSchemePanel from './SpSchemePanel';
 import { RegionProvider } from '../../contexts/RegionContext';
 import { buildExampleSite, buildExampleZip } from '../../lib/spScheme';
@@ -33,7 +33,7 @@ test('pasted code is checked and blocked when it has problems', async () => {
   fireEvent.click(screen.getByRole('button', { name: /Paste code|粘贴代码/ }));
   fireEvent.change(screen.getByLabelText('SP-Scheme package'), { target: { value: '<!doctype html><html><body>hello</body></html>' } });
   fireEvent.click(screen.getByRole('button', { name: /Check format|检查格式/ }));
-  expect(await screen.findByText(/id="sp-scheme"/)).toBeInTheDocument();
+  expect(await screen.findByTestId('sp-scheme-verdict')).toHaveTextContent(/not a survey file that matches SP-Scheme|不是符合 SP-Scheme/);
   expect(screen.getByRole('button', { name: /Import into Builder|导入 Builder/ })).toBeDisabled();
 });
 
@@ -91,4 +91,33 @@ test('unticking a domain the page loads its script from blocks the import', asyn
   fireEvent.click(screen.getByRole('checkbox', { name: /cdn\.legacy-lab\.org/ }));
   expect(await screen.findByText(/Scripts must be inline/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Import into Builder|导入 Builder/ })).toBeDisabled();
+});
+
+test('a page that does not match SP-Scheme says so, with a copy button next to it', async () => {
+  const writeText = jest.fn(() => Promise.resolve());
+  Object.assign(navigator, { clipboard: { writeText } });
+  renderPanel();
+  const file = new File([LEGACY_SURVEY_HTML], 'survey.html', { type: 'text/html' });
+  fireEvent.change(screen.getByTestId('sp-scheme-file'), { target: { files: [file] } });
+  const verdict = await screen.findByTestId('sp-scheme-verdict');
+  expect(verdict).toHaveTextContent(/not a survey file that matches SP-Scheme|不是符合 SP-Scheme 的问卷文件/);
+  fireEvent.click(within(verdict).getByRole('button', { name: /Copy SP-Scheme|复制 SP-Scheme/ }));
+  await waitFor(() => expect(writeText).toHaveBeenCalled());
+  expect(await within(verdict).findByRole('button', { name: /Copied|已复制/ })).toBeInTheDocument();
+});
+
+test('dropping the page with its config sends the config to the model', async () => {
+  convertSurveyPage.mockResolvedValue({ result: LEGACY_SURVEY_CONVERSION, model: 'free' });
+  renderPanel();
+  const files = [
+    new File([LEGACY_SURVEY_HTML], 'index.html', { type: 'text/html' }),
+    new File(['{"tasks":[{"id":"safety"}]}'], 'config.json', { type: 'application/json' }),
+  ];
+  fireEvent.drop(screen.getByTestId('sp-scheme-panel'), { dataTransfer: { files, types: ['Files'] } });
+  expect(await screen.findByText(/config\.json/)).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId('sp-scheme-convert'));
+  await screen.findByTestId('sp-scheme-converted');
+  expect(convertSurveyPage.mock.calls[0][0].dataFiles).toEqual([
+    expect.objectContaining({ name: 'config.json', text: '{"tasks":[{"id":"safety"}]}' }),
+  ]);
 });

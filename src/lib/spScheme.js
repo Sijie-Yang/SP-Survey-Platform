@@ -135,6 +135,7 @@ export const SP_SITE_PREVIEW_SHIM = `${SITE_SHIM_START}
     getAnswers: function () { return answers; },
     allowedHosts: [],
     onSubmit: function () { /* the platform hands intercepted result posts here */ },
+    onRequest: function () { /* the platform lets the page answer its own requests here */ },
     answer: function (name, value, options) {
       var q = find(name);
       if (!q) { console.warn('[SPSite preview] unknown question', name); return done({ ok: false, error: 'Unknown question "' + name + '"' }); }
@@ -455,7 +456,7 @@ A question object: \`{ name, type, kind, answerShape, title, description, requir
 - Record timing or extra behaviour only through declared questions (for example a \`number\` question for a reaction time in milliseconds).
 
 Runtime limits on the platform (the page runs full-screen in a sandboxed frame):
-- No network: \`fetch\`, XHR, WebSocket and form posts are blocked; nothing leaves the page except through SPSite. A researcher can allow named domains in the Builder (\`SPSite.allowedHosts\`) for pages that must load something at run time. Posts to any other host are not sent: they resolve as a success and their payload is passed to \`SPSite.onSubmit(function (item) { /* item.kind, item.url, item.method, item.data */ })\`, so an older page's "send results" call can be mapped onto \`SPSite.answer\`.
+- No network: \`fetch\`, XHR, WebSocket and form posts are blocked; nothing leaves the page except through SPSite. A researcher can allow named domains in the Builder (\`SPSite.allowedHosts\`) for pages that must load something at run time. Posts to any other host are not sent: they resolve as a success and their payload is passed to \`SPSite.onSubmit(function (item) { /* item.kind, item.url, item.method, item.data */ })\`, so an older page's "send results" call can be mapped onto \`SPSite.answer\`. For a page that expects its own server, \`SPSite.onRequest(function (req) { if (req.url === '/api/state') return { json: { … } }; })\` answers any request that would otherwise be blocked (\`req.url\` is the path for same-page URLs; \`req.method\`, \`req.data\`); returning nothing leaves it blocked.
 - Scripts must be inline or loaded from ${SP_SITE_SCRIPT_HOSTS.join(', ')}; styles may also use Google Fonts. Images and media load over https only (the platform's), or data: URLs for your own decoration.
 - \`localStorage\` works only in memory for the session; do not rely on it.
 - No navigation to other pages, no new windows for survey content, no iframes, no camera or microphone.
@@ -542,6 +543,27 @@ function inlineLocalAssets(html, entries, base) {
   return { html: out, inlined };
 }
 
+const DATA_FILE_RE = /\.(json|csv|tsv|txt|md)$/i;
+const DATA_FILE_MAX = 60000;
+const DATA_TOTAL_MAX = 150000;
+
+/** Text files that came with the page (question lists, configs), for page conversion. */
+function readDataFiles(entries, skip = []) {
+  let total = 0;
+  return Object.keys(entries)
+    .filter((name) => DATA_FILE_RE.test(name) && !skip.includes(name) && !/(^|\/)(readme|license)[^/]*$/i.test(name))
+    .sort((a, b) => a.length - b.length)
+    .map((name) => {
+      if (total >= DATA_TOTAL_MAX) return null;
+      let text = strFromU8(entries[name]);
+      const truncated = text.length > DATA_FILE_MAX;
+      if (truncated) text = text.slice(0, DATA_FILE_MAX);
+      total += text.length;
+      return { name, text, truncated };
+    })
+    .filter(Boolean);
+}
+
 /**
  * Read an uploaded package: index.html on its own, a .zip holding it (plus
  * optional sp-scheme.json and local assets), or a bare sp-scheme.json.
@@ -566,7 +588,7 @@ export function readSpSchemeUpload(bytes) {
         if (file.name.endsWith('/') || /(^|\/)(__MACOSX|\.DS_Store)/.test(file.name)) return false;
         total += file.originalSize || 0;
         if (total > MAX_UNZIPPED_BYTES) throw new Error('The zip expands to more than 25 MB.');
-        return /\.(json|html?|md|txt|css|js|svg|png|jpe?g|gif|webp)$/i.test(file.name);
+        return /\.(json|html?|md|txt|csv|tsv|css|js|svg|png|jpe?g|gif|webp)$/i.test(file.name);
       },
     });
   } catch (err) {
@@ -597,6 +619,7 @@ export function readSpSchemeUpload(bytes) {
     siteHtml,
     siteFile: sitePath ? sitePath.slice(root.length) : null,
     files: names.filter((name) => name.startsWith(root)).map((name) => name.slice(root.length)),
+    dataFiles: readDataFiles(entries, [sitePath, manifestPath]),
     fromZip: true,
     manifestSource: manifestPath ? 'json' : (embedded ? 'embedded' : null),
   };

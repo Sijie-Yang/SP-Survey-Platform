@@ -11,6 +11,7 @@
 const MAX_HTML_CHARS = 200000;
 const MAX_REFERENCE_CHARS = 80000;
 const MAX_PREVIOUS_CHARS = 200000;
+const MAX_DATA_CHARS = 150000;
 
 function extractJson(text) {
   if (!text) return null;
@@ -54,11 +55,15 @@ Rules:
    - Prefer listening to the page's own inputs (change/click) and calling SPSite.answer(name, value) with the value shape from the REFERENCE.
    - The page's old way of sending results (fetch/XMLHttpRequest/sendBeacon POST, form submit, Google Forms, Apps Script, Firebase, Supabase, Formspree, etc.) is intercepted by the platform: it never leaves the page, the call resolves as a success, and the payload arrives in SPSite.onSubmit(function (item) { item.kind, item.url, item.method, item.data }). Use onSubmit to map any remaining fields onto SPSite.answer, then call SPSite.complete(). Await every SPSite.answer before complete.
    - When the page ends (its last submit or thank-you step) call SPSite.complete() exactly once.
+   - Pages that expect their own server (relative URLs such as fetch('/api/state'), '/api/save', '/image/<id>'): the page has no server on SP-Survey. Emulate it with SPSite.onRequest(function (req) { ... }) where req = { url (path + query for same-page URLs, full URL otherwise), method, data, headers }. Return { json: ... } (or { status, json }) to answer; return nothing to leave the request blocked. Build every response from SPSite.getQuestions(): for example answer the page's "state/config" request with its tasks, options and image list made from the questions and question.trials[t].media, and its "save" request by calling SPSite.answer(...) (return the shape the page expects, e.g. { answer: { value } }), and its "complete/finish" request by awaiting SPSite.complete(). Answer heartbeat/ping requests with { json: { ok: true } }. Handlers may return a Promise.
+   - Images the page loads by URL from its own server (img.src = '/image/' + id) do not exist on SP-Survey: use a replacement so the page takes the URL from the question media instead (for example keep a map id -> media url built in onRequest).
+   - The page's own scripts start before adapterScript runs; requests they make at start-up wait until onRequest handlers are registered, so register them at the top level of adapterScript (not inside onReady).
    - Use plain ES2017 that runs in a browser, no imports. Keep it under 300 lines.
 4. replacements: only when the adapter cannot do the job (for example removing a hard-coded API key, or a script that would break). Each "find" must be copied exactly from the page and be unique. Never replace large blocks. Strings like data:sp-token/3 stand for embedded images; keep them unchanged.
 5. externalHosts: every host the page needs at run time for loading things (questions, config, scripts or styles not on cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, cdn.tailwindcss.com, esm.sh or Google Fonts). Hosts that only received the results do not need to be listed, because results go through SPSite.
 6. Remove any secret (API key, token, password) you find with a replacement and say so in notes.
-7. If FEEDBACK is given, it lists problems with your PREVIOUS answer after it was applied and checked. Return a complete corrected JSON, not a diff.`;
+7. DATA FILES (config, question lists, CSV) that came with the page tell you the real tasks, wording, options and images; use them instead of guessing. When the page loads its wording from a server and no data file gives it, keep the structure the code implies, write the most likely wording, and say in notes exactly what was guessed.
+8. If FEEDBACK is given, it lists problems with your PREVIOUS answer after it was applied and checked. Return a complete corrected JSON, not a diff.`;
 
 function clip(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
@@ -86,8 +91,19 @@ export function normalizeConvertRequest(body) {
     const text = JSON.stringify(body.previous);
     if (text.length <= MAX_PREVIOUS_CHARS) previous = text;
   }
+  let dataBudget = MAX_DATA_CHARS;
+  const dataFiles = (Array.isArray(body?.dataFiles) ? body.dataFiles : [])
+    .filter((file) => file && typeof file.name === 'string' && typeof file.text === 'string')
+    .slice(0, 20)
+    .map((file) => {
+      const text = file.text.slice(0, Math.max(0, dataBudget));
+      dataBudget -= text.length;
+      return { name: file.name.slice(0, 200), text };
+    })
+    .filter((file) => file.text);
   return {
     html,
+    dataFiles,
     reference: clip(body?.reference, MAX_REFERENCE_CHARS),
     notes: clip(body?.notes, 2000),
     feedback,
@@ -152,6 +168,7 @@ export async function handleSpSchemeConvert(env, userId, body, deps = {}) {
   if (input.reference) parts.push(`REFERENCE (SP-Scheme)\n${input.reference}`);
   if (input.notes) parts.push(`RESEARCHER NOTES\n${input.notes}`);
   parts.push(`PAGE (index.html)\n${input.html}`);
+  input.dataFiles.forEach((file) => parts.push(`DATA FILE ${file.name}\n${file.text}`));
   if (input.previous) parts.push(`PREVIOUS\n${input.previous}`);
   if (input.feedback.length) parts.push(`FEEDBACK\n- ${input.feedback.join('\n- ')}`);
 

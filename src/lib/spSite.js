@@ -492,34 +492,81 @@ export const SP_SITE_SDK_SOURCE = `
   function capture(kind, url, method, body) {
     dispatch({ kind: kind, url: String(url || ''), method: String(method || 'POST').toUpperCase(), data: parseBody(body) });
   }
+  // SPSite.onRequest handlers can answer the page's own requests (a converted page
+  // that loaded its questions from, or saved answers to, its own server). Requests
+  // made before the adapter script has run wait for it (DOMContentLoaded).
+  var requestHandlers = [];
+  var adaptersReady = new Promise(function (resolve) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(resolve, 0); });
+    else resolve();
+  });
+  // Same-page paths stay relative ("/api/state?x=1"); other hosts keep their full URL.
+  function absolute(url) {
+    try { var u = new URL(url, 'https://invalid.local/'); return u.host === 'invalid.local' ? u.pathname + u.search : u.href; } catch (e) { return String(url || ''); }
+  }
+  function answerRequest(req) {
+    return adaptersReady.then(function () {
+      for (var i = 0; i < requestHandlers.length; i += 1) {
+        var out;
+        try { out = requestHandlers[i](req); } catch (err) { console.error('[SPSite] onRequest handler failed', err); return Promise.resolve({ status: 500, json: { error: String(err && err.message || err) } }); }
+        if (out !== undefined) return Promise.resolve(out).then(function (r) { return r === undefined || r === null ? { status: 200, json: { ok: true } } : r; });
+      }
+      return undefined;
+    });
+  }
+  function responseParts(r) {
+    var isRaw = r && typeof r === 'object' && ('status' in r || 'json' in r || 'body' in r);
+    var status = isRaw && r.status ? r.status : 200;
+    var body = isRaw ? ('json' in r ? JSON.stringify(r.json) : (r.body == null ? '' : String(r.body))) : JSON.stringify(r);
+    var type = isRaw && !('json' in r) && r.contentType ? r.contentType : 'application/json';
+    return { status: status, body: body, type: type };
+  }
+  function headersOf(init) {
+    var out = {};
+    var h = init && init.headers;
+    if (!h) return out;
+    if (typeof Headers !== 'undefined' && h instanceof Headers) h.forEach(function (v, k) { out[k] = v; });
+    else Object.keys(h).forEach(function (k) { out[k] = h[k]; });
+    return out;
+  }
   var nativeFetch = window.fetch && window.fetch.bind(window);
   if (nativeFetch) {
     window.fetch = function (input, init) {
       var url = typeof input === 'string' ? input : (input && input.url) || String(input);
-      var method = (init && init.method) || (input && input.method) || 'GET';
+      var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
       if (hostAllowed(url)) return nativeFetch(input, init);
-      if (/^(GET|HEAD)$/i.test(method)) return Promise.reject(new TypeError('SP-Survey blocked a request to ' + url));
-      capture('fetch', url, method, init && init.body);
-      return Promise.resolve(new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      var req = { kind: 'fetch', url: absolute(url), method: method, data: parseBody(init && init.body), headers: headersOf(init) };
+      return answerRequest(req).then(function (r) {
+        if (r !== undefined) { var p = responseParts(r); return new Response(p.body, { status: p.status, headers: { 'Content-Type': p.type } }); }
+        if (/^(GET|HEAD)$/.test(method)) throw new TypeError('SP-Survey blocked a request to ' + url);
+        dispatch(req);
+        return new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      });
     };
   }
   if (window.XMLHttpRequest) {
     var open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.open = function (method, url) { this.__sp = { method: method, url: url }; return open.apply(this, arguments); };
+    XMLHttpRequest.prototype.open = function (method, url) { this.__sp = { method: String(method || 'GET').toUpperCase(), url: url }; return open.apply(this, arguments); };
     XMLHttpRequest.prototype.send = function (body) {
       var info = this.__sp || {};
-      if (hostAllowed(info.url) || /^(GET|HEAD)$/i.test(info.method || 'GET')) return send.apply(this, arguments);
-      capture('xhr', info.url, info.method, body);
+      if (hostAllowed(info.url)) return send.apply(this, arguments);
       var xhr = this;
-      ['readyState', 'status', 'responseText', 'response'].forEach(function (k) {
-        Object.defineProperty(xhr, k, { configurable: true, value: { readyState: 4, status: 200, responseText: '{"ok":true}', response: '{"ok":true}' }[k] });
-      });
-      setTimeout(function () {
+      var req = { kind: 'xhr', url: absolute(info.url), method: info.method || 'GET', data: parseBody(body), headers: {} };
+      function finish(status, text) {
+        ['readyState', 'status', 'responseText', 'response'].forEach(function (k) {
+          Object.defineProperty(xhr, k, { configurable: true, value: { readyState: 4, status: status, responseText: text, response: text }[k] });
+        });
         ['readystatechange', 'load', 'loadend'].forEach(function (type) {
           var ev = new Event(type); xhr.dispatchEvent(ev);
           if (typeof xhr['on' + type] === 'function') xhr['on' + type](ev);
         });
-      }, 0);
+      }
+      answerRequest(req).then(function (r) {
+        if (r !== undefined) { var p = responseParts(r); finish(p.status, p.body); return; }
+        if (/^(GET|HEAD)$/.test(req.method)) { var ev = new Event('error'); xhr.dispatchEvent(ev); if (typeof xhr.onerror === 'function') xhr.onerror(ev); return; }
+        dispatch(req);
+        finish(200, '{"ok":true}');
+      });
     };
   }
   if (navigator.sendBeacon) {
@@ -576,6 +623,7 @@ export const SP_SITE_SDK_SOURCE = `
     getAnswers: function () { return answers; },
     answer: function (name, value, options) { return call('answer', { name: name, value: value === undefined ? null : value, trial: options && options.trial }); },
     complete: function () { return call('complete', {}); },
+    onRequest: function (fn) { requestHandlers.push(fn); },
     onSubmit: function (fn) {
       submitHandlers.push(fn);
       submitQueue.splice(0).forEach(function (item) { try { fn(item); } catch (err) { console.error(err); } });
@@ -681,9 +729,12 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [] } = 
   if (!/SPSite\.complete\s*\(/.test(text)) errors.push('index.html never calls SPSite.complete(), so participants could not submit.');
   if (/SPSkill\./.test(text)) errors.push('index.html uses the old SPSkill API; use SPSite instead.');
   if (/\b(fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|navigator\.sendBeacon)/.test(text)) {
-    warnings.push(hosts.length
-      ? `index.html makes network calls; only ${hosts.join(', ')} can be reached, and data sent elsewhere is handed to SPSite.onSubmit instead.`
-      : 'index.html makes network calls; they are blocked on the platform. Answers must go through SPSite.answer.');
+    const handled = /SPSite\.on(Request|Submit)\s*\(/.test(text);
+    if (!handled) {
+      warnings.push(hosts.length
+        ? `index.html makes network calls; only ${hosts.join(', ')} can be reached, and data sent elsewhere is handed to SPSite.onSubmit instead.`
+        : 'index.html makes network calls; they are blocked on the platform. Answers must go through SPSite.answer.');
+    }
   }
   const scriptSrc = [...text.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]);
   const scriptHosts = [...CDN_HOSTS, ...hosts.map((h) => `https://${h}`)];

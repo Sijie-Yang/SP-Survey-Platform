@@ -115,7 +115,7 @@ export function candidateHosts(html, result) {
  * Convert a page with the Assistant model, retrying with the validation
  * errors. `request` posts to /api/agent/sp-scheme/convert.
  */
-export async function convertSurveyHtml(originalHtml, { request, notes = '', onProgress } = {}) {
+export async function convertSurveyHtml(originalHtml, { request, notes = '', dataFiles = [], onProgress } = {}) {
   const source = stripSitePreviewShim(String(originalHtml || ''));
   const tokenized = tokenizeDataUris(source);
   if (tokenized.html.length > CONVERT_MAX_HTML_CHARS) {
@@ -126,10 +126,11 @@ export async function convertSurveyHtml(originalHtml, { request, notes = '', onP
   let feedback = [];
   let last = null;
   for (let round = 0; round <= CONVERT_FIX_ROUNDS; round += 1) {
-    onProgress?.({ round, fixing: round > 0, feedback });
-    const response = await request({ html: tokenized.html, reference, notes, previous, feedback });
+    onProgress?.({ round, stage: 'model', fixing: round > 0, feedback });
+    const response = await request({ html: tokenized.html, reference, notes, dataFiles, previous, feedback });
     const result = response?.result;
     if (!result) throw new Error('The model returned nothing usable.');
+    onProgress?.({ round, stage: 'check', fixing: round > 0, feedback });
     const applied = applyConversion(tokenized.html, result, tokenized.tokens);
     const hosts = candidateHosts(applied.html, result);
     // Validate as if every candidate domain were allowed; the researcher then

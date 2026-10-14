@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -15,8 +15,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { AutoAwesome, AutoFixHigh, ContentCopy, Download, FactCheck, FolderZip, UploadFile, Web } from '@mui/icons-material';
-import { strToU8 } from 'fflate';
+import { AutoAwesome, AutoFixHigh, CheckCircle, ContentCopy, Download, FactCheck, FolderZip, UploadFile, Web } from '@mui/icons-material';
+import { strToU8, zipSync } from 'fflate';
 import { useRegion } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
 import {
@@ -29,7 +29,7 @@ import {
 } from '../../lib/spScheme';
 import { externalHostsIn } from '../../lib/spSite';
 import { convertSurveyPage } from '../../lib/agentApi';
-import { convertSurveyHtml } from '../../lib/spSchemeConvert';
+import { CONVERT_FIX_ROUNDS, convertSurveyHtml } from '../../lib/spSchemeConvert';
 
 function downloadText(filename, text, type) {
   const blob = new Blob([text], { type });
@@ -67,6 +67,70 @@ function IssueList({ items, max = 8 }) {
 
 function formatKb(bytes) {
   return `${Math.max(1, Math.round((bytes || 0) / 1024))} KB`;
+}
+
+const MODEL_STAGE_SECONDS = 60;
+
+/**
+ * Conversion progress: the model call has no progress events, so its bar
+ * eases toward the end of its share while time passes; checking is quick.
+ */
+function ConvertProgress({ state, L }) {
+  const [now, setNow] = useState(Date.now());
+  const startedAt = useRef(Date.now());
+  const stageAt = useRef(Date.now());
+  const stageKey = `${state.round}-${state.stage}`;
+  useEffect(() => { stageAt.current = Date.now(); }, [stageKey]);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+  const rounds = 1 + Math.max(0, state.maxRounds || 0);
+  const inStage = (now - stageAt.current) / 1000;
+  // Each round (first pass, then each fix) fills the bar again.
+  const value = state.stage === 'model' ? 90 * (1 - Math.exp(-inStage / (MODEL_STAGE_SECONDS / 2))) : 96;
+  const elapsed = Math.round((now - startedAt.current) / 1000);
+  const steps = [
+    { key: 'read', label: L('Read the page', '读取页面'), done: true },
+    { key: 'model', label: L('Model maps questions and submission to the platform', '模型把题目和提交接到平台'), done: state.stage !== 'model' || state.round > 0, active: state.stage === 'model' && state.round === 0 },
+    { key: 'check', label: L('Apply changes and check', '应用修改并检查'), done: state.round > 0, active: state.stage === 'check' && state.round === 0 },
+  ];
+  if (state.round > 0) {
+    steps.push({
+      key: 'fix',
+      label: L(`Fix ${state.feedback?.length || 0} problem(s) (round ${state.round} of ${rounds - 1})`, `修正 ${state.feedback?.length || 0} 个问题（第 ${state.round}/${rounds - 1} 轮）`),
+      done: false,
+      active: true,
+    });
+  }
+  return (
+    <Box data-testid="sp-scheme-convert-progress">
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <LinearProgress variant="determinate" value={value} sx={{ flex: 1, height: 8, borderRadius: 4 }} />
+        <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, textAlign: 'right' }}>
+          {Math.round(value)}% · {elapsed}s
+        </Typography>
+      </Box>
+      <Box component="ol" sx={{ listStyle: 'none', m: '8px 0 0', p: 0 }}>
+        {steps.map((step) => (
+          <Typography
+            component="li"
+            variant="body2"
+            key={step.key}
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: step.done ? 'success.main' : (step.active ? 'text.primary' : 'text.disabled'), fontWeight: step.active ? 600 : 400 }}
+          >
+            {step.done ? <CheckCircle sx={{ fontSize: 16 }} /> : <Box component="span" sx={{ width: 16, display: 'inline-flex', justifyContent: 'center' }}>{step.active ? '•' : '○'}</Box>}
+            {step.label}
+          </Typography>
+        ))}
+      </Box>
+      {state.stage === 'model' && inStage > 20 ? (
+        <Typography variant="caption" color="text.secondary">
+          {L('The free model usually needs 30–90 seconds for a full page. You can keep this dialog open.', '免费模型处理整页通常需要 30–90 秒，请保持此窗口打开。')}
+        </Typography>
+      ) : null}
+    </Box>
+  );
 }
 
 /**
@@ -136,12 +200,13 @@ export default function SpSchemePanel({ config, onChange }) {
     const source = upload?.originalHtml || upload?.siteHtml;
     if (!source) return;
     setParseError('');
-    setConverting({ round: 0 });
+    setConverting({ round: 0, stage: 'model', maxRounds: CONVERT_FIX_ROUNDS });
     try {
       const out = await convertSurveyHtml(source, {
         request: convertSurveyPage,
         notes: convertNotes,
-        onProgress: (p) => setConverting(p),
+        dataFiles: upload?.dataFiles || [],
+        onProgress: (p) => setConverting({ ...p, maxRounds: CONVERT_FIX_ROUNDS }),
       });
       const ticked = out.hosts.filter((h) => h.needed).map((h) => h.host);
       setConversion({
@@ -163,18 +228,69 @@ export default function SpSchemePanel({ config, onChange }) {
     }
   };
 
+  // One file is read as is; several (index.html plus its config or CSV files) are
+  // read as if they came in one zip.
+  const readFiles = async (list) => {
+    const files = Array.from(list || []).filter(Boolean);
+    if (!files.length) return;
+    const contents = await Promise.all(files.map((file) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(new Uint8Array(e.target.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    })));
+    setPasted('');
+    setOpen(true);
+    if (files.length === 1) {
+      check(contents[0], files[0].name);
+      return;
+    }
+    const bundle = {};
+    files.forEach((file, i) => { bundle[file.name] = contents[i]; });
+    const page = files.find((file) => /\.html?$/i.test(file.name));
+    check(zipSync(bundle), page ? `${page.name} + ${files.length - 1}` : `${files.length} files`);
+  };
+
   const onFile = (event) => {
-    const file = event.target.files?.[0];
+    const list = event.target.files;
+    readFiles(list).catch((err) => setParseError(err?.message || String(err)));
     event.target.value = '';
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const bytes = new Uint8Array(e.target.result);
-      setPasted('');
-      setOpen(true);
-      check(bytes, file.name);
-    };
-    reader.readAsArrayBuffer(file);
+  };
+
+  const [dragging, setDragging] = useState(false);
+  const dropProps = {
+    onDragOver: (e) => {
+      if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDragging(true);
+    },
+    onDragLeave: (e) => {
+      if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false);
+    },
+    onDrop: (e) => {
+      if (!e.dataTransfer?.files?.length) return;
+      e.preventDefault();
+      // The dialog renders in a portal, but React still bubbles its events to the panel.
+      e.stopPropagation();
+      setDragging(false);
+      if (converting || importing) return;
+      readFiles(e.dataTransfer.files).catch((err) => setParseError(err?.message || String(err)));
+    },
+  };
+
+  const [copied, setCopied] = useState(false);
+  const copyForFix = async () => {
+    const errorsText = report?.errors?.length && report?.summary
+      ? `\n\n## Problems to fix in my index.html\n${report.errors.map((e) => `- ${e.message}${e.path ? ` (${e.path})` : ''}`).join('\n')}\n`
+      : '';
+    try {
+      await navigator.clipboard.writeText(schemeText + errorsText);
+    } catch {
+      downloadText(`sp-scheme-${SP_SCHEME_VERSION}.md`, schemeText + errorsText, 'text/markdown');
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   const closeDialog = () => {
@@ -221,12 +337,16 @@ export default function SpSchemePanel({ config, onChange }) {
     <Paper
       variant="outlined"
       data-testid="sp-scheme-panel"
+      {...dropProps}
       sx={{
         mb: 2,
         p: { xs: 2, sm: 2.5 },
         borderRadius: 2,
         borderWidth: 2,
         borderColor: 'primary.main',
+        borderStyle: dragging ? 'dashed' : 'solid',
+        outline: dragging ? '3px solid' : 'none',
+        outlineColor: 'primary.light',
         background: (theme) => `linear-gradient(135deg, ${theme.palette.primary.main}14, transparent 60%)`,
       }}
     >
@@ -258,9 +378,9 @@ export default function SpSchemePanel({ config, onChange }) {
         <Button variant="outlined" startIcon={<Download />} onClick={() => downloadText(`sp-scheme-${SP_SCHEME_VERSION}.md`, schemeText, 'text/markdown')}>
           {L('Download .md', '下载 .md')}
         </Button>
-        <input ref={fileRef} type="file" accept=".html,.htm,.zip,.json,.txt,.md,text/html,application/zip,application/json" hidden onChange={onFile} data-testid="sp-scheme-file" />
+        <input ref={fileRef} type="file" accept=".html,.htm,.zip,.json,.txt,.md,.csv,.tsv,text/html,application/zip,application/json" multiple hidden onChange={onFile} data-testid="sp-scheme-file" />
         <Button variant="contained" color="secondary" startIcon={<UploadFile />} onClick={() => fileRef.current?.click()}>
-          {L('Upload index.html / zip', '上传 index.html / zip')}
+          {L('Upload or drop index.html / zip', '上传或拖入 index.html / zip')}
         </Button>
         <Button variant="text" startIcon={<FolderZip />} onClick={() => downloadBytes('sp-scheme-example.zip', buildExampleZip(), 'application/zip')}>
           {L('Example', '示例')}
@@ -287,7 +407,7 @@ export default function SpSchemePanel({ config, onChange }) {
 
       <Dialog open={open} onClose={closeDialog} fullWidth maxWidth="md">
         <DialogTitle>{L('Check an SP-Scheme upload', '检查 SP-Scheme 上传')}</DialogTitle>
-        <DialogContent dividers>
+        <DialogContent dividers {...dropProps} sx={dragging ? { outline: '3px dashed', outlineColor: 'primary.main', outlineOffset: -6 } : undefined}>
           {upload?.name ? (
             <Alert severity="info" sx={{ mb: 2 }}>
               {upload.name}
@@ -318,11 +438,21 @@ export default function SpSchemePanel({ config, onChange }) {
 
           {report ? (
             <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              <Alert severity={report.ok ? 'success' : 'error'}>
+              <Alert
+                severity={report.ok ? 'success' : 'error'}
+                data-testid="sp-scheme-verdict"
+                action={report.ok ? null : (
+                  <Button color="inherit" size="small" startIcon={copied ? <CheckCircle /> : <ContentCopy />} onClick={copyForFix} sx={{ whiteSpace: 'nowrap' }}>
+                    {copied ? L('Copied', '已复制') : L('Copy SP-Scheme', '复制 SP-Scheme')}
+                  </Button>
+                )}
+              >
                 <Typography variant="subtitle2">
                   {report.ok
                     ? L('Format aligned with the platform. Ready to import.', '格式与平台对齐，可以导入。')
-                    : L(`${report.errors.length} problem(s) must be fixed. Send this list back to the model and ask it to correct the package.`, `有 ${report.errors.length} 个问题需要修正。可以把下面的列表发回给大模型，让它修改问卷包。`)}
+                    : (summary
+                      ? L(`${report.errors.length} problem(s) to fix: copy SP-Scheme (with the problems) to your model to fix it, or convert it online below.`, `有 ${report.errors.length} 个问题需要修正：复制 SP-Scheme（附带问题列表）让大模型修正，或在下方用模型在线转换。`)
+                      : L('This is not a survey file that matches SP-Scheme: copy SP-Scheme to your model to fix it, or convert it online below.', '这不是符合 SP-Scheme 的问卷文件：复制 SP-Scheme 让大模型修正，或在下方用模型在线转换。'))}
                 </Typography>
                 {summary ? (
                   <Typography variant="body2" sx={{ mt: 0.5 }}>
@@ -393,18 +523,16 @@ export default function SpSchemePanel({ config, onChange }) {
                     maxRows={3}
                     value={convertNotes}
                     onChange={(e) => setConvertNotes(e.target.value)}
-                    placeholder={L('Optional: anything the model should know (which images are stimuli, which fields to keep…)', '可选：告诉模型需要注意的地方（哪些图是刺激图、哪些字段要保留…）')}
+                    placeholder={L('Optional: anything the model should know (which images are stimuli, the question wording if the page loads it from a server…). You can also drop config / CSV files with the page.', '可选：告诉模型需要注意的地方（哪些图是刺激图、页面从服务器加载的题目文字…）。也可以把配置 / CSV 文件和页面一起拖进来。')}
                     sx={{ mb: 1 }}
                   />
+                  {upload?.dataFiles?.length ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                      {L(`The model also reads: ${upload.dataFiles.map((f) => f.name).join(', ')}`, `模型还会读取：${upload.dataFiles.map((f) => f.name).join('、')}`)}
+                    </Typography>
+                  ) : null}
                   {converting ? (
-                    <Box>
-                      <LinearProgress />
-                      <Typography variant="caption" color="text.secondary">
-                        {converting.fixing
-                          ? L(`Fixing ${converting.feedback?.length || 0} problem(s), round ${converting.round + 1}…`, `正在修正 ${converting.feedback?.length || 0} 个问题，第 ${converting.round + 1} 轮…`)
-                          : L('Converting with the free model; this can take a minute…', '正在用免费模型转换，可能需要一分钟左右…')}
-                      </Typography>
-                    </Box>
+                    <ConvertProgress state={converting} L={L} />
                   ) : (
                     <Button variant="contained" size="small" startIcon={<AutoFixHigh />} onClick={runConversion} data-testid="sp-scheme-convert">
                       {conversion ? L('Convert again', '重新转换') : L('Convert with the free model', '用免费模型自动转换')}
@@ -412,7 +540,7 @@ export default function SpSchemePanel({ config, onChange }) {
                   )}
                 </Box>
               ) : null}
-              {report.errors.length ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
+              {report.errors.length && (summary || conversion) && !converting ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
               {report.warnings.length ? <Box><Typography variant="subtitle2" color="warning.main">{L('Warnings', '提醒')}</Typography><IssueList items={report.warnings} /></Box> : null}
               {summary ? (
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
