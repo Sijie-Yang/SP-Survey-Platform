@@ -3,9 +3,9 @@ import SpSiteFrame from './SpSiteFrame';
 import { buildSiteQuestions, siteMatchLevel, siteMediaFolders } from '../lib/spSite';
 import { collectSurveyDataWithTrials, isTrialsAnswer, persistTrialsAnswer } from '../lib/trialNavigation';
 
-/** Response key holding the page's own requests when no adapter mapped them. */
+/** Response key holding every request the page sent with data, exactly as sent. */
 export const SP_SITE_REQUESTS_KEY = '__sp_requests';
-export const SP_SITE_REQUESTS_MAX = 500;
+export const SP_SITE_REQUESTS_MAX = 3000;
 const SP_SITE_REQUEST_MAX_CHARS = 20000;
 /** A request to one of these paths means the page is done (when nothing else says so). */
 export const SP_SITE_DEFAULT_COMPLETE_ON = '(finish|complete|submit|done|final)';
@@ -19,7 +19,10 @@ export function captureRecord(request, at = new Date().toISOString()) {
   } catch {
     data = String(data);
   }
-  return { at, kind: String(request?.kind || ''), method: String(request?.method || ''), url: String(request?.url || '').slice(0, 2000), data };
+  const record = { at, kind: String(request?.kind || ''), method: String(request?.method || ''), url: String(request?.url || '').slice(0, 2000), data };
+  // The adapter also answered it: this is the backup copy of what the page sent.
+  if (request?.answered) record.answered = true;
+  return record;
 }
 
 export function completesOn(url, pattern) {

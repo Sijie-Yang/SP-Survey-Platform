@@ -31,3 +31,8 @@ test('with questions declared there is no submit bar', () => {
   render(<SpSiteSurvey model={new Model(json)} surveyJson={json} language="en" />);
   expect(screen.queryByTestId('sp-site-raw-bar')).toBeNull();
 });
+
+test('a request the adapter answered is still kept as a marked backup copy', () => {
+  const rec = captureRecord({ kind: 'fetch', method: 'POST', url: '/api/save', data: { question_id: 'q1', value: 2 }, answered: true }, 't');
+  expect(rec).toEqual({ at: 't', kind: 'fetch', method: 'POST', url: '/api/save', data: { question_id: 'q1', value: 2 }, answered: true });
+});

@@ -675,6 +675,11 @@ export const SP_SITE_SDK_SOURCE = `
     });
     return Promise.race([work, timeout]).then(function (r) {
       clearTimeout(timer);
+      // Backup copy: whatever the page sends is kept raw, even when the adapter
+      // answered it, so an adapter that forgets SPSite.answer loses nothing.
+      if (r !== undefined && !/^(GET|HEAD)$/.test(req.method)) {
+        post({ type: 'capture', request: { kind: req.kind, url: req.url, method: req.method, data: req.data, answered: true } });
+      }
       var status = r === undefined ? 0 : responseParts(r).status;
       post({ type: 'net', phase: 'end', id: id, status: status });
       if (r === undefined && /^(GET|HEAD)$/.test(req.method)) {
