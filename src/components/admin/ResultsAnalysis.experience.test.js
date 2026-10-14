@@ -160,3 +160,19 @@ test('an uploaded SP-Scheme page shows its questions greyed out and unanalysed',
   expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/uploaded SP-Scheme page/);
   expect(screen.getByText('Analyse yourself')).toBeTruthy();
 });
+
+test('the export menu offers two clear choices', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
+  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Answers table (CSV)', 'Full analysis pack (ZIP)']);
+});
+
+test('an SP-Scheme page exports one ZIP of its answers', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={{ ...config, spSite: { html: '<html></html>' } }} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
+  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['All answers (ZIP)']);
+});

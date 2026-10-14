@@ -2463,6 +2463,7 @@ export function buildResultsExportBundle({
   filters,
   excludeFlagged,
   wideCsv,
+  report = null,
 }) {
   const answerable = (questions || []).filter((q) => q?.name && !isDisplayOnly(q));
   const questionFiles = [];
@@ -2522,7 +2523,40 @@ export function buildResultsExportBundle({
   if (bibtex) {
     rootFiles.push({ path: 'references.bib', content: bibtex });
   }
+  if (report) {
+    rootFiles.push({ path: 'analysis_report.json', content: `${JSON.stringify(report, null, 2)}\n` });
+  }
   return rootFiles;
+}
+
+/**
+ * Export for an uploaded SP-Scheme page: nothing is analysed, so the ZIP holds
+ * only the answers (one row per submission) and every record exactly as stored.
+ */
+export function buildSiteResultsExportFiles({ project, filteredResponses, wideCsv }) {
+  const rows = filteredResponses || [];
+  const readme = [
+    `SP-Survey export · ${project?.name || project?.id || 'survey'} · ${exportDateStamp()}`,
+    '',
+    'This survey is an uploaded SP-Scheme page. Its questions were identified by a model and',
+    'may not match what the page really asks, so SP-Survey has not analysed anything.',
+    '',
+    'responses_wide.csv   one row per submission, one column per recorded answer',
+    'responses_raw.json   every submission exactly as stored (page requests under __sp_requests)',
+    '',
+    `Submissions: ${rows.length}`,
+    '',
+  ].join('\n');
+  return [
+    { path: 'README.txt', content: readme },
+    { path: 'responses_wide.csv', content: wideCsv || rowsToCsv([['participant_id']]) },
+    { path: 'responses_raw.json', content: `${JSON.stringify(rows, null, 2)}\n` },
+  ];
+}
+
+export function downloadSiteResultsZip(opts) {
+  const folder = `results_${opts.project?.id || 'survey'}_${exportDateStamp()}`;
+  downloadZip(`${folder}.zip`, buildSiteResultsExportFiles(opts).map((f) => ({ path: `${folder}/${f.path}`, content: f.content })));
 }
 
 export function downloadResultsExportZip(opts) {

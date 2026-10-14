@@ -25,7 +25,6 @@ import { computeTrueSkillFromMatches, matchesFromOrderedRanking, attachMatchCate
 import { average, pct, wilsonCI } from '../../lib/stats';
 import { computeBordaScores, kendallW, interpretKendallW } from '../../lib/rankingStats';
 import { wordFrequency, textLengthStats } from '../../lib/textStats';
-import { generateMethodsText, downloadTextFile } from '../../lib/methodsExport';
 import { createAnalysisScope, defaultAnalysisTimezone } from '../../lib/analysisScope';
 import { rowMatchesDemographicFilters, listStudyAreas, resolveEvaluativeMapPair } from '../../lib/mapAnnotation';
 import DemographicFilterBar from './DemographicFilterBar';
@@ -35,7 +34,7 @@ import { createResultsReport, deleteResultsReport, readResultsReport, reportStal
 import { ResultsFilterForm, ResultsFilterShell, ResultsReportCard, ResultsScopeChips, ResultsToolbar, ResultsViewTabs } from './ResultsWorkbenchChrome';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { buildResponsesWideCsv, downloadResponsesWideCsv } from '../../lib/responsesWideExport';
-import { downloadQuestionExportZip, downloadResultsExportZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
+import { downloadQuestionExportZip, downloadResultsExportZip, downloadSiteResultsZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
 import { DensityHistogramChart, DescriptiveStatsLine, SemanticProfileChart, WordFrequencyChart } from './analysisCharts';
 import { getPresetSkillAnalysis } from './skillAnalysis';
 import { TrueSkillMuChart, TrueSkillTable, TrueSkillBoardStack, TRUESKILL_SORT_COLUMNS, RANKING_EXTRA_COLUMNS } from './trueSkillAnalysisUi';
@@ -3062,6 +3061,50 @@ export default function ResultsAnalysis({
     };
   }, [heavyQuestionPrep, allQuestions, filteredResponses, answerableNumberByName, surveyConfig]);
   const readyQuestionCards = heavyQuestionPrep ? preparedCards : questionCardProps;
+  const exportBlocked = exporting || loading || !filteredResponses.length;
+  // Two choices only: the answers table, or everything in one ZIP. An uploaded
+  // SP-Scheme page is not analysed, so it gets a single ZIP of its answers.
+  const exportItems = siteMatch ? [{
+    id: 'site',
+    label: t.resultsExportSiteAnswers,
+    disabled: exportBlocked,
+    onClick: () => runExport(() => downloadSiteResultsZip({
+      project: currentProject,
+      filteredResponses,
+      wideCsv: buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)
+    }))
+  }] : [{
+    id: 'csv',
+    label: t.resultsExportTable,
+    disabled: exportBlocked,
+    onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))
+  }, {
+    id: 'bundle',
+    label: t.resultsExportBundle,
+    disabled: exportBlocked || !surveyConfig,
+    onClick: () => runExport(() => {
+      const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
+      downloadResultsExportZip({
+        project: currentProject,
+        surveyConfig,
+        questions: allQuestions,
+        filteredResponses,
+        dateFilteredResponses,
+        excludeFlagged,
+        wideCsv,
+        report: savedReport || null,
+        filters: {
+          date_from: dateFrom || null,
+          date_to: dateTo || null,
+          session_id: sessionFilter || null,
+          survey_revision: revisionFilter || null,
+          include_practice: includePractice,
+          exclude_flagged: excludeFlagged,
+          data_source: dataSource
+        }
+      });
+    })
+  }];
   return <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
       <AdminPageHeader icon={<Assessment />} title={t.resultsTitle} description={t.resultsDescription} />
@@ -3070,65 +3113,7 @@ export default function ResultsAnalysis({
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
         </IconButton>
-      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={handleAnalyze} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={[{
-        id: 'report',
-        label: t.resultsExportReport,
-        disabled: !savedReport,
-        onClick: () => downloadTextFile(JSON.stringify(savedReport, null, 2), `results_report_${currentProject?.id || 'survey'}.json`)
-      }, {
-        id: 'summary',
-        label: t.resultsExportSummary,
-        disabled: exporting || loading || !filteredResponses.length,
-        onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))
-      }, {
-        id: 'raw',
-        label: t.resultsExportRaw,
-        disabled: exporting || loading || !filteredResponses.length,
-        onClick: () => runExport(() => downloadResponsesWideCsv(filteredResponses, allQuestions, surveyConfig))
-      }, {
-        id: 'bundle',
-        label: t.resultsExportBundle,
-        disabled: exporting || loading || !filteredResponses.length || !surveyConfig,
-        onClick: () => runExport(() => {
-          const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
-          downloadResultsExportZip({
-            project: currentProject,
-            surveyConfig,
-            questions: allQuestions,
-            filteredResponses,
-            dateFilteredResponses,
-            excludeFlagged,
-            wideCsv,
-            filters: {
-              date_from: dateFrom || null,
-              date_to: dateTo || null,
-              session_id: sessionFilter || null,
-              survey_revision: revisionFilter || null,
-              include_practice: includePractice,
-              exclude_flagged: excludeFlagged,
-              data_source: dataSource
-            }
-          });
-        })
-      }, {
-        id: 'methods',
-        label: t.resultsExportMethods,
-        disabled: exporting || loading || !filteredResponses.length || !surveyConfig,
-        onClick: () => runExport(() => {
-          const {
-            methodsText,
-            bibtex
-          } = generateMethodsText({
-            project: currentProject,
-            surveyConfig,
-            responses: dateFilteredResponses,
-            templateMeta: currentProject?.templateMeta || null,
-            excludeFlagged
-          });
-          downloadTextFile(methodsText, `methods_${currentProject?.id || 'survey'}.txt`);
-          if (bibtex) downloadTextFile(bibtex, `references_${currentProject?.id || 'survey'}.bib`);
-        })
-      }]} />
+      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={handleAnalyze} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={exportItems} exportHelp={siteMatch ? t.resultsExportSiteHelp : undefined} />
       <Paper variant="outlined" sx={{
         p: {
           xs: 1.5,
