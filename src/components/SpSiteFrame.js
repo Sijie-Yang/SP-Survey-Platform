@@ -14,6 +14,8 @@ export default function SpSiteFrame({
   onAnswer,
   onComplete,
   onProblem,
+  onCapture,
+  media = null,
   title = 'Survey',
   allowedHosts = [],
   style,
@@ -21,14 +23,14 @@ export default function SpSiteFrame({
   const frameRef = useRef(null);
   const answersRef = useRef({ ...initialAnswers });
   const latest = useRef({});
-  latest.current = { questions, survey, onAnswer, onComplete, onProblem };
+  latest.current = { questions, survey, onAnswer, onComplete, onProblem, onCapture, media };
   // Questions and answers are embedded as boot data so the page can read them
   // synchronously; the key keeps the iframe from reloading on equal props.
-  const bootKey = JSON.stringify({ questions, survey, answers: initialAnswers, allowedHosts });
+  const bootKey = JSON.stringify({ questions, survey, answers: initialAnswers, allowedHosts, media });
   const srcDoc = useMemo(() => {
     const boot = JSON.parse(bootKey);
     return prepareSiteDocument(html, {
-      boot: { questions: boot.questions || [], survey: boot.survey || {}, answers: boot.answers || {} },
+      boot: { questions: boot.questions || [], survey: boot.survey || {}, answers: boot.answers || {}, media: boot.media || {} },
       allowedHosts: boot.allowedHosts,
     });
   }, [html, bootKey]);
@@ -46,7 +48,12 @@ export default function SpSiteFrame({
           questions: latest.current.questions || [],
           survey: latest.current.survey || {},
           answers: answersRef.current,
+          media: latest.current.media || {},
         });
+        return;
+      }
+      if (data.type === 'capture') {
+        latest.current.onCapture?.(data.request || {});
         return;
       }
       if (data.type === 'problem') {
@@ -56,7 +63,7 @@ export default function SpSiteFrame({
       if (data.type === 'answer') {
         const question = byName().get(data.name);
         const result = question
-          ? applySiteAnswer(question, answersRef.current[data.name], data.value, { trial: data.trial })
+          ? applySiteAnswer(question, answersRef.current[data.name], data.value, { trial: data.trial, shown: data.shown, key: data.key }, latest.current.media)
           : { ok: false, reason: `Unknown question "${data.name}"` };
         if (result.ok) {
           if (result.stored == null) delete answersRef.current[data.name];

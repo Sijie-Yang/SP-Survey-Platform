@@ -10,9 +10,26 @@
 
 import { buildConvertReference, SP_SCHEME_FORMAT, SP_SCHEME_VERSION, validateSpSchemePackage } from './spScheme';
 import { externalHostsIn, normalizeAllowedHosts, stripSitePreviewShim } from './spSite';
-import { smokeQuestions } from './spSiteSmoke';
+import { smokeMedia, smokeQuestions } from './spSiteSmoke';
 
 export const CONVERT_MAX_HTML_CHARS = 200000;
+
+/**
+ * The page as it is, with no questions declared: the platform keeps every
+ * request it sends and the researcher analyses the export. Used when the
+ * model's conversion cannot be made to pass, and offered as a choice.
+ */
+export function rawConversionResult(result = null) {
+  return {
+    survey: { pages: [], mediaFolders: (result?.mediaGroups || []).map((g) => g.folder).filter(Boolean) },
+    adapterScript: '',
+    replacements: [],
+    externalHosts: result?.externalHosts || [],
+    originalImages: result?.originalImages || [],
+    mediaGroups: result?.mediaGroups || [],
+    notes: ['Imported as it is: no questions declared, the platform records the requests the page sends and does not analyse them.'],
+  };
+}
 export const CONVERT_FIX_ROUNDS = 2;
 
 const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=\s]{200,}/gi;
@@ -90,9 +107,10 @@ export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles
   const pkg = { format: SP_SCHEME_FORMAT, spScheme: SP_SCHEME_VERSION, survey };
   html = insertAfterHeadOpen(html, `\n<script type="application/json" id="sp-scheme">\n${escapeJsonForScript(pkg)}\n</script>\n`);
   const adapter = String(result?.adapterScript || '').trim();
+  const declared = (survey?.pages || []).some((page) => (page?.elements || []).length);
   if (adapter) {
     html = insertBeforeBodyClose(html, `\n<script data-sp-adapter>\n${escapeScriptText(adapter)}\n</script>\n`);
-  } else {
+  } else if (declared) {
     problems.push('adapterScript is empty: the page must record answers with SPSite.answer and finish with SPSite.complete().');
   }
   return { html: restoreDataUris(html, tokens), pkg, problems, mediaPlan };
@@ -165,6 +183,14 @@ function eachElement(survey, fn) {
 /** Point questions at the uploaded folders; report folders that will be empty or too small. */
 function linkQuestionFolders(survey, plan) {
   const problems = [];
+  if (survey && Array.isArray(survey.mediaFolders)) {
+    survey.mediaFolders = survey.mediaFolders.map((folder) => {
+      const rel = String(folder || '').replace(/^\/+|\/+$/g, '');
+      const hit = plan.folders.get(rel);
+      if (!hit) problems.push(`survey.mediaFolders "${folder}" has no files; use one of: ${[...plan.folders.keys()].join(', ')}.`);
+      return hit ? hit.full : folder;
+    });
+  }
   eachElement(survey, (el) => {
     if (!Array.isArray(el.mediaFolders) || !el.mediaFolders.length) return;
     let available = 0;
@@ -270,6 +296,7 @@ export async function convertSurveyHtml(originalHtml, {
       // eslint-disable-next-line no-await-in-loop
       const run = await smokeTest(applied.html, {
         questions: smokeQuestions(applied.pkg?.survey, applied.mediaPlan),
+        media: smokeMedia(applied.pkg?.survey, applied.mediaPlan),
         allowedHosts: hosts.map((h) => h.host),
       });
       (run?.problems || []).forEach((p) => problems.push(`When the page loads: ${p}`));
@@ -278,5 +305,14 @@ export async function convertSurveyHtml(originalHtml, {
     previous = result;
     feedback = problems.slice(0, 30);
   }
-  return { ...last, ok: false };
+  // Nothing the model produced passes: offer the page as it is (raw records).
+  const rawResult = rawConversionResult(last?.result);
+  const raw = applyConversion(tokenized.html, rawResult, tokenized.tokens, { mediaFiles, mediaBase });
+  const rawReport = validateSpSchemePackage(raw.pkg, { siteHtml: raw.html, allowedHosts: last.hosts.map((h) => h.host) });
+  const rawProblems = [...raw.problems, ...rawReport.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
+  return {
+    ...last,
+    ok: false,
+    raw: rawProblems.length ? null : { html: raw.html, pkg: raw.pkg, mediaPlan: raw.mediaPlan, report: rawReport, result: rawResult },
+  };
 }

@@ -28,6 +28,7 @@ import {
   externalHostsIn,
   extractEmbeddedScheme,
   normalizeAllowedHosts,
+  siteMatchLevel,
   stripSitePreviewShim,
   utf8Bytes,
 } from './spSite';
@@ -135,12 +136,28 @@ export const SP_SITE_PREVIEW_SHIM = `${SITE_SHIM_START}
     getSurvey: function () { return survey; },
     getAnswers: function () { return answers; },
     allowedHosts: [],
+    getMedia: function (folder) {
+      // On the platform: the files of a survey-level mediaFolders entry. The preview has none.
+      var all = (survey && survey.mediaFolders) || [];
+      if (folder === undefined) { var out = {}; all.forEach(function (f) { out[f] = []; }); return out; }
+      console.warn('[SPSite preview] getMedia(' + folder + '): the preview has no media library; the platform fills this in');
+      return [];
+    },
     onSubmit: function () { /* the platform hands intercepted result posts here */ },
     onRequest: function () { /* the platform lets the page answer its own requests here */ },
     answer: function (name, value, options) {
       var q = find(name);
       if (!q) { console.warn('[SPSite preview] unknown question', name); return done({ ok: false, error: 'Unknown question "' + name + '"' }); }
-      if (q.trialCount > 1) {
+      var key = options && options.key, shown = options && options.shown;
+      if (key != null || (shown != null && !(q.trialCount > 1 && options.trial != null))) {
+        // Page-drawn media: one record per item, replaced when the same key comes again.
+        var rec = answers[name] && answers[name].trials ? answers[name] : { trials: [] };
+        var list = [].concat(shown == null ? [] : shown).map(String);
+        var at = key == null ? -1 : rec.trials.findIndex(function (x) { return x.key === String(key); });
+        if (value == null) { if (at >= 0) rec.trials.splice(at, 1); }
+        else { var e = { value: value, shown_images: list, shown_media_ids: list }; if (key != null) e.key = String(key); if (at >= 0) rec.trials[at] = e; else rec.trials.push(e); }
+        if (rec.trials.length) answers[name] = rec; else delete answers[name];
+      } else if (q.trialCount > 1) {
         var t = options && options.trial;
         if (typeof t !== 'number' || t < 0 || t >= q.trialCount) return done({ ok: false, error: name + ' repeats ' + q.trialCount + ' times: pass { trial: 0…' + (q.trialCount - 1) + ' }' });
         var cur = answers[name] || { trials: [] };
@@ -410,10 +427,15 @@ Put this block inside \`<head>\`, before the preview shim:
 - Start with a \`consent\` question when the study collects data from people, and mark questions the participant must answer with \`"isRequired": true\`.
 - Do not include API keys, tokens, Supabase settings or any credential.
 
-## 2. Stimuli and randomisation (platform-owned)
+## 2. Stimuli and randomisation
 
-Images, videos and audio come from the researcher's project media pool. The platform draws them for each participant, records exactly what was shown, and passes them to your page as \`question.media\` (or \`question.trials[i].media\`). Show only these; placeholders exist only in your preview.
+Images, videos and audio come from the researcher's project media pool; you never invent or hard-code media URLs. Two ways to draw them, mixable per question:
 
+**A. Platform draws (default when you design the page from scratch).** The platform draws the files for each participant, records exactly what was shown, and passes them to your page as \`question.media\` (or \`question.trials[i].media\`). Show only these; placeholders exist only in your preview.
+
+**B. Your page draws (default when a page already has its own randomisation).** Declare the folders at the survey level, \`"mediaFolders": ["task_a", "task_b"]\`, and read them with \`SPSite.getMedia('task_a')\` → \`[{ url, name, type }]\` (the whole folder). Keep the page's own logic for sampling, grouping, pairing and ordering, and record each answer with \`SPSite.answer(name, value, { key, shown })\`: \`shown\` lists the file names shown for that answer and \`key\` (for example the image id) makes a later answer replace an earlier one for the same item. The platform then records what was shown exactly like in A.
+
+Settings for A:
 - Default for every media question: \`"imageSelectionMode": "huggingface_random", "randomImageSelection": true, "excludePreviouslyUsedImages": true\` and \`"choices": []\`.
 - \`imageCount\` = how many files are drawn per presentation. \`trialCount\` = how many rounds the question repeats, each with a fresh draw; each round is recorded separately, so loop over \`question.trials\` in your page rather than declaring many similar questions.
 - \`mediaAssignmentMode\`: \`individual\` (random files, default), \`set\` (one whole folder tagged set; imageCount must equal the folder size) or \`category\` (folders tagged category). \`mediaFolders\` optionally limits eligible folders.
@@ -427,6 +449,8 @@ ${rules.map((rule) => `- ${rule}`).join('\n')}
 ## 3. Native question types
 
 ${questionCatalogLines()}
+
+Use a native type whenever the answer fits its shape: the researcher then gets the platform's analysis. When a page records something no native type fits (its own composite record, a trace, a free structure), declare it with \`"type": "custom"\`: the value is any JSON (≤ 32 KB), stored and exported as is, never analysed — the researcher is told so in the Builder and on the Results page. Never force a value into a native type it does not fit.
 
 Answer value for each kind (what you pass to \`SPSite.answer\`):
 
@@ -447,6 +471,8 @@ SPSite.getQuestion('safety_duel');            // one question object
 SPSite.answer('rate_scene', 5);                // returns a Promise of { ok, error }
 SPSite.answer('safety_duel', 'image_1', { trial: 2 });  // repeated question: round index 0…trialCount-1
 SPSite.answer('rate_scene', null);             // clear an answer
+SPSite.getMedia('task_a');                     // files of a survey-level mediaFolders entry: [{ url, name, type }]
+SPSite.answer('task_a', 2, { key: 'IMG0279', shown: ['IMG0279.jpg'] });  // page-drawn media: one record per item
 SPSite.complete();                             // Promise of { ok, missing, error }
 \`\`\`
 
@@ -483,7 +509,8 @@ ${EXAMPLE_SITE_HTML.trim()}
 2. index.html contains the \`<script type="application/json" id="sp-scheme">\` block with \`format\`, \`spScheme\`, \`survey.pages\`, and the preview shim right after it.
 3. Every recorded answer has a declared question with a native type; names are unique; required questions have \`isRequired: true\`.
 4. No media URLs in the JSON or the page; every image or clip participants judge comes from \`question.media\` / \`question.trials[i].media\`.
-5. Every answer goes through \`SPSite.answer(name, value)\` (with \`{ trial }\` for repeated questions) in the shape of its kind, and the end calls \`SPSite.complete()\`.
+5. Every answer goes through \`SPSite.answer(name, value)\` (with \`{ trial }\` for platform-drawn rounds, or \`{ key, shown }\` when the page draws media itself) in the shape of its kind, and the end calls \`SPSite.complete()\`.
+6. Questions the platform cannot analyse are declared as \`custom\`, not squeezed into a native type.
 6. No network calls, external scripts outside the allowed hosts, or credentials.
 `;
 }
@@ -711,7 +738,12 @@ function issue(list, path, message) {
 }
 
 /** Short stable id for an imported site, recorded with every response. */
-export function siteId(html) {
+export /** Short relative folder names of letters, digits, _ - and /. */
+function normalizeMediaFolders(list) {
+  return [...new Set((Array.isArray(list) ? list : []).map((f) => String(f || '').trim().replace(/^\/+|\/+$/g, '')).filter((f) => /^[\w-]+(\/[\w-]+)*$/.test(f)))].slice(0, 50);
+}
+
+function siteId(html) {
   let a = 0x811c9dc5;
   let b = 0x01000193;
   for (let i = 0; i < html.length; i += 1) {
@@ -812,19 +844,21 @@ export function validateSpSchemePackage(pkg, { siteHtml = null, allowedHosts = [
       .filter(({ element }) => element.name && !['display', 'unsupported'].includes(answerKindOf(element)))
       .map(({ element }) => element.name);
     const hosts = normalizeAllowedHosts(allowedHosts);
-    const checked = checkSiteHtml(html, answerable, { allowedHosts: hosts });
+    const checked = checkSiteHtml(html, answerable, { allowedHosts: hosts, raw: answerable.length === 0 });
     checked.errors.forEach((message) => issue(errors, 'index.html', message));
     checked.warnings.forEach((message) => issue(warnings, 'index.html', message));
     if (pkg.__embeddedNames && pkg.__embeddedNames.join(',') !== [...names].sort().join(',')) {
       issue(warnings, 'index.html', 'The questions embedded in index.html differ from sp-scheme.json; sp-scheme.json is used.');
     }
-    site = { html, bytes: utf8Bytes(html), id: siteId(html), allowedHosts: hosts, externalHosts: externalHostsIn(html) };
+    const mediaFolders = normalizeMediaFolders(survey.mediaFolders);
+    site = { html, bytes: utf8Bytes(html), id: siteId(html), allowedHosts: hosts, externalHosts: externalHostsIn(html), mediaFolders, completeOn: typeof survey.completeOn === 'string' ? survey.completeOn.slice(0, 200) : null };
   } else {
     issue(warnings, 'index.html', 'No index.html in the upload, so participants will see the platform\'s standard question style. Upload the page the model built to use its interface.');
   }
 
   const types = {};
   questions.forEach(({ element }) => { types[element.type] = (types[element.type] || 0) + 1; });
+  const match = siteMatchLevel({ pages: normalized.pages });
   return {
     ok: errors.length === 0,
     errors,
@@ -838,6 +872,11 @@ export function validateSpSchemePackage(pkg, { siteHtml = null, allowedHosts = [
       hasSite: Boolean(site),
       siteBytes: site?.bytes || 0,
       types,
+      // full: every question a platform type; partial / custom: some or all
+      // recorded as is; none: nothing declared, the page's requests are kept raw.
+      match: match.level,
+      nativeCount: match.native,
+      customCount: match.custom,
     },
   };
 }
@@ -859,10 +898,17 @@ export function applySpSchemePackage(report, { baseConfig = {} } = {}) {
     theme: survey.theme || baseConfig.theme,
     spScheme: { version: SP_SCHEME_VERSION, importedAt },
   };
+  // Site-level settings live on spSite, not on the survey.
+  delete next.mediaFolders;
+  delete next.completeOn;
   if (report.site) {
     next.spSite = { html: report.site.html, id: report.site.id, version: SP_SITE_VERSION, importedAt };
     // Domains the researcher allowed this page to reach; recorded with the survey.
     if (report.site.allowedHosts?.length) next.spSite.allowedHosts = [...report.site.allowedHosts];
+    // Folders the page draws from itself (SPSite.getMedia) and, with no questions
+    // declared, which of its requests means it is finished.
+    if (report.site.mediaFolders?.length) next.spSite.mediaFolders = [...report.site.mediaFolders];
+    if (report.site.completeOn) next.spSite.completeOn = report.site.completeOn;
   } else {
     delete next.spSite;
   }

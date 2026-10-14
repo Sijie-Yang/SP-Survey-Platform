@@ -120,5 +120,5 @@ test('imagerating labels become the answer options of a one-image rating', () =>
   const [q] = buildSiteQuestions({ pages: [{ name: 'p', elements: [
     { type: 'imagerating', name: 'state', imageCount: 1, rateMin: 0, rateMax: 2, rateLabels: ['Clean', 'Minor issues', 'Vacant'] },
   ] }] });
-  expect(q.rateValues).toEqual([{ value: 0, text: 'Clean' }, { value: 1, text: 'Minor issues' }, { value: 2, text: 'Vacant' }]);
+  expect(q.rateValues).toEqual([{ value: '0', text: 'Clean' }, { value: '1', text: 'Minor issues' }, { value: '2', text: 'Vacant' }]);
 });

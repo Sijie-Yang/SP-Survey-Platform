@@ -54,3 +54,31 @@ test('a page that fails when it loads goes back to the model', async () => {
   expect(request.mock.calls[1][0].feedback).toEqual(['When the page loads: GET /api/state was still waiting after 9 s']);
   expect(smokeTest.mock.calls[0][1].questions.map((q) => q.name)).toContain('safety');
 });
+
+test('when no round passes, the page is offered as it is (raw records)', async () => {
+  const broken = { ...LEGACY_SURVEY_CONVERSION, adapterScript: '' };
+  const request = jest.fn(async () => ({ success: true, result: broken }));
+  const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request });
+  expect(out.ok).toBe(false);
+  expect(out.raw).toBeTruthy();
+  expect(out.raw.pkg.survey.pages).toEqual([]);
+  expect(out.raw.report.ok).toBe(true);
+  expect(out.raw.report.summary.match).toBe('none');
+  expect(out.raw.html).toContain('id="sp-scheme"');
+  expect(out.raw.html).not.toContain('data-sp-adapter');
+});
+
+test('survey-level mediaFolders are pointed at the uploaded folders', () => {
+  const result = {
+    survey: { pages: [], mediaFolders: ['task_a'] },
+    adapterScript: '',
+    replacements: [],
+    mediaGroups: [{ folder: 'task_a', files: ['img/1.jpg'] }],
+  };
+  const out = applyConversion('<html><head></head><body></body></html>', result, [], {
+    mediaFiles: [{ path: 'img/1.jpg', bytes: new Uint8Array([1]) }],
+    mediaBase: 'sp-scheme/study',
+  });
+  expect(out.problems).toEqual([]);
+  expect(out.pkg.survey.mediaFolders).toEqual(['sp-scheme/study/task_a']);
+});

@@ -1,4 +1,4 @@
-import { smokeQuestions, smokeTestSite } from './spSiteSmoke';
+import { smokeMedia, smokeQuestions, smokeTestSite } from './spSiteSmoke';
 
 test('placeholder media are named after the planned files of each folder', () => {
   const survey = { pages: [{ name: 'p1', elements: [
@@ -15,4 +15,11 @@ test('placeholder media are named after the planned files of each folder', () =>
 
 test('does not run without a real browser', async () => {
   await expect(smokeTestSite('<html></html>')).resolves.toEqual({ ran: false, problems: [] });
+});
+
+test('placeholder media for the folders a page draws itself', () => {
+  const plan = { files: [{ path: 'img/a/1.jpg', folder: 'sp/x/a' }] };
+  const media = smokeMedia({ mediaFolders: ['sp/x/a', 'sp/x/b'] }, plan);
+  expect(media['sp/x/a'].map((m) => m.name)).toEqual(['1.jpg']);
+  expect(media['sp/x/b']).toHaveLength(3);
 });

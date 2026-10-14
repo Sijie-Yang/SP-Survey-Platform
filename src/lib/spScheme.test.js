@@ -162,3 +162,25 @@ test('an imagepicker that shows one image is rejected with the rating type to us
   ] }] } });
   expect(report.errors.map((e) => e.message).join(' ')).toMatch(/imagerating with imageCount 1/);
 });
+
+test('a page with no questions is accepted as a raw record and keeps its folders', () => {
+  const pkg = { format: 'sp-scheme', spScheme: '2.0', survey: { pages: [], mediaFolders: ['sp/a', '../bad'], completeOn: 'finish$' } };
+  const report = validateSpSchemePackage(pkg, { siteHtml: '<html><body><script>fetch("/api/save")</script></body></html>' });
+  expect(report.ok).toBe(true);
+  expect(report.summary.match).toBe('none');
+  expect(report.warnings.map((w) => w.message).join(' ')).toMatch(/records the requests/);
+  const config = applySpSchemePackage(report, {});
+  expect(config.spSite.mediaFolders).toEqual(['sp/a']);
+  expect(config.spSite.completeOn).toBe('finish$');
+  expect(config.mediaFolders).toBeUndefined();
+});
+
+test('custom questions count as recorded, not analysed', () => {
+  const pkg = { format: 'sp-scheme', spScheme: '2.0', survey: { pages: [{ name: 'p', elements: [
+    { type: 'imagerating', name: 'a', imageCount: 1 }, { type: 'custom', name: 'b' },
+  ] }] } };
+  const html = '<html><body><script>SPSite.onReady(function(){}); SPSite.answer("a", 1); SPSite.complete();</script></body></html>';
+  const report = validateSpSchemePackage(pkg, { siteHtml: html });
+  expect(report.ok).toBe(true);
+  expect(report.summary).toMatchObject({ match: 'partial', nativeCount: 1, customCount: 1 });
+});

@@ -44,8 +44,14 @@ export function answerKindOf(element = {}) {
   if (MATRIX_TYPES.has(type)) return 'matrix';
   if (ALLOCATION_TYPES.has(type)) return 'allocation';
   if (type === 'imageannotation') return 'annotation';
+  if (type === 'custom') return 'custom';
   return 'unsupported';
 }
+
+/** Largest JSON value a custom question may record (bytes). */
+export const CUSTOM_ANSWER_MAX_BYTES = 32 * 1024;
+/** Most records one custom question may hold (one per answer with { key } or { shown }). */
+export const CUSTOM_ANSWER_MAX_RECORDS = 1000;
 
 export const ANSWER_SHAPES = {
   text: 'a string',
@@ -59,6 +65,7 @@ export const ANSWER_SHAPES = {
   matrix: 'an object { <row value>: <column value> } for every row',
   allocation: 'an object { <choice value>: points } summing to budget',
   annotation: 'an object { shapes: [{ tool, label, points: [{ x, y }] }] } with x/y normalised 0–1',
+  custom: 'any JSON (≤ 32 KB); the platform stores it as is and does not analyse it',
 };
 
 function localText(value, lang) {
@@ -176,7 +183,7 @@ export function buildSiteQuestions(surveyJson, { language } = {}) {
       else if (Array.isArray(element.rateLabels) && element.rateLabels.length) {
         // One label per scale point (rateMin, rateMin + step, …); the answer stays numeric.
         const step = Number(element.rateStep) || 1;
-        q.rateValues = element.rateLabels.map((label, i) => ({ value: q.rateMin + i * step, text: localText(label, lang) }));
+        q.rateValues = element.rateLabels.map((label, i) => ({ value: String(q.rateMin + i * step), text: localText(label, lang) }));
       }
       if (element.minRateDescription) q.minLabel = localText(element.minRateDescription, lang);
       if (element.maxRateDescription) q.maxLabel = localText(element.maxRateDescription, lang);
@@ -250,6 +257,14 @@ export function validateSiteAnswer(question, value, choices = question?.choices)
   const kind = question?.kind;
   const allowed = (choices || []).map((c) => c.value);
   switch (kind) {
+    case 'custom': {
+      if (value === undefined || typeof value === 'function') return fail('Expected a JSON value');
+      let text;
+      try { text = JSON.stringify(value); } catch { return fail('Expected a JSON value'); }
+      if (text === undefined) return fail('Expected a JSON value');
+      if (utf8Bytes(text) > CUSTOM_ANSWER_MAX_BYTES) return fail(`Value larger than ${CUSTOM_ANSWER_MAX_BYTES / 1024} KB`);
+      return { ok: true, value: JSON.parse(text) };
+    }
     case 'text': {
       const text = typeof value === 'string' ? value : (value == null ? '' : String(value));
       if (question.maxLength && text.length > question.maxLength) return fail(`Text longer than ${question.maxLength} characters`);
@@ -372,13 +387,78 @@ function emptyTrials(n) {
   return { trials: Array.from({ length: n }, () => ({ value: null, shown_images: [], shown_media_ids: [] })) };
 }
 
+/** Folders an SP-Scheme page may draw from itself (SPSite.getMedia). */
+export function siteMediaFolderNames(config = {}) {
+  const names = new Set((config.spSite?.mediaFolders || []).map((f) => String(f || '').replace(/^\/+|\/+$/g, '')).filter(Boolean));
+  flatElements(config.pages).forEach(({ element }) => (element.mediaFolders || []).forEach((f) => {
+    const name = String(f || '').replace(/^\/+|\/+$/g, '');
+    if (name) names.add(name);
+  }));
+  return [...names];
+}
+
+export const SITE_MEDIA_MAX_ITEMS = 2000;
+
+/**
+ * The project's media grouped by folder for the page: only the folders the
+ * survey names (recursively), so a large library is not sent whole.
+ */
+export function siteMediaFolders(pool = [], config = {}) {
+  const wanted = siteMediaFolderNames(config);
+  const out = {};
+  let count = 0;
+  (Array.isArray(pool) ? pool : []).forEach((item) => {
+    if (!item?.url) return;
+    const folder = String(item.logicalFolder || item.folder || '').replace(/^\/+|\/+$/g, '');
+    const hit = wanted.find((w) => folder === w || folder.startsWith(`${w}/`));
+    if (!hit || count >= SITE_MEDIA_MAX_ITEMS) return;
+    count += 1;
+    (out[hit] = out[hit] || []).push({ url: item.url, name: item.name || String(item.url).split('?')[0].split('/').pop(), type: item.type || 'image', folder });
+  });
+  return out;
+}
+
+/**
+ * How far an SP-Scheme site matches the platform: every question a native
+ * type (full), some recorded as is (partial), or nothing declared (none: the
+ * page's requests are kept raw).
+ */
+export function siteMatchLevel(config = {}) {
+  const elements = flatElements(config.pages).map(({ element }) => element).filter((el) => el.name && !DISPLAY_TYPES.has(el.type) && !(el.type === 'html' && /_placeholder$/.test(el.name)));
+  const custom = elements.filter((el) => el.type === 'custom').length;
+  const native = elements.length - custom;
+  const level = !elements.length ? 'none' : (custom ? (native ? 'partial' : 'custom') : 'full');
+  return { level, native, custom, total: elements.length };
+}
+
 /**
  * Validate an answer from the site and merge it into the stored value.
  * `value === null` clears the answer (or the trial).
  * @returns {{ ok: true, stored: any } | { ok: false, reason: string }}
  */
-export function applySiteAnswer(question, previous, value, { trial } = {}) {
+export function applySiteAnswer(question, previous, value, { trial, shown, key } = {}, mediaIndex = null) {
   if (!question) return fail('Unknown question');
+  const shownMedia = resolveShown(shown, question, mediaIndex);
+  if (key != null || (shown != null && !(question.trialCount > 1 && trial != null))) {
+    // A page that runs its own loop (its own media draw) records one entry per
+    // answer: { key } updates an earlier entry (same image, same screen),
+    // otherwise entries are appended. Values still follow the question's type.
+    const next = isTrialsAnswer(previous) ? { trials: previous.trials.map((t) => ({ ...t })) } : { trials: [] };
+    const id = key == null ? null : String(key);
+    const at = id == null ? -1 : next.trials.findIndex((t) => t.key === id);
+    if (value == null) {
+      if (at >= 0) next.trials.splice(at, 1);
+      return { ok: true, stored: next.trials.length ? next : null };
+    }
+    const checked = validateSiteAnswer(question, value);
+    if (!checked.ok) return fail(`${question.name}: ${checked.reason}`);
+    const entry = { value: checked.value, shown_images: mediaSetToShownImages(shownMedia), shown_media_ids: mediaSetToShownIds(shownMedia) };
+    if (id != null) entry.key = id;
+    if (at >= 0) next.trials[at] = entry;
+    else if (next.trials.length >= CUSTOM_ANSWER_MAX_RECORDS) return fail(`${question.name}: more than ${CUSTOM_ANSWER_MAX_RECORDS} records`);
+    else next.trials.push(entry);
+    return { ok: true, stored: next };
+  }
   if (question.trialCount > 1) {
     const index = Number(trial);
     if (!Number.isInteger(index) || index < 0 || index >= question.trialCount) {
@@ -394,10 +474,11 @@ export function applySiteAnswer(question, previous, value, { trial } = {}) {
     }
     const checked = validateSiteAnswer(question, value, slot.choices);
     if (!checked.ok) return fail(`${question.name} trial ${index}: ${checked.reason}`);
+    const media = shownMedia.length ? shownMedia : (slot.media || []);
     next.trials[index] = {
       value: checked.value,
-      shown_images: mediaSetToShownImages(slot.media || []),
-      shown_media_ids: mediaSetToShownIds(slot.media || []),
+      shown_images: mediaSetToShownImages(media),
+      shown_media_ids: mediaSetToShownIds(media),
     };
     return { ok: true, stored: next };
   }
@@ -405,6 +486,26 @@ export function applySiteAnswer(question, previous, value, { trial } = {}) {
   const checked = validateSiteAnswer(question, value);
   if (!checked.ok) return fail(`${question.name}: ${checked.reason}`);
   return { ok: true, stored: checked.value };
+}
+
+/**
+ * Media the page says it showed, as media items. Names (or URLs) are looked up
+ * in the drawn media and the folders the page may draw from; unknown names are
+ * kept as names so the record still says what was shown.
+ */
+function resolveShown(shown, question, mediaIndex) {
+  if (shown == null) return [];
+  const list = (Array.isArray(shown) ? shown : [shown]).slice(0, 50);
+  const known = new Map();
+  const add = (m) => { if (m?.url) { known.set(String(m.url), m); if (m.name) known.set(String(m.name).toLowerCase(), m); } };
+  (question?.media || []).forEach(add);
+  (question?.trials || []).forEach((t) => (t.media || []).forEach(add));
+  if (mediaIndex) Object.values(mediaIndex).forEach((items) => (items || []).forEach(add));
+  return list.map((item) => {
+    const text = typeof item === 'string' ? item : (item?.url || item?.name || '');
+    if (!text) return null;
+    return known.get(text) || known.get(text.toLowerCase()) || { name: text.split('?')[0].split('/').pop() };
+  }).filter(Boolean);
 }
 
 function answered(value) {
@@ -440,7 +541,7 @@ export const SP_SITE_SCRIPT_HOSTS = CDN_HOSTS;
 export const SP_SITE_SDK_SOURCE = `
 (function () {
   var boot = window.__SP_SITE_BOOT__ || null;
-  var questions = [], survey = {}, answers = {}, ready = false, waiters = [], pending = {}, seq = 0;
+  var questions = [], survey = {}, answers = {}, media = {}, ready = false, waiters = [], pending = {}, seq = 0;
   var allowedHosts = (boot && boot.allowedHosts) || [];
   var submitHandlers = [], submitQueue = [];
   function post(msg) { window.parent.postMessage(Object.assign({ source: 'sp-site' }, msg), '*'); }
@@ -515,8 +616,14 @@ export const SP_SITE_SDK_SOURCE = `
     }
     return body;
   }
+  // With no onSubmit handler the platform keeps the request itself, so a page
+  // whose data the adapter could not map still loses nothing.
   function dispatch(item) {
-    if (!submitHandlers.length) { submitQueue.push(item); console.warn('[SPSite] captured a ' + item.method + ' to ' + item.url + '; register SPSite.onSubmit to record it'); return; }
+    if (!submitHandlers.length) {
+      submitQueue.push(item);
+      post({ type: 'capture', request: { kind: item.kind, url: item.url, method: item.method, data: item.data } });
+      return;
+    }
     submitHandlers.forEach(function (fn) { try { fn(item); } catch (err) { console.error(err); } });
   }
   function capture(kind, url, method, body) {
@@ -656,9 +763,10 @@ export const SP_SITE_SDK_SOURCE = `
       if (!url || !name) return;
       var n = String(name).toLowerCase();
       mediaByKey[n] = url;
-      mediaByKey[n.replace(/\.[a-z0-9]+$/, '')] = url;
+      mediaByKey[n.replace(/[.][a-z0-9]+$/, '')] = url;
     }
     function addMedia(m) { if (m) add(m.url, m.name); }
+    Object.keys(media).forEach(function (folder) { (media[folder] || []).forEach(addMedia); });
     questions.forEach(function (q) {
       (q.media || []).forEach(addMedia);
       (q.trials || []).forEach(function (t) { (t.media || []).forEach(addMedia); });
@@ -719,7 +827,7 @@ export const SP_SITE_SDK_SOURCE = `
   function whenDom(fn) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn); else fn(); }
   if (boot) {
     // Questions and media are known before the page's own scripts run.
-    questions = boot.questions || []; survey = boot.survey || {}; answers = boot.answers || {};
+    questions = boot.questions || []; survey = boot.survey || {}; answers = boot.answers || {}; media = boot.media || {};
     indexMedia();
     ready = true;
     whenDom(fire);
@@ -729,7 +837,7 @@ export const SP_SITE_SDK_SOURCE = `
     if (e.source !== window.parent || !d || d.source !== 'sp-site-host') return;
     if (d.type === 'init') {
       if (ready) return;
-      questions = d.questions || []; survey = d.survey || {}; answers = d.answers || {};
+      questions = d.questions || []; survey = d.survey || {}; answers = d.answers || {}; media = d.media || {};
       indexMedia();
       ready = true;
       whenDom(fire);
@@ -750,7 +858,17 @@ export const SP_SITE_SDK_SOURCE = `
     getQuestion: function (name) { for (var i = 0; i < questions.length; i += 1) if (questions[i].name === name) return questions[i]; return null; },
     getSurvey: function () { return survey; },
     getAnswers: function () { return answers; },
-    answer: function (name, value, options) { return call('answer', { name: name, value: value === undefined ? null : value, trial: options && options.trial }); },
+    getMedia: function (folder) {
+      if (folder === undefined) { var all = {}; Object.keys(media).forEach(function (k) { all[k] = media[k].slice(); }); return all; }
+      var key = String(folder || '').replace(/^[/]+|[/]+$/g, '');
+      if (media[key]) return media[key].slice();
+      var hit = Object.keys(media).filter(function (k) { return k === key || k.slice(-(key.length + 1)) === '/' + key; })[0];
+      return hit ? media[hit].slice() : [];
+    },
+    answer: function (name, value, options) {
+      var o = options || {};
+      return call('answer', { name: name, value: value === undefined ? null : value, trial: o.trial, shown: o.shown, key: o.key });
+    },
     complete: function () { return call('complete', {}); },
     onRequest: function (fn) { requestHandlers.push(fn); },
     onSubmit: function (fn) {
@@ -846,7 +964,7 @@ export function extractEmbeddedScheme(html) {
  * Static checks on an uploaded site.
  * @returns {{ errors: string[], warnings: string[] }}
  */
-export function checkSiteHtml(html, questionNames = [], { allowedHosts = [] } = {}) {
+export function checkSiteHtml(html, questionNames = [], { allowedHosts = [], raw = false } = {}) {
   const hosts = normalizeAllowedHosts(allowedHosts);
   const errors = [];
   const warnings = [];
@@ -854,6 +972,13 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [] } = 
   const bytes = utf8Bytes(text);
   if (!/<(html|body|div|main|script)\b/i.test(text)) errors.push('index.html does not look like an HTML page.');
   if (bytes > SP_SITE_MAX_BYTES) errors.push(`index.html is ${(bytes / 1048576).toFixed(1)} MB; keep it under 3 MB (media belongs in the Media Dataset).`);
+  if (raw) {
+    // No questions declared: the platform keeps the page's own requests as they
+    // are and the participant submits from the platform's bar.
+    if (/SPSite\.answer\s*\(/.test(text)) warnings.push('index.html calls SPSite.answer but declares no questions, so those answers are not recorded; declare the questions in sp-scheme.');
+    warnings.push('No questions are declared: the platform records the requests this page sends as they are and does not analyse them.');
+    return { errors, warnings };
+  }
   if (!/SPSite\.answer\s*\(/.test(text)) errors.push('index.html never calls SPSite.answer(...), so no answers would be recorded.');
   if (!/SPSite\.complete\s*\(/.test(text)) errors.push('index.html never calls SPSite.complete(), so participants could not submit.');
   if (/SPSkill\./.test(text)) errors.push('index.html uses the old SPSkill API; use SPSite instead.');
@@ -871,8 +996,8 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [] } = 
   if (blocked.length) {
     errors.push(`Scripts must be inline or come from ${CDN_HOSTS.join(', ')} or an allowed domain: ${blocked.slice(0, 3).join(', ')}.`);
   }
-  if (!/getQuestions\s*\(|getQuestion\s*\(|spsite-ready|onReady\s*\(/.test(text)) {
-    errors.push('index.html never reads the questions from SPSite (SPSite.onReady / getQuestions), so it cannot show the media the platform drew.');
+  if (!/getQuestions\s*\(|getQuestion\s*\(|getMedia\s*\(|spsite-ready|onReady\s*\(/.test(text)) {
+    errors.push('index.html never reads the questions or media from SPSite (SPSite.onReady / getQuestions / getMedia), so it cannot show the media the platform holds.');
   }
   const unseen = questionNames.filter((name) => !text.includes(name));
   if (unseen.length && !/getQuestions\s*\(/.test(text)) {

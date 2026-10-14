@@ -193,6 +193,7 @@ export default function SurveyPreview({
   const [loading, setLoading] = useState(true);
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
   const [mediaErrors, setMediaErrors] = useState([]);
+  const [siteMediaPool, setSiteMediaPool] = useState([]);
   const sourceKey = useMemo(
     () => previewSourceKey(config, currentProject),
     [config, currentProject],
@@ -224,10 +225,11 @@ export default function SurveyPreview({
         
         let configCopy = JSON.parse(JSON.stringify(config));
         await resolveSkillQuestions(configCopy);
-        const mediaContext = surveyUsesSampledMedia(configCopy)
+        const mediaContext = surveyUsesSampledMedia(configCopy) || configCopy.spSite?.html
           ? await resolvePreviewMediaContext(currentProject || {})
           : { images: [], fromPreviewLibrary: false };
         const mediaPool = mediaContext.images;
+        if (!cancelled) setSiteMediaPool(mediaPool);
         const fromPreviewLibrary = mediaContext.fromPreviewLibrary;
         if (fromPreviewLibrary) configCopy = adaptSurveyForPreviewLibrary(configCopy, mediaPool);
         if (cancelled) return;
@@ -717,6 +719,7 @@ export default function SurveyPreview({
       <SpSitePreview
         config={processedConfig}
         spSite={config.spSite}
+        mediaPool={siteMediaPool}
         viewport={interactive ? viewport : 'desktop'}
       />
     );

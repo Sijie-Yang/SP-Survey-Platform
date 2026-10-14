@@ -46,6 +46,22 @@ export function smokeQuestions(survey, mediaPlan = null) {
   return buildSiteQuestions(config);
 }
 
+/** Placeholder files for the folders a page draws from itself (survey.mediaFolders). */
+export function smokeMedia(survey, mediaPlan = null) {
+  const byFolder = new Map();
+  (mediaPlan?.files || []).forEach((f) => {
+    const list = byFolder.get(f.folder) || [];
+    list.push(String(f.path || '').split('/').pop());
+    byFolder.set(f.folder, list);
+  });
+  const out = {};
+  (survey?.mediaFolders || []).forEach((folder) => {
+    const names = byFolder.get(folder) || Array.from({ length: 3 }, (_, i) => `stimulus_${i + 1}.jpg`);
+    out[folder] = names.map((name) => ({ url: PLACEHOLDER_IMAGE, name, type: 'image', folder }));
+  });
+  return out;
+}
+
 /**
  * Load a page the way participants get it, in a hidden sandboxed frame, and
  * report what goes wrong while it starts: script errors, failed requests, and
@@ -54,7 +70,7 @@ export function smokeQuestions(survey, mediaPlan = null) {
  * @returns {Promise<{ ran: boolean, problems: string[] }>}
  */
 export function smokeTestSite(html, {
-  questions = [], survey = {}, allowedHosts = [], waitMs = 3500, maxWaitMs = 9000,
+  questions = [], media = {}, survey = {}, allowedHosts = [], waitMs = 3500, maxWaitMs = 9000,
 } = {}) {
   if (typeof document === 'undefined' || typeof window === 'undefined' || /jsdom/i.test(navigator?.userAgent || '')) {
     return Promise.resolve({ ran: false, problems: [] });
@@ -96,7 +112,7 @@ export function smokeTestSite(html, {
       else setTimeout(check, 250);
     };
     window.addEventListener('message', onMessage);
-    frame.srcdoc = prepareSiteDocument(html, { boot: { questions, survey: { ...survey, preview: true }, answers: {} }, allowedHosts });
+    frame.srcdoc = prepareSiteDocument(html, { boot: { questions, media, survey: { ...survey, preview: true }, answers: {} }, allowedHosts });
     document.body.appendChild(frame);
     setTimeout(check, 250);
   });

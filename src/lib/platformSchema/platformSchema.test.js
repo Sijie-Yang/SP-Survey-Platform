@@ -64,8 +64,11 @@ describe('canonical platform schema', () => {
     const editorTypes = [...source.slice(start, end).matchAll(/\{\s*value:\s*'([^']+)'/g)]
       .map((match) => match[1]);
 
-    expect(QUESTION_TYPE_IDS).toEqual(editorTypes);
-    expect(new Set(QUESTION_TYPE_IDS).size).toBe(editorTypes.length);
+    // Types only an SP-Scheme page can declare are not offered in the editor.
+    const siteOnly = ['custom'];
+    const editable = QUESTION_TYPE_IDS.filter((id) => !siteOnly.includes(id));
+    expect(editable).toEqual(editorTypes);
+    expect(new Set(QUESTION_TYPE_IDS).size).toBe(QUESTION_TYPE_IDS.length);
   });
 
   test.each(QUESTION_TYPE_IDS)('%s has complete field metadata', (type) => {

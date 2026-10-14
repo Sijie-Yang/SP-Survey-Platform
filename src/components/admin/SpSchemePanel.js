@@ -279,6 +279,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         originalImages: out.result?.originalImages || [],
         mediaPlan: out.mediaPlan,
         model: out.model,
+        raw: out.raw || null,
       });
       const allHosts = withSourceHost(out.hosts, upload);
       if (upload?.sourceHost && !ticked.includes(upload.sourceHost)) ticked.push(upload.sourceHost);
@@ -291,6 +292,15 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     } finally {
       setConverting(null);
     }
+  };
+
+  // The page unchanged, with no questions: the platform records what it sends.
+  const useRawConversion = () => {
+    const raw = conversion?.raw;
+    if (!raw) return;
+    setConversion((prev) => ({ ...prev, ok: true, raw: null, usedRaw: true, problems: [], mediaPlan: raw.mediaPlan, notes: raw.result.notes || [] }));
+    setUpload((prev) => ({ ...prev, siteHtml: raw.html, pkg: raw.pkg, converted: true }));
+    revalidate(raw.pkg, raw.html, allowed);
   };
 
   // One file is read as is; several (index.html plus its config or CSV files) are
@@ -563,6 +573,16 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                   </Typography>
                 ) : null}
               </Alert>
+              {summary?.hasSite && report.ok ? (
+                <Alert severity={summary.match === 'full' ? 'success' : 'warning'} data-testid="sp-scheme-match">
+                  <Typography variant="subtitle2">
+                    {summary.match === 'full' && L(`All ${summary.nativeCount} questions use platform types: results can be analysed on the Results page.`, `全部 ${summary.nativeCount} 道题都是平台题型：结果可以在结果页分析。`)}
+                    {summary.match === 'partial' && L(`${summary.nativeCount} question(s) can be analysed; ${summary.customCount} are recorded as the page sends them (custom) and you analyse those yourself from the export.`, `${summary.nativeCount} 道题可以分析；另外 ${summary.customCount} 道题按页面自己的格式原样记录（custom），平台不分析，需要你导出后自行处理。`)}
+                    {summary.match === 'custom' && L(`All ${summary.customCount} questions are recorded as the page sends them (custom): the platform stores and exports them but does not analyse them.`, `全部 ${summary.customCount} 道题按页面自己的格式原样记录（custom）：平台只保存和导出，不做分析，需要你自行处理。`)}
+                    {summary.match === 'none' && L('No questions are declared: the platform records every request the page sends, as it is, and exports it. Nothing is analysed; you process the export yourself.', '没有声明任何题目：平台会原样记录页面发出的每个请求并导出，不做任何分析，需要你自行处理导出的数据。')}
+                  </Typography>
+                </Alert>
+              ) : null}
               {summary?.hasSite ? (
                 <Alert severity="info" icon={<Web />} data-testid="sp-scheme-site">
                   {L(`Includes the page the model built (${upload?.siteFile || 'index.html'}, ${formatKb(summary.siteBytes)}). After import, Preview and the survey link show this page.`,
@@ -573,7 +593,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                 <Alert severity={conversion.ok ? 'success' : 'warning'} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
                   {conversion.ok
                     ? L('Converted by the model: the original design is kept, and its questions and submission now go through the platform. Try it in Preview after import.', '已由模型转换：保留原设计，题目和提交改由平台记录。导入后请在预览里试一遍。')
-                    : L(`The model could not fix everything in ${conversion.rounds} rounds. You can convert again, or send the errors below to another model.`, `模型在 ${conversion.rounds} 轮内没能修完所有问题。可以再转换一次，或把下面的错误发给其他大模型。`)}
+                    : L(`The model could not fix everything in ${conversion.rounds} rounds. You can convert again, send the errors below to another model${conversion.raw ? ', or import the page as it is (the platform then only records what it sends and analyses nothing)' : ''}.`, `模型在 ${conversion.rounds} 轮内没能修完所有问题。可以再转换一次，把下面的错误发给其他大模型${conversion.raw ? '，或者按原样导入（平台只原样记录页面发出的数据，不做任何分析）' : ''}。`)}
                   {conversion.notes.length ? (
                     <Box component="ul" sx={{ m: '4px 0 0', pl: 2.5 }}>
                       {conversion.notes.map((n, i) => <Typography component="li" variant="body2" key={i}>{n}</Typography>)}
@@ -582,6 +602,11 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                   <Button size="small" startIcon={<Download />} sx={{ mt: 0.5 }} onClick={() => downloadText('index.sp-scheme.html', upload.siteHtml, 'text/html')}>
                     {L('Download converted page', '下载转换后的页面')}
                   </Button>
+                  {!conversion.ok && conversion.raw ? (
+                    <Button size="small" variant="outlined" color="warning" sx={{ mt: 0.5, ml: 1 }} data-testid="sp-scheme-use-raw" onClick={useRawConversion}>
+                      {L('Import as it is (record only)', '按原样导入（只记录，不分析）')}
+                    </Button>
+                  ) : null}
                 </Alert>
               ) : null}
               {conversion?.originalImages?.length ? (

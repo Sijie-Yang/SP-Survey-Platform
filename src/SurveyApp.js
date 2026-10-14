@@ -46,7 +46,8 @@ import {
   rehydrateTrialsAnswerStoreFromSurvey,
 } from './lib/trialNavigation';
 import { SurveyTrialNavProvider } from './contexts/SurveyTrialNavContext';
-import SpSiteSurvey from './components/SpSiteSurvey';
+import SpSiteSurvey, { SP_SITE_REQUESTS_KEY } from './components/SpSiteSurvey';
+import { siteMatchLevel } from './lib/spSite';
 import { applySurveyLocale, surveyUiStrings, resolveSurveyJsLocale, resolveSurveyUiLanguage } from './lib/surveyLocale';
 import { loadLocaleBundle } from './lib/uiLanguages';
 import {
@@ -108,6 +109,8 @@ export default function SurveyApp() {
   const [resumeDialog, setResumeDialog] = useState(null);
   const [completionMessage, setCompletionMessage] = useState('');
   const answerLanguageRef = useRef('en');
+  // The project's media library, for an SP-Scheme page that draws media itself.
+  const siteMediaPoolRef = useRef([]);
   const questionLanguageRef = useRef({});
   const repeatSessionRef = useRef(null);
   const repeatParticipantRef = useRef(null);
@@ -436,6 +439,7 @@ export default function SurveyApp() {
       try {
         const { getParticipantProject } = await import('./lib/projectManager');
         projectData = await getParticipantProject(projectId);
+        siteMediaPoolRef.current = Array.isArray(projectData?.preloadedImages) ? projectData.preloadedImages.filter(Boolean) : [];
 
       } catch (error) {
         console.error('❌ Error loading project data:', error);
@@ -1176,7 +1180,7 @@ export default function SurveyApp() {
             survey_revision: revision.id,
             survey_response_contract: revision.contract,
             published_version: finalSurveyJson._spPublishedVersion || null,
-            ...(finalSurveyJson.spSite ? { sp_site: { id: finalSurveyJson.spSite.id || null, version: finalSurveyJson.spSite.version || null, allowed_hosts: finalSurveyJson.spSite.allowedHosts || [] } } : {}),
+            ...(finalSurveyJson.spSite ? { sp_site: { id: finalSurveyJson.spSite.id || null, version: finalSurveyJson.spSite.version || null, allowed_hosts: finalSurveyJson.spSite.allowedHosts || [], match: siteMatchLevel(finalSurveyJson).level, captured_requests: Array.isArray(responses?.[SP_SITE_REQUESTS_KEY]) ? responses[SP_SITE_REQUESTS_KEY].length : 0 } } : {}),
             survey_draft_updated_at: resumeDraft?.finalSurveyJson ? null : projectData?.draftUpdatedAt || null,
             timing: {
               total_seconds: totalSeconds,
@@ -1507,6 +1511,7 @@ export default function SurveyApp() {
           model={surveyModel}
           surveyJson={publishedSurveyJson}
           language={answerLanguageRef.current}
+          mediaPool={siteMediaPoolRef.current}
         />
       )}
 

@@ -18,6 +18,8 @@ import { ImageResolverContext } from './imageResolverContext';
 import { summarizeQuality, QUALITY_FLAG_LABELS, attentionCheckQuestionStats } from '../../lib/quality';
 import { computeQuestionIrr } from '../../lib/reliability';
 import { expandQuestionAnswerUnits, normalizeBooleanAnswer } from '../../lib/responseAnswerUnits';
+import { siteMatchLevel } from '../../lib/spSite';
+import { SP_SITE_REQUESTS_KEY } from '../SpSiteSurvey';
 import { supportsTrialCount } from '../../lib/questionTypeConstraints';
 import { computeTrueSkillFromMatches, matchesFromOrderedRanking, attachMatchCategory, splitsTrueSkillByCategory, trueSkillBoards } from '../../lib/trueskill';
 import { average, pct, wilsonCI } from '../../lib/stats';
@@ -1713,6 +1715,30 @@ function renderNativeQuestionAnalysisBody(question, answers, allResponses, surve
   return null;
 }
 
+/**
+ * A question an SP-Scheme page records in its own format: the platform keeps
+ * the values and exports them, and says plainly that it does not analyse them.
+ */
+function CustomRecordAnalysis({ question, answers, allResponses }) {
+  const { language } = useRegion();
+  const zh = isChineseLanguage(language);
+  const records = (answers || []).filter((a) => a !== undefined && a !== null);
+  const sample = records.slice(0, 5).map((a) => {
+    try { return JSON.stringify(a); } catch { return String(a); }
+  });
+  return <Box data-testid="custom-record-analysis">
+      <Alert severity="warning" sx={{ mb: 1.5 }}>
+        {zh
+          ? `这道题由页面按自己的格式记录（custom），平台不做任何分析，也不做统计。请导出 CSV 或 JSON 后自行处理。共 ${records.length} 条记录。`
+          : `This question is recorded in the page's own format (custom). The platform does not analyse or summarise it; export the CSV or JSON and process it yourself. ${records.length} record(s).`}
+      </Alert>
+      {sample.length > 0 && <Box component="pre" sx={{ m: 0, p: 1, bgcolor: 'grey.50', border: '1px solid', borderColor: 'divider', borderRadius: 1, fontSize: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {sample.join('\n')}
+          {records.length > sample.length ? `\n… ${records.length - sample.length} more` : ''}
+        </Box>}
+    </Box>;
+}
+
 /** Render an adapted Skill field through the same chart components as its native question type. */
 function NativeSkillFieldAnalysis({
   sourceQuestion,
@@ -2356,6 +2382,9 @@ export function QuestionCard({
       const questions = (surveyConfig?.pages || []).flatMap(page => page.elements || []);
       return <GeographicEvaluativePanel question={question} responses={allResponses || []} surveyConfig={surveyConfig} questions={questions} />;
     }
+    if (type === 'custom') {
+      return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} />;
+    }
     const nativeBody = renderNativeQuestionAnalysisBody(question, answers, allResponses, surveyConfig);
     if (nativeBody) return nativeBody;
     if (isDisplayOnlyQuestion(question) || ['expression', 'image', 'html', 'mediadisplay'].includes(type)) {
@@ -2909,6 +2938,12 @@ export default function ResultsAnalysis({
     excludeFlagged,
     demographicFilters
   }), [currentProject?.id, dataSource, siliconRunId, revisionFilter, dateFrom, dateTo, timezone, sessionFilter, includePractice, excludeFlagged, demographicFilters]);
+  // SP-Scheme pages: say how much of the data the platform can analyse.
+  const siteMatch = useMemo(() => (surveyConfig?.spSite?.html ? siteMatchLevel(surveyConfig) : null), [surveyConfig]);
+  const siteCapturedCount = useMemo(() => (responses || []).reduce((n, row) => {
+    const list = row?.responses?.[SP_SITE_REQUESTS_KEY];
+    return n + (Array.isArray(list) ? list.length : Number(row?.survey_metadata?.sp_site?.captured_requests) || 0);
+  }, 0), [responses]);
   const workbenchOverview = useMemo(() => computeResultsOverview({
     scope: analysisScope,
     rows: filteredResponses,
@@ -3187,6 +3222,23 @@ export default function ResultsAnalysis({
             mb: 2
           }}>
           Research sessions: {sessionStats.length} ({sessionStats.map(([sid, s]) => `${sid.slice(-6)}: ${s.count} rounds`).join(', ')})
+        </Alert>}
+
+      {siteMatch && view === 'overview' && <Alert severity={siteMatch.level === 'full' ? 'info' : 'warning'} sx={{
+            mb: 2
+          }} data-testid="results-site-match">
+          {siteMatch.level === 'full' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面；全部 ${siteMatch.total} 道题都是平台题型，下面的分析适用。`
+            : `This survey is an SP-Scheme page; all ${siteMatch.total} questions use platform types, so the analysis below applies.`)}
+          {siteMatch.level === 'partial' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面：${siteMatch.native} 道题可以分析；另外 ${siteMatch.custom} 道题按页面自己的格式原样记录（custom），平台不分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page: ${siteMatch.native} question(s) are analysed below; ${siteMatch.custom} are recorded in the page's own format (custom) and are not analysed. Export them and process them yourself.`)}
+          {siteMatch.level === 'custom' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面，全部 ${siteMatch.total} 道题按页面自己的格式原样记录（custom）。平台不做任何分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page and all ${siteMatch.total} questions are recorded in the page's own format (custom). Nothing is analysed here; export the data and process it yourself.`)}
+          {siteMatch.level === 'none' && (isChineseLanguage(language)
+            ? `这份问卷是 SP-Scheme 页面，没有声明任何题目。平台只原样记录页面发出的请求（共 ${siteCapturedCount} 条，在导出的 __sp_requests 里），不做任何分析，请导出后自行处理。`
+            : `This survey is an SP-Scheme page with no questions declared. The platform only records the requests the page sent (${siteCapturedCount} in total, under __sp_requests in the export) and analyses nothing; export the data and process it yourself.`)}
         </Alert>}
 
       {/* Overview metrics */}
