@@ -29,7 +29,7 @@ import {
 } from '../../lib/spScheme';
 import { externalHostsIn, extractEmbeddedScheme } from '../../lib/spSite';
 import { convertSurveyPage, fetchSurveyPage, fetchSurveyPageMedia } from '../../lib/agentApi';
-import { CONVERT_FIX_ROUNDS, convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
+import { CONVERT_FIX_ROUNDS, CONVERT_START_FIX_ROUNDS, convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
 import { downloadPageMedia, uploadPlannedMedia } from '../../lib/spSchemeMediaImport';
 import { smokeTestSite } from '../../lib/spSiteSmoke';
 import { uploadImageToR2 } from '../../lib/r2';
@@ -252,7 +252,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     const source = upload?.originalHtml || upload?.siteHtml;
     if (!source) return;
     setParseError('');
-    setConverting({ round: 0, stage: 'model', maxRounds: CONVERT_FIX_ROUNDS + (upload?.sourceUrl ? 1 : 0) });
+    setConverting({ round: 0, stage: 'model', maxRounds: CONVERT_FIX_ROUNDS + CONVERT_START_FIX_ROUNDS + (upload?.sourceUrl ? 1 : 0) });
     try {
       const out = await convertSurveyHtml(source, {
         request: convertSurveyPage,
@@ -266,7 +266,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
           : null,
         onProgress: (p) => setConverting((prev) => ({
           ...p,
-          maxRounds: CONVERT_FIX_ROUNDS + (upload?.sourceUrl ? 1 : 0),
+          maxRounds: CONVERT_FIX_ROUNDS + CONVERT_START_FIX_ROUNDS + (upload?.sourceUrl ? 1 : 0),
           mediaDone: Boolean(prev?.mediaDone || (prev?.stage === 'media' && p.stage !== 'media')),
         })),
       });

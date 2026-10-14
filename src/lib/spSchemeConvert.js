@@ -78,6 +78,9 @@ export function rawConversionResult(result = null, { keepAdapter = false } = {})
 // The model gets one pass. Questions it gets wrong are recorded as they are
 // (custom) rather than sent back for fixing; set this above 0 to allow fix rounds.
 export const CONVERT_FIX_ROUNDS = 0;
+// A page that does not start (a script error, a request its adapter never
+// answers) cannot be used at all, so that one problem goes back to the model once.
+export const CONVERT_START_FIX_ROUNDS = 1;
 
 const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)*;base64,[a-z0-9+/=\s]{200,}/gi;
 const TOKEN_RE = /data:sp-token\/(\d+)/g;
@@ -161,7 +164,10 @@ export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles
   const adapter = String(result?.adapterScript || '').trim();
   const declared = (survey?.pages || []).some((page) => (page?.elements || []).length);
   if (adapter) {
-    html = insertBeforeBodyClose(html, `\n<script data-sp-adapter>\n${escapeScriptText(adapter)}\n</script>\n`);
+    // The marker after the adapter tells whether it ran to its end; when it
+    // stops early (an error at the top level) its onRequest handlers may never
+    // be registered and the page waits forever, so that is reported plainly.
+    html = insertBeforeBodyClose(html, `\n<script data-sp-adapter>\n${escapeScriptText(adapter)}\n;window.__spAdapterRan = true;\n</script>\n<script data-sp-adapter-check>if (!window.__spAdapterRan) throw new Error('The adapter script stopped before its end because of an error at its top level, so the handlers it registers after that point (SPSite.onRequest, SPSite.onSubmit) do not exist.');</script>\n`);
   } else if (declared) {
     problems.push('adapterScript is empty: the page must record answers with SPSite.answer and finish with SPSite.complete().');
   }
@@ -302,7 +308,9 @@ export async function convertSurveyHtml(originalHtml, {
   let feedback = [];
   let last = null;
   // One extra round when the page's stimuli are downloaded after the first answer.
-  const lastRound = CONVERT_FIX_ROUNDS + (fetchMedia ? 1 : 0);
+  let lastRound = CONVERT_FIX_ROUNDS + (fetchMedia ? 1 : 0);
+  let startFixes = 0;
+  let startFallback = null; // a version that passed the checks but did not start
   const startCheck = async (html, pkg, mediaPlan, hostList) => {
     // Load the page once, the way participants get it, and report errors or
     // requests it never answers. This is shown to the researcher, not fixed.
@@ -356,11 +364,22 @@ export async function convertSurveyHtml(originalHtml, {
     if (!problems.length) {
       // eslint-disable-next-line no-await-in-loop
       const startProblems = await startCheck(applied.html, applied.pkg, applied.mediaPlan, hosts);
+      if (startProblems.length && startFixes < CONVERT_START_FIX_ROUNDS) {
+        startFixes += 1;
+        lastRound += 1;
+        previous = result;
+        feedback = startProblems.slice(0, 30).map((p) => `When the page loads: ${p}`);
+        startFallback = { ...last, ok: true, startProblems };
+        continue; // eslint-disable-line no-continue
+      }
       return { ...last, ok: true, startProblems };
     }
     previous = result;
     feedback = problems.slice(0, 30);
   }
+  // The fix for a page that did not start broke the checks: keep the version
+  // that passed them (its start problems are shown to the researcher).
+  if (startFallback) return startFallback;
   // Questions the checks still reject are recorded as they are (custom) so the
   // page can be imported with every other question analysed as usual.
   const rejected = degradeRejectedQuestions(last.result?.survey, last.report?.errors || [], last.problems);

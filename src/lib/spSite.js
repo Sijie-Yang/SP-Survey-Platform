@@ -561,7 +561,13 @@ export const SP_SITE_SDK_SOURCE = `
       if (src && !/^data:/.test(src)) problem('resource', 'Could not load ' + String(src).slice(0, 200));
       return;
     }
-    if (e && e.message) problem('script', e.message + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
+    if (!e) return;
+    var err = e.error, text = e.message || '';
+    if (err && err.stack) text = String(err.stack).split(String.fromCharCode(10)).slice(0, 2).join(' ');
+    else if (err && err.message) text = (err.name ? err.name + ': ' : '') + err.message;
+    if (!text) return;
+    if (/^Script error[.]?$/.test(text)) text += ' (no details were given; it came from ' + (e.filename || 'a script the browser hides the error of') + ')';
+    problem('script', text + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
     var r = e && e.reason;

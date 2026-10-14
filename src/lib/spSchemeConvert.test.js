@@ -41,14 +41,33 @@ test('the model gets one pass: what it gets wrong is not sent back for fixing', 
   expect(request.mock.calls[0][0].reference).toContain('SPSite');
 });
 
-test('a page that fails when it loads is reported, not sent back to the model', async () => {
+test('a page that does not start goes back to the model once, then is reported', async () => {
   const request = jest.fn(async () => ({ success: true, result: LEGACY_SURVEY_CONVERSION }));
-  const smokeTest = jest.fn().mockResolvedValueOnce({ ran: true, problems: ['GET /api/state was still waiting after 9 s'] });
+  const stuck = { ran: true, problems: ['GET /api/state was still waiting after 9 s'] };
+  const smokeTest = jest.fn().mockResolvedValue(stuck);
   const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request, smokeTest });
   expect(out.ok).toBe(true);
-  expect(request).toHaveBeenCalledTimes(1);
-  expect(out.startProblems).toEqual(['GET /api/state was still waiting after 9 s']);
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls[1][0].feedback).toEqual(['When the page loads: GET /api/state was still waiting after 9 s']);
+  expect(out.startProblems).toEqual(stuck.problems);
   expect(smokeTest.mock.calls[0][1].questions.map((q) => q.name)).toContain('safety');
+});
+
+test('when the start fix breaks the checks, the version that passed them is kept', async () => {
+  const broken = { ...LEGACY_SURVEY_CONVERSION, adapterScript: '' };
+  const request = jest.fn()
+    .mockResolvedValueOnce({ result: LEGACY_SURVEY_CONVERSION })
+    .mockResolvedValueOnce({ result: broken });
+  const smokeTest = jest.fn().mockResolvedValue({ ran: true, problems: ['Script error.'] });
+  const out = await convertSurveyHtml(LEGACY_SURVEY_HTML, { request, smokeTest });
+  expect(out.ok).toBe(true);
+  expect(out.result).toBe(LEGACY_SURVEY_CONVERSION);
+  expect(out.startProblems).toEqual(['Script error.']);
+});
+
+test('the adapter is followed by a check that reports when it stopped early', () => {
+  const out = applyConversion(LEGACY_SURVEY_HTML, LEGACY_SURVEY_CONVERSION);
+  expect(out.html).toMatch(/window\.__spAdapterRan = true;\n<\/script>\n<script data-sp-adapter-check>/);
 });
 
 test('when the declared questions cannot be used, the page is offered as it is (raw records)', async () => {
