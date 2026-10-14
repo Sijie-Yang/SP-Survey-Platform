@@ -3237,8 +3237,8 @@ export default function ResultsAnalysis({
             mb: 2
           }} data-testid="results-site-match">
           {siteConverted && (isChineseLanguage(language)
-            ? `这份问卷是在线转换导入的页面，题目由模型识别，未必准确，所以平台不做分析，题目都以灰色显示。答案已原样记录，请导出 CSV 或 JSON 后自行分析。`
-            : `This survey is a page converted online. Its questions were identified by a model and may be inaccurate, so the platform analyses nothing and shows them greyed out. Answers are recorded as sent; export the CSV or JSON and analyse them yourself.`)}
+            ? `这份问卷是在线转换导入的页面，题目由模型识别，未必准确，所以平台不做分析，题目都以灰色显示。答案已原样记录：页面发出的数据在 __sp_requests，页面自己保存的作答在 __sp_page_state。请导出 CSV 或 JSON 后自行分析。`
+            : `This survey is a page converted online. Its questions were identified by a model and may be inaccurate, so the platform analyses nothing and shows them greyed out. Answers are recorded as they are: what the page sent is under __sp_requests and what it saved in its own storage under __sp_page_state. Export the CSV or JSON and analyse them yourself.`)}
           {!siteConverted && siteMatch.level === 'full' && (isChineseLanguage(language)
             ? `这份问卷是 SP-Scheme 页面；全部 ${siteMatch.total} 道题都是平台题型，下面的分析适用。`
             : `This survey is an SP-Scheme page; all ${siteMatch.total} questions use platform types, so the analysis below applies.`)}

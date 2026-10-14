@@ -713,6 +713,59 @@ export const SP_SITE_SDK_SOURCE = `
     else Object.keys(h).forEach(function (k) { out[k] = h[k]; });
     return out;
   }
+  // Many standalone pages keep their answers in localStorage, which a sandboxed
+  // page cannot use. Give it a working in-memory store and send each saved value
+  // to the platform, which keeps the latest copy on the response.
+  var stateTimers = {};
+  function sendState(area, key, value) {
+    var id = area + ':' + key;
+    clearTimeout(stateTimers[id]);
+    stateTimers[id] = setTimeout(function () { post({ type: 'state', area: area, key: String(key), value: value }); }, 300);
+  }
+  function memoryStorage(area) {
+    var data = {};
+    var store = {
+      getItem: function (k) { k = String(k); return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; },
+      setItem: function (k, v) { k = String(k); data[k] = String(v); sendState(area, k, data[k]); },
+      removeItem: function (k) { k = String(k); delete data[k]; sendState(area, k, null); },
+      clear: function () { Object.keys(data).forEach(function (k) { delete data[k]; sendState(area, k, null); }); },
+      key: function (i) { return Object.keys(data)[i] || null; },
+    };
+    Object.defineProperty(store, 'length', { get: function () { return Object.keys(data).length; } });
+    return store;
+  }
+  ['localStorage', 'sessionStorage'].forEach(function (area) {
+    try { Object.defineProperty(window, area, { configurable: true, value: memoryStorage(area) }); } catch (e) { /* keep the browser's own */ }
+  });
+  // A page that offers its results as a file download (CSV, JSON): keep the file's text.
+  // (The page's CSP blocks fetching blob: URLs, so the blob is remembered when its URL is made.)
+  var blobsByUrl = {};
+  if (window.URL && URL.createObjectURL) {
+    var nativeCreateUrl = URL.createObjectURL;
+    URL.createObjectURL = function (obj) {
+      var url = nativeCreateUrl.apply(URL, arguments);
+      if (obj && typeof obj.text === 'function') blobsByUrl[url] = obj;
+      return url;
+    };
+  }
+  function downloadText(href) {
+    if (blobsByUrl[href]) return blobsByUrl[href].text();
+    var m = /^data:([^,]*),(.*)$/i.exec(href);
+    if (!m) return Promise.reject(new Error('unreadable'));
+    return Promise.resolve(/;base64/i.test(m[1]) ? decodeURIComponent(escape(atob(m[2]))) : decodeURIComponent(m[2]));
+  }
+  var nativeAnchorClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    var href = this.href || '', name = this.getAttribute('download');
+    if (name != null && /^(blob|data):/i.test(href)) {
+      downloadText(href).then(function (text) {
+        text = String(text);
+        post({ type: 'capture', request: { kind: 'download', url: name || 'download', method: 'FILE', data: text.length > 400000 ? text.slice(0, 400000) : text } });
+      }).catch(function () {});
+      return undefined;
+    }
+    return nativeAnchorClick.apply(this, arguments);
+  };
   var nativeFetch = window.fetch && window.fetch.bind(window);
   if (nativeFetch) {
     window.fetch = function (input, init) {

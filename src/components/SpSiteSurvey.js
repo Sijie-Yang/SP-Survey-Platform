@@ -6,6 +6,23 @@ import { collectSurveyDataWithTrials, isTrialsAnswer, persistTrialsAnswer } from
 /** Response key holding every request the page sent with data, exactly as sent. */
 export const SP_SITE_REQUESTS_KEY = '__sp_requests';
 export const SP_SITE_REQUESTS_MAX = 3000;
+/** Response key holding what the page saved in its own storage (latest value per key). */
+export const SP_SITE_STATE_KEY = '__sp_page_state';
+const SP_SITE_STATE_MAX_CHARS = 200000;
+
+/** Fold one saved value into the page-state record: JSON is parsed, null removes the key. */
+export function applyPageState(prev, area, key, value) {
+  const next = { ...(prev && typeof prev === 'object' ? prev : {}) };
+  const id = area === 'localStorage' ? key : `${area}:${key}`;
+  if (value == null) {
+    delete next[id];
+    return next;
+  }
+  let parsed = value;
+  try { parsed = JSON.parse(value); } catch { /* plain text */ }
+  next[id] = value.length > SP_SITE_STATE_MAX_CHARS ? { truncated: true, text: value.slice(0, SP_SITE_STATE_MAX_CHARS) } : parsed;
+  return next;
+}
 const SP_SITE_REQUEST_MAX_CHARS = 20000;
 /** A request to one of these paths means the page is done (when nothing else says so). */
 export const SP_SITE_DEFAULT_COMPLETE_ON = '(finish|complete|submit|done|final)';
@@ -90,8 +107,14 @@ export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = 
     if (match.level === 'none' && completesOn(request?.url, surveyJson.spSite?.completeOn)) complete();
   };
 
+  const onState = (area, key, value) => {
+    if (!key) return;
+    model.setValue(SP_SITE_STATE_KEY, applyPageState(model.getValue(SP_SITE_STATE_KEY), area, key, value));
+  };
+
   const zh = /^zh/i.test(language || surveyJson.locale || '');
-  const showBar = match.level === 'none';
+  // A converted page may never tell the platform it is finished, so it always gets the bar.
+  const showBar = match.level === 'none' || Boolean(surveyJson.spSite?.convertedFrom);
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1, background: '#fff', display: 'flex', flexDirection: 'column' }} data-testid="sp-site-survey">
@@ -109,6 +132,7 @@ export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = 
           initialAnswers={initialAnswers}
           onAnswer={onAnswer}
           onCapture={onCapture}
+          onState={onState}
           onComplete={complete}
           title={model.title || 'Survey'}
         />
@@ -120,8 +144,8 @@ export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = 
         >
           <span style={{ flex: 1 }}>
             {zh
-              ? `SP-Survey 正在原样记录本页发送的数据（${captured} 条）。做完后请点“完成并提交”。`
-              : `SP-Survey is recording what this page sends (${captured} so far). Click “Finish and submit” when you are done.`}
+              ? 'SP-Survey 正在原样记录你在本页的作答。全部做完后请点“完成并提交”。'
+              : 'SP-Survey is recording your answers on this page as they are. Click “Finish and submit” when you have finished.'}
           </span>
           <button
             type="button"

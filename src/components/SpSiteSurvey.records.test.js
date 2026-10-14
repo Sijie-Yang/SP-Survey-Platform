@@ -36,3 +36,12 @@ test('a request the adapter answered is still kept as a marked backup copy', () 
   const rec = captureRecord({ kind: 'fetch', method: 'POST', url: '/api/save', data: { question_id: 'q1', value: 2 }, answered: true }, 't');
   expect(rec).toEqual({ at: 't', kind: 'fetch', method: 'POST', url: '/api/save', data: { question_id: 'q1', value: 2 }, answered: true });
 });
+
+test('what a page saves in its own storage is kept as the latest value per key', () => {
+  const { applyPageState } = require('./SpSiteSurvey');
+  let state = applyPageState(undefined, 'localStorage', 'survey', '{"step":1}');
+  state = applyPageState(state, 'localStorage', 'survey', '{"step":2,"done":true}');
+  state = applyPageState(state, 'sessionStorage', 'tab', 'plain');
+  expect(state).toEqual({ survey: { step: 2, done: true }, 'sessionStorage:tab': 'plain' });
+  expect(applyPageState(state, 'localStorage', 'survey', null)).toEqual({ 'sessionStorage:tab': 'plain' });
+});

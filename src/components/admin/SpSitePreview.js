@@ -2,7 +2,7 @@ import React, { useContext, useMemo, useState } from 'react';
 import { Alert, Box, Button, Typography } from '@mui/material';
 import SpSiteFrame from '../SpSiteFrame';
 import { buildSiteQuestions, siteMatchLevel, siteMediaFolders } from '../../lib/spSite';
-import { captureRecord } from '../SpSiteSurvey';
+import { applyPageState, captureRecord } from '../SpSiteSurvey';
 import { RegionContext } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
 
@@ -23,6 +23,7 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
   const [completed, setCompleted] = useState(false);
   const [problems, setProblems] = useState([]);
   const [captured, setCaptured] = useState([]);
+  const [pageState, setPageState] = useState({});
   const media = useMemo(() => siteMediaFolders(mediaPool, config), [mediaPool, config]);
   const match = useMemo(() => siteMatchLevel(config), [config]);
   const converted = Boolean(config?.spSite?.convertedFrom);
@@ -33,6 +34,7 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
     setCompleted(false);
     setProblems([]);
     setCaptured([]);
+    setPageState({});
     setRun((n) => n + 1);
   };
 
@@ -90,6 +92,7 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
           onComplete={() => setCompleted(true)}
           onProblem={(p) => setProblems((prev) => (prev.some((x) => x.message === p.message) ? prev : [...prev, p].slice(-20)))}
           onCapture={(request) => setCaptured((prev) => [...prev, captureRecord(request)].slice(-200))}
+          onState={(area, key, value) => setPageState((prev) => applyPageState(prev, area, key, value))}
           title={config.title || 'Survey preview'}
         />
       </Box>
@@ -109,6 +112,19 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
         >
           {Object.keys(answers).length ? JSON.stringify(answers, null, 2) : L('(no answers yet)', '（还没有答案）')}
         </Box>
+        {Object.keys(pageState).length > 0 && (
+          <Box sx={{ mt: 1.5 }} data-testid="sp-site-preview-state">
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              {L('What the page saved (its own storage, latest value)', '页面自己保存的数据（最新一版）')}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+              {L('Stored on each response under __sp_page_state and included in the export.', '存在每份回答的 __sp_page_state 里并随导出一起输出。')}
+            </Typography>
+            <Box component="pre" sx={{ m: 0, maxHeight: 200, overflow: 'auto', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {JSON.stringify(pageState, null, 2)}
+            </Box>
+          </Box>
+        )}
         {(captured.length > 0 || match.level === 'none') && (
           <Box sx={{ mt: 1.5 }} data-testid="sp-site-preview-captured">
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
