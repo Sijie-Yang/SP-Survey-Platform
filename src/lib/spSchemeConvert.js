@@ -103,6 +103,22 @@ function escapeScriptText(text) {
   return String(text).replace(/<\/script/gi, '<\\/script');
 }
 
+const RUNTIME_DATA_RE = /\.(json|csv|tsv|txt)$/i;
+const RUNTIME_DATA_MAX = 400000;
+/** Data files the page may read at run time (never server code), by name. */
+export function runtimeDataFiles(dataFiles = []) {
+  const out = {};
+  let total = 0;
+  (dataFiles || []).forEach((f) => {
+    const name = String(f?.name || '');
+    const text = String(f?.text || '');
+    if (!RUNTIME_DATA_RE.test(name) || f?.truncated || !text || total + text.length > RUNTIME_DATA_MAX) return;
+    total += text.length;
+    out[name] = text;
+  });
+  return out;
+}
+
 const NAME_RE = /^[A-Za-z_$][\w$]*$/;
 const wordIn = (name, text) => new RegExp(`(^|[^\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(text);
 
@@ -142,7 +158,7 @@ function insertBeforeBodyClose(html, block) {
  * Apply one model answer to the page the model saw (data URIs tokenized).
  * @returns {{ html: string, pkg: object, problems: string[] }}
  */
-export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles = [], mediaBase = '' } = {}) {
+export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles = [], mediaBase = '', dataFiles = [] } = {}) {
   const problems = [];
   let html = stripSitePreviewShim(String(tokenizedHtml || ''));
   (result?.replacements || []).forEach(({ find, replace }, i) => {
@@ -176,6 +192,13 @@ export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles
   }
   const pkg = { format: SP_SCHEME_FORMAT, spScheme: SP_SCHEME_VERSION, survey };
   html = insertAfterHeadOpen(html, `\n<script type="application/json" id="sp-scheme">\n${escapeJsonForScript(pkg)}\n</script>\n`);
+  // The study's data files (config, CSV) travel with the page, so the adapter
+  // can hand the page its own data as it is: SPSite.getData('config.json').
+  html = html.replace(/<script\b[^>]*\bid=["']sp-data["'][^>]*>[\s\S]*?<\/script>/gi, '');
+  const runtimeData = runtimeDataFiles(dataFiles);
+  if (Object.keys(runtimeData).length) {
+    html = insertAfterHeadOpen(html, `\n<script type="application/json" id="sp-data">\n${escapeJsonForScript(runtimeData)}\n</script>\n`);
+  }
   const adapter = String(result?.adapterScript || '').trim();
   const declared = (survey?.pages || []).some((page) => (page?.elements || []).length);
   if (adapter) {
@@ -336,7 +359,7 @@ export async function convertSurveyHtml(originalHtml, {
     return response;
   };
   const check = (result) => {
-    const applied = applyConversion(tokenized.html, result, tokenized.tokens, { mediaFiles, mediaBase });
+    const applied = applyConversion(tokenized.html, result, tokenized.tokens, { mediaFiles, mediaBase, dataFiles });
     const hosts = candidateHosts(applied.html, result);
     // Validate as if every candidate domain were allowed; the researcher then
     // chooses which ones to allow and the import re-checks that choice.

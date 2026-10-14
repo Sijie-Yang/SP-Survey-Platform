@@ -52,7 +52,9 @@ survey: one element per answer the page records (unique snake_case name, title =
 
 adapterScript stands in for the page's own server (see its server code and DATA FILES) and does nothing else:
 - SPSite.onRequest(function (req) { ... }) answers the page's requests; req = { url (path + query), method, data, headers }. Return { json: ... } in exactly the shape the page's code reads, or nothing to leave it unanswered. Register it at the top level, never inside a callback. Every handler returns at once or a Promise that settles quickly.
-- Build lists of images from SPSite.getMedia("<folder>") -> [{ url, name, type }] combined with the page's own config (its task list, image assignment, order rules), so the page's randomisation stays its own. Image ids are file names without extension.
+- DATA FILES (.json/.csv/.txt) are available at run time: SPSite.getData("config.json") returns the parsed JSON (other files as text). When the page's server answered with a data file (or part of it), return that data AS IT IS from SPSite.getData, never rebuilt or reordered by hand: the page checks its structure. Only add what the server added (for example saved answers, start empty: {}).
+- Image file names and ids in that data stay as they are; the page's image URLs are mapped to the uploaded files automatically.
+- Only when there is no data file to return, build lists of images from SPSite.getMedia("<folder>") -> [{ url, name, type }] combined with the page's own config (its task list, image assignment, order rules), so the page's randomisation stays its own. Image ids are file names without extension.
 - When the page saves an answer, call SPSite.answer(name, value, { key: <item id>, shown: [<file name shown>] }) and return what the page expects; when it finishes, await SPSite.complete().
 - A page with no server that posts its results elsewhere: SPSite.onSubmit(function (item) { item.url, item.method, item.data }) maps the payload to SPSite.answer, then SPSite.complete().
 - Plain ES2017, no imports, no DOM changes, under 200 lines. Never include secrets.

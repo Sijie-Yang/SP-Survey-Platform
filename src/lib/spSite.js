@@ -638,7 +638,7 @@ export const SP_SITE_SDK_SOURCE = `
   // SPSite.onRequest handlers can answer the page's own requests (a converted page
   // that loaded its questions from, or saved answers to, its own server). Requests
   // made before the adapter script has run wait for it (DOMContentLoaded).
-  var requestHandlers = [];
+  var requestHandlers = [], dataFiles = null;
   var adaptersReady = new Promise(function (resolve) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(resolve, 0); });
     else resolve();
@@ -864,6 +864,16 @@ export const SP_SITE_SDK_SOURCE = `
     getQuestion: function (name) { for (var i = 0; i < questions.length; i += 1) if (questions[i].name === name) return questions[i]; return null; },
     getSurvey: function () { return survey; },
     getAnswers: function () { return answers; },
+    getData: function (name) {
+      // The study's own data files (config.json, a CSV) that came with the page.
+      if (!dataFiles) { try { var el = document.getElementById('sp-data'); dataFiles = el ? JSON.parse(el.textContent || '{}') : {}; } catch (e) { dataFiles = {}; } }
+      var key = String(name || '').replace(/^[.]?[/]+/, '');
+      var hit = dataFiles[key] != null ? key : Object.keys(dataFiles).filter(function (k) { return k.split('/').pop() === key.split('/').pop(); })[0];
+      if (hit == null) return null;
+      var text = dataFiles[hit];
+      if (/[.]json$/i.test(hit)) { try { return JSON.parse(text); } catch (e) { return text; } }
+      return text;
+    },
     getMedia: function (folder) {
       if (folder === undefined) { var all = {}; Object.keys(media).forEach(function (k) { all[k] = media[k].slice(); }); return all; }
       var key = String(folder || '').replace(/^[/]+|[/]+$/g, '');
@@ -1002,8 +1012,8 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [], raw
   if (blocked.length) {
     errors.push(`Scripts must be inline or come from ${CDN_HOSTS.join(', ')} or an allowed domain: ${blocked.slice(0, 3).join(', ')}.`);
   }
-  if (!/getQuestions\s*\(|getQuestion\s*\(|getMedia\s*\(|spsite-ready|onReady\s*\(/.test(text)) {
-    errors.push('index.html never reads the questions or media from SPSite (SPSite.onReady / getQuestions / getMedia), so it cannot show the media the platform holds.');
+  if (!/getQuestions\s*\(|getQuestion\s*\(|getMedia\s*\(|getData\s*\(|spsite-ready|onReady\s*\(/.test(text)) {
+    errors.push('index.html never reads the questions or media from SPSite (SPSite.onReady / getQuestions / getMedia / getData), so it cannot show the media the platform holds.');
   }
   const unseen = questionNames.filter((name) => !text.includes(name));
   if (unseen.length && !/getQuestions\s*\(/.test(text)) {

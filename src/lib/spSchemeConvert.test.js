@@ -110,3 +110,12 @@ test('when the model call fails, the page is imported as it is instead of failin
   expect(out.raw.pkg.survey.pages).toEqual([]);
   expect(out.raw.report.ok).toBe(true);
 });
+
+test('the study\'s data files travel with the page; server code does not', () => {
+  const out = applyConversion('<html><head></head><body></body></html>', { survey: { pages: [] }, adapterScript: 'var c = SPSite.getData("config.json");', replacements: [] }, [], {
+    dataFiles: [{ name: 'app/config.json', text: '{"tasks":[]}' }, { name: 'app/server.py', text: 'secret = 1' }],
+  });
+  expect(out.html).toContain('<script type="application/json" id="sp-data">');
+  expect(out.html).toContain('app/config.json');
+  expect(out.html).not.toContain('server.py');
+});
