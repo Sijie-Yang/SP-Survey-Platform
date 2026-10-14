@@ -107,6 +107,25 @@ function escapeScriptText(text) {
   return String(text).replace(/<\/script/gi, '<\\/script');
 }
 
+const NAME_RE = /^[A-Za-z_$][\w$]*$/;
+const wordIn = (name, text) => new RegExp(`(^|[^\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(text);
+
+/**
+ * Wrap the adapter in its own function scope. Top-level functions and
+ * variables that the page's replaced code calls (and the page itself does not
+ * define) are still put on window, so those calls keep working.
+ */
+export function isolateAdapter(adapter, replacements = [], pageHtml = '') {
+  const added = (replacements || []).map((r) => String(r?.replace || '')).join('\n');
+  const declared = new Set();
+  const re = /^(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)|^(?:var|let|const)\s+([A-Za-z_$][\w$]*)/gm;
+  let m;
+  while ((m = re.exec(adapter))) declared.add(m[1] || m[2]);
+  const exported = [...declared].filter((name) => NAME_RE.test(name) && wordIn(name, added) && !wordIn(name, pageHtml));
+  const exports = exported.map((name) => `try { if (typeof ${name} !== 'undefined') window.${name} = ${name}; } catch (e) { /* not reached */ }`).join('\n');
+  return `(function () {\n${adapter}\n;${exports ? `\n${exports}\n` : ''}window.__spAdapterRan = true;\n}).call(window);`;
+}
+
 function insertAfterHeadOpen(html, block) {
   const head = html.match(/<head\b[^>]*>/i);
   if (head) return html.slice(0, head.index + head[0].length) + block + html.slice(head.index + head[0].length);
@@ -164,10 +183,12 @@ export function applyConversion(tokenizedHtml, result, tokens = [], { mediaFiles
   const adapter = String(result?.adapterScript || '').trim();
   const declared = (survey?.pages || []).some((page) => (page?.elements || []).length);
   if (adapter) {
-    // The marker after the adapter tells whether it ran to its end; when it
-    // stops early (an error at the top level) its onRequest handlers may never
-    // be registered and the page waits forever, so that is reported plainly.
-    html = insertBeforeBodyClose(html, `\n<script data-sp-adapter>\n${escapeScriptText(adapter)}\n;window.__spAdapterRan = true;\n</script>\n<script data-sp-adapter-check>if (!window.__spAdapterRan) throw new Error('The adapter script stopped before its end because of an error at its top level, so the handlers it registers after that point (SPSite.onRequest, SPSite.onSubmit) do not exist.');</script>\n`);
+    // The adapter runs in its own function scope, so its names never collide
+    // with the page's own globals (a page's `let imageReady` and an adapter's
+    // `let imageReady` would otherwise stop the whole adapter before it runs).
+    // The marker after it tells whether it ran to its end; when it stops early
+    // its onRequest handlers may never be registered, which is reported plainly.
+    html = insertBeforeBodyClose(html, `\n<script data-sp-adapter>\n${escapeScriptText(isolateAdapter(adapter, result?.replacements, tokenizedHtml))}\n</script>\n<script data-sp-adapter-check>if (!window.__spAdapterRan) throw new Error('The adapter script stopped before its end because of an error at its top level, so the handlers it registers after that point (SPSite.onRequest, SPSite.onSubmit) do not exist.');</script>\n`);
   } else if (declared) {
     problems.push('adapterScript is empty: the page must record answers with SPSite.answer and finish with SPSite.complete().');
   }
@@ -182,9 +203,10 @@ function dirOf(path) {
 }
 
 /** A short media-library folder for an import ("sp-scheme/retail_validation_r10_mac"). */
-export function importMediaBase(name) {
-  const stem = String(name || 'import').replace(/\.[a-z0-9]+$/i, '').replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase();
-  return `sp-scheme/${stem.slice(0, 60) || 'import'}`;
+// The media library belongs to one project, so imported files keep the
+// upload's own folders (images/, app/) with no extra prefix.
+export function importMediaBase() {
+  return '';
 }
 
 /**

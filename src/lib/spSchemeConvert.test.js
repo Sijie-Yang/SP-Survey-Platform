@@ -1,4 +1,4 @@
-import { applyConversion, candidateHosts, convertSurveyHtml, restoreDataUris, tokenizeDataUris } from './spSchemeConvert';
+import { applyConversion, candidateHosts, convertSurveyHtml, isolateAdapter, restoreDataUris, tokenizeDataUris } from './spSchemeConvert';
 import { extractEmbeddedScheme } from './spSite';
 import { LEGACY_SURVEY_CONVERSION, LEGACY_SURVEY_HTML } from './__fixtures__/legacySurvey';
 
@@ -65,9 +65,19 @@ test('when the start fix breaks the checks, the version that passed them is kept
   expect(out.startProblems).toEqual(['Script error.']);
 });
 
-test('the adapter is followed by a check that reports when it stopped early', () => {
+test('the adapter runs in its own scope and is followed by a check that reports when it stopped early', () => {
   const out = applyConversion(LEGACY_SURVEY_HTML, LEGACY_SURVEY_CONVERSION);
-  expect(out.html).toMatch(/window\.__spAdapterRan = true;\n<\/script>\n<script data-sp-adapter-check>/);
+  expect(out.html).toMatch(/<script data-sp-adapter>\n\(function \(\) \{\n/);
+  expect(out.html).toMatch(/window\.__spAdapterRan = true;\n\}\)\.call\(window\);\n<\/script>\n<script data-sp-adapter-check>/);
+});
+
+test('adapter names the page also declares do not collide; names the replaced page code calls stay global', () => {
+  const page = '<script>let imageReady = false; function show() {}</script>';
+  const wrapped = isolateAdapter('let imageReady = true;\nfunction spImageUrl(q) { return q; }\nfunction show() {}', [{ find: 'x', replace: 'img.src = spImageUrl(q); show();' }], page);
+  expect(wrapped.startsWith('(function () {')).toBe(true);
+  expect(wrapped).toContain('window.spImageUrl = spImageUrl');
+  expect(wrapped).not.toContain('window.show');
+  expect(wrapped).not.toContain('window.imageReady');
 });
 
 test('when the declared questions cannot be used, the page is offered as it is (raw records)', async () => {

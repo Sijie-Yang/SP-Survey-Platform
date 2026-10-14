@@ -148,7 +148,7 @@ test('a survey link is fetched, its stimuli downloaded and planned for the media
     expect(await screen.findByTestId('sp-scheme-converted')).toHaveTextContent(/Converted by the model|已由模型转换/);
     expect(fetchSurveyPageMedia).toHaveBeenCalledTimes(2);
     expect(convertSurveyPage.mock.calls[1][0].mediaFiles).toEqual(['rating/img/1.jpg', 'rating/img/2.jpg']);
-    expect(screen.getByTestId('sp-scheme-media-plan')).toHaveTextContent('sp-scheme/lab_github_io_rating/rating/img · 2');
+    expect(screen.getByTestId('sp-scheme-media-plan')).toHaveTextContent('rating/img · 2');
   } finally {
     global.fetch = originalFetch;
   }
