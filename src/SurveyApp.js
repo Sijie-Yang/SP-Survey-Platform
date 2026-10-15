@@ -1339,7 +1339,13 @@ export default function SurveyApp() {
     );
   }
 
-  if (surveyPhase === 'submitting') {
+  // A recorded-as-is page (converted, or declaring no questions) stays on screen
+  // while it submits and after: it may still be showing the participant its own end.
+  const siteStaysOpen = Boolean(surveyModel && publishedSurveyJson?.spSite?.html
+    && (publishedSurveyJson.spSite.convertedFrom || siteMatchLevel(publishedSurveyJson).level === 'none')
+    && !completionInfo?.isRepeatMode);
+
+  if (surveyPhase === 'submitting' && !siteStaysOpen) {
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100vh', gap: 2 }}>
         <CircularProgress />
@@ -1360,7 +1366,7 @@ export default function SurveyApp() {
     );
   }
 
-  if (surveyPhase === 'completed' && completionInfo) {
+  if (surveyPhase === 'completed' && completionInfo && !siteStaysOpen) {
     const defaultMsg = completionInfo.isRepeatMode
       ? tf(participantText.participantRoundsCompleted, { n: completionInfo.repeatTotal })
       : participantText.participantCompleted;
@@ -1506,12 +1512,14 @@ export default function SurveyApp() {
       </Box>
       )}
       
-      {surveyModel && surveyPhase === 'active' && publishedSurveyJson?.spSite?.html && (
+      {surveyModel && (surveyPhase === 'active' || (siteStaysOpen && (surveyPhase === 'submitting' || surveyPhase === 'completed'))) && publishedSurveyJson?.spSite?.html && (
         <SpSiteSurvey
           model={surveyModel}
           surveyJson={publishedSurveyJson}
           language={answerLanguageRef.current}
           mediaPool={siteMediaPoolRef.current}
+          status={surveyPhase}
+          completionCode={completionInfo?.completionCode || ''}
         />
       )}
 

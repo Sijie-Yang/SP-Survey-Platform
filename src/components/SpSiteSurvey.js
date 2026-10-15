@@ -23,6 +23,15 @@ export function applyPageState(prev, area, key, value) {
   next[id] = value.length > SP_SITE_STATE_MAX_CHARS ? { truncated: true, text: value.slice(0, SP_SITE_STATE_MAX_CHARS) } : parsed;
   return next;
 }
+const PAGE_FINISH_FLAGS = ['done', 'finished', 'completed', 'complete', 'isComplete', 'isDone', 'submitted'];
+
+/** A saved value saying the page reached its own end, e.g. {"done": true, ...}. */
+export function pageSaysFinished(value) {
+  if (value == null) return false;
+  let parsed;
+  try { parsed = JSON.parse(value); } catch { return false; }
+  return Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && PAGE_FINISH_FLAGS.some((k) => parsed[k] === true));
+}
 const SP_SITE_REQUEST_MAX_CHARS = 20000;
 /** A request to one of these paths means the page is done (when nothing else says so). */
 export const SP_SITE_DEFAULT_COMPLETE_ON = '(finish|complete|submit|done|final)';
@@ -58,7 +67,7 @@ export function completesOn(url, pattern) {
  * normal submission path (drafts, enrichment, response contract) is unchanged.
  * Requests the page sends that no adapter maps are kept raw on the response.
  */
-export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = [] }) {
+export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = [], status = 'active', completionCode = '' }) {
   const questions = useMemo(() => buildSiteQuestions(surveyJson, { language }), [surveyJson, language]);
   const media = useMemo(() => siteMediaFolders(mediaPool, surveyJson), [mediaPool, surveyJson]);
   const match = useMemo(() => siteMatchLevel(surveyJson), [surveyJson]);
@@ -107,14 +116,24 @@ export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = 
     if (match.level === 'none' && completesOn(request?.url, surveyJson.spSite?.completeOn)) complete();
   };
 
+  // A converted page may never tell the platform it is finished, so it always gets the bar.
+  const showBar = match.level === 'none' || Boolean(surveyJson.spSite?.convertedFrom);
+
   const onState = (area, key, value) => {
     if (!key) return;
     model.setValue(SP_SITE_STATE_KEY, applyPageState(model.getValue(SP_SITE_STATE_KEY), area, key, value));
+    // The page's own finish (it saves {"done": true}) submits; the page stays on screen.
+    if (showBar && area !== 'sp-media' && pageSaysFinished(value)) complete();
   };
 
   const zh = /^zh/i.test(language || surveyJson.locale || '');
-  // A converted page may never tell the platform it is finished, so it always gets the bar.
-  const showBar = match.level === 'none' || Boolean(surveyJson.spSite?.convertedFrom);
+  const barText = status === 'completed'
+    ? (zh ? `✓ 已提交，谢谢参与！${completionCode ? `完成码：${completionCode}` : ''}` : `✓ Submitted, thank you!${completionCode ? ` Completion code: ${completionCode}` : ''}`)
+    : status === 'submitting'
+      ? (zh ? '正在提交…' : 'Submitting…')
+      : (zh
+        ? 'SP-Survey 正在原样记录你在本页的作答。页面完成时会自动提交；如果没有自动提交，请点“完成并提交”。'
+        : 'SP-Survey is recording your answers on this page as they are. It submits when the page finishes; if it does not, click “Finish and submit”.');
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1, background: '#fff', display: 'flex', flexDirection: 'column' }} data-testid="sp-site-survey">
@@ -142,18 +161,14 @@ export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = 
           data-testid="sp-site-raw-bar"
           style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', borderTop: '1px solid #e0e0e0', background: '#fafafa', fontSize: 13, color: '#444' }}
         >
-          <span style={{ flex: 1 }}>
-            {zh
-              ? 'SP-Survey 正在原样记录你在本页的作答。全部做完后请点“完成并提交”。'
-              : 'SP-Survey is recording your answers on this page as they are. Click “Finish and submit” when you have finished.'}
-          </span>
-          <button
+          <span style={{ flex: 1, fontWeight: status === 'completed' ? 600 : 400 }} data-testid="sp-site-bar-text">{barText}</span>
+          {status === 'active' && <button
             type="button"
             onClick={complete}
             style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #1976d2', background: '#1976d2', color: '#fff', cursor: 'pointer', fontSize: 13 }}
           >
             {zh ? '完成并提交' : 'Finish and submit'}
-          </button>
+          </button>}
         </div>
       )}
     </div>

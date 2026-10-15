@@ -19,7 +19,7 @@ import { summarizeQuality, QUALITY_FLAG_LABELS, attentionCheckQuestionStats } fr
 import { computeQuestionIrr } from '../../lib/reliability';
 import { expandQuestionAnswerUnits, normalizeBooleanAnswer } from '../../lib/responseAnswerUnits';
 import { siteMatchLevel } from '../../lib/spSite';
-import { SP_SITE_REQUESTS_KEY } from '../SpSiteSurvey';
+import { SP_SITE_REQUESTS_KEY, SP_SITE_STATE_KEY } from '../SpSiteSurvey';
 import { supportsTrialCount } from '../../lib/questionTypeConstraints';
 import { computeTrueSkillFromMatches, matchesFromOrderedRanking, attachMatchCategory, splitsTrueSkillByCategory, trueSkillBoards } from '../../lib/trueskill';
 import { average, pct, wilsonCI } from '../../lib/stats';
@@ -1718,6 +1718,37 @@ function renderNativeQuestionAnalysisBody(question, answers, allResponses, surve
  * A question an SP-Scheme page records in its own format: the platform keeps
  * the values and exports them, and says plainly that it does not analyse them.
  */
+const SITE_RECORD_SHOW_CHARS = 60000;
+function recordText(value) {
+  const text = JSON.stringify(value, null, 2) ?? '';
+  return text.length > SITE_RECORD_SHOW_CHARS ? `${text.slice(0, SITE_RECORD_SHOW_CHARS)}\n…` : text;
+}
+
+/** What an SP-Scheme page saved and sent for one participant, as recorded. */
+export function SitePageRecords({ row, zh = false }) {
+  const state = row?.responses?.[SP_SITE_STATE_KEY];
+  const stateKeys = state && typeof state === 'object' ? Object.keys(state) : [];
+  const requests = Array.isArray(row?.responses?.[SP_SITE_REQUESTS_KEY]) ? row.responses[SP_SITE_REQUESTS_KEY] : [];
+  if (!stateKeys.length && !requests.length) return null;
+  const pre = { m: 0, p: 1, maxHeight: 320, overflow: 'auto', fontSize: '0.8rem', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', bgcolor: 'grey.50', borderRadius: 1 };
+  return <Box sx={{ mt: 2 }} data-testid="results-site-records">
+    <Typography fontWeight={700}>{zh ? '页面记录' : 'Page records'}</Typography>
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+      {zh ? '页面自己保存和发出的数据，原样记录，也在导出的原始 JSON 里。' : 'What the page saved and sent, as recorded; also in the raw JSON of the export.'}
+    </Typography>
+    {stateKeys.map(key => <Box key={key} sx={{ mb: 1.5 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600, fontFamily: 'monospace' }}>
+        {key.startsWith('sp-media:') ? (zh ? `媒体库图片（${key.slice(9)}）` : `Media library images (${key.slice(9)})`) : key}
+      </Typography>
+      <Box component="pre" sx={pre}>{recordText(state[key])}</Box>
+    </Box>)}
+    {requests.length > 0 && <Box sx={{ mb: 1.5 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600 }}>{zh ? `页面发出的请求（${requests.length} 条）` : `Requests the page sent (${requests.length})`}</Typography>
+      <Box component="pre" sx={pre}>{recordText(requests)}</Box>
+    </Box>}
+  </Box>;
+}
+
 function CustomRecordAnalysis({ question, answers, allResponses, site = false, task = false }) {
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
@@ -2963,6 +2994,9 @@ export default function ResultsAnalysis({
   // SP-Scheme pages: say how much of the data the platform can analyse.
   const siteMatch = useMemo(() => (surveyConfig?.spSite?.html ? siteMatchLevel(surveyConfig) : null), [surveyConfig]);
   const siteConverted = Boolean(surveyConfig?.spSite?.convertedFrom);
+  // A converted page imported as it is declares no questions: the overview shows
+  // the ones the model saw on it (kept at import), or a dash.
+  const sitePageQuestions = siteConverted && !answerableQuestions.length ? (Array.isArray(surveyConfig?.spSite?.pageQuestions) ? surveyConfig.spSite.pageQuestions : []) : null;
   const siteCapturedCount = useMemo(() => (responses || []).reduce((n, row) => {
     const list = row?.responses?.[SP_SITE_REQUESTS_KEY];
     return n + (Array.isArray(list) ? list.length : Number(row?.survey_metadata?.sp_site?.captured_requests) || 0);
@@ -3295,9 +3329,12 @@ export default function ResultsAnalysis({
                   fontWeight: 700,
                   fontSize: 28
                 }}>
-              {loading ? '–' : answerableQuestions.length}
+              {loading ? '–' : sitePageQuestions ? (sitePageQuestions.length || '–') : answerableQuestions.length}
             </Typography>
-            <Typography variant="body2" color="text.secondary">{t.resultsAnswerableQuestions}</Typography>
+            <Typography variant="body2" color="text.secondary">{sitePageQuestions ? (isChineseLanguage(language) ? '页面题目（平台不分析）' : 'Questions on the page (not analysed)') : t.resultsAnswerableQuestions}</Typography>
+            {sitePageQuestions && !sitePageQuestions.length && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                {isChineseLanguage(language) ? '题目由页面自己管理，每位参与者的数据见“回答记录”。' : 'The page manages its own questions; see Response records for each participant.'}
+              </Typography>}
           </Box>
         </Grid>
         <Grid size={{
@@ -3312,7 +3349,7 @@ export default function ResultsAnalysis({
                   fontWeight: 700,
                   fontSize: 28
                 }}>
-              {loading || !totalResponses || !answerableQuestions.length ? '–' : `${pct(answeredQuestions, answerableQuestions.length)}%`}
+              {loading || !totalResponses || !answerableQuestions.length || sitePageQuestions ? '–' : `${pct(answeredQuestions, answerableQuestions.length)}%`}
             </Typography>
             <Tooltip title={t.resultsCoverageHelp} describeChild>
               <Typography tabIndex={0} variant="body2" color="text.secondary" sx={{
@@ -3627,6 +3664,7 @@ export default function ResultsAnalysis({
               </Box>)}
             </Box>;
           })}
+          {detailTarget && <SitePageRecords row={detailTarget} zh={isChineseLanguage(language)} />}
         </DialogContent>
         <DialogActions><Button onClick={() => setDetailTarget(null)}>{t.resultsClose}</Button></DialogActions>
       </Dialog>

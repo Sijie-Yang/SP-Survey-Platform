@@ -946,6 +946,17 @@ export const SP_SITE_SDK_SOURCE = `
       var o = options || {};
       return call('answer', { name: name, value: value === undefined ? null : value, trial: o.trial, shown: o.shown, key: o.key });
     },
+    imageSlot: function (name, fallback) {
+      // A page's own image list (e.g. PHOTO_URLS), filled from the media folders
+      // linked in the Builder; which images went in is kept with the response.
+      var items = [];
+      Object.keys(media).sort().forEach(function (k) {
+        media[k].forEach(function (m) { if (!/video|audio/i.test(String(m.type || ''))) items.push(m); });
+      });
+      if (!items.length) return fallback;
+      sendState('sp-media', name, JSON.stringify(items.map(function (m) { return { name: m.name, url: m.url, folder: m.folder }; })));
+      return items.map(function (m) { return m.url; });
+    },
     complete: function () { return call('complete', {}); },
     onRequest: function (fn) { requestHandlers.push(fn); },
     onSubmit: function (fn) {
@@ -988,12 +999,55 @@ export function buildSiteCsp(allowedHosts = []) {
   ].join('; ');
 }
 
+const IMAGE_SLOT_NAME_RE = /(photo|image|img|pic|stimul|media)/i;
+// An array literal holding only quoted strings (or nothing).
+const IMAGE_SLOT_ITEMS_RE = /^\s*(?:(?:'[^'\n]*'|"[^"\n]*")\s*,?\s*)*$/;
+const IMAGE_SLOT_RE = /\b(const|let|var)(\s+)([A-Za-z_$][\w$]*)(\s*=\s*)\[([^[\]]*)\]/g;
+const INLINE_SCRIPT_RE = /(<script\b(?![^>]*\bsrc\s*=)[^>]*>)([\s\S]*?)(<\/script>)/gi;
+
+function pageReadsMedia(html) {
+  return /SPSite\s*\.\s*getMedia\s*\(/.test(String(html || ''));
+}
+
+/**
+ * Image lists a page keeps in its own code (`const PHOTO_URLS = []`): plain
+ * arrays of URL strings whose name says they hold pictures. A page that does
+ * not read SPSite.getMedia can still use the media library through them.
+ */
+export function findImageSlots(html) {
+  const text = String(html || '');
+  if (pageReadsMedia(text)) return [];
+  const slots = [];
+  text.replace(INLINE_SCRIPT_RE, (all, open, body) => {
+    body.replace(IMAGE_SLOT_RE, (m, kw, sp, name, eq, items) => {
+      if (IMAGE_SLOT_NAME_RE.test(name) && IMAGE_SLOT_ITEMS_RE.test(items)) {
+        slots.push({ name, count: (items.match(/'[^'\n]*'|"[^"\n]*"/g) || []).length });
+      }
+      return m;
+    });
+    return all;
+  });
+  return slots;
+}
+
+/** Fill the page's image lists from the linked media folders (its own list when none). */
+export function linkImageSlots(html) {
+  const text = String(html || '');
+  if (pageReadsMedia(text)) return text;
+  return text.replace(INLINE_SCRIPT_RE, (all, open, body, close) => open + body.replace(IMAGE_SLOT_RE, (m, kw, sp, name, eq, items) => {
+    if (!IMAGE_SLOT_NAME_RE.test(name) || !IMAGE_SLOT_ITEMS_RE.test(items)) return m;
+    const list = `[${items}]`;
+    return `${kw}${sp}${name}${eq}(window.SPSite && SPSite.imageSlot ? SPSite.imageSlot(${JSON.stringify(name)}, ${list}) : ${list})`;
+  }) + close);
+}
+
 /**
  * Insert the CSP, the start-up data and the SDK at the top of <head> so they
  * run before the site's own code.
  */
 export function prepareSiteDocument(html, { boot = null, allowedHosts = [] } = {}) {
-  const source = stripSitePreviewShim(html);
+  const hasMedia = Boolean(boot?.media && Object.values(boot.media).some((list) => list?.length));
+  const source = hasMedia ? linkImageSlots(stripSitePreviewShim(html)) : stripSitePreviewShim(html);
   const hosts = normalizeAllowedHosts(allowedHosts);
   const bootData = boot ? { ...boot, allowedHosts: hosts } : (hosts.length ? { allowedHosts: hosts } : null);
   const inject = `<meta http-equiv="Content-Security-Policy" content="${buildSiteCsp(hosts)}">`

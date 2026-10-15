@@ -2,7 +2,7 @@ import React, { useContext, useMemo, useState } from 'react';
 import { Alert, Box, Button, Typography } from '@mui/material';
 import SpSiteFrame from '../SpSiteFrame';
 import { buildSiteQuestions, siteMatchLevel, siteMediaFolders } from '../../lib/spSite';
-import { applyPageState, captureRecord } from '../SpSiteSurvey';
+import { applyPageState, captureRecord, pageSaysFinished } from '../SpSiteSurvey';
 import { RegionContext } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
 
@@ -92,7 +92,10 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
           onComplete={() => setCompleted(true)}
           onProblem={(p) => setProblems((prev) => (prev.some((x) => x.message === p.message) ? prev : [...prev, p].slice(-20)))}
           onCapture={(request) => setCaptured((prev) => [...prev, captureRecord(request)].slice(-200))}
-          onState={(area, key, value) => setPageState((prev) => applyPageState(prev, area, key, value))}
+          onState={(area, key, value) => {
+            setPageState((prev) => applyPageState(prev, area, key, value));
+            if ((converted || match.level === 'none') && area !== 'sp-media' && pageSaysFinished(value)) setCompleted(true);
+          }}
           title={config.title || 'Survey preview'}
         />
       </Box>
@@ -100,18 +103,24 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
           <Typography variant="subtitle2" sx={{ flex: 1 }}>
             {completed
-              ? L('Preview finished: the participant would now submit these answers.', '预览完成：参与者此时会提交这些答案。')
-              : L('Answers recorded so far', '目前记录的答案')}
+              ? L('Preview finished: the participant would now submit these answers, and the page stays on screen.', '预览完成：参与者此时会自动提交这些数据，页面保持显示。')
+              : L('Recorded so far', '目前记录的数据')}
           </Typography>
           <Button size="small" onClick={restart}>{L('Restart', '重新开始')}</Button>
         </Box>
-        <Box
-          component="pre"
-          data-testid="sp-site-preview-answers"
-          sx={{ m: 0, maxHeight: 240, overflow: 'auto', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
-        >
-          {Object.keys(answers).length ? JSON.stringify(answers, null, 2) : L('(no answers yet)', '（还没有答案）')}
-        </Box>
+        {questions.length > 0 ? (
+          <Box
+            component="pre"
+            data-testid="sp-site-preview-answers"
+            sx={{ m: 0, maxHeight: 240, overflow: 'auto', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+          >
+            {Object.keys(answers).length ? JSON.stringify(answers, null, 2) : L('(no answers yet)', '（还没有答案）')}
+          </Box>
+        ) : !Object.keys(pageState).length && !captured.length && (
+          <Typography variant="body2" color="text.secondary">
+            {L('Nothing recorded yet. What the page saves and sends appears here as you answer.', '还没有记录。作答时，页面保存和发出的数据会显示在这里。')}
+          </Typography>
+        )}
         {Object.keys(pageState).length > 0 && (
           <Box sx={{ mt: 1.5 }} data-testid="sp-site-preview-state">
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>

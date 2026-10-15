@@ -119,3 +119,16 @@ test('the study\'s data files travel with the page; server code does not', () =>
   expect(out.html).toContain('app/config.json');
   expect(out.html).not.toContain('server.py');
 });
+
+test('the questions the model saw are kept for display when the page is imported as it is', () => {
+  const { modelQuestionList } = require('./spSchemeConvert');
+  expect(modelQuestionList({ pages: [{ elements: [
+    { type: 'html', name: 'intro' },
+    { type: 'radiogroup', name: 'safe', title: { zh: '安全吗', en: 'Safe?' } },
+    { type: 'custom', name: 'pairs', title: 'Pairwise' },
+  ] }] })).toEqual([
+    { name: 'safe', title: '安全吗', type: 'radiogroup' },
+    { name: 'pairs', title: 'Pairwise', type: 'custom' },
+  ]);
+  expect(modelQuestionList(null)).toEqual([]);
+});
