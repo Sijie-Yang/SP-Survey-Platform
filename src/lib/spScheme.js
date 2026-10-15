@@ -399,9 +399,9 @@ The platform takes care of three things; how much of your data it can analyse de
 
 **Step 2 · Build index.html and let the researcher try it.** Write the page with the embedded survey JSON (section 1) and the preview shim (section 5), and show it in your preview / canvas / artifact view (or tell the researcher to save it and open it in a browser). The shim fills in placeholder images and shows the recorded data in a small panel, so the page works fully before it reaches the platform. Ask the researcher to click through it on a phone-sized and a desktop-sized window. Change it until they say they are happy. Do NOT hand over the final file before the researcher confirms.
 
-**Step 3 · Hand over the same page.** The file the researcher approved IS the deliverable; do not rebuild or simplify it. Prefer a single self-contained \`index.html\` (inline CSS and JS). If you produced extra local files (CSS, JS, small images such as a logo), put them with index.html in a zip; the platform inlines them.
-If you cannot make files, give the whole page in one \`\`\`html code block and tell the researcher: "save this as index.html".
-Then tell them: in SP-Survey open Survey Builder → SP-Scheme → Upload, choose index.html (or the zip), read the check report, and click Import. If the report lists problems, the researcher will paste them back to you; return a corrected page.
+**Step 3 · Hand over the same page, as a zip.** The file the researcher approved IS the deliverable; do not rebuild or simplify it. Put \`index.html\` and every file it uses (images, CSS, JS, data) into one zip, keeping their folders. Stimulus images must be real image files in the zip (for example \`images/street_01.jpg\`), never pictures your code draws (SVG, canvas or CSS art) to stand in for photos: on import they go into the project's media library under the same folders, and the page finds them by the same relative paths. The platform treats the media library as the folder index.html sits in.
+If you cannot make files, give the whole page in one \`\`\`html code block and tell the researcher: "save this as index.html, put it in a zip together with the images it uses".
+Then tell them: in SP-Survey open Survey Builder → SP-Scheme → Upload, choose the zip, read the check report, and click Import. If the report lists problems, the researcher will paste them back to you; return a corrected page.
 
 ## 1. The embedded survey JSON
 
@@ -432,6 +432,8 @@ Put this block inside \`<head>\`, before the preview shim:
 Images, videos and audio come from the researcher's project media pool; you never invent or hard-code media URLs. Two ways to draw them, mixable per question:
 
 **A. Platform draws (default when you design the page from scratch).** The platform draws the files for each participant, records exactly what was shown, and passes them to your page as \`question.media\` (or \`question.trials[i].media\`). Show only these; placeholders exist only in your preview.
+
+**Paths.** The media library is the page's own folder: \`<img src="images/a.jpg">\` (or a CSS \`url(images/a.jpg)\`) shows the library file \`a.jpg\` in folder \`images\`. An empty image list in your code (for example \`const PHOTO_URLS = []\`) is filled with the images of the folders the researcher links in the Builder (the library root when none), in a random order for each participant; record the file names you show, not your own ids.
 
 **B. Your page draws (default when a page already has its own randomisation).** Declare the folders at the survey level by their names in the media library (the same as the folders of the researcher's zip, for example \`"mediaFolders": ["images"]\`), and read them with \`SPSite.getMedia('task_a')\` → \`[{ url, name, type }]\` (the whole folder). Keep the page's own logic for sampling, grouping, pairing and ordering, and record each answer with \`SPSite.answer(name, value, { key, shown })\`: \`shown\` lists the file names shown for that answer and \`key\` (for example the image id) makes a later answer replace an earlier one for the same item. The platform then records what was shown exactly like in A.
 
@@ -479,7 +481,7 @@ SPSite.complete();                             // Promise of { ok, missing, erro
 A question object: \`{ name, type, kind, answerShape, title, description, required, trialCount, media: [{ url, name, type }], choices: [{ value, text, imageUrl? }], trials: [{ media, choices }] /* when trialCount > 1 */ }\` plus, by kind, \`min/max\`, \`rateMin/rateMax/rateValues/minLabel/maxLabel\`, \`labelTrue/labelFalse\`, \`dimensions: [{ id, label, left, right, min, max, step }]\`, \`rows/columns\`, \`budget\`, \`tools/labels/minShapes/maxShapes\`. \`media[].type\` is \`image\`, \`video\` or \`audio\`.
 
 - Call \`SPSite.answer\` whenever an answer is made or changed. Check \`ok\`; on \`ok: false\` show \`error\` and let the participant fix it (it means the value did not fit the question).
-- Call \`SPSite.complete()\` once at the end. On \`ok: true\` the platform submits and shows its thank-you screen, so show only a short "Submitting…" state. On \`ok: false\`, \`missing\` lists required questions still unanswered; take the participant back to them.
+- Call \`SPSite.complete()\` once at the end, when the participant reaches the last screen or presses its finish button; without it the platform never knows the survey is over. A page that keeps its answers in localStorage instead must save a top-level \`"done": true\` in that saved object at the end (the platform then submits). Never tell participants their data stays only in their browser: it is sent to the researcher's project. On \`ok: true\` the platform submits and shows its thank-you screen, so show only a short "Submitting…" state. On \`ok: false\`, \`missing\` lists required questions still unanswered; take the participant back to them.
 - Record timing or extra behaviour only through declared questions (for example a \`number\` question for a reaction time in milliseconds).
 
 Runtime limits on the platform (the page runs full-screen in a sandboxed frame):

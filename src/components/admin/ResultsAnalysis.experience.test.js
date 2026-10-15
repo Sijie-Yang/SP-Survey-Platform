@@ -5,8 +5,10 @@ import { RegionProvider } from '../../contexts/RegionContext';
 import { createResultsReport, readResultsReport, reportStorageKey, writeResultsReport } from '../../lib/resultsReportStore';
 import { saveProjectFull } from '../../lib/projectManager';
 import { fetchAdminResponsePage } from '../../lib/adminResults';
+import { getSkillById } from '../../lib/skillManager';
 
 jest.mock('../../lib/supabase', () => ({supabase: null}));
+jest.mock('../../lib/skillManager', () => ({ getSkillById: jest.fn() }));
 jest.mock('../../lib/projectManager', () => ({saveProjectFull: jest.fn()}));
 jest.mock('./ImagePerceptionPanel', () => () => null);
 jest.mock('../../lib/adminResults', () => ({
@@ -35,6 +37,40 @@ test('platform admin reads the selected project through the admin API without de
   expect(screen.getAllByRole('button', {name: 'View'})).toHaveLength(2);
   expect(screen.queryByRole('button', {name: 'Delete this response'})).toBeNull();
   expect(saveProjectFull).not.toHaveBeenCalled();
+});
+
+test('platform admin can generate an AI analysis for a custom question and sees the saved one', async () => {
+  const customConfig = { pages: [{ name: 'p1', elements: [{ type: 'custom', name: 'q', title: 'Custom' }] }] };
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', metadata: { resultsAiAnalyses: {} } }} surveyConfig={customConfig} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(screen.getByRole('tab', { name: /^Questions$/i }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Expand analysis: q' }));
+  expect(await screen.findByTestId('ai-analysis-generate')).toBeTruthy();
+});
+
+test('a custom task whose records rate several images on the same items gets a platform table before any model', async () => {
+  const task = { type: 'skillquestion', name: 'task', title: 'Rural scenes', skillId: 'skill_rural', skillRevision: 2 };
+  const taskConfig = { pages: [{ name: 'p1', elements: [task] }] };
+  const scene = (id, a1) => ({ imageId: id, imageName: `${id}__1a6d.jpg`, ratings: { A1: a1, M1: 4, S3: 3 } });
+  const rows = [
+    { id: 'a', participant_id: 'p1', responses: { task: { scenes: [scene('P027B', 1), scene('P034B', 5)], complete: true } } },
+    { id: 'b', participant_id: 'p2', responses: { task: { scenes: [scene('P027B', 4), scene('P034B', 5)], complete: true } } },
+  ];
+  getSkillById.mockResolvedValue({ sourceHtml: '<script>SPSkill.setAnswer({ scenes })</script>' });
+  fetchAdminResponsePage.mockResolvedValueOnce(rows).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', metadata: { resultsAiAnalyses: {} } }} surveyConfig={taskConfig} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(screen.getByRole('tab', { name: /^Questions$/i }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Expand analysis: task' }));
+  const table = within(await screen.findByTestId('ai-analysis-platform'));
+  expect(table.getByText('A1')).toBeTruthy();
+  const p027 = table.getByRole('row', { name: /P027B__1a6d\.jpg/ });
+  // mean of A1 over the two raters, then n
+  expect(within(p027).getByText('2.500')).toBeTruthy();
+  expect(within(p027).getByText('2')).toBeTruthy();
+  expect(screen.getByTestId('ai-analysis-generate')).toBeTruthy();
+  await waitFor(() => expect(getSkillById).toHaveBeenCalledWith('skill_rural', 2));
 });
 
 test('unreadable admin rows are skipped so the rest of the project still loads', async () => {
@@ -154,10 +190,10 @@ test('an empty or cancelled analysis cannot replace a saved report', async () =>
   expect(readResultsReport('p').id).toBe(previous.id);
 });
 
-test('a page converted online shows its questions greyed out and unanalysed', () => {
+test('a page imported as it is shows its questions greyed out and unanalysed', () => {
   render(<RegionProvider><QuestionCard question={q} answers={[1, 5]} totalResponses={2} questionNumber={1}
     allResponses={responses} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} defaultExpanded /></RegionProvider>);
-  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/converted online/);
+  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/imported as it is/);
   expect(screen.getByText('Analyse yourself')).toBeTruthy();
 });
 
@@ -176,7 +212,7 @@ test('the export menu offers two clear choices', async () => {
   expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Answers table (CSV)', 'Full analysis pack (ZIP)']);
 });
 
-test('a page converted online exports one ZIP of its answers', async () => {
+test('a page imported as it is exports one ZIP of its answers', async () => {
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -16,7 +16,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { AutoAwesome, AutoFixHigh, CheckCircle, ContentCopy, Link as LinkIcon, Download, FactCheck, FolderZip, UploadFile, Web } from '@mui/icons-material';
+import { AutoAwesome, CheckCircle, ContentCopy, Link as LinkIcon, Download, FactCheck, FolderZip, UploadFile, Web } from '@mui/icons-material';
 import { strToU8, zipSync } from 'fflate';
 import { useRegion } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
@@ -30,9 +30,9 @@ import {
 } from '../../lib/spScheme';
 import { SITE_MEDIA_ROOT, externalHostsIn, extractEmbeddedScheme, findImageSlots } from '../../lib/spSite';
 import { listAllKnownFolders } from '../../lib/mediaUtils';
-import { convertSurveyPage, fetchSurveyPage, fetchSurveyPageMedia } from '../../lib/agentApi';
-import { convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
-import { downloadPageMedia, uploadPlannedMedia } from '../../lib/spSchemeMediaImport';
+import { fetchSurveyPage } from '../../lib/agentApi';
+import { planUploadMedia, prepareAsIsImport } from '../../lib/spSchemeAsIs';
+import { uploadPlannedMedia } from '../../lib/spSchemeMediaImport';
 import { uploadImageToR2 } from '../../lib/r2';
 import { useOptionalAuth } from '../../contexts/AuthContext';
 
@@ -74,72 +74,6 @@ function formatKb(bytes) {
   return `${Math.max(1, Math.round((bytes || 0) / 1024))} KB`;
 }
 
-const MODEL_STAGE_SECONDS = 60;
-
-/**
- * Conversion progress: the model call has no progress events, so its bar
- * eases toward the end of its share while time passes; checking is quick.
- */
-function ConvertProgress({ state, L }) {
-  const [now, setNow] = useState(Date.now());
-  const startedAt = useRef(Date.now());
-  const stageAt = useRef(Date.now());
-  const stageKey = `${state.round}-${state.stage}`;
-  useEffect(() => { stageAt.current = Date.now(); }, [stageKey]);
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(id);
-  }, []);
-  const inStage = (now - stageAt.current) / 1000;
-  // Each round (first pass, then each fix) fills the bar again.
-  const value = state.stage === 'model'
-    ? 90 * (1 - Math.exp(-inStage / (MODEL_STAGE_SECONDS / 2)))
-    : (state.stage === 'media' ? Math.round(((state.done || 0) / Math.max(1, state.total || 1)) * 100) : 96);
-  const elapsed = Math.round((now - startedAt.current) / 1000);
-  const modelDone = state.stage === 'check';
-  const steps = [
-    { key: 'read', label: L('Keep the page as it is', '页面原样保留'), done: true },
-    { key: 'files', label: L('Media files into the library, same folders as the upload', '图片按原文件夹放进媒体库'), done: true },
-    {
-      key: 'model',
-      label: state.stage === 'media'
-        ? L(`Download the page's stimulus images (${state.done || 0} / ${state.total || 0})`, `下载页面里的刺激图（${state.done || 0} / ${state.total || 0}）`)
-        : L('Model writes the data interface (one call)', '模型写数据接口（只调用一次）'),
-      done: modelDone,
-      active: !modelDone,
-    },
-    { key: 'check', label: L('Connect the data interface; every answer is recorded as sent', '接上数据接口，所有回答原样记录'), done: false, active: modelDone },
-  ];
-  return (
-    <Box data-testid="sp-scheme-convert-progress">
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <LinearProgress variant="determinate" value={value} sx={{ flex: 1, height: 8, borderRadius: 4 }} />
-        <Typography variant="caption" color="text.secondary" sx={{ minWidth: 72, textAlign: 'right' }}>
-          {Math.round(value)}% · {elapsed}s
-        </Typography>
-      </Box>
-      <Box component="ol" sx={{ listStyle: 'none', m: '8px 0 0', p: 0 }}>
-        {steps.map((step) => (
-          <Typography
-            component="li"
-            variant="body2"
-            key={step.key}
-            sx={{ display: 'flex', alignItems: 'center', gap: 0.75, color: step.done ? 'success.main' : (step.active ? 'text.primary' : 'text.disabled'), fontWeight: step.active ? 600 : 400 }}
-          >
-            {step.done ? <CheckCircle sx={{ fontSize: 16 }} /> : <Box component="span" sx={{ width: 16, display: 'inline-flex', justifyContent: 'center' }}>{step.active ? '•' : '○'}</Box>}
-            {step.label}
-          </Typography>
-        ))}
-      </Box>
-      {state.stage === 'model' && inStage > 20 ? (
-        <Typography variant="caption" color="text.secondary">
-          {L('The free model usually needs 30–90 seconds for a full page. You can keep this dialog open.', '免费模型处理整页通常需要 30–90 秒，请保持此窗口打开。')}
-        </Typography>
-      ) : null}
-    </Box>
-  );
-}
-
 /**
  * SP-Scheme: copy the platform contract to any external LLM, then upload the
  * page it builds. Nothing changes until the researcher confirms import.
@@ -161,9 +95,6 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
   // Domains the page may reach at run time, ticked by the researcher.
   const [hosts, setHosts] = useState([]);
   const [allowed, setAllowed] = useState([]);
-  const [convertNotes, setConvertNotes] = useState('');
-  const [converting, setConverting] = useState(null);
-  const [conversion, setConversion] = useState(null);
 
   const copyScheme = async () => {
     try {
@@ -179,21 +110,51 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     setReport(validateSpSchemePackage(pkg, { siteHtml, allowedHosts }));
   };
 
+  const hostList = (html) => externalHostsIn(html).map(({ host, kinds }) => ({ host, why: kinds.join(', '), needed: kinds.some((k) => k !== 'request') }));
+
+  // What an upload becomes: an SP-Scheme page as uploaded, or any other page
+  // as it is (no questions declared; the platform only records what it saves
+  // and sends). Nothing here involves a model.
+  const prepare = (read, name) => {
+    const up = { name, ...read };
+    if (!read.siteHtml) return { up, found: [] };
+    const found = hostList(read.siteHtml);
+    const first = validateSpSchemePackage(read.pkg, { siteHtml: read.siteHtml, allowedHosts: found.map((h) => h.host) });
+    if (first.ok) return { up: { ...up, mediaPlan: planUploadMedia(read.mediaFiles) }, found };
+    const prepared = prepareAsIsImport(read.siteHtml, { mediaFiles: read.mediaFiles || [], dataFiles: read.dataFiles || [] });
+    return {
+      up: {
+        ...up,
+        originalHtml: read.siteHtml,
+        siteHtml: prepared.html,
+        pkg: prepared.pkg,
+        mediaPlan: prepared.mediaPlan,
+        // declared: the page carries an SP-Scheme block with problems, listed so they can be fixed.
+        asIs: { declared: Boolean(first.summary), errors: first.errors, problems: prepared.problems },
+      },
+      found: prepared.hosts,
+    };
+  };
+
+  const settle = (read, name, { sourceHost = null } = {}) => {
+    let { up, found } = prepare(read, name);
+    if (sourceHost) {
+      up = { ...up, sourceHost };
+      found = withSourceHost(found, up);
+    }
+    const ticked = found.filter((h) => h.needed).map((h) => h.host);
+    setHosts(found);
+    setAllowed(ticked);
+    setUpload(up);
+    revalidate(up.pkg, up.siteHtml, ticked);
+  };
+
   const check = (bytes, name = '') => {
     setReport(null);
     setParseError('');
     setUpload(null);
-    setConversion(null);
     try {
-      const read = readSpSchemeUpload(bytes);
-      const found = read.siteHtml
-        ? externalHostsIn(read.siteHtml).map(({ host, kinds }) => ({ host, why: kinds.join(', '), needed: kinds.some((k) => k !== 'request') }))
-        : [];
-      const ticked = found.filter((h) => h.needed).map((h) => h.host);
-      setHosts(found);
-      setAllowed(ticked);
-      setUpload({ name, ...read });
-      revalidate(read.pkg, read.siteHtml, ticked);
+      settle(readSpSchemeUpload(bytes), name);
     } catch (err) {
       setParseError(err.message);
     }
@@ -217,75 +178,16 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
   const fetchPage = async () => {
     setParseError('');
     setReport(null);
-    setConversion(null);
     setFetchingPage(true);
     try {
       const res = await fetchSurveyPage(pageUrl.trim());
       if (!res?.success) throw new Error(res?.error || L('The page could not be fetched.', '无法抓取这个页面。'));
-      const up = { name: res.url, siteHtml: res.html, pkg: extractEmbeddedScheme(res.html), dataFiles: res.dataFiles || [], files: [], sourceUrl: res.url, sourceHost: res.host };
-      const found = withSourceHost(externalHostsIn(res.html).map(({ host, kinds }) => ({ host, why: kinds.join(', '), needed: kinds.some((k) => k !== 'request') })), up);
-      const ticked = found.filter((h) => h.needed).map((h) => h.host);
-      setHosts(found);
-      setAllowed(ticked);
-      setUpload(up);
-      revalidate(up.pkg, up.siteHtml, ticked);
+      const read = { siteHtml: res.html, siteFile: 'index.html', pkg: extractEmbeddedScheme(res.html), dataFiles: res.dataFiles || [], mediaFiles: [], files: [], fromZip: false, sourceUrl: res.url };
+      settle(read, res.url, { sourceHost: res.host });
     } catch (err) {
       setParseError(err?.message || String(err));
     } finally {
       setFetchingPage(false);
-    }
-  };
-
-  const runConversion = async () => {
-    const source = upload?.originalHtml || upload?.siteHtml;
-    if (!source) return;
-    setParseError('');
-    setConverting({ round: 0, stage: 'model' });
-    try {
-      const out = await convertSurveyHtml(source, {
-        request: convertSurveyPage,
-        notes: convertNotes,
-        dataFiles: upload?.dataFiles || [],
-        mediaFiles: upload?.mediaFiles || [],
-        mediaBase: importMediaBase(upload?.sourceUrl ? `${upload.sourceHost}${new URL(upload.sourceUrl).pathname}` : upload?.name),
-        fetchMedia: upload?.sourceUrl
-          ? (urls, progress) => downloadPageMedia(urls, upload.sourceUrl, { fetchViaServer: fetchSurveyPageMedia, onProgress: progress })
-          : null,
-        onProgress: (p) => setConverting((prev) => ({
-          ...p,
-          mediaDone: Boolean(prev?.mediaDone || (prev?.stage === 'media' && p.stage !== 'media')),
-        })),
-      });
-      const ticked = out.hosts.filter((h) => h.needed).map((h) => h.host);
-      // What the model could not convert is imported as it is: the platform
-      // records what the page sends and analyses nothing.
-      const useRaw = !out.ok && Boolean(out.raw);
-      const chosen = useRaw ? out.raw : out;
-      setConversion({
-        ok: out.ok || useRaw,
-        usedRaw: useRaw,
-        startProblems: chosen.startProblems || [],
-        rounds: out.rounds,
-        failure: out.failure || '',
-        problems: out.problems,
-        degraded: out.degraded || [],
-        notes: useRaw ? [] : (out.result?.notes || []),
-        // Files that came with the upload are uploaded on import, so there is nothing to ask for.
-        originalImages: useRaw || chosen.mediaPlan?.files?.length ? [] : (out.result?.originalImages || []),
-        mediaPlan: chosen.mediaPlan,
-        model: out.model,
-        modelQuestions: useRaw ? (out.modelQuestions || []) : [],
-      });
-      const allHosts = withSourceHost(out.hosts, upload);
-      if (upload?.sourceHost && !ticked.includes(upload.sourceHost)) ticked.push(upload.sourceHost);
-      setHosts(allHosts);
-      setAllowed(ticked);
-      setUpload((prev) => ({ ...prev, originalHtml: source, siteHtml: chosen.html, pkg: chosen.pkg, converted: true }));
-      revalidate(chosen.pkg, chosen.html, ticked);
-    } catch (err) {
-      setParseError(err?.message || String(err));
-    } finally {
-      setConverting(null);
     }
   };
 
@@ -335,15 +237,16 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
       // The dialog renders in a portal, but React still bubbles its events to the panel.
       e.stopPropagation();
       setDragging(false);
-      if (converting || importing) return;
+      if (importing) return;
       readFiles(e.dataTransfer.files).catch((err) => setParseError(err?.message || String(err)));
     },
   };
 
   const [copied, setCopied] = useState(false);
   const copyForFix = async () => {
-    const errorsText = report?.errors?.length && report?.summary
-      ? `\n\n## Problems to fix in my index.html\n${report.errors.map((e) => `- ${e.message}${e.path ? ` (${e.path})` : ''}`).join('\n')}\n`
+    const fixErrors = upload?.asIs ? (upload.asIs.declared ? upload.asIs.errors : []) : (report?.summary ? report?.errors || [] : []);
+    const errorsText = fixErrors.length
+      ? `\n\n## Problems to fix in my index.html\n${fixErrors.map((e) => `- ${e.message}${e.path ? ` (${e.path})` : ''}`).join('\n')}\n`
       : '';
     try {
       await navigator.clipboard.writeText(schemeText + errorsText);
@@ -355,11 +258,11 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
   };
 
   const closeDialog = () => {
-    if (importing || converting) return;
+    if (importing) return;
     setOpen(false);
   };
 
-  const mediaPlan = conversion?.mediaPlan?.files?.length ? conversion.mediaPlan : null;
+  const mediaPlan = upload?.mediaPlan?.files?.length ? upload.mediaPlan : null;
   const canUploadMedia = Boolean(currentProject?.id && onProjectUpdate && user?.id);
 
   const doImport = async () => {
@@ -383,22 +286,24 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         }
       }
       const next = applySpSchemePackage(report, { baseConfig: config });
-      if (next.spSite && upload?.converted) next.spSite.convertedFrom = upload.name || 'index.html';
-      // Imported as it is: the questions the model saw are kept to show, never analysed.
-      if (next.spSite && upload?.converted && conversion?.modelQuestions?.length) next.spSite.pageQuestions = conversion.modelQuestions;
+      // Imported as it is: Results and the export treat every record as the page's own.
+      if (next.spSite && upload?.asIs) next.spSite.convertedFrom = upload.name || 'index.html';
+      // The zip's folders are the page's folders unless the page named its own.
+      if (next.spSite && mediaPlan && !next.spSite.mediaFolders?.length) next.spSite.mediaFolders = [...mediaPlan.folders.values()].map((f) => f.full);
       onChange(next);
       setOpen(false);
       setReport(null);
       setPasted('');
       setUpload(null);
-      setConversion(null);
       setHosts([]);
       setAllowed([]);
       setNotice({
         severity: 'success',
-        text: next.spSite
-          ? L('Imported. Preview and the survey link now use the page the model built. Check it in Preview, then Save.', '已导入。预览和问卷链接现在都使用大模型做的页面。请在预览里确认后点保存。')
-          : L('Imported into the Builder. Review it, preview, then Save.', '已导入 Builder。检查并预览后再点保存。'),
+        text: next.spSite?.convertedFrom
+          ? L('Imported as it is. The platform records what participants do on this page and analyses nothing. Try it in Preview, then Save and publish.', '已原样导入。平台只记录参与者在这个页面上的作答，不做分析。请在预览里试一遍，再保存并发布。')
+          : (next.spSite
+            ? L('Imported. Preview and the survey link now use this page. Check it in Preview, then Save.', '已导入。预览和问卷链接现在都使用这个页面。请在预览里确认后点保存。')
+            : L('Imported into the Builder. Review it, preview, then Save.', '已导入 Builder。检查并预览后再点保存。')),
       });
     } catch (err) {
       setParseError(err.message || String(err));
@@ -460,7 +365,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
           {L('Let it build the survey as a web page and refine it until you are happy.', '让它把问卷做成网页，试到满意为止。')}
         </Typography>
         <Typography component="li" variant="body2">
-          {L('Upload its index.html here to go live; the platform handles images and answers.', '上传它的 index.html 即可上线，抽图和记录答案由平台负责。')}
+          {L('Upload the zip it hands over (page plus images) to go live; the platform handles images and answers. Any other page is imported as it is and only recorded.', '上传它交付的 zip（页面加图片）即可上线，抽图和记录答案由平台负责。其它页面会原样导入，平台只记录。')}
         </Typography>
       </Box>
 
@@ -478,7 +383,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         <Button variant="text" startIcon={<FolderZip />} onClick={() => downloadBytes('sp-scheme-example.zip', buildExampleZip(), 'application/zip')}>
           {L('Example', '示例')}
         </Button>
-        <Button variant="text" startIcon={<FactCheck />} onClick={() => { setUpload(null); setReport(null); setParseError(''); setConversion(null); setHosts([]); setAllowed([]); setOpen(true); }}>
+        <Button variant="text" startIcon={<FactCheck />} onClick={() => { setUpload(null); setReport(null); setParseError(''); setHosts([]); setAllowed([]); setOpen(true); }}>
           {L('Paste code or link', '粘贴代码或链接')}
         </Button>
       </Box>
@@ -515,14 +420,15 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
             )}
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }} data-testid="sp-site-media-help">
+            {L('The media library counts as the page\'s own folder: an image the page names by relative path (images/a.jpg) is that library file. ', '媒体库视为页面所在的文件夹：页面用相对路径写的图（如 images/a.jpg）就是媒体库里同路径的文件。')}
             {siteReadsMedia && L('The page reads these folders itself (SPSite.getMedia).', '页面会自己读取这些文件夹里的媒体（SPSite.getMedia）。')}
             {!siteReadsMedia && siteSlots.length > 0 && L(
-              `The page keeps its own image list (${siteSlots.map((x) => x.name).join(', ')}). With folders linked, it is filled with their images in name order and the images used are recorded with each response; with none, the page shows what it has built in.`,
-              `页面代码里有自己的图片列表（${siteSlots.map((x) => x.name).join('、')}）。链接文件夹后，会按文件名顺序填入这些文件夹里的图片，并在每份回答里记录用了哪些图；不链接则显示页面自带的内容。`,
+              `The page keeps its own image list (${siteSlots.map((x) => x.name).join(', ')}). An empty list is filled with the images of the linked folders (the library root when none is linked), in a random order for each participant, and the images used are recorded with each response; the page never shows pictures it draws itself.`,
+              `页面代码里有自己的图片列表（${siteSlots.map((x) => x.name).join('、')}）。空列表会填入链接文件夹里的图片（没链接时用媒体库根目录），每位参与者顺序随机，并在每份回答里记录用了哪些图；不会显示页面自己画的图。`,
             )}
             {!siteReadsMedia && !siteSlots.length && L(
-              'This page does not load images from outside its own code, so linking folders does not change what it shows. Ask the model that built it to read the images with SPSite.getMedia(folder).',
-              '这个页面不从外部读取图片，链接文件夹不会改变它显示的内容。可以让生成页面的大模型改成用 SPSite.getMedia(文件夹) 读取图片。',
+              'This page does not load images from outside its own code, so linking folders does not change what it shows: what it draws itself is what participants see. Ask the model that built it to use image files by relative path or an empty image list.',
+              '这个页面不从外部读取图片，链接文件夹不会改变它显示的内容，参与者看到的就是它自己画的图。可以让生成页面的大模型改成用相对路径引用图片文件，或留一个空的图片列表。',
             )}
           </Typography>
         </Box>
@@ -531,7 +437,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
       {notice ? <Alert severity={notice.severity} sx={{ mt: 1.5 }} onClose={() => setNotice(null)}>{notice.text}</Alert> : null}
 
       <Dialog open={open} onClose={closeDialog} fullWidth maxWidth="md">
-        <DialogTitle>{L('Check an SP-Scheme upload', '检查 SP-Scheme 上传')}</DialogTitle>
+        <DialogTitle>{L('Check an uploaded page', '检查上传的页面')}</DialogTitle>
         <DialogContent dividers {...dropProps} sx={dragging ? { outline: '3px dashed', outlineColor: 'primary.main', outlineOffset: -6 } : undefined}>
           {upload?.name ? (
             <Alert severity="info" sx={{ mb: 2 }}>
@@ -563,7 +469,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
             maxRows={14}
             value={pasted}
             onChange={(e) => { setPasted(e.target.value); setReport(null); setParseError(''); }}
-            placeholder={L('Paste the whole index.html the model gave you (or a sp-scheme.json).', '把大模型给你的完整 index.html 代码粘贴到这里（也可以是 sp-scheme.json）。')}
+            placeholder={L('Paste a whole index.html (or a sp-scheme.json).', '把完整的 index.html 代码粘贴到这里（也可以是 sp-scheme.json）。')}
             inputProps={{ 'aria-label': 'SP-Scheme package', style: { fontFamily: 'monospace', fontSize: 12 } }}
           />
           ) : null}
@@ -580,29 +486,44 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
           {report ? (
             <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               <Alert
-                severity={report.ok ? 'success' : 'error'}
+                severity={upload?.asIs ? (report.ok ? 'warning' : 'error') : (report.ok ? 'success' : 'error')}
                 data-testid="sp-scheme-verdict"
-                action={report.ok ? null : (
+                action={report.ok && !upload?.asIs ? null : (
                   <Button color="inherit" size="small" startIcon={copied ? <CheckCircle /> : <ContentCopy />} onClick={copyForFix} sx={{ whiteSpace: 'nowrap' }}>
                     {copied ? L('Copied', '已复制') : L('Copy SP-Scheme', '复制 SP-Scheme')}
                   </Button>
                 )}
               >
                 <Typography variant="subtitle2">
-                  {report.ok
-                    ? L('Format aligned with the platform. Ready to import.', '格式与平台对齐，可以导入。')
-                    : (summary
-                      ? L(`${report.errors.length} problem(s) to fix: copy SP-Scheme (with the problems) to your model to fix it, or convert it online below.`, `有 ${report.errors.length} 个问题需要修正：复制 SP-Scheme（附带问题列表）让大模型修正，或在下方用模型在线转换。`)
-                      : L('This is not a survey file that matches SP-Scheme: copy SP-Scheme to your model to fix it, or convert it online below.', '这不是符合 SP-Scheme 的问卷文件：复制 SP-Scheme 让大模型修正，或在下方用模型在线转换。'))}
+                  {upload?.asIs
+                    ? L('This page does not match SP-Scheme, so it is imported as it is: participants see this page unchanged; the platform records what it saves and sends, analyses nothing, and exports the records.',
+                      '这个页面不符合 SP-Scheme，将原样导入：参与者看到的就是这个页面；平台记录它保存和发出的数据，不做分析，可以导出记录。')
+                    : (report.ok
+                      ? L('Format aligned with the platform. Ready to import.', '格式与平台对齐，可以导入。')
+                      : L(`${report.errors.length} problem(s) to fix: copy SP-Scheme (with the problems) to your model to fix it.`, `有 ${report.errors.length} 个问题需要修正：复制 SP-Scheme（附带问题列表）让大模型修正。`))}
                 </Typography>
-                {summary ? (
+                {upload?.asIs ? (
+                  <Typography variant="body2" sx={{ mt: 0.5 }}>
+                    {L('It submits when the page calls SPSite.complete() or saves {"done": true}; otherwise participants click “Finish and submit” under the page. To get the platform\'s analysis, have the model that built it follow SP-Scheme (copy it on the right).',
+                      '页面调用 SPSite.complete() 或保存 {"done": true} 时自动提交；否则参与者点页面下方的「完成并提交」。想让平台做分析，请让生成页面的模型按 SP-Scheme 重做（右侧复制）。')}
+                  </Typography>
+                ) : null}
+                {upload?.asIs?.declared && upload.asIs.errors.length ? (
+                  <Box sx={{ mt: 0.5 }} data-testid="sp-scheme-asis-declared">
+                    <Typography variant="body2">
+                      {L('The page declares SP-Scheme questions with problems; an as-is import ignores that declaration. To keep it, fix these and upload again:', '页面里声明的 SP-Scheme 题目有问题，原样导入会忽略这份声明。要保留它，请修正后重新上传：')}
+                    </Typography>
+                    <IssueList items={upload.asIs.errors} />
+                  </Box>
+                ) : null}
+                {summary && !upload?.asIs ? (
                   <Typography variant="body2" sx={{ mt: 0.5 }}>
                     {summary.title ? `「${summary.title}」 · ` : ''}
                     {L(`${summary.pageCount} pages · ${summary.questionCount} questions`, `${summary.pageCount} 页 · ${summary.questionCount} 题`)}
                   </Typography>
                 ) : null}
               </Alert>
-              {summary?.hasSite && report.ok && !upload?.converted ? (
+              {summary?.hasSite && report.ok && !upload?.asIs ? (
                 <Alert severity={summary.match === 'full' ? 'success' : 'warning'} data-testid="sp-scheme-match">
                   <Typography variant="subtitle2">
                     {summary.match === 'full' && L(`All ${summary.nativeCount} questions use platform types: results can be analysed on the Results page.`, `全部 ${summary.nativeCount} 道题都是平台题型：结果可以在结果页分析。`)}
@@ -614,47 +535,8 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
               ) : null}
               {summary?.hasSite ? (
                 <Alert severity="info" icon={<Web />} data-testid="sp-scheme-site">
-                  {L(`Includes the page the model built (${upload?.siteFile || 'index.html'}, ${formatKb(summary.siteBytes)}). After import, Preview and the survey link show this page.`,
-                    `包含大模型做的页面（${upload?.siteFile || 'index.html'}，${formatKb(summary.siteBytes)}）。导入后，预览和问卷链接都直接显示这个页面。`)}
-                </Alert>
-              ) : null}
-              {conversion ? (
-                <Alert severity={conversion.usedRaw ? 'warning' : 'success'} icon={<AutoFixHigh />} data-testid="sp-scheme-converted">
-                  {conversion.usedRaw && L(
-                    'The model\'s data interface could not be used, so the page is imported as it is: the platform records everything the page sends and analyses nothing. You can convert again.',
-                    '模型写的数据接口用不了，已按原样导入：平台原样记录页面发出的所有数据，不做分析。可以再转换一次。',
-                  )}
-                  {conversion.usedRaw && conversion.failure ? (
-                    <Typography variant="caption" component="div" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>{conversion.failure}</Typography>
-                  ) : null}
-                  {!conversion.usedRaw && L('Converted: the page is kept as it is and every answer is recorded. The platform does not analyse a converted survey; export the results and analyse them yourself. Try it in Preview after import.', '已转换成功：页面原样保留，所有回答都会记录。转换导入的问卷平台不做分析，请导出结果后自行分析。导入后请在预览里试一遍。')}
-                  {conversion.startProblems?.length ? (
-                    <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }} data-testid="sp-scheme-raw-start">
-                      {L('When the page was opened for a test it reported problems; check it in Preview after import, and convert again if participants would get stuck:', '试开这个页面时它报告了问题；导入后请在预览里确认，如果参与者会卡住就再转换一次：')}
-                      {' '}{conversion.startProblems.slice(0, 3).join(' ')}
-                    </Typography>
-                  ) : null}
-                  {conversion.notes.length ? (
-                    <Box component="ul" sx={{ m: '4px 0 0', pl: 2.5 }}>
-                      {conversion.notes.map((n, i) => <Typography component="li" variant="body2" key={i}>{n}</Typography>)}
-                    </Box>
-                  ) : null}
-                  <Button size="small" startIcon={<Download />} sx={{ mt: 0.5 }} onClick={() => downloadText('index.sp-scheme.html', upload.siteHtml, 'text/html')}>
-                    {L('Download converted page', '下载转换后的页面')}
-                  </Button>
-
-                </Alert>
-              ) : null}
-              {conversion?.originalImages?.length ? (
-                <Alert severity="info" data-testid="sp-scheme-original-images">
-                  {L('Stimulus images now come from this project\'s Media Dataset. Upload these original images there so participants see them:', '刺激图片现在由本项目的媒体库抽取。请把这些原图上传到媒体库，参与者才能看到：')}
-                  <Box component="ul" sx={{ m: '4px 0 0', pl: 2.5, maxHeight: 140, overflow: 'auto' }}>
-                    {conversion.originalImages.slice(0, 50).map((img, i) => (
-                      <Typography component="li" variant="caption" key={i} sx={{ display: 'list-item', overflowWrap: 'anywhere' }}>
-                        {img.url}{img.note ? ` · ${img.note}` : ''}
-                      </Typography>
-                    ))}
-                  </Box>
+                  {L(`Includes the page (${upload?.siteFile || 'index.html'}, ${formatKb(summary.siteBytes)}). After import, Preview and the survey link show this page.`,
+                    `包含页面（${upload?.siteFile || 'index.html'}，${formatKb(summary.siteBytes)}）。导入后，预览和问卷链接都直接显示这个页面。`)}
                 </Alert>
               ) : null}
               {mediaPlan ? (
@@ -691,39 +573,9 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                   ))}
                 </Box>
               ) : null}
-              {!report.ok && (upload?.siteHtml || upload?.originalHtml) ? (
-                <Box data-testid="sp-scheme-convert-box" sx={{ p: 1.5, border: '1px dashed', borderColor: 'primary.main', borderRadius: 1 }}>
-                  <Typography variant="subtitle2">{L('Convert this page automatically', '自动转换这个页面')}</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                    {L('Any survey page works, including ones that send results to their own server. The free model keeps the design and connects its questions and submission to the platform.', '任何问卷网页都可以，包括把结果发到自己服务器的。免费模型会保留原设计，把题目和提交接到平台上。')}
-                  </Typography>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    multiline
-                    maxRows={3}
-                    value={convertNotes}
-                    onChange={(e) => setConvertNotes(e.target.value)}
-                    placeholder={L('Optional: anything the model should know (which images are stimuli, the question wording if the page loads it from a server…). You can also drop config / CSV files with the page.', '可选：告诉模型需要注意的地方（哪些图是刺激图、页面从服务器加载的题目文字…）。也可以把配置 / CSV 文件和页面一起拖进来。')}
-                    sx={{ mb: 1 }}
-                  />
-                  {upload?.dataFiles?.length ? (
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                      {L(`The model also reads: ${upload.dataFiles.map((f) => f.name).join(', ')}`, `模型还会读取：${upload.dataFiles.map((f) => f.name).join('、')}`)}
-                    </Typography>
-                  ) : null}
-                  {converting ? (
-                    <ConvertProgress state={converting} L={L} />
-                  ) : (
-                    <Button variant="contained" size="small" startIcon={<AutoFixHigh />} onClick={runConversion} data-testid="sp-scheme-convert">
-                      {conversion ? L('Convert again', '重新转换') : L('Convert with the free model', '用免费模型自动转换')}
-                    </Button>
-                  )}
-                </Box>
-              ) : null}
-              {report.errors.length && (summary || conversion) && !converting ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
+              {report.errors.length && (summary || upload?.asIs) ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
               {report.warnings.length ? <Box><Typography variant="subtitle2" color="warning.main">{L('Warnings', '提醒')}</Typography><IssueList items={report.warnings} /></Box> : null}
-              {summary ? (
+              {summary && !upload?.asIs ? (
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                   {Object.entries(summary.types).map(([type, n]) => <Chip key={type} size="small" label={`${type} × ${n}`} />)}
                 </Box>
@@ -738,7 +590,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         </DialogContent>
         <DialogActions>
           <Button onClick={closeDialog} disabled={importing} color="inherit">{L('Cancel', '取消')}</Button>
-          <Button variant="contained" onClick={doImport} disabled={!report?.ok || importing || Boolean(converting) || Boolean(mediaPlan && !canUploadMedia)}>
+          <Button variant="contained" onClick={doImport} disabled={!report?.ok || importing || Boolean(mediaPlan && !canUploadMedia)}>
             {importing ? L('Importing…', '导入中…') : L('Import into Builder', '导入 Builder')}
           </Button>
         </DialogActions>

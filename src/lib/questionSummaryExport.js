@@ -1,3 +1,4 @@
+import { AI_ANALYSIS_README_LINES } from './aiQuestionAnalysis.js';
 import { isNoPreference } from './choiceTie.js';
 import { choiceOutcome, summarizeChoiceOutcomes } from './choiceOutcomes.js';
 import { buildExportDictionary } from './exportDictionary.js';
@@ -2252,8 +2253,8 @@ export function buildQuestionExportFiles(question, responses, surveyConfig, { pa
   return files;
 }
 
-export function downloadQuestionExportZip(question, responses, surveyConfig) {
-  const files = buildQuestionExportFiles(question, responses, surveyConfig);
+export function downloadQuestionExportZip(question, responses, surveyConfig, extraFiles = []) {
+  const files = [...(buildQuestionExportFiles(question, responses, surveyConfig) || []), ...(extraFiles || [])];
   if (!files?.length) return;
   const date = exportDateStamp();
   downloadZip(`${question.name}_${date}.zip`, files);
@@ -2464,6 +2465,7 @@ export function buildResultsExportBundle({
   excludeFlagged,
   wideCsv,
   report = null,
+  aiAnalysisFiles = [],
 }) {
   const answerable = (questions || []).filter((q) => q?.name && !isDisplayOnly(q));
   const questionFiles = [];
@@ -2526,6 +2528,10 @@ export function buildResultsExportBundle({
   if (report) {
     rootFiles.push({ path: 'analysis_report.json', content: `${JSON.stringify(report, null, 2)}\n` });
   }
+  if (aiAnalysisFiles?.length) {
+    rootFiles[0] = { path: 'README.txt', content: `${readme}${AI_ANALYSIS_README_LINES.join('\n')}\n` };
+    rootFiles.push(...aiAnalysisFiles);
+  }
   return rootFiles;
 }
 
@@ -2533,25 +2539,30 @@ export function buildResultsExportBundle({
  * Export for an uploaded SP-Scheme page: nothing is analysed, so the ZIP holds
  * only the answers (one row per submission) and every record exactly as stored.
  */
-export function buildSiteResultsExportFiles({ project, filteredResponses, wideCsv }) {
+export function buildSiteResultsExportFiles({ project, filteredResponses, wideCsv, aiAnalysisFiles = [] }) {
   const rows = filteredResponses || [];
   const readme = [
     `SP-Survey export · ${project?.name || project?.id || 'survey'} · ${exportDateStamp()}`,
     '',
     'This survey is an uploaded SP-Scheme page. Its questions were identified by a model and',
-    'may not match what the page really asks, so SP-Survey has not analysed anything.',
+    ...(aiAnalysisFiles?.length
+      ? ['may not match what the page really asks, so SP-Survey does not analyse it by itself;',
+        'the AI analyses generated on the Results page are listed below.']
+      : ['may not match what the page really asks, so SP-Survey has not analysed anything.']),
     '',
     'responses_wide.csv   one row per submission, one column per recorded answer',
     'responses_raw.json   every submission exactly as stored: what the page saved under',
     '                     __sp_page_state, the requests it sent under __sp_requests',
     '',
     `Submissions: ${rows.length}`,
+    ...(aiAnalysisFiles?.length ? AI_ANALYSIS_README_LINES : []),
     '',
   ].join('\n');
   return [
     { path: 'README.txt', content: readme },
     { path: 'responses_wide.csv', content: wideCsv || rowsToCsv([['participant_id']]) },
     { path: 'responses_raw.json', content: `${JSON.stringify(rows, null, 2)}\n` },
+    ...(aiAnalysisFiles || []),
   ];
 }
 

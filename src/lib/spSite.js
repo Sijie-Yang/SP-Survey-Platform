@@ -409,9 +409,61 @@ export const SITE_MEDIA_MAX_ITEMS = 2000;
  * The project's media grouped by folder for the page: only the folders the
  * survey names (recursively), so a large library is not sent whole.
  */
+/** Media-folder key for the library files a page names by relative path (not a real folder). */
+export const SITE_PAGE_FILES = '__page_files__';
+
+const PAGE_FILE_RE = /["'(=]\s*((?:\.\/)?[^"'()<>\s:?#]*?([^"'()<>\s:?#/]+\.(?:jpe?g|png|webp|gif|avif|bmp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)))(?:[?#][^"'()\s]*)?\s*["')]/gi;
+
+/**
+ * Files the page itself names by relative path ("images/a.jpg", "a.jpg"). The
+ * media library counts as the folder the page sits in, so those names are the
+ * library's files: same folder path, else the same file name.
+ */
+export function pageReferencedFiles(html) {
+  const refs = new Map();
+  const text = String(html || '');
+  let m;
+  PAGE_FILE_RE.lastIndex = 0;
+  while ((m = PAGE_FILE_RE.exec(text))) {
+    const path = m[1].replace(/^\.\//, '').replace(/^\/+/, '');
+    if (/^(data|blob|https?):/i.test(path) || path.startsWith('//')) continue;
+    refs.set(path.toLowerCase(), m[2].toLowerCase());
+  }
+  return refs;
+}
+
+function pageFilesFromPool(pool, html) {
+  const refs = pageReferencedFiles(html);
+  if (!refs.size) return [];
+  const byPath = new Map();
+  const byName = new Map();
+  (Array.isArray(pool) ? pool : []).forEach((item) => {
+    if (!item?.url) return;
+    const folder = String(normalizeMediaEntry(item)?.folder || '').replace(/^\/+|\/+$/g, '');
+    const name = item.name || String(item.url).split('?')[0].split('/').pop();
+    const entry = { url: item.url, name, type: item.type || 'image', folder };
+    const path = `${folder ? `${folder}/` : ''}${name}`.toLowerCase();
+    if (!byPath.has(path)) byPath.set(path, entry);
+    if (!byName.has(name.toLowerCase())) byName.set(name.toLowerCase(), entry);
+  });
+  const out = [];
+  const seen = new Set();
+  refs.forEach((name, path) => {
+    const hit = byPath.get(path) || byName.get(name);
+    if (hit && !seen.has(hit.url)) { seen.add(hit.url); out.push(hit); }
+  });
+  return out;
+}
+
 export function siteMediaFolders(pool = [], config = {}) {
   const wanted = siteMediaFolderNames(config);
   const out = {};
+  // Library files the page names itself are always there, linked folder or not.
+  const own = pageFilesFromPool(pool, config?.spSite?.html);
+  if (own.length) out[SITE_PAGE_FILES] = own.slice(0, SITE_MEDIA_MAX_ITEMS);
+  // A page with an empty image list of its own and no folder linked gets the
+  // library root, so it never falls back to pictures it draws itself.
+  if (!wanted.length && findImageSlots(config?.spSite?.html || '').some((slot) => !slot.count)) wanted.push(SITE_MEDIA_ROOT);
   let count = 0;
   (Array.isArray(pool) ? pool : []).forEach((item) => {
     if (!item?.url) return;
@@ -887,6 +939,17 @@ export const SP_SITE_SDK_SOURCE = `
       var mapped = mappedMedia(el.getAttribute('src'));
       if (mapped) setAttr.call(el, 'src', mapped);
     });
+    // Inline background images: style="background-image:url(images/a.jpg)".
+    var styled = [root].concat(Array.prototype.slice.call(root.querySelectorAll('[style*="url("]')));
+    styled.forEach(function (el) {
+      var style = el.getAttribute && el.getAttribute('style');
+      if (!style || style.indexOf('url(') < 0) return;
+      var next = style.replace(/url\\(\\s*(["']?)([^"')]+)\\1\\s*\\)/g, function (all, q, ref) {
+        var mapped = mappedMedia(ref);
+        return mapped ? 'url("' + mapped + '")' : all;
+      });
+      if (next !== style) setAttr.call(el, 'style', next);
+    });
   }
   if (window.MutationObserver) {
     new MutationObserver(function (records) {
@@ -956,13 +1019,22 @@ export const SP_SITE_SDK_SOURCE = `
       return call('answer', { name: name, value: value === undefined ? null : value, trial: o.trial, shown: o.shown, key: o.key });
     },
     imageSlot: function (name, fallback) {
-      // A page's own image list (e.g. PHOTO_URLS), filled from the media folders
-      // linked in the Builder; which images went in is kept with the response.
+      // A page's own image list (e.g. PHOTO_URLS). Files the page names itself
+      // stay (the library is its folder); an empty list is filled with the
+      // linked folders' images in a random order for each participant, so the
+      // page shows library images instead of drawing its own. Which images went
+      // in, in that order, is kept with the response.
+      if (fallback && fallback.length) return fallback;
       var items = [];
       Object.keys(media).sort().forEach(function (k) {
+        if (k === '__page_files__') return;
         media[k].forEach(function (m) { if (!/video|audio/i.test(String(m.type || ''))) items.push(m); });
       });
       if (!items.length) return fallback;
+      for (var i = items.length - 1; i > 0; i -= 1) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = items[i]; items[i] = items[j]; items[j] = tmp;
+      }
       sendState('sp-media', name, JSON.stringify(items.map(function (m) { return { name: m.name, url: m.url, folder: m.folder }; })));
       return items.map(function (m) { return m.url; });
     },
@@ -1008,7 +1080,12 @@ export function buildSiteCsp(allowedHosts = []) {
   ].join('; ');
 }
 
-const IMAGE_SLOT_NAME_RE = /(photo|image|img|pic|stimul|media)/i;
+// A name holds pictures when one of its words says so: PHOTO_URLS, imageList,
+// pics, stimuli; not "pick" or "picker", which a loose /pic/ would match.
+const IMAGE_SLOT_WORD_RE = /^(photo|image|img|stimul|media)|^(pic|pics|picture|pictures)$/;
+function isImageSlotName(name) {
+  return String(name || '').replace(/([a-z\d])([A-Z])/g, '$1 $2').split(/[^A-Za-z]+/).some((word) => IMAGE_SLOT_WORD_RE.test(word.toLowerCase()));
+}
 // An array literal holding only quoted strings (or nothing).
 const IMAGE_SLOT_ITEMS_RE = /^\s*(?:(?:'[^'\n]*'|"[^"\n]*")\s*,?\s*)*$/;
 const IMAGE_SLOT_RE = /\b(const|let|var)(\s+)([A-Za-z_$][\w$]*)(\s*=\s*)\[([^[\]]*)\]/g;
@@ -1029,7 +1106,7 @@ export function findImageSlots(html) {
   const slots = [];
   text.replace(INLINE_SCRIPT_RE, (all, open, body) => {
     body.replace(IMAGE_SLOT_RE, (m, kw, sp, name, eq, items) => {
-      if (IMAGE_SLOT_NAME_RE.test(name) && IMAGE_SLOT_ITEMS_RE.test(items)) {
+      if (isImageSlotName(name) && IMAGE_SLOT_ITEMS_RE.test(items)) {
         slots.push({ name, count: (items.match(/'[^'\n]*'|"[^"\n]*"/g) || []).length });
       }
       return m;
@@ -1044,7 +1121,7 @@ export function linkImageSlots(html) {
   const text = String(html || '');
   if (pageReadsMedia(text)) return text;
   return text.replace(INLINE_SCRIPT_RE, (all, open, body, close) => open + body.replace(IMAGE_SLOT_RE, (m, kw, sp, name, eq, items) => {
-    if (!IMAGE_SLOT_NAME_RE.test(name) || !IMAGE_SLOT_ITEMS_RE.test(items)) return m;
+    if (!isImageSlotName(name) || !IMAGE_SLOT_ITEMS_RE.test(items)) return m;
     const list = `[${items}]`;
     return `${kw}${sp}${name}${eq}(window.SPSite && SPSite.imageSlot ? SPSite.imageSlot(${JSON.stringify(name)}, ${list}) : ${list})`;
   }) + close);
@@ -1112,10 +1189,14 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [], raw
   const bytes = utf8Bytes(text);
   if (!/<(html|body|div|main|script)\b/i.test(text)) errors.push('index.html does not look like an HTML page.');
   if (bytes > SP_SITE_MAX_BYTES) errors.push(`index.html is ${(bytes / 1048576).toFixed(1)} MB; keep it under 3 MB (media belongs in the Media Dataset).`);
+  const scriptSrc = [...text.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]);
+  const scriptHosts = [...CDN_HOSTS, ...hosts.map((h) => `https://${h}`)];
+  const blocked = scriptSrc.filter((src) => !scriptHosts.some((host) => src.startsWith(`${host}/`) || src === host));
   if (raw) {
     // No questions declared: the platform keeps the page's own requests as they
     // are and the participant submits from the platform's bar.
     if (/SPSite\.answer\s*\(/.test(text)) warnings.push('index.html calls SPSite.answer but declares no questions, so those answers are not recorded; declare the questions in sp-scheme.');
+    if (blocked.length) warnings.push(`Scripts from domains that are not ticked will be blocked, which may break the page: ${blocked.slice(0, 3).join(', ')}.`);
     warnings.push('No questions are declared: the platform records the requests this page sends as they are and does not analyse them.');
     return { errors, warnings };
   }
@@ -1130,9 +1211,6 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [], raw
         : 'index.html makes network calls; they are blocked on the platform. Answers must go through SPSite.answer.');
     }
   }
-  const scriptSrc = [...text.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]);
-  const scriptHosts = [...CDN_HOSTS, ...hosts.map((h) => `https://${h}`)];
-  const blocked = scriptSrc.filter((src) => !scriptHosts.some((host) => src.startsWith(`${host}/`) || src === host));
   if (blocked.length) {
     errors.push(`Scripts must be inline or come from ${CDN_HOSTS.join(', ')} or an allowed domain: ${blocked.slice(0, 3).join(', ')}.`);
   }
