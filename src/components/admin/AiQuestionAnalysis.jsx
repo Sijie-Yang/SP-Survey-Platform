@@ -9,7 +9,7 @@ import { Alert, Box, Button, Chip, CircularProgress, Collapse, Table, TableBody,
 import { AutoAwesome } from '@mui/icons-material';
 import { useRegion } from '../../contexts/RegionContext';
 import { isChineseLanguage } from '../../lib/uiLanguages';
-import { evaluateAnalysis, generateQuestionAnalysis } from '../../lib/aiQuestionAnalysis';
+import { evaluateAnalysis, generateQuestionAnalysis, pageMediaUrls } from '../../lib/aiQuestionAnalysis';
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { writeQuestionAnalysis } from '../../lib/agentApi';
 import { ImageResolverContext } from './imageResolverContext';
@@ -25,16 +25,18 @@ function baseName(key) {
 }
 
 /** Look images up by full key, then by file name, so model keys like "IMG1.jpg" find the media. */
-function useLenientResolver() {
+function useLenientResolver(extra) {
   const map = useContext(ImageResolverContext);
   return useMemo(() => {
     const byName = new Map();
+    // The media library lists the page was given: the images the page really showed.
+    if (extra) extra.forEach((url, name) => { if (!byName.has(name)) byName.set(name, url); });
     if (map && typeof map.forEach === 'function') map.forEach((url, key) => { const name = baseName(key); if (name && !byName.has(name)) byName.set(name, url); });
     // Pages often name an image without its extension ("IMG0395").
     const byStem = new Map();
     byName.forEach((url, name) => { const stem = name.replace(/\.[a-z0-9]+$/i, ''); if (!byStem.has(stem)) byStem.set(stem, url); });
     return { get: (key) => map?.get?.(key) || byName.get(baseName(key)) || byStem.get(baseName(key).replace(/\.[a-z0-9]+$/i, '')) || null };
-  }, [map]);
+  }, [map, extra]);
 }
 
 function Bars({ items, total, unit = '', showCount = true }) {
@@ -196,10 +198,10 @@ function TrueSkillTableColumns() {
   ];
 }
 
-export function AiAnalysisBlocks({ blocks }) {
+export function AiAnalysisBlocks({ blocks, media }) {
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
-  const resolver = useLenientResolver();
+  const resolver = useLenientResolver(media);
   return <ImageResolverContext.Provider value={resolver}>
     {(blocks || []).map((block, i) => <BlockView key={i} block={block} zh={zh} />)}
   </ImageResolverContext.Provider>;
@@ -213,6 +215,7 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
   const [state, setState] = useState({ status: saved ? 'running' : 'idle', blocks: [], error: '' });
+  const pageMedia = useMemo(() => pageMediaUrls(records), [records]);
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState(saved?.instructions || '');
   const [showCode, setShowCode] = useState(false);
@@ -227,12 +230,12 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
     }
     let cancelled = false;
     setState((prev) => ({ ...prev, status: 'running' }));
-    evaluateAnalysis(saved.code, records, runAnalysisInSandbox).then((result) => {
+    evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml }).then((result) => {
       if (cancelled) return;
       setState(result.ok ? { status: 'done', blocks: result.blocks, error: '' } : { status: 'error', blocks: [], error: result.error });
     });
     return () => { cancelled = true; };
-  }, [saved?.code, records]);
+  }, [saved?.code, records, pageHtml]);
 
   const generate = async () => {
     setBusy(true);
@@ -330,7 +333,7 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
     {state.status === 'error' && <Alert severity="warning" sx={{ mb: 2 }}>
       {zh ? `分析没有跑通（已自动让模型修过一次）：${state.error}。可以在说明里写清答案在哪个字段、表示什么，再生成一次。` : `The analysis did not run (the model already had one automatic fix): ${state.error}. Say in the notes where the answer is and what it means, then generate again.`}
     </Alert>}
-    {state.status === 'done' && <AiAnalysisBlocks blocks={state.blocks} />}
+    {state.status === 'done' && <AiAnalysisBlocks blocks={state.blocks} media={pageMedia} />}
     {children}
   </Box>;
 }

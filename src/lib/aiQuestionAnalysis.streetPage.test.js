@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  buildAnalysisRecords, generateQuestionAnalysis, mediaSummary, pageCodeExcerpt, runAnalysisUnsandboxed,
+  buildAnalysisRecords, evaluateAnalysis, generateQuestionAnalysis, mediaSummary, pageCodeExcerpt, pageIdMediaMap, pageMediaUrls, runAnalysisUnsandboxed,
 } from './aiQuestionAnalysis';
 
 // A real converted page: 24 generated scenes S01..S24; the platform fills its
@@ -70,4 +70,54 @@ test('the model is sent the excerpt, the media list size and the other fields', 
   expect([...items].every((k) => /^street_0\d\d\.jpg$/.test(k))).toBe(true);
   expect(items.size).toBe(10);
   expect(items.has('street_002.jpg')).toBe(true); // S02 = PHOTO_URLS[1]
+});
+
+// What a weak model writes: it reads the scene ids and never touches the media list.
+const NAIVE = `function analyze(records, helpers) {
+  var matches = [], flash = [];
+  records.forEach(function (r) {
+    var s = helpers.parse(r.page_state['streetscape-survey-v1']) || {};
+    (s.pairs || []).forEach(function (t) {
+      if (t.choice === 'L') matches.push({ winner: t.left, loser: t.right, category: t.dim });
+      if (t.choice === 'R') matches.push({ winner: t.right, loser: t.left, category: t.dim });
+    });
+    (s.flash || []).forEach(function (f) { flash.push({ item: f.scene, value: f.rating, rater: r.participant_id }); });
+  });
+  return { blocks: [
+    { type: 'pairwise', title: 'pairs', matches: matches },
+    { type: 'per_item', title: 'flash', values: flash },
+    { type: 'choice', title: 'side', values: ['L', 'R'] },
+  ] };
+}`;
+
+test('the platform finds how the page names its scenes and which library image each one shows', () => {
+  const records = buildAnalysisRecords(ROWS, QUESTION, { site: true });
+  const map = pageIdMediaMap(records, HTML);
+  expect(map.list).toBe('PHOTO_URLS');
+  expect(map.formats).toContainEqual({ prefix: 'S', offset: 1 });
+  expect(map.names.slice(0, 3)).toEqual(['street_001.jpg', 'street_002.jpg', 'street_003.jpg']);
+  expect(pageMediaUrls(records).get('street_005.jpg')).toBe(LIBRARY[4].url);
+  expect(pageIdMediaMap(records, '')).toBeNull();
+  expect(pageIdMediaMap(records, '<script>const S = "x";</script>')).toBeNull();
+});
+
+test('scene ids become library images even when the model never maps them', async () => {
+  const records = buildAnalysisRecords(ROWS, QUESTION, { site: true });
+  const run = (code, recs) => Promise.resolve(runAnalysisUnsandboxed(code, recs));
+  const result = await evaluateAnalysis(NAIVE, records, run, { pageHtml: HTML });
+  expect(result.ok).toBe(true);
+  const [pairs, flash, side] = result.blocks;
+  const items = new Set(pairs.boards.flatMap((b) => b.rankings.map((r) => r.imageKey)));
+  expect(pairs.boards.map((b) => b.label).sort()).toEqual([...DIMS].sort());
+  expect(items.size).toBe(10);
+  expect([...items].every((k) => /^street_0\d\d\.jpg$/.test(k))).toBe(true);
+  expect(items.has('street_003.jpg')).toBe(true); // S03 = PHOTO_URLS[2]
+  expect(items.has('S03')).toBe(false);
+  expect(flash.items.map((r) => r.item).sort()).toEqual(['street_001.jpg', 'street_004.jpg', 'street_008.jpg', 'street_012.jpg', 'street_016.jpg', 'street_020.jpg']);
+  expect(pairs.note).toMatch(/媒体库/);
+  // Values that are not page ids are left alone.
+  expect(side.values).toEqual(['L', 'R']);
+  // Without the page code nothing is guessed.
+  const plain = await evaluateAnalysis(NAIVE, records, run);
+  expect(plain.blocks[0].boards[0].rankings.every((r) => /^S\d\d$/.test(r.imageKey))).toBe(true);
 });

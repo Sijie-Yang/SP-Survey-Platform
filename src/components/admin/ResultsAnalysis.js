@@ -2565,7 +2565,7 @@ export function QuestionCard({
           let extra = [];
           if (aiAnalysis?.code) {
             const records = buildAnalysisRecords(exportResponses || allResponses, question, { site: siteSurvey });
-            const run = await evaluateAnalysis(aiAnalysis.code, records, runAnalysisInSandbox);
+            const run = await evaluateAnalysis(aiAnalysis.code, records, runAnalysisInSandbox, { pageHtml: surveyConfig?.spSite?.html || '' });
             if (run.ok) extra = aiAnalysisExportFiles(question, aiAnalysis, run.blocks);
           }
           downloadQuestionExportZip(question, exportResponses || allResponses, surveyConfig, extra);
@@ -3165,7 +3165,7 @@ export default function ResultsAnalysis({
       const saved = savedAnalyses[question.name];
       if (!saved?.code) continue;
       const records = buildAnalysisRecords(filteredResponses, question, { site: siteConverted });
-      const run = await evaluateAnalysis(saved.code, records, runAnalysisInSandbox);
+      const run = await evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml: surveyConfig?.spSite?.html || '' });
       if (run.ok) files.push(...aiAnalysisExportFiles(question, saved, run.blocks));
     }
     return files;

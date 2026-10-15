@@ -431,13 +431,117 @@ export function computeAnalysisBlocks(blocks) {
   });
 }
 
+const escapeRe = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Pages often name their own items ("S03") and take the pictures from the
+ * media library list the platform gave them, by position (SCENES[i].img =
+ * PHOTO_URLS[i], id 'S'+(i+1)). Answers then hold the page's ids. This finds
+ * that mapping in the page code and returns id -> library image name, so
+ * results show the real images whatever code the model wrote.
+ */
+export function pageIdMediaMap(records, pageHtml) {
+  if (!pageHtml) return null;
+  const html = String(pageHtml);
+  // The list every submission got (the platform sorts it, so it is the same for all).
+  const lists = new Map();
+  (records || []).forEach((record) => {
+    const state = record?.page_state && typeof record.page_state === 'object' ? record.page_state : {};
+    Object.keys(state).filter((k) => k.startsWith('sp-media:')).forEach((k) => {
+      const list = jsonInString(state[k]) ?? state[k];
+      if (!Array.isArray(list) || !list.length) return;
+      const names = list.map((m) => (m && typeof m === 'object' ? (m.name || String(m.url || '').split('/').pop()) : String(m || '').split('/').pop()));
+      const sig = `${k}\n${names.join('\n')}`;
+      const entry = lists.get(sig) || { name: k.slice(9), names, count: 0 };
+      entry.count += 1;
+      lists.set(sig, entry);
+    });
+  });
+  const best = [...lists.values()].sort((a, b) => b.count - a.count)[0];
+  if (!best) return null;
+  const list = escapeRe(best.name);
+  // The page must use the list by position.
+  const positional = new RegExp(`${list}\\s*\\.\\s*forEach\\s*\\(\\s*(?:function\\s*)?\\(?\\s*\\w+\\s*,\\s*\\w+|${list}\\s*\\[\\s*\\w+\\s*(?:[-+]\\s*\\d+\\s*)?\\]|${list}\\s*\\.\\s*map\\s*\\(\\s*(?:function\\s*)?\\(?\\s*\\w+\\s*,\\s*\\w+`).test(html);
+  if (!positional) return null;
+  // How the page builds its ids: 'S'+String(i+1).padStart(2,'0'), 'S'+(i+1), `S${i+1}`.
+  const idRe = /(['"`])([A-Za-z][A-Za-z_-]{0,11})\1\s*\+\s*(?:String\s*\(\s*)?\(?\s*(\w+)\s*(?:\+\s*(\d+))?\s*\)?|`([A-Za-z][A-Za-z_-]{0,11})\$\{\s*(?:String\s*\(\s*)?(\w+)\s*(?:\+\s*(\d+))?/g;
+  const formats = [];
+  let m;
+  while ((m = idRe.exec(html))) {
+    const prefix = m[2] || m[5];
+    const offset = Number(m[4] || m[7] || 0);
+    if (!formats.some((f) => f.prefix === prefix)) formats.push({ prefix, offset });
+  }
+  if (!formats.length) return null;
+  return { list: best.name, names: best.names, formats };
+}
+
+/** name -> url for every image in the media lists the page was given. */
+export function pageMediaUrls(records) {
+  const out = new Map();
+  (records || []).forEach((record) => {
+    const state = record?.page_state && typeof record.page_state === 'object' ? record.page_state : {};
+    Object.keys(state).filter((k) => k.startsWith('sp-media:')).forEach((k) => {
+      const list = jsonInString(state[k]) ?? state[k];
+      (Array.isArray(list) ? list : []).forEach((m) => {
+        if (m && typeof m === 'object' && m.name && m.url && !out.has(m.name)) out.set(m.name, m.url);
+      });
+    });
+  });
+  return out;
+}
+
+function mediaNameForId(map, id) {
+  if (!map || typeof id !== 'string') return null;
+  for (const f of map.formats) {
+    const m = id.match(new RegExp(`^${escapeRe(f.prefix)}0*(\\d+)$`));
+    if (m) {
+      const name = map.names[Number(m[1]) - f.offset];
+      return name || null;
+    }
+  }
+  return null;
+}
+
+/** Replace page ids with library image names in normalized blocks, only where every id in a block maps. */
+export function remapBlocksToMedia(blocks, map) {
+  if (!map) return blocks;
+  return blocks.map((block) => {
+    const ids = [];
+    if (block.type === 'pairwise') block.matches.forEach((x) => ids.push(x.winner, x.loser));
+    else if (block.type === 'ranking') block.orders.forEach((o) => ids.push(...o));
+    else if (block.type === 'per_item') block.values.forEach((v) => ids.push(v.item));
+    else if (block.type === 'rating') block.items.forEach((it) => ids.push(it.label));
+    else if (block.type === 'bar') block.items.forEach((it) => ids.push(it.label));
+    else if (block.type === 'choice') ids.push(...block.values);
+    else if (block.type === 'table') {
+      // Only cells that are exactly a page id; everything else stays as written.
+      let changed = false;
+      const rows = block.rows.map((row) => row.map((cell) => {
+        const name = mediaNameForId(map, cell);
+        if (name) changed = true;
+        return name ? `${name} (${cell})` : cell;
+      }));
+      return changed ? { ...block, rows, note: [block.note, `编号已按页面代码对应到媒体库图片（${map.list}）`].filter(Boolean).join(' · ') } : block;
+    } else return block;
+    if (!ids.length || !ids.every((id) => mediaNameForId(map, id))) return block;
+    const to = (id) => mediaNameForId(map, id);
+    const note = [block.note, `编号已按页面代码对应到媒体库图片（${map.list}）`].filter(Boolean).join(' · ');
+    if (block.type === 'pairwise') return { ...block, note, matches: block.matches.map((x) => ({ ...x, winner: to(x.winner), loser: to(x.loser) })) };
+    if (block.type === 'ranking') return { ...block, note, orders: block.orders.map((o) => o.map(to)) };
+    if (block.type === 'per_item') return { ...block, note, values: block.values.map((v) => ({ ...v, item: to(v.item) })) };
+    if (block.type === 'rating' || block.type === 'bar') return { ...block, note, items: block.items.map((it) => ({ ...it, label: to(it.label) })) };
+    return { ...block, note, values: block.values.map(to) };
+  });
+}
+
 /** Run checked code on records (any runner) and compute: { ok, blocks, problems, error }. */
-export async function evaluateAnalysis(code, records, runner) {
+export async function evaluateAnalysis(code, records, runner, { pageHtml = '' } = {}) {
   const run = await runner(code, records);
   if (!run?.ok) return { ok: false, error: run?.error || 'The code did not run.', blocks: [], problems: [] };
   const { blocks, problems } = normalizeAnalysisResult(run.result);
   if (!blocks.length) return { ok: false, error: problems.join(' ') || 'No usable result.', blocks: [], problems };
-  return { ok: true, blocks: computeAnalysisBlocks(blocks), problems };
+  return { ok: true, blocks: computeAnalysisBlocks(remapBlocksToMedia(blocks, pageIdMediaMap(records, pageHtml))), problems };
 }
 
 function csvCell(value) {
@@ -674,11 +778,11 @@ export async function generateQuestionAnalysis({ question, records, otherQuestio
     instructions,
   };
   let reply = await request(base);
-  let evaluation = await evaluateAnalysis(reply.code, records, runner);
+  let evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml });
   let attempts = 1;
   if (!evaluation.ok) {
     reply = await request({ ...base, previous: reply.code, error: evaluation.error });
-    evaluation = await evaluateAnalysis(reply.code, records, runner);
+    evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml });
     attempts = 2;
   }
   return {
