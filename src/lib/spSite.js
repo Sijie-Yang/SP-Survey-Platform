@@ -11,6 +11,7 @@
 
 import { applyMediaToElement } from './surveyMediaInjection';
 import { sliderScale } from './sliderScale';
+import { normalizeMediaEntry } from './mediaUtils';
 import { isTrialsAnswer, mediaSetToShownIds, mediaSetToShownImages } from './trialNavigation';
 
 export const SP_SITE_VERSION = '1.0';
@@ -387,9 +388,14 @@ function emptyTrials(n) {
   return { trials: Array.from({ length: n }, () => ({ value: null, shown_images: [], shown_media_ids: [] })) };
 }
 
+/** The media library root in spSite.mediaFolders: the files directly in it, no subfolders. */
+export const SITE_MEDIA_ROOT = '/';
+
 /** Folders an SP-Scheme page may draw from itself (SPSite.getMedia). */
 export function siteMediaFolderNames(config = {}) {
-  const names = new Set((config.spSite?.mediaFolders || []).map((f) => String(f || '').replace(/^\/+|\/+$/g, '')).filter(Boolean));
+  const linked = config.spSite?.mediaFolders || [];
+  const names = new Set(linked.map((f) => String(f || '').replace(/^\/+|\/+$/g, '')).filter(Boolean));
+  if (linked.includes(SITE_MEDIA_ROOT)) names.add(SITE_MEDIA_ROOT);
   flatElements(config.pages).forEach(({ element }) => (element.mediaFolders || []).forEach((f) => {
     const name = String(f || '').replace(/^\/+|\/+$/g, '');
     if (name) names.add(name);
@@ -409,9 +415,12 @@ export function siteMediaFolders(pool = [], config = {}) {
   let count = 0;
   (Array.isArray(pool) ? pool : []).forEach((item) => {
     if (!item?.url) return;
-    const folder = String(item.logicalFolder || item.folder || '').replace(/^\/+|\/+$/g, '');
-    const hit = wanted.find((w) => folder === w || folder.startsWith(`${w}/`));
-    if (!hit || count >= SITE_MEDIA_MAX_ITEMS) return;
+    // Same folder the media library shows (an entry may only carry its R2 key).
+    const folder = String(normalizeMediaEntry(item)?.folder || '').replace(/^\/+|\/+$/g, '');
+    const hit = wanted.find((w) => w !== SITE_MEDIA_ROOT && (folder === w || folder.startsWith(`${w}/`)))
+      // Root files are read as SPSite.getMedia('').
+      ?? (!folder && wanted.includes(SITE_MEDIA_ROOT) ? '' : undefined);
+    if (hit === undefined || count >= SITE_MEDIA_MAX_ITEMS) return;
     count += 1;
     (out[hit] = out[hit] || []).push({ url: item.url, name: item.name || String(item.url).split('?')[0].split('/').pop(), type: item.type || 'image', folder });
   });

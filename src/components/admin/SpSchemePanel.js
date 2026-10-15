@@ -28,7 +28,7 @@ import {
   readSpSchemeUpload,
   validateSpSchemePackage,
 } from '../../lib/spScheme';
-import { externalHostsIn, extractEmbeddedScheme, findImageSlots } from '../../lib/spSite';
+import { SITE_MEDIA_ROOT, externalHostsIn, extractEmbeddedScheme, findImageSlots } from '../../lib/spSite';
 import { listAllKnownFolders } from '../../lib/mediaUtils';
 import { convertSurveyPage, fetchSurveyPage, fetchSurveyPageMedia } from '../../lib/agentApi';
 import { convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
@@ -418,10 +418,11 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
   const siteSlots = useMemo(() => (activeSite ? findImageSlots(activeSite.html) : []), [activeSite]);
   const siteReadsMedia = Boolean(activeSite && /SPSite\s*\.\s*getMedia\s*\(/.test(activeSite.html));
   const siteFolders = useMemo(() => activeSite?.mediaFolders || [], [activeSite]);
-  const folderOptions = useMemo(() => [...new Set([
+  const folderOptions = useMemo(() => [SITE_MEDIA_ROOT, ...[...new Set([
     ...listAllKnownFolders(currentProject?.preloadedImages || [], {}, null, currentProject?.imageDatasetConfig?.mediaFolders || []),
     ...siteFolders,
-  ])].filter(Boolean).sort(), [currentProject, siteFolders]);
+  ])].filter((f) => f && f !== SITE_MEDIA_ROOT).sort()], [currentProject, siteFolders]);
+  const folderLabel = (f) => (f === SITE_MEDIA_ROOT ? L('Root (files not in a folder)', '根目录（不在文件夹里的文件）') : f);
   const setSiteFolders = (folders) => onChange({ ...config, spSite: { ...config.spSite, mediaFolders: folders } });
   const summary = report?.summary;
 
@@ -504,9 +505,10 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
             options={folderOptions}
             value={siteFolders}
             onChange={(_, next) => setSiteFolders(next)}
+            getOptionLabel={folderLabel}
             noOptionsText={L('No media folders yet: upload media to the media library first.', '媒体库里还没有文件夹，请先上传媒体。')}
             renderOption={(props, option, { selected }) => (
-              <li {...props} key={option}><Checkbox checked={selected} size="small" sx={{ mr: 1 }} />{option}</li>
+              <li {...props} key={option}><Checkbox checked={selected} size="small" sx={{ mr: 1 }} />{folderLabel(option)}</li>
             )}
             renderInput={(params) => (
               <TextField {...params} label={L('Media library folders for this page', '这个页面使用的媒体库文件夹')} placeholder={siteFolders.length ? '' : L('None linked', '未链接')} />
