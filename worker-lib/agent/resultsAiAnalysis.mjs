@@ -39,6 +39,7 @@ helpers (already defined):
   helpers.get(obj, "a.b.c")  safe nested read (parses JSON strings on the way)
   helpers.file(url)     file name of a URL or path ("https://x/images/IMG1.jpg?x=1" -> "IMG1.jpg")
   helpers.flat(arr)     flatten one level
+  helpers.media(r, name?)  the media library images the platform put into the page's own list for record r: [{ name, url, folder }] in order ([] if none)
 
 Return blocks. You only reshape data; SP-Survey runs the statistics:
   { type: "per_item", title, values: [{ item, value, rater }], measure?: "category"|"number", labels?: { value: "label" } }
@@ -67,6 +68,8 @@ Rules:
 - Read the QUESTION to decide what the answer means, then pick the ONE block type that fits it. Usually one block; at most 3, all about this question.
 - Images: participants usually see a random subset of images in a random order. Results must be keyed by WHICH image (its file name), never by trial number or position. MEDIA says where image names appear. Use helpers.file(url) as the item so the platform can show the picture.
 - Use the question's own options (choices) as labels when the answer is a code.
+- The page may name its own items (e.g. scene ids "S03") while the pictures come from the media library list it was given (PAGE CODE shows how, e.g. SCENES[i].img = PHOTO_URLS[i], id "S"+(i+1)). Then translate each id to helpers.media(r)[that position].name and use that name as the item, so results show the real images. Keep the page's id only when the list has no image at that position.
+- If the page uses several conditions or dimensions for the same task (e.g. a "dim" field), split by it: pairwise "category", or one block per dimension (still at most 3).
 - Skip records or trials that lack the data; never throw. Guard every access: (x || {}), Array.isArray(...).
 - Plain modern JavaScript only. No fetch, no DOM, no imports, no async, no Math.random.
 - Reply with the function in one \`\`\`javascript block and nothing else.`;
@@ -90,6 +93,7 @@ export function normalizeAnalysisRequest(body) {
     instructions: clip(body?.instructions, 2000).trim(),
     otherQuestions: clip(body?.otherQuestions, 6000).trim(),
     media: clip(body?.media, 3000).trim(),
+    pageCode: clip(body?.pageCode, 6000).trim(),
     previous: clip(body?.previous, MAX_CODE_CHARS),
     error: clip(body?.error, 3000).trim(),
   };
@@ -110,6 +114,7 @@ export function buildAnalysisUserMessage(input) {
   const parts = [`QUESTION\n${input.question}`];
   if (input.otherQuestions) parts.push(`OTHER QUESTIONS ON THE PAGE (do not analyse these)\n${input.otherQuestions}`);
   if (input.media) parts.push(`MEDIA\n${input.media}`);
+  if (input.pageCode) parts.push(`PAGE CODE (excerpt of the page's script: how it uses its media list)\n${input.pageCode}`);
   if (input.instructions) parts.push(`RESEARCHER NOTES (follow these)\n${input.instructions}`);
   parts.push(`RECORDS: ${input.recordCount || 'several'} in total`);
   if (input.fields) parts.push(`FIELDS (path  types  (records having it)  example)\n${input.fields}`);

@@ -166,9 +166,15 @@ var helpers = {
   parse: function (v) { if (typeof v !== 'string') return v; try { return JSON.parse(v); } catch (e) { return v; } },
   list: function (v) { v = helpers.parse(v); if (Array.isArray(v)) return v; if (v && typeof v === 'object') return Object.keys(v).map(function (k) { return v[k]; }); return v == null ? [] : [v]; },
   num: function (v) { if (v === null || v === undefined || v === '' || typeof v === 'boolean') return null; var n = Number(v); return isFinite(n) ? n : null; },
-  get: function (obj, path) { var parts = String(path || '').split('.'); var cur = obj; for (var i = 0; i < parts.length; i++) { if (cur == null) return undefined; cur = helpers.parse(cur)[parts[i]]; } return cur; },
+  get: function (obj, path) { var parts = String(path || '').split('.'); var cur = obj; for (var i = 0; i < parts.length; i++) { if (cur == null) return undefined; cur = helpers.parse(cur)[parts[i]]; } return typeof cur === 'string' && /^\\s*[\\[{]/.test(cur) ? helpers.parse(cur) : cur; },
   file: function (v) { var s = String(v == null ? '' : v).split('?')[0].split('#')[0]; var i = s.lastIndexOf('/'); return i >= 0 ? s.slice(i + 1) : s; },
-  flat: function (arr) { var out = []; (arr || []).forEach(function (x) { if (Array.isArray(x)) out.push.apply(out, x); else out.push(x); }); return out; }
+  flat: function (arr) { var out = []; (arr || []).forEach(function (x) { if (Array.isArray(x)) out.push.apply(out, x); else out.push(x); }); return out; },
+  media: function (record, name) {
+    var state = helpers.parse(record && record.page_state) || {};
+    var key = name ? 'sp-media:' + String(name).replace(/^sp-media:/, '') : Object.keys(state).filter(function (k) { return k.indexOf('sp-media:') === 0; })[0];
+    var list = key ? helpers.parse(state[key]) : null;
+    return Array.isArray(list) ? list : [];
+  }
 };
 function runAnalysis(code, records) {
   var analyze;
@@ -512,6 +518,67 @@ export function questionBrief(question) {
   return parts.join('\n');
 }
 
+function listSizes(records, lists) {
+  const sizes = new Set();
+  (records || []).forEach((record) => lists.forEach((k) => {
+    const list = jsonInString(record?.page_state?.[k]) ?? record?.page_state?.[k];
+    if (Array.isArray(list)) sizes.add(list.length);
+  }));
+  return sizes.size ? `${[...sizes].sort((a, b) => a - b).join(' or ')} images` : 'empty';
+}
+
+const JS_WORDS = new Set(['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'new', 'this', 'true', 'false', 'null', 'undefined', 'length', 'forEach', 'map', 'filter', 'push', 'slice', 'Math', 'String', 'Number', 'Array', 'Object', 'JSON', 'from', 'img', 'src']);
+
+/**
+ * The lines of the page's own script that use the media library list (e.g.
+ * PHOTO_URLS) and the lines defining what they use, two levels deep. This is
+ * how the model learns that, say, scene "S03" shows PHOTO_URLS[2].
+ */
+export function pageCodeExcerpt(html, listNames = [], { maxChars = 5000, maxLine = 420 } = {}) {
+  const names = [...new Set((listNames || []).map((n) => String(n).replace(/^sp-media:/, '')).filter((n) => /^[A-Za-z_$][\w$]*$/.test(n)))];
+  if (!html || !names.length) return '';
+  const scripts = [...String(html).matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]).join('\n');
+  const lines = scripts.split('\n');
+  const picked = new Set();
+  const wordRe = (w) => new RegExp(`(^|[^\\w$])${w.replace(/\$/g, '\\$')}([^\\w$]|$)`);
+  lines.forEach((line, i) => { if (names.some((n) => wordRe(n).test(line))) picked.add(i); });
+  let frontier = [...picked];
+  for (let level = 0; level < 2 && frontier.length; level += 1) {
+    const ids = new Set();
+    frontier.forEach((i) => (lines[i].match(/[A-Za-z_$][\w$]*/g) || []).forEach((w) => { if (w.length > 1 && !JS_WORDS.has(w) && !names.includes(w)) ids.add(w); }));
+    const next = [];
+    lines.forEach((line, i) => {
+      if (picked.has(i)) return;
+      for (const id of ids) {
+        if (new RegExp(`(?:const|let|var|function)\\s+${id.replace(/\$/g, '\\$')}\\b`).test(line)) {
+          picked.add(i);
+          next.push(i);
+          // A function's body often continues on the next lines (where ids are built).
+          if (/\bfunction\b|=>\s*\{?\s*$/.test(line)) for (let k = 1; k <= 2 && i + k < lines.length; k += 1) picked.add(i + k);
+          break;
+        }
+      }
+    });
+    frontier = next;
+  }
+  let out = '';
+  for (const i of [...picked].sort((a, b) => a - b)) {
+    const text = lines[i].trim();
+    const line = `${i + 1}: ${text.length > maxLine ? `${text.slice(0, maxLine)}…` : text}\n`;
+    if (out.length + line.length > maxChars) break;
+    out += line;
+  }
+  return out.trim();
+}
+
+/** Names of the media lists the platform filled for this page, from the records. */
+export function mediaListNames(records) {
+  const names = new Set();
+  (records || []).forEach((record) => Object.keys(record?.page_state && typeof record.page_state === 'object' ? record.page_state : {})
+    .forEach((k) => { if (k.startsWith('sp-media:')) names.add(k.slice(9)); }));
+  return [...names];
+}
+
 /** The page's other questions, so the model leaves their data alone. */
 export function otherQuestionList(questions, current) {
   const text = (value) => (value && typeof value === 'object' ? Object.values(value)[0] : value);
@@ -586,7 +653,7 @@ export function mediaSummary(records) {
   if (nonZero.length) lines.push(`Per submission: ${Math.min(...nonZero)}–${Math.max(...nonZero)} distinct files.${Math.max(...nonZero) < names.size ? ' Each participant saw only a subset.' : ''}`);
   if (keyedBy.size) lines.push(`Answers keyed by image (object keys are image names): ${[...keyedBy.keys()].slice(0, 8).join('; ')}. Use the key as the item.`);
   if (where.size) lines.push(`Image names as values at: ${[...where.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([p, n]) => `${p} (${n})`).join('; ')}`);
-  if (lists.size) lines.push(`${[...lists].map((k) => `page_state["${k}"]`).join(', ')}: the image list the platform gave the page (filled the page's own ${[...lists].map((k) => k.slice(9)).join(', ')} array) for that participant, in the order given, as [{name, url, folder}]. If the page records an image by index or position, it means a position in the page's (possibly shuffled) copy of that list: prefer a stored file name/URL; use an index only if nothing else identifies the image.`);
+  if (lists.size) lines.push(`${[...lists].map((k) => `page_state["${k}"]`).join(', ')} (read with helpers.media(r)${lists.size > 1 ? ', or helpers.media(r, "NAME")' : ''}; ${listSizes(records, lists)}): the image list the platform gave the page (filled the page's own ${[...lists].map((k) => k.slice(9)).join(', ')} array) for that participant, in the order given, as [{name, url, folder}]. If the page records an image by index or position, it means a position in the page's (possibly shuffled) copy of that list: prefer a stored file name/URL; use an index only if nothing else identifies the image.`);
   return lines.join('\n');
 }
 
@@ -595,8 +662,9 @@ export function mediaSummary(records) {
  * the error back once for a fix (automatic; the researcher clicks once).
  * `request(body)` posts to the worker; `runner(code, records)` is the sandbox.
  */
-export async function generateQuestionAnalysis({ question, records, otherQuestions = [], instructions = '', request, runner }) {
+export async function generateQuestionAnalysis({ question, records, otherQuestions = [], pageHtml = '', instructions = '', request, runner }) {
   const base = {
+    pageCode: pageCodeExcerpt(pageHtml, mediaListNames(records)),
     question: questionBrief(question),
     otherQuestions: otherQuestionList(otherQuestions, question),
     media: mediaSummary(records),

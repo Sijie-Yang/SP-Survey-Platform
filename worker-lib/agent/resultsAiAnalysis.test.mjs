@@ -42,6 +42,7 @@ describe('Results AI analysis', () => {
       instructions: 'left means the left image',
       otherQuestions: '- complexity (rating): Visual complexity',
       media: '90 distinct media files appear in the records',
+      pageCode: '177: const SCENES=Array.from({length:24},(_,i)=>genParams(i));',
       previous: 'function analyze() { throw 1 }',
       error: 'TypeError: x',
     }, deps(chat));
@@ -54,6 +55,8 @@ describe('Results AI analysis', () => {
     assert.match(user, /RECORDS: 3 in total/);
     assert.match(user, /OTHER QUESTIONS ON THE PAGE \(do not analyse these\)\n- complexity/);
     assert.match(user, /MEDIA\n90 distinct/);
+    assert.match(user, /PAGE CODE \(excerpt[^\n]*\n177: const SCENES/);
+    assert.match(call.messages[0].content, /helpers\.media\(r\)\[that position\]\.name/);
     assert.match(call.messages[0].content, /type: "per_item"/);
     assert.match(user, /FIELDS .*\nanswer {2}string/);
     assert.match(user, /YOUR PREVIOUS CODE/);

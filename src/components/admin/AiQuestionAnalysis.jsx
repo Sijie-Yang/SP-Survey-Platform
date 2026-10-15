@@ -209,7 +209,7 @@ export function AiAnalysisBlocks({ blocks }) {
  * records: buildAnalysisRecords(...) for this question.
  * saved: the stored analysis or null. onSave(entry|null) persists it.
  */
-export default function AiQuestionAnalysis({ question, records, otherQuestions = [], saved, onSave, children }) {
+export default function AiQuestionAnalysis({ question, records, otherQuestions = [], pageHtml = '', saved, onSave, children }) {
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
   const [state, setState] = useState({ status: saved ? 'running' : 'idle', blocks: [], error: '' });
@@ -243,6 +243,7 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
         question,
         records,
         otherQuestions,
+        pageHtml,
         instructions: notes.trim(),
         request: (body) => writeQuestionAnalysis(body),
         runner: runAnalysisInSandbox,
