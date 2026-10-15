@@ -37,6 +37,16 @@ test('platform admin reads the selected project through the admin API without de
   expect(saveProjectFull).not.toHaveBeenCalled();
 });
 
+test('platform admin can generate an AI analysis for a custom question and sees the saved one', async () => {
+  const customConfig = { pages: [{ name: 'p1', elements: [{ type: 'custom', name: 'q', title: 'Custom' }] }] };
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'other-owner-project', metadata: { resultsAiAnalyses: {} } }} surveyConfig={customConfig} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  fireEvent.click(screen.getByRole('tab', { name: /^Questions$/i }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Expand analysis: q' }));
+  expect(await screen.findByTestId('ai-analysis-generate')).toBeTruthy();
+});
+
 test('unreadable admin rows are skipped so the rest of the project still loads', async () => {
   fetchAdminResponsePage.mockResolvedValueOnce([
     ...responses,

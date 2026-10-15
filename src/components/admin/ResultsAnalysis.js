@@ -3680,7 +3680,7 @@ export default function ResultsAnalysis({
                 }}>
                   {page.title || page.name}
                 </Typography>
-                {pageQuestions.map(question => <QuestionCard key={question.name} defaultExpanded={compactLayout || question.name === selectedQuestionName} onExplain={handleExplainQuestion} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={adminMode ? null : handleSaveAiAnalysis} {...readyQuestionCards.get(question.name)} />)}
+                {pageQuestions.map(question => <QuestionCard key={question.name} defaultExpanded={compactLayout || question.name === selectedQuestionName} onExplain={handleExplainQuestion} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={handleSaveAiAnalysis} {...readyQuestionCards.get(question.name)} />)}
               </Box>;
             })}
         </>}
@@ -3688,7 +3688,7 @@ export default function ResultsAnalysis({
           <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1.5, fontWeight: 'bold', letterSpacing: 1 }}>
             {isChineseLanguage(language) ? '页面题目（答案在页面记录里）' : 'Questions on the page (answers are in the page records)'}
           </Typography>
-          {sitePageCards.map((question, index) => <QuestionCard key={question.name} question={question} answers={[]} totalResponses={filteredResponses.length} questionNumber={index + 1} allResponses={filteredResponses} surveyConfig={surveyConfig} exportResponses={filteredResponses} defaultExpanded={sitePageCards.length === 1} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={adminMode ? null : handleSaveAiAnalysis} />)}
+          {sitePageCards.map((question, index) => <QuestionCard key={question.name} question={question} answers={[]} totalResponses={filteredResponses.length} questionNumber={index + 1} allResponses={filteredResponses} surveyConfig={surveyConfig} exportResponses={filteredResponses} defaultExpanded={sitePageCards.length === 1} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={handleSaveAiAnalysis} />)}
         </Box>}
 
         </Box>

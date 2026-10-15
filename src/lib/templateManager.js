@@ -508,6 +508,8 @@ function rowToAdminProject(row) {
     preloadedAt:     row.preloaded_at    || null,
     preloadedSource: row.preloaded_source || null,
     imageDatasetConfig: row.image_dataset_config || {},
+    // Saved AI analyses live here; the admin results view reads them like the owner's.
+    metadata:        row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
     created_at:      row.created_at,
     updated_at:      row.updated_at,
     draftUpdatedAt:  row.draft_updated_at ?? null,
