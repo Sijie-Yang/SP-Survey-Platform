@@ -14,7 +14,6 @@ import { descriptiveStats, wilsonCI } from './stats.js';
 import { computeBordaScores, kendallW, interpretKendallW } from './rankingStats.js';
 import { wordFrequency, textLengthStats } from './textStats.js';
 import { krippendorffAlpha, interpretAlpha } from './reliability.js';
-import { findImageSlots } from './spSite';
 
 export const AI_ANALYSIS_VERSION = 1;
 const SP_SITE_REQUESTS_KEY = '__sp_requests';
@@ -469,7 +468,8 @@ export function pageIdMediaMap(records, pageHtml) {
   });
   const best = [...lists.values()].sort((a, b) => b.count - a.count)[0];
   // Without a usable mapping, say why on the result (ids stay as the page wrote them).
-  const slots = findImageSlots(html).map((slot) => slot.name);
+  // The page's own image lists the platform can fill (const PHOTO_URLS = [...]).
+  const slots = [...new Set([...html.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[/g)].map((x) => x[1]).filter((n) => /photo|image|img|pic/i.test(n)))];
   if (!best) {
     return formats.length && slots.length
       ? { names: [], formats, reason: `这些答卷里没有媒体库图片列表（${slots.join(', ')}）：提交时页面没有从媒体库取图（没链接媒体库文件夹，或答卷在链接之前提交），页面显示的是它自己的图，所以只能用页面编号` }
