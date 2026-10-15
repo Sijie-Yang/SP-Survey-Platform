@@ -20,6 +20,7 @@
   "showOnLanding": false,
   "thumbnailUrl": null,
   "website": "https://doi.org/10.1016/j.landurbplan.2026.105686",
+  "doi": "10.1016/j.landurbplan.2026.105686",
   "huggingfaceDataset": null,
   "createdAt": "2026-07-15T00:00:00+00:00",
   "config": {
