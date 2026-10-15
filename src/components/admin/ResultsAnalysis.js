@@ -1765,8 +1765,8 @@ function CustomRecordAnalysis({ question, answers, allResponses, site = false, t
         {task ? (zh
           ? `这是高级自定义任务：交互由你自己的 HTML 定义，平台不知道它的含义，所以不做分析也不做统计。回答已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
           : `This is an advanced custom task: its interaction is your own HTML, so the platform does not know what the answers mean and does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : site ? (zh
-          ? `这份问卷是在线转换导入的页面，题目由模型识别，可能与页面实际含义不符，所以平台不分析也不统计。答案已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
-          : `This survey is a page converted online. Its questions were identified by a model and may not match what the page really asks, so the platform does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : zh
+          ? `这份问卷是原样导入的页面（不符合 SP-Scheme），平台不知道它的题目含义，所以不分析也不统计。页面保存和发出的数据已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
+          : `This survey is a page imported as it is (it does not match SP-Scheme), so the platform does not know what its answers mean and does not analyse or summarise them. What the page saved and sent is recorded as it is; export the CSV or JSON and analyse it yourself. ${records.length} record(s).`) : zh
           ? `这道题由页面按自己的格式记录（custom），平台不做任何分析，也不做统计。请导出 CSV 或 JSON 后自行处理。共 ${records.length} 条记录。`
           : `This question is recorded in the page's own format (custom). The platform does not analyse or summarise it; export the CSV or JSON and process it yourself. ${records.length} record(s).`}
       </Alert>}
@@ -2403,7 +2403,7 @@ export function QuestionCard({
   const [exporting, setExporting] = useState(false);
   const exportLock = React.useRef(false);
   const type = question.type || 'text';
-  // A page converted online: its questions are the model's reading of the page, so nothing is analysed.
+  // A page imported as it is: the platform does not know its questions, so nothing is analysed.
   // A page built to SP-Scheme declares its own questions and is analysed as usual.
   const siteSurvey = Boolean(surveyConfig?.spSite?.convertedFrom);
   // An advanced custom task (a skill question that is not a built-in preset) is the researcher's own HTML.
@@ -3033,11 +3033,11 @@ export default function ResultsAnalysis({
   // SP-Scheme pages: say how much of the data the platform can analyse.
   const siteMatch = useMemo(() => (surveyConfig?.spSite?.html ? siteMatchLevel(surveyConfig) : null), [surveyConfig]);
   const siteConverted = Boolean(surveyConfig?.spSite?.convertedFrom);
-  // A converted page imported as it is declares no questions: the overview shows
-  // the ones the model saw on it (kept at import), or a dash.
+  // A page imported as it is declares no questions: the overview shows a dash
+  // (older imports may carry the question names a model once saw on it).
   const sitePageQuestions = siteConverted && !answerableQuestions.length ? (Array.isArray(surveyConfig?.spSite?.pageQuestions) ? surveyConfig.spSite.pageQuestions : []) : null;
-  // A page imported as it is has no question cards: each question the model saw
-  // on it (or the page as a whole) gets one, analysed from the page records.
+  // A page imported as it is has no question cards: the page as a whole gets
+  // one (older imports: each question a model once saw), analysed from the page records.
   const sitePageCards = useMemo(() => {
     if (!siteConverted || answerableQuestions.length) return [];
     const seen = Array.isArray(surveyConfig?.spSite?.pageQuestions) ? surveyConfig.spSite.pageQuestions.filter(q => q?.name) : [];
@@ -3333,8 +3333,8 @@ export default function ResultsAnalysis({
             mb: 2
           }} data-testid="results-site-match">
           {siteConverted && (isChineseLanguage(language)
-            ? `这份问卷是在线转换导入的页面，题目由模型识别，未必准确，所以平台不默认分析。答案已原样记录：页面发出的数据在 __sp_requests，页面自己保存的作答在 __sp_page_state。可以在“题目”里逐题点“生成分析”，由模型写分析代码、平台算法出图并写进导出；也可以导出 CSV 或 JSON 后自行分析。`
-            : `This survey is a page converted online. Its questions were identified by a model and may be inaccurate, so the platform does not analyse them by default. Answers are recorded as they are: what the page sent is under __sp_requests and what it saved in its own storage under __sp_page_state. Under Questions, "Generate analysis" on a question has the model write analysis code that the platform's algorithms chart and add to the export; or export the CSV or JSON and analyse it yourself.`)}
+            ? `这份问卷是原样导入的页面（不符合 SP-Scheme），平台不知道它的题目含义，所以不默认分析。作答已原样记录：页面自己保存的作答在 __sp_page_state，页面发出的数据在 __sp_requests。可以在“题目”里点“生成分析”，由模型写分析代码、平台算法出图并写进导出（结果需自行核对）；也可以导出 CSV 或 JSON 后自行分析。`
+            : `This survey is a page imported as it is (it does not match SP-Scheme), so the platform does not know what its answers mean and does not analyse them by default. Records are kept as they are: what the page saved in its own storage is under __sp_page_state and what it sent under __sp_requests. Under Questions, "Generate analysis" has the model write analysis code that the platform's algorithms chart and add to the export (check its result yourself); or export the CSV or JSON and analyse it yourself.`)}
           {!siteConverted && siteMatch.level === 'full' && (isChineseLanguage(language)
             ? `这份问卷是 SP-Scheme 页面；全部 ${siteMatch.total} 道题都是平台题型，下面的分析适用。`
             : `This survey is an SP-Scheme page; all ${siteMatch.total} questions use platform types, so the analysis below applies.`)}

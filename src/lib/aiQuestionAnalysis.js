@@ -440,6 +440,11 @@ const escapeRe = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * that mapping in the page code and returns id -> library image name, so
  * results show the real images whatever code the model wrote.
  */
+// Same rule as spSite.findImageSlots: a word of the name says it holds pictures.
+function isImageListName(name) {
+  return String(name || '').replace(/([a-z\d])([A-Z])/g, '$1 $2').split(/[^A-Za-z]+/).some((w) => /^(photo|image|img|stimul|media)|^(pic|pics|picture|pictures)$/.test(w.toLowerCase()));
+}
+
 export function pageIdMediaMap(records, pageHtml) {
   if (!pageHtml) return null;
   const html = String(pageHtml);
@@ -469,7 +474,7 @@ export function pageIdMediaMap(records, pageHtml) {
   const best = [...lists.values()].sort((a, b) => b.count - a.count)[0];
   // Without a usable mapping, say why on the result (ids stay as the page wrote them).
   // The page's own image lists the platform can fill (const PHOTO_URLS = [...]).
-  const slots = [...new Set([...html.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[/g)].map((x) => x[1]).filter((n) => /photo|image|img|pic/i.test(n)))];
+  const slots = [...new Set([...html.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[/g)].map((x) => x[1]).filter(isImageListName))];
   if (!best) {
     return formats.length && slots.length
       ? { names: [], formats, reason: `这些答卷里没有媒体库图片列表（${slots.join(', ')}）：提交时页面没有从媒体库取图（没链接媒体库文件夹，或答卷在链接之前提交），页面显示的是它自己的图，所以只能用页面编号` }

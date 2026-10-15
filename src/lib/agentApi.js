@@ -94,14 +94,6 @@ export async function translateSurveyText(body) {
   });
 }
 
-/** Ask the Assistant model to adapt an existing survey page to SP-Scheme. */
-export async function convertSurveyPage(body) {
-  return agentFetch('/api/agent/sp-scheme/convert', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-}
-
 /** Ask the Assistant model to write the analysis code for one Results question. */
 export async function writeQuestionAnalysis(body) {
   return agentFetch('/api/agent/results/ai-analysis', {

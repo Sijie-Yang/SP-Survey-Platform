@@ -154,10 +154,10 @@ test('an empty or cancelled analysis cannot replace a saved report', async () =>
   expect(readResultsReport('p').id).toBe(previous.id);
 });
 
-test('a page converted online shows its questions greyed out and unanalysed', () => {
+test('a page imported as it is shows its questions greyed out and unanalysed', () => {
   render(<RegionProvider><QuestionCard question={q} answers={[1, 5]} totalResponses={2} questionNumber={1}
     allResponses={responses} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} defaultExpanded /></RegionProvider>);
-  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/converted online/);
+  expect(screen.getByTestId('custom-record-analysis').textContent).toMatch(/imported as it is/);
   expect(screen.getByText('Analyse yourself')).toBeTruthy();
 });
 
@@ -176,7 +176,7 @@ test('the export menu offers two clear choices', async () => {
   expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Answers table (CSV)', 'Full analysis pack (ZIP)']);
 });
 
-test('a page converted online exports one ZIP of its answers', async () => {
+test('a page imported as it is exports one ZIP of its answers', async () => {
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);

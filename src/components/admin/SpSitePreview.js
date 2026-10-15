@@ -42,8 +42,8 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
     <Box data-testid="sp-site-preview">
       <Alert severity={!converted && match.level === 'full' ? 'info' : 'warning'} sx={{ mb: 1.5 }} data-testid="sp-site-match">
         {converted && L(
-          'This page was converted online. Participants see exactly this page; every answer is recorded as sent and nothing is analysed, so export the results and analyse them yourself. Nothing is submitted from the preview.',
-          '这个页面由模型在线转换导入。参与者看到的就是这个页面；所有回答原样记录，平台不做分析，请导出结果后自行分析。预览不会提交数据。',
+          'This page was imported as it is (it does not match SP-Scheme). Participants see exactly this page; what it saves and sends is recorded as it is and nothing is analysed, so export the records and analyse them yourself. Nothing is submitted from the preview.',
+          '这个页面是原样导入的（不符合 SP-Scheme）。参与者看到的就是这个页面；它保存和发出的数据原样记录，平台不做分析，请导出记录后自行分析。预览不会提交数据。',
         )}
         {!converted && match.level === 'full' && L(
           `This page was imported with SP-Scheme. Participants see exactly this page; all ${match.total} questions use platform types and can be analysed on the Results page. Nothing is submitted from the preview.`,
@@ -66,8 +66,8 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
         <Alert severity="warning" sx={{ mb: 1.5 }} data-testid="sp-site-problems">
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
             {L(
-              'The page reported problems. If it is stuck, convert it again or send these lines back to the model that built it.',
-              '页面报告了以下问题。如果页面卡住，请重新转换，或把这些内容发回给生成页面的模型修正。',
+              'The page reported problems. If it is stuck, send these lines back to the model that built it.',
+              '页面报告了以下问题。如果页面卡住，请把这些内容发回给生成页面的模型修正。',
             )}
           </Typography>
           <Box component="ul" sx={{ m: 0, pl: 2.5, fontSize: 13, wordBreak: 'break-word' }}>

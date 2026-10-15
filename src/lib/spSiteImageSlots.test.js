@@ -11,6 +11,14 @@ test('finds image lists the page keeps in its own code', () => {
   expect(findImageSlots(page)).toEqual([{ name: 'PHOTO_URLS', count: 0 }, { name: 'IMAGES', count: 2 }]);
 });
 
+test('a list is an image list only when a word of its name says so', () => {
+  const html = (body) => `<html><body><script>${body}</script></body></html>`;
+  expect(findImageSlots(html('const pick=[],seen={}; const picker = []; const topics = [];')).map((s) => s.name)).toEqual([]);
+  expect(findImageSlots(html('const pics = []; const imageList = []; let stimuli = []; var mediaUrls = []; const PICTURE_SET = [];')).map((s) => s.name))
+    .toEqual(['pics', 'imageList', 'stimuli', 'mediaUrls', 'PICTURE_SET']);
+  expect(linkImageSlots(html('const pick=[];'))).toContain('const pick=[];');
+});
+
 test('a page that reads SPSite.getMedia is left alone', () => {
   const own = page.replace('</script>', 'SPSite.getMedia("x");</script>');
   expect(findImageSlots(own)).toEqual([]);

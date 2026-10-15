@@ -1080,7 +1080,12 @@ export function buildSiteCsp(allowedHosts = []) {
   ].join('; ');
 }
 
-const IMAGE_SLOT_NAME_RE = /(photo|image|img|pic|stimul|media)/i;
+// A name holds pictures when one of its words says so: PHOTO_URLS, imageList,
+// pics, stimuli; not "pick" or "picker", which a loose /pic/ would match.
+const IMAGE_SLOT_WORD_RE = /^(photo|image|img|stimul|media)|^(pic|pics|picture|pictures)$/;
+function isImageSlotName(name) {
+  return String(name || '').replace(/([a-z\d])([A-Z])/g, '$1 $2').split(/[^A-Za-z]+/).some((word) => IMAGE_SLOT_WORD_RE.test(word.toLowerCase()));
+}
 // An array literal holding only quoted strings (or nothing).
 const IMAGE_SLOT_ITEMS_RE = /^\s*(?:(?:'[^'\n]*'|"[^"\n]*")\s*,?\s*)*$/;
 const IMAGE_SLOT_RE = /\b(const|let|var)(\s+)([A-Za-z_$][\w$]*)(\s*=\s*)\[([^[\]]*)\]/g;
@@ -1101,7 +1106,7 @@ export function findImageSlots(html) {
   const slots = [];
   text.replace(INLINE_SCRIPT_RE, (all, open, body) => {
     body.replace(IMAGE_SLOT_RE, (m, kw, sp, name, eq, items) => {
-      if (IMAGE_SLOT_NAME_RE.test(name) && IMAGE_SLOT_ITEMS_RE.test(items)) {
+      if (isImageSlotName(name) && IMAGE_SLOT_ITEMS_RE.test(items)) {
         slots.push({ name, count: (items.match(/'[^'\n]*'|"[^"\n]*"/g) || []).length });
       }
       return m;
@@ -1116,7 +1121,7 @@ export function linkImageSlots(html) {
   const text = String(html || '');
   if (pageReadsMedia(text)) return text;
   return text.replace(INLINE_SCRIPT_RE, (all, open, body, close) => open + body.replace(IMAGE_SLOT_RE, (m, kw, sp, name, eq, items) => {
-    if (!IMAGE_SLOT_NAME_RE.test(name) || !IMAGE_SLOT_ITEMS_RE.test(items)) return m;
+    if (!isImageSlotName(name) || !IMAGE_SLOT_ITEMS_RE.test(items)) return m;
     const list = `[${items}]`;
     return `${kw}${sp}${name}${eq}(window.SPSite && SPSite.imageSlot ? SPSite.imageSlot(${JSON.stringify(name)}, ${list}) : ${list})`;
   }) + close);
@@ -1184,10 +1189,14 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [], raw
   const bytes = utf8Bytes(text);
   if (!/<(html|body|div|main|script)\b/i.test(text)) errors.push('index.html does not look like an HTML page.');
   if (bytes > SP_SITE_MAX_BYTES) errors.push(`index.html is ${(bytes / 1048576).toFixed(1)} MB; keep it under 3 MB (media belongs in the Media Dataset).`);
+  const scriptSrc = [...text.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]);
+  const scriptHosts = [...CDN_HOSTS, ...hosts.map((h) => `https://${h}`)];
+  const blocked = scriptSrc.filter((src) => !scriptHosts.some((host) => src.startsWith(`${host}/`) || src === host));
   if (raw) {
     // No questions declared: the platform keeps the page's own requests as they
     // are and the participant submits from the platform's bar.
     if (/SPSite\.answer\s*\(/.test(text)) warnings.push('index.html calls SPSite.answer but declares no questions, so those answers are not recorded; declare the questions in sp-scheme.');
+    if (blocked.length) warnings.push(`Scripts from domains that are not ticked will be blocked, which may break the page: ${blocked.slice(0, 3).join(', ')}.`);
     warnings.push('No questions are declared: the platform records the requests this page sends as they are and does not analyse them.');
     return { errors, warnings };
   }
@@ -1202,9 +1211,6 @@ export function checkSiteHtml(html, questionNames = [], { allowedHosts = [], raw
         : 'index.html makes network calls; they are blocked on the platform. Answers must go through SPSite.answer.');
     }
   }
-  const scriptSrc = [...text.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]);
-  const scriptHosts = [...CDN_HOSTS, ...hosts.map((h) => `https://${h}`)];
-  const blocked = scriptSrc.filter((src) => !scriptHosts.some((host) => src.startsWith(`${host}/`) || src === host));
   if (blocked.length) {
     errors.push(`Scripts must be inline or come from ${CDN_HOSTS.join(', ')} or an allowed domain: ${blocked.slice(0, 3).join(', ')}.`);
   }
