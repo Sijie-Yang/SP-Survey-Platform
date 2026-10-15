@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  buildAnalysisRecords, evaluateAnalysis, generateQuestionAnalysis, mediaSummary, pageCodeExcerpt, pageIdMediaMap, pageMediaUrls, runAnalysisUnsandboxed,
+  buildAnalysisRecords, evaluateAnalysis, generateQuestionAnalysis, mapRecordsToMedia, mediaSummary, pageCodeExcerpt, pageIdMediaMap, pageMediaUrls, runAnalysisUnsandboxed,
 } from './aiQuestionAnalysis';
 
 // A real converted page: 24 generated scenes S01..S24; the platform fills its
@@ -130,7 +130,7 @@ test('a short media list maps what it can and says which scenes drew their own p
   const items = new Set(pairs.boards.flatMap((b) => b.rankings.map((r) => r.imageKey)));
   expect(items.has('street_003.jpg')).toBe(true);
   expect(items.has('S14')).toBe(true); // past the 12 library images
-  expect(pairs.note).toMatch(/S14.*超出媒体库的 12 张图/);
+  expect(pairs.note).toMatch(/S14.*超出.*12 张图/);
   expect(flash.items.map((r) => r.item)).toContain('street_012.jpg');
 });
 
@@ -142,4 +142,41 @@ test('without a media list in the answers the card says why it shows page ids', 
   expect(pairs.boards[0].rankings.every((r) => /^S\d\d$/.test(r.imageKey))).toBe(true);
   expect(pairs.note).toMatch(/没有媒体库图片列表（PHOTO_URLS）/);
   expect(side.note || '').not.toMatch(/媒体库/);
+});
+
+test('each participant\'s own random list decides which image a scene id was', async () => {
+  // The platform hands every participant the library in a different random order.
+  const shuffled = (p) => LIBRARY.map((m, i) => ({ m, k: (i * 7 + p * 13) % 41 })).sort((a, b) => a.k - b.k).map((x) => x.m);
+  const rows = ROWS.map((r, i) => ({ ...r, responses: { __sp_page_state: { ...r.responses.__sp_page_state, 'sp-media:PHOTO_URLS': shuffled(i + 1) } } }));
+  const records = buildAnalysisRecords(rows, QUESTION, { site: true });
+  const mapped = mapRecordsToMedia(records, HTML);
+  mapped.forEach((record, i) => {
+    const state = JSON.parse(record.page_state['streetscape-survey-v1']);
+    const list = shuffled(i + 1);
+    const original = JSON.parse(records[i].page_state['streetscape-survey-v1']);
+    state.pairs.forEach((t, k) => {
+      const n = Number(original.pairs[k].left.slice(1)) - 1;
+      expect(t.left).toBe(list[n].name);
+    });
+    expect(state.flash[0].scene).toBe(list[0].name); // S01
+    expect(state.pairs[0].dim).toBe(original.pairs[0].dim);
+  });
+  // The model sees names only, and the stored state is not touched.
+  let sent;
+  await generateQuestionAnalysis({
+    question: QUESTION, records, pageHtml: HTML,
+    request: async (body) => { sent = body; return { code: NAIVE, model: 'm' }; },
+    runner: async (code, recs) => runAnalysisUnsandboxed(code, recs),
+  });
+  expect(sent.sample).not.toMatch(/"S\d\d"/);
+  expect(records[0].page_state['streetscape-survey-v1']).toMatch(/"S\d\d"/);
+  const run = (code, recs) => Promise.resolve(runAnalysisUnsandboxed(code, recs));
+  const { blocks: [pairs] } = await evaluateAnalysis(NAIVE, records, run, { pageHtml: HTML });
+  expect(pairs.boards.flatMap((b) => b.rankings.map((r) => r.imageKey)).every((k) => /^street_0\d\d\.jpg$/.test(k))).toBe(true);
+});
+
+test('stored page state as objects (how the platform saves it) is mapped too', () => {
+  const rows = ROWS.slice(0, 2).map((r) => ({ ...r, responses: { __sp_page_state: { 'sp-media:PHOTO_URLS': LIBRARY, 'streetscape-survey-v1': JSON.parse(r.responses.__sp_page_state['streetscape-survey-v1']) } } }));
+  const mapped = mapRecordsToMedia(buildAnalysisRecords(rows, QUESTION, { site: true }), HTML);
+  expect(mapped[0].page_state['streetscape-survey-v1'].flash[0].scene).toBe('street_001.jpg');
 });

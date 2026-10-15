@@ -484,6 +484,45 @@ export function pageIdMediaMap(records, pageHtml) {
   return { list: best.name, names: best.names, formats };
 }
 
+/**
+ * Give the analysis the images participants really saw. When the page names
+ * its items itself ("S03") and takes the pictures from the media list it was
+ * given, by position, each record's page ids are replaced with the library
+ * image at that position in THAT participant's list (lists are drawn at random
+ * per participant). Values are rewritten in place of exact matches only, and a
+ * value that was a JSON string stays one.
+ */
+export function mapRecordsToMedia(records, pageHtml) {
+  const map = pageIdMediaMap(records, pageHtml);
+  if (!map || map.reason || !map.formats.length) return records;
+  const key = `sp-media:${map.list}`;
+  return (records || []).map((record) => {
+    const state = record?.page_state && typeof record.page_state === 'object' ? record.page_state : null;
+    if (!state) return record;
+    const list = jsonInString(state[key]) ?? state[key];
+    if (!Array.isArray(list) || !list.length) return record;
+    const names = list.map((x) => (x && typeof x === 'object' ? (x.name || String(x.url || '').split('/').pop()) : String(x || '').split('/').pop()));
+    const own = { ...map, names };
+    const swap = (value) => {
+      if (typeof value === 'string') return mediaNameForId(own, value) || value;
+      if (Array.isArray(value)) return value.map(swap);
+      if (value && typeof value === 'object') {
+        const out = {};
+        Object.keys(value).forEach((k) => { out[mediaNameForId(own, k) || k] = swap(value[k]); });
+        return out;
+      }
+      return value;
+    };
+    const next = {};
+    Object.keys(state).forEach((k) => {
+      if (k.startsWith('sp-media:')) { next[k] = state[k]; return; }
+      const parsed = jsonInString(state[k]);
+      next[k] = parsed !== undefined ? JSON.stringify(swap(parsed)) : swap(state[k]);
+    });
+    return { ...record, page_state: next };
+  });
+}
+
 /** name -> url for every image in the media lists the page was given. */
 export function pageMediaUrls(records) {
   const out = new Map();
@@ -514,13 +553,15 @@ function mediaNameForId(map, id) {
 }
 
 /**
- * Replace page ids with library image names in normalized blocks. A block is
- * remapped when all its items are page ids; ids past the end of the list keep
- * their name (the page drew its own picture there) and the note says so.
+ * Replace page ids with library image names in normalized blocks (for ids the
+ * records still carry), and say on each block what was done: mapped from each
+ * participant's list, ids past the end of the list kept, or why nothing could
+ * be mapped.
  */
-export function remapBlocksToMedia(blocks, map) {
+export function remapBlocksToMedia(blocks, map, { mappedRecords = false, libraryNames = new Set() } = {}) {
   if (!map) return blocks;
-  const addNote = (block, text) => ({ ...block, note: [block.note, text].filter(Boolean).join(' · ') });
+  const addNote = (block, text) => (text ? { ...block, note: [block.note, text].filter(Boolean).join(' · ') } : block);
+  const doneNote = `编号已按页面代码换成每位参与者实际看到的媒体库图片（${map.list}）`;
   return blocks.map((block) => {
     const ids = [];
     if (block.type === 'pairwise') block.matches.forEach((x) => ids.push(x.winner, x.loser));
@@ -539,15 +580,24 @@ export function remapBlocksToMedia(blocks, map) {
         if (name) changed = true;
         return name ? `${name} (${cell})` : cell;
       }));
-      if (changed) return addNote({ ...block, rows }, `编号已按页面代码对应到媒体库图片（${map.list}）`);
+      if (changed) return addNote({ ...block, rows }, doneNote);
       return seen && map.reason ? addNote(block, map.reason) : block;
     } else return block;
-    if (!ids.length || !ids.every((id) => idNumber(map, id))) return block;
-    if (map.reason) return addNote(block, map.reason);
-    const missing = [...new Set(ids.filter((id) => !mediaNameForId(map, id)))];
-    if (missing.length === ids.length) return addNote(block, `媒体库图片列表（${map.list}）只有 ${map.names.length} 张，这些编号都超出了，页面用的是它自己的图`);
+    if (!ids.length) return block;
+    const pageIds = [...new Set(ids.filter((id) => idNumber(map, id)))];
+    const names = ids.filter((id) => libraryNames.has(id));
+    // Every item is either a page id or a library image, and at least one id or image is there.
+    if (pageIds.length + new Set(names).size === 0 || !ids.every((id) => idNumber(map, id) || libraryNames.has(id))) return block;
+    if (map.reason) return pageIds.length ? addNote(block, map.reason) : block;
+    if (mappedRecords) {
+      // The records were mapped per participant; ids left over had no image at that position.
+      const left = pageIds.length ? `；${pageIds.slice(0, 8).join('、')} 超出参与者拿到的 ${map.names.length} 张图，页面没有对应的媒体库图片，保留编号` : '';
+      return addNote(block, names.length ? doneNote + left : left.slice(1));
+    }
+    const missing = pageIds.filter((id) => !mediaNameForId(map, id));
+    if (missing.length === pageIds.length) return addNote(block, `媒体库图片列表（${map.list}）只有 ${map.names.length} 张，这些编号都超出了，页面用的是它自己的图`);
     const to = (id) => mediaNameForId(map, id) || id;
-    const note = `编号已按页面代码对应到媒体库图片（${map.list}）${missing.length ? `；${missing.slice(0, 8).join('、')} 超出媒体库的 ${map.names.length} 张图，页面用的是它自己的图，保留编号` : ''}`;
+    const note = `${doneNote}${missing.length ? `；${missing.slice(0, 8).join('、')} 超出媒体库的 ${map.names.length} 张图，保留编号` : ''}`;
     if (block.type === 'pairwise') return addNote({ ...block, matches: block.matches.map((x) => ({ ...x, winner: to(x.winner), loser: to(x.loser) })) }, note);
     if (block.type === 'ranking') return addNote({ ...block, orders: block.orders.map((o) => o.map(to)) }, note);
     if (block.type === 'per_item') return addNote({ ...block, values: block.values.map((v) => ({ ...v, item: to(v.item) })) }, note);
@@ -558,11 +608,16 @@ export function remapBlocksToMedia(blocks, map) {
 
 /** Run checked code on records (any runner) and compute: { ok, blocks, problems, error }. */
 export async function evaluateAnalysis(code, records, runner, { pageHtml = '' } = {}) {
-  const run = await runner(code, records);
+  const mapped = mapRecordsToMedia(records, pageHtml);
+  const run = await runner(code, mapped);
   if (!run?.ok) return { ok: false, error: run?.error || 'The code did not run.', blocks: [], problems: [] };
   const { blocks, problems } = normalizeAnalysisResult(run.result);
   if (!blocks.length) return { ok: false, error: problems.join(' ') || 'No usable result.', blocks: [], problems };
-  return { ok: true, blocks: computeAnalysisBlocks(remapBlocksToMedia(blocks, pageIdMediaMap(records, pageHtml))), problems };
+  const remapped = remapBlocksToMedia(blocks, pageIdMediaMap(records, pageHtml), {
+    mappedRecords: mapped !== records,
+    libraryNames: new Set(pageMediaUrls(records).keys()),
+  });
+  return { ok: true, blocks: computeAnalysisBlocks(remapped), problems };
 }
 
 function csvCell(value) {
@@ -787,7 +842,9 @@ export function mediaSummary(records) {
  * the error back once for a fix (automatic; the researcher clicks once).
  * `request(body)` posts to the worker; `runner(code, records)` is the sandbox.
  */
-export async function generateQuestionAnalysis({ question, records, otherQuestions = [], pageHtml = '', instructions = '', request, runner }) {
+export async function generateQuestionAnalysis({ question, records: rawRecords, otherQuestions = [], pageHtml = '', instructions = '', request, runner }) {
+  // The model only ever sees library image names where the page took them by position.
+  const records = mapRecordsToMedia(rawRecords, pageHtml);
   const base = {
     pageCode: pageCodeExcerpt(pageHtml, mediaListNames(records)),
     question: questionBrief(question),

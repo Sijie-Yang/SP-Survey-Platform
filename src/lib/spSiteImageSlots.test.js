@@ -53,3 +53,28 @@ test('an entry known only by its storage key is placed in the folder the key nam
   const out = siteMediaFolders(pool, { spSite: { mediaFolders: ['/'] } });
   expect((out[''] || []).map((m) => m.url)).toEqual(['https://m/u/p/b.jpg']);
 });
+
+test('a page with an empty image list and no folder linked gets the library root', () => {
+  const { siteMediaFolders } = require('./spSite');
+  const pool = [{ url: 'https://m/r1.jpg', name: 'r1.jpg', folder: '' }, { url: 'https://m/s/a.jpg', name: 'a.jpg', folder: 'streets' }];
+  const out = siteMediaFolders(pool, { spSite: { html: page, mediaFolders: [] } });
+  expect(out[''].map((m) => m.name)).toEqual(['r1.jpg']);
+  // IMAGES names a.jpg itself, so that file comes along as the page's own.
+  expect(out.__page_files__.map((m) => m.name)).toEqual(['a.jpg']);
+  // A page without such a list is sent nothing it did not ask for.
+  expect(siteMediaFolders(pool, { spSite: { html: '<script>const STEPS = [];</script>', mediaFolders: [] } })).toEqual({});
+});
+
+test('files the page names by relative path come from the library as if it were the page folder', () => {
+  const { pageReferencedFiles, siteMediaFolders, SITE_PAGE_FILES } = require('./spSite');
+  const html = '<img src="images/a.jpg"><div style="background:url(\'./b.png\')"></div><img src="https://x.org/c.jpg"><script>const IMGS=["d.jpg"]</script>';
+  expect([...pageReferencedFiles(html).keys()].sort()).toEqual(['b.png', 'd.jpg', 'images/a.jpg']);
+  const pool = [
+    { url: 'https://m/images/a.jpg', name: 'a.jpg', folder: 'images' },
+    { url: 'https://m/other/a.jpg', name: 'a.jpg', folder: 'other' },
+    { url: 'https://m/x/b.png', name: 'b.png', folder: 'x' },
+    { url: 'https://m/c.jpg', name: 'c.jpg', folder: '' },
+  ];
+  const own = siteMediaFolders(pool, { spSite: { html, mediaFolders: [] } })[SITE_PAGE_FILES];
+  expect(own.map((m) => m.url).sort()).toEqual(['https://m/images/a.jpg', 'https://m/x/b.png']);
+});

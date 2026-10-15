@@ -68,7 +68,7 @@ Rules:
 - Read the QUESTION to decide what the answer means, then pick the ONE block type that fits it. Usually one block; at most 3, all about this question.
 - Images: participants usually see a random subset of images in a random order. Results must be keyed by WHICH image (its file name), never by trial number or position. MEDIA says where image names appear. Use helpers.file(url) as the item so the platform can show the picture.
 - Use the question's own options (choices) as labels when the answer is a code.
-- The page may name its own items (e.g. scene ids "S03") while the pictures come from the media library list it was given (PAGE CODE shows how, e.g. SCENES[i].img = PHOTO_URLS[i], id "S"+(i+1)). Then translate each id to helpers.media(r)[that position].name and use that name as the item, so results show the real images. Keep the page's id only when the list has no image at that position.
+- Where the page named its own items (e.g. scene ids "S03") but took the pictures by position from the media library list it was given, the platform has ALREADY replaced those ids with the library image names in the records (each participant's list is in a random order). Use the names as they appear; never translate ids yourself. Ids that are still there had no library image.
 - If the page uses several conditions or dimensions for the same task (e.g. a "dim" field), split by it: pairwise "category", or one block per dimension (still at most 3).
 - Skip records or trials that lack the data; never throw. Guard every access: (x || {}), Array.isArray(...).
 - Plain modern JavaScript only. No fetch, no DOM, no imports, no async, no Math.random.

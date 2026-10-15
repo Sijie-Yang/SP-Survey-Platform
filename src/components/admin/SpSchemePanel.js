@@ -515,14 +515,15 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
             )}
           />
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }} data-testid="sp-site-media-help">
+            {L('The media library counts as the page\'s own folder: an image the page names by relative path (images/a.jpg) is that library file. ', '媒体库视为页面所在的文件夹：页面用相对路径写的图（如 images/a.jpg）就是媒体库里同路径的文件。')}
             {siteReadsMedia && L('The page reads these folders itself (SPSite.getMedia).', '页面会自己读取这些文件夹里的媒体（SPSite.getMedia）。')}
             {!siteReadsMedia && siteSlots.length > 0 && L(
-              `The page keeps its own image list (${siteSlots.map((x) => x.name).join(', ')}). With folders linked, it is filled with their images in name order and the images used are recorded with each response; with none, the page shows what it has built in.`,
-              `页面代码里有自己的图片列表（${siteSlots.map((x) => x.name).join('、')}）。链接文件夹后，会按文件名顺序填入这些文件夹里的图片，并在每份回答里记录用了哪些图；不链接则显示页面自带的内容。`,
+              `The page keeps its own image list (${siteSlots.map((x) => x.name).join(', ')}). An empty list is filled with the images of the linked folders (the library root when none is linked), in a random order for each participant, and the images used are recorded with each response; the page never shows pictures it draws itself.`,
+              `页面代码里有自己的图片列表（${siteSlots.map((x) => x.name).join('、')}）。空列表会填入链接文件夹里的图片（没链接时用媒体库根目录），每位参与者顺序随机，并在每份回答里记录用了哪些图；不会显示页面自己画的图。`,
             )}
             {!siteReadsMedia && !siteSlots.length && L(
-              'This page does not load images from outside its own code, so linking folders does not change what it shows. Ask the model that built it to read the images with SPSite.getMedia(folder).',
-              '这个页面不从外部读取图片，链接文件夹不会改变它显示的内容。可以让生成页面的大模型改成用 SPSite.getMedia(文件夹) 读取图片。',
+              'This page does not load images from outside its own code, so linking folders does not change what it shows: what it draws itself is what participants see. Ask the model that built it to use image files by relative path or an empty image list.',
+              '这个页面不从外部读取图片，链接文件夹不会改变它显示的内容，参与者看到的就是它自己画的图。可以让生成页面的大模型改成用相对路径引用图片文件，或留一个空的图片列表。',
             )}
           </Typography>
         </Box>

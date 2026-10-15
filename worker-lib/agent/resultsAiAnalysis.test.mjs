@@ -56,7 +56,7 @@ describe('Results AI analysis', () => {
     assert.match(user, /OTHER QUESTIONS ON THE PAGE \(do not analyse these\)\n- complexity/);
     assert.match(user, /MEDIA\n90 distinct/);
     assert.match(user, /PAGE CODE \(excerpt[^\n]*\n177: const SCENES/);
-    assert.match(call.messages[0].content, /helpers\.media\(r\)\[that position\]\.name/);
+    assert.match(call.messages[0].content, /ALREADY replaced those ids with the library image names/);
     assert.match(call.messages[0].content, /type: "per_item"/);
     assert.match(user, /FIELDS .*\nanswer {2}string/);
     assert.match(user, /YOUR PREVIOUS CODE/);
