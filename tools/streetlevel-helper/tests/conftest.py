@@ -32,6 +32,7 @@ class UpstreamStub:
         self.fail_tiles = 0
         self.app = web.Application()
         self.app.router.add_get("/{host}/{path:.*}", self.handle)
+        self.app.router.add_post("/{host}/{path:.*}", self.handle_post)
 
     async def handle(self, request):
         host = request.match_info["host"]
@@ -50,6 +51,21 @@ class UpstreamStub:
                 return web.Response(status=503)
             return web.Response(body=tile_jpeg(int(request.query["x"]), int(request.query["y"]), int(request.query["zoom"])),
                                 content_type="image/jpeg")
+        return web.Response(status=404)
+
+    async def handle_post(self, request):
+        """streetlevel>=0.12.13 searches by POSTing JSON to the MapsJsInternalService RPC.
+
+        The reply is the same message as the JSONP lookup, without the callback wrapper.
+        """
+        host = request.match_info["host"]
+        path = request.match_info["path"]
+        body = json.loads(await request.text())
+        self.requests.append((host, path, {"body": body}))
+        if host == "maps.googleapis.com" and "SingleImageSearch" in path:
+            lat = body[1][0][2]
+            text = NOT_FOUND if abs(lat) >= 10 else (FIXTURES / "single_image_search.txt").read_text()
+            return web.Response(text=text[text.index("(") + 1:text.rindex(")")].strip())
         return web.Response(status=404)
 
 

@@ -15,6 +15,7 @@ export default function SpSiteFrame({
   onComplete,
   onProblem,
   onCapture,
+  onState,
   media = null,
   title = 'Survey',
   allowedHosts = [],
@@ -23,7 +24,7 @@ export default function SpSiteFrame({
   const frameRef = useRef(null);
   const answersRef = useRef({ ...initialAnswers });
   const latest = useRef({});
-  latest.current = { questions, survey, onAnswer, onComplete, onProblem, onCapture, media };
+  latest.current = { questions, survey, onAnswer, onComplete, onProblem, onCapture, onState, media };
   // Questions and answers are embedded as boot data so the page can read them
   // synchronously; the key keeps the iframe from reloading on equal props.
   const bootKey = JSON.stringify({ questions, survey, answers: initialAnswers, allowedHosts, media });
@@ -54,6 +55,10 @@ export default function SpSiteFrame({
       }
       if (data.type === 'capture') {
         latest.current.onCapture?.(data.request || {});
+        return;
+      }
+      if (data.type === 'state') {
+        latest.current.onState?.(String(data.area || 'localStorage'), String(data.key || ''), data.value == null ? null : String(data.value));
         return;
       }
       if (data.type === 'problem') {

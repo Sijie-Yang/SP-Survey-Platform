@@ -36,3 +36,31 @@ test('a request the adapter answered is still kept as a marked backup copy', () 
   const rec = captureRecord({ kind: 'fetch', method: 'POST', url: '/api/save', data: { question_id: 'q1', value: 2 }, answered: true }, 't');
   expect(rec).toEqual({ at: 't', kind: 'fetch', method: 'POST', url: '/api/save', data: { question_id: 'q1', value: 2 }, answered: true });
 });
+
+test('what a page saves in its own storage is kept as the latest value per key', () => {
+  const { applyPageState } = require('./SpSiteSurvey');
+  let state = applyPageState(undefined, 'localStorage', 'survey', '{"step":1}');
+  state = applyPageState(state, 'localStorage', 'survey', '{"step":2,"done":true}');
+  state = applyPageState(state, 'sessionStorage', 'tab', 'plain');
+  expect(state).toEqual({ survey: { step: 2, done: true }, 'sessionStorage:tab': 'plain' });
+  expect(applyPageState(state, 'localStorage', 'survey', null)).toEqual({ 'sessionStorage:tab': 'plain' });
+});
+
+test('a saved value with a finished flag means the page reached its own end', () => {
+  const { pageSaysFinished } = require('./SpSiteSurvey');
+  expect(pageSaysFinished('{"step":9,"done":true}')).toBe(true);
+  expect(pageSaysFinished('{"completed":true}')).toBe(true);
+  expect(pageSaysFinished('{"done":false}')).toBe(false);
+  expect(pageSaysFinished('{"done":"yes"}')).toBe(false);
+  expect(pageSaysFinished('[true]')).toBe(false);
+  expect(pageSaysFinished('done')).toBe(false);
+  expect(pageSaysFinished(null)).toBe(false);
+});
+
+test('after submitting, the page stays and the bar shows the completion code', () => {
+  const json = { pages: [], spSite: { html: '<html><body>page</body></html>', convertedFrom: 'x.html' } };
+  render(<SpSiteSurvey model={new Model(json)} surveyJson={json} language="zh" status="completed" completionCode="ABC123" />);
+  expect(screen.getByTestId('sp-site-frame')).toBeTruthy();
+  expect(screen.getByTestId('sp-site-bar-text').textContent).toContain('ABC123');
+  expect(screen.queryByRole('button', { name: '完成并提交' })).toBeNull();
+});

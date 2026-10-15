@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Checkbox,
@@ -27,7 +28,8 @@ import {
   readSpSchemeUpload,
   validateSpSchemePackage,
 } from '../../lib/spScheme';
-import { externalHostsIn, extractEmbeddedScheme } from '../../lib/spSite';
+import { SITE_MEDIA_ROOT, externalHostsIn, extractEmbeddedScheme, findImageSlots } from '../../lib/spSite';
+import { listAllKnownFolders } from '../../lib/mediaUtils';
 import { convertSurveyPage, fetchSurveyPage, fetchSurveyPageMedia } from '../../lib/agentApi';
 import { convertSurveyHtml, importMediaBase } from '../../lib/spSchemeConvert';
 import { downloadPageMedia, uploadPlannedMedia } from '../../lib/spSchemeMediaImport';
@@ -272,6 +274,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
         originalImages: useRaw || chosen.mediaPlan?.files?.length ? [] : (out.result?.originalImages || []),
         mediaPlan: chosen.mediaPlan,
         model: out.model,
+        modelQuestions: useRaw ? (out.modelQuestions || []) : [],
       });
       const allHosts = withSourceHost(out.hosts, upload);
       if (upload?.sourceHost && !ticked.includes(upload.sourceHost)) ticked.push(upload.sourceHost);
@@ -381,6 +384,8 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
       }
       const next = applySpSchemePackage(report, { baseConfig: config });
       if (next.spSite && upload?.converted) next.spSite.convertedFrom = upload.name || 'index.html';
+      // Imported as it is: the questions the model saw are kept to show, never analysed.
+      if (next.spSite && upload?.converted && conversion?.modelQuestions?.length) next.spSite.pageQuestions = conversion.modelQuestions;
       onChange(next);
       setOpen(false);
       setReport(null);
@@ -410,6 +415,15 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     onChange(rest);
     setNotice({ severity: 'info', text: L('The model-built page was removed; the survey uses the standard platform style again. Save to apply.', '已移除大模型页面，问卷恢复平台标准样式。点保存后生效。') });
   };
+  const siteSlots = useMemo(() => (activeSite ? findImageSlots(activeSite.html) : []), [activeSite]);
+  const siteReadsMedia = Boolean(activeSite && /SPSite\s*\.\s*getMedia\s*\(/.test(activeSite.html));
+  const siteFolders = useMemo(() => activeSite?.mediaFolders || [], [activeSite]);
+  const folderOptions = useMemo(() => [SITE_MEDIA_ROOT, ...[...new Set([
+    ...listAllKnownFolders(currentProject?.preloadedImages || [], {}, null, currentProject?.imageDatasetConfig?.mediaFolders || []),
+    ...siteFolders,
+  ])].filter((f) => f && f !== SITE_MEDIA_ROOT).sort()], [currentProject, siteFolders]);
+  const folderLabel = (f) => (f === SITE_MEDIA_ROOT ? L('Root (files not in a folder)', '根目录（不在文件夹里的文件）') : f);
+  const setSiteFolders = (folders) => onChange({ ...config, spSite: { ...config.spSite, mediaFolders: folders } });
   const summary = report?.summary;
 
   return (
@@ -480,6 +494,38 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
           {L(`This survey runs on the page built with SP-Scheme (${formatKb(activeSite.html.length)}). Preview and the survey link show it; editing questions here changes what it records.`,
             `这份问卷使用 SP-Scheme 导入的大模型页面（${formatKb(activeSite.html.length)}）。预览和问卷链接都显示这个页面；在这里修改题目会改变它记录的内容。`)}
         </Alert>
+      ) : null}
+
+      {activeSite ? (
+        <Box sx={{ mt: 1.5 }} data-testid="sp-site-media">
+          <Autocomplete
+            multiple
+            size="small"
+            disableCloseOnSelect
+            options={folderOptions}
+            value={siteFolders}
+            onChange={(_, next) => setSiteFolders(next)}
+            getOptionLabel={folderLabel}
+            noOptionsText={L('No media folders yet: upload media to the media library first.', '媒体库里还没有文件夹，请先上传媒体。')}
+            renderOption={(props, option, { selected }) => (
+              <li {...props} key={option}><Checkbox checked={selected} size="small" sx={{ mr: 1 }} />{folderLabel(option)}</li>
+            )}
+            renderInput={(params) => (
+              <TextField {...params} label={L('Media library folders for this page', '这个页面使用的媒体库文件夹')} placeholder={siteFolders.length ? '' : L('None linked', '未链接')} />
+            )}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }} data-testid="sp-site-media-help">
+            {siteReadsMedia && L('The page reads these folders itself (SPSite.getMedia).', '页面会自己读取这些文件夹里的媒体（SPSite.getMedia）。')}
+            {!siteReadsMedia && siteSlots.length > 0 && L(
+              `The page keeps its own image list (${siteSlots.map((x) => x.name).join(', ')}). With folders linked, it is filled with their images in name order and the images used are recorded with each response; with none, the page shows what it has built in.`,
+              `页面代码里有自己的图片列表（${siteSlots.map((x) => x.name).join('、')}）。链接文件夹后，会按文件名顺序填入这些文件夹里的图片，并在每份回答里记录用了哪些图；不链接则显示页面自带的内容。`,
+            )}
+            {!siteReadsMedia && !siteSlots.length && L(
+              'This page does not load images from outside its own code, so linking folders does not change what it shows. Ask the model that built it to read the images with SPSite.getMedia(folder).',
+              '这个页面不从外部读取图片，链接文件夹不会改变它显示的内容。可以让生成页面的大模型改成用 SPSite.getMedia(文件夹) 读取图片。',
+            )}
+          </Typography>
+        </Box>
       ) : null}
 
       {notice ? <Alert severity={notice.severity} sx={{ mt: 1.5 }} onClose={() => setNotice(null)}>{notice.text}</Alert> : null}

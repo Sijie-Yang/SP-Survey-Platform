@@ -63,6 +63,17 @@ export function degradeRejectedQuestions(survey, errors = [], problems = []) {
  * request it sends and the researcher analyses the export. Used when the
  * model's conversion cannot be made to pass, and offered as a choice.
  */
+/** The questions the model found on the page, kept for display when it is imported as it is. */
+export function modelQuestionList(survey) {
+  const out = [];
+  (Array.isArray(survey?.pages) ? survey.pages : []).forEach((page) => (Array.isArray(page?.elements) ? page.elements : []).forEach((el) => {
+    if (!el?.name || ['html', 'image', 'expression'].includes(el.type)) return;
+    const title = typeof el.title === 'string' ? el.title : (el.title && typeof el.title === 'object' ? Object.values(el.title)[0] : '');
+    out.push({ name: String(el.name).slice(0, 120), title: String(title || '').slice(0, 300), type: String(el.type || '') });
+  }));
+  return out.slice(0, 500);
+}
+
 export function rawConversionResult(result = null, { keepAdapter = false } = {}) {
   return {
     survey: { pages: [], ...(result?.survey?.mediaFolders ? { mediaFolders: result.survey.mediaFolders } : {}) },
@@ -421,6 +432,7 @@ export async function convertSurveyHtml(originalHtml, {
     model: response?.model,
     ok: false,
     failure,
+    modelQuestions: modelQuestionList(response?.result?.survey),
     problems: failure ? [failure] : [],
     raw: raw.problems.length ? null : { html: raw.html, pkg: raw.pkg, mediaPlan: raw.mediaPlan, report: raw.report, result: rawResult, startProblems: [] },
   };

@@ -134,6 +134,7 @@ function qualityFlags(row, surveyConfig, allResponses) {
  */
 /** Response key where an SP-Scheme page's unmapped requests are kept. */
 const SP_RAW_REQUESTS_KEY = '__sp_requests';
+const SP_PAGE_STATE_KEY = '__sp_page_state';
 
 export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
   const identity = [
@@ -187,7 +188,8 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
 
   // Requests an SP-Scheme page sent that no question mapped: kept raw, as JSON.
   const hasRawRequests = responses.some((row) => Array.isArray(row.responses?.[SP_RAW_REQUESTS_KEY]) && row.responses[SP_RAW_REQUESTS_KEY].length);
-  const headers = [...identity, ...headerCols, ...(hasRawRequests ? [SP_RAW_REQUESTS_KEY] : [])];
+  const hasPageState = responses.some((row) => row.responses?.[SP_PAGE_STATE_KEY] && typeof row.responses[SP_PAGE_STATE_KEY] === 'object' && Object.keys(row.responses[SP_PAGE_STATE_KEY]).length);
+  const headers = [...identity, ...headerCols, ...(hasRawRequests ? [SP_RAW_REQUESTS_KEY] : []), ...(hasPageState ? [SP_PAGE_STATE_KEY] : [])];
   const objects = responses.map((row) => {
     const flags = surveyConfig ? qualityFlags(row, surveyConfig, responses) : [];
     const obj = {
@@ -202,6 +204,10 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     if (hasRawRequests) {
       const raw = row.responses?.[SP_RAW_REQUESTS_KEY];
       obj[SP_RAW_REQUESTS_KEY] = Array.isArray(raw) && raw.length ? JSON.stringify(raw) : '';
+    }
+    if (hasPageState) {
+      const state = row.responses?.[SP_PAGE_STATE_KEY];
+      obj[SP_PAGE_STATE_KEY] = state && typeof state === 'object' && Object.keys(state).length ? JSON.stringify(state) : '';
     }
 
     for (const q of questions) {
