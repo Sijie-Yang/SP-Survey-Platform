@@ -98,7 +98,7 @@ test('the platform finds how the page names its scenes and which library image e
   expect(map.names.slice(0, 3)).toEqual(['street_001.jpg', 'street_002.jpg', 'street_003.jpg']);
   expect(pageMediaUrls(records).get('street_005.jpg')).toBe(LIBRARY[4].url);
   expect(pageIdMediaMap(records, '')).toBeNull();
-  expect(pageIdMediaMap(records, '<script>const S = "x";</script>')).toBeNull();
+  expect(pageIdMediaMap(records, '<script>const S = "x";</script>').names).toEqual([]);
 });
 
 test('scene ids become library images even when the model never maps them', async () => {
@@ -120,4 +120,26 @@ test('scene ids become library images even when the model never maps them', asyn
   // Without the page code nothing is guessed.
   const plain = await evaluateAnalysis(NAIVE, records, run);
   expect(plain.blocks[0].boards[0].rankings.every((r) => /^S\d\d$/.test(r.imageKey))).toBe(true);
+});
+
+test('a short media list maps what it can and says which scenes drew their own picture', async () => {
+  const short = ROWS.map((r) => ({ ...r, responses: { __sp_page_state: { ...r.responses.__sp_page_state, 'sp-media:PHOTO_URLS': JSON.stringify(LIBRARY.slice(0, 12)) } } }));
+  const records = buildAnalysisRecords(short, QUESTION, { site: true });
+  const run = (code, recs) => Promise.resolve(runAnalysisUnsandboxed(code, recs));
+  const { blocks: [pairs, flash] } = await evaluateAnalysis(NAIVE, records, run, { pageHtml: HTML });
+  const items = new Set(pairs.boards.flatMap((b) => b.rankings.map((r) => r.imageKey)));
+  expect(items.has('street_003.jpg')).toBe(true);
+  expect(items.has('S14')).toBe(true); // past the 12 library images
+  expect(pairs.note).toMatch(/S14.*超出媒体库的 12 张图/);
+  expect(flash.items.map((r) => r.item)).toContain('street_012.jpg');
+});
+
+test('without a media list in the answers the card says why it shows page ids', async () => {
+  const bare = ROWS.map((r) => ({ ...r, responses: { __sp_page_state: { 'streetscape-survey-v1': r.responses.__sp_page_state['streetscape-survey-v1'] } } }));
+  const records = buildAnalysisRecords(bare, QUESTION, { site: true });
+  const run = (code, recs) => Promise.resolve(runAnalysisUnsandboxed(code, recs));
+  const { blocks: [pairs, , side] } = await evaluateAnalysis(NAIVE, records, run, { pageHtml: HTML });
+  expect(pairs.boards[0].rankings.every((r) => /^S\d\d$/.test(r.imageKey))).toBe(true);
+  expect(pairs.note).toMatch(/没有媒体库图片列表（PHOTO_URLS）/);
+  expect(side.note || '').not.toMatch(/媒体库/);
 });

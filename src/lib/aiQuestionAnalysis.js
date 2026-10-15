@@ -14,6 +14,7 @@ import { descriptiveStats, wilsonCI } from './stats.js';
 import { computeBordaScores, kendallW, interpretKendallW } from './rankingStats.js';
 import { wordFrequency, textLengthStats } from './textStats.js';
 import { krippendorffAlpha, interpretAlpha } from './reliability.js';
+import { findImageSlots } from './spSite';
 
 export const AI_ANALYSIS_VERSION = 1;
 const SP_SITE_REQUESTS_KEY = '__sp_requests';
@@ -443,26 +444,6 @@ const escapeRe = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function pageIdMediaMap(records, pageHtml) {
   if (!pageHtml) return null;
   const html = String(pageHtml);
-  // The list every submission got (the platform sorts it, so it is the same for all).
-  const lists = new Map();
-  (records || []).forEach((record) => {
-    const state = record?.page_state && typeof record.page_state === 'object' ? record.page_state : {};
-    Object.keys(state).filter((k) => k.startsWith('sp-media:')).forEach((k) => {
-      const list = jsonInString(state[k]) ?? state[k];
-      if (!Array.isArray(list) || !list.length) return;
-      const names = list.map((m) => (m && typeof m === 'object' ? (m.name || String(m.url || '').split('/').pop()) : String(m || '').split('/').pop()));
-      const sig = `${k}\n${names.join('\n')}`;
-      const entry = lists.get(sig) || { name: k.slice(9), names, count: 0 };
-      entry.count += 1;
-      lists.set(sig, entry);
-    });
-  });
-  const best = [...lists.values()].sort((a, b) => b.count - a.count)[0];
-  if (!best) return null;
-  const list = escapeRe(best.name);
-  // The page must use the list by position.
-  const positional = new RegExp(`${list}\\s*\\.\\s*forEach\\s*\\(\\s*(?:function\\s*)?\\(?\\s*\\w+\\s*,\\s*\\w+|${list}\\s*\\[\\s*\\w+\\s*(?:[-+]\\s*\\d+\\s*)?\\]|${list}\\s*\\.\\s*map\\s*\\(\\s*(?:function\\s*)?\\(?\\s*\\w+\\s*,\\s*\\w+`).test(html);
-  if (!positional) return null;
   // How the page builds its ids: 'S'+String(i+1).padStart(2,'0'), 'S'+(i+1), `S${i+1}`.
   const idRe = /(['"`])([A-Za-z][A-Za-z_-]{0,11})\1\s*\+\s*(?:String\s*\(\s*)?\(?\s*(\w+)\s*(?:\+\s*(\d+))?\s*\)?|`([A-Za-z][A-Za-z_-]{0,11})\$\{\s*(?:String\s*\(\s*)?(\w+)\s*(?:\+\s*(\d+))?/g;
   const formats = [];
@@ -472,7 +453,34 @@ export function pageIdMediaMap(records, pageHtml) {
     const offset = Number(m[4] || m[7] || 0);
     if (!formats.some((f) => f.prefix === prefix)) formats.push({ prefix, offset });
   }
-  if (!formats.length) return null;
+  // The list every submission got (the platform sorts it, so it is the same for all).
+  const lists = new Map();
+  (records || []).forEach((record) => {
+    const state = record?.page_state && typeof record.page_state === 'object' ? record.page_state : {};
+    Object.keys(state).filter((k) => k.startsWith('sp-media:')).forEach((k) => {
+      const list = jsonInString(state[k]) ?? state[k];
+      if (!Array.isArray(list) || !list.length) return;
+      const names = list.map((x) => (x && typeof x === 'object' ? (x.name || String(x.url || '').split('/').pop()) : String(x || '').split('/').pop()));
+      const sig = `${k}\n${names.join('\n')}`;
+      const entry = lists.get(sig) || { name: k.slice(9), names, count: 0 };
+      entry.count += 1;
+      lists.set(sig, entry);
+    });
+  });
+  const best = [...lists.values()].sort((a, b) => b.count - a.count)[0];
+  // Without a usable mapping, say why on the result (ids stay as the page wrote them).
+  const slots = findImageSlots(html).map((slot) => slot.name);
+  if (!best) {
+    return formats.length && slots.length
+      ? { names: [], formats, reason: `这些答卷里没有媒体库图片列表（${slots.join(', ')}）：提交时页面没有从媒体库取图（没链接媒体库文件夹，或答卷在链接之前提交），页面显示的是它自己的图，所以只能用页面编号` }
+      : null;
+  }
+  const list = escapeRe(best.name);
+  // The page must use the list by position.
+  const positional = new RegExp(`${list}\\s*\\.\\s*forEach\\s*\\(\\s*(?:function\\s*)?\\(?\\s*\\w+\\s*,\\s*\\w+|${list}\\s*\\[\\s*\\w+\\s*(?:[-+]\\s*\\d+\\s*)?\\]|${list}\\s*\\.\\s*map\\s*\\(\\s*(?:function\\s*)?\\(?\\s*\\w+\\s*,\\s*\\w+`).test(html);
+  if (!positional || !formats.length) {
+    return { names: [], formats, reason: `页面代码里找不到编号和媒体库图片（${best.name}）按位置对应的写法，所以保留页面编号` };
+  }
   return { list: best.name, names: best.names, formats };
 }
 
@@ -491,21 +499,28 @@ export function pageMediaUrls(records) {
   return out;
 }
 
-function mediaNameForId(map, id) {
+function idNumber(map, id) {
   if (!map || typeof id !== 'string') return null;
   for (const f of map.formats) {
     const m = id.match(new RegExp(`^${escapeRe(f.prefix)}0*(\\d+)$`));
-    if (m) {
-      const name = map.names[Number(m[1]) - f.offset];
-      return name || null;
-    }
+    if (m) return { index: Number(m[1]) - f.offset };
   }
   return null;
 }
 
-/** Replace page ids with library image names in normalized blocks, only where every id in a block maps. */
+function mediaNameForId(map, id) {
+  const hit = idNumber(map, id);
+  return hit && map.names[hit.index] ? map.names[hit.index] : null;
+}
+
+/**
+ * Replace page ids with library image names in normalized blocks. A block is
+ * remapped when all its items are page ids; ids past the end of the list keep
+ * their name (the page drew its own picture there) and the note says so.
+ */
 export function remapBlocksToMedia(blocks, map) {
   if (!map) return blocks;
+  const addNote = (block, text) => ({ ...block, note: [block.note, text].filter(Boolean).join(' · ') });
   return blocks.map((block) => {
     const ids = [];
     if (block.type === 'pairwise') block.matches.forEach((x) => ids.push(x.winner, x.loser));
@@ -516,22 +531,28 @@ export function remapBlocksToMedia(blocks, map) {
     else if (block.type === 'choice') ids.push(...block.values);
     else if (block.type === 'table') {
       // Only cells that are exactly a page id; everything else stays as written.
+      let seen = false;
       let changed = false;
       const rows = block.rows.map((row) => row.map((cell) => {
+        if (idNumber(map, cell)) seen = true;
         const name = mediaNameForId(map, cell);
         if (name) changed = true;
         return name ? `${name} (${cell})` : cell;
       }));
-      return changed ? { ...block, rows, note: [block.note, `编号已按页面代码对应到媒体库图片（${map.list}）`].filter(Boolean).join(' · ') } : block;
+      if (changed) return addNote({ ...block, rows }, `编号已按页面代码对应到媒体库图片（${map.list}）`);
+      return seen && map.reason ? addNote(block, map.reason) : block;
     } else return block;
-    if (!ids.length || !ids.every((id) => mediaNameForId(map, id))) return block;
-    const to = (id) => mediaNameForId(map, id);
-    const note = [block.note, `编号已按页面代码对应到媒体库图片（${map.list}）`].filter(Boolean).join(' · ');
-    if (block.type === 'pairwise') return { ...block, note, matches: block.matches.map((x) => ({ ...x, winner: to(x.winner), loser: to(x.loser) })) };
-    if (block.type === 'ranking') return { ...block, note, orders: block.orders.map((o) => o.map(to)) };
-    if (block.type === 'per_item') return { ...block, note, values: block.values.map((v) => ({ ...v, item: to(v.item) })) };
-    if (block.type === 'rating' || block.type === 'bar') return { ...block, note, items: block.items.map((it) => ({ ...it, label: to(it.label) })) };
-    return { ...block, note, values: block.values.map(to) };
+    if (!ids.length || !ids.every((id) => idNumber(map, id))) return block;
+    if (map.reason) return addNote(block, map.reason);
+    const missing = [...new Set(ids.filter((id) => !mediaNameForId(map, id)))];
+    if (missing.length === ids.length) return addNote(block, `媒体库图片列表（${map.list}）只有 ${map.names.length} 张，这些编号都超出了，页面用的是它自己的图`);
+    const to = (id) => mediaNameForId(map, id) || id;
+    const note = `编号已按页面代码对应到媒体库图片（${map.list}）${missing.length ? `；${missing.slice(0, 8).join('、')} 超出媒体库的 ${map.names.length} 张图，页面用的是它自己的图，保留编号` : ''}`;
+    if (block.type === 'pairwise') return addNote({ ...block, matches: block.matches.map((x) => ({ ...x, winner: to(x.winner), loser: to(x.loser) })) }, note);
+    if (block.type === 'ranking') return addNote({ ...block, orders: block.orders.map((o) => o.map(to)) }, note);
+    if (block.type === 'per_item') return addNote({ ...block, values: block.values.map((v) => ({ ...v, item: to(v.item) })) }, note);
+    if (block.type === 'rating' || block.type === 'bar') return addNote({ ...block, items: block.items.map((it) => ({ ...it, label: to(it.label) })) }, note);
+    return addNote({ ...block, values: block.values.map(to) }, note);
   });
 }
 
