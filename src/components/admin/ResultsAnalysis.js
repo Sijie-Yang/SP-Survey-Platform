@@ -2431,7 +2431,7 @@ export function QuestionCard({
     };
   }, [allResponses, question.name]);
   const withAi = body => aiReady
-    ? <AiQuestionAnalysis question={question} records={aiRecords} saved={aiAnalysis} onSave={entry => onSaveAiAnalysis(question.name, entry)}>{body}</AiQuestionAnalysis>
+    ? <AiQuestionAnalysis question={question} records={aiRecords} otherQuestions={question.pageOnly ? (surveyConfig?.spSite?.pageQuestions || []) : (surveyConfig?.pages || []).flatMap(page => page.elements || [])} saved={aiAnalysis} onSave={entry => onSaveAiAnalysis(question.name, entry)}>{body}</AiQuestionAnalysis>
     : body;
   const renderAnalysis = () => {
     if (question.pageOnly) return withAi(null);

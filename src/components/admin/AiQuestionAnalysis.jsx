@@ -30,7 +30,10 @@ function useLenientResolver() {
   return useMemo(() => {
     const byName = new Map();
     if (map && typeof map.forEach === 'function') map.forEach((url, key) => { const name = baseName(key); if (name && !byName.has(name)) byName.set(name, url); });
-    return { get: (key) => map?.get?.(key) || byName.get(baseName(key)) || null };
+    // Pages often name an image without its extension ("IMG0395").
+    const byStem = new Map();
+    byName.forEach((url, name) => { const stem = name.replace(/\.[a-z0-9]+$/i, ''); if (!byStem.has(stem)) byStem.set(stem, url); });
+    return { get: (key) => map?.get?.(key) || byName.get(baseName(key)) || byStem.get(baseName(key).replace(/\.[a-z0-9]+$/i, '')) || null };
   }, [map]);
 }
 
@@ -63,12 +66,75 @@ function SimpleTable({ columns, rows, max = 200 }) {
   </TableContainer>;
 }
 
+function ItemThumb({ item }) {
+  const resolver = useContext(ImageResolverContext);
+  const url = resolver?.get?.(item);
+  return <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+    {url && <Box component="img" src={url} alt={baseName(item)} loading="lazy" sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 0.5, flexShrink: 0 }} />}
+    <Typography variant="caption" noWrap title={item} sx={{ maxWidth: 240 }}>{baseName(item) || item}</Typography>
+  </Box>;
+}
+
+function PerItemView({ block, zh, head }) {
+  const [showAll, setShowAll] = useState(false);
+  const category = block.measure === 'category';
+  const list = showAll ? block.items : block.items.slice(0, 15);
+  const label = (c) => (block.labels?.[c] ? `${c} · ${block.labels[c]}` : c);
+  return <Box sx={{ mb: 3 }}>
+    {head}
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+      {zh ? `${block.itemCount} 张图 · ${block.raterCount || '?'} 位作答者 · ${block.values.length} 条作答` : `${block.itemCount} images · ${block.raterCount || '?'} raters · ${block.values.length} answers`}
+      {block.raterCount >= 2 ? ` · Krippendorff α = ${block.alpha == null ? '–' : fmt(block.alpha, 3)} (${block.alphaText})` : ''}
+    </Typography>
+    {category && <Box sx={{ mb: 2 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>{zh ? '总体分布' : 'Overall distribution'}</Typography>
+      <Bars items={block.overall.map((o) => ({ label: o.label, value: o.count, extra: ` · 95% CI ${fmt(o.low, 1)}–${fmt(o.high, 1)}%` }))} total={block.values.length} />
+    </Box>}
+    {!category && <DescriptiveStatsLine nums={block.values.map((v) => v.value)} />}
+    {!category && block.items.length > 2 && <DensityHistogramChart scores={block.items.map((i) => i.mean)} domainMin={Math.min(...block.items.map((i) => i.mean))} domainMax={Math.max(...block.items.map((i) => i.mean))} title={zh ? '每张图的均值分布' : 'Distribution of per-image means'} xLabel={zh ? '均值' : 'mean'} padB={36} />}
+    <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+      <Table size="small">
+        <TableHead><TableRow>
+          <TableCell sx={{ fontWeight: 600 }}>{zh ? '图片' : 'Image'}</TableCell>
+          <TableCell align="right" sx={{ fontWeight: 600 }}>n</TableCell>
+          {category ? <>
+            <TableCell sx={{ fontWeight: 600 }}>{zh ? '多数答案' : 'Majority'}</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 600 }}>{zh ? '一致比例' : 'Share'}</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>{zh ? '各选项' : 'Counts'}</TableCell>
+          </> : <>
+            <TableCell align="right" sx={{ fontWeight: 600 }}>mean</TableCell>
+            <TableCell align="right" sx={{ fontWeight: 600 }}>SD</TableCell>
+          </>}
+        </TableRow></TableHead>
+        <TableBody>
+          {list.map((r) => <TableRow key={r.item}>
+            <TableCell><ItemThumb item={r.item} /></TableCell>
+            <TableCell align="right">{r.n}</TableCell>
+            {category ? <>
+              <TableCell>{label(r.mode)}</TableCell>
+              <TableCell align="right">{Math.round(r.agreement * 100)}%</TableCell>
+              <TableCell><Typography variant="caption" color="text.secondary">{block.categories.map((c) => `${c}: ${r.counts[c] || 0}`).join(' · ')}</Typography></TableCell>
+            </> : <>
+              <TableCell align="right">{fmt(r.mean)}</TableCell>
+              <TableCell align="right">{fmt(r.sd)}</TableCell>
+            </>}
+          </TableRow>)}
+        </TableBody>
+      </Table>
+    </TableContainer>
+    {block.items.length > 15 && <Button size="small" sx={{ mt: 0.5 }} onClick={() => setShowAll((v) => !v)}>
+      {showAll ? (zh ? '收起' : 'Show fewer') : (zh ? `显示全部 ${block.items.length} 张` : `Show all ${block.items.length}`)}
+    </Button>}
+  </Box>;
+}
+
 function BlockView({ block, zh }) {
   const title = block.title || '';
   const head = <>
     {title && <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>{title}</Typography>}
     {block.note && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{block.note}</Typography>}
   </>;
+  if (block.type === 'per_item') return <PerItemView block={block} zh={zh} head={head} />;
   if (block.type === 'pairwise' || block.type === 'ranking') {
     const ranking = block.type === 'ranking';
     const borda = new Map((block.table?.rows || []).map((row) => [`${row[0]}|${row[2]}`, { borda: row[9], avgRank: row[10] }]));
@@ -143,7 +209,7 @@ export function AiAnalysisBlocks({ blocks }) {
  * records: buildAnalysisRecords(...) for this question.
  * saved: the stored analysis or null. onSave(entry|null) persists it.
  */
-export default function AiQuestionAnalysis({ question, records, saved, onSave, children }) {
+export default function AiQuestionAnalysis({ question, records, otherQuestions = [], saved, onSave, children }) {
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
   const [state, setState] = useState({ status: saved ? 'running' : 'idle', blocks: [], error: '' });
@@ -176,6 +242,7 @@ export default function AiQuestionAnalysis({ question, records, saved, onSave, c
       const result = await generateQuestionAnalysis({
         question,
         records,
+        otherQuestions,
         instructions: notes.trim(),
         request: (body) => writeQuestionAnalysis(body),
         runner: runAnalysisInSandbox,

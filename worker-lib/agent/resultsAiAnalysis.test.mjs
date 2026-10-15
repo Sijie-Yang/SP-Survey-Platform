@@ -40,6 +40,8 @@ describe('Results AI analysis', () => {
       fields: 'answer  string  (3/3)',
       recordCount: 3,
       instructions: 'left means the left image',
+      otherQuestions: '- complexity (rating): Visual complexity',
+      media: '90 distinct media files appear in the records',
       previous: 'function analyze() { throw 1 }',
       error: 'TypeError: x',
     }, deps(chat));
@@ -50,6 +52,9 @@ describe('Results AI analysis', () => {
     assert.match(user, /QUESTION\nname: q1/);
     assert.match(user, /RESEARCHER NOTES \(follow these\)\nleft means/);
     assert.match(user, /RECORDS: 3 in total/);
+    assert.match(user, /OTHER QUESTIONS ON THE PAGE \(do not analyse these\)\n- complexity/);
+    assert.match(user, /MEDIA\n90 distinct/);
+    assert.match(call.messages[0].content, /type: "per_item"/);
     assert.match(user, /FIELDS .*\nanswer {2}string/);
     assert.match(user, /YOUR PREVIOUS CODE/);
     assert.match(user, /IT FAILED ON THE REAL RECORDS\nTypeError: x/);

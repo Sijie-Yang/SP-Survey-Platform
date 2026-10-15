@@ -13,12 +13,15 @@ import { computeTrueSkillFromMatches, matchesFromOrderedRanking, trueSkillBoards
 import { descriptiveStats, wilsonCI } from './stats.js';
 import { computeBordaScores, kendallW, interpretKendallW } from './rankingStats.js';
 import { wordFrequency, textLengthStats } from './textStats.js';
+import { krippendorffAlpha, interpretAlpha } from './reliability.js';
 
 export const AI_ANALYSIS_VERSION = 1;
 const SP_SITE_REQUESTS_KEY = '__sp_requests';
 const SP_SITE_STATE_KEY = '__sp_page_state';
 
-export const AI_ANALYSIS_BLOCK_TYPES = ['pairwise', 'ranking', 'choice', 'rating', 'text', 'table', 'bar', 'note'];
+export const AI_ANALYSIS_BLOCK_TYPES = ['per_item', 'pairwise', 'ranking', 'choice', 'rating', 'text', 'table', 'bar', 'note'];
+/** At most this many data blocks per question: one question, one focused analysis. */
+export const AI_ANALYSIS_MAX_DATA_BLOCKS = 3;
 
 /**
  * The records the analysis code receives: one per submission.
@@ -59,6 +62,13 @@ function jsonInString(value) {
   } catch {
     return undefined;
   }
+}
+
+/** An object used as a lookup table keyed by ids (image names, trial ids). */
+function isIdMap(value) {
+  const keys = Object.keys(value);
+  if (keys.length < 8) return false;
+  return keys.filter((k) => /\d/.test(k)).length / keys.length >= 0.8;
 }
 
 export const JSON_STRING_MARK = '(JSON string — helpers.parse it)';
@@ -120,14 +130,23 @@ export function describeRecordShape(records, { maxPaths = 160 } = {}) {
     if (inner !== undefined) value = inner;
     else if (entry.example === undefined && value !== null && typeof value !== 'object') entry.example = value;
     if (Array.isArray(value)) value.slice(0, 50).forEach((item) => visit(item, `${path}[]`, depth + 1, seenInRecord));
-    else if (value && typeof value === 'object') Object.keys(value).slice(0, 80).forEach((k) => visit(value[k], path ? `${path}.${k}` : k, depth + 1, seenInRecord));
+    else if (value && typeof value === 'object' && isIdMap(value)) {
+      // { IMG0395: 2, IMG0396: 0, ... }: one path for all keys, not one per image.
+      const keys = Object.keys(value);
+      entry.mapKeys = entry.mapKeys || new Set();
+      keys.slice(0, 3).forEach((k) => entry.mapKeys.size < 3 && entry.mapKeys.add(k));
+      entry.mapSize = Math.max(entry.mapSize || 0, keys.length);
+      keys.slice(0, 50).forEach((k) => visit(value[k], `${path}.{key}`, depth + 1, seenInRecord));
+    } else if (value && typeof value === 'object') Object.keys(value).slice(0, 80).forEach((k) => visit(value[k], path ? `${path}.${k}` : k, depth + 1, seenInRecord));
   };
   (records || []).forEach((record) => visit(record, '', 0, new Set()));
   const total = (records || []).length;
   const lines = [];
   for (const [path, entry] of paths) {
     if (path === '(record)') continue;
-    const example = entry.example === undefined ? '' : `  e.g. ${JSON.stringify(entry.example).slice(0, 60)}`;
+    const example = entry.mapKeys
+      ? `  map keyed by id, up to ${entry.mapSize} keys, e.g. ${[...entry.mapKeys].map((k) => JSON.stringify(k)).join(', ')} (read with Object.keys)`
+      : entry.example === undefined ? '' : `  e.g. ${JSON.stringify(entry.example).slice(0, 60)}`;
     lines.push(`${path}  ${[...entry.types].join('|')}  (${Math.min(entry.records, total)}/${total})${example}`);
     if (lines.length >= maxPaths) {
       lines.push(`… ${paths.size - maxPaths} more paths`);
@@ -201,7 +220,18 @@ export function normalizeAnalysisResult(result) {
     const title = clean(block.title, 160);
     const note = clean(block.note, 400);
     if (!AI_ANALYSIS_BLOCK_TYPES.includes(type)) { problems.push(`${at}.type "${block.type}" is not one of ${AI_ANALYSIS_BLOCK_TYPES.join(', ')}.`); return; }
-    if (type === 'pairwise') {
+    if (type === 'per_item') {
+      const labels = block.labels && typeof block.labels === 'object' && !Array.isArray(block.labels) ? block.labels : {};
+      const values = (Array.isArray(block.values) ? block.values : [])
+        .filter((v) => v && v.item != null && v.item !== '' && v.value !== null && v.value !== undefined && v.value !== '')
+        .map((v) => ({ item: keyOf(v.item), value: typeof v.value === 'number' ? v.value : keyOf(v.value), ...(v.rater != null && v.rater !== '' ? { rater: clean(v.rater, 120) } : {}) }));
+      if (!values.length) { problems.push(`${at} (per_item) has no values: use values: [{ item, value, rater }].`); return; }
+      const allNumeric = values.every((v) => typeof v.value === 'number' || (v.value !== '' && Number.isFinite(Number(v.value))));
+      const measure = block.measure === 'category' || !allNumeric || Object.keys(labels).length ? 'category' : 'number';
+      const labelText = {};
+      Object.keys(labels).slice(0, 50).forEach((k) => { labelText[String(k)] = clean(labels[k], 200); });
+      blocks.push({ type, title, note, values: measure === 'number' ? values.map((v) => ({ ...v, value: Number(v.value) })) : values.map((v) => ({ ...v, value: String(v.value) })), measure, labels: labelText });
+    } else if (type === 'pairwise') {
       const matches = (Array.isArray(block.matches) ? block.matches : [])
         .filter((m) => m && m.winner != null && m.loser != null && keyOf(m.winner) && keyOf(m.loser) && keyOf(m.winner) !== keyOf(m.loser))
         .map((m) => ({ winner: keyOf(m.winner), loser: keyOf(m.loser), ...(m.category != null && m.category !== '' ? { category: clean(m.category, 120) } : {}) }));
@@ -248,6 +278,12 @@ export function normalizeAnalysisResult(result) {
       if (text) blocks.push({ type, title, text });
     }
   });
+  const dataBlocks = blocks.filter((b) => b.type !== 'note');
+  if (dataBlocks.length > AI_ANALYSIS_MAX_DATA_BLOCKS) {
+    problems.push(`Only ${AI_ANALYSIS_MAX_DATA_BLOCKS} data blocks were kept: analyse this one question only.`);
+    const keep = new Set(dataBlocks.slice(0, AI_ANALYSIS_MAX_DATA_BLOCKS));
+    for (let i = blocks.length - 1; i >= 0; i -= 1) if (blocks[i].type !== 'note' && !keep.has(blocks[i])) blocks.splice(i, 1);
+  }
   if (!blocks.some((b) => b.type !== 'note') && !problems.length) problems.push('No block carries data: every block was empty or a note. Check the field paths against FIELDS.');
   return { blocks, problems };
 }
@@ -255,11 +291,79 @@ export function normalizeAnalysisResult(result) {
 const round = (n, d = 3) => (n == null || !Number.isFinite(n) ? null : Math.round(n * 10 ** d) / 10 ** d);
 
 /**
+ * One answer per (item, rater): the usual shape of a study where each
+ * participant sees a random subset or order of images. Summarised per item,
+ * never per position, with agreement across raters (Krippendorff's alpha).
+ */
+function computePerItemBlock(block) {
+  const byItem = new Map();
+  block.values.forEach((v) => {
+    if (!byItem.has(v.item)) byItem.set(v.item, []);
+    byItem.get(v.item).push(v);
+  });
+  const raters = new Set(block.values.map((v) => v.rater).filter(Boolean));
+  const categories = block.measure === 'category'
+    ? [...new Set([...Object.keys(block.labels || {}), ...block.values.map((v) => v.value)])].sort((a, b) => (Number.isFinite(Number(a)) && Number.isFinite(Number(b)) ? Number(a) - Number(b) : String(a).localeCompare(String(b))))
+    : [];
+  // Agreement: one coder per rater, one unit per item (platform reliability code).
+  let alpha = null;
+  if (raters.size >= 2) {
+    const code = new Map(categories.map((c, i) => [c, i]));
+    const rows = [...raters].map((rater) => ({
+      participant_id: rater,
+      responses: { __ai: { trials: block.values.filter((v) => v.rater === rater).map((v) => ({ answer: block.measure === 'category' ? code.get(v.value) : v.value, shown_images: [v.item] })) } },
+    }));
+    alpha = krippendorffAlpha(rows, '__ai', { level: block.measure === 'category' ? 'nominal' : 'interval' });
+  }
+  const label = (c) => (block.labels?.[c] ? `${c} · ${block.labels[c]}` : c);
+  let columns;
+  let rows;
+  let items;
+  if (block.measure === 'number') {
+    items = [...byItem.entries()].map(([item, list]) => {
+      const s = descriptiveStats(list.map((v) => v.value));
+      return { item, n: s.n, mean: s.mean, sd: s.sd, median: s.median, min: s.min, max: s.max };
+    }).sort((a, b) => b.mean - a.mean);
+    columns = ['item', 'n', 'mean', 'sd', 'median', 'min', 'max'];
+    rows = items.map((r) => [r.item, r.n, round(r.mean), round(r.sd), round(r.median), round(r.min), round(r.max)]);
+  } else {
+    items = [...byItem.entries()].map(([item, list]) => {
+      const counts = {};
+      list.forEach((v) => { counts[v.value] = (counts[v.value] || 0) + 1; });
+      const mode = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+      return { item, n: list.length, counts, mode, agreement: counts[mode] / list.length };
+    // Least agreement first: the images raters disagree on are the ones to look at.
+    }).sort((a, b) => (a.agreement - b.agreement) || (b.n - a.n) || String(a.item).localeCompare(String(b.item)));
+    columns = ['item', 'n', 'majority', 'majority_share', ...categories.map((c) => `n_${c}`)];
+    rows = items.map((r) => [r.item, r.n, r.mode, round(r.agreement), ...categories.map((c) => r.counts[c] || 0)]);
+  }
+  const overall = block.measure === 'category'
+    ? categories.map((c) => {
+      const count = block.values.filter((v) => v.value === c).length;
+      const ci = wilsonCI(count, block.values.length);
+      return { category: c, label: label(c), count, pct: count / block.values.length * 100, low: ci.low * 100, high: ci.high * 100 };
+    })
+    : null;
+  return {
+    ...block,
+    items,
+    categories,
+    overall,
+    raterCount: raters.size,
+    itemCount: byItem.size,
+    alpha: alpha == null ? null : round(alpha),
+    alphaText: interpretAlpha(alpha),
+    table: { columns, rows },
+  };
+}
+
+/**
  * Run the platform's own algorithms on normalized blocks. Each computed
  * block carries `table` ({ columns, rows }) used for display and export.
  */
 export function computeAnalysisBlocks(blocks) {
   return (blocks || []).map((block) => {
+    if (block.type === 'per_item') return computePerItemBlock(block);
     if (block.type === 'pairwise' || block.type === 'ranking') {
       const matches = block.type === 'pairwise' ? block.matches : block.orders.flatMap((order) => matchesFromOrderedRanking(order));
       const split = block.type === 'pairwise' && block.matches.some((m) => m.category);
@@ -408,14 +512,94 @@ export function questionBrief(question) {
   return parts.join('\n');
 }
 
+/** The page's other questions, so the model leaves their data alone. */
+export function otherQuestionList(questions, current) {
+  const text = (value) => (value && typeof value === 'object' ? Object.values(value)[0] : value);
+  return (questions || [])
+    .filter((q) => q?.name && q.name !== current?.name && q.name !== current?.pageName)
+    .slice(0, 40)
+    .map((q) => `- ${clean(q.pageName || q.name, 120)}${q.type ? ` (${clean(q.type, 40)})` : ''}: ${clean(text(q.title), 200)}`)
+    .join('\n');
+}
+
+const MEDIA_RE = /\.(jpe?g|png|webp|gif|avif|bmp|tiff?|mp4|webm|mov)(?:[?#].*)?$/i;
+
+/**
+ * Which images the records mention and where, so the model keys results by
+ * image (participants usually see a random subset or order).
+ */
+export function mediaSummary(records) {
+  const names = new Set();
+  const where = new Map();
+  const lists = new Set();
+  const perRecord = [];
+  // Names the platform gave the page, so ids like "IMG0395" are recognised too.
+  const known = new Set();
+  const stem = (name) => String(name).split(/[?#]/)[0].split('/').pop().replace(/\.[a-z0-9]+$/i, '');
+  (records || []).forEach((record) => {
+    const state = record?.page_state && typeof record.page_state === 'object' ? record.page_state : {};
+    Object.keys(state).filter((k) => k.startsWith('sp-media:')).forEach((k) => {
+      const list = jsonInString(state[k]) ?? state[k];
+      (Array.isArray(list) ? list : []).forEach((m) => { if (m?.name) known.add(stem(m.name)); if (m?.url) known.add(stem(m.url)); });
+    });
+  });
+  const keyedBy = new Map();
+  const walk = (value, path, depth, seen) => {
+    if (depth > 8 || value == null) return;
+    if (/(^|\.)sp-media:/.test(path)) return;
+    const inner = typeof value === 'string' ? jsonInString(value) : undefined;
+    if (inner !== undefined) { walk(inner, path, depth + 1, seen); return; }
+    if (typeof value === 'string') {
+      if (MEDIA_RE.test(value) || (known.size && known.has(stem(value)) && value.length < 300)) {
+        names.add(stem(value));
+        seen.add(stem(value));
+        const at = path.replace(/\[\d+\]/g, '[]');
+        where.set(at, (where.get(at) || 0) + 1);
+      }
+      return;
+    }
+    if (Array.isArray(value)) value.slice(0, 2000).forEach((v, i) => walk(v, `${path}[${i}]`, depth + 1, seen));
+    else if (typeof value === 'object') {
+      const keys = Object.keys(value);
+      const mediaKeys = keys.filter((k) => MEDIA_RE.test(k) || known.has(stem(k)));
+      if (keys.length && mediaKeys.length / keys.length >= 0.8) {
+        // Answers keyed by image: { IMG0395: 2, ... }
+        mediaKeys.forEach((k) => { names.add(stem(k)); seen.add(stem(k)); });
+        keyedBy.set(`${path}.{image}`, (keyedBy.get(`${path}.{image}`) || 0) + mediaKeys.length);
+        keys.slice(0, 2000).forEach((k) => walk(value[k], `${path}.{image}`, depth + 1, seen));
+        return;
+      }
+      keys.slice(0, 200).forEach((k) => {
+        if (k.startsWith('sp-media:')) lists.add(k);
+        walk(value[k], path ? `${path}.${k}` : k, depth + 1, seen);
+      });
+    }
+  };
+  (records || []).forEach((record) => {
+    const seen = new Set();
+    walk(record, '', 0, seen);
+    perRecord.push(seen.size);
+  });
+  if (!names.size && !lists.size) return '';
+  const lines = [`${names.size} distinct images appear in the records${names.size ? ` (e.g. ${[...names].slice(0, 5).join(', ')})` : ''}.`];
+  const nonZero = perRecord.filter(Boolean);
+  if (nonZero.length) lines.push(`Per submission: ${Math.min(...nonZero)}–${Math.max(...nonZero)} distinct files.${Math.max(...nonZero) < names.size ? ' Each participant saw only a subset.' : ''}`);
+  if (keyedBy.size) lines.push(`Answers keyed by image (object keys are image names): ${[...keyedBy.keys()].slice(0, 8).join('; ')}. Use the key as the item.`);
+  if (where.size) lines.push(`Image names as values at: ${[...where.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([p, n]) => `${p} (${n})`).join('; ')}`);
+  if (lists.size) lines.push(`${[...lists].map((k) => `page_state["${k}"]`).join(', ')}: the image list the platform gave the page (filled the page's own ${[...lists].map((k) => k.slice(9)).join(', ')} array) for that participant, in the order given, as [{name, url, folder}]. If the page records an image by index or position, it means a position in the page's (possibly shuffled) copy of that list: prefer a stored file name/URL; use an index only if nothing else identifies the image.`);
+  return lines.join('\n');
+}
+
 /**
  * Ask the model for the code, run it on every record, and when it fails send
  * the error back once for a fix (automatic; the researcher clicks once).
  * `request(body)` posts to the worker; `runner(code, records)` is the sandbox.
  */
-export async function generateQuestionAnalysis({ question, records, instructions = '', request, runner }) {
+export async function generateQuestionAnalysis({ question, records, otherQuestions = [], instructions = '', request, runner }) {
   const base = {
     question: questionBrief(question),
+    otherQuestions: otherQuestionList(otherQuestions, question),
+    media: mediaSummary(records),
     sample: sampleRecords(records),
     fields: describeRecordShape(records),
     recordCount: records.length,

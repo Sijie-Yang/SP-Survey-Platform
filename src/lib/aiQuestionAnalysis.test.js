@@ -5,6 +5,8 @@ import {
   describeRecordShape,
   evaluateAnalysis,
   generateQuestionAnalysis,
+  mediaSummary,
+  otherQuestionList,
   normalizeAnalysisResult,
   questionBrief,
   readSavedAnalyses,
@@ -69,7 +71,6 @@ const MODEL_CODE = `function analyze(records, helpers) {
   return { blocks: [
     { type: 'pairwise', title: 'Attractiveness ranking', matches: matches },
     { type: 'rating', title: 'Ratings per image', items: Object.keys(ratings).map(function (k) { return { label: k, values: ratings[k] }; }) },
-    { type: 'table', title: 'Reaction time', columns: ['n', 'mean_ms'], rows: [[rts.length, rts.reduce(function (a, b) { return a + b; }, 0) / rts.length]] },
     { type: 'text', title: 'Comments', values: comments },
     { type: 'note', text: 'Each compare trial is one A-vs-B decision.' }
   ] };
@@ -111,7 +112,7 @@ describe('AI question analysis', () => {
     const records = buildAnalysisRecords(ROWS, PAGE_QUESTION, { site: true });
     const result = await evaluateAnalysis(MODEL_CODE, records, syncRunner);
     expect(result.ok).toBe(true);
-    const [pairwise, rating, table, text, note] = result.blocks;
+    const [pairwise, rating, text, note] = result.blocks;
     expect(pairwise.matchCount).toBe(30);
     const order = pairwise.boards[0].rankings.map((r) => r.imageKey);
     expect(order[0]).toBe('IMG0101.jpg');
@@ -119,7 +120,6 @@ describe('AI question analysis', () => {
     expect(pairwise.table.columns).toContain('mu');
     expect(rating.table.rows[0][0]).toBe('IMG0101.jpg');
     expect(rating.table.rows[0][1]).toBe(5);
-    expect(table.rows[0][0]).toBe(30);
     expect(text.words.map((w) => w.word)).toContain('safe');
     expect(note.text).toMatch(/A-vs-B/);
   });
@@ -177,16 +177,106 @@ describe('AI question analysis', () => {
     expect(files.map((f) => f.path)).toEqual([
       'questions/__page__compare__ai__1_pairwise.csv',
       'questions/__page__compare__ai__2_rating.csv',
-      'questions/__page__compare__ai__3_table.csv',
-      'questions/__page__compare__ai__4_text.csv',
+      'questions/__page__compare__ai__3_text.csv',
       'questions/__page__compare__ai__analyze.js',
     ]);
     expect(files[0].content).toMatch(/^﻿category,rank,item,mu,sigma/);
-    expect(files[4].content).toMatch(/inferred by the model/);
+    expect(files[3].content).toMatch(/inferred by the model/);
   });
 
   test('saved analyses are read from project metadata', () => {
     expect(readSavedAnalyses({ metadata: { resultsAiAnalyses: { q: { code: 'x' } } } })).toEqual({ q: { code: 'x' } });
     expect(readSavedAnalyses({})).toEqual({});
+  });
+});
+
+// R10-like page: three tasks rate the same random subset of 90 images per
+// participant; answers saved per task keyed by image id (no extension).
+const R10_IMAGES = Array.from({ length: 90 }, (_, i) => `IMG${String(300 + i).padStart(4, '0')}`);
+function r10Row(p) {
+  const start = (p * 17) % 90;
+  const shown = Array.from({ length: 30 }, (_, i) => R10_IMAGES[(start + i * 3) % 90]);
+  const answers = { occupancy: {}, complexity: {}, transparency: {} };
+  shown.forEach((id, i) => {
+    const n = Number(id.slice(3));
+    answers.occupancy[id] = (p % 4 === 0 && i % 5 === 0) ? (n + 1) % 3 : n % 3;
+    answers.complexity[id] = (n + p) % 5 + 1;
+    answers.transparency[id] = i % 2;
+  });
+  return {
+    participant_id: `P${p}`,
+    responses: {
+      __sp_page_state: {
+        'sp-media:PHOTO_URLS': R10_IMAGES.map((id) => ({ name: `${id}.jpg`, url: `https://media.sp-survey.org/p/images/${id}.jpg`, folder: 'images' })),
+        retail_state: JSON.stringify({ done: true, order: shown.map((id) => `images/${id}.jpg`), answers }),
+      },
+    },
+  };
+}
+const R10_ROWS = Array.from({ length: 8 }, (_, i) => r10Row(i + 1));
+const R10_QUESTIONS = [
+  { name: 'occupancy', title: 'What is the visible state of the retail storefront? 0 Clean/occupied, 1 Minor issues, 2 Vacant', type: 'radiogroup' },
+  { name: 'complexity', title: 'Visual complexity 1-5', type: 'rating' },
+  { name: 'transparency', title: 'Is the shopfront transparent?', type: 'boolean' },
+];
+const OCCUPANCY_CODE = `function analyze(records, helpers) {
+  var values = [];
+  records.forEach(function (r) {
+    var answers = helpers.get(r, 'page_state.retail_state.answers.occupancy') || {};
+    Object.keys(answers).forEach(function (id) {
+      values.push({ item: id, value: answers[id], rater: r.participant_id });
+    });
+  });
+  return { blocks: [{ type: 'per_item', title: 'Occupancy', measure: 'category', labels: { 0: 'Clean, occupied', 1: 'Minor issues', 2: 'Vacant' }, values: values }] };
+}`;
+
+describe('AI analysis of one question on a page with random images', () => {
+  const question = { name: '__page__occupancy', pageName: 'occupancy', title: R10_QUESTIONS[0].title, type: 'radiogroup', pageOnly: true };
+  const records = buildAnalysisRecords(R10_ROWS, question, { site: true });
+
+  test('the model is told the other questions and where the images are', () => {
+    const others = otherQuestionList(R10_QUESTIONS, question);
+    expect(others).not.toMatch(/^- occupancy/m);
+    expect(others).toMatch(/^- complexity \(rating\)/m);
+    const media = mediaSummary(records);
+    expect(media).toMatch(/^90 distinct images/);
+    expect(media).toMatch(/Per submission: 30–30 distinct files\. Each participant saw only a subset\./);
+    expect(media).toMatch(/page_state\["sp-media:PHOTO_URLS"\]/);
+    expect(media).toMatch(/page_state\.retail_state\.order\[\] \(240\)/);
+    expect(media).toMatch(/Answers keyed by image .*page_state\.retail_state\.answers\.occupancy\.\{image\}/);
+    const fields = describeRecordShape(records);
+    expect(fields).toMatch(/page_state\.retail_state\.answers\.occupancy {2}object {2}\(8\/8\) {2}map keyed by id, up to 30 keys/);
+    expect(fields).toMatch(/page_state\.retail_state\.answers\.occupancy\.\{key\} {2}number/);
+    expect(fields.split('\n').length).toBeLessThan(40);
+  });
+
+  test('per-item answers are summarised per image with agreement across raters', async () => {
+    const result = await evaluateAnalysis(OCCUPANCY_CODE, records, syncRunner);
+    expect(result.ok).toBe(true);
+    const [block] = result.blocks;
+    expect(block.measure).toBe('category');
+    expect(block.raterCount).toBe(8);
+    expect(block.itemCount).toBe(90);
+    expect(block.categories).toEqual(['0', '1', '2']);
+    expect(block.overall.map((o) => o.label)).toEqual(['0 · Clean, occupied', '1 · Minor issues', '2 · Vacant']);
+    expect(block.alpha).toBeGreaterThan(0.5);
+    expect(block.alpha).toBeLessThan(1);
+    expect(block.table.columns).toEqual(['item', 'n', 'majority', 'majority_share', 'n_0', 'n_1', 'n_2']);
+  });
+
+  test('numeric per-item answers give per-image means', async () => {
+    const code = OCCUPANCY_CODE.replace('answers.occupancy', 'answers.complexity').replace("measure: 'category', labels: { 0: 'Clean, occupied', 1: 'Minor issues', 2: 'Vacant' }, ", '');
+    const result = await evaluateAnalysis(code, records, syncRunner);
+    const [block] = result.blocks;
+    expect(block.measure).toBe('number');
+    expect(block.table.columns.slice(0, 3)).toEqual(['item', 'n', 'mean']);
+    expect(block.items[0].mean).toBeGreaterThanOrEqual(block.items[block.items.length - 1].mean);
+  });
+
+  test('a result about many questions is cut to three blocks', () => {
+    const many = Array.from({ length: 5 }, (_, i) => ({ type: 'choice', title: `q${i}`, values: ['a'] }));
+    const { blocks, problems } = normalizeAnalysisResult({ blocks: many });
+    expect(blocks).toHaveLength(3);
+    expect(problems[0]).toMatch(/this one question only/);
   });
 });

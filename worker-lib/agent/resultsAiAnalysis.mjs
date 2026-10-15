@@ -13,7 +13,9 @@ const MAX_SAMPLE_CHARS = 16000;
 const MAX_FIELDS_CHARS = 12000;
 const MAX_CODE_CHARS = 40000;
 
-export const ANALYSIS_SYSTEM_PROMPT = `You write the analysis for one question of a perception survey on SP-Survey.
+export const ANALYSIS_SYSTEM_PROMPT = `You write the analysis for ONE question of a perception survey on SP-Survey.
+The page usually has several questions and the records hold the data of all of them. Analyse ONLY the QUESTION given.
+OTHER QUESTIONS lists the rest: their data is in the same records, leave it alone (e.g. if the page saves answers per task, read only this question's task).
 Write ONE JavaScript function:
 
 function analyze(records, helpers) {
@@ -39,6 +41,11 @@ helpers (already defined):
   helpers.flat(arr)     flatten one level
 
 Return blocks. You only reshape data; SP-Survey runs the statistics:
+  { type: "per_item", title, values: [{ item, value, rater }], measure?: "category"|"number", labels?: { value: "label" } }
+      one entry per answer about one image/item: item = the image (helpers.file(url) or its name), value = the answer, rater = r.participant_id.
+      Use for: each image rated or classified on its own (Likert score, 0/1/2 category, yes/no). SP-Survey summarises per image
+      (mean, or counts and majority), the overall distribution, and agreement across raters (Krippendorff's alpha).
+      Use measure "category" for codes or options (labels give their text from the question), "number" for scores.
   { type: "pairwise", title, matches: [{ winner, loser, category? }] }
       one match per A-vs-B decision (winner = chosen item, loser = the other). SP-Survey ranks items with TrueSkill.
       Use for: forced choice between two images/options, "which is more X", best-of-N (chosen beats each other shown item).
@@ -57,8 +64,9 @@ Return blocks. You only reshape data; SP-Survey runs the statistics:
 Every block may have a short "note".
 
 Rules:
-- Read the QUESTION to decide what the answer means, then pick the block type that fits it. Several blocks are fine (e.g. a pairwise ranking plus a reaction-time table).
-- For images, use helpers.file(url) as the item, so the platform can show the picture.
+- Read the QUESTION to decide what the answer means, then pick the ONE block type that fits it. Usually one block; at most 3, all about this question.
+- Images: participants usually see a random subset of images in a random order. Results must be keyed by WHICH image (its file name), never by trial number or position. MEDIA says where image names appear. Use helpers.file(url) as the item so the platform can show the picture.
+- Use the question's own options (choices) as labels when the answer is a code.
 - Skip records or trials that lack the data; never throw. Guard every access: (x || {}), Array.isArray(...).
 - Plain modern JavaScript only. No fetch, no DOM, no imports, no async, no Math.random.
 - Reply with the function in one \`\`\`javascript block and nothing else.`;
@@ -80,6 +88,8 @@ export function normalizeAnalysisRequest(body) {
     fields,
     recordCount: Math.max(0, Math.floor(Number(body?.recordCount) || 0)),
     instructions: clip(body?.instructions, 2000).trim(),
+    otherQuestions: clip(body?.otherQuestions, 6000).trim(),
+    media: clip(body?.media, 3000).trim(),
     previous: clip(body?.previous, MAX_CODE_CHARS),
     error: clip(body?.error, 3000).trim(),
   };
@@ -98,6 +108,8 @@ export function parseAnalysisAnswer(text) {
 
 export function buildAnalysisUserMessage(input) {
   const parts = [`QUESTION\n${input.question}`];
+  if (input.otherQuestions) parts.push(`OTHER QUESTIONS ON THE PAGE (do not analyse these)\n${input.otherQuestions}`);
+  if (input.media) parts.push(`MEDIA\n${input.media}`);
   if (input.instructions) parts.push(`RESEARCHER NOTES (follow these)\n${input.instructions}`);
   parts.push(`RECORDS: ${input.recordCount || 'several'} in total`);
   if (input.fields) parts.push(`FIELDS (path  types  (records having it)  example)\n${input.fields}`);
