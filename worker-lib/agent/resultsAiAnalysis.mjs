@@ -114,7 +114,7 @@ export function buildAnalysisUserMessage(input) {
   const parts = [`QUESTION\n${input.question}`];
   if (input.otherQuestions) parts.push(`OTHER QUESTIONS ON THE PAGE (do not analyse these)\n${input.otherQuestions}`);
   if (input.media) parts.push(`MEDIA\n${input.media}`);
-  if (input.pageCode) parts.push(`PAGE CODE (excerpt of the page's script: how it uses its media list)\n${input.pageCode}`);
+  if (input.pageCode) parts.push(`PAGE CODE (excerpt of the page's or task's script: how it draws its media and how it records the answers; use it to read what the fields mean)\n${input.pageCode}`);
   if (input.instructions) parts.push(`RESEARCHER NOTES (follow these)\n${input.instructions}`);
   parts.push(`RECORDS: ${input.recordCount || 'several'} in total`);
   if (input.fields) parts.push(`FIELDS (path  types  (records having it)  example)\n${input.fields}`);

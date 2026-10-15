@@ -9,7 +9,7 @@ import { Alert, Box, Button, Chip, CircularProgress, Collapse, Table, TableBody,
 import { AutoAwesome } from '@mui/icons-material';
 import { useRegion } from '../../contexts/RegionContext';
 import { isChineseLanguage } from '../../lib/uiLanguages';
-import { evaluateAnalysis, generateQuestionAnalysis, pageMediaUrls } from '../../lib/aiQuestionAnalysis';
+import { computeAnalysisBlocks, evaluateAnalysis, generateQuestionAnalysis, pageMediaUrls, platformSummaryBlocks } from '../../lib/aiQuestionAnalysis';
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { writeQuestionAnalysis } from '../../lib/agentApi';
 import { ImageResolverContext } from './imageResolverContext';
@@ -216,6 +216,8 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
   const zh = isChineseLanguage(language);
   const [state, setState] = useState({ status: saved ? 'running' : 'idle', blocks: [], error: '' });
   const pageMedia = useMemo(() => pageMediaUrls(records), [records]);
+  // What the platform reads off the records by itself, shown before any model is involved.
+  const platformBlocks = useMemo(() => computeAnalysisBlocks(platformSummaryBlocks(records)), [records]);
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState(saved?.instructions || '');
   const [showCode, setShowCode] = useState(false);
@@ -283,13 +285,23 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
     placeholder={zh ? '补充说明（可选），例如：左右两张图选一张，按“更安全”排序；忽略练习题' : 'Notes (optional), e.g. "pick one of two images, rank by safety; skip practice trials"'}
     sx={{ mb: 1 }} />;
 
+  const platformSummary = platformBlocks.length > 0 && <Box data-testid="ai-analysis-platform" sx={{ mb: 2 }}>
+    <Chip size="small" color="primary" variant="outlined" label={zh ? '平台自动汇总' : 'Platform summary'} sx={{ mb: 1 }} />
+    <AiAnalysisBlocks blocks={platformBlocks} media={pageMedia} />
+  </Box>;
+
   if (!saved && !busy && state.status !== 'error') {
     return <Box data-testid="ai-analysis-empty">
+      {platformSummary}
       <Box sx={{ p: 1.5, mb: 2, border: '1px dashed', borderColor: 'primary.light', borderRadius: 1, bgcolor: 'background.paper' }}>
         <Typography variant="body2" sx={{ mb: 1 }}>
-          {zh
-            ? `平台不认识这道题的格式。点“生成分析”，助手模型会读题目和 ${records.length} 条记录里的几条，写一段分析代码，在隔离环境里跑；TrueSkill、均值和置信区间等统计用平台自己的算法。生成后会保存，结果页和导出都会用它。`
-            : `The platform does not know this question's format. "Generate analysis" has the Assistant model read the question and a few of the ${records.length} records and write analysis code, which runs in a sandbox; TrueSkill, means and confidence intervals use the platform's own algorithms. It is saved and used here and in exports.`}
+          {platformBlocks.length
+            ? (zh
+              ? `上表是平台直接从 ${records.length} 条记录算出来的。要更多分析（排名、分布、文字等），点“生成分析”：助手模型会读题目代码和几条记录，写一段分析代码，在隔离环境里跑；统计用平台自己的算法。生成后会保存，结果页和导出都会用它。`
+              : `The table above is computed by the platform from the ${records.length} records. For more (rankings, distributions, text), "Generate analysis" has the Assistant model read the task's code and a few records and write analysis code, which runs in a sandbox; the statistics are the platform's own. It is saved and used here and in exports.`)
+            : (zh
+              ? `平台不认识这道题的格式。点“生成分析”，助手模型会读题目代码和 ${records.length} 条记录里的几条，写一段分析代码，在隔离环境里跑；TrueSkill、均值和置信区间等统计用平台自己的算法。生成后会保存，结果页和导出都会用它。`
+              : `The platform does not know this question's format. "Generate analysis" has the Assistant model read the task's code and a few of the ${records.length} records and write analysis code, which runs in a sandbox; TrueSkill, means and confidence intervals use the platform's own algorithms. It is saved and used here and in exports.`)}
         </Typography>
         {notesField}
         <Button size="small" variant="contained" startIcon={<AutoAwesome />} onClick={generate} disabled={!records.length} data-testid="ai-analysis-generate">
@@ -333,6 +345,7 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
     {state.status === 'error' && <Alert severity="warning" sx={{ mb: 2 }}>
       {zh ? `分析没有跑通（已自动让模型修过一次）：${state.error}。可以在说明里写清答案在哪个字段、表示什么，再生成一次。` : `The analysis did not run (the model already had one automatic fix): ${state.error}. Say in the notes where the answer is and what it means, then generate again.`}
     </Alert>}
+    {state.status === 'error' && platformSummary}
     {state.status === 'done' && <AiAnalysisBlocks blocks={state.blocks} media={pageMedia} />}
     {children}
   </Box>;

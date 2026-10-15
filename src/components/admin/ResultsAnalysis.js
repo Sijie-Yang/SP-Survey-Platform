@@ -2379,6 +2379,19 @@ function PointAllocationAnalysis({
     </Box>;
 }
 
+// The page code the AI analysis reads field meanings from: the uploaded page
+// for a site survey, the task's own HTML for an advanced custom task.
+const taskHtmlCache = new Map();
+export async function analysisPageHtml(question, surveyConfig) {
+  const skillId = question?.type === 'skillquestion' ? String(question.skillId || '') : '';
+  if (!skillId || skillId.startsWith('preset_')) return surveyConfig?.spSite?.html || '';
+  const key = `${skillId}@${question.skillRevision || ''}`;
+  if (!taskHtmlCache.has(key)) {
+    taskHtmlCache.set(key, getSkillById(skillId, question.skillRevision || null).then((skill) => skill?.sourceHtml || '').catch(() => ''));
+  }
+  return taskHtmlCache.get(key);
+}
+
 // ─── Question Card ────────────────────────────────────────────────────────────
 
 export function QuestionCard({
@@ -2415,6 +2428,15 @@ export function QuestionCard({
   const aiReady = unanalysedType && Boolean(onSaveAiAnalysis) && !isDisplayOnlyQuestion(question);
   const unanalysed = unanalysedType && !aiAnalysis;
   const aiRecords = useMemo(() => (aiReady ? buildAnalysisRecords(allResponses, question, { site: siteSurvey }) : []), [aiReady, allResponses, question, siteSurvey]);
+  // A custom task's own HTML tells the model what the recorded fields mean.
+  const [taskHtml, setTaskHtml] = useState('');
+  useEffect(() => {
+    if (!aiReady || !customTask) return undefined;
+    let cancelled = false;
+    analysisPageHtml(question, surveyConfig).then(html => { if (!cancelled) setTaskHtml(html); });
+    return () => { cancelled = true; };
+  }, [aiReady, customTask, question, surveyConfig]);
+  const pageHtml = customTask ? taskHtml : (surveyConfig?.spSite?.html || '');
   const zh = isChineseLanguage(language);
   const typeLabel = customTask ? (zh ? '高级自定义任务' : 'Advanced custom task')
     : presetSkill ? `${zh ? '交互题' : 'Interactive'} · ${presetSkill.builderLabel || presetSkill.name}` : type;
@@ -2431,7 +2453,7 @@ export function QuestionCard({
     };
   }, [allResponses, question.name]);
   const withAi = body => aiReady
-    ? <AiQuestionAnalysis question={question} records={aiRecords} otherQuestions={question.pageOnly ? (surveyConfig?.spSite?.pageQuestions || []) : (surveyConfig?.pages || []).flatMap(page => page.elements || [])} pageHtml={surveyConfig?.spSite?.html || ''} saved={aiAnalysis} onSave={entry => onSaveAiAnalysis(question.name, entry)}>{body}</AiQuestionAnalysis>
+    ? <AiQuestionAnalysis question={question} records={aiRecords} otherQuestions={question.pageOnly ? (surveyConfig?.spSite?.pageQuestions || []) : (surveyConfig?.pages || []).flatMap(page => page.elements || [])} pageHtml={pageHtml} saved={aiAnalysis} onSave={entry => onSaveAiAnalysis(question.name, entry)}>{body}</AiQuestionAnalysis>
     : body;
   const renderAnalysis = () => {
     if (question.pageOnly) return withAi(null);
@@ -2565,7 +2587,7 @@ export function QuestionCard({
           let extra = [];
           if (aiAnalysis?.code) {
             const records = buildAnalysisRecords(exportResponses || allResponses, question, { site: siteSurvey });
-            const run = await evaluateAnalysis(aiAnalysis.code, records, runAnalysisInSandbox, { pageHtml: surveyConfig?.spSite?.html || '' });
+            const run = await evaluateAnalysis(aiAnalysis.code, records, runAnalysisInSandbox, { pageHtml });
             if (run.ok) extra = aiAnalysisExportFiles(question, aiAnalysis, run.blocks);
           }
           downloadQuestionExportZip(question, exportResponses || allResponses, surveyConfig, extra);
@@ -3165,7 +3187,7 @@ export default function ResultsAnalysis({
       const saved = savedAnalyses[question.name];
       if (!saved?.code) continue;
       const records = buildAnalysisRecords(filteredResponses, question, { site: siteConverted });
-      const run = await evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml: surveyConfig?.spSite?.html || '' });
+      const run = await evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml: await analysisPageHtml(question, surveyConfig) });
       if (run.ok) files.push(...aiAnalysisExportFiles(question, saved, run.blocks));
     }
     return files;

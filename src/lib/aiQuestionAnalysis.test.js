@@ -1,5 +1,6 @@
 import {
   aiAnalysisExportFiles,
+  analysisCodeExcerpt,
   buildAnalysisRecords,
   computeAnalysisBlocks,
   describeRecordShape,
@@ -8,8 +9,10 @@ import {
   mediaSummary,
   otherQuestionList,
   normalizeAnalysisResult,
+  platformSummaryBlocks,
   questionBrief,
   readSavedAnalyses,
+  recordFieldNames,
   runAnalysisUnsandboxed,
   sampleRecords,
 } from './aiQuestionAnalysis';
@@ -278,5 +281,90 @@ describe('AI analysis of one question on a page with random images', () => {
     const { blocks, problems } = normalizeAnalysisResult({ blocks: many });
     expect(blocks).toHaveLength(3);
     expect(problems[0]).toMatch(/this one question only/);
+  });
+});
+
+// An advanced custom task that shows each participant several images and asks
+// ten rating items per image. The page stores the ratings twice: nested under
+// scenes[].ratings and as a flat list under result.ratings, plus a profile as
+// a JSON string. Three participants, three images each from a pool of four.
+describe('Platform summary of per-image item ratings', () => {
+  const ITEMS = ['A1', 'M1', 'M2', 'M3', 'N1', 'R1', 'R2', 'R3', 'R4', 'S3'];
+  const POOL = ['P027B', 'P034B', 'P051B', 'P057B'];
+  const url = (id) => `https://media.sp-survey.org/u/p/${id}__1a6d540f.jpg`;
+  const score = (p, img, item) => ((POOL.indexOf(img) + ITEMS.indexOf(item) + p) % 5) + 1;
+  function taskAnswer(p) {
+    const shown = [POOL[p % 4], POOL[(p + 1) % 4], POOL[(p + 2) % 4]];
+    const scenes = shown.map((id, i) => ({
+      pairId: id.slice(0, 4), imageId: id, imageName: `${id}__1a6d540f.jpg`, imageUrl: url(id), position: i + 1,
+      ratings: Object.fromEntries(ITEMS.map((item) => [item, score(p, id, item)])), panoramaMs: 9000 + p, staticLoaded: true,
+    }));
+    const flat = shown.flatMap((id, i) => ITEMS.map((item) => ({ id: `${id}_${item}`, label: `${id} · ${item}`, value: score(p, id, item), itemId: item, pairId: id.slice(0, 4), imageId: id, imageUrl: url(id), position: i + 1 })));
+    return {
+      result: { text: JSON.stringify({ personal: { age: 20 + p }, attention: { MIDCHECK: 6 } }), ratings: flat },
+      scenes, pairIds: shown.map((id) => id.slice(0, 4)), version: 'rural-static12-10items', complete: true,
+      personal: { age: 20 + p, gender: 'female', stress: 6 }, attention: { MIDCHECK: 6, FINALCHECK: 6 },
+      shownUrls: shown.map(url), elapsedSeconds: 700 + p,
+    };
+  }
+  const QUESTION = { name: 'task', type: 'skillquestion', skillId: 'skill_rural', title: 'Rural scenes' };
+  const rows = [1, 2, 3].map((p) => ({ id: `r${p}`, participant_id: `P${p}`, created_at: '2026-10-15T00:00:00Z', responses: { task: taskAnswer(p) } }));
+  const records = buildAnalysisRecords(rows, QUESTION);
+
+  test('a table of the mean per image and item, one observation per participant, image and item', () => {
+    const blocks = platformSummaryBlocks(records);
+    expect(blocks).toHaveLength(1);
+    const [table] = blocks;
+    expect(table.type).toBe('table');
+    expect(table.platform).toBe(true);
+    expect(table.columns).toEqual(['image', ...ITEMS, 'n']);
+    // Four images in the pool, labelled by their file names; each shown to the participants whose window covered it.
+    expect(table.rows.map((r) => r[0])).toEqual(POOL.map((id) => `${id}__1a6d540f.jpg`));
+    const p027 = table.rows.find((r) => r[0].startsWith('P027B'));
+    // P027B was shown to participants 2 (index 0) and 3 (index 1) only; its A1 scores are 1+0+2→3 and 1+0+3→4... computed below.
+    const raters = [1, 2, 3].filter((p) => [POOL[p % 4], POOL[(p + 1) % 4], POOL[(p + 2) % 4]].includes('P027B'));
+    expect(p027[p027.length - 1]).toBe(raters.length);
+    const expectedA1 = raters.reduce((a, p) => a + score(p, 'P027B', 'A1'), 0) / raters.length;
+    expect(p027[1]).toBeCloseTo(expectedA1, 2);
+    // The nested and the flat copy of the same rating count once: the mean is a plain average of the raters' scores.
+    const p051 = table.rows.find((r) => r[0].startsWith('P051B'));
+    const raters051 = [1, 2, 3].filter((p) => [POOL[p % 4], POOL[(p + 1) % 4], POOL[(p + 2) % 4]].includes('P051B'));
+    expect(p051[1 + ITEMS.indexOf('S3')]).toBeCloseTo(raters051.reduce((a, p) => a + score(p, 'P051B', 'S3'), 0) / raters051.length, 2);
+  });
+
+  test('records without such a shape give no platform table', () => {
+    expect(platformSummaryBlocks(ROWS.map((row) => ({ participant_id: row.participant_id, answer: row.responses.__sp_page_state })))).toEqual([]);
+    expect(platformSummaryBlocks([])).toEqual([]);
+  });
+
+  test('the platform table comes first in an evaluated analysis and in the export', async () => {
+    const code = 'function analyze(records) { return { blocks: [{ type: "note", text: "n=" + records.length }] }; }';
+    const run = await evaluateAnalysis(code, records, syncRunner);
+    expect(run.ok).toBe(true);
+    expect(run.blocks.map((b) => b.type)).toEqual(['table', 'note']);
+    expect(run.blocks[0].table.rows).toHaveLength(4);
+    const files = aiAnalysisExportFiles(QUESTION, { code }, run.blocks);
+    const csv = files.find((f) => /\.csv$/.test(f.path));
+    expect(csv.content).toContain('image,A1,M1');
+    expect(csv.content).toContain('P027B__1a6d540f.jpg');
+  });
+
+  test('the model gets the task code that records the answer and names the fields it stores', () => {
+    const html = `<!doctype html><html><body><script>
+const POOL = ['P027B', 'P034B'];
+function draw() { document.title = 'x'; }
+function finish() {
+  const flat = scenes.flatMap((s) => Object.keys(s.ratings).map((itemId) => ({ itemId, value: s.ratings[itemId], imageId: s.imageId })));
+  SPSkill.setAnswer({ result: { ratings: flat, text: JSON.stringify(profile) }, scenes, pairIds, personal, attention });
+}
+</script></body></html>`;
+    const names = recordFieldNames(records);
+    expect(names).toEqual(expect.arrayContaining(['scenes', 'ratings', 'imageId', 'itemId', 'personal', 'attention']));
+    expect(names).not.toContain('id');
+    const excerpt = analysisCodeExcerpt(html, records);
+    expect(excerpt).toContain('SPSkill.setAnswer');
+    expect(excerpt).toContain('s.ratings[itemId]');
+    expect(excerpt).not.toContain('document.title');
+    expect(analysisCodeExcerpt('', records)).toBe('');
   });
 });

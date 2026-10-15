@@ -611,6 +611,134 @@ export function remapBlocksToMedia(blocks, map, { mappedRecords = false, library
   });
 }
 
+// ── Platform summaries: record shapes the platform recognises without the model ──
+
+const OBS_IMAGE_ID_KEYS = ['imageId', 'image_id', 'stimulusId', 'stimulus_id', 'sceneId', 'scene_id', 'photoId', 'photo_id'];
+const OBS_IMAGE_KEYS = ['imageName', 'image_name', 'image', 'img', 'photo', 'picture', 'stimulus', 'file', 'filename', 'imageUrl', 'image_url', 'url', 'name'];
+const OBS_ITEM_KEYS = ['itemId', 'item_id', 'item', 'dimension', 'dim', 'attribute', 'scale', 'metric', 'question', 'key'];
+const OBS_VALUE_KEYS = ['value', 'score', 'rating', 'response', 'answer'];
+const OBS_MAP_KEYS = ['ratings', 'scores', 'answers', 'values', 'responses', 'items', 'rating', 'scale'];
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * The image an object is about: { key, label }. The key is the page's own id
+ * (imageId) when it has one, so the same image stored nested (scenes[].imageId)
+ * and flat (ratings[].imageId) counts once; else the file name. The label is
+ * the file name when known. Never a generic id like P057B_S3 under `id`.
+ */
+function observationImage(obj) {
+  const str = (keys) => {
+    for (const key of keys) {
+      const v = obj[key];
+      if (typeof v !== 'string' || !v.trim()) continue;
+      if (/^(https?:)?\/\/|\//.test(v)) return v.split(/[?#]/)[0].split('/').pop();
+      return v.trim();
+    }
+    return '';
+  };
+  const id = str(OBS_IMAGE_ID_KEYS);
+  const name = str(OBS_IMAGE_KEYS);
+  if (!id && !name) return null;
+  return { key: id || name, label: name || id };
+}
+
+/** A map of several numeric items ({ A1: 3, M1: 5, … }) with at least two entries. */
+function numericItemMap(value) {
+  if (!isPlainObject(value)) return null;
+  const entries = Object.entries(value).filter(([, v]) => typeof v === 'number' && Number.isFinite(v));
+  return entries.length >= 2 && entries.length === Object.keys(value).length ? entries : null;
+}
+
+/**
+ * Rating observations { image, item, value } found anywhere in one record:
+ * objects that name an image and carry a map of numeric items (scenes[].ratings),
+ * objects with an image, an item and a value (a flat list), or a map keyed by
+ * image whose values are maps of numbers. One observation per image and item,
+ * so a page that stores the same ratings twice (nested and flat) is not counted twice.
+ */
+function recordObservations(record) {
+  const seen = new Map();
+  const labels = new Map();
+  const add = (image, item, value) => {
+    if (!image || !item || typeof value !== 'number' || !Number.isFinite(value)) return;
+    const key = `${image.key}\u0000${item}`;
+    if (!seen.has(key)) seen.set(key, { image: image.key, item: String(item), value });
+    // A file name beats a bare id as the row label.
+    if (image.label !== image.key || !labels.has(image.key)) labels.set(image.key, image.label);
+  };
+  const visit = (value, depth) => {
+    if (depth > 7 || !value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.slice(0, 5000).forEach((v) => visit(v, depth + 1));
+      return;
+    }
+    const image = observationImage(value);
+    if (image) {
+      OBS_MAP_KEYS.forEach((k) => { const entries = numericItemMap(value[k]); if (entries) entries.forEach(([item, v]) => add(image, item, v)); });
+      const item = OBS_ITEM_KEYS.map((k) => value[k]).find((v) => typeof v === 'string' && v.trim());
+      const val = OBS_VALUE_KEYS.map((k) => value[k]).find((v) => typeof v === 'number');
+      if (item && val !== undefined) add(image, item.trim(), val);
+    }
+    // { P057B: { A1: 3, … }, P027B: { … } }
+    if (isIdMap(value)) {
+      Object.entries(value).forEach(([imageKey, v]) => { const entries = numericItemMap(v); if (entries) entries.forEach(([item, n]) => add({ key: imageKey, label: imageKey }, item, n)); });
+    }
+    Object.values(value).forEach((v) => {
+      const parsed = typeof v === 'string' ? jsonInString(v) : v;
+      visit(parsed, depth + 1);
+    });
+  };
+  visit(record?.answer, 0);
+  if (record?.page_state !== undefined) visit(record.page_state, 0);
+  return { observations: [...seen.values()], labels };
+}
+
+/**
+ * The summaries the platform computes itself from the records' shape, before
+ * and regardless of any model-written code. Today: when every participant
+ * rated several images on the same set of items, a table of the mean per
+ * image and item. Empty when the records do not have such a shape.
+ */
+export function platformSummaryBlocks(records) {
+  const cells = new Map(); // image -> item -> values
+  const raters = new Map(); // image -> set of raters
+  const itemCounts = new Map();
+  const labels = new Map();
+  (records || []).forEach((record, i) => {
+    const { observations: obs, labels: recordLabels } = recordObservations(record);
+    if (!obs.length) return;
+    recordLabels.forEach((label, key) => { if (label !== key || !labels.has(key)) labels.set(key, label); });
+    const rater = record?.participant_id || `row_${i + 1}`;
+    obs.forEach(({ image, item, value }) => {
+      if (!cells.has(image)) cells.set(image, new Map());
+      const row = cells.get(image);
+      if (!row.has(item)) row.set(item, []);
+      row.get(item).push(value);
+      if (!raters.has(image)) raters.set(image, new Set());
+      raters.get(image).add(rater);
+      itemCounts.set(item, (itemCounts.get(item) || 0) + 1);
+    });
+  });
+  const images = [...cells.keys()];
+  // Items rated on most images, in a stable order; one-off keys are noise.
+  const items = [...itemCounts.entries()].filter(([, n]) => n >= Math.max(2, images.length * 0.5)).map(([item]) => item).sort();
+  if (images.length < 2 || items.length < 2) return [];
+  const mean = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+  const round = (n) => (n == null ? '' : Math.round(n * 100) / 100);
+  const rows = images.sort().map((image) => [labels.get(image) || image, ...items.map((item) => round(mean(cells.get(image).get(item) || []))), raters.get(image).size]);
+  return [{
+    type: 'table',
+    platform: true,
+    title: '图片 × 条目 平均分（平台自动汇总 · platform summary）',
+    note: `每位参与者对每张图的每个条目计一次；n = 评分人数。${images.length} 张图 × ${items.length} 个条目。 One observation per participant, image and item; n = raters.`,
+    columns: ['image', ...items, 'n'],
+    rows,
+  }];
+}
+
 /** Run checked code on records (any runner) and compute: { ok, blocks, problems, error }. */
 export async function evaluateAnalysis(code, records, runner, { pageHtml = '' } = {}) {
   const mapped = mapRecordsToMedia(records, pageHtml);
@@ -622,7 +750,8 @@ export async function evaluateAnalysis(code, records, runner, { pageHtml = '' } 
     mappedRecords: mapped !== records,
     libraryNames: new Set(pageMediaUrls(records).keys()),
   });
-  return { ok: true, blocks: computeAnalysisBlocks(remapped), problems };
+  // What the platform reads off the records itself comes first, whatever the code did.
+  return { ok: true, blocks: computeAnalysisBlocks([...platformSummaryBlocks(records), ...remapped]), problems };
 }
 
 function csvCell(value) {
@@ -719,14 +848,14 @@ const JS_WORDS = new Set(['const', 'let', 'var', 'function', 'return', 'if', 'el
  * PHOTO_URLS) and the lines defining what they use, two levels deep. This is
  * how the model learns that, say, scene "S03" shows PHOTO_URLS[2].
  */
-export function pageCodeExcerpt(html, listNames = [], { maxChars = 5000, maxLine = 420 } = {}) {
+export function pageCodeExcerpt(html, listNames = [], { maxChars = 5000, maxLine = 420, patterns = [] } = {}) {
   const names = [...new Set((listNames || []).map((n) => String(n).replace(/^sp-media:/, '')).filter((n) => /^[A-Za-z_$][\w$]*$/.test(n)))];
-  if (!html || !names.length) return '';
+  if (!html || (!names.length && !patterns.length)) return '';
   const scripts = [...String(html).matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]).join('\n');
   const lines = scripts.split('\n');
   const picked = new Set();
   const wordRe = (w) => new RegExp(`(^|[^\\w$])${w.replace(/\$/g, '\\$')}([^\\w$]|$)`);
-  lines.forEach((line, i) => { if (names.some((n) => wordRe(n).test(line))) picked.add(i); });
+  lines.forEach((line, i) => { if (names.some((n) => wordRe(n).test(line)) || patterns.some((re) => re.test(line))) picked.add(i); });
   let frontier = [...picked];
   for (let level = 0; level < 2 && frontier.length; level += 1) {
     const ids = new Set();
@@ -754,6 +883,29 @@ export function pageCodeExcerpt(html, listNames = [], { maxChars = 5000, maxLine
     out += line;
   }
   return out.trim();
+}
+
+/** Where a page or task hands its data over: the lines the model needs to read the records. */
+const RECORD_API_RE = [/SPSkill\s*\.\s*setAnswer|SPSite\s*\.\s*(answer|complete|onSubmit|onRequest)|localStorage\s*\.\s*setItem|postMessage\s*\(|sendBeacon|\bfetch\s*\(/];
+const GENERIC_FIELD_NAMES = new Set(['answer', 'page_state', 'requests', 'shown', 'participant_id', 'submitted_at', 'value', 'text', 'data', 'id', 'name', 'type', 'url', 'key', 'items', 'list', 'result', 'results']);
+
+/** Field names the records use (answer.scenes[].ratings → scenes, ratings), to find the code that writes them. */
+export function recordFieldNames(records, { max = 24 } = {}) {
+  const counts = new Map();
+  describeRecordShape(records).split('\n').forEach((line) => {
+    const path = line.split(/\s{2,}/)[0] || '';
+    path.split('.').forEach((part) => {
+      const word = part.replace(/\[\]$/, '');
+      if (!/^[A-Za-z_$][\w$]*$/.test(word) || word.length < 3 || GENERIC_FIELD_NAMES.has(word) || word === '{key}') return;
+      counts.set(word, (counts.get(word) || 0) + 1);
+    });
+  });
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, max).map(([w]) => w);
+}
+
+/** The page's or task's code the model should read: how it draws media and how it records answers. */
+export function analysisCodeExcerpt(html, records) {
+  return pageCodeExcerpt(html, [...mediaListNames(records), ...recordFieldNames(records)], { patterns: RECORD_API_RE });
 }
 
 /** Names of the media lists the platform filled for this page, from the records. */
@@ -851,7 +1003,7 @@ export async function generateQuestionAnalysis({ question, records: rawRecords, 
   // The model only ever sees library image names where the page took them by position.
   const records = mapRecordsToMedia(rawRecords, pageHtml);
   const base = {
-    pageCode: pageCodeExcerpt(pageHtml, mediaListNames(records)),
+    pageCode: analysisCodeExcerpt(pageHtml, records),
     question: questionBrief(question),
     otherQuestions: otherQuestionList(otherQuestions, question),
     media: mediaSummary(records),
