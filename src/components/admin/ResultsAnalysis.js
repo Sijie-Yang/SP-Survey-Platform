@@ -48,6 +48,10 @@ import { useRegion } from '../../contexts/RegionContext';
 import PaperMethodsPanel, { PairwiseAnalysis } from './PaperMethodsPanel';
 import ConditionWordingSummary from './ConditionWordingSummary';
 import { tf } from '../../contexts/adminI18n';
+import AiQuestionAnalysis from './AiQuestionAnalysis';
+import { aiAnalysisExportFiles, buildAnalysisRecords, evaluateAnalysis, readSavedAnalyses } from '../../lib/aiQuestionAnalysis';
+import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
+import { saveQuestionAnalysis } from '../../lib/aiQuestionAnalysisStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -1749,7 +1753,7 @@ export function SitePageRecords({ row, zh = false }) {
   </Box>;
 }
 
-function CustomRecordAnalysis({ question, answers, allResponses, site = false, task = false }) {
+function CustomRecordAnalysis({ question, answers, allResponses, site = false, task = false, hideNotice = false }) {
   const { language } = useRegion();
   const zh = isChineseLanguage(language);
   const records = (answers || []).filter((a) => a !== undefined && a !== null);
@@ -1757,7 +1761,7 @@ function CustomRecordAnalysis({ question, answers, allResponses, site = false, t
     try { return JSON.stringify(a); } catch { return String(a); }
   });
   return <Box data-testid="custom-record-analysis">
-      <Alert severity="warning" sx={{ mb: 1.5 }}>
+      {!hideNotice && <Alert severity="warning" sx={{ mb: 1.5 }}>
         {task ? (zh
           ? `这是高级自定义任务：交互由你自己的 HTML 定义，平台不知道它的含义，所以不做分析也不做统计。回答已原样记录，请导出 CSV 或 JSON 后自行分析。共 ${records.length} 条记录。`
           : `This is an advanced custom task: its interaction is your own HTML, so the platform does not know what the answers mean and does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : site ? (zh
@@ -1765,7 +1769,7 @@ function CustomRecordAnalysis({ question, answers, allResponses, site = false, t
           : `This survey is a page converted online. Its questions were identified by a model and may not match what the page really asks, so the platform does not analyse or summarise them. Answers are recorded as sent; export the CSV or JSON and analyse them yourself. ${records.length} record(s).`) : zh
           ? `这道题由页面按自己的格式记录（custom），平台不做任何分析，也不做统计。请导出 CSV 或 JSON 后自行处理。共 ${records.length} 条记录。`
           : `This question is recorded in the page's own format (custom). The platform does not analyse or summarise it; export the CSV or JSON and process it yourself. ${records.length} record(s).`}
-      </Alert>
+      </Alert>}
       {sample.length > 0 && <Box component="pre" sx={{ m: 0, p: 1, bgcolor: 'grey.50', border: '1px solid', borderColor: 'divider', borderRadius: 1, fontSize: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
           {sample.join('\n')}
           {records.length > sample.length ? `\n… ${records.length - sample.length} more` : ''}
@@ -2386,6 +2390,8 @@ export function QuestionCard({
   surveyConfig,
   exportResponses,
   onExplain,
+  aiAnalysis = null,
+  onSaveAiAnalysis = null,
   defaultExpanded = false
 }) {
   const {
@@ -2404,7 +2410,11 @@ export function QuestionCard({
   const customTask = type === 'skillquestion' && !String(question.skillId || '').startsWith('preset_');
   const presetSkill = type === 'skillquestion' && !customTask ? getPresetSkill(question.skillId) : null;
   // A custom question or task is recorded as sent and analysed by the researcher.
-  const unanalysed = siteSurvey || type === 'custom' || customTask;
+  const unanalysedType = siteSurvey || type === 'custom' || customTask;
+  // An AI analysis the researcher generated turns the card back into an analysed one.
+  const aiReady = unanalysedType && Boolean(onSaveAiAnalysis) && !isDisplayOnlyQuestion(question);
+  const unanalysed = unanalysedType && !aiAnalysis;
+  const aiRecords = useMemo(() => (aiReady ? buildAnalysisRecords(allResponses, question, { site: siteSurvey }) : []), [aiReady, allResponses, question, siteSurvey]);
   const zh = isChineseLanguage(language);
   const typeLabel = customTask ? (zh ? '高级自定义任务' : 'Advanced custom task')
     : presetSkill ? `${zh ? '交互题' : 'Interactive'} · ${presetSkill.builderLabel || presetSkill.name}` : type;
@@ -2420,8 +2430,13 @@ export function QuestionCard({
       participantCount: new Set(answered.map((row, i) => row.participant_id || row.id || 'row_' + i)).size
     };
   }, [allResponses, question.name]);
+  const withAi = body => aiReady
+    ? <AiQuestionAnalysis question={question} records={aiRecords} saved={aiAnalysis} onSave={entry => onSaveAiAnalysis(question.name, entry)}>{body}</AiQuestionAnalysis>
+    : body;
   const renderAnalysis = () => {
+    if (question.pageOnly) return withAi(null);
     if (customTask) {
+      if (aiReady) return withAi(<CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} task hideNotice />);
       return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} task />;
     }
     if (type === 'skillquestion') {
@@ -2432,6 +2447,7 @@ export function QuestionCard({
       return <GeographicEvaluativePanel question={question} responses={allResponses || []} surveyConfig={surveyConfig} questions={questions} />;
     }
     if (type === 'custom' || (siteSurvey && !isDisplayOnlyQuestion(question))) {
+      if (aiReady) return withAi(<CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} site={siteSurvey} hideNotice />);
       return <CustomRecordAnalysis question={question} answers={answers} allResponses={allResponses} site={siteSurvey} />;
     }
     const nativeBody = renderNativeQuestionAnalysisBody(question, answers, allResponses, surveyConfig);
@@ -2500,7 +2516,10 @@ export function QuestionCard({
             <Chip icon={typeIcon(type)} label={typeLabel} size="small" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />
-            {unanalysed && !displayOnly && <Chip label={isChineseLanguage(language) ? '自行分析' : 'Analyse yourself'} size="small" variant="outlined" sx={{
+            {unanalysed && !displayOnly && <Chip label={aiReady ? (isChineseLanguage(language) ? '可生成 AI 分析' : 'AI analysis available') : (isChineseLanguage(language) ? '自行分析' : 'Analyse yourself')} size="small" variant="outlined" sx={{
+            fontSize: '0.7rem'
+          }} />}
+            {aiAnalysis && unanalysedType && <Chip label={isChineseLanguage(language) ? 'AI 分析' : 'AI analysis'} size="small" color="secondary" variant="outlined" sx={{
             fontSize: '0.7rem'
           }} />}
             {question.isAttentionCheck && <Chip label="Attention check" size="small" color="warning" variant="outlined" sx={{
@@ -2508,6 +2527,8 @@ export function QuestionCard({
           }} />}
             {displayOnly ? <Typography variant="caption" color="text.secondary">
                 Display / instruction
+              </Typography> : question.pageOnly ? <Typography variant="caption" color="text.secondary">
+                {isChineseLanguage(language) ? `${aiRecords.length} 份答卷有页面记录` : `${aiRecords.length} submission(s) with page records`}
               </Typography> : <Typography variant="caption" color="text.secondary">
                 {tf(t.resultsCounts, {
               answered: responseCount,
@@ -2541,7 +2562,13 @@ export function QuestionCard({
         setExportError('');
         try {
           await new Promise(resolve => setTimeout(resolve, 30));
-          downloadQuestionExportZip(question, exportResponses || allResponses, surveyConfig);
+          let extra = [];
+          if (aiAnalysis?.code) {
+            const records = buildAnalysisRecords(exportResponses || allResponses, question, { site: siteSurvey });
+            const run = await evaluateAnalysis(aiAnalysis.code, records, runAnalysisInSandbox);
+            if (run.ok) extra = aiAnalysisExportFiles(question, aiAnalysis, run.blocks);
+          }
+          downloadQuestionExportZip(question, exportResponses || allResponses, surveyConfig, extra);
         } catch (err) {
           setExportError(err.message || 'Export failed');
         } finally {
@@ -2567,13 +2594,13 @@ export function QuestionCard({
       <Collapse in={expanded} mountOnEnter unmountOnExit>
         <Divider />
         <CardContent>
-          {!unanalysed && answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
+          {!unanalysedType && answers.some(a => a.shown_images?.length > 1) && !['imagepicker', 'mediapicker', 'imageranking', 'mediaranking', 'skillquestion'].includes(type) && <Alert severity="info" sx={{
           mb: 2
         }}>{t.resultsGroupExplanation}</Alert>}
-          {!unanalysed && <AttentionCheckPassRate question={question} allResponses={allResponses} />}
-          {responseCount === 0 && !isDisplayOnlyQuestion(question) ? <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography> : <>
+          {!unanalysedType && <AttentionCheckPassRate question={question} allResponses={allResponses} />}
+          {responseCount === 0 && !isDisplayOnlyQuestion(question) && !(aiReady && aiRecords.length) ? <Typography variant="body2" color="text.secondary">No responses for this question yet.</Typography> : <>
               {renderAnalysis()}
-              {responseCount > 0 && !unanalysed && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
+              {responseCount > 0 && !unanalysedType && <PaperMethodsPanel question={question} allResponses={allResponses} surveyConfig={surveyConfig} />}
             </>}
         </CardContent>
       </Collapse>
@@ -2599,6 +2626,7 @@ export default function ResultsAnalysis({
   onScopeChange,
   onAnalyzeCurrent,
   onExplainQuestion,
+  onProjectUpdated,
   analysisBusy = false
 }) {
   const {
@@ -2606,6 +2634,17 @@ export default function ResultsAnalysis({
     language
   } = useRegion();
   const [responses, setResponses] = useState([]);
+  // AI analyses the researcher generated, saved in the project's metadata.
+  const [savedAnalyses, setSavedAnalyses] = useState(() => readSavedAnalyses(currentProject));
+  useEffect(() => {
+    setSavedAnalyses(readSavedAnalyses(currentProject));
+  }, [currentProject]);
+  const handleSaveAiAnalysis = useCallback(async (questionName, entry) => {
+    const projectId = currentProject?.id;
+    const metadata = await saveQuestionAnalysis(projectId, questionName, entry);
+    setSavedAnalyses(readSavedAnalyses({ metadata }));
+    onProjectUpdated?.({ metadata });
+  }, [currentProject?.id, onProjectUpdated]);
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState(null);
   const [preparedCards, setPreparedCards] = useState(null);
@@ -2997,6 +3036,14 @@ export default function ResultsAnalysis({
   // A converted page imported as it is declares no questions: the overview shows
   // the ones the model saw on it (kept at import), or a dash.
   const sitePageQuestions = siteConverted && !answerableQuestions.length ? (Array.isArray(surveyConfig?.spSite?.pageQuestions) ? surveyConfig.spSite.pageQuestions : []) : null;
+  // A page imported as it is has no question cards: each question the model saw
+  // on it (or the page as a whole) gets one, analysed from the page records.
+  const sitePageCards = useMemo(() => {
+    if (!siteConverted || answerableQuestions.length) return [];
+    const seen = Array.isArray(surveyConfig?.spSite?.pageQuestions) ? surveyConfig.spSite.pageQuestions.filter(q => q?.name) : [];
+    const list = seen.length ? seen : [{ name: 'page', title: isChineseLanguage(language) ? '整份页面记录' : 'All page records', type: '' }];
+    return list.map(q => ({ ...q, name: `__page__${q.name}`, pageName: q.name, type: q.type || 'custom', pageOnly: true }));
+  }, [siteConverted, answerableQuestions.length, surveyConfig, language]);
   const siteCapturedCount = useMemo(() => (responses || []).reduce((n, row) => {
     const list = row?.responses?.[SP_SITE_REQUESTS_KEY];
     return n + (Array.isArray(list) ? list.length : Number(row?.survey_metadata?.sp_site?.captured_requests) || 0);
@@ -3111,16 +3158,29 @@ export default function ResultsAnalysis({
   }, [heavyQuestionPrep, allQuestions, filteredResponses, answerableNumberByName, surveyConfig]);
   const readyQuestionCards = heavyQuestionPrep ? preparedCards : questionCardProps;
   const exportBlocked = exporting || loading || !filteredResponses.length;
+  const buildAiAnalysisFiles = async () => {
+    const files = [];
+    const questions = [...allQuestions, ...sitePageCards];
+    for (const question of questions) {
+      const saved = savedAnalyses[question.name];
+      if (!saved?.code) continue;
+      const records = buildAnalysisRecords(filteredResponses, question, { site: siteConverted });
+      const run = await evaluateAnalysis(saved.code, records, runAnalysisInSandbox);
+      if (run.ok) files.push(...aiAnalysisExportFiles(question, saved, run.blocks));
+    }
+    return files;
+  };
   // Two choices only: the answers table, or everything in one ZIP. An uploaded
   // SP-Scheme page is not analysed, so it gets a single ZIP of its answers.
   const exportItems = siteConverted ? [{
     id: 'site',
     label: t.resultsExportSiteAnswers,
     disabled: exportBlocked,
-    onClick: () => runExport(() => downloadSiteResultsZip({
+    onClick: () => runExport(async () => downloadSiteResultsZip({
       project: currentProject,
       filteredResponses,
-      wideCsv: buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig)
+      wideCsv: buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig),
+      aiAnalysisFiles: await buildAiAnalysisFiles()
     }))
   }] : [{
     id: 'csv',
@@ -3131,9 +3191,11 @@ export default function ResultsAnalysis({
     id: 'bundle',
     label: t.resultsExportBundle,
     disabled: exportBlocked || !surveyConfig,
-    onClick: () => runExport(() => {
+    onClick: () => runExport(async () => {
       const wideCsv = buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig);
+      const aiAnalysisFiles = await buildAiAnalysisFiles();
       downloadResultsExportZip({
+        aiAnalysisFiles,
         project: currentProject,
         surveyConfig,
         questions: allQuestions,
@@ -3271,8 +3333,8 @@ export default function ResultsAnalysis({
             mb: 2
           }} data-testid="results-site-match">
           {siteConverted && (isChineseLanguage(language)
-            ? `这份问卷是在线转换导入的页面，题目由模型识别，未必准确，所以平台不做分析，题目都以灰色显示。答案已原样记录：页面发出的数据在 __sp_requests，页面自己保存的作答在 __sp_page_state。请导出 CSV 或 JSON 后自行分析。`
-            : `This survey is a page converted online. Its questions were identified by a model and may be inaccurate, so the platform analyses nothing and shows them greyed out. Answers are recorded as they are: what the page sent is under __sp_requests and what it saved in its own storage under __sp_page_state. Export the CSV or JSON and analyse them yourself.`)}
+            ? `这份问卷是在线转换导入的页面，题目由模型识别，未必准确，所以平台不默认分析。答案已原样记录：页面发出的数据在 __sp_requests，页面自己保存的作答在 __sp_page_state。可以在“题目”里逐题点“生成分析”，由模型写分析代码、平台算法出图并写进导出；也可以导出 CSV 或 JSON 后自行分析。`
+            : `This survey is a page converted online. Its questions were identified by a model and may be inaccurate, so the platform does not analyse them by default. Answers are recorded as they are: what the page sent is under __sp_requests and what it saved in its own storage under __sp_page_state. Under Questions, "Generate analysis" on a question has the model write analysis code that the platform's algorithms chart and add to the export; or export the CSV or JSON and analyse it yourself.`)}
           {!siteConverted && siteMatch.level === 'full' && (isChineseLanguage(language)
             ? `这份问卷是 SP-Scheme 页面；全部 ${siteMatch.total} 道题都是平台题型，下面的分析适用。`
             : `This survey is an SP-Scheme page; all ${siteMatch.total} questions use platform types, so the analysis below applies.`)}
@@ -3618,10 +3680,16 @@ export default function ResultsAnalysis({
                 }}>
                   {page.title || page.name}
                 </Typography>
-                {pageQuestions.map(question => <QuestionCard key={question.name} defaultExpanded={compactLayout || question.name === selectedQuestionName} onExplain={handleExplainQuestion} {...readyQuestionCards.get(question.name)} />)}
+                {pageQuestions.map(question => <QuestionCard key={question.name} defaultExpanded={compactLayout || question.name === selectedQuestionName} onExplain={handleExplainQuestion} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={adminMode ? null : handleSaveAiAnalysis} {...readyQuestionCards.get(question.name)} />)}
               </Box>;
             })}
         </>}
+      {view === 'questions' && !loading && surveyConfig && allQuestions.length === 0 && sitePageCards.length > 0 && <Box data-testid="results-site-page-cards">
+          <Typography variant="overline" color="text.secondary" sx={{ display: 'block', mb: 1.5, fontWeight: 'bold', letterSpacing: 1 }}>
+            {isChineseLanguage(language) ? '页面题目（答案在页面记录里）' : 'Questions on the page (answers are in the page records)'}
+          </Typography>
+          {sitePageCards.map((question, index) => <QuestionCard key={question.name} question={question} answers={[]} totalResponses={filteredResponses.length} questionNumber={index + 1} allResponses={filteredResponses} surveyConfig={surveyConfig} exportResponses={filteredResponses} defaultExpanded={sitePageCards.length === 1} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={adminMode ? null : handleSaveAiAnalysis} />)}
+        </Box>}
 
         </Box>
       </Paper>

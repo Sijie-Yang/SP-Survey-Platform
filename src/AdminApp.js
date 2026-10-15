@@ -1966,6 +1966,7 @@ export default function AdminApp() {
                 currentProject={currentProject}
                 surveyConfig={surveyConfig}
                 onSurveyConfigChange={handleResultsConfigSync}
+                onProjectUpdated={(patch) => setCurrentProject((prev) => (prev ? { ...prev, ...patch } : prev))}
                 analysisBusy={resultsAnalyzeBusy}
                 onScopeChange={(scope) => setResultsScope(scope)}
                 onAnalyzeCurrent={async ({ scope, overview, onSaved }) => {

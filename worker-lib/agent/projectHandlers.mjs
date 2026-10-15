@@ -211,7 +211,7 @@ export async function updateProjectMeta(env, accessToken, projectId, body, userI
   const metaKeys = ['author', 'year', 'category', 'tags', 'website', 'huggingfaceDataset', 'metadata'];
   const touchesMeta = metaKeys.some((k) => body?.[k] !== undefined);
   if (touchesMeta) {
-    patch.metadata = normalizeProjectMetadata(body, metadataFromRow(existing));
+    patch.metadata = normalizeProjectMetadata(body, { ...(existing?.metadata || {}), ...metadataFromRow(existing) });
   }
   if (!Object.keys(patch).length) {
     throw Object.assign(new Error('Provide name, description, and/or metadata fields to update.'), { status: 400 });

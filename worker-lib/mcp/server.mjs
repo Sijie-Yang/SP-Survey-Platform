@@ -874,7 +874,7 @@ async function updateMetaViaService(env, userId, body) {
   }
   const metaKeys = ['author', 'year', 'category', 'tags', 'website', 'huggingfaceDataset', 'metadata'];
   if (metaKeys.some((k) => body?.[k] !== undefined)) {
-    patch.metadata = normalizeProjectMetadata(body, metadataFromRow(existing || {}));
+    patch.metadata = normalizeProjectMetadata(body, { ...(existing?.metadata || {}), ...metadataFromRow(existing || {}) });
   }
   if (!Object.keys(patch).length) {
     throw Object.assign(new Error('Provide name, description, and/or metadata fields to update.'), { status: 400 });

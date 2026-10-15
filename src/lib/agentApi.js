@@ -102,6 +102,14 @@ export async function convertSurveyPage(body) {
   });
 }
 
+/** Ask the Assistant model to write the analysis code for one Results question. */
+export async function writeQuestionAnalysis(body) {
+  return agentFetch('/api/agent/results/ai-analysis', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 /** Fetch a published survey page on the server (no CORS), with its same-site scripts inlined. */
 export async function fetchSurveyPage(url) {
   return agentFetch('/api/agent/sp-scheme/fetch-page', {
