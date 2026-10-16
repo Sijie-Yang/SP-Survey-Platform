@@ -9,6 +9,7 @@ import { useRegion } from '../../contexts/RegionContext';
 import RegionSwitcher from '../admin/RegionSwitcher';
 import { UI_LANGUAGES, isChineseLanguage, uiPair } from '../../lib/uiLanguages';
 import { getBenchPublicStatus } from '../../lib/spBenchApi';
+import { recordSiteVisit } from '../../lib/siteGrowth';
 export const GITHUB_REPO_URL = 'https://github.com/Sijie-Yang/SP-Survey';
 function BrandLogo({
   src,
@@ -46,6 +47,9 @@ export default function PublicHeader({
   const [menuAnchor, setMenuAnchor] = useState(null);
   const isActive = path => location.pathname === path;
   const [benchEnabled, setBenchEnabled] = useState(false);
+  useEffect(() => {
+    recordSiteVisit();
+  }, []);
   useEffect(() => {
     let cancelled = false;
     getBenchPublicStatus().then(res => {
