@@ -90,15 +90,15 @@ npm run research:filter
 npm run research:enrich
 ```
 
-然后在 **论文库 → 导入粗筛进论文库**。
+然后 `npm run research:library` 生成 `public/research/library.json`，提交部署后在 **论文库 → 从文件同步**（见 [`../library/README.md`](../library/README.md)）。
 
 ## 模板
 
-不从摘要自动生成壳模板。读完论文后，把可用问卷写进 `public/project_templates/`（并更新 `index.json`），再在管理端导入 / 批量匹配 DOI。
+不从摘要自动生成壳模板。读完论文后，把可用问卷写进 `public/project_templates/`（并更新 `index.json`），在模板 JSON 里写上 `"doi"`。`npm run research:library` 会按 DOI 把模板关联到论文；论文不在库里时会强制收录（见 [`../library/README.md`](../library/README.md)）。
 
 ## 去重
 
-DOI 唯一；无 DOI 用标题+年份；重复导入只补新行。
+DOI 唯一；无 DOI 用标题+年份。线上与文件的差异由「从文件同步」预览并对齐，线上多出的论文由管理员选择是否归档，不会自动删除。
 
 ## 论文库画像 metadata
 
@@ -108,5 +108,5 @@ DOI 唯一；无 DOI 用标题+年份；重复导入只补新行。
 npm run research:enrich
 ```
 
-会更新 `research/scopus/shortlists/2026-07-12_library_coarse.json` 与 `public/research/scopus-shortlist.json`。  
+会更新 `research/scopus/shortlists/2026-07-12_library_coarse.json`；`npm run research:library` 再把标注带进 `public/research/library.json`（只为新论文补标注）。  
 公开页 `/papers` 用这些字段做 Library profile；**不是**作者原生结构化字段。

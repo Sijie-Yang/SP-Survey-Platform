@@ -7,16 +7,23 @@ import {
   Tooltip, Typography,
 } from '@mui/material';
 import {
-  OpenInNew, Refresh, AutoAwesome, UploadFile, Delete,
+  OpenInNew, Refresh, AutoAwesome, Sync, Download, Delete,
   ThumbUp, ThumbDown, Search, Clear, Link as LinkIcon, LinkOff,
 } from '@mui/icons-material';
 import { draftTemplateFromPaper } from '../../lib/researchSearch';
 import {
   listAllResearchPapers,
   updateResearchPaper,
-  upsertResearchCandidates,
+  applyResearchLibrarySync,
   deleteResearchPaper,
 } from '../../lib/researchPaperStore';
+import {
+  LIBRARY_FILE_URL,
+  LIBRARY_FORMAT,
+  planLibrarySync,
+  summarizeSyncPlan,
+  buildLibraryOverridesExport,
+} from '../../lib/researchLibrarySync';
 import { listAllTemplates, saveTemplateToSupabase } from '../../lib/templateManager';
 import {
   matchPapersToTemplates,
@@ -243,7 +250,34 @@ const PapersTable = memo(function PapersTable({ rows, emptyLabel, ...actionProps
   );
 });
 
-/** Admin paper library (coarse import lands here as approved). */
+async function loadLibraryFile() {
+  const res = await fetch(LIBRARY_FILE_URL, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Could not load ${LIBRARY_FILE_URL} (${res.status})`);
+  const payload = await res.json();
+  if (payload.format !== LIBRARY_FORMAT || !Array.isArray(payload.papers)) {
+    throw new Error(`${LIBRARY_FILE_URL} is not a paper library file`);
+  }
+  return payload;
+}
+
+function downloadJson(filename, data) {
+  const blob = new Blob([`${JSON.stringify(data, null, 2)}\n`], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const CHANGE_LABEL = {
+  status: '恢复为已收录',
+  template_id: '模板关联',
+  inclusion: '收录原因',
+  abstract: '补摘要',
+};
+
+/** Admin paper library. public/research/library.json is the source of truth; sync it in here. */
 export default function ResearchDeepSearch() {
   const [listLoading, setListLoading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -252,6 +286,10 @@ export default function ResearchDeepSearch() {
   const [applyingMatch, setApplyingMatch] = useState(false);
   const [snack, setSnack] = useState({ open: false, msg: '', sev: 'success' });
   const [library, setLibrary] = useState([]);
+  const [syncDialog, setSyncDialog] = useState(null); // { plan, summary, file }
+  const [syncArchive, setSyncArchive] = useState({}); // online-only id → archive?
+  const [preparingSync, setPreparingSync] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [activeFilter, setActiveFilter] = useState('');
   const searchRef = useRef(null);
   const [draftingId, setDraftingId] = useState(null);
@@ -328,32 +366,68 @@ export default function ResearchDeepSearch() {
     setActiveFilter('');
   }, []);
 
-  const importShortlist = async () => {
-    setImporting(true);
-    setImportProgress({ current: 0, total: 0, inserted: 0, updated: 0, skipped: 0 });
+  const openLibrarySync = async () => {
+    setPreparingSync(true);
     try {
-      const res = await fetch('/research/scopus-shortlist.json');
-      if (!res.ok) throw new Error(`Could not load shortlist (${res.status})`);
-      const payload = await res.json();
-      const papers = payload.papers || [];
-      if (!papers.length) throw new Error('Shortlist is empty');
-      setImportProgress({ current: 0, total: papers.length, inserted: 0, updated: 0, skipped: 0 });
-      const result = await upsertResearchCandidates(papers, {
-        defaultStatus: 'approved',
+      const [file, online] = await Promise.all([loadLibraryFile(), listAllResearchPapers()]);
+      const plan = planLibrarySync(file.papers, online);
+      setSyncArchive({});
+      setSyncDialog({ plan, summary: summarizeSyncPlan(plan), file });
+    } catch (err) {
+      showSnack(err.message || String(err), 'error');
+    } finally {
+      setPreparingSync(false);
+    }
+  };
+
+  const archiveIds = useMemo(
+    () => Object.entries(syncArchive).filter(([, v]) => v).map(([id]) => id),
+    [syncArchive],
+  );
+
+  const applyLibrarySync = async () => {
+    if (!syncDialog) return;
+    const { plan } = syncDialog;
+    setImporting(true);
+    setImportProgress({ label: '准备中', current: 0, total: 0 });
+    try {
+      const result = await applyResearchLibrarySync(plan, {
+        archiveIds,
         onProgress: (p) => setImportProgress({ ...p }),
       });
       showSnack(
-        `粗筛入库：+${result.inserted} 新 / ${result.updated} 已存在去重`
-        + (result.skipped ? ` / ${result.skipped} 跳过` : '')
-        + ` · 共 ${papers.length} 条`,
+        `同步完成：+${result.inserted} 新增 / ${result.updated} 更新`
+        + (result.archived ? ` / ${result.archived} 归档` : '')
+        + (result.skipped ? ` / ${result.skipped} 跳过` : ''),
+        result.errors.length ? 'warning' : 'success',
       );
-      if (result.errors?.length) showSnack(result.errors.slice(0, 2).join(' · '), 'error');
+      if (result.errors.length) showSnack(result.errors.slice(0, 2).join(' · '), 'error');
+      setSyncDialog(null);
       await loadLists();
     } catch (err) {
       showSnack(err.message || String(err), 'error');
     } finally {
       setImporting(false);
       setImportProgress(null);
+    }
+  };
+
+  const exportOnlineAdditions = async () => {
+    setExporting(true);
+    try {
+      const [file, online] = await Promise.all([loadLibraryFile(), listAllResearchPapers()]);
+      const out = buildLibraryOverridesExport(online, file.papers);
+      const n = out.include.length + out.exclude.length + out.template_links.length;
+      if (!n) {
+        showSnack('线上与文件一致，没有需要导出的改动', 'info');
+        return;
+      }
+      downloadJson(`library-overrides-export-${new Date().toISOString().slice(0, 10)}.json`, out);
+      showSnack(`已导出：新增 ${out.include.length} / 移出 ${out.exclude.length} / 模板关联 ${out.template_links.length}`);
+    } catch (err) {
+      showSnack(err.message || String(err), 'error');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -543,7 +617,7 @@ export default function ResearchDeepSearch() {
     }
   };
 
-  const busy = listLoading || importing || matching || applyingMatch || linkSaving;
+  const busy = listLoading || importing || matching || applyingMatch || linkSaving || preparingSync || exporting;
 
   const matchRowsPreview = useMemo(() => {
     if (!matchDialog) return [];
@@ -596,15 +670,31 @@ export default function ResearchDeepSearch() {
         >
           批量匹配模板
         </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={importing ? <CircularProgress size={14} color="inherit" /> : <UploadFile />}
-          onClick={importShortlist}
-          disabled={busy}
-        >
-          导入粗筛进论文库
-        </Button>
+        <Tooltip title="把 public/research/library.json 同步到线上：先预览差异，再确认">
+          <span>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={preparingSync || importing ? <CircularProgress size={14} color="inherit" /> : <Sync />}
+              onClick={openLibrarySync}
+              disabled={busy}
+            >
+              从文件同步
+            </Button>
+          </span>
+        </Tooltip>
+        <Tooltip title="把线上新增、移出和改过的模板关联导出为 overrides 文件，合并进仓库">
+          <span>
+            <Button
+              size="small"
+              startIcon={exporting ? <CircularProgress size={14} color="inherit" /> : <Download />}
+              onClick={exportOnlineAdditions}
+              disabled={busy}
+            >
+              导出线上改动
+            </Button>
+          </span>
+        </Tooltip>
         <Button
           size="small"
           startIcon={<Refresh />}
@@ -640,23 +730,15 @@ export default function ResearchDeepSearch() {
       </Stack>
 
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-        论文库自带模板匹配：点行内链接图标可搜索/更换模板；「批量匹配模板」按 DOI / 标题+年自动提案。Fit 标记是否适合做成模板。模板本身按读完论文后手搓进 `public/project_templates/`，不从摘要自动生成。
+        仓库里的 `public/research/library.json` 是论文库的唯一来源（由 `npm run research:library` 生成），模板与论文按模板文件里的 DOI 自动关联。「从文件同步」把文件写到线上，线上多出的论文由你决定是否归档；在线上新增或改过关联后，用「导出线上改动」把它们带回仓库（合并进 `research/library/overrides.json`）。
       </Typography>
 
       {importing && importProgress && (
         <Alert severity="info" sx={{ mb: 2 }} icon={false}>
           <Typography variant="body2" fontWeight={600} sx={{ mb: 0.75 }}>
-            正在导入粗筛…
+            正在同步论文库：{importProgress.label || '准备中'}
             {' '}
-            {importProgress.total
-              ? `${importProgress.current} / ${importProgress.total}`
-              : '准备中…'}
-            {importProgress.total > 0 && (
-              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                +{importProgress.inserted} 新 · {importProgress.updated} 去重
-                {importProgress.skipped ? ` · ${importProgress.skipped} 跳过` : ''}
-              </Typography>
-            )}
+            {importProgress.total ? `${importProgress.current} / ${importProgress.total}` : ''}
           </Typography>
           <LinearProgress
             variant={importProgress.total ? 'determinate' : 'indeterminate'}
@@ -666,7 +748,7 @@ export default function ResearchDeepSearch() {
             sx={{ height: 8, borderRadius: 1 }}
           />
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-            请保持本页打开。中断后可再导（DOI 去重）。
+            请保持本页打开。中断后可重新同步（按 DOI 对齐，不会重复）。
           </Typography>
         </Alert>
       )}
@@ -684,7 +766,7 @@ export default function ResearchDeepSearch() {
           </Typography>
           <PapersTable
             rows={filteredLibrary}
-            emptyLabel={activeFilter || linkFilter !== 'all' ? '无匹配结果' : '暂无论文 — 可点「导入粗筛进论文库」'}
+            emptyLabel={activeFilter || linkFilter !== 'all' ? '无匹配结果' : '暂无论文 — 可点「从文件同步」'}
             onFit={onFit}
             onDraft={onDraft}
             onDelete={onDelete}
@@ -904,6 +986,153 @@ export default function ResearchDeepSearch() {
             disabled={applyingMatch || selectedCount === 0}
           >
             {applyingMatch ? '写入中…' : `确认关联 ${selectedCount}`}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={!!syncDialog}
+        onClose={() => !importing && setSyncDialog(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>从文件同步论文库</DialogTitle>
+        <DialogContent dividers>
+          {importing && importProgress && (
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="caption" color="text.secondary">
+                {importProgress.label || '准备中'}
+                {importProgress.total ? ` ${importProgress.current} / ${importProgress.total}` : ''}
+              </Typography>
+              <LinearProgress
+                variant={importProgress.total ? 'determinate' : 'indeterminate'}
+                value={importProgress.total ? Math.min(100, (100 * importProgress.current) / importProgress.total) : 0}
+                sx={{ height: 6, borderRadius: 1 }}
+              />
+            </Box>
+          )}
+          {syncDialog && (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                文件：{syncDialog.file.count} 篇（生成于 {syncDialog.file.generated_at}）。
+                按文件补齐线上的论文、收录状态和模板关联；不会删除任何论文。
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+                <Chip size="small" color="success" variant="outlined" label={`新增 ${syncDialog.summary.insert}`} />
+                <Chip size="small" color="primary" variant="outlined" label={`更新 ${syncDialog.summary.update}`} />
+                <Chip size="small" variant="outlined" label={`一致 ${syncDialog.summary.unchanged}`} />
+                <Chip
+                  size="small"
+                  color={syncDialog.summary.onlineOnly ? 'warning' : 'default'}
+                  variant="outlined"
+                  label={`线上多出 ${syncDialog.summary.onlineOnly}`}
+                />
+              </Stack>
+              {syncDialog.summary.update > 0 && (
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+                  更新内容：
+                  {Object.keys(CHANGE_LABEL)
+                    .filter((k) => syncDialog.summary[k])
+                    .map((k) => `${CHANGE_LABEL[k]} ${syncDialog.summary[k]}`)
+                    .join(' · ')}
+                </Typography>
+              )}
+              {(syncDialog.plan.duplicateOnline.length > 0 || syncDialog.plan.duplicateFile.length > 0) && (
+                <Alert severity="warning" sx={{ mb: 1.5 }}>
+                  重复：线上 {syncDialog.plan.duplicateOnline.length} 组，文件 {syncDialog.plan.duplicateFile.length} 条。
+                  重复的线上行只同步第一条。
+                </Alert>
+              )}
+
+              {syncDialog.plan.toUpdate.some((u) => u.changes.template_id) && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>模板关联变化</Typography>
+                  <Table size="small">
+                    <TableBody>
+                      {syncDialog.plan.toUpdate.filter((u) => u.changes.template_id).map((u) => (
+                        <TableRow key={u.id}>
+                          <TableCell sx={{ maxWidth: 420 }}>
+                            <Typography variant="body2" noWrap>{u.title}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption">
+                              {u.changes.template_id.from || '（无）'} → {u.changes.template_id.to || '（无）'}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Box>
+              )}
+
+              {syncDialog.plan.onlineOnly.length > 0 && (
+                <>
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>
+                    线上有、文件里没有的论文
+                  </Typography>
+                  <Alert severity="info" sx={{ mb: 1 }}>
+                    想保留的请先点「导出线上改动」并合并进仓库；勾选的会被归档（status = archived，可恢复，不删除）。
+                  </Alert>
+                  <Box sx={{ maxHeight: 260, overflow: 'auto' }}>
+                    <Table size="small">
+                      <TableBody>
+                        {syncDialog.plan.onlineOnly.map((row) => (
+                          <TableRow key={row.id} hover>
+                            <TableCell padding="checkbox">
+                              <Checkbox
+                                size="small"
+                                checked={!!syncArchive[row.id]}
+                                onChange={(e) => setSyncArchive((prev) => ({ ...prev, [row.id]: e.target.checked }))}
+                                disabled={importing}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight={600}>{row.title}</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {row.year || '—'} · {row.doi || 'no DOI'}{row.template_id ? ` · 模板 ${row.template_id}` : ''}
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Box>
+                </>
+              )}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          {!!syncDialog?.plan.onlineOnly.length && (
+            <FormControlLabel
+              sx={{ mr: 'auto', ml: 1 }}
+              control={(
+                <Checkbox
+                  size="small"
+                  checked={archiveIds.length === syncDialog.plan.onlineOnly.length}
+                  indeterminate={archiveIds.length > 0 && archiveIds.length < syncDialog.plan.onlineOnly.length}
+                  onChange={(e) => {
+                    const next = {};
+                    syncDialog.plan.onlineOnly.forEach((r) => { next[r.id] = e.target.checked; });
+                    setSyncArchive(next);
+                  }}
+                  disabled={importing}
+                />
+              )}
+              label="全部归档"
+            />
+          )}
+          <Button onClick={() => setSyncDialog(null)} disabled={importing}>取消</Button>
+          <Button
+            variant="contained"
+            onClick={applyLibrarySync}
+            disabled={importing || !syncDialog
+              || (!syncDialog.summary.insert && !syncDialog.summary.update && !archiveIds.length)}
+          >
+            {importing
+              ? '同步中…'
+              : `确认同步（新增 ${syncDialog?.summary.insert || 0} · 更新 ${syncDialog?.summary.update || 0}${archiveIds.length ? ` · 归档 ${archiveIds.length}` : ''}）`}
           </Button>
         </DialogActions>
       </Dialog>
