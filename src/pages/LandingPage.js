@@ -21,6 +21,7 @@ import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
 import { getBenchPublic } from '../lib/spBenchApi';
 import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
+import SiteGrowthSection from '../components/SiteGrowthSection';
 import { filterMediaByType } from '../lib/mediaUtils';
 import { coverCandidatesForTemplate, DEFAULT_TEMPLATE_COVER, hashString, loadCoverIndex, useCoverCandidate } from '../lib/templateCover';
 import { listPreviewMedia } from '../lib/previewMediaLibrary';
@@ -459,6 +460,10 @@ export default function LandingPage() {
           ))}
         </Box>
       </Container>
+
+      <Divider />
+
+      <SiteGrowthSection />
 
       <Divider />
 
