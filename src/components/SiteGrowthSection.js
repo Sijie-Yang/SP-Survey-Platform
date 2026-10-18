@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Card, CardContent, Container, Typography } from '@mui/material';
+import { Alert, Box, Card, CardContent, CircularProgress, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
@@ -59,20 +59,26 @@ function Sparkline({ series, color, formatValue, label }) {
   );
 }
 
+// Admin-only: get_site_growth_stats() refuses anyone who isn't a platform admin.
 export default function SiteGrowthSection() {
   const { t, language } = useRegion();
   const theme = useTheme();
-  const [stats, setStats] = useState(null);
+  const [stats, setStats] = useState(undefined);
 
   useEffect(() => {
     let cancelled = false;
     getSiteGrowthStats()
       .then((data) => { if (!cancelled) setStats(data); })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setStats(null); });
     return () => { cancelled = true; };
   }, []);
 
-  if (!stats || !Array.isArray(stats.months)) return null;
+  if (stats === undefined) {
+    return <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>;
+  }
+  if (!stats || !Array.isArray(stats.months)) {
+    return <Alert severity="warning">{t.landGrowthUnavailable}</Alert>;
+  }
 
   const fmt = new Intl.NumberFormat(intlLocale(language));
   const formatValue = (n) => fmt.format(Number(n) || 0);
@@ -112,12 +118,12 @@ export default function SiteGrowthSection() {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 8 }}>
-      <Box sx={{ textAlign: 'center', mb: 5 }}>
-        <Typography variant="h4" fontWeight={700} sx={{ mb: 1 }}>
+    <Box>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h6" fontWeight={700}>
           {t.landGrowthTitle}
         </Typography>
-        <Typography variant="body1" color="text.secondary">
+        <Typography variant="body2" color="text.secondary">
           {t.landGrowthSubtitle}
         </Typography>
       </Box>
@@ -145,6 +151,6 @@ export default function SiteGrowthSection() {
           </Card>
         ))}
       </Box>
-    </Container>
+    </Box>
   );
 }
