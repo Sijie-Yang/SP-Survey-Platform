@@ -21,7 +21,6 @@ import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
 import { getBenchPublic } from '../lib/spBenchApi';
 import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
-import PlatformHighlights from '../components/PlatformHighlights';
 import { filterMediaByType } from '../lib/mediaUtils';
 import { coverCandidatesForTemplate, DEFAULT_TEMPLATE_COVER, hashString, loadCoverIndex, useCoverCandidate } from '../lib/templateCover';
 import { listPreviewMedia } from '../lib/previewMediaLibrary';
@@ -391,8 +390,6 @@ export default function LandingPage() {
         </Container>
       </Box>
 
-      <PlatformHighlights templateCount={templates.length} />
-
       {benchSummary && (
         <Box
           sx={{
@@ -465,7 +462,7 @@ export default function LandingPage() {
 
       <Divider />
 
-      <Container id="templates" maxWidth="lg" sx={{ py: 8, scrollMarginTop: 72 }}>
+      <Container maxWidth="lg" sx={{ py: 8 }}>
         <Box sx={{ textAlign: 'center', mb: 5 }}>
           <Typography variant="h4" fontWeight={700} sx={{ mb: 1 }}>
             {t.landTemplatesTitle}
