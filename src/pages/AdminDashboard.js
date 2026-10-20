@@ -73,6 +73,7 @@ import SharedAssistantSubsidy from '../components/admin/SharedAssistantSubsidy';
 import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDialog';
 import { toAdminPreviewProject } from '../lib/adminPreviewProject';
 import SiteGrowthSection from '../components/SiteGrowthSection';
+import SiteFeedbackManagement from '../components/admin/SiteFeedbackManagement';
 import {
   coverSourceDetail,
   describeTemplateCover,
@@ -2707,6 +2708,7 @@ export default function AdminDashboard() {
           scrollButtons="auto"
         >
           <Tab label="平台增长" />
+          <Tab label="用户建议" />
           <Tab label="模板管理" />
           <Tab label="项目概览" />
           <Tab label="预览媒体库" />
@@ -2721,17 +2723,18 @@ export default function AdminDashboard() {
         </Tabs>
       </Box>
       {tab === 0 && <SiteGrowthSection />}
-      {tab === 1 && <TemplateManagement />}
-      {tab === 2 && <ProjectOverview />}
-      {tab === 3 && <PreviewMediaLibraryManagement />}
-      {tab === 4 && <SkillManagement />}
-      {tab === 5 && <LiveSurveyManagement />}
-      {tab === 6 && <ResearchDeepSearch />}
-      {tab === 7 && <SurveyDesignRequestManagement />}
-      {tab === 8 && <SpBenchManagement />}
-      {tab === 9 && <NewsManagement />}
-      {tab === 10 && <SharedAssistantSubsidy />}
-      {tab === 11 && <ContentSubmissionManagement />}
+      {tab === 1 && <SiteFeedbackManagement />}
+      {tab === 2 && <TemplateManagement />}
+      {tab === 3 && <ProjectOverview />}
+      {tab === 4 && <PreviewMediaLibraryManagement />}
+      {tab === 5 && <SkillManagement />}
+      {tab === 6 && <LiveSurveyManagement />}
+      {tab === 7 && <ResearchDeepSearch />}
+      {tab === 8 && <SurveyDesignRequestManagement />}
+      {tab === 9 && <SpBenchManagement />}
+      {tab === 10 && <NewsManagement />}
+      {tab === 11 && <SharedAssistantSubsidy />}
+      {tab === 12 && <ContentSubmissionManagement />}
     </AdminShell>
   );
 }
