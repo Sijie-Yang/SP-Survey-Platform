@@ -11,7 +11,7 @@ const landing = {
     newsUnavailable: '新聞尚未開放。',
     benchViewLeaderboard: '查看排行榜',
     landGrowthTitle: '平台成長',
-    landGrowthSubtitle: '平台即時累計數據，以及最近 12 個月的成長。',
+    landGrowthSubtitle: '平台即時累計數據，以及最近 12 個月的成長。僅平台管理員可見。',
     landGrowthUsers: '註冊研究者',
     landGrowthProjects: '問卷專案',
     landGrowthResponses: '已收集回答',

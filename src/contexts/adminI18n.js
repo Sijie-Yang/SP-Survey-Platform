@@ -1016,8 +1016,9 @@ export const adminI18n = {
     benchViewLeaderboard: 'View leaderboard',
 
     // Landing page
-    landGrowthTitle: 'SP-Survey in numbers',
-    landGrowthSubtitle: 'Live totals from the platform, with the last 12 months of growth.',
+    landGrowthTitle: 'Platform growth',
+    landGrowthSubtitle: 'Live totals from the platform, with the last 12 months of growth. Only platform admins can see this.',
+    landGrowthUnavailable: 'Growth stats are unavailable. Run supabase/site_growth_stats.sql in Supabase, and make sure you are a platform admin.',
     landGrowthUsers: 'Researchers',
     landGrowthProjects: 'Survey projects',
     landGrowthResponses: 'Responses collected',
@@ -2293,7 +2294,8 @@ export const adminI18n = {
     benchViewLeaderboard: '查看排行榜',
 
     landGrowthTitle: '平台增长',
-    landGrowthSubtitle: '平台实时累计数据，以及最近 12 个月的增长。',
+    landGrowthSubtitle: '平台实时累计数据，以及最近 12 个月的增长。仅平台管理员可见。',
+    landGrowthUnavailable: '暂时读不到增长数据。请确认已在 Supabase 运行 supabase/site_growth_stats.sql，并且当前账号是平台管理员。',
     landGrowthUsers: '注册研究者',
     landGrowthProjects: '问卷项目',
     landGrowthResponses: '已收集回答',

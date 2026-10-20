@@ -1,5 +1,7 @@
--- Homepage "growth" section: public aggregate numbers and a privacy-safe
--- visit counter. Additive and idempotent; run once in the Supabase SQL editor.
+-- Platform growth numbers for the admin dashboard, plus a privacy-safe visit
+-- counter fed by public pages. Additive and idempotent; re-run the whole file
+-- in the Supabase SQL editor after changes. The stats are admin-only (they
+-- used to be public for the homepage); this file revokes the old anon grant.
 --
 -- Nothing personal is stored or returned: visits are one counter row per UTC
 -- day (no IP, no user agent, no cookie id), and the stats function returns
@@ -50,6 +52,10 @@ DECLARE
   v_start DATE := (date_trunc('month', now() AT TIME ZONE 'utc') - INTERVAL '11 months')::date;
   v_result JSONB;
 BEGIN
+  IF NOT COALESCE(public.is_platform_admin(), FALSE) THEN
+    RAISE EXCEPTION 'platform admins only' USING ERRCODE = '42501';
+  END IF;
+
   WITH months AS (
     SELECT generate_series(v_start, (now() AT TIME ZONE 'utc')::date, INTERVAL '1 month')::date AS m
   ),
@@ -123,5 +129,5 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.get_site_growth_stats() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_site_growth_stats() TO anon, authenticated;
+REVOKE ALL ON FUNCTION public.get_site_growth_stats() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_site_growth_stats() TO authenticated;

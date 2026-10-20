@@ -39,7 +39,7 @@ test('shows platform totals and recent visits', async () => {
     visits: 420, visitors: 150, visits_30d: 380, visitors_30d: 120, visits_since: '2026-09-02', months,
   });
   renderSection();
-  expect(await screen.findByText('SP-Survey in numbers')).toBeInTheDocument();
+  expect(await screen.findByText('Platform growth')).toBeInTheDocument();
   expect(screen.getByText('1,234')).toBeInTheDocument();
   expect(screen.getByText('5,600')).toBeInTheDocument();
   expect(screen.getByText('Visits (30 days)')).toBeInTheDocument();
@@ -55,9 +55,8 @@ test('hides the visits tile until the counter has data', async () => {
   expect(screen.queryByText('Visits (30 days)')).not.toBeInTheDocument();
 });
 
-test('renders nothing when the stats are unavailable', async () => {
+test('explains what to check when the stats are unavailable', async () => {
   getSiteGrowthStats.mockResolvedValue(null);
-  const { container } = renderSection();
-  await Promise.resolve();
-  expect(container).toBeEmptyDOMElement();
+  renderSection();
+  expect(await screen.findByText(/site_growth_stats\.sql/)).toBeInTheDocument();
 });
