@@ -1,0 +1,2 @@
+[console_scripts]
+spsurvey = spsurvey.cli:main

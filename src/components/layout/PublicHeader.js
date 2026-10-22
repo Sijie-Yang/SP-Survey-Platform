@@ -53,7 +53,7 @@ export default function PublicHeader({
   useEffect(() => {
     let cancelled = false;
     getBenchPublicStatus().then(res => {
-      if (!cancelled) setBenchEnabled(!!res.enabled);
+      if (!cancelled) setBenchEnabled(!!res.enabled || Number(res.human_tasks) > 0);
     }).catch(() => {
       if (!cancelled) setBenchEnabled(false);
     });
@@ -61,7 +61,7 @@ export default function PublicHeader({
       cancelled = true;
     };
   }, []);
-  const navigationItems = [['/docs', t.navDocs], ['/papers', t.navPaperLibrary], ['/news', t.navNews], ['/request-template', t.navRequestTemplate], ['/request-survey-design', t.navRequestDesign], ['/team', t.navTeam], ['/live', t.navLiveSurveys], ...(benchEnabled ? [['/bench', t.navSpBench || 'SP-Bench']] : [])];
+  const navigationItems = [['/docs', t.navDocs], ['/papers', t.navPaperLibrary], ['/news', t.navNews], ['/forum', t.navForum || 'SP-Forum'], ['/request-template', t.navRequestTemplate], ['/request-survey-design', t.navRequestDesign], ['/team', t.navTeam], ['/live', t.navLiveSurveys], ...(benchEnabled ? [['/bench', t.navSpBench || 'SP-Bench']] : [])];
   const activeItem = path => isActive(path) || location.pathname.startsWith(`${path}/`);
   useEffect(() => {
     setMenuAnchor(null);
@@ -220,6 +220,14 @@ export function PublicFooter() {
           fontWeight: 600
         }}>
             GitHub
+          </Box>
+          {' · '}
+          <Box component={RouterLink} to="/publications" sx={{
+          color: 'primary.main',
+          textDecoration: 'none',
+          fontWeight: 600
+        }}>
+            {t.footerCite || 'Cite'}
           </Box>
         </Typography>
       </Container>

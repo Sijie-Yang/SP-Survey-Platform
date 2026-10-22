@@ -1,0 +1,11 @@
+
+[pandas]
+pandas>=1.5
+
+[plot]
+pandas>=1.5
+matplotlib>=3.6
+
+[test]
+pytest>=8
+pandas>=1.5

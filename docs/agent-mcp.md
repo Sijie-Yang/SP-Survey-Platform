@@ -128,6 +128,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 - `survey_update_project` — name, description, metadata
 - `survey_duplicate_project` — optional `copyMedia: true`
 - `survey_export_project` / `survey_import_project`
+- `survey_import_qualtrics` — new project from a Qualtrics `.qsf` (JSON object or text); returns `qualtricsReport` with questions not converted and logic to rebuild
 - `survey_delete_project` — `confirm: true`
 
 **Templates & Main Page**
@@ -153,7 +154,12 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 **Results** (`results:read`)
 
-- `survey_list_responses`, `survey_export_responses` (`json` | `wide_csv` | `both` | `long_csv` | `summary_csv` | `analysis_bundle`, optional `questionName`), `survey_results_summary`
+- `survey_list_responses`, `survey_export_responses` (`json` | `wide_csv` | `both` | `long_csv` | `summary_csv` | `analysis_bundle` | `dataset_package`, optional `questionName`), `survey_results_summary`
+- `silicon_list_runs`, `silicon_run_responses` — read-only view of silicon-sample pretest runs (runs are started in the browser)
+
+`dataset_package` returns the citable package from Results → Export (README, LICENSE, CITATION.cff, datapackage.json, anonymised data, stimuli manifest) using the dataset details saved on the project. Stimulus image files are not bundled.
+
+**Python SDK** — `sdk/python` (`pip install spsurvey`) wraps these tools; see its README.
 
 Results tools accept an optional `surveyRevision`. Typed exports and summaries select one recorded revision when several designs occur in a project, and return `surveyRevision` / `availableRevisions` so callers can switch explicitly. Raw `json` exports and response listings retain all revisions unless filtered. An unknown explicit revision returns `UNKNOWN_SURVEY_REVISION`. Where a saved question contract exists, its question names, scales and Skill schema drive analysis instead of today's draft. Historical records without a saved contract still require manual verification.
 

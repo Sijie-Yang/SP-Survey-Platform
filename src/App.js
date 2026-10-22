@@ -24,8 +24,11 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const McpOAuthPage = lazy(() => import('./pages/McpOAuthPage'));
 const SpBenchPage = lazy(() => import('./pages/SpBenchPage'));
 const NewsPage = lazy(() => import('./pages/NewsPage'));
+const ForumPage = lazy(() => import('./pages/ForumPage'));
 const ContributePage = lazy(() => import('./pages/ContributePage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
+const PublicationsPage = lazy(() => import('./pages/PublicationsPage'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -123,12 +126,15 @@ const router = createBrowserRouter(createRoutesFromElements(
               <>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/papers" element={<PapersLibraryPage />} />
+                <Route path="/publications" element={<PublicationsPage />} />
                 <Route path="/contribute" element={<ContributePage />} />
                 <Route path="/docs" element={<DocsPage />} />
                 <Route path="/docs/:docId" element={<DocsPage />} />
                 <Route path="/tutorial" element={<Navigate to="/docs/2013-salesses-collaborative" replace />} />
                 <Route path="/news" element={<NewsPage />} />
                 <Route path="/news/:slug" element={<NewsPage />} />
+                <Route path="/forum" element={<ForumPage />} />
+                <Route path="/forum/:id" element={<ForumPage />} />
                 <Route path="/request-template" element={<RequestTemplatePage />} />
                 <Route path="/request-survey-design" element={<RequestSurveyDesignPage />} />
                 <Route path="/team" element={<TeamPage />} />
@@ -144,6 +150,7 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/skills" element={<ProtectedSkillLibrary />} />
                 <Route path="/skill-editor" element={<ProtectedSkillEditor />} />
                 <Route path="/skill-editor/:id" element={<ProtectedSkillEditor />} />
+                <Route path="*" element={<NotFoundPage />} />
               </>
 ));
 

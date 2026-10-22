@@ -14,6 +14,7 @@ import {
   buildQuestionSummaryCsv,
 } from '../../src/lib/questionSummaryExport.js';
 import { createAnalysisScope, toToolFilters } from '../../src/lib/analysisScope.js';
+import { buildDatasetPackageFiles, datasetFolderName, readDatasetMeta } from '../../src/lib/datasetPackage.js';
 import {
   computeResultsOverview,
   computeResultsQuestion,
@@ -232,8 +233,8 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
     limit: filters.limit != null ? filters.limit : EXPORT_MAX,
   });
   const format = String(filters.format || 'json').toLowerCase();
-  if (!['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle'].includes(format)) {
-    throw Object.assign(new Error('format must be json, wide_csv, both, long_csv, summary_csv, or analysis_bundle'), { status: 400 });
+  if (!['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle', 'dataset_package'].includes(format)) {
+    throw Object.assign(new Error('format must be json, wide_csv, both, long_csv, summary_csv, analysis_bundle, or dataset_package'), { status: 400 });
   }
 
   const all = await loadScopedResponses(env, projectId, opts);
@@ -279,6 +280,32 @@ export async function exportResponses(env, ctx, projectId, filters = {}) {
   if (format === 'wide_csv' || format === 'both') {
     result.wideCsv = buildResponsesWideCsv(filtered, questions, surveyConfig);
     result.wideCsvFilename = `responses_wide_${projectId}_${new Date().toISOString().slice(0, 10)}.csv`;
+  }
+  if (format === 'dataset_package') {
+    // The same citable package as Results → Export, with the dataset details
+    // saved from that form (title, authors, license, DOI, anonymisation).
+    // Stimulus image files are never bundled here; the manifest lists them.
+    const meta = readDatasetMeta(project);
+    const files = buildDatasetPackageFiles({
+      meta,
+      project,
+      surveyConfig,
+      questions,
+      filteredResponses: filtered,
+      dateFilteredResponses: filterRows(all, { ...opts, excludeFlagged: false }, surveyConfig),
+      filters: {
+        date_from: opts.dateFrom,
+        date_to: opts.dateTo,
+        session_id: opts.sessionId,
+        include_practice: opts.includePractice,
+        exclude_flagged: opts.excludeFlagged,
+        survey_revision: opts.surveyRevision,
+      },
+      excludeFlagged: opts.excludeFlagged,
+      siteConverted: Boolean(surveyConfig?.spSite?.convertedFrom),
+    });
+    result.datasetPackage = { folder: datasetFolderName(meta, project), files };
+    result.note = 'Write every file under `folder/` (or into one ZIP). Fill the dataset details once in Results → Export → Citable dataset package; they are reused here.';
   }
   if (['long_csv', 'summary_csv', 'analysis_bundle'].includes(format)) {
     const analyses = questions.map((question) => ({

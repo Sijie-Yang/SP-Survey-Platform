@@ -1,0 +1,29 @@
+name: Research template proposal
+description: Propose a published study as a one-click template
+labels: [template]
+body:
+  - type: input
+    id: citation
+    attributes:
+      label: Paper (full reference and DOI)
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: Task and scale
+      description: What participants did, the exact question wording, scale, trial count.
+    validations:
+      required: true
+  - type: textarea
+    id: stimuli
+    attributes:
+      label: Stimuli and licence
+      description: Where the images come from and whether they may be redistributed. AI-generated images are not accepted.
+    validations:
+      required: true
+  - type: textarea
+    id: analysis
+    attributes:
+      label: Analysis used in the paper
+      description: e.g. TrueSkill, Q-score, mean ratings, minimum responses per image.

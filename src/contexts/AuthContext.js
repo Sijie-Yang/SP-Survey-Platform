@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase, signIn, signUp, signOut } from '../lib/supabase';
+import { supabase, signIn, signUp, signOut, requestPasswordReset, resendSignupConfirmation, updatePassword } from '../lib/supabase';
 import { parsePreviewSessionMessage } from '../lib/previewSession';
 
 const AuthContext = createContext(null);
+
+export const isResetPage = (loc) => loc.pathname === '/login' && new URLSearchParams(loc.search).get('reset') === '1';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -29,8 +31,13 @@ export function AuthProvider({ children }) {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      // A reset link may land anywhere (Supabase falls back to the Site URL when
+      // /login is not an allowed redirect); always finish it on the login page.
+      if (event === 'PASSWORD_RECOVERY' && !isResetPage(window.location)) {
+        window.location.replace('/login?reset=1');
+      }
     });
 
     const onPreviewSession = (event) => {
@@ -68,6 +75,17 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  // Password reset and confirmation e-mails; each throws the service's error.
+  const callAuth = async (fn, ...args) => {
+    if (!supabase) throw new Error('Supabase is not configured for this local build.');
+    const { data, error } = (await fn(...args)) || {};
+    if (error) throw error;
+    return data;
+  };
+  const sendPasswordReset = (email) => callAuth(requestPasswordReset, email);
+  const resendConfirmation = (email) => callAuth(resendSignupConfirmation, email);
+  const setNewPassword = (password) => callAuth(updatePassword, password);
+
   const logout = async () => {
     await signOut();
     setUser(null);
@@ -77,7 +95,7 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !supabase || !!user;
 
   return (
-    <AuthContext.Provider value={{ user, loading, isAuthenticated, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, isAuthenticated, login, register, logout, sendPasswordReset, resendConfirmation, setNewPassword }}>
       {children}
     </AuthContext.Provider>
   );

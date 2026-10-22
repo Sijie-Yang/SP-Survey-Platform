@@ -67,6 +67,8 @@ import {
   getActiveProjectId 
 } from '../../lib/projectManager';
 import SurveyPreview from './SurveyPreview';
+import QsfImportReport from './QsfImportReport';
+import { isQsfFile, qsfToSurveyConfig } from '../../lib/qsfImport';
 import { saveSurveyConfig, loadSurveyConfig } from '../../lib/surveyStorage';
 import {
   loadTemplatesFromFiles,
@@ -116,7 +118,8 @@ export default function ProjectSidebar({
   runningProjectIds = [],
   width = 400
 }) {
-  const { t } = useRegion();
+  const { t, language } = useRegion();
+  const [qsfReport, setQsfReport] = useState(null);
   const narrow = useMediaQuery('(max-width:899px)');
   const [projects, setProjects] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -755,10 +758,33 @@ export default function ProjectSidebar({
     return cleaned;
   };
 
+  // A Qualtrics .qsf becomes a new project; the report lists what was not carried over.
+  const importQualtrics = async (text) => {
+    const { surveyConfig, report } = qsfToSurveyConfig(JSON.parse(text));
+    const result = await createProject({
+      name: report.title,
+      description: `Imported from Qualtrics (${report.converted} questions)`,
+      surveyConfig: { ...surveyConfig, title: report.title },
+    });
+    if (!result.success) throw new Error(result.error || 'Could not create the project');
+    await loadProjects();
+    setActiveProject(result.project.id);
+    setActiveProjectId(result.project.id);
+    onProjectSelect(result.project, result.surveyConfig);
+    setError('');
+    setQsfReport(report);
+  };
+
   const handleImportProject = async (event) => {
     const file = event.target.files[0];
     if (file) {
       try {
+        const text = await file.text();
+        if (isQsfFile(file.name, text)) {
+          await importQualtrics(text);
+          event.target.value = '';
+          return;
+        }
         const result = await importProjectFromFile(file);
         if (result.success) {
           // Project is automatically saved, reload immediately
@@ -987,7 +1013,7 @@ export default function ProjectSidebar({
                     <input
                       type="file"
                       hidden
-                      accept=".json"
+                      accept=".json,.qsf"
                       onChange={handleImportProject}
                     />
                   </IconButton>
@@ -1473,6 +1499,7 @@ export default function ProjectSidebar({
       </Menu>
 
       {/* Create Project Dialog */}
+      <QsfImportReport report={qsfReport} language={language} onClose={() => setQsfReport(null)} />
       <Dialog open={createDialog} onClose={() => setCreateDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{t.sidebarCreateProject}</DialogTitle>
         <DialogContent>

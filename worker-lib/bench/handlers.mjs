@@ -15,6 +15,7 @@ import {
   buildPromptTemplate,
 } from './dimensions.mjs';
 import { enqueueOrProcess, processRunChunk } from './runner.mjs';
+import { countHumanTasks, listHumanTasks } from './humanTrack.mjs';
 
 async function requireAdmin(request, env) {
   const auth = await getUserFromBearer(request, env);
@@ -83,6 +84,12 @@ export async function handleBenchRoutes(request, env, ctx) {
 
   try {
     // ── Public ────────────────────────────────────────────────────────────
+    // Human-agreement track: works without the SP-Bench tables.
+    if (pathname === '/api/bench/human/tasks' && request.method === 'GET') {
+      const tasks = await listHumanTasks(env);
+      return jsonResponse({ success: true, tasks }, { headers: { 'cache-control': 'public, max-age=300' } });
+    }
+
     if (pathname === '/api/bench/public' && request.method === 'GET') {
       const settings = await getSettings(env);
       const pub = publicSettingsRow(settings);
@@ -123,10 +130,15 @@ export async function handleBenchRoutes(request, env, ctx) {
     }
 
     if (pathname === '/api/bench/public/status' && request.method === 'GET') {
-      const settings = await getSettings(env);
+      // The SP-Bench tables may not exist yet; the human track still counts.
+      const [settings, humanTasks] = await Promise.all([
+        getSettings(env).catch(() => null),
+        countHumanTasks(env),
+      ]);
       return jsonResponse({
         success: true,
         enabled: !!settings?.public_enabled,
+        human_tasks: humanTasks,
         settings: publicSettingsRow(settings),
       });
     }

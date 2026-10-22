@@ -38,3 +38,13 @@ test('analysis bundle includes exact selected raw submissions for lossless reana
   const bundle = buildResultsExportBundle({ project: { id: 'test' }, surveyConfig: { pages: [{ elements: [q] }] }, questions: [q], filteredResponses: responses, dateFilteredResponses: responses });
   expect(JSON.parse(bundle.find((f) => f.path === 'responses_raw.json').content)).toEqual(responses);
 });
+test('full analysis pack carries the silicon agreement tables when given', () => {
+  const q = { name: 'q', type: 'radiogroup', choices: ['a', 'b'] };
+  const responses = [{ participant_id: 'p', responses: { q: 'a' } }];
+  const silicon = [{ path: 'silicon_agreement.csv', content: 'question_name\n' }, { path: 'silicon_agreement_gaps.csv', content: 'question_name\n' }];
+  const bundle = buildResultsExportBundle({ project: { id: 'test' }, surveyConfig: { pages: [{ elements: [q] }] }, questions: [q], filteredResponses: responses, dateFilteredResponses: responses, siliconAgreementFiles: silicon });
+  expect(bundle.map((f) => f.path)).toEqual(expect.arrayContaining(['silicon_agreement.csv', 'silicon_agreement_gaps.csv']));
+  expect(bundle[0].content).toMatch(/silicon_agreement\.csv/);
+  const plain = buildResultsExportBundle({ project: { id: 'test' }, surveyConfig: { pages: [{ elements: [q] }] }, questions: [q], filteredResponses: responses, dateFilteredResponses: responses });
+  expect(plain.some((f) => f.path.startsWith('silicon_'))).toBe(false);
+});

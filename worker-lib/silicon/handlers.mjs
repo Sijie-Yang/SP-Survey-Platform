@@ -218,6 +218,41 @@ export async function listSiliconRuns(env, auth, projectId) {
   return { success: true, runs };
 }
 
+/**
+ * Read-only service-role variants for MCP / SDK tokens, which carry no
+ * Supabase JWT. The caller must check that the user owns the project first.
+ */
+export async function listSiliconRunsService(env, projectId) {
+  requireProject(projectId);
+  const rows = await selectSiliconRuns(env, null, `?project_id=eq.${encodeURIComponent(projectId)}&order=created_at.desc`, { serviceRole: true });
+  const runs = [];
+  for (const run of rows || []) {
+    const units = await listSiliconUnits(env, run.id).catch(() => []);
+    runs.push(summarizeRun(run, units.length ? countsFromUnits(units) : null));
+  }
+  return { success: true, runs };
+}
+
+export async function siliconRunProjectId(env, runId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/silicon_runs',
+    serviceRole: true,
+    query: `?id=eq.${encodeURIComponent(runId)}&select=project_id`,
+  });
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) throw Object.assign(new Error('Run not found'), { status: 404 });
+  return row.project_id;
+}
+
+export async function listSiliconResponsesService(env, runId) {
+  const rows = await supabaseRest(env, {
+    path: '/rest/v1/silicon_responses',
+    serviceRole: true,
+    query: `?run_id=eq.${encodeURIComponent(runId)}&select=*&order=created_at.asc`,
+  });
+  return { success: true, responses: rows || [] };
+}
+
 export async function createSiliconRun(env, auth, body, request, ctx) {
   requireProject(body?.projectId);
   await requireSiliconBackgroundSchema(env);

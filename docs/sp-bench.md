@@ -49,3 +49,13 @@ APIs:
 npm run dev
 npm run test:bench
 ```
+
+## Human-agreement track (no SQL, no admin setup)
+
+A second, public track scores models on how well they reproduce **real participants** on platform studies.
+
+- **Tasks** — a project owner opens Results → *SP-Bench* → *Publish* on an image question. The browser freezes the per-image human aggregate (TrueSkill μ for pairwise/ranking, mean for ratings/sliders, plus spread and n) into `projects.metadata.spBenchTasks`. Minimum 5 images and 20 responses. No individual answers are stored.
+- **API** — `GET /api/bench/human/tasks` (public, cached 5 min) reads those tasks with the service role and re-shapes each through `publicTask`, so nothing else in the metadata is exposed; the task id prefix and project fields come from the row. `GET /api/bench/public/status` also returns `human_tasks`, which turns on the header link even when the admin benchmark is closed, and no longer fails if the SP-Bench tables are missing.
+- **Scoring** — `src/lib/benchHumanTrack.js` (re-exported for the Worker in `worker-lib/bench/agreementMetrics.mjs`): Kendall τ-b for `item_scores`, Spearman ρ (+ Pearson r, MAD) for `item_means`, ≥ 3 matched images, overall = mean over all tasks with missing = 0. Same statistics as the Results "Silicon vs human" card.
+- **Submissions** — JSON files in `public/bench/submissions/` listed in `index.json` (see the README there), added by pull request. The page recomputes every score from these files. External users get the file from `/bench` → *Score your model*; a silicon run gets it from the Results card's *SP-Bench* button.
+- **Tests** — `npm run test:bench` (endpoint + shared metrics) and the Jest suites `benchHumanTrack`, `benchSubmissionsFolder`, `SpBenchTaskCard`, `HumanAgreementTrack`, `SpBenchPage`.

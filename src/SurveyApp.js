@@ -1,5 +1,6 @@
 import ParticipantSurveySurface from './components/ParticipantSurveySurface';
 import ViewportLayoutFrame from './components/ViewportLayoutFrame';
+import PlatformBadge from './components/PlatformBadge';
 import { submitWithRecovery } from './lib/recoverableSubmission';
 import { handleSurveyMediaError } from './lib/mediaRecovery';
 import { surveyRevision } from './lib/surveyRevision';
@@ -1395,6 +1396,7 @@ export default function SurveyApp() {
             ? participantText.participantSavedLocally
             : participantText.participantSaved}
         </Typography>
+        <PlatformBadge surveyJson={publishedSurveyJson} locale={participantLocale} sx={{ mt: 3 }} />
       </Box>
     );
   }
@@ -1541,6 +1543,7 @@ export default function SurveyApp() {
             <ViewportLayoutFrame config={publishedSurveyJson} surveyModel={surveyModel}>
               <Survey model={surveyModel} />
             </ViewportLayoutFrame>
+            <PlatformBadge surveyJson={publishedSurveyJson} locale={participantLocale} />
           </ParticipantSurveySurface>
         </SurveyTrialNavProvider>
       )}

@@ -34,7 +34,8 @@ import { createResultsReport, deleteResultsReport, readResultsReport, reportStal
 import { ResultsFilterForm, ResultsFilterShell, ResultsReportCard, ResultsScopeChips, ResultsToolbar, ResultsViewTabs } from './ResultsWorkbenchChrome';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { buildResponsesWideCsv, downloadResponsesWideCsv } from '../../lib/responsesWideExport';
-import { downloadQuestionExportZip, downloadResultsExportZip, downloadSiteResultsZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
+import { collectShownStimuli, downloadQuestionExportZip, downloadResultsExportZip, downloadSiteResultsZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
+import { methodsFacts } from '../../lib/journalMethods';
 import { DensityHistogramChart, DescriptiveStatsLine, SemanticProfileChart, WordFrequencyChart } from './analysisCharts';
 import { getPresetSkillAnalysis } from './skillAnalysis';
 import { TrueSkillMuChart, TrueSkillTable, TrueSkillBoardStack, TRUESKILL_SORT_COLUMNS, RANKING_EXTRA_COLUMNS } from './trueSkillAnalysisUi';
@@ -52,6 +53,16 @@ import AiQuestionAnalysis from './AiQuestionAnalysis';
 import { aiAnalysisExportFiles, buildAnalysisRecords, evaluateAnalysis, readSavedAnalyses } from '../../lib/aiQuestionAnalysis';
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { saveQuestionAnalysis } from '../../lib/aiQuestionAnalysisStore';
+import DatasetPackageDialog from './DatasetPackageDialog';
+import FigureDownloadButton from './FigureDownloadButton';
+import { figureSvgFiles, figureZipFiles, figuresForSurvey } from '../../lib/journalFigures';
+import { downloadZip } from '../../lib/zipDownload';
+import SiliconAgreementCard from './SiliconAgreementCard';
+import SpBenchTaskCard from './SpBenchTaskCard';
+import VariantContrastCard from './VariantContrastCard';
+import CitePlatformButton from './CitePlatformButton';
+import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
+import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -2573,6 +2584,7 @@ export function QuestionCard({
             {t.resultsExplainQuestion}
           </Button>}
 
+        {canExport && !unanalysedType && <FigureDownloadButton question={question} responses={exportResponses || allResponses} questionNumber={questionNumber} language={language} onError={setExportError} />}
         {canExport && <Button size="small" variant="outlined" startIcon={<Download />} sx={{
         mr: 1,
         flexShrink: 0
@@ -2696,6 +2708,7 @@ export default function ResultsAnalysis({
   const [perceptionOpen, setPerceptionOpen] = useState(false);
   const [dataSource, setDataSource] = useState('human');
   const [siliconRunId, setSiliconRunId] = useState('');
+  const [siliconAgreementFiles, setSiliconAgreementFiles] = useState([]);
   const [demographicFilters, setDemographicFilters] = useState([]);
   const [savedReport, setSavedReport] = useState(null);
   const [reportError, setReportError] = useState(null);
@@ -3192,6 +3205,71 @@ export default function ResultsAnalysis({
     }
     return files;
   };
+  const [datasetOpen, setDatasetOpen] = useState(false);
+  // Facts for the journal-style Methods draft in the Cite dialog (computed only when that tab opens).
+  const getMethodsFacts = useCallback(() => {
+    if (!surveyConfig || siteConverted) throw new Error('No survey to describe');
+    let stimuli = [];
+    try { stimuli = collectShownStimuli(answerableQuestions, filteredResponses, surveyConfig); } catch { stimuli = []; }
+    return methodsFacts({
+      surveyConfig, responses: filteredResponses, allResponses: dateFilteredResponses, excludeFlagged, stimuli,
+      templateMeta: currentProject?.templateMeta || null,
+    });
+  }, [surveyConfig, siteConverted, answerableQuestions, filteredResponses, dateFilteredResponses, excludeFlagged, currentProject]);
+  const exportFilters = () => ({
+    date_from: dateFrom || null,
+    date_to: dateTo || null,
+    session_id: sessionFilter || null,
+    survey_revision: revisionFilter || null,
+    include_practice: includePractice,
+    exclude_flagged: excludeFlagged,
+    data_source: dataSource
+  });
+  // Citable dataset package: the full export plus README, license, citation
+  // and stimulus manifest. The form is saved with the project for next time.
+  const buildDatasetPackage = async (meta, onStep) => {
+    try {
+      const metadata = await saveDatasetRelease(currentProject?.id, meta);
+      onProjectUpdated?.({ metadata });
+    } catch {
+      // Saving the form is a convenience; the package does not depend on it.
+    }
+    let stimulusRows = null;
+    let stimulusFiles = [];
+    if (meta.includeImages) {
+      const stimuli = collectStimuli(allQuestions, filteredResponses, surveyConfig);
+      const resolveUrl = source => /^(https?:|blob:|data:)/.test(source) ? source : imageNameToUrl.get(source) || imageNameToUrl.get(mediaIdentityKey(source)) || '';
+      const fetched = await fetchStimulusFiles(stimuli, {
+        resolveUrl,
+        onProgress: (done, total) => onStep(uiPair(language, `Downloading images ${done}/${total}…`, `正在下载图片 ${done}/${total}…`))
+      });
+      stimulusRows = fetched.rows;
+      stimulusFiles = fetched.files;
+    }
+    onStep(uiPair(language, 'Building the package…', '正在打包…'));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return downloadDatasetPackage({
+      meta,
+      project: currentProject,
+      surveyConfig,
+      questions: allQuestions,
+      filteredResponses,
+      dateFilteredResponses,
+      filters: exportFilters(),
+      excludeFlagged,
+      report: savedReport || null,
+      aiAnalysisFiles: await buildAiAnalysisFiles(),
+      siteConverted,
+      stimulusRows,
+      stimulusFiles
+    });
+  };
+  const datasetItem = {
+    id: 'dataset',
+    label: uiPair(language, 'Citable dataset package (ZIP)…', '可引用的数据集包（ZIP）…'),
+    disabled: exportBlocked || !surveyConfig,
+    onClick: () => setDatasetOpen(true)
+  };
   // Two choices only: the answers table, or everything in one ZIP. An uploaded
   // SP-Scheme page is not analysed, so it gets a single ZIP of its answers.
   const exportItems = siteConverted ? [{
@@ -3204,7 +3282,7 @@ export default function ResultsAnalysis({
       wideCsv: buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig),
       aiAnalysisFiles: await buildAiAnalysisFiles()
     }))
-  }] : [{
+  }, datasetItem] : [{
     id: 'csv',
     label: t.resultsExportTable,
     disabled: exportBlocked,
@@ -3218,6 +3296,8 @@ export default function ResultsAnalysis({
       const aiAnalysisFiles = await buildAiAnalysisFiles();
       downloadResultsExportZip({
         aiAnalysisFiles,
+        figureFiles: figureSvgFiles(figuresForSurvey(allQuestions, filteredResponses, { numberByName: answerableNumberByName }), { projectName: currentProject?.name || '' }),
+        siliconAgreementFiles: dataSource === 'human' ? siliconAgreementFiles : [],
         project: currentProject,
         surveyConfig,
         questions: allQuestions,
@@ -3226,23 +3306,26 @@ export default function ResultsAnalysis({
         excludeFlagged,
         wideCsv,
         report: savedReport || null,
-        filters: {
-          date_from: dateFrom || null,
-          date_to: dateTo || null,
-          session_id: sessionFilter || null,
-          survey_revision: revisionFilter || null,
-          include_practice: includePractice,
-          exclude_flagged: excludeFlagged,
-          data_source: dataSource
-        }
+        filters: exportFilters()
       });
     })
-  }];
+  }, {
+    id: 'figures',
+    label: uiPair(language, 'All figures (SVG + PNG, ZIP)', '全部论文图（SVG + PNG，ZIP）'),
+    disabled: exportBlocked || !surveyConfig,
+    onClick: () => runExport(async () => {
+      const figures = figuresForSurvey(allQuestions, filteredResponses, { numberByName: answerableNumberByName });
+      if (!figures.length) throw new Error(uiPair(language, 'No question in this survey has a figure to export.', '这份问卷没有可以导出的图。'));
+      const folder = `figures_${currentProject?.id || 'survey'}`;
+      const files = await figureZipFiles(figures, { png: true, dir: folder, projectName: currentProject?.name || '' });
+      downloadZip(`${folder}.zip`, files);
+    })
+  }, datasetItem];
   return <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
       <AdminPageHeader icon={<Assessment />} title={t.resultsTitle} description={t.resultsDescription} />
       {currentProject?.ownResponseSupabase?.enabled && <Alert severity="info" sx={{ mb: 2 }}>{uiPair(language, 'Responses for this project are stored in your Supabase, not on SP-Survey. This page does not copy or analyze them.', '本项目的回答写入你的 Supabase，不在 SP-Survey 上。此页不会复制或分析这些回答。')}</Alert>}
-      <ResultsToolbar refreshAction={<Tooltip title={t.resultsRefresh} placement="top" disableInteractive>
+      <ResultsToolbar citeAction={<CitePlatformButton language={language} getMethodsFacts={getMethodsFacts} />} refreshAction={<Tooltip title={t.resultsRefresh} placement="top" disableInteractive>
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
         </IconButton>
@@ -3284,6 +3367,7 @@ export default function ResultsAnalysis({
         }}>
 
 
+      <DatasetPackageDialog open={datasetOpen} onClose={() => setDatasetOpen(false)} onBuild={buildDatasetPackage} project={currentProject} language={language} nSubmissions={filteredResponses.length} siteConverted={siteConverted} freeTextNames={freeTextQuestionNames(allQuestions)} reuseQuestions={datasetOpen ? reuseConsentQuestions(allQuestions).map(q => ({ ...q, yes: filteredResponses.filter(r => answeredYes(r, q.name)).length })) : []} />
       <ResultsFilterShell open={filtersOpen} onClose={() => setFiltersOpen(false)} t={t} onReset={() => {
             resetFilters();
             setDemographicFilters([]);
@@ -3625,6 +3709,28 @@ export default function ResultsAnalysis({
       {reportError && <Alert severity="error" sx={{
             mb: 2
           }} onClose={() => setReportError(null)}>{reportError}</Alert>}
+      {view === 'overview' && dataSource === 'human' && !adminMode && !siteConverted && answerableQuestions.length > 0 && filteredResponses.length > 0 && <SiliconAgreementCard
+          projectId={currentProject?.id}
+          projectName={currentProject?.name || ''}
+          questions={answerableQuestions}
+          humanRows={filteredResponses}
+          language={language}
+          numberByName={answerableNumberByName}
+          benchTasks={currentProject?.metadata?.spBenchTasks}
+          onResult={setSiliconAgreementFiles} />}
+      {view === 'overview' && !siteConverted && answerableQuestions.length > 0 && filteredResponses.length > 0 && <VariantContrastCard
+          questions={answerableQuestions}
+          responses={filteredResponses}
+          language={language}
+          numberByName={answerableNumberByName}
+          projectName={currentProject?.name || ''} />}
+      {view === 'overview' && dataSource === 'human' && !adminMode && !siteConverted && filteredResponses.length > 0 && <SpBenchTaskCard
+          project={currentProject}
+          questions={answerableQuestions}
+          humanRows={filteredResponses}
+          language={language}
+          numberByName={answerableNumberByName}
+          onProjectUpdated={onProjectUpdated} />}
       {view === 'overview' && savedReport && <Box sx={{
             mb: 3
           }}>

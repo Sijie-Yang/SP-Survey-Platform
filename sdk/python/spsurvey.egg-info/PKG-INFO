@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: spsurvey
+Version: 0.1.0
+Summary: Python SDK for SP-Survey: build, run and analyse visual perception experiments from code or from an agent
+Author: Urban Analytics Lab, National University of Singapore
+License: MIT
+Project-URL: Homepage, https://sp-survey.org
+Project-URL: Documentation, https://sp-survey.org/docs
+Project-URL: Source, https://github.com/Sijie-Yang/SP-Survey-Platform/tree/main/sdk/python
+Keywords: survey,perception,urban,streetscape,pairwise,trueskill,benchmark
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Scientific/Engineering
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Provides-Extra: pandas
+Requires-Dist: pandas>=1.5; extra == "pandas"
+Provides-Extra: plot
+Requires-Dist: pandas>=1.5; extra == "plot"
+Requires-Dist: matplotlib>=3.6; extra == "plot"
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
+Requires-Dist: pandas>=1.5; extra == "test"

@@ -9,12 +9,17 @@ export function safeWikiUrl(value) {
   if (/^https?:\/\//i.test(value) || /^\/(?!\/)/.test(value) || /^#[\w-]+$/.test(value)) return value;
   return '';
 }
-export default function WikiMarkdown({ body }) {
+export default function WikiMarkdown({ body, allowImages = true }) {
   return <Box sx={{ lineHeight: 1.85, overflowWrap: 'anywhere', '& h2, & h3': { mt: 4, scrollMarginTop: 110 }, '& img': { maxWidth: '100%', height: 'auto' }, '& pre': { overflowX: 'auto', p: 2, bgcolor: 'action.hover' }, '& table': { borderCollapse: 'collapse', width: '100%' }, '& th, & td': { p: 1, border: 1, borderColor: 'divider', minWidth: 130 }, '& blockquote': { borderLeft: 3, borderColor: 'divider', pl: 2, ml: 0, color: 'text.secondary' } }}>
     <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} skipHtml urlTransform={safeWikiUrl} components={{
       h1: ({ children }) => <h2>{children}</h2>,
       a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
-      img: ({ src, alt }) => src ? <img src={src} alt={alt || ''} loading="lazy" referrerPolicy="no-referrer" /> : null,
+      img: ({ src, alt }) => {
+        if (!src) return null;
+        // Where anyone can post (the forum), images stay links so a post cannot load third-party content.
+        if (!allowImages) return <a href={src} target="_blank" rel="noopener noreferrer nofollow">{alt || src}</a>;
+        return <img src={src} alt={alt || ''} loading="lazy" referrerPolicy="no-referrer" />;
+      },
       table: ({ children }) => <Box sx={{ overflowX: 'auto' }}><table>{children}</table></Box>,
     }}>{body || ''}</ReactMarkdown>
   </Box>;

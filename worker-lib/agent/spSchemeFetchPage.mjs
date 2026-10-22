@@ -11,7 +11,6 @@ const MAX_ASSET_BYTES = 3 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 const MAX_DATA_FILES = 20;
 const MAX_DATA_BYTES = 200 * 1024;
-const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
 
 const PRIVATE_HOST_RE = /^(localhost|.*\.local|.*\.internal|0\.0\.0\.0|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|\[.*\])$/i;
 
@@ -135,21 +134,4 @@ export async function handleSpSchemeFetchPage(body, deps = {}) {
     }
   }
   return { success: true, html, url: pageUrl.href, host: pageUrl.host, inlined, dataFiles, skipped };
-}
-
-/**
- * Download one media file for import into the media library. Only files on
- * the imported page's own site, and only images, video and audio.
- */
-export async function handleSpSchemeFetchMedia(body, deps = {}) {
-  const fetchImpl = deps.fetch || fetch;
-  const page = checkPublicUrl(body?.pageUrl);
-  const url = checkPublicUrl(new URL(String(body?.url || ''), page).href);
-  if (url.host !== page.host) throw fail('Only files from the imported page\'s own site can be downloaded.', 403);
-  const response = await fetchImpl(url.href, { redirect: 'follow' });
-  if (!response.ok) throw fail(`${url.href} answered ${response.status}.`, 502);
-  const type = response.headers.get('content-type') || '';
-  if (!/^(image|video|audio)\//i.test(type)) throw fail(`${url.pathname} is not an image, video or audio file.`, 415);
-  const buffer = await readLimited(response, MAX_MEDIA_BYTES);
-  return new Response(buffer, { status: 200, headers: { 'Content-Type': type, 'Cache-Control': 'no-store' } });
 }

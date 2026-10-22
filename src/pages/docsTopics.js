@@ -417,7 +417,83 @@ export const DOC_TOPICS = [
         p('Record the study revision, stimulus identities, filters, answer direction, method, tie handling, thresholds, scaling and algorithm version. The bundle’s analysis plan describes exported filters and submissions; it is not a preregistration.', '记录研究版本、刺激材料身份、筛选条件、回答方向、方法、平局处理、阈值、缩放和算法版本。分析包中的 analysis plan 描述导出筛选与提交记录，不是预注册。'),
         p('An AI explanation can help read the computed results, but it does not change the evidence or turn an exploratory association into a causal result. For spatial models, image prediction or other external analysis, keep the same media IDs and report the additional procedures.', 'AI 解释可以帮助阅读已计算结果，但不改变证据，也不会把探索性关联变成因果结论。空间模型、图像预测等外部分析应保留同一媒体 ID，并另行报告方法。'),
       ]),
-    ], related: ['choosing-analysis', 'quality-reliability', 'platform-workflow', 'skills-agents'],
+    ], related: ['choosing-analysis', 'quality-reliability', 'platform-workflow', 'skills-agents', 'sp-report'],
+  },
+  {
+    id: 'sp-report', group: 'platform', title: p('SP-Report: reporting a perception experiment', 'SP-Report：感知实验报告清单'),
+    summary: p('Ten items every paper based on people judging stimuli should report. SP-Survey fills most of them from your data in every export.', '凡是让人对刺激做判断的研究，论文里都应报告这十项。SP-Survey 在每次导出时从数据里自动填好大部分。'),
+    flow: [p('Export results', '导出结果'), p('Open README / methods.txt', '打开 README 或 methods.txt'), p('Finish the [ ] items', '补完 [ ] 项'), p('Cite SP-Report in Methods', '在方法部分引用 SP-Report')],
+    sections: [
+      s('why', p('Why a checklist', '为什么需要清单'), [
+        p('Perception results depend on what was shown, to whom, with which task and how answers were combined. Papers often leave out one of these, so results cannot be compared or reused. SP-Report (version 1) lists the minimum, in the spirit of CONSORT and PRISMA for other fields. It applies whether or not you used SP-Survey.', '感知研究的结果取决于展示了什么、给谁看、用什么任务、怎样合并回答。论文常常漏掉其中一项，导致结果无法比较或再利用。SP-Report（第 1 版）列出最低限度要报告的内容，思路类似其他领域的 CONSORT 和 PRISMA。不论是否用 SP-Survey 做的研究都适用。'),
+        p('In every SP-Survey analysis export, README.txt and methods.txt end with the checklist. [x] means filled from your data, [~] means partly filled with a bracketed part for you, [ ] means the authors must add it.', 'SP-Survey 的每个分析导出包里，README.txt 和 methods.txt 末尾都附有这份清单。[x] 表示已从数据中填好，[~] 表示部分填好、括号里的部分需要你补，[ ] 表示需要作者自己填写。'),
+      ]),
+      s('items', p('The ten items', '十个必报项'), [
+        p('The right column shows what SP-Survey fills automatically.', '右列说明 SP-Survey 能自动填写什么。'),
+      ], { table: table([p('Item', '项目'), p('Report', '要报告的内容'), p('Filled by SP-Survey', '平台自动填写')], [
+        [p('1. Stimuli', '1. 刺激材料'), p('Number, origin and licence of the stimuli', '刺激数量、来源与使用许可'), p('Count and hosts; you add origin and licence', '数量与来源站点；来源说明和许可需补充')],
+        [p('2. Participants', '2. 参与者'), p('Who, how recruited, when, how many', '人群、招募方式、时间、人数'), p('Counts and dates; you add recruitment', '人数与日期；招募方式需补充')],
+        [p('3. Task paradigm', '3. 任务范式'), p('Judgement task per measure and its wording', '每个测量的判断任务及原文'), p('Yes', '全部')],
+        [p('4. Judgements per stimulus', '4. 每个刺激的判断次数'), p('Minimum, median, maximum', '最少、中位数、最多'), p('Yes', '全部')],
+        [p('5. Quality control', '5. 质量控制'), p('Checks, flags and exclusions', '注意力检查、标记规则与排除数量'), p('Yes', '全部')],
+        [p('6. Aggregation', '6. 聚合方法'), p('How judgements became scores', '个体判断如何变成分数'), p('Yes', '全部')],
+        [p('7. Demographics', '7. 人口统计'), p('Variables collected and their use', '收集了哪些变量、怎样使用'), p('Variables; you add their use', '变量列表；用途需补充')],
+        [p('8. Ethics and consent', '8. 伦理与同意'), p('Approval, consent, reuse and training consent', '伦理批准、知情同意、再利用与训练同意'), p('Consent questions; you add approval number', '同意题；伦理批号需补充')],
+        [p('9. Synthetic respondents', '9. 合成回答'), p('Whether AI answers were used and kept apart', '是否使用了 AI 回答、是否与真人分开'), p('Yes', '全部')],
+        [p('10. Data availability', '10. 数据可获得性'), p('Where data and materials are deposited, with DOI', '数据和材料存放在哪里、DOI'), p('DOI if you entered one in the dataset package', '在数据集包里填了 DOI 时自动写入')],
+      ]) }),
+      s('cite', p('How to cite', '如何引用'), [
+        p('Cite SP-Survey with the software version you used, and mention "SP-Report v1" when you report with this checklist. The Cite button on the Results page copies BibTeX, APA or a methods sentence; every export contains references.bib and CITATION.cff.', '引用平台时请引用 SP-Survey 并注明所用软件版本；按本清单报告时，在方法部分注明「SP-Report v1」。结果页的「引用」按钮可一键复制 BibTeX、APA 或方法段落句子，每个导出包也带 references.bib 和 CITATION.cff。'),
+      ]),
+    ], related: ['results-export', 'quality-reliability', 'study-design'],
+  },
+  {
+    id: 'sp-bench-human', group: 'platform', title: p('SP-Bench: test AI models against your participants', 'SP-Bench：用你的被试数据测试 AI 模型'),
+    summary: p('Publish an image question as a benchmark task. Anyone can then score a model on how well it reproduces your participants\' ranking of the images.', '把图片题发布成评测任务。之后任何人都能测一个模型能多大程度复现你的被试对这些图的排名。'),
+    flow: [p('Collect responses', '收集回答'), p('Results → SP-Bench → Publish', '结果页 → SP-Bench → 发布'), p('Models are scored at /bench', '在 /bench 给模型打分'), p('Submissions join by pull request', '通过 pull request 上榜')],
+    sections: [
+      s('what', p('What is published', '公开什么'), [
+        p('A task freezes one image question from the responses in the current Results filter: the TrueSkill μ of each image for pairwise or ranking questions, or the mean for ratings and sliders, with its spread and count. No individual answer, participant id or free text leaves the project. A task needs at least 5 images and 20 responses. Publishing again replaces the frozen values; Remove takes it off the benchmark.', '一个任务把一道图片题在当前结果筛选下的数据冻结下来：成对比较或排序题是每张图的 TrueSkill μ，评分和滑块题是平均值，另附离散度和人数。任何个人回答、被试编号或文字回答都不会离开项目。一个任务至少要 5 张图、20 份回答。再次发布会替换冻结的数值，撤下即从评测中移除。'),
+      ]),
+      s('score', p('How models are scored', '怎样给模型打分'), [
+        p('A model gives one number per image. Pairwise and ranking tasks are scored by Kendall τ-b with the human μ; rating tasks by Spearman ρ (Pearson r and mean absolute difference are shown too). Fewer than 3 matched images give no score. The overall score is the mean over all tasks, with a missing task counted as 0. The same code computes the "Silicon vs human" card on the Results page.', '模型对每张图给一个数。成对比较和排序任务用它与人类 μ 的 Kendall τ-b 打分，评分题用 Spearman ρ（同时显示 Pearson r 和平均绝对差）。匹配上的图少于 3 张不给分。总分是所有任务的平均，缺的任务按 0 计。结果页「硅样本 vs 真人」卡片用的是同一套代码。'),
+        p('On sp-survey.org/bench anyone can download a task CSV, fill in their model\'s values and upload it. Scoring runs in the browser. To join the leaderboard, the page produces a submission file that is added to public/bench/submissions by pull request; the leaderboard recomputes every score from these files. A silicon-sample run can be saved as a submission from the Results page in one click.', '在 sp-survey.org/bench，任何人都能下载任务 CSV，填上模型的数值再上传，打分在浏览器里完成。要上榜，页面会生成一个提交文件，通过 pull request 加到 public/bench/submissions；榜单从这些文件重新计算每个分数。硅样本运行可以在结果页一键保存为提交文件。'),
+      ]),
+    ], related: ['sp-report', 'results-export'],
+  },
+  {
+    id: 'image-versions', group: 'platform', title: p('Image versions: before/after and counterfactual designs', '图片版本：前后对比与反事实设计'),
+    summary: p('Show the same scene in several versions (e.g. with and without trees). Results then reports each version\'s effect against a baseline, scene by scene.', '把同一场景做成几个版本（例如有树、无树）给被试看，结果页会逐个场景算出每个版本相对基准版本的效果。'),
+    flow: [p('Name files scene__version.jpg', '文件命名为 场景__版本.jpg'), p('Upload to the media library', '上传到媒体库'), p('Collect responses', '收集回答'), p('Results → Image versions', '结果页 → 图片版本对比')],
+    sections: [
+      s('naming', p('How versions are recognised', '怎样识别版本'), [
+        p('Either put the version after a double underscore in the file name (s12__base.jpg, s12__trees.jpg), or put each version in its own folder with the same file names (before/s12.jpg, after/s12.jpg), or give each scene a folder with one file per version (s12/before.jpg, s12/after.jpg). At least two scenes must come in two or more versions. A version called base, baseline, before, original or control is the default baseline; you can pick another on the card.', '版本写在文件名的双下划线后面（s12__base.jpg、s12__trees.jpg），或每个版本一个文件夹、文件名相同（before/s12.jpg、after/s12.jpg），或每个场景一个文件夹、每个版本一个文件（s12/before.jpg、s12/after.jpg）。至少要有两个场景各有两个以上版本。名为 base、baseline、before、original 或 control 的版本默认作为基准，也可以在卡片上换。'),
+      ]),
+      s('stats', p('What is computed', '计算什么'), [
+        p('Each image first gets its usual score (TrueSkill μ for pairwise questions, the mean for ratings). For every scene the platform takes the difference between a version and the baseline; the table shows the mean difference across scenes with a 95% confidence interval, a paired t-test, the Holm-adjusted p-value across versions, Cohen\'s d_z and how many scenes went up or down. Scenes are the unit of analysis, so more scenes give more power than more participants alone. The analysis pack contains variant_contrasts.csv and variant_pairs.csv.', '每张图先按常规得分（成对比较用 TrueSkill μ，评分用平均分）。对每个场景，平台计算某版本与基准版本的差值；表格给出各场景差值的平均、95% 置信区间、配对 t 检验、多个版本间 Holm 校正后的 p 值、Cohen d_z，以及有多少场景升高或降低。分析单位是场景，所以增加场景数比只增加被试更能提高检验力。分析导出包里有 variant_contrasts.csv 和 variant_pairs.csv。'),
+      ]),
+    ], related: ['choosing-analysis', 'results-export'],
+  },
+  {
+    id: 'qualtrics-import', group: 'platform', title: p('Import a Qualtrics survey', '导入 Qualtrics 问卷'),
+    summary: p('Bring an existing Qualtrics questionnaire over as a new project, then add image questions around it.', '把已有的 Qualtrics 问卷转成新项目，再在里面加图片题。'),
+    flow: [p('Qualtrics: Tools → Import/Export → Export Survey (.qsf)', 'Qualtrics：工具 → 导入/导出 → 导出调查（.qsf）'), p('Builder sidebar → Import project', '设计页侧栏 → 导入项目'), p('Read the import report', '查看导入报告'), p('Preview before sharing', '分享前先预览')],
+    sections: [
+      s('mapping', p('What is converted', '能转换什么'), [
+        p('Multiple choice (single, multiple, dropdown), Net Promoter Score, Likert and bipolar matrices, sliders, text entry (single line, essay, form, numeric), rank order, constant sum and descriptive text. Blocks keep their flow order and page breaks; the trash block is skipped. Recode values become the stored answer values.', '单选、多选、下拉、净推荐值（NPS）、Likert 与双极矩阵、滑块、文本输入（单行、多行、表单、数字）、排序、固定总和和说明文字。区块按调查流程排序并保留分页，回收站区块会跳过。重新编码的值会作为存储的答案值。'),
+        p('Not converted, and listed in the report: display and skip logic, block randomizers and branches, piped text, embedded data, quotas, images inside question text, and question types without a native equivalent (heat map, hot spot, side-by-side, drawing, file upload, signature, timing, meta info). Agents can do the same import with the MCP tool survey_import_qualtrics, and the Python SDK with Client.import_qualtrics().', '不转换、但会在报告里列出的：显示与跳转逻辑、区块随机和分支、管道文本、嵌入数据、配额、题干里的图片，以及平台没有对应题型的题目（热图、热点、并排题、绘图、文件上传、签名、计时、元信息）。AI 助手可以用 MCP 工具 survey_import_qualtrics 做同样的导入，Python SDK 用 Client.import_qualtrics()。'),
+      ]),
+    ], related: ['study-design', 'skills-agents'],
+  },
+  {
+    id: 'sp-forum', group: 'platform', title: p('SP-Forum: ask and discuss', 'SP-Forum 论坛：提问与讨论'),
+    summary: p('A public forum at sp-survey.org/forum for questions, methods discussion and sharing studies.', 'sp-survey.org/forum 上的公开论坛，用来提问、讨论方法、分享研究。'),
+    sections: [
+      s('use', p('Posting', '发帖'), [
+        p('Anyone can read; sign in to post or reply. Choose a category (Help, Methods, Showcase, Ideas or General), write in Markdown, and optionally set a display name. Your e-mail address is never shown. You can edit or delete your own posts, and close your thread once the question is answered; a closed thread keeps its replies but takes no new ones, and you can reopen it.', '所有人都能浏览；登录后可以发帖和回复。选择分类（求助、研究方法、成果展示、功能建议或综合讨论），用 Markdown 书写，可以设置显示名称。邮箱不会显示。你可以编辑或删除自己的帖子；问题解决后可以关帖，关闭的帖子保留回复但不能再回复，也可以重新打开。'),
+        p('Never post participant data, survey links that should stay private, or API keys. Images in posts are shown as links. The platform team pins useful threads, posts announcements and hides spam.', '不要贴参与者数据、不该公开的问卷链接或 API key。帖子里的图片以链接形式显示。平台团队会置顶有用的帖子、发布公告并隐藏垃圾信息。'),
+      ]),
+    ], related: ['skills-agents'],
   },
   {
     id: 'skills-agents', group: 'platform', title: p('AI assistance, Skills & integrations', 'AI 辅助、Skills 与集成'),

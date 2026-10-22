@@ -1,0 +1,16 @@
+pyproject.toml
+spsurvey/__init__.py
+spsurvey/auth.py
+spsurvey/cli.py
+spsurvey/client.py
+spsurvey/errors.py
+spsurvey/surveys.py
+spsurvey/transport.py
+spsurvey.egg-info/PKG-INFO
+spsurvey.egg-info/SOURCES.txt
+spsurvey.egg-info/dependency_links.txt
+spsurvey.egg-info/entry_points.txt
+spsurvey.egg-info/requires.txt
+spsurvey.egg-info/top_level.txt
+tests/test_client.py
+tests/test_transport_auth.py

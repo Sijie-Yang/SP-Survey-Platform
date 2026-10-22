@@ -73,6 +73,7 @@ import SurveyPreview from './SurveyPreview';
 import ConfirmDialog from '../layout/ConfirmDialog';
 import AiAssistantPanel from './AiAssistantPanel';
 import SpSchemePanel from './SpSchemePanel';
+import PhonePreviewButton from './PhonePreviewButton';
 import SurveyThemePreviewPanel from '../SurveyThemePreviewPanel';
 import useSurveyAssistant from '../../hooks/useSurveyAssistant';
 import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
@@ -566,6 +567,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <Button size="small" variant="contained" startIcon={<Tune />} onClick={openLayoutStudio}>{t.builderLayoutStudio}</Button>
             <Button size="small" variant="outlined" startIcon={<Preview />} onClick={openPreview}>{t.builderPreview}</Button>
+            <PhonePreviewButton project={currentProject} language={language} />
           </Box>
         }
       >
@@ -760,6 +762,15 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'block', ml: 4.5, mt: -0.5, mb: 0.5 }}>
                     Uses Primary / Success colors from Theme Customization. Preview it under Theme Preview.
                   </Typography>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={config.hidePlatformBadge !== true}
+                        onChange={(e) => onChange({ ...config, hidePlatformBadge: !e.target.checked })}
+                      />
+                    }
+                    label={uiPair(language, 'Show a small "Made with SP-Survey" link at the bottom', '页尾显示「用 SP-Survey 制作」小字链接')}
+                  />
                   <Divider sx={{ my: 1 }} />
                   <Typography variant="subtitle2" color="text.secondary">Research Annotation Mode</Typography>
                   <FormControlLabel

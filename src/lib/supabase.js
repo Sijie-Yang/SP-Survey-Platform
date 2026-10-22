@@ -25,6 +25,15 @@ export const signIn = (email, password) =>
 
 export const signOut = () => supabase?.auth.signOut();
 
+// The emailed link lands on /login?reset=1 with a recovery session.
+export const requestPasswordReset = (email) =>
+  supabase?.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/login?reset=1` });
+
+export const resendSignupConfirmation = (email) =>
+  supabase?.auth.resend({ type: 'signup', email, options: { emailRedirectTo: `${window.location.origin}/login` } });
+
+export const updatePassword = (password) => supabase?.auth.updateUser({ password });
+
 export const getSession = () => supabase?.auth.getSession();
 
 export const onAuthStateChange = (callback) =>

@@ -204,20 +204,20 @@ test('a page built to SP-Scheme keeps the platform analysis', () => {
   expect(screen.queryByText('Analyse yourself')).toBeNull();
 });
 
-test('the export menu offers two clear choices', async () => {
+test('the export menu offers the answers table, the analysis pack, figures and the dataset package', async () => {
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
   fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
-  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Answers table (CSV)', 'Full analysis pack (ZIP)']);
+  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['Answers table (CSV)', 'Full analysis pack (ZIP)', 'All figures (SVG + PNG, ZIP)', 'Citable dataset package (ZIP)…']);
 });
 
-test('a page imported as it is exports one ZIP of its answers', async () => {
+test('a page imported as it is exports one ZIP of its answers, or a dataset package', async () => {
   fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
   render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={{ ...config, spSite: { html: '<html></html>', convertedFrom: 'survey.html' } }} adminMode /></RegionProvider>);
   await screen.findByText(/2 \/ 2 submissions in analysis/);
   fireEvent.click(screen.getByRole('button', { name: /^Export/ }));
-  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['All answers (ZIP)']);
+  expect(screen.getAllByRole('menuitem').map((el) => el.textContent)).toEqual(['All answers (ZIP)', 'Citable dataset package (ZIP)…']);
 });
 
 test('a custom question on a page built to SP-Scheme is greyed and marked analyse yourself', () => {
