@@ -110,22 +110,6 @@ export async function fetchSurveyPage(url) {
   });
 }
 
-/** Download one media file from an imported page's own site, as a Blob. */
-export async function fetchSurveyPageMedia(url, pageUrl) {
-  const token = await getAccessToken();
-  const res = await fetch(`${API_BASE}/api/agent/sp-scheme/fetch-media`, {
-    method: 'POST',
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify({ url, pageUrl }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || res.statusText);
-  }
-  return res.blob();
-}
-
 export async function storeOpenAiCredential(apiKey) {
   return agentFetch('/api/agent/credentials/openai', {
     method: 'POST',

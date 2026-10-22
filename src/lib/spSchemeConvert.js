@@ -1,14 +1,12 @@
 /**
- * Convert an existing survey page (any HTML survey, including ones that post
- * results to their own server) into an SP-Scheme site.
- *
- * The Assistant model returns native questions, an adapter script and exact
- * find/replace patches (see worker-lib/agent/spSchemeConvert.mjs). They are
- * applied here and the result goes through the same validation as an
- * uploaded SP-Scheme page; failures are sent back to the model for a fix.
+ * Deterministic helpers for importing an existing survey page as it is
+ * (see spSchemeAsIs.js): embedding the SP-Scheme block, planning the zip's
+ * media into the library and listing the hosts the page loads from.
+ * The online model conversion that used to live here was removed on
+ * 2026-10-15; nothing in this file calls a model.
  */
 
-import { buildConvertReference, SP_SCHEME_FORMAT, SP_SCHEME_VERSION, validateSpSchemePackage } from './spScheme';
+import { SP_SCHEME_FORMAT, SP_SCHEME_VERSION } from './spScheme';
 import { externalHostsIn, normalizeAllowedHosts, stripSitePreviewShim } from './spSite';
 
 export const CONVERT_MAX_HTML_CHARS = 200000;
@@ -339,101 +337,4 @@ export function candidateHosts(html, result) {
     found.set(clean, { ...entry, why: why || entry.why, needed: true });
   });
   return [...found.values()];
-}
-
-/**
- * Convert a page in four fixed steps, with one model call:
- *   1. the page stays as it is (no patches); 2. its files go to the media
- *   library in the upload's own folders and same-site image URLs are mapped
- *   to them by file name; 3. the model writes the data interface once
- *   (SPSite.onRequest / onSubmit standing in for the page's server) and
- *   declares the questions; 4. questions that fit a platform type are
- *   analysed, the rest are recorded as they are (custom).
- * Nothing is sent back for fixing. When the model's answer cannot be used at
- * all, the page is imported as it is and the platform records what it sends.
- * `request` posts to /api/agent/sp-scheme/convert.
- */
-export async function convertSurveyHtml(originalHtml, {
-  request, notes = '', dataFiles = [], mediaFiles: givenMedia = [], mediaBase = '', fetchMedia = null, onProgress,
-} = {}) {
-  let mediaFiles = givenMedia;
-  const source = stripSitePreviewShim(String(originalHtml || ''));
-  const tokenized = tokenizeDataUris(source);
-  if (tokenized.html.length > CONVERT_MAX_HTML_CHARS) {
-    throw new Error(`The page is too long to convert automatically (${tokenized.html.length} characters; the limit is ${CONVERT_MAX_HTML_CHARS}).`);
-  }
-  const reference = buildConvertReference();
-  const ask = async (extra = {}) => {
-    const response = await request({ html: tokenized.html, reference, notes, dataFiles, mediaFiles: mediaFiles.map((f) => f.path), previous: null, feedback: [], ...extra });
-    if (response?.success === false) throw new Error(response.error || 'The conversion request failed.');
-    if (!response?.result) throw new Error('The model returned nothing usable.');
-    return response;
-  };
-  const check = (result) => {
-    const applied = applyConversion(tokenized.html, result, tokenized.tokens, { mediaFiles, mediaBase, dataFiles });
-    const hosts = candidateHosts(applied.html, result);
-    // Validate as if every candidate domain were allowed; the researcher then
-    // chooses which ones to allow and the import re-checks that choice.
-    const report = validateSpSchemePackage(applied.pkg, { siteHtml: applied.html, allowedHosts: hosts.map((h) => h.host) });
-    const problems = [...applied.problems, ...report.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message))];
-    return { html: applied.html, pkg: applied.pkg, mediaPlan: applied.mediaPlan, report, problems, hosts, result };
-  };
-
-  let response = null;
-  let failure = '';
-  try {
-    onProgress?.({ round: 0, stage: 'model' });
-    response = await ask();
-    // A page from the web: its stimuli are downloaded once and the model is
-    // told their names, exactly as for the files of a zip.
-    const images = response.result.originalImages || [];
-    if (fetchMedia && !mediaFiles.length && images.length) {
-      onProgress?.({ round: 0, stage: 'media', total: images.length });
-      const got = await fetchMedia(images.map((img) => img.url), (done) => onProgress?.({ round: 0, stage: 'media', done, total: images.length }));
-      if (got.files.length) {
-        mediaFiles = got.files;
-        onProgress?.({ round: 1, stage: 'model' });
-        response = await ask();
-      }
-    }
-  } catch (err) {
-    failure = err?.message || String(err);
-  }
-
-  if (response) {
-    onProgress?.({ round: 0, stage: 'check' });
-    const meta = { rounds: 1, provider: response.provider, model: response.model };
-    const first = check(response.result);
-    if (!first.problems.length) return { ...first, ...meta, ok: true, degraded: [] };
-    // Questions the checks reject are recorded as they are (custom); every
-    // other question keeps the platform's analysis.
-    const rejected = degradeRejectedQuestions(response.result.survey, first.report?.errors || [], first.problems);
-    if (rejected.degraded.length) {
-      const second = check({ ...response.result, survey: rejected.survey });
-      if (!second.problems.length) return { ...second, ...meta, ok: true, degraded: rejected.degraded };
-      failure = second.problems.slice(0, 3).join(' ');
-    } else {
-      failure = first.problems.slice(0, 3).join(' ');
-    }
-  }
-
-  // Nothing usable from the model: the page as it is, raw records.
-  // The model's adapter is kept when it still passes the checks: it may be
-  // what answers the page's own server requests.
-  let rawResult = rawConversionResult(response?.result, { keepAdapter: true });
-  let raw = check(rawResult);
-  if (raw.problems.length) {
-    rawResult = rawConversionResult(response?.result);
-    raw = check(rawResult);
-  }
-  return {
-    ...raw,
-    rounds: response ? 1 : 0,
-    model: response?.model,
-    ok: false,
-    failure,
-    modelQuestions: modelQuestionList(response?.result?.survey),
-    problems: failure ? [failure] : [],
-    raw: raw.problems.length ? null : { html: raw.html, pkg: raw.pkg, mediaPlan: raw.mediaPlan, report: raw.report, result: rawResult, startProblems: [] },
-  };
 }

@@ -1,6 +1,6 @@
 /**
- * Upload the stimulus files that came in a converted project zip to the
- * project's media library, in the folders the conversion planned, so the
+ * Upload the stimulus files that came in an imported project zip to the
+ * project's media library, in the folders the import planned, so the
  * survey's questions can draw them like any other project media.
  */
 
@@ -71,71 +71,4 @@ export async function uploadPlannedMedia({ plan, project, userId, upload, onProj
     if (result.saveError) return { uploaded, failures, saveError: result.saveError, project: latest };
   }
   return { uploaded, failures, saveError: null, project: latest };
-}
-
-const MAX_PAGE_MEDIA = 400;
-
-function blobBytes(blob) {
-  if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer().then((buf) => new Uint8Array(buf));
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(new Uint8Array(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsArrayBuffer(blob);
-  });
-}
-const MAX_PAGE_MEDIA_BYTES = 300 * 1024 * 1024;
-
-/**
- * Download the stimuli of a page imported from the web, so they can go into
- * the media library like the files of a project zip. Tries the site directly
- * (most static hosts allow it), then the platform server.
- * @returns {Promise<{ files: { path, bytes, size }[], failed: string[] }>}
- */
-export async function downloadPageMedia(urls, pageUrl, { fetchViaServer, onProgress = () => {}, fetchImpl = fetch } = {}) {
-  const seen = new Set();
-  const list = [];
-  (urls || []).forEach((raw) => {
-    try {
-      const url = new URL(raw, pageUrl);
-      if (!/^https?:$/.test(url.protocol) || seen.has(url.href)) return;
-      seen.add(url.href);
-      list.push(url);
-    } catch { /* not a URL */ }
-  });
-  const files = [];
-  const failed = [];
-  const paths = new Set();
-  let total = 0;
-  let done = 0;
-  const take = list.slice(0, MAX_PAGE_MEDIA);
-  failed.push(...list.slice(MAX_PAGE_MEDIA).map((u) => u.href));
-  const one = async (url) => {
-    let blob = null;
-    try {
-      const res = await fetchImpl(url.href, { mode: 'cors' });
-      if (res.ok && /^(image|video|audio)\//.test(res.headers.get('content-type') || '')) blob = await res.blob();
-    } catch { /* blocked by CORS: use the server */ }
-    if (!blob && fetchViaServer) {
-      try { blob = await fetchViaServer(url.href, pageUrl); } catch { blob = null; }
-    }
-    if (!blob || total + blob.size > MAX_PAGE_MEDIA_BYTES) {
-      failed.push(url.href);
-      return;
-    }
-    total += blob.size;
-    let path = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'file';
-    if (!/\.[a-z0-9]{2,5}$/i.test(path)) path += `.${(blob.type.split('/')[1] || 'bin').replace('jpeg', 'jpg').replace(/\W.*$/, '')}`;
-    while (paths.has(path)) path = path.replace(/(\.[^.]+)$/, '_1$1');
-    paths.add(path);
-    files.push({ path, bytes: await blobBytes(blob), size: blob.size });
-  };
-  for (let i = 0; i < take.length; i += 4) {
-    // eslint-disable-next-line no-await-in-loop
-    await Promise.all(take.slice(i, i + 4).map(one));
-    done = Math.min(take.length, i + 4);
-    onProgress(done);
-  }
-  files.sort((a, b) => a.path.localeCompare(b.path));
-  return { files, failed };
 }

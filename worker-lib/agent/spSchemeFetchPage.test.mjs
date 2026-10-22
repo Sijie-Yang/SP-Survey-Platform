@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { checkPublicUrl, handleSpSchemeFetchMedia, handleSpSchemeFetchPage } from './spSchemeFetchPage.mjs';
+import { checkPublicUrl, handleSpSchemeFetchPage } from './spSchemeFetchPage.mjs';
 
 function site(files) {
   return async (href) => {
@@ -36,12 +36,5 @@ describe('SP-Scheme page import', () => {
     assert.match(res.html, /<style data-sp-inlined="assets\/app\.css">body\{color:red\}<\/style>/);
     assert.match(res.html, /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/x\.js"><\/script>/);
     assert.deepEqual(res.dataFiles, [{ name: '/rating/data/pairs.json', text: '[{"a":"img/1.jpg","b":"img/2.jpg"}]' }]);
-  });
-
-  it('downloads media only from the page\'s own site', async () => {
-    const ok = await handleSpSchemeFetchMedia({ url: 'img/1.jpg', pageUrl: PAGE }, { fetch: site(files) });
-    assert.equal(ok.headers.get('content-type'), 'image/jpeg');
-    await assert.rejects(() => handleSpSchemeFetchMedia({ url: 'https://evil.example/x.jpg', pageUrl: PAGE }, { fetch: site(files) }), /own site/);
-    await assert.rejects(() => handleSpSchemeFetchMedia({ url: 'notes.txt', pageUrl: PAGE }, { fetch: site(files) }), /not an image/);
   });
 });
