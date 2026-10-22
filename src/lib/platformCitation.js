@@ -1,7 +1,7 @@
 /**
  * How to cite SP-Survey. One place for the platform's citation so the cite
  * dialog, the methods text, every export README and CITATION.cff say the same
- * thing. Change the paper entry here once it is published.
+ * thing. The paper appears only once its DOI is set (see paperPublished).
  */
 
 // Keep in step with package.json "version" (a test checks this).
@@ -17,7 +17,10 @@ function env(name) {
   }
 }
 
-/** The methods paper. `doi` / `volume` / `pages` stay empty until it is published. */
+/**
+ * The methods paper. It is not cited anywhere until it is published: set
+ * REACT_APP_PLATFORM_PAPER_DOI at build time and every citation includes it.
+ */
 export const PLATFORM_PAPER = Object.freeze({
   title: 'SP-Survey: An Open-source Platform for Visual Assessment of Urban Environments',
   authors: Object.freeze([
@@ -33,7 +36,6 @@ export const PLATFORM_PAPER = Object.freeze({
   ].map(Object.freeze)),
   journal: 'Environment and Planning B: Urban Analytics and City Science',
   year: '2026',
-  status: 'under review',
 });
 
 // The software is credited to the lab; change to named people if preferred.
@@ -69,42 +71,76 @@ function textAuthors(list) {
 }
 
 /**
- * All citation formats.
- * @returns {{ apa: string, bibtex: string, text: string, software: { apa: string, bibtex: string } }}
+ * The paper is cited only once it is published, i.e. once
+ * REACT_APP_PLATFORM_PAPER_DOI is set. Until then every citation names the
+ * software alone, so nothing claims a paper that readers cannot find.
+ */
+export function paperPublished() {
+  return Boolean(platformDois().paper);
+}
+
+/**
+ * In-text author-year parts. Before the paper is out the software is cited by
+ * its name, which the sentence already says, so `author` is null and the text
+ * reads "SP-Survey (2026)".
+ */
+export function platformInText() {
+  if (paperPublished()) return { author: `${PLATFORM_PAPER.authors[0].family} et al.`, year: PLATFORM_PAPER.year };
+  return { author: null, year: PLATFORM_PAPER.year };
+}
+
+/**
+ * All citation formats. `paper` is null until the paper is published; `apa` /
+ * `bibtex` are the preferred citation and `all` joins every entry.
+ * @returns {{ apa: string, bibtex: string, text: string, paper: ({ apa: string, bibtex: string }|null),
+ *   software: { apa: string, bibtex: string }, all: { apa: string, bibtex: string } }}
  */
 export function platformCitations({ version = PLATFORM_VERSION, accessed = '' } = {}) {
   const p = PLATFORM_PAPER;
   const { paper: paperDoi, software: softwareDoi } = platformDois();
-  const published = Boolean(paperDoi);
-  const paperTail = published ? ` https://doi.org/${paperDoi}` : ` Manuscript ${p.status}.`;
-  const apa = `${apaAuthors(p.authors)} (${p.year}). ${p.title}. *${p.journal}*.${paperTail}`;
-  const bibtex = [
-    '@article{yang2026spsurvey,',
-    `  title   = {${p.title}},`,
-    `  author  = {${bibAuthors(p.authors)}},`,
-    `  journal = {${p.journal}},`,
-    `  year    = {${p.year}},`,
-    published ? `  doi     = {${paperDoi}},` : `  note    = {Manuscript ${p.status}},`,
-    `  url     = {${PLATFORM_URL}}`,
-    '}',
-  ].join('\n');
+  const paper = paperDoi ? {
+    apa: `${apaAuthors(p.authors)} (${p.year}). ${p.title}. *${p.journal}*. https://doi.org/${paperDoi}`,
+    bibtex: [
+      '@article{yang2026spsurvey,',
+      `  title   = {${p.title}},`,
+      `  author  = {${bibAuthors(p.authors)}},`,
+      `  journal = {${p.journal}},`,
+      `  year    = {${p.year}},`,
+      `  doi     = {${paperDoi}},`,
+      `  url     = {${PLATFORM_URL}}`,
+      '}',
+    ].join('\n'),
+  } : null;
 
   const swAuthors = PLATFORM_SOFTWARE_AUTHORS;
   const swTail = softwareDoi ? ` https://doi.org/${softwareDoi}` : ` ${PLATFORM_URL}`;
-  const softwareApa = `${apaAuthors(swAuthors)} (${p.year}). *SP-Survey* (Version ${version}) [Computer software].${swTail}`;
-  const softwareBib = [
-    '@software{spsurvey_software,',
-    '  title   = {SP-Survey},',
-    `  author  = {${bibAuthors(swAuthors)}},`,
-    `  version = {${version}},`,
-    `  year    = {${p.year}},`,
-    softwareDoi ? `  doi     = {${softwareDoi}},` : null,
-    `  url     = {${PLATFORM_URL}}`,
-    '}',
-  ].filter(Boolean).join('\n');
+  const software = {
+    apa: `${apaAuthors(swAuthors)} (${p.year}). *SP-Survey* (Version ${version}) [Computer software].${swTail}`,
+    bibtex: [
+      '@software{spsurvey_software,',
+      '  title   = {SP-Survey},',
+      `  author  = {${bibAuthors(swAuthors)}},`,
+      `  version = {${version}},`,
+      `  year    = {${p.year}},`,
+      softwareDoi ? `  doi     = {${softwareDoi}},` : null,
+      `  url     = {${PLATFORM_URL}}`,
+      '}',
+    ].filter(Boolean).join('\n'),
+  };
 
-  const text = `Data were collected with SP-Survey (${textAuthors(p.authors)}, ${p.year}; version ${version}, ${PLATFORM_URL}${accessed ? `, accessed ${accessed}` : ''}).`;
-  return { apa, bibtex, text, software: { apa: softwareApa, bibtex: softwareBib } };
+  const where = `version ${version}, ${PLATFORM_URL}${accessed ? `, accessed ${accessed}` : ''}`;
+  const text = paper
+    ? `Data were collected with SP-Survey (${textAuthors(p.authors)}, ${p.year}; ${where}).`
+    : `Data were collected with SP-Survey (${where}).`;
+  const entries = [paper, software].filter(Boolean);
+  return {
+    apa: (paper || software).apa,
+    bibtex: (paper || software).bibtex,
+    text,
+    paper,
+    software,
+    all: { apa: entries.map((e) => e.apa).join('\n\n'), bibtex: entries.map((e) => e.bibtex).join('\n\n') },
+  };
 }
 
 /** Plain-text lines for README files. */
@@ -112,16 +148,14 @@ export function howToCiteLines({ version = PLATFORM_VERSION } = {}) {
   const c = platformCitations({ version });
   return [
     'How to cite SP-Survey:',
-    `  ${c.apa.replace(/\*/g, '')}`,
-    `  Software: ${c.software.apa.replace(/\*/g, '')}`,
-    '  BibTeX for both is in references.bib; machine-readable metadata in CITATION.cff.',
+    ...(c.paper ? [`  ${c.paper.apa.replace(/\*/g, '')}`, `  Software: ${c.software.apa.replace(/\*/g, '')}`] : [`  ${c.software.apa.replace(/\*/g, '')}`]),
+    '  BibTeX is in references.bib; machine-readable metadata in CITATION.cff.',
   ];
 }
 
-/** BibTeX for both the paper and the software, for references.bib. */
+/** BibTeX for the platform (paper once published, and the software), for references.bib. */
 export function platformBibtex({ version = PLATFORM_VERSION } = {}) {
-  const c = platformCitations({ version });
-  return `${c.bibtex}\n\n${c.software.bibtex}\n`;
+  return `${platformCitations({ version }).all.bibtex}\n`;
 }
 
 const yaml = (v) => JSON.stringify(String(v ?? ''));
@@ -131,13 +165,15 @@ export function platformCffReferenceLines({ indent = '  ', version = PLATFORM_VE
   const { paper: paperDoi, software: softwareDoi } = platformDois();
   const p = PLATFORM_PAPER;
   const lines = [
-    `${indent}- type: article`,
-    `${indent}  title: ${yaml(p.title)}`,
-    `${indent}  journal: ${yaml(p.journal)}`,
-    `${indent}  year: ${p.year}`,
-    ...(paperDoi ? [`${indent}  doi: ${yaml(paperDoi)}`] : [`${indent}  status: ${yaml('submitted')}`]),
-    `${indent}  authors:`,
-    ...p.authors.flatMap((a) => [`${indent}    - family-names: ${yaml(a.family)}`, `${indent}      given-names: ${yaml(a.given)}`]),
+    ...(paperDoi ? [
+      `${indent}- type: article`,
+      `${indent}  title: ${yaml(p.title)}`,
+      `${indent}  journal: ${yaml(p.journal)}`,
+      `${indent}  year: ${p.year}`,
+      `${indent}  doi: ${yaml(paperDoi)}`,
+      `${indent}  authors:`,
+      ...p.authors.flatMap((a) => [`${indent}    - family-names: ${yaml(a.family)}`, `${indent}      given-names: ${yaml(a.given)}`]),
+    ] : []),
     `${indent}- type: software`,
     `${indent}  title: "SP-Survey"`,
     `${indent}  version: ${yaml(version)}`,

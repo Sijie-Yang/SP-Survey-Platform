@@ -17,7 +17,9 @@ test('facts come from the survey and the data', () => {
 test('EPB: SAGE Harvard citation, British spelling, unnumbered headings', () => {
   const { markdown } = renderJournalMethods(facts, 'epb');
   expect(markdown).toMatch(/^# Methods/);
-  expect(markdown).toMatch(/\(Yang et al\. 2026\)/);
+  expect(markdown).toMatch(/with SP-Survey \(2026\), an open-source platform/);
+  expect(markdown).toMatch(/SP-Survey \(2026\) Version .* \[Computer software\]\. Urban Analytics Lab/);
+  expect(markdown).not.toMatch(/Yang|Environment and Planning B: Urban|under review/);
   expect(markdown).toMatch(/summarised/);
   expect(markdown).not.toMatch(/summarized/);
   expect(markdown).toMatch(/Herbrich R, Minka T and Graepel T \(2007\)/);
@@ -29,7 +31,8 @@ test('CEUS and LUP: Elsevier citations, numbered headings, required statements',
   const ceus = renderJournalMethods(facts, 'ceus').markdown;
   expect(ceus).toMatch(/^# 2\. Methods/);
   expect(ceus).toMatch(/## 2\.1\. Survey instrument/);
-  expect(ceus).toMatch(/\(Yang et al\., 2026\)/);
+  expect(ceus).toMatch(/with SP-Survey \(2026\)/);
+  expect(ceus).toMatch(/SP-Survey \(Version .*\) \[Computer software\]\. \(2026\)\./);
   expect(ceus).toMatch(/Software and code availability/);
   expect(ceus).toMatch(/Declaration of generative AI use/);
   expect(ceus).not.toMatch(/## 2\.4\. Ethics/);

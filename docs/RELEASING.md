@@ -25,7 +25,7 @@ Three places carry the version and must agree (tests check the first two):
 1. On a branch: bump the version in the files above and add a section to `CHANGELOG.md` (what changed for researchers, any SQL to run, any change in computed numbers).
 2. Open a PR, wait for CI, merge.
 3. Tag `main`: `git tag -a v0.2.0 -m "SP-Survey 0.2.0" && git push origin v0.2.0`, then create a GitHub release from the tag with the changelog section as notes.
-4. **DOI (optional, once Zenodo is connected).** With the Zenodo–GitHub integration switched on for this repository, each GitHub release is archived automatically and gets a version DOI. Put the *concept* DOI (the one that always resolves to the latest version) in the Cloudflare build variable `REACT_APP_PLATFORM_DOI`; every citation and export then includes it. The paper DOI goes in `REACT_APP_PLATFORM_PAPER_DOI` once the paper is published.
+4. **DOI (optional, once Zenodo is connected).** With the Zenodo–GitHub integration switched on for this repository, each GitHub release is archived automatically and gets a version DOI. Put the *concept* DOI (the one that always resolves to the latest version) in the Cloudflare build variable `REACT_APP_PLATFORM_DOI`; every citation and export then includes it. The methods paper is not cited anywhere until it is published; once it is, put its DOI in `REACT_APP_PLATFORM_PAPER_DOI` and every citation, export and Methods draft adds it.
 5. **Python SDK (only if `sdk/python` changed).** `cd sdk/python && python -m build && python -m twine upload dist/*`.
 
 ## SQL

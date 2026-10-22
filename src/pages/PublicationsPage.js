@@ -22,18 +22,17 @@ function CiteBox({ L }) {
   const c = platformCitations();
   const [tab, setTab] = useState('apa');
   const [copied, setCopied] = useState(false);
-  const text = tab === 'apa' ? c.apa.replace(/\*/g, '') : tab === 'bibtex' ? `${c.bibtex}\n\n${c.software.bibtex}` : c.software.apa.replace(/\*/g, '');
+  const text = tab === 'bibtex' ? c.all.bibtex : c.all.apa.replace(/\*/g, '');
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, mb: 4 }}>
       <Typography variant="h6" sx={{ mb: 0.5 }}>{L('How to cite SP-Survey', '如何引用 SP-Survey')}</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        {L('Please cite the paper, and the software version for reproducibility. Exports from the platform include these as references.bib and CITATION.cff.',
-          '请引用论文；为了可复现，也请引用所用的软件版本。平台的导出包里已带 references.bib 和 CITATION.cff。')}
+        {L('Please cite SP-Survey with the version you used, for reproducibility. Exports from the platform include this as references.bib and CITATION.cff.',
+          '请引用 SP-Survey 并注明所用版本，便于复现。平台的导出包里已带 references.bib 和 CITATION.cff。')}
       </Typography>
       <Tabs value={tab} onChange={(_, v) => { setTab(v); setCopied(false); }} sx={{ minHeight: 36, '& .MuiTab-root': { minHeight: 36 } }}>
-        <Tab value="apa" label={L('Paper (APA)', '论文（APA）')} />
+        <Tab value="apa" label="APA" />
         <Tab value="bibtex" label="BibTeX" />
-        <Tab value="software" label={L('Software', '软件')} />
       </Tabs>
       <Box component="pre" data-testid="publications-citation" sx={{
         m: 0, mt: 1, p: 1.5, bgcolor: 'action.hover', borderRadius: 1, fontSize: 13, lineHeight: 1.55,

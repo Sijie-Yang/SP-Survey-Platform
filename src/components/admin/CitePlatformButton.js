@@ -40,8 +40,8 @@ export default function CitePlatformButton({ language, getMethodsFacts = null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, tab, journal, getMethodsFacts]);
   const formats = {
-    bibtex: { label: 'BibTeX', text: `${c.bibtex}\n\n${c.software.bibtex}` },
-    apa: { label: 'APA', text: `${c.apa.replace(/\*/g, '')}\n\n${c.software.apa.replace(/\*/g, '')}` },
+    bibtex: { label: 'BibTeX', text: c.all.bibtex },
+    apa: { label: 'APA', text: c.all.apa.replace(/\*/g, '') },
     text: { label: L('Methods sentence', '方法段落'), text: c.text },
     ...(getMethodsFacts ? { journal: { label: L('Methods for a journal', '按期刊写方法'), text: journalText } } : {}),
   };
@@ -62,8 +62,8 @@ export default function CitePlatformButton({ language, getMethodsFacts = null })
         <DialogContent dividers>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
             {L(
-              `If these data appear in a paper, please cite the SP-Survey paper and the software version you used (${PLATFORM_VERSION}). Every export also carries references.bib and CITATION.cff.`,
-              `数据用在论文里时，请引用 SP-Survey 论文和所用的软件版本（${PLATFORM_VERSION}）。每个导出包里也带 references.bib 和 CITATION.cff。`,
+              `If these data appear in a paper, please cite SP-Survey with the version you used (${PLATFORM_VERSION}). Every export also carries references.bib and CITATION.cff.`,
+              `数据用在论文里时，请引用 SP-Survey 和所用的版本（${PLATFORM_VERSION}）。每个导出包里也带 references.bib 和 CITATION.cff。`,
             )}
           </Typography>
           <Tabs value={tab} onChange={(_, v) => { setTab(v); setCopied(''); }} variant="scrollable" allowScrollButtonsMobile sx={{ mb: 1 }}>

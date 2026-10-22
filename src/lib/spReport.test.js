@@ -57,8 +57,9 @@ test('the analysis pack carries the checklist, CITATION.cff and references.bib',
   expect(get('README.txt')).toMatch(/How to cite SP-Survey:/);
   expect(get('README.txt')).toMatch(/Reporting checklist \(SP-Report v1, https:\/\/sp-survey\.org\/docs\/sp-report\)/);
   expect(get('methods.txt')).toMatch(/\[x\] 3\. Task paradigm:/);
-  expect(get('methods.txt')).toMatch(/using SP-Survey \(Yang et al\., 2026; version /);
+  expect(get('methods.txt')).toMatch(/using SP-Survey \(2026; version /);
   expect(get('CITATION.cff')).toMatch(/cff-version: 1\.2\.0/);
-  expect(get('references.bib')).toMatch(/@article\{yang2026spsurvey,/);
+  expect(get('references.bib')).toMatch(/@software\{spsurvey_software,/);
+  expect(get('references.bib')).not.toMatch(/@article\{yang2026spsurvey,/);
   expect(spReportLines(buildSpReport({ surveyConfig: config, responses }))).toHaveLength(13);
 });

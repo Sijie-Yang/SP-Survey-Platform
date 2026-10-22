@@ -30,6 +30,6 @@ test('lists papers newest first with how to cite', async () => {
   const items = await screen.findAllByTestId('publication');
   expect(items).toHaveLength(data.publications.length);
   expect(items[0]).toHaveTextContent(sortPublications(data.publications)[0].title);
-  expect(screen.getByTestId('publications-citation')).toHaveTextContent(/^Yang, S\./);
+  expect(screen.getByTestId('publications-citation')).toHaveTextContent(/^Urban Analytics Lab, National University of Singapore\. \(2026\)\. SP-Survey/);
   expect(screen.getByRole('link', { name: 'SP-Report' })).toHaveAttribute('href', '/docs/sp-report');
 });

@@ -3,17 +3,20 @@
  * data by fixed templates (no language model). Three house styles for the
  * journals most perception studies go to, plus a neutral one:
  *
- *   epb   Environment and Planning B (SAGE): SAGE Harvard citations "(Yang et al. 2026)",
+ *   epb   Environment and Planning B (SAGE): SAGE Harvard citations "(Herbrich et al. 2007)",
  *         British spelling, unnumbered headings.
- *   ceus  Computers, Environment and Urban Systems (Elsevier): "(Yang et al., 2026)",
+ *   ceus  Computers, Environment and Urban Systems (Elsevier): "(Herbrich et al., 2007)",
  *         numbered headings, a software/code availability statement.
+ *
+ * The platform is cited as software until its paper is published (see
+ * platformCitation.js), then as the paper.
  *   lup   Landscape and Urban Planning (Elsevier): as CEUS plus the ethics and data
  *         statements the journal asks for.
  *
  * Whatever the platform cannot know (recruitment, payment, ethics number) is
  * left as a [bracketed] placeholder. The researcher edits the result.
  */
-import { PLATFORM_PAPER, PLATFORM_URL, PLATFORM_VERSION, platformDois } from './platformCitation.js';
+import { PLATFORM_PAPER, PLATFORM_SOFTWARE_AUTHORS, PLATFORM_URL, PLATFORM_VERSION, platformDois, platformInText } from './platformCitation.js';
 import { ANALYSIS_ALGORITHM_VERSION } from './analysisVersion.js';
 import { flattenQuestions, getAttentionCheckQuestions } from './quality.js';
 
@@ -143,11 +146,10 @@ export function methodsFacts({ surveyConfig, responses = [], allResponses = null
 }
 
 function platformCite(style) {
-  const first = PLATFORM_PAPER.authors[0].family;
-  const y = PLATFORM_PAPER.year;
-  if (style.publisher === 'sage') return `(${first} et al. ${y})`;
-  if (style.publisher === 'elsevier') return `(${first} et al., ${y})`;
-  return `(${first} et al., ${y})`;
+  const { author, year } = platformInText();
+  if (!author) return `(${year})`;
+  if (style.publisher === 'sage') return `(${author} ${year})`;
+  return `(${author}, ${year})`;
 }
 
 function trueskillCite(style) {
@@ -255,13 +257,16 @@ export function renderJournalMethods(facts, styleId = 'generic', { doi = '' } = 
 
   const references = [];
   const authors = PLATFORM_PAPER.authors;
+  const swAuthor = PLATFORM_SOFTWARE_AUTHORS.map((a) => a.name || `${a.given} ${a.family}`).join(', ');
   if (style.publisher === 'sage') {
     references.push(`Herbrich R, Minka T and Graepel T (2007) TrueSkill™: A Bayesian skill rating system. In: Advances in Neural Information Processing Systems 19. Cambridge, MA: MIT Press, pp. 569–576.`);
-    references.push(`${authors.map((a) => `${a.family} ${a.given.split(/[\s-]+/).map((g) => g[0]).join('')}`).join(', ')} (${PLATFORM_PAPER.year}) ${PLATFORM_PAPER.title}. ${PLATFORM_PAPER.journal}. ${dois.paper ? `DOI: ${dois.paper}.` : `(${PLATFORM_PAPER.status})`}`);
+    if (dois.paper) references.push(`${authors.map((a) => `${a.family} ${a.given.split(/[\s-]+/).map((g) => g[0]).join('')}`).join(', ')} (${PLATFORM_PAPER.year}) ${PLATFORM_PAPER.title}. ${PLATFORM_PAPER.journal}. DOI: ${dois.paper}.`);
+    else references.push(`SP-Survey (${PLATFORM_PAPER.year}) Version ${PLATFORM_VERSION} [Computer software]. ${swAuthor}. Available at: ${dois.software ? `https://doi.org/${dois.software}` : PLATFORM_URL}.`);
   } else {
     references.push('Herbrich, R., Minka, T., & Graepel, T. (2007). TrueSkill™: A Bayesian skill rating system. In Advances in Neural Information Processing Systems 19 (pp. 569–576). MIT Press.');
     const names = authors.map((a) => `${a.family}, ${a.given.split(/[\s-]+/).map((g) => `${g[0]}.`).join(' ')}`);
-    references.push(`${names.slice(0, -1).join(', ')}, & ${names[names.length - 1]} (${PLATFORM_PAPER.year}). ${PLATFORM_PAPER.title}. ${PLATFORM_PAPER.journal}. ${dois.paper ? `https://doi.org/${dois.paper}` : `(${PLATFORM_PAPER.status})`}`);
+    if (dois.paper) references.push(`${names.slice(0, -1).join(', ')}, & ${names[names.length - 1]} (${PLATFORM_PAPER.year}). ${PLATFORM_PAPER.title}. ${PLATFORM_PAPER.journal}. https://doi.org/${dois.paper}`);
+    else references.push(`SP-Survey (Version ${PLATFORM_VERSION}) [Computer software]. (${PLATFORM_PAPER.year}). ${swAuthor}. ${dois.software ? `https://doi.org/${dois.software}` : PLATFORM_URL}`);
   }
   if (f.pairwise.length === 0) references.shift();
   parts.push('## References');

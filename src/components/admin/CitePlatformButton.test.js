@@ -8,11 +8,11 @@ test('opens the cite dialog, switches formats and copies', async () => {
   Object.assign(navigator, { clipboard: { writeText } });
   render(<CitePlatformButton language="en" />);
   fireEvent.click(screen.getByRole('button', { name: 'Cite' }));
-  expect(screen.getByTestId('citation-text')).toHaveTextContent('@article{yang2026spsurvey');
+  expect(screen.getByTestId('citation-text')).toHaveTextContent('@software{spsurvey_software');
   fireEvent.click(screen.getByRole('tab', { name: 'APA' }));
-  expect(screen.getByTestId('citation-text')).toHaveTextContent(/^Yang, S\./);
+  expect(screen.getByTestId('citation-text')).toHaveTextContent(/^Urban Analytics Lab/);
   fireEvent.click(screen.getByRole('button', { name: 'Copy APA' }));
-  await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^Yang, S\., Liang, X\./)));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^Urban Analytics Lab/)));
   expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'SP-Report' })).toHaveAttribute('href', '/docs/sp-report');
 });
@@ -32,7 +32,7 @@ test('drafts a Methods section in a journal style from the survey', () => {
   fireEvent.click(screen.getByRole('button', { name: 'Cite' }));
   expect(getMethodsFacts).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('tab', { name: 'Methods for a journal' }));
-  expect(screen.getByTestId('citation-text')).toHaveTextContent(/\(Yang et al\. 2026\)/);
+  expect(screen.getByTestId('citation-text')).toHaveTextContent(/with SP-Survey \(2026\)/);
   fireEvent.mouseDown(screen.getByRole('combobox'));
   fireEvent.click(screen.getByRole('option', { name: /Landscape and Urban Planning/ }));
   expect(screen.getByTestId('citation-text')).toHaveTextContent(/2\.4\. Ethics/);

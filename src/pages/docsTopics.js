@@ -443,7 +443,7 @@ export const DOC_TOPICS = [
         [p('10. Data availability', '10. 数据可获得性'), p('Where data and materials are deposited, with DOI', '数据和材料存放在哪里、DOI'), p('DOI if you entered one in the dataset package', '在数据集包里填了 DOI 时自动写入')],
       ]) }),
       s('cite', p('How to cite', '如何引用'), [
-        p('Cite the SP-Survey paper and the software version for the platform, and mention "SP-Report v1" when you report with this checklist. The Cite button on the Results page copies BibTeX, APA or a methods sentence; every export contains references.bib and CITATION.cff.', '引用平台时请同时引用 SP-Survey 论文和所用软件版本；按本清单报告时，在方法部分注明「SP-Report v1」。结果页的「引用」按钮可一键复制 BibTeX、APA 或方法段落句子，每个导出包也带 references.bib 和 CITATION.cff。'),
+        p('Cite SP-Survey with the software version you used, and mention "SP-Report v1" when you report with this checklist. The Cite button on the Results page copies BibTeX, APA or a methods sentence; every export contains references.bib and CITATION.cff.', '引用平台时请引用 SP-Survey 并注明所用软件版本；按本清单报告时，在方法部分注明「SP-Report v1」。结果页的「引用」按钮可一键复制 BibTeX、APA 或方法段落句子，每个导出包也带 references.bib 和 CITATION.cff。'),
       ]),
     ], related: ['results-export', 'quality-reliability', 'study-design'],
   },
