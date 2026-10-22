@@ -52,6 +52,9 @@ import AiQuestionAnalysis from './AiQuestionAnalysis';
 import { aiAnalysisExportFiles, buildAnalysisRecords, evaluateAnalysis, readSavedAnalyses } from '../../lib/aiQuestionAnalysis';
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { saveQuestionAnalysis } from '../../lib/aiQuestionAnalysisStore';
+import DatasetPackageDialog from './DatasetPackageDialog';
+import { collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames } from '../../lib/datasetPackage';
+import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -3192,6 +3195,61 @@ export default function ResultsAnalysis({
     }
     return files;
   };
+  const [datasetOpen, setDatasetOpen] = useState(false);
+  const exportFilters = () => ({
+    date_from: dateFrom || null,
+    date_to: dateTo || null,
+    session_id: sessionFilter || null,
+    survey_revision: revisionFilter || null,
+    include_practice: includePractice,
+    exclude_flagged: excludeFlagged,
+    data_source: dataSource
+  });
+  // Citable dataset package: the full export plus README, license, citation
+  // and stimulus manifest. The form is saved with the project for next time.
+  const buildDatasetPackage = async (meta, onStep) => {
+    try {
+      const metadata = await saveDatasetRelease(currentProject?.id, meta);
+      onProjectUpdated?.({ metadata });
+    } catch {
+      // Saving the form is a convenience; the package does not depend on it.
+    }
+    let stimulusRows = null;
+    let stimulusFiles = [];
+    if (meta.includeImages) {
+      const stimuli = collectStimuli(allQuestions, filteredResponses, surveyConfig);
+      const resolveUrl = source => /^(https?:|blob:|data:)/.test(source) ? source : imageNameToUrl.get(source) || imageNameToUrl.get(mediaIdentityKey(source)) || '';
+      const fetched = await fetchStimulusFiles(stimuli, {
+        resolveUrl,
+        onProgress: (done, total) => onStep(uiPair(language, `Downloading images ${done}/${total}…`, `正在下载图片 ${done}/${total}…`))
+      });
+      stimulusRows = fetched.rows;
+      stimulusFiles = fetched.files;
+    }
+    onStep(uiPair(language, 'Building the package…', '正在打包…'));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return downloadDatasetPackage({
+      meta,
+      project: currentProject,
+      surveyConfig,
+      questions: allQuestions,
+      filteredResponses,
+      dateFilteredResponses,
+      filters: exportFilters(),
+      excludeFlagged,
+      report: savedReport || null,
+      aiAnalysisFiles: await buildAiAnalysisFiles(),
+      siteConverted,
+      stimulusRows,
+      stimulusFiles
+    });
+  };
+  const datasetItem = {
+    id: 'dataset',
+    label: uiPair(language, 'Citable dataset package (ZIP)…', '可引用的数据集包（ZIP）…'),
+    disabled: exportBlocked || !surveyConfig,
+    onClick: () => setDatasetOpen(true)
+  };
   // Two choices only: the answers table, or everything in one ZIP. An uploaded
   // SP-Scheme page is not analysed, so it gets a single ZIP of its answers.
   const exportItems = siteConverted ? [{
@@ -3204,7 +3262,7 @@ export default function ResultsAnalysis({
       wideCsv: buildResponsesWideCsv(filteredResponses, allQuestions, surveyConfig),
       aiAnalysisFiles: await buildAiAnalysisFiles()
     }))
-  }] : [{
+  }, datasetItem] : [{
     id: 'csv',
     label: t.resultsExportTable,
     disabled: exportBlocked,
@@ -3226,18 +3284,10 @@ export default function ResultsAnalysis({
         excludeFlagged,
         wideCsv,
         report: savedReport || null,
-        filters: {
-          date_from: dateFrom || null,
-          date_to: dateTo || null,
-          session_id: sessionFilter || null,
-          survey_revision: revisionFilter || null,
-          include_practice: includePractice,
-          exclude_flagged: excludeFlagged,
-          data_source: dataSource
-        }
+        filters: exportFilters()
       });
     })
-  }];
+  }, datasetItem];
   return <ImageResolverContext.Provider value={imageNameToUrl}>
     <Box>
       <AdminPageHeader icon={<Assessment />} title={t.resultsTitle} description={t.resultsDescription} />
@@ -3284,6 +3334,7 @@ export default function ResultsAnalysis({
         }}>
 
 
+      <DatasetPackageDialog open={datasetOpen} onClose={() => setDatasetOpen(false)} onBuild={buildDatasetPackage} project={currentProject} language={language} nSubmissions={filteredResponses.length} siteConverted={siteConverted} freeTextNames={freeTextQuestionNames(allQuestions)} />
       <ResultsFilterShell open={filtersOpen} onClose={() => setFiltersOpen(false)} t={t} onReset={() => {
             resetFilters();
             setDemographicFilters([]);
