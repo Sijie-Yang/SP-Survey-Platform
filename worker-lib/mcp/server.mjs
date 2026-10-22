@@ -52,6 +52,13 @@ import { DESIGN_CAPABILITIES } from '../designProtocol.mjs';
 import { buildSkillAnalysisGuideText, skillAnalysisGuideBlurb } from '../agent/skillAnalysisGuide.mjs';
 import { getCredentialStatus } from '../agent/credentials.mjs';
 import { supabaseRest } from '../supabaseUserClient.mjs';
+import {
+  listSiliconResponses,
+  listSiliconResponsesService,
+  listSiliconRuns,
+  listSiliconRunsService,
+  siliconRunProjectId,
+} from '../silicon/handlers.mjs';
 import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from '../agent/projectMeta.mjs';
 
 function mcpCtx(auth) {
@@ -429,12 +436,12 @@ const TOOLS = [
   },
   {
     name: 'survey_export_responses',
-    description: 'Export owned project responses as JSON, wide/long/summary CSV, or a typed per-question analysis bundle (results:read).',
+    description: 'Export owned project responses as JSON, wide/long/summary CSV, a typed per-question analysis bundle, or the citable dataset package (README, LICENSE, CITATION.cff, datapackage.json, anonymised data) (results:read).',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
-        format: { type: 'string', enum: ['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle'] },
+        format: { type: 'string', enum: ['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle', 'dataset_package'] },
         questionName: { type: 'string', description: 'Optional single-question filter.' },
         dataSource: { type: 'string', enum: ['human', 'practice', 'silicon'] },
         siliconRunId: { type: 'string' },
@@ -608,6 +615,24 @@ const TOOLS = [
     },
   },
   {
+    name: 'silicon_list_runs',
+    description: 'List the silicon-sample (AI respondent) pretest runs of an owned project, newest first (results:read). Read-only; runs are started in the browser.',
+    inputSchema: {
+      type: 'object',
+      properties: { projectId: { type: 'string' } },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'silicon_run_responses',
+    description: 'Read the answers of one silicon-sample run of an owned project (results:read). Silicon answers are for pretesting and never replace human data.',
+    inputSchema: {
+      type: 'object',
+      properties: { runId: { type: 'string' } },
+      required: ['runId'],
+    },
+  },
+  {
     name: 'credentials_status',
     description: 'Check whether a Platform Assistant API key is configured (never returns the key).',
     inputSchema: { type: 'object', properties: {} },
@@ -731,6 +756,23 @@ async function callTool(env, auth, request, name, args = {}) {
     case 'survey_list_responses': {
       requireScope(auth, 'results:read');
       return toolResult(await listResponses(env, mcpCtx(auth), args.projectId, args));
+    }
+    case 'silicon_list_runs': {
+      requireScope(auth, 'results:read');
+      if (useService) {
+        await assertOwned(env, auth.userId, args.projectId);
+        return toolResult(await listSiliconRunsService(env, args.projectId));
+      }
+      return toolResult(await listSiliconRuns(env, auth, args.projectId));
+    }
+    case 'silicon_run_responses': {
+      requireScope(auth, 'results:read');
+      if (!args.runId) return toolResult({ error: 'runId is required' }, true);
+      if (useService) {
+        await assertOwned(env, auth.userId, await siliconRunProjectId(env, args.runId));
+        return toolResult(await listSiliconResponsesService(env, args.runId));
+      }
+      return toolResult(await listSiliconResponses(env, auth, args.runId));
     }
     case 'survey_export_responses': {
       requireScope(auth, 'results:read');

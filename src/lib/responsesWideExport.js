@@ -3,12 +3,12 @@ import { mediaIdentityKey, resolveMediaAnswerKey } from './mediaIdentity.js';
  * Wide (one-row-per-response) CSV builder for Results Analysis.
  */
 
-import { evaluateResponseQuality } from './quality';
-import { getPresetSkill } from './presetSkills';
-import { stripSkillAnswerContext } from './skillMediaUtils';
-import { objectsToCsv, exportDateStamp } from './csvUtil';
-import { downloadTextFile } from './methodsExport';
-import { supportsTrialCount } from './questionTypeConstraints';
+import { evaluateResponseQuality } from './quality.js';
+import { getPresetSkill } from './presetSkills.js';
+import { stripSkillAnswerContext } from './skillMediaUtils.js';
+import { objectsToCsv, exportDateStamp } from './csvUtil.js';
+import { downloadTextFile } from './methodsExport.js';
+import { supportsTrialCount } from './questionTypeConstraints.js';
 
 const IMAGE_TYPES = new Set([
   'imagerating', 'image_rating',
