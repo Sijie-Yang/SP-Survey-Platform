@@ -38,6 +38,8 @@ test('compares the latest run with the human answers and hands CSVs to the expor
   const csv = onResult.mock.calls.at(-1)[0][0].content;
   expect(csv).toMatch(/persona:a/);
   expect(csv).toMatch(/,all\n|,all$/m);
+  expect(screen.getAllByTestId('silicon-calibration')[0]).toHaveTextContent(/Calibration: human ≈ .* × silicon · R²/);
+  expect(onResult.mock.calls.at(-1)[0].map((f) => f.path)).toContain('silicon_calibration.csv');
 });
 
 jest.mock('../../lib/methodsExport', () => ({ downloadTextFile: jest.fn() }));

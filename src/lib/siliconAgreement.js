@@ -8,7 +8,7 @@
  */
 import { buildQuestionSummaryRows, exportFamilyForQuestion } from './questionSummaryExport.js';
 
-export const AGREEMENT_VERSION = '1.0.0';
+export const AGREEMENT_VERSION = '1.1.0';
 
 export const AGREEMENT_HEADERS = [
   'question_name',
@@ -37,6 +37,24 @@ export const GAP_HEADERS = [
   'human_rank',
   'silicon_rank',
   'rank_gap',
+];
+
+// Per-item calibration table: silicon values mapped onto the human scale by
+// the linear fit human ≈ intercept + slope × silicon.
+export const CALIBRATION_HEADERS = [
+  'question_name',
+  'attribute_key',
+  'attribute_label',
+  'comparison',
+  'unit_key',
+  'unit_label',
+  'human_value',
+  'silicon_value',
+  'calibrated_value',
+  'residual',
+  'loo_calibrated_value',
+  'silicon_run_id',
+  'silicon_group',
 ];
 
 // The headline metric of each comparison, in the order the overview shows them.
@@ -151,6 +169,57 @@ function modalKey(dist) {
   return best;
 }
 
+/**
+ * Least-squares calibration of silicon values onto the human scale:
+ * human ≈ intercept + slope × silicon. `loo_rmse` is the leave-one-out error,
+ * i.e. how far off a calibrated silicon score is for an item the fit did not
+ * see; it is the honest number to quote when silicon scores stand in for new
+ * images. Needs ≥3 items with some spread on the silicon side (≥4 for LOO).
+ */
+export function linearCalibration(silicon, human) {
+  const n = silicon.length;
+  if (n < MIN_UNITS_FOR_CORRELATION || n !== human.length || !finite(silicon) || !finite(human)) return null;
+  const fit = (xs, ys) => {
+    const m = xs.length;
+    const mx = xs.reduce((a, b) => a + b, 0) / m;
+    const my = ys.reduce((a, b) => a + b, 0) / m;
+    let sxx = 0;
+    let sxy = 0;
+    for (let i = 0; i < m; i += 1) {
+      sxx += (xs[i] - mx) ** 2;
+      sxy += (xs[i] - mx) * (ys[i] - my);
+    }
+    if (!(sxx > 1e-12)) return null;
+    const slope = sxy / sxx;
+    return { slope, intercept: my - slope * mx };
+  };
+  const all = fit(silicon, human);
+  if (!all) return null;
+  const predicted = silicon.map((x) => all.intercept + all.slope * x);
+  const my = human.reduce((a, b) => a + b, 0) / n;
+  const ssRes = human.reduce((a, y, i) => a + (y - predicted[i]) ** 2, 0);
+  const ssTot = human.reduce((a, y) => a + (y - my) ** 2, 0);
+  let loo = null;
+  if (n >= 4) {
+    loo = [];
+    for (let i = 0; i < n; i += 1) {
+      const f = fit(silicon.filter((_, j) => j !== i), human.filter((_, j) => j !== i));
+      if (!f) { loo = null; break; }
+      loo.push(f.intercept + f.slope * silicon[i]);
+    }
+  }
+  return {
+    n,
+    slope: all.slope,
+    intercept: all.intercept,
+    r2: ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : null,
+    rmse: Math.sqrt(ssRes / n),
+    loo_rmse: loo ? Math.sqrt(human.reduce((a, y, i) => a + (y - loo[i]) ** 2, 0) / n) : null,
+    predicted,
+    loo_predicted: loo,
+  };
+}
+
 // ---------------------------------------------------------------- summaries
 
 function safeSummary(question, rows) {
@@ -214,7 +283,7 @@ function rankOf(values) {
   return averageRanks(values.map((v) => -v));
 }
 
-function compareItems({ hRows, sRows, metric, comparison, push, gaps, question, attr }) {
+function compareItems({ hRows, sRows, metric, comparison, push, gaps, calibration, meta = {}, question, attr }) {
   const pairs = pairUnits(unitValues(hRows, metric), unitValues(sRows, metric));
   const xs = pairs.map(([h]) => h.value);
   const ys = pairs.map(([, s]) => s.value);
@@ -227,6 +296,28 @@ function compareItems({ hRows, sRows, metric, comparison, push, gaps, question, 
     push('spearman_rho', enough ? spearman(xs, ys) : null, pairs.length);
     push('mean_abs_diff', pairs.length ? pairs.reduce((a, [h, s]) => a + Math.abs(s.value - h.value), 0) / pairs.length : null, pairs.length);
     push('mean_diff', pairs.length ? pairs.reduce((a, [h, s]) => a + (s.value - h.value), 0) / pairs.length : null, pairs.length);
+  }
+  const cal = linearCalibration(ys, xs);
+  push('calib_slope', cal?.slope ?? null, pairs.length);
+  push('calib_intercept', cal?.intercept ?? null, pairs.length);
+  push('calib_r2', cal?.r2 ?? null, pairs.length);
+  push('calib_loo_rmse', cal?.loo_rmse ?? null, pairs.length);
+  if (cal && calibration) {
+    pairs.forEach(([h, s], i) => calibration.push({
+      question_name: question.name,
+      attribute_key: attr.key,
+      attribute_label: attr.label,
+      comparison,
+      unit_key: h.key,
+      unit_label: h.label,
+      human_value: h.value,
+      silicon_value: s.value,
+      calibrated_value: cal.predicted[i],
+      residual: h.value - cal.predicted[i],
+      loo_calibrated_value: cal.loo_predicted ? cal.loo_predicted[i] : null,
+      silicon_run_id: meta.siliconRunId || '',
+      silicon_group: meta.siliconGroup || 'all',
+    }));
   }
   if (pairs.length >= 2) {
     const hr = rankOf(xs);
@@ -266,7 +357,7 @@ function distributions(rows) {
  * `meta` = { siliconRunId, siliconGroup } copied onto every row.
  */
 export function questionAgreement(question, humanRows, siliconRows, meta = {}) {
-  const out = { rows: [], gaps: [] };
+  const out = { rows: [], gaps: [], calibration: [] };
   if (!question?.name || SKIP_FAMILIES.has(exportFamilyForQuestion(question))) return out;
   const h = safeSummary(question, humanRows);
   const s = safeSummary(question, siliconRows);
@@ -295,7 +386,7 @@ export function questionAgreement(question, humanRows, siliconRows, meta = {}) {
     for (const g of groupByAttribute(h)) {
       const sg = sGroups.get(g.key);
       if (!sg) continue;
-      compareItems({ hRows: g.rows, sRows: sg.rows, metric: 'mu', comparison: 'item_scores', push: base(g, 'item_scores'), gaps: out.gaps, question, attr: g });
+      compareItems({ hRows: g.rows, sRows: sg.rows, metric: 'mu', comparison: 'item_scores', push: base(g, 'item_scores'), gaps: out.gaps, calibration: out.calibration, meta, question, attr: g });
     }
     return out;
   }
@@ -304,7 +395,7 @@ export function questionAgreement(question, humanRows, siliconRows, meta = {}) {
     for (const g of groupByAttribute(h)) {
       const sg = sGroups.get(g.key);
       if (!sg) continue;
-      compareItems({ hRows: g.rows, sRows: sg.rows, metric: 'mean', comparison: 'item_means', push: base(g, 'item_means'), gaps: out.gaps, question, attr: g });
+      compareItems({ hRows: g.rows, sRows: sg.rows, metric: 'mean', comparison: 'item_means', push: base(g, 'item_means'), gaps: out.gaps, calibration: out.calibration, meta, question, attr: g });
     }
     return out;
   }
@@ -339,21 +430,24 @@ export function questionAgreement(question, humanRows, siliconRows, meta = {}) {
 
 /**
  * Agreement for a whole survey.
- * Returns { rows, gaps (top `gapLimit`, largest rank disagreement first), summary }.
+ * Returns { rows, gaps (top `gapLimit`, largest rank disagreement first),
+ * calibration (every matched item), summary }.
  */
 export function siliconAgreement(questions, humanRows, siliconRows, { siliconRunId = '', siliconGroup = 'all', gapLimit = 5 } = {}) {
   const rows = [];
   const gaps = [];
+  const calibration = [];
   for (const q of questions || []) {
     const r = questionAgreement(q, humanRows || [], siliconRows || [], { siliconRunId, siliconGroup });
     rows.push(...r.rows);
     gaps.push(...r.gaps);
+    calibration.push(...r.calibration);
   }
   gaps.sort((a, b) => (b.rank_gap - a.rank_gap)
     || (Math.abs(b.silicon_rank - b.human_rank) - Math.abs(a.silicon_rank - a.human_rank))
     || String(a.question_name).localeCompare(String(b.question_name))
     || String(a.unit_label).localeCompare(String(b.unit_label)));
-  return { rows, gaps: gaps.slice(0, gapLimit), summary: summarizeAgreement(rows) };
+  return { rows, gaps: gaps.slice(0, gapLimit), calibration, summary: summarizeAgreement(rows) };
 }
 
 /**
@@ -373,7 +467,18 @@ export function summarizeAgreement(rows) {
     const id = `${r.question_name}\u0000${r.attribute_key}\u0000${r.comparison}`;
     if (seen.has(id)) continue;
     seen.add(id);
-    const line = { ...r, top_choice_match: null, mean_diff: null };
+    const line = { ...r, top_choice_match: null, mean_diff: null, calibration: null };
+    if (r.comparison === 'item_scores' || r.comparison === 'item_means') {
+      const slope = find(r, r.comparison, 'calib_slope')?.value ?? null;
+      if (slope != null) {
+        line.calibration = {
+          slope,
+          intercept: find(r, r.comparison, 'calib_intercept')?.value ?? null,
+          r2: find(r, r.comparison, 'calib_r2')?.value ?? null,
+          loo_rmse: find(r, r.comparison, 'calib_loo_rmse')?.value ?? null,
+        };
+      }
+    }
     if (r.comparison === 'answer_distribution') {
       line.top_choice_match = find(r, 'answer_distribution', 'top_choice_match')?.value ?? null;
       line.mean_diff = find(r, 'overall_mean', 'mean_diff')?.value ?? null;
@@ -415,11 +520,17 @@ export function gapsCsv(gaps) {
   return toCsv(GAP_HEADERS, gaps);
 }
 
+export function calibrationCsv(rows) {
+  return toCsv(CALIBRATION_HEADERS, rows);
+}
+
 /** Files for the full analysis pack. */
 export function agreementExportFiles(result, { allGaps = null } = {}) {
   if (!result?.rows?.length) return [];
-  return [
+  const files = [
     { path: 'silicon_agreement.csv', content: agreementCsv(result.rows) },
     { path: 'silicon_agreement_gaps.csv', content: gapsCsv(allGaps || result.gaps) },
   ];
+  if (result.calibration?.length) files.push({ path: 'silicon_calibration.csv', content: calibrationCsv(result.calibration) });
+  return files;
 }

@@ -1,7 +1,7 @@
 import { syntheticResponses, syntheticSurveyConfig } from './__fixtures__/syntheticResults';
 import { flattenQuestions } from './quality';
 import {
-  AGREEMENT_HEADERS, agreementCsv, agreementExportFiles, averageRanks, jsDivergence, kendallTauB,
+  AGREEMENT_HEADERS, CALIBRATION_HEADERS, agreementCsv, calibrationCsv, linearCalibration, agreementExportFiles, averageRanks, jsDivergence, kendallTauB,
   pearson, questionAgreement, siliconAgreement, siliconGroups, spearman,
 } from './siliconAgreement';
 
@@ -96,7 +96,44 @@ describe('agreement', () => {
     expect(csv.split('\n')[0]).toBe(AGREEMENT_HEADERS.join(','));
     expect(csv).toMatch(/persona:p1/);
     const files = agreementExportFiles(result);
-    expect(files.map((f) => f.path)).toEqual(['silicon_agreement.csv', 'silicon_agreement_gaps.csv']);
+    expect(files.map((f) => f.path)).toEqual(['silicon_agreement.csv', 'silicon_agreement_gaps.csv', 'silicon_calibration.csv']);
+    expect(calibrationCsv(result.calibration).split('\n')[0]).toBe(CALIBRATION_HEADERS.join(','));
     expect(agreementExportFiles({ rows: [] })).toEqual([]);
+  });
+});
+
+describe('calibration', () => {
+  test('recovers a known linear map and reports leave-one-out error', () => {
+    const human = [1, 2, 3, 4, 5];
+    const silicon = human.map((h) => 2 * h + 1);
+    const cal = linearCalibration(silicon, human);
+    expect(cal.slope).toBeCloseTo(0.5);
+    expect(cal.intercept).toBeCloseTo(-0.5);
+    expect(cal.r2).toBeCloseTo(1);
+    expect(cal.loo_rmse).toBeCloseTo(0);
+    expect(cal.predicted).toEqual(human.map((h) => expect.closeTo(h)));
+    // Noise: LOO error is larger than in-sample error.
+    const noisy = linearCalibration([1, 2, 3, 4, 5, 6], [1.2, 1.8, 3.4, 3.7, 5.3, 5.9]);
+    expect(noisy.r2).toBeGreaterThan(0.9);
+    expect(noisy.loo_rmse).toBeGreaterThan(noisy.rmse);
+  });
+
+  test('no fit without enough items or without silicon spread', () => {
+    expect(linearCalibration([1, 2], [1, 2])).toBeNull();
+    expect(linearCalibration([3, 3, 3, 3], [1, 2, 3, 4])).toBeNull();
+    expect(linearCalibration([1, 2, 3], [1, 2, 3]).loo_rmse).toBeNull();
+  });
+
+  test('identical answers calibrate to the identity, per item and in the summary', () => {
+    const result = siliconAgreement(questions, human, asSilicon(human));
+    const means = result.rows.filter((r) => r.question_name === 'comfort');
+    expect(metric(means, 'calib_slope')).toBeCloseTo(1);
+    expect(metric(means, 'calib_intercept')).toBeCloseTo(0);
+    expect(metric(means, 'calib_r2')).toBeCloseTo(1);
+    const items = result.calibration.filter((r) => r.question_name === 'comfort');
+    expect(items.length).toBeGreaterThan(2);
+    items.forEach((r) => expect(r.residual).toBeCloseTo(0));
+    const line = result.summary.find((r) => r.question_name === 'comfort');
+    expect(line.calibration.slope).toBeCloseTo(1);
   });
 });

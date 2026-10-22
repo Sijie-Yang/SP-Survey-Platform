@@ -42,6 +42,16 @@ function headline(row, L) {
   }
 }
 
+/** "human ≈ 1.20 + 0.85 × silicon · R² 0.71 · LOO error ±0.42" */
+function calibrationLine(cal, L) {
+  if (!cal) return '';
+  const sign = cal.slope < 0 ? '−' : '+';
+  const parts = [`${L('human', '真人')} ≈ ${fmt(cal.intercept)} ${sign} ${fmt(Math.abs(cal.slope))} × ${L('silicon', '硅')}`];
+  if (cal.r2 != null) parts.push(`R² ${fmt(cal.r2)}`);
+  if (cal.loo_rmse != null) parts.push(`${L('LOO error', '留一误差')} ±${fmt(cal.loo_rmse)}`);
+  return parts.join(' · ');
+}
+
 const COLLAPSED_ROWS = 8;
 
 function Thumb({ src, label }) {
@@ -119,12 +129,14 @@ export default function SiliconAgreementCard({ projectId, projectName = '', ques
     // The export always holds every group, so the CSV is a complete table.
     const rows = [];
     const gaps = [];
+    const calibration = [];
     for (const g of groups) {
       const r = siliconAgreement(questions, humanRows, g.rows, { siliconRunId: runId, siliconGroup: g.id, gapLimit: Infinity });
       rows.push(...r.rows);
       gaps.push(...r.gaps.map((x) => ({ ...x, silicon_group: g.id })));
+      calibration.push(...r.calibration);
     }
-    return agreementExportFiles({ rows }, { allGaps: gaps });
+    return agreementExportFiles({ rows, calibration }, { allGaps: gaps });
   }, [groups, questions, humanRows, runId, siliconRows]);
 
   useEffect(() => {
@@ -217,6 +229,16 @@ export default function SiliconAgreementCard({ projectId, projectName = '', ques
                       <TableCell>
                         <Typography variant="body2">{qLabel(row.question_name)}{row.attribute_label ? ` · ${row.attribute_label}` : ''}</Typography>
                         <Typography variant="caption" color="text.secondary">{h.label}</Typography>
+                        {row.calibration && (
+                          <Tooltip title={L(
+                            'Linear calibration of the silicon scores onto the human scale. LOO error = typical error for an image the fit did not see, the number to quote if silicon scores stand in for new images. Full table: silicon_calibration.csv.',
+                            '把硅样本分数线性映射到真人尺度。留一误差 = 对拟合没见过的图的典型误差，用硅样本分数代替新图打分时应报告这个数。完整表格见 silicon_calibration.csv。',
+                          )}>
+                            <Typography variant="caption" color="text.secondary" display="block" data-testid="silicon-calibration">
+                              {L('Calibration: ', '校准：')}{calibrationLine(row.calibration, L)}
+                            </Typography>
+                          </Tooltip>
+                        )}
                       </TableCell>
                       <TableCell align="right">
                         <Tooltip title={L(`${row.n_units} shared items · ${row.n_human} human · ${row.n_silicon} silicon`, `${row.n_units} 个共同项目 · 真人 ${row.n_human} 份 · 硅样本 ${row.n_silicon} 份`)}>

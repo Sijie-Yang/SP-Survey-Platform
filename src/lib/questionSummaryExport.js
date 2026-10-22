@@ -2596,7 +2596,7 @@ export function buildResultsExportBundle({
     rootFiles.push(...figureFiles);
   }
   if (siliconAgreementFiles?.length) {
-    rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nsilicon_agreement.csv       Silicon-sample run vs these human answers, per question (deterministic; see column metric)\nsilicon_agreement_gaps.csv  Items ranked most differently by the silicon run and by people\n` };
+    rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nsilicon_agreement.csv       Silicon-sample run vs these human answers, per question (deterministic; see column metric)\nsilicon_agreement_gaps.csv  Items ranked most differently by the silicon run and by people\n${siliconAgreementFiles.some((f) => f.path === 'silicon_calibration.csv') ? 'silicon_calibration.csv     Per item: silicon score mapped onto the human scale (human ≈ intercept + slope × silicon), residual and leave-one-out prediction\n' : ''}` };
     rootFiles.push(...siliconAgreementFiles);
   }
   return rootFiles;
