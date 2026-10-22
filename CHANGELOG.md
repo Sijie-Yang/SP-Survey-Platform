@@ -13,6 +13,7 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 - Python SDK `spsurvey` (`sdk/python`) wrapping the MCP tools; read-only MCP tools for silicon runs; `dataset_package` export format.
 - Phone-preview QR code in Builder; optional "Made with SP-Survey" footer on participant pages.
 - Forgot-password and resend-confirmation on the login page; 404 page.
+- Image-version contrasts for counterfactual designs: when files are named `scene__version.jpg` or versions sit in folders, Results shows each version's mean per-scene difference from a baseline (95% CI, paired t, Holm-adjusted p, Cohen's d_z); the analysis pack adds `variant_contrasts.csv` and `variant_pairs.csv`.
 - SP-Forum at `/forum`: categories, search, open/closed threads, replies, edit and delete own posts; authors close and reopen their threads; admins pin, hide and post announcements. Posts show a display name, never the e-mail; outside images are shown as links.
 - Governance: CONTRIBUTING, RELEASING, architecture decision records, template contribution guide, issue and PR templates.
 

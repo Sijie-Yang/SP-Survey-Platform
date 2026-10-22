@@ -7,6 +7,7 @@ import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js
 import { allocationStatus } from './allocationStats.js';
 import { computeQuestionIrr } from './reliability.js';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from './mediaIdentity.js';
+import { VARIANT_README_LINES, surveyVariantAnalysis, variantExportFiles } from './variantAnalysis.js';
 /**
  * Unified Results Analysis export: per-question __long / __summary CSVs,
  * data_quality, manifest, README, and full ZIP file list.
@@ -2598,6 +2599,17 @@ export function buildResultsExportBundle({
   if (siliconAgreementFiles?.length) {
     rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nsilicon_agreement.csv       Silicon-sample run vs these human answers, per question (deterministic; see column metric)\nsilicon_agreement_gaps.csv  Items ranked most differently by the silicon run and by people\n${siliconAgreementFiles.some((f) => f.path === 'silicon_calibration.csv') ? 'silicon_calibration.csv     Per item: silicon score mapped onto the human scale (human ≈ intercept + slope × silicon), residual and leave-one-out prediction\n' : ''}` };
     rootFiles.push(...siliconAgreementFiles);
+  }
+  // Versions of the same scene (scene12__trees.jpg vs scene12__base.jpg): paired contrasts.
+  let variantFiles = [];
+  try {
+    variantFiles = variantExportFiles(surveyVariantAnalysis(answerable, filteredResponses));
+  } catch {
+    variantFiles = [];
+  }
+  if (variantFiles.length) {
+    rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\n${VARIANT_README_LINES.join('\n')}\n` };
+    rootFiles.push(...variantFiles);
   }
   return rootFiles;
 }

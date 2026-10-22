@@ -58,6 +58,7 @@ import { figureSvgFiles, figureZipFiles, figuresForSurvey } from '../../lib/jour
 import { downloadZip } from '../../lib/zipDownload';
 import SiliconAgreementCard from './SiliconAgreementCard';
 import SpBenchTaskCard from './SpBenchTaskCard';
+import VariantContrastCard from './VariantContrastCard';
 import CitePlatformButton from './CitePlatformButton';
 import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
 import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
@@ -3706,6 +3707,12 @@ export default function ResultsAnalysis({
           numberByName={answerableNumberByName}
           benchTasks={currentProject?.metadata?.spBenchTasks}
           onResult={setSiliconAgreementFiles} />}
+      {view === 'overview' && !siteConverted && answerableQuestions.length > 0 && filteredResponses.length > 0 && <VariantContrastCard
+          questions={answerableQuestions}
+          responses={filteredResponses}
+          language={language}
+          numberByName={answerableNumberByName}
+          projectName={currentProject?.name || ''} />}
       {view === 'overview' && dataSource === 'human' && !adminMode && !siteConverted && filteredResponses.length > 0 && <SpBenchTaskCard
           project={currentProject}
           questions={answerableQuestions}
