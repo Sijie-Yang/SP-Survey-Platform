@@ -462,6 +462,40 @@ export const DOC_TOPICS = [
     ], related: ['sp-report', 'results-export'],
   },
   {
+    id: 'image-versions', group: 'platform', title: p('Image versions: before/after and counterfactual designs', '图片版本：前后对比与反事实设计'),
+    summary: p('Show the same scene in several versions (e.g. with and without trees). Results then reports each version\'s effect against a baseline, scene by scene.', '把同一场景做成几个版本（例如有树、无树）给被试看，结果页会逐个场景算出每个版本相对基准版本的效果。'),
+    flow: [p('Name files scene__version.jpg', '文件命名为 场景__版本.jpg'), p('Upload to the media library', '上传到媒体库'), p('Collect responses', '收集回答'), p('Results → Image versions', '结果页 → 图片版本对比')],
+    sections: [
+      s('naming', p('How versions are recognised', '怎样识别版本'), [
+        p('Either put the version after a double underscore in the file name (s12__base.jpg, s12__trees.jpg), or put each version in its own folder with the same file names (before/s12.jpg, after/s12.jpg), or give each scene a folder with one file per version (s12/before.jpg, s12/after.jpg). At least two scenes must come in two or more versions. A version called base, baseline, before, original or control is the default baseline; you can pick another on the card.', '版本写在文件名的双下划线后面（s12__base.jpg、s12__trees.jpg），或每个版本一个文件夹、文件名相同（before/s12.jpg、after/s12.jpg），或每个场景一个文件夹、每个版本一个文件（s12/before.jpg、s12/after.jpg）。至少要有两个场景各有两个以上版本。名为 base、baseline、before、original 或 control 的版本默认作为基准，也可以在卡片上换。'),
+      ]),
+      s('stats', p('What is computed', '计算什么'), [
+        p('Each image first gets its usual score (TrueSkill μ for pairwise questions, the mean for ratings). For every scene the platform takes the difference between a version and the baseline; the table shows the mean difference across scenes with a 95% confidence interval, a paired t-test, the Holm-adjusted p-value across versions, Cohen\'s d_z and how many scenes went up or down. Scenes are the unit of analysis, so more scenes give more power than more participants alone. The analysis pack contains variant_contrasts.csv and variant_pairs.csv.', '每张图先按常规得分（成对比较用 TrueSkill μ，评分用平均分）。对每个场景，平台计算某版本与基准版本的差值；表格给出各场景差值的平均、95% 置信区间、配对 t 检验、多个版本间 Holm 校正后的 p 值、Cohen d_z，以及有多少场景升高或降低。分析单位是场景，所以增加场景数比只增加被试更能提高检验力。分析导出包里有 variant_contrasts.csv 和 variant_pairs.csv。'),
+      ]),
+    ], related: ['choosing-analysis', 'results-export'],
+  },
+  {
+    id: 'qualtrics-import', group: 'platform', title: p('Import a Qualtrics survey', '导入 Qualtrics 问卷'),
+    summary: p('Bring an existing Qualtrics questionnaire over as a new project, then add image questions around it.', '把已有的 Qualtrics 问卷转成新项目，再在里面加图片题。'),
+    flow: [p('Qualtrics: Tools → Import/Export → Export Survey (.qsf)', 'Qualtrics：工具 → 导入/导出 → 导出调查（.qsf）'), p('Builder sidebar → Import project', '设计页侧栏 → 导入项目'), p('Read the import report', '查看导入报告'), p('Preview before sharing', '分享前先预览')],
+    sections: [
+      s('mapping', p('What is converted', '能转换什么'), [
+        p('Multiple choice (single, multiple, dropdown), Net Promoter Score, Likert and bipolar matrices, sliders, text entry (single line, essay, form, numeric), rank order, constant sum and descriptive text. Blocks keep their flow order and page breaks; the trash block is skipped. Recode values become the stored answer values.', '单选、多选、下拉、净推荐值（NPS）、Likert 与双极矩阵、滑块、文本输入（单行、多行、表单、数字）、排序、固定总和和说明文字。区块按调查流程排序并保留分页，回收站区块会跳过。重新编码的值会作为存储的答案值。'),
+        p('Not converted, and listed in the report: display and skip logic, block randomizers and branches, piped text, embedded data, quotas, images inside question text, and question types without a native equivalent (heat map, hot spot, side-by-side, drawing, file upload, signature, timing, meta info). Agents can do the same import with the MCP tool survey_import_qualtrics, and the Python SDK with Client.import_qualtrics().', '不转换、但会在报告里列出的：显示与跳转逻辑、区块随机和分支、管道文本、嵌入数据、配额、题干里的图片，以及平台没有对应题型的题目（热图、热点、并排题、绘图、文件上传、签名、计时、元信息）。AI 助手可以用 MCP 工具 survey_import_qualtrics 做同样的导入，Python SDK 用 Client.import_qualtrics()。'),
+      ]),
+    ], related: ['study-design', 'skills-agents'],
+  },
+  {
+    id: 'sp-forum', group: 'platform', title: p('SP-Forum: ask and discuss', 'SP-Forum 论坛：提问与讨论'),
+    summary: p('A public forum at sp-survey.org/forum for questions, methods discussion and sharing studies.', 'sp-survey.org/forum 上的公开论坛，用来提问、讨论方法、分享研究。'),
+    sections: [
+      s('use', p('Posting', '发帖'), [
+        p('Anyone can read; sign in to post or reply. Choose a category (Help, Methods, Showcase, Ideas or General), write in Markdown, and optionally set a display name. Your e-mail address is never shown. You can edit or delete your own posts, and close your thread once the question is answered; a closed thread keeps its replies but takes no new ones, and you can reopen it.', '所有人都能浏览；登录后可以发帖和回复。选择分类（求助、研究方法、成果展示、功能建议或综合讨论），用 Markdown 书写，可以设置显示名称。邮箱不会显示。你可以编辑或删除自己的帖子；问题解决后可以关帖，关闭的帖子保留回复但不能再回复，也可以重新打开。'),
+        p('Never post participant data, survey links that should stay private, or API keys. Images in posts are shown as links. The platform team pins useful threads, posts announcements and hides spam.', '不要贴参与者数据、不该公开的问卷链接或 API key。帖子里的图片以链接形式显示。平台团队会置顶有用的帖子、发布公告并隐藏垃圾信息。'),
+      ]),
+    ], related: ['skills-agents'],
+  },
+  {
     id: 'skills-agents', group: 'platform', title: p('AI assistance, Skills & integrations', 'AI 辅助、Skills 与集成'),
     summary: p('Use an assistant to draft an instrument while preserving typed answers, review and a deliberate release.', '用助手起草问卷，同时保留明确的答案类型、检查流程与正式发布步骤。'),
     sections: [

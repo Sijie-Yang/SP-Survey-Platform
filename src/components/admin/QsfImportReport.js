@@ -39,7 +39,10 @@ export default function QsfImportReport({ report, language, onClose }) {
           </>
         )}
       </DialogContent>
-      <DialogActions><Button variant="contained" onClick={onClose}>{L('OK', '好的')}</Button></DialogActions>
+      <DialogActions>
+        <Button href="/docs/qualtrics-import" target="_blank" rel="noopener noreferrer">{L('What is converted', '转换说明')}</Button>
+        <Button variant="contained" onClick={onClose}>{L('OK', '好的')}</Button>
+      </DialogActions>
     </Dialog>
   );
 }

@@ -101,9 +101,10 @@ export default function VariantContrastCard({ questions, responses, language, nu
         </Stack>
         <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1.5 }}>
           {L(
-            'Name files scene__version.jpg (e.g. s12__base.jpg, s12__trees.jpg) or put each version in its own folder to get this table. Scenes, not participants, are the unit of analysis.',
+            'Name files scene__version.jpg (e.g. s12__base.jpg, s12__trees.jpg) or put each version in its own folder to get this table. Scenes, not participants, are the unit of analysis. ',
             '把文件命名为 场景__版本.jpg（如 s12__base.jpg、s12__trees.jpg），或把每个版本放进单独的文件夹，就会出现这张表。分析单位是场景，不是参与者。',
           )}
+          <a href="/docs/image-versions" target="_blank" rel="noopener noreferrer">{L('How it works', '说明')}</a>
         </Typography>
       </CardContent>
     </Card>
