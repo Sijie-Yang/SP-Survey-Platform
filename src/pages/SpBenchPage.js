@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { isChineseLanguage, uiPair } from '../lib/uiLanguages';
+import { uiPair } from '../lib/uiLanguages';
 import { Box, Container, Typography, Paper, Table, TableBody, TableCell, TableHead, TableRow, Chip, CircularProgress, Alert, Tabs, Tab, Stack } from '@mui/material';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
-import { getBenchPublic } from '../lib/spBenchApi';
+import { getBenchPublic, getHumanSubmissions, getHumanTasks } from '../lib/spBenchApi';
+import HumanAgreementTrack from '../components/bench/HumanAgreementTrack';
 import { useRegion } from '../contexts/RegionContext';
 function fmt(v) {
   if (v == null || Number.isNaN(Number(v))) return '—';
@@ -74,28 +75,45 @@ export default function SpBenchPage() {
     t,
     language
   } = useRegion();
+  const L = (en, zh) => uiPair(language, en, zh);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+  const [human, setHuman] = useState({ tasks: [], submissions: [] });
   const [error, setError] = useState('');
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState('');
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      try {
-        const res = await getBenchPublic();
-        if (!cancelled) setData(res);
-      } catch (e) {
-        if (!cancelled) setError(e.message || String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      // The two tracks load independently: one failing must not hide the other.
+      const [board, tasks, submissions] = await Promise.allSettled([getBenchPublic(), getHumanTasks(), getHumanSubmissions()]);
+      if (cancelled) return;
+      if (board.status === 'fulfilled') setData(board.value);
+      setHuman({
+        tasks: tasks.status === 'fulfilled' ? tasks.value : [],
+        submissions: submissions.status === 'fulfilled' ? submissions.value : [],
+      });
+      if (board.status === 'rejected' && tasks.status === 'rejected') setError(board.reason?.message || String(board.reason));
+      setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-  const groupKey = tab === 1 ? 'objective' : tab === 2 ? 'subjective' : tab === 3 ? 'cognition' : null;
+  const objectiveOpen = !!data?.enabled;
+  const humanOpen = human.tasks.length > 0;
+  const tabs = [
+    ...(humanOpen ? [['human', L('Human agreement', '真人一致性')]] : []),
+    ...(objectiveOpen ? [
+      ['overall', t.benchOverall || 'Overall'],
+      ['objective', t.benchObjective || 'Objective'],
+      ['subjective', t.benchSubjective || 'Subjective'],
+      ['cognition', t.benchCognition || 'Cognition'],
+      ['method', t.benchMethodTab || 'Methodology'],
+    ] : []),
+  ];
+  const activeTab = tabs.some(([id]) => id === tab) ? tab : (tabs[0]?.[0] || '');
+  const groupKey = ['objective', 'subjective', 'cognition'].includes(activeTab) ? activeTab : null;
   return <Box sx={{
     minHeight: '100vh',
     bgcolor: 'background.default',
@@ -115,7 +133,7 @@ export default function SpBenchPage() {
             <CircularProgress />
           </Box>}
         {error && <Alert severity="error">{error}</Alert>}
-        {!loading && data && !data.enabled && <Paper sx={{
+        {!loading && !error && !tabs.length && <Paper sx={{
         p: 4,
         textAlign: 'center'
       }}>
@@ -128,46 +146,44 @@ export default function SpBenchPage() {
               {t.benchNotOpenBody || 'This benchmark is not open to the public yet.'}
             </Typography>
           </Paper>}
-        {!loading && data?.enabled && <>
+        {!loading && tabs.length > 0 && <>
             <Typography variant="h4" fontWeight={800} sx={{
           mb: 1
         }}>
-              {data.settings?.title || 'SP-Bench'}
+              {data?.settings?.title || 'SP-Bench'}
             </Typography>
             <Typography variant="body1" color="text.secondary" sx={{
           mb: 2,
           maxWidth: 900
         }}>
-              {data.settings?.subtitle}
+              {data?.settings?.subtitle || L('How well do AI models see cities the way people do?', 'AI 模型看城市的方式和人有多接近？')}
             </Typography>
-            {data.settings?.landing_blurb && <Typography variant="body2" sx={{
+            {objectiveOpen && data.settings?.landing_blurb && <Typography variant="body2" sx={{
           mb: 3
         }}>{data.settings.landing_blurb}</Typography>}
-            <Stack direction="row" spacing={1} sx={{
+            {objectiveOpen && <Stack direction="row" spacing={1} sx={{
           mb: 3
         }} flexWrap="wrap" useFlexGap>
               <Chip label={`${t.benchMethod || 'Method'} ${data.method?.version || data.settings?.method_version || '—'}`} />
               <Chip label={`${t.benchDataset || 'Dataset'} ${data.dataset?.version || '—'} (${data.dataset?.item_count ?? '—'} ${t.benchSamples || 'samples'})`} />
               <Chip label={`${data.leaderboard?.length || 0} ${t.benchModels || 'models'}`} />
-            </Stack>
+            </Stack>}
 
-            <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{
+            {tabs.length > 1 && <Tabs value={activeTab} onChange={(_, v) => setTab(v)} variant="scrollable" allowScrollButtonsMobile sx={{
           mb: 2
         }}>
-              <Tab label={t.benchOverall || 'Overall'} />
-              <Tab label={t.benchObjective || 'Objective'} />
-              <Tab label={t.benchSubjective || 'Subjective'} />
-              <Tab label={t.benchCognition || 'Cognition'} />
-              <Tab label={t.benchMethodTab || 'Methodology'} />
-            </Tabs>
+              {tabs.map(([id, label]) => <Tab key={id} value={id} label={label} />)}
+            </Tabs>}
 
-            {tab < 4 && <Paper sx={{
+            {activeTab === 'human' && <HumanAgreementTrack tasks={human.tasks} submissions={human.submissions} language={language} />}
+
+            {['overall', 'objective', 'subjective', 'cognition'].includes(activeTab) && <Paper sx={{
           overflow: 'auto'
         }}>
                 <LeaderboardTable rows={data.leaderboard} groupKey={groupKey} />
               </Paper>}
 
-            {tab === 4 && <Paper sx={{
+            {activeTab === 'method' && <Paper sx={{
           p: 3
         }}>
                 <Typography variant="h6" fontWeight={700} sx={{

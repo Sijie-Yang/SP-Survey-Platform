@@ -448,6 +448,20 @@ export const DOC_TOPICS = [
     ], related: ['results-export', 'quality-reliability', 'study-design'],
   },
   {
+    id: 'sp-bench-human', group: 'platform', title: p('SP-Bench: test AI models against your participants', 'SP-Bench：用你的被试数据测试 AI 模型'),
+    summary: p('Publish an image question as a benchmark task. Anyone can then score a model on how well it reproduces your participants\' ranking of the images.', '把图片题发布成评测任务。之后任何人都能测一个模型能多大程度复现你的被试对这些图的排名。'),
+    flow: [p('Collect responses', '收集回答'), p('Results → SP-Bench → Publish', '结果页 → SP-Bench → 发布'), p('Models are scored at /bench', '在 /bench 给模型打分'), p('Submissions join by pull request', '通过 pull request 上榜')],
+    sections: [
+      s('what', p('What is published', '公开什么'), [
+        p('A task freezes one image question from the responses in the current Results filter: the TrueSkill μ of each image for pairwise or ranking questions, or the mean for ratings and sliders, with its spread and count. No individual answer, participant id or free text leaves the project. A task needs at least 5 images and 20 responses. Publishing again replaces the frozen values; Remove takes it off the benchmark.', '一个任务把一道图片题在当前结果筛选下的数据冻结下来：成对比较或排序题是每张图的 TrueSkill μ，评分和滑块题是平均值，另附离散度和人数。任何个人回答、被试编号或文字回答都不会离开项目。一个任务至少要 5 张图、20 份回答。再次发布会替换冻结的数值，撤下即从评测中移除。'),
+      ]),
+      s('score', p('How models are scored', '怎样给模型打分'), [
+        p('A model gives one number per image. Pairwise and ranking tasks are scored by Kendall τ-b with the human μ; rating tasks by Spearman ρ (Pearson r and mean absolute difference are shown too). Fewer than 3 matched images give no score. The overall score is the mean over all tasks, with a missing task counted as 0. The same code computes the "Silicon vs human" card on the Results page.', '模型对每张图给一个数。成对比较和排序任务用它与人类 μ 的 Kendall τ-b 打分，评分题用 Spearman ρ（同时显示 Pearson r 和平均绝对差）。匹配上的图少于 3 张不给分。总分是所有任务的平均，缺的任务按 0 计。结果页「硅样本 vs 真人」卡片用的是同一套代码。'),
+        p('On sp-survey.org/bench anyone can download a task CSV, fill in their model\'s values and upload it. Scoring runs in the browser. To join the leaderboard, the page produces a submission file that is added to public/bench/submissions by pull request; the leaderboard recomputes every score from these files. A silicon-sample run can be saved as a submission from the Results page in one click.', '在 sp-survey.org/bench，任何人都能下载任务 CSV，填上模型的数值再上传，打分在浏览器里完成。要上榜，页面会生成一个提交文件，通过 pull request 加到 public/bench/submissions；榜单从这些文件重新计算每个分数。硅样本运行可以在结果页一键保存为提交文件。'),
+      ]),
+    ], related: ['sp-report', 'results-export'],
+  },
+  {
     id: 'skills-agents', group: 'platform', title: p('AI assistance, Skills & integrations', 'AI 辅助、Skills 与集成'),
     summary: p('Use an assistant to draft an instrument while preserving typed answers, review and a deliberate release.', '用助手起草问卷，同时保留明确的答案类型、检查流程与正式发布步骤。'),
     sections: [

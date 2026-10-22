@@ -3,11 +3,15 @@ import {
   Alert, Box, Button, Card, CardContent, CircularProgress, MenuItem, Stack, Table, TableBody, TableCell,
   TableHead, TableRow, TextField, Tooltip, Typography,
 } from '@mui/material';
-import { Download } from '@mui/icons-material';
+import { Download, Leaderboard } from '@mui/icons-material';
 import { uiPair } from '../../lib/uiLanguages';
 import { listSiliconResponses, listSiliconRuns } from '../../lib/agentApi';
 import { agreementExportFiles, siliconAgreement, siliconGroups } from '../../lib/siliconAgreement';
 import { downloadZip } from '../../lib/zipDownload';
+import { downloadTextFile } from '../../lib/methodsExport';
+import {
+  SUBMISSIONS_NEW_FILE_URL, buildSubmission, predictionsFromRows, submissionFileName, tasksFromProjectMetadata,
+} from '../../lib/benchHumanTrack';
 import { ImageResolverContext } from './imageResolverContext';
 
 const fmt = (v, digits = 2) => (v == null || !Number.isFinite(v) ? '—' : v.toFixed(digits));
@@ -57,7 +61,7 @@ function runLabel(run, L) {
  * current filter. Renders nothing until the project has at least one run.
  * `onResult(files)` hands the CSV files to the full analysis pack.
  */
-export default function SiliconAgreementCard({ projectId, projectName = '', questions, humanRows, language, numberByName, onResult }) {
+export default function SiliconAgreementCard({ projectId, projectName = '', questions, humanRows, language, numberByName, benchTasks, onResult }) {
   const L = (en, zh) => uiPair(language, en, zh);
   const resolve = useContext(ImageResolverContext);
   const [runs, setRuns] = useState([]);
@@ -67,6 +71,7 @@ export default function SiliconAgreementCard({ projectId, projectName = '', ques
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const [benchFile, setBenchFile] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +131,25 @@ export default function SiliconAgreementCard({ projectId, projectName = '', ques
     onResult?.(allGroupsFiles);
   }, [allGroupsFiles, onResult]);
 
+  // SP-Bench: the selected run's per-image answers as a leaderboard submission.
+  const tasks = useMemo(() => tasksFromProjectMetadata(benchTasks), [benchTasks]);
+  const benchPredictions = useMemo(
+    () => (tasks.length && group?.rows?.length ? predictionsFromRows(tasks, questions, group.rows) : {}),
+    [tasks, questions, group],
+  );
+  const downloadBenchSubmission = () => {
+    const run = runs.find((r) => r.id === runId);
+    const sub = buildSubmission({
+      model: `${run?.model || 'Silicon sample'}${group && group.id !== 'all' ? ` (${group.label})` : ''}`,
+      kind: 'silicon',
+      notes: `SP-Survey silicon-sample run ${runId}; personas: ${group?.id === 'all' ? 'all' : group?.label || ''}.`,
+      predictions: benchPredictions,
+    });
+    const name = submissionFileName(sub);
+    downloadTextFile(`${JSON.stringify(sub, null, 2)}\n`, name);
+    setBenchFile(name);
+  };
+
   if (!runs.length) return null;
 
   const thumbUrl = (key, label) => resolve?.get(key) || resolve?.get(label) || (/^(https?:)?\//.test(key) ? key : null);
@@ -148,7 +172,23 @@ export default function SiliconAgreementCard({ projectId, projectName = '', ques
             onClick={() => downloadZip(`${(projectName || 'survey').replace(/[^\w.-]+/g, '_')}_silicon_agreement.zip`, allGroupsFiles)}>
             CSV
           </Button>
+          {tasks.length > 0 && (
+            <Tooltip title={L('Download this run as an SP-Bench submission for the tasks this project published', '把这次运行导出为 SP-Bench 提交文件（针对本项目已发布的任务）')}>
+              <span>
+                <Button size="small" startIcon={<Leaderboard />} disabled={!Object.keys(benchPredictions).length} onClick={downloadBenchSubmission}>
+                  SP-Bench
+                </Button>
+              </span>
+            </Tooltip>
+          )}
         </Stack>
+        {benchFile && (
+          <Alert severity="success" onClose={() => setBenchFile('')} sx={{ mb: 1.5 }}>
+            {L(`Saved ${benchFile}. To put it on the leaderboard, add the file to `, `已保存 ${benchFile}。要上榜，把这个文件添加到 `)}
+            <a href={`${SUBMISSIONS_NEW_FILE_URL}?filename=${encodeURIComponent(benchFile)}`} target="_blank" rel="noopener noreferrer">public/bench/submissions</a>
+            {L(' by pull request and list it in index.json.', '（通过 pull request），并在 index.json 里加上文件名。')}
+          </Alert>
+        )}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {L(
             `Compares ${group?.rows?.length ?? 0} silicon answers with the ${humanRows?.length || 0} human submissions in the current filter. Computed by the platform, not by a model. Silicon samples help pretest a survey; they do not replace people.`,

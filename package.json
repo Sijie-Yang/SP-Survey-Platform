@@ -64,7 +64,7 @@
     "catalog:check": "node scripts/sync-harness-model-catalog.mjs --check",
     "schema:sync": "node scripts/sync-platform-schema.mjs",
     "schema:check": "node scripts/sync-platform-schema.mjs --check",
-    "test:bench": "node --test worker-lib/bench/scoring.test.mjs",
+    "test:bench": "node --test worker-lib/bench/scoring.test.mjs worker-lib/bench/humanTrack.test.mjs",
     "test:media-pipeline": "node scripts/test-media-set-category.mjs",
     "sql:check": "node scripts/check-sql-idempotency.mjs",
     "research:filter": "python3 scripts/filter-scopus-coarse.py --csv research/scopus/exports/2026-07-12.csv --out research/scopus/shortlists/2026-07-12_library_coarse.json --also public/research/scopus-shortlist.json",

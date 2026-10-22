@@ -173,3 +173,31 @@ export async function reviewBenchRun(runId, action, notes, publish) {
 export async function getBenchRunResults(runId) {
   return request(`/api/bench/runs/${encodeURIComponent(runId)}/results`);
 }
+
+// ── Human-agreement track (public, no account) ──────────────────────────────
+
+export async function getHumanTasks() {
+  const res = await request('/api/bench/human/tasks', { auth: false });
+  return res.tasks || [];
+}
+
+/**
+ * Leaderboard entries are JSON files in public/bench/submissions/, added by
+ * pull request; index.json lists them. A file that fails to load is skipped.
+ */
+export async function getHumanSubmissions() {
+  const base = `${process.env.PUBLIC_URL || ''}/bench/submissions`;
+  const res = await fetch(`${base}/index.json`, { cache: 'no-cache' });
+  if (!res.ok) return [];
+  const index = await res.json();
+  const files = Array.isArray(index?.submissions) ? index.submissions : [];
+  const loaded = await Promise.all(files.map(async (name) => {
+    try {
+      const r = await fetch(`${base}/${encodeURIComponent(name)}`);
+      return r.ok ? { ...(await r.json()), file: name } : null;
+    } catch {
+      return null;
+    }
+  }));
+  return loaded.filter(Boolean);
+}

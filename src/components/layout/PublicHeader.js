@@ -53,7 +53,7 @@ export default function PublicHeader({
   useEffect(() => {
     let cancelled = false;
     getBenchPublicStatus().then(res => {
-      if (!cancelled) setBenchEnabled(!!res.enabled);
+      if (!cancelled) setBenchEnabled(!!res.enabled || Number(res.human_tasks) > 0);
     }).catch(() => {
       if (!cancelled) setBenchEnabled(false);
     });

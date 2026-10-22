@@ -57,6 +57,7 @@ import FigureDownloadButton from './FigureDownloadButton';
 import { figureSvgFiles, figureZipFiles, figuresForSurvey } from '../../lib/journalFigures';
 import { downloadZip } from '../../lib/zipDownload';
 import SiliconAgreementCard from './SiliconAgreementCard';
+import SpBenchTaskCard from './SpBenchTaskCard';
 import CitePlatformButton from './CitePlatformButton';
 import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
 import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
@@ -3703,7 +3704,15 @@ export default function ResultsAnalysis({
           humanRows={filteredResponses}
           language={language}
           numberByName={answerableNumberByName}
+          benchTasks={currentProject?.metadata?.spBenchTasks}
           onResult={setSiliconAgreementFiles} />}
+      {view === 'overview' && dataSource === 'human' && !adminMode && !siteConverted && filteredResponses.length > 0 && <SpBenchTaskCard
+          project={currentProject}
+          questions={answerableQuestions}
+          humanRows={filteredResponses}
+          language={language}
+          numberByName={answerableNumberByName}
+          onProjectUpdated={onProjectUpdated} />}
       {view === 'overview' && savedReport && <Box sx={{
             mb: 3
           }}>

@@ -39,3 +39,25 @@ test('compares the latest run with the human answers and hands CSVs to the expor
   expect(csv).toMatch(/persona:a/);
   expect(csv).toMatch(/,all\n|,all$/m);
 });
+
+jest.mock('../../lib/methodsExport', () => ({ downloadTextFile: jest.fn() }));
+
+test('a run can be saved as an SP-Bench submission for the published tasks', async () => {
+  const { downloadTextFile } = require('../../lib/methodsExport');
+  const { buildHumanTask } = require('../../lib/benchHumanTrack');
+  const { fireEvent } = require('@testing-library/react');
+  const task = buildHumanTask({ project: { id: 'abcd1234-x', name: 'S' }, question: questions.find((q) => q.name === 'safe'), humanRows: human });
+  listSiliconRuns.mockResolvedValue({ success: true, runs: [{ id: 'r1', model: 'qwen-vl', status: 'completed', progress_valid: 10 }] });
+  listSiliconResponses.mockResolvedValue({ success: true, responses: syntheticResponses(20, { config, seed: 3 }) });
+  render(<SiliconAgreementCard projectId="p" questions={questions} humanRows={human} language="en" benchTasks={{ [task.task_id]: task }} />);
+  const button = await screen.findByRole('button', { name: 'SP-Bench' });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  const [content, name] = downloadTextFile.mock.calls.at(-1);
+  const sub = JSON.parse(content);
+  expect(sub).toMatchObject({ model: 'qwen-vl', kind: 'silicon' });
+  expect(Object.keys(sub.predictions)).toEqual(['abcd1234-safe']);
+  expect(Object.keys(sub.predictions['abcd1234-safe']).length).toBeGreaterThanOrEqual(3);
+  expect(name).toMatch(/-qwen-vl\.json$/);
+  expect(screen.getByText(/To put it on the leaderboard/)).toBeInTheDocument();
+});
