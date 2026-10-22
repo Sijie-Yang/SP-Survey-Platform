@@ -73,6 +73,7 @@ import SurveyPreview from './SurveyPreview';
 import ConfirmDialog from '../layout/ConfirmDialog';
 import AiAssistantPanel from './AiAssistantPanel';
 import SpSchemePanel from './SpSchemePanel';
+import PhonePreviewButton from './PhonePreviewButton';
 import SurveyThemePreviewPanel from '../SurveyThemePreviewPanel';
 import useSurveyAssistant from '../../hooks/useSurveyAssistant';
 import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
@@ -566,6 +567,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
             <Button size="small" variant="contained" startIcon={<Tune />} onClick={openLayoutStudio}>{t.builderLayoutStudio}</Button>
             <Button size="small" variant="outlined" startIcon={<Preview />} onClick={openPreview}>{t.builderPreview}</Button>
+            <PhonePreviewButton project={currentProject} language={language} />
           </Box>
         }
       >
