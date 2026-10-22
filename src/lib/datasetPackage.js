@@ -9,6 +9,7 @@ import { buildResponsesWideCsv } from './responsesWideExport.js';
 import { rowsToCsv, exportDateStamp } from './csvUtil.js';
 import { downloadZip } from './zipDownload.js';
 import { normalizeBooleanAnswer } from './responseAnswerUnits.js';
+import { figureSvgFiles, figuresForSurvey } from './journalFigures.js';
 
 export const DATASET_LICENSES = {
   'CC-BY-4.0': {
@@ -441,6 +442,7 @@ export function buildDatasetReadme(meta, {
       '| `data/data_dictionary.json` | What every column means, per question |',
       '| `data/data_quality.csv` | Quality flags per submission |',
       '| `data/methods.txt` | Auto-generated methods paragraph |',
+      '| `data/figures/` | Journal-style figures (SVG) with suggested captions |',
     ]),
     '| `data/README.txt` | Column-level layout of the data folder |',
     ...(includeSurvey ? ['| `survey/survey.json` | The survey definition as run; import it into SP-Survey to reproduce the study |'] : []),
@@ -536,6 +538,7 @@ export function buildDatasetPackageFiles({
     : buildResultsExportBundle({
       project, surveyConfig, questions: keptQuestions, filteredResponses: rows, dateFilteredResponses: broader,
       filters, excludeFlagged, wideCsv, report, aiAnalysisFiles,
+      figureFiles: figureSvgFiles(figuresForSurvey(keptQuestions, rows), { projectName: meta.title || project?.name || '' }),
     });
 
   const stimuli = stimulusRows || collectStimuli(keptQuestions, rows, surveyConfig);

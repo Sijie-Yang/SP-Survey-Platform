@@ -53,6 +53,9 @@ import { aiAnalysisExportFiles, buildAnalysisRecords, evaluateAnalysis, readSave
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { saveQuestionAnalysis } from '../../lib/aiQuestionAnalysisStore';
 import DatasetPackageDialog from './DatasetPackageDialog';
+import FigureDownloadButton from './FigureDownloadButton';
+import { figureSvgFiles, figureZipFiles, figuresForSurvey } from '../../lib/journalFigures';
+import { downloadZip } from '../../lib/zipDownload';
 import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
 import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
@@ -2576,6 +2579,7 @@ export function QuestionCard({
             {t.resultsExplainQuestion}
           </Button>}
 
+        {canExport && !unanalysedType && <FigureDownloadButton question={question} responses={exportResponses || allResponses} questionNumber={questionNumber} language={language} onError={setExportError} />}
         {canExport && <Button size="small" variant="outlined" startIcon={<Download />} sx={{
         mr: 1,
         flexShrink: 0
@@ -3276,6 +3280,7 @@ export default function ResultsAnalysis({
       const aiAnalysisFiles = await buildAiAnalysisFiles();
       downloadResultsExportZip({
         aiAnalysisFiles,
+        figureFiles: figureSvgFiles(figuresForSurvey(allQuestions, filteredResponses, { numberByName: answerableNumberByName }), { projectName: currentProject?.name || '' }),
         project: currentProject,
         surveyConfig,
         questions: allQuestions,
@@ -3286,6 +3291,17 @@ export default function ResultsAnalysis({
         report: savedReport || null,
         filters: exportFilters()
       });
+    })
+  }, {
+    id: 'figures',
+    label: uiPair(language, 'All figures (SVG + PNG, ZIP)', '全部论文图（SVG + PNG，ZIP）'),
+    disabled: exportBlocked || !surveyConfig,
+    onClick: () => runExport(async () => {
+      const figures = figuresForSurvey(allQuestions, filteredResponses, { numberByName: answerableNumberByName });
+      if (!figures.length) throw new Error(uiPair(language, 'No question in this survey has a figure to export.', '这份问卷没有可以导出的图。'));
+      const folder = `figures_${currentProject?.id || 'survey'}`;
+      const files = await figureZipFiles(figures, { png: true, dir: folder, projectName: currentProject?.name || '' });
+      downloadZip(`${folder}.zip`, files);
     })
   }, datasetItem];
   return <ImageResolverContext.Provider value={imageNameToUrl}>

@@ -123,3 +123,15 @@ test('a yes/no reuse question can limit the package to those who agreed', () => 
   expect(JSON.parse(files.find((f) => f.path === 'data/responses_raw.json').content)).toHaveLength(4);
   expect(files.find((f) => f.path === 'README.md').content).toMatch(/answered yes to "May your anonymised answers be reused\?" are included \(4 of 8\)/);
 });
+
+test('the package carries journal figures with captions', () => {
+  const files = buildDatasetPackageFiles({
+    meta, project: { id: 'p1', name: 'Street perception' }, surveyConfig: config, questions,
+    filteredResponses: responses, dateFilteredResponses: responses, filters: {}, excludeFlagged: false, releaseDate: '2026-10-22',
+  });
+  const paths = files.map((f) => f.path);
+  expect(paths).toContain('data/figures/safe__trueskill.svg');
+  expect(paths).toContain('data/figures/captions.md');
+  expect(paths.some((p) => p.startsWith('data/figures/comment'))).toBe(false);
+  expect(files.find((f) => f.path === 'data/README.txt').content).toMatch(/figures\/\{name\}__\*\.svg/);
+});

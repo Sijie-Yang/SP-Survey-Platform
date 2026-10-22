@@ -2466,6 +2466,7 @@ export function buildResultsExportBundle({
   wideCsv,
   report = null,
   aiAnalysisFiles = [],
+  figureFiles = [],
 }) {
   const answerable = (questions || []).filter((q) => q?.name && !isDisplayOnly(q));
   const questionFiles = [];
@@ -2531,6 +2532,10 @@ export function buildResultsExportBundle({
   if (aiAnalysisFiles?.length) {
     rootFiles[0] = { path: 'README.txt', content: `${readme}${AI_ANALYSIS_README_LINES.join('\n')}\n` };
     rootFiles.push(...aiAnalysisFiles);
+  }
+  if (figureFiles?.length) {
+    rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nfigures/{name}__*.svg    Journal-style figure per question (vector); captions in figures/captions.md\n` };
+    rootFiles.push(...figureFiles);
   }
   return rootFiles;
 }
