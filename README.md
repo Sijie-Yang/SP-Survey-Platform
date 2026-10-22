@@ -140,6 +140,12 @@ For the multi-user platform's version management and reliable submission upgrade
 
 ---
 
+## Contributing
+
+Bug reports, research templates and code are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); templates follow [docs/template-contributing.md](docs/template-contributing.md), releases [docs/RELEASING.md](docs/RELEASING.md), and the reasons behind the main design choices are in [docs/adr/](docs/adr/README.md). Changes for researchers are listed in [CHANGELOG.md](CHANGELOG.md).
+
+---
+
 ## License
 
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — Urban Analytics Lab, NUS

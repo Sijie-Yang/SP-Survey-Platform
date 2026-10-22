@@ -1,0 +1,33 @@
+name: Bug report
+description: Something on sp-survey.org or a self-hosted copy does not work
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw. Screenshots help.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Page or feature
+      placeholder: e.g. Results → Export → dataset package
+  - type: dropdown
+    id: instance
+    attributes:
+      label: Instance
+      options: [sp-survey.org, Self-hosted]
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      placeholder: e.g. Safari 18, iPhone 15
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed participant data, emails and API keys from this report
+          required: true

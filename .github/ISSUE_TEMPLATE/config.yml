@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://sp-survey.org/docs
+    about: How-to guides, SP-Scheme, SP-Bench and the MCP/SDK reference.
+  - name: Suggest something from the website
+    url: https://sp-survey.org
+    about: The homepage has a suggestion box if you do not use GitHub.

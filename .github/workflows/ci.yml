@@ -31,6 +31,9 @@ jobs:
       - name: Agent runtime, BYOK, and Silicon tests
         run: npm run test:agent
 
+      - name: SP-Bench scoring tests
+        run: npm run test:bench
+
       - name: Admin results authorization tests
         run: node --test worker-lib/adminResults.test.mjs worker-lib/surveyResponsePages.test.mjs worker-lib/agent/skillContracts.test.mjs worker-lib/agent/skillHtmlValidate.test.mjs
 

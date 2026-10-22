@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest something the platform should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: study
+    attributes:
+      label: The study you are running
+      description: What you are measuring and with whom. Concrete studies make better features.
+    validations:
+      required: true
+  - type: textarea
+    id: need
+    attributes:
+      label: What you need
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Papers or tools that do this
+      description: DOIs or links, if any.
