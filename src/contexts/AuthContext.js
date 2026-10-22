@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase, signIn, signUp, signOut } from '../lib/supabase';
+import { supabase, signIn, signUp, signOut, requestPasswordReset, resendSignupConfirmation, updatePassword } from '../lib/supabase';
 import { parsePreviewSessionMessage } from '../lib/previewSession';
 
 const AuthContext = createContext(null);
@@ -68,6 +68,17 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  // Password reset and confirmation e-mails; each throws the service's error.
+  const callAuth = async (fn, ...args) => {
+    if (!supabase) throw new Error('Supabase is not configured for this local build.');
+    const { data, error } = (await fn(...args)) || {};
+    if (error) throw error;
+    return data;
+  };
+  const sendPasswordReset = (email) => callAuth(requestPasswordReset, email);
+  const resendConfirmation = (email) => callAuth(resendSignupConfirmation, email);
+  const setNewPassword = (password) => callAuth(updatePassword, password);
+
   const logout = async () => {
     await signOut();
     setUser(null);
@@ -77,7 +88,7 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !supabase || !!user;
 
   return (
-    <AuthContext.Provider value={{ user, loading, isAuthenticated, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, isAuthenticated, login, register, logout, sendPasswordReset, resendConfirmation, setNewPassword }}>
       {children}
     </AuthContext.Provider>
   );

@@ -26,6 +26,7 @@ const SpBenchPage = lazy(() => import('./pages/SpBenchPage'));
 const NewsPage = lazy(() => import('./pages/NewsPage'));
 const ContributePage = lazy(() => import('./pages/ContributePage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -144,6 +145,7 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/skills" element={<ProtectedSkillLibrary />} />
                 <Route path="/skill-editor" element={<ProtectedSkillEditor />} />
                 <Route path="/skill-editor/:id" element={<ProtectedSkillEditor />} />
+                <Route path="*" element={<NotFoundPage />} />
               </>
 ));
 
