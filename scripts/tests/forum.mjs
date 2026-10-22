@@ -113,4 +113,15 @@ await db.exec('SET ROLE authenticated');
 assert.equal((await db.query('SELECT id FROM forum_threads')).rows.length, 2);
 await db.exec('RESET ROLE');
 
+// Only admins delete for good: a reply, then a whole thread with its replies.
+await as(alice);
+await fails(`SELECT forum_moderate('post', $1, 'purge')`, [p2], /platform team/);
+await as(admin);
+await one(`SELECT forum_moderate('post', $1, 'purge')`, [p2]);
+assert.equal((await one('SELECT count(*)::int AS n FROM forum_posts WHERE id = $1', [p2])).n, 0);
+assert.equal((await one('SELECT reply_count FROM forum_threads WHERE id = $1', [t1])).reply_count, 1);
+await one(`SELECT forum_moderate('thread', $1, 'purge')`, [t1]);
+assert.equal((await one('SELECT count(*)::int AS n FROM forum_threads WHERE id = $1', [t1])).n, 0);
+assert.equal((await one('SELECT count(*)::int AS n FROM forum_posts WHERE thread_id = $1', [t1])).n, 0);
+
 console.log('forum.sql OK');

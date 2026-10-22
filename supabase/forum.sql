@@ -283,7 +283,8 @@ $$;
 
 -- p_action: 'close' | 'reopen' (thread author or admin),
 --           'delete' (author or admin; hides the thread or reply),
---           'hide' | 'restore' | 'pin' | 'unpin' (admin only).
+--           'hide' | 'restore' | 'pin' | 'unpin' (admin only),
+--           'purge' (admin only; removes the row for good, a thread with its replies).
 CREATE OR REPLACE FUNCTION public.forum_moderate(p_kind text, p_id uuid, p_action text)
 RETURNS void
 LANGUAGE plpgsql
@@ -315,7 +316,7 @@ BEGIN
     IF v_author IS DISTINCT FROM v_uid AND NOT v_admin THEN
       RAISE EXCEPTION 'Only the author or the platform team can do this' USING ERRCODE = '42501';
     END IF;
-  ELSIF p_action IN ('hide', 'restore', 'pin', 'unpin') THEN
+  ELSIF p_action IN ('hide', 'restore', 'pin', 'unpin', 'purge') THEN
     IF NOT v_admin THEN
       RAISE EXCEPTION 'Only the platform team can do this' USING ERRCODE = '42501';
     END IF;
@@ -325,6 +326,16 @@ BEGIN
 
   IF p_action IN ('close', 'reopen', 'pin', 'unpin') AND p_kind <> 'thread' THEN
     RAISE EXCEPTION 'Only threads can be closed or pinned' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_action = 'purge' THEN
+    IF p_kind = 'thread' THEN
+      DELETE FROM public.forum_threads WHERE id = p_id;
+    ELSE
+      DELETE FROM public.forum_posts WHERE id = p_id;
+      PERFORM public.forum_refresh_thread(v_thread);
+    END IF;
+    RETURN;
   END IF;
 
   IF p_kind = 'thread' THEN

@@ -337,6 +337,15 @@ function ForumThread({ id, L, language, user, isAdmin }) {
       list.push(thread.hidden
         ? { key: 'restore', label: L('Restore', '恢复显示'), run: run(() => moderateForumItem('thread', thread.id, 'restore')) }
         : { key: 'hide', label: L('Hide (moderation)', '隐藏（管理）'), danger: true, run: run(() => moderateForumItem('thread', thread.id, 'hide')) });
+      list.push({
+        key: 'purge', label: L('Delete permanently', '彻底删除'), danger: true,
+        run: run(async () => {
+          // eslint-disable-next-line no-alert
+          if (!window.confirm(L('Delete this thread and all its replies for good? This cannot be undone.', '彻底删除这个帖子和全部回复？删除后无法恢复。'))) return;
+          await moderateForumItem('thread', thread.id, 'purge');
+          navigate('/forum');
+        }),
+      });
     } else if (mine(thread.authorId)) {
       list.push({
         key: 'delete', label: L('Delete thread', '删除帖子'), danger: true,
@@ -359,6 +368,14 @@ function ForumThread({ id, L, language, user, isAdmin }) {
       list.push(post.hidden
         ? { key: 'restore', label: L('Restore', '恢复显示'), run: run(() => moderateForumItem('post', post.id, 'restore')) }
         : { key: 'hide', label: L('Hide (moderation)', '隐藏（管理）'), danger: true, run: run(() => moderateForumItem('post', post.id, 'hide')) });
+      list.push({
+        key: 'purge', label: L('Delete permanently', '彻底删除'), danger: true,
+        run: run(async () => {
+          // eslint-disable-next-line no-alert
+          if (!window.confirm(L('Delete this reply for good? This cannot be undone.', '彻底删除这条回复？删除后无法恢复。'))) return;
+          await moderateForumItem('post', post.id, 'purge');
+        }),
+      });
     } else if (mine(post.authorId)) {
       list.push({ key: 'delete', label: L('Delete', '删除'), danger: true, run: run(() => moderateForumItem('post', post.id, 'delete')) });
     }
