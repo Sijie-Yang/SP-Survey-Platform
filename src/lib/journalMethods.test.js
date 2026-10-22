@@ -37,6 +37,7 @@ test('CEUS and LUP: Elsevier citations, numbered headings, required statements',
   expect(lup).toMatch(/## 2\.4\. Ethics/);
   expect(lup).toMatch(/informed consent/);
   expect(lup).toMatch(/https:\/\/doi\.org\/10\.5281\/zenodo\.123/);
+  expect(lup).toMatch(/Further questions used single-choice, drop-down, Likert-grid and open-text formats/);
   expect(lup).toMatch(/Of these, 4 flagged submissions were excluded, leaving 36/);
   expect(lup).toMatch(/In three pairwise-choice tasks \("Which place looks safer\?", "Which place looks livelier\?" and "Which place looks more beautiful\?"\)/);
   expect(lup).toMatch(/Ten further items \("BFI 1", "BFI 2", "BFI 3" and 7 others\)/);

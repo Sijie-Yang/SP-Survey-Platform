@@ -24,6 +24,12 @@ export const JOURNAL_STYLES = Object.freeze({
   generic: { id: 'generic', label: 'Generic (APA-style citations)', short: 'Generic', publisher: 'apa', british: false, numbered: false, statements: ['data'] },
 });
 
+const TYPE_WORDS = {
+  radiogroup: 'single-choice', checkbox: 'multiple-choice', dropdown: 'drop-down', matrix: 'Likert-grid', comment: 'open-text',
+  text: 'short-text', number: 'numeric', boolean: 'yes/no', ranking: 'ranking', pointallocation: 'point-allocation',
+  imagecheckbox: 'image multiple-choice', imageranking: 'image-ranking', imagematrix: 'image rating-grid', imageboolean: 'image yes/no',
+  imageannotation: 'image-annotation', imagepointallocation: 'image point-allocation', skillquestion: 'custom interactive',
+};
 const CONSENT_PATTERN = /consent|agree|同意|知情/i;
 const DISPLAY_TYPES = new Set(['html', 'expression', 'image', 'mediadisplay']);
 const PAIRWISE_TYPES = new Set(['imagepicker', 'mediapicker']);
@@ -189,7 +195,10 @@ export function renderJournalMethods(facts, styleId = 'generic', { doi = '' } = 
         : `${capitalize(numberWord(g.length))} further items (${quoted(g)}) were answered on ${scale}.`);
     }
   }
-  if (f.otherTypes.length) instrument.push(`Further questions recorded ${listText(f.otherTypes.map((t) => t.replace(/group$/, ' group')))} answers; the full wording is given in the supplementary survey definition.`);
+  if (f.otherTypes.length) {
+    const labels = [...new Set(f.otherTypes.map((t) => TYPE_WORDS[t] || t))];
+    instrument.push(`Further questions used ${listText(labels)} formats; the full wording is given in the supplementary survey definition.`);
+  }
   if (f.nStimuli) {
     instrument.push(`In total, ${plural(f.nStimuli, 'distinct image')} ${f.nStimuli === 1 ? 'was' : 'were'} shown${f.exposure ? `, each judged ${f.exposure.min === f.exposure.max ? f.exposure.min : `${f.exposure.min}–${f.exposure.max}`} times (median ${f.exposure.median})` : ''}. [Describe where the images come from, how they were selected, and their licence.]`);
   } else if (f.imageQuestions) {
