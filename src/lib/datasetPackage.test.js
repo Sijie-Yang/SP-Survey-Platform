@@ -2,7 +2,7 @@ import { syntheticResponses, syntheticSurveyConfig } from './__fixtures__/synthe
 import { flattenQuestions } from './quality';
 import {
   buildCitationCff, buildDatasetPackageFiles, collectStimuli, createAnonymizer, fetchStimulusFiles,
-  formatAuthorLines, freeTextQuestionNames, parseAuthorLines, readDatasetMeta,
+  formatAuthorLines, freeTextQuestionNames, parseAuthorLines, readDatasetMeta, reuseConsentQuestions, answeredYes,
 } from './datasetPackage';
 
 const config = syntheticSurveyConfig({ images: 12 });
@@ -107,4 +107,19 @@ test('stimuli are collected once each with counts, and fetched files carry a has
 
 test('citation without authors still parses as CFF', () => {
   expect(buildCitationCff({ title: 'T', license: 'CC0-1.0', authors: [] }, { releaseDate: '2026-01-01' })).toMatch(/family-names: "Anonymous"/);
+});
+
+test('a yes/no reuse question can limit the package to those who agreed', () => {
+  const share = { name: 'share', type: 'boolean', title: 'May your anonymised answers be reused?' };
+  const qs = [...questions, share, { name: 'gate', type: 'boolean', isRequired: true }];
+  expect(reuseConsentQuestions(qs).map((q) => q.name)).toContain('share');
+  expect(reuseConsentQuestions(qs).map((q) => q.name)).not.toContain('gate');
+  const rows = responses.map((r, i) => ({ ...r, responses: { ...r.responses, share: i % 2 === 0 } }));
+  expect(answeredYes(rows[0], 'share')).toBe(true);
+  const files = buildDatasetPackageFiles({
+    meta: { ...meta, onlyAgreedTo: 'share' }, project: { id: 'p1' }, surveyConfig: config, questions: qs,
+    filteredResponses: rows, dateFilteredResponses: rows, filters: {}, excludeFlagged: false, releaseDate: '2026-10-22',
+  });
+  expect(JSON.parse(files.find((f) => f.path === 'data/responses_raw.json').content)).toHaveLength(4);
+  expect(files.find((f) => f.path === 'README.md').content).toMatch(/answered yes to "May your anonymised answers be reused\?" are included \(4 of 8\)/);
 });

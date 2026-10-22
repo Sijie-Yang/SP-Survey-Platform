@@ -26,3 +26,15 @@ test('download stays off until there is a title, an author and data', () => {
   render(<DatasetPackageDialog open onClose={() => {}} onBuild={jest.fn()} project={{ id: 'p', name: '' }} language="en" nSubmissions={3} />);
   expect(screen.getByRole('button', { name: 'Download package' })).toBeDisabled();
 });
+
+test('a reuse question narrows the package and shows how many agreed', async () => {
+  const onBuild = jest.fn(async () => 9);
+  render(<DatasetPackageDialog open onClose={() => {}} onBuild={onBuild} project={project} language="en" nSubmissions={10}
+    reuseQuestions={[{ name: 'share', title: 'May we reuse your answers?', yes: 6 }]} />);
+  fireEvent.mouseDown(screen.getByLabelText('Which submissions'));
+  fireEvent.click(await screen.findByText('Only those answering yes to: May we reuse your answers?'));
+  expect(screen.getByText('6 of 10 answered yes.')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Download package' }));
+  await waitFor(() => expect(onBuild).toHaveBeenCalled());
+  expect(onBuild.mock.calls[0][0].onlyAgreedTo).toBe('share');
+});

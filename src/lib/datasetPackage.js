@@ -8,6 +8,7 @@ import { buildResultsExportBundle, buildSiteResultsExportFiles, buildQuestionLon
 import { buildResponsesWideCsv } from './responsesWideExport.js';
 import { rowsToCsv, exportDateStamp } from './csvUtil.js';
 import { downloadZip } from './zipDownload.js';
+import { normalizeBooleanAnswer } from './responseAnswerUnits.js';
 
 export const DATASET_LICENSES = {
   'CC-BY-4.0': {
@@ -41,6 +42,9 @@ export const DEFAULT_DATASET_META = {
   anonymize: { pseudonymizeIds: true, dateOnly: true, dropFreeText: true },
   includeSurvey: true,
   includeImages: false,
+  // Name of a yes/no question (e.g. "may your answers be reused?"): only
+  // submissions answering yes are packed. Empty = every submission.
+  onlyAgreedTo: '',
 };
 
 /** Saved form values merged over the defaults (older saves may lack fields). */
@@ -98,6 +102,20 @@ export function freeTextQuestionNames(questions) {
     || q.type === 'multipletext'
     || (q.type === 'text' && !NON_FREE_TEXT_INPUTS.has(q.inputType))
   )).map((q) => q.name);
+}
+
+const questionTitle = (q) => (typeof q.title === 'string' ? q.title : (q.title?.default || q.title?.en || '')) || q.name;
+
+/** Optional yes/no questions that can gate reuse (a required consent gate cannot). */
+export function reuseConsentQuestions(questions) {
+  return (questions || [])
+    .filter((q) => q?.name && q.type === 'boolean' && !q.isRequired)
+    .map((q) => ({ name: q.name, title: questionTitle(q) }));
+}
+
+export function answeredYes(row, name) {
+  const v = row?.responses?.[name] ?? row?.raw_responses?.[name];
+  return normalizeBooleanAnswer(v) === 1;
 }
 
 // Device and recruitment fields that can identify a person.
@@ -379,7 +397,7 @@ export function buildDatapackageJson(meta, { files, wideCsv, questions = [], rel
 
 export function buildDatasetReadme(meta, {
   project, nSubmissions, nParticipants, dateRange, questions = [], siteConverted = false,
-  freeTextDropped = [], stimuli = { total: 0, included: 0 }, includeSurvey = true, releaseDate = exportDateStamp(),
+  freeTextDropped = [], reuseFilter = null, stimuli = { total: 0, included: 0 }, includeSurvey = true, releaseDate = exportDateStamp(),
 }) {
   const lic = DATASET_LICENSES[meta.license] || DATASET_LICENSES[DEFAULT_DATASET_META.license];
   const authors = (meta.authors || []).map((a) => `${a.name}${a.orcid ? ` (ORCID ${a.orcid})` : ''}${a.affiliation ? `, ${a.affiliation}` : ''}`);
@@ -443,6 +461,7 @@ export function buildDatasetReadme(meta, {
         ? `- Typed free-text answers were removed: ${freeTextDropped.join(', ')}.`
         : '- No free-text questions were found, so nothing was removed.')
       : '- Free-text answers are included as typed.',
+    ...(reuseFilter ? [`- Only submissions that answered yes to "${reuseFilter.title}" are included (${reuseFilter.kept} of ${reuseFilter.total}).`] : []),
     ...(siteConverted ? ['- This survey is a researcher-built page; anything the page itself stored is kept as recorded under `__sp_page_state` / `__sp_requests`. Review it before publishing.'] : []),
     '',
     '## Stimuli',
@@ -500,11 +519,15 @@ export function buildDatasetPackageFiles({
   stimulusFiles = [],
   releaseDate = exportDateStamp(),
 }) {
+  const gate = meta.onlyAgreedTo ? reuseConsentQuestions(questions).find((q) => q.name === meta.onlyAgreedTo) : null;
+  const agreed = (list) => (gate ? (list || []).filter((r) => answeredYes(r, gate.name)) : (list || []));
+  const selected = agreed(filteredResponses);
+  const reuseFilter = gate ? { title: gate.title, kept: selected.length, total: (filteredResponses || []).length } : null;
   const anonymize = createAnonymizer(meta.anonymize, questions);
-  const rows = (filteredResponses || []).map(anonymize);
+  const rows = selected.map(anonymize);
   // Same pseudonyms for the broader (date-only filtered) set used by data_quality.csv.
-  const included = new Map((filteredResponses || []).map((r, i) => [r, rows[i]]));
-  const broader = (dateFilteredResponses || filteredResponses || []).map((r) => included.get(r) || anonymize(r));
+  const included = new Map(selected.map((r, i) => [r, rows[i]]));
+  const broader = agreed(dateFilteredResponses || filteredResponses).map((r) => included.get(r) || anonymize(r));
   const keptQuestions = (questions || []).filter((q) => !anonymize.freeTextQuestions.includes(q.name));
   const wideCsv = buildResponsesWideCsv(rows, keptQuestions, surveyConfig);
 
@@ -534,6 +557,7 @@ export function buildDatasetPackageFiles({
       questions: keptQuestions,
       siteConverted,
       freeTextDropped: anonymize.freeTextQuestions,
+      reuseFilter,
       stimuli: { total: stimuli.length, included: stimuli.filter((s) => s.included).length },
       includeSurvey: !!survey,
       releaseDate,

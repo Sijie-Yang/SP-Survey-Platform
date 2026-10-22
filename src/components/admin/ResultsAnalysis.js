@@ -53,7 +53,7 @@ import { aiAnalysisExportFiles, buildAnalysisRecords, evaluateAnalysis, readSave
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { saveQuestionAnalysis } from '../../lib/aiQuestionAnalysisStore';
 import DatasetPackageDialog from './DatasetPackageDialog';
-import { collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames } from '../../lib/datasetPackage';
+import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
 import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
 
@@ -3334,7 +3334,7 @@ export default function ResultsAnalysis({
         }}>
 
 
-      <DatasetPackageDialog open={datasetOpen} onClose={() => setDatasetOpen(false)} onBuild={buildDatasetPackage} project={currentProject} language={language} nSubmissions={filteredResponses.length} siteConverted={siteConverted} freeTextNames={freeTextQuestionNames(allQuestions)} />
+      <DatasetPackageDialog open={datasetOpen} onClose={() => setDatasetOpen(false)} onBuild={buildDatasetPackage} project={currentProject} language={language} nSubmissions={filteredResponses.length} siteConverted={siteConverted} freeTextNames={freeTextQuestionNames(allQuestions)} reuseQuestions={datasetOpen ? reuseConsentQuestions(allQuestions).map(q => ({ ...q, yes: filteredResponses.filter(r => answeredYes(r, q.name)).length })) : []} />
       <ResultsFilterShell open={filtersOpen} onClose={() => setFiltersOpen(false)} t={t} onReset={() => {
             resetFilters();
             setDemographicFilters([]);

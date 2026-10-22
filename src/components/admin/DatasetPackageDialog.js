@@ -14,7 +14,7 @@ import {
  * downloads the ZIP; the caller saves the form with the project.
  */
 export default function DatasetPackageDialog({
-  open, onClose, onBuild, project, language, nSubmissions = 0, siteConverted = false, freeTextNames = [],
+  open, onClose, onBuild, project, language, nSubmissions = 0, siteConverted = false, freeTextNames = [], reuseQuestions = [],
 }) {
   const L = (en, zh) => uiPair(language, en, zh);
   const [meta, setMeta] = useState(() => readDatasetMeta(project));
@@ -39,7 +39,9 @@ export default function DatasetPackageDialog({
   const set = (patch) => setMeta((m) => ({ ...m, ...patch }));
   const setAnon = (patch) => setMeta((m) => ({ ...m, anonymize: { ...m.anonymize, ...patch } }));
   const authors = parseAuthorLines(authorText);
-  const canBuild = !busy && meta.title.trim() && authors.length && nSubmissions > 0;
+  const gate = reuseQuestions.find((q) => q.name === meta.onlyAgreedTo) || null;
+  const nPacked = gate ? gate.yes : nSubmissions;
+  const canBuild = !busy && meta.title.trim() && authors.length && nPacked > 0;
 
   const build = async () => {
     setBusy(true);
@@ -108,6 +110,23 @@ export default function DatasetPackageDialog({
               label={freeTextNames.length
                 ? L(`Remove typed free-text answers (${freeTextNames.join(', ')})`, `去掉文字填空题的回答（${freeTextNames.join('、')}）`)
                 : L('Remove typed free-text answers (none in this survey)', '去掉文字填空题的回答（本问卷没有）')} />
+            {reuseQuestions.length ? (
+              <TextField select fullWidth size="small" sx={{ mt: 1.5 }}
+                label={L('Which submissions', '包含哪些回答')}
+                value={gate ? gate.name : ''}
+                onChange={(e) => set({ onlyAgreedTo: e.target.value })}
+                helperText={gate ? L(`${gate.yes} of ${nSubmissions} answered yes.`, `${nSubmissions} 份里有 ${gate.yes} 份回答「是」。`) : ''}>
+                <MenuItem value="">{L(`All ${nSubmissions} submissions`, `全部 ${nSubmissions} 份回答`)}</MenuItem>
+                {reuseQuestions.map((q) => (
+                  <MenuItem key={q.name} value={q.name}>{L(`Only those answering yes to: ${q.title}`, `只要对这题回答「是」的：${q.title}`)}</MenuItem>
+                ))}
+              </TextField>
+            ) : (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+                {L('To publish only the people who agreed to reuse, add an optional yes/no question to the survey, e.g. "May your anonymised answers be shared for research and used to train perception models?" It will appear here as a choice.',
+                  '想只公开同意再利用的人？在问卷里加一道非必答的「是/否」题，例如「是否同意你的匿名回答公开用于研究和训练感知模型？」，这里就能按它筛选。')}
+              </Typography>
+            )}
             {siteConverted && <Alert severity="warning" sx={{ mt: 1 }}>
               {L('This survey is an uploaded page. What the page stored itself is kept as recorded; check responses_raw.json before publishing.', '这份问卷是上传的页面，页面自己保存的内容会原样保留。公开前请检查 responses_raw.json。')}
             </Alert>}
