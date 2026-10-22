@@ -57,6 +57,7 @@ import FigureDownloadButton from './FigureDownloadButton';
 import { figureSvgFiles, figureZipFiles, figuresForSurvey } from '../../lib/journalFigures';
 import { downloadZip } from '../../lib/zipDownload';
 import SiliconAgreementCard from './SiliconAgreementCard';
+import CitePlatformButton from './CitePlatformButton';
 import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
 import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
@@ -3311,7 +3312,7 @@ export default function ResultsAnalysis({
     <Box>
       <AdminPageHeader icon={<Assessment />} title={t.resultsTitle} description={t.resultsDescription} />
       {currentProject?.ownResponseSupabase?.enabled && <Alert severity="info" sx={{ mb: 2 }}>{uiPair(language, 'Responses for this project are stored in your Supabase, not on SP-Survey. This page does not copy or analyze them.', '本项目的回答写入你的 Supabase，不在 SP-Survey 上。此页不会复制或分析这些回答。')}</Alert>}
-      <ResultsToolbar refreshAction={<Tooltip title={t.resultsRefresh} placement="top" disableInteractive>
+      <ResultsToolbar citeAction={<CitePlatformButton language={language} />} refreshAction={<Tooltip title={t.resultsRefresh} placement="top" disableInteractive>
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
         </IconButton>

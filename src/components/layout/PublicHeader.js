@@ -221,6 +221,14 @@ export function PublicFooter() {
         }}>
             GitHub
           </Box>
+          {' · '}
+          <Box component={RouterLink} to="/publications" sx={{
+          color: 'primary.main',
+          textDecoration: 'none',
+          fontWeight: 600
+        }}>
+            {t.footerCite || 'Cite'}
+          </Box>
         </Typography>
       </Container>
     </Box>;

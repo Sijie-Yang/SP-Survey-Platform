@@ -64,6 +64,8 @@ import { summarizeVideoMomentsByVideo, aggregateContinuousRatingByVideo } from '
 import { objectsToCsv, rowsToCsv, exportDateStamp } from './csvUtil.js';
 import { downloadZip } from './zipDownload.js';
 import { downloadTextFile, generateMethodsText } from './methodsExport.js';
+import { howToCiteLines, platformBibtex, resultsCitationCff } from './platformCitation.js';
+import { buildSpReport, spReportLines } from './spReport.js';
 import {
   annotationToolLabel,
   inferShapeTool,
@@ -2356,6 +2358,49 @@ export function buildManifest({
   };
 }
 
+function stimulusFileName(source) {
+  const clean = String(source).split(/[?#]/)[0];
+  const name = clean.split('/').filter(Boolean).pop() || clean;
+  try { return decodeURIComponent(name); } catch { return name; }
+}
+
+/** Every stimulus that was shown, with how often and in which questions. */
+export function collectShownStimuli(questions, responses, surveyConfig) {
+  const bySource = new Map();
+  (questions || []).forEach((q) => {
+    let table = null;
+    try { table = buildQuestionLongTable(q, responses, surveyConfig); } catch { table = null; }
+    (table?.rows || []).forEach((row) => {
+      String(row.shown_images || '').split('|').map((x) => x.trim()).filter(Boolean).forEach((source) => {
+        const entry = bySource.get(source) || { source, file_name: stimulusFileName(source), times_shown: 0, questions: new Set() };
+        entry.times_shown += 1;
+        entry.questions.add(q.name);
+        bySource.set(source, entry);
+      });
+    });
+  });
+  return [...bySource.values()]
+    .sort((a, b) => a.source.localeCompare(b.source))
+    .map((e) => ({ ...e, questions: [...e.questions].sort() }));
+}
+
+/** SP-Report checklist for an export, filled from the survey and the data. */
+export function buildExportSpReport({ surveyConfig, questions, filteredResponses, dateFilteredResponses, excludeFlagged, siliconCompared = false, doi = '' }) {
+  const answerable = (questions || []).filter((q) => q?.name && !isDisplayOnly(q));
+  let stimuli = [];
+  try { stimuli = collectShownStimuli(answerable, filteredResponses || [], surveyConfig); } catch { stimuli = []; }
+  return buildSpReport({
+    surveyConfig,
+    responses: filteredResponses || [],
+    allResponses: dateFilteredResponses || filteredResponses || [],
+    excludeFlagged,
+    stimuli,
+    familyOf: exportFamilyForQuestion,
+    siliconCompared,
+    doi,
+  });
+}
+
 export function buildExportReadme({ project, filters, nResponses, questionCount }) {
   const lines = [
     'SP Survey Platform — Results export',
@@ -2367,6 +2412,8 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     `Exported: ${new Date().toISOString()}`,
     `Responses in export: ${nResponses}`,
     `Answerable questions: ${questionCount}`,
+    '',
+    ...howToCiteLines(),
     '',
     'Filters',
     '-------',
@@ -2385,7 +2432,8 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     'responses_wide.csv     One row per participant/submission',
     'data_quality.csv       Quality flags per response',
     'methods.txt            Methods narrative',
-    'references.bib         Bibliography (if available)',
+    'references.bib         BibTeX for SP-Survey (+ the survey template, if any)',
+    'CITATION.cff           Machine-readable citation metadata',
     'manifest.json          Machine-readable export metadata',
     'questions/{name}__long.csv      Tidy long answers for one question',
     'questions/{name}__summary.csv   All attributes together',
@@ -2468,6 +2516,7 @@ export function buildResultsExportBundle({
   aiAnalysisFiles = [],
   figureFiles = [],
   siliconAgreementFiles = [],
+  datasetDoi = '',
 }) {
   const answerable = (questions || []).filter((q) => q?.name && !isDisplayOnly(q));
   const questionFiles = [];
@@ -2506,12 +2555,21 @@ export function buildResultsExportBundle({
     questionFiles,
   });
 
-  const readme = buildExportReadme({
+  const reportLines = spReportLines(buildExportSpReport({
+    surveyConfig,
+    questions: answerable,
+    filteredResponses,
+    dateFilteredResponses,
+    excludeFlagged,
+    siliconCompared: Boolean(siliconAgreementFiles?.length),
+    doi: datasetDoi,
+  }));
+  const readme = `${buildExportReadme({
     project,
     filters,
     nResponses: (filteredResponses || []).length,
     questionCount: answerable.length,
-  });
+  })}\n${reportLines.join('\n')}\n`;
 
   const rootFiles = [
     { path: 'README.txt', content: readme },
@@ -2521,12 +2579,11 @@ export function buildResultsExportBundle({
     { path: 'data_dictionary.json', content: JSON.stringify(buildExportDictionary(answerable, (q) => buildQuestionLongTable(q, [], surveyConfig)?.headers || []), null, 2) + '\n' },
     { path: 'analysis_plan.json', content: JSON.stringify({ algorithm_version: ANALYSIS_ALGORITHM_VERSION, filters: filters || {}, exclude_flagged: !!excludeFlagged, included_response_ids: [...includedKeys], submission_count: (filteredResponses || []).length, participant_count: new Set((filteredResponses || []).map((r) => r.participant_id).filter(Boolean)).size, note: 'Export configuration for reproducibility; this is not a preregistration.' }, null, 2) + '\n' },
     { path: 'data_quality.csv', content: qualityCsv },
-    { path: 'methods.txt', content: methodsText || '' },
+    { path: 'methods.txt', content: `${methodsText || ''}\n\n${reportLines.join('\n')}\n` },
     ...questionFiles,
   ];
-  if (bibtex) {
-    rootFiles.push({ path: 'references.bib', content: bibtex });
-  }
+  rootFiles.push({ path: 'references.bib', content: `${platformBibtex()}${bibtex ? `\n${bibtex}\n` : ''}` });
+  rootFiles.push({ path: 'CITATION.cff', content: resultsCitationCff({ project, releaseDate: exportDateStamp() }) });
   if (report) {
     rootFiles.push({ path: 'analysis_report.json', content: `${JSON.stringify(report, null, 2)}\n` });
   }
@@ -2567,11 +2624,15 @@ export function buildSiteResultsExportFiles({ project, filteredResponses, wideCs
     `Submissions: ${rows.length}`,
     ...(aiAnalysisFiles?.length ? AI_ANALYSIS_README_LINES : []),
     '',
+    ...howToCiteLines(),
+    '',
   ].join('\n');
   return [
     { path: 'README.txt', content: readme },
     { path: 'responses_wide.csv', content: wideCsv || rowsToCsv([['participant_id']]) },
     { path: 'responses_raw.json', content: `${JSON.stringify(rows, null, 2)}\n` },
+    { path: 'references.bib', content: platformBibtex() },
+    { path: 'CITATION.cff', content: resultsCitationCff({ project, releaseDate: exportDateStamp() }) },
     ...(aiAnalysisFiles || []),
   ];
 }

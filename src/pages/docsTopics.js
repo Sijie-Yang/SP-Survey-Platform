@@ -417,7 +417,35 @@ export const DOC_TOPICS = [
         p('Record the study revision, stimulus identities, filters, answer direction, method, tie handling, thresholds, scaling and algorithm version. The bundle’s analysis plan describes exported filters and submissions; it is not a preregistration.', '记录研究版本、刺激材料身份、筛选条件、回答方向、方法、平局处理、阈值、缩放和算法版本。分析包中的 analysis plan 描述导出筛选与提交记录，不是预注册。'),
         p('An AI explanation can help read the computed results, but it does not change the evidence or turn an exploratory association into a causal result. For spatial models, image prediction or other external analysis, keep the same media IDs and report the additional procedures.', 'AI 解释可以帮助阅读已计算结果，但不改变证据，也不会把探索性关联变成因果结论。空间模型、图像预测等外部分析应保留同一媒体 ID，并另行报告方法。'),
       ]),
-    ], related: ['choosing-analysis', 'quality-reliability', 'platform-workflow', 'skills-agents'],
+    ], related: ['choosing-analysis', 'quality-reliability', 'platform-workflow', 'skills-agents', 'sp-report'],
+  },
+  {
+    id: 'sp-report', group: 'platform', title: p('SP-Report: reporting a perception experiment', 'SP-Report：感知实验报告清单'),
+    summary: p('Ten items every paper based on people judging stimuli should report. SP-Survey fills most of them from your data in every export.', '凡是让人对刺激做判断的研究，论文里都应报告这十项。SP-Survey 在每次导出时从数据里自动填好大部分。'),
+    flow: [p('Export results', '导出结果'), p('Open README / methods.txt', '打开 README 或 methods.txt'), p('Finish the [ ] items', '补完 [ ] 项'), p('Cite SP-Report in Methods', '在方法部分引用 SP-Report')],
+    sections: [
+      s('why', p('Why a checklist', '为什么需要清单'), [
+        p('Perception results depend on what was shown, to whom, with which task and how answers were combined. Papers often leave out one of these, so results cannot be compared or reused. SP-Report (version 1) lists the minimum, in the spirit of CONSORT and PRISMA for other fields. It applies whether or not you used SP-Survey.', '感知研究的结果取决于展示了什么、给谁看、用什么任务、怎样合并回答。论文常常漏掉其中一项，导致结果无法比较或再利用。SP-Report（第 1 版）列出最低限度要报告的内容，思路类似其他领域的 CONSORT 和 PRISMA。不论是否用 SP-Survey 做的研究都适用。'),
+        p('In every SP-Survey analysis export, README.txt and methods.txt end with the checklist. [x] means filled from your data, [~] means partly filled with a bracketed part for you, [ ] means the authors must add it.', 'SP-Survey 的每个分析导出包里，README.txt 和 methods.txt 末尾都附有这份清单。[x] 表示已从数据中填好，[~] 表示部分填好、括号里的部分需要你补，[ ] 表示需要作者自己填写。'),
+      ]),
+      s('items', p('The ten items', '十个必报项'), [
+        p('The right column shows what SP-Survey fills automatically.', '右列说明 SP-Survey 能自动填写什么。'),
+      ], { table: table([p('Item', '项目'), p('Report', '要报告的内容'), p('Filled by SP-Survey', '平台自动填写')], [
+        [p('1. Stimuli', '1. 刺激材料'), p('Number, origin and licence of the stimuli', '刺激数量、来源与使用许可'), p('Count and hosts; you add origin and licence', '数量与来源站点；来源说明和许可需补充')],
+        [p('2. Participants', '2. 参与者'), p('Who, how recruited, when, how many', '人群、招募方式、时间、人数'), p('Counts and dates; you add recruitment', '人数与日期；招募方式需补充')],
+        [p('3. Task paradigm', '3. 任务范式'), p('Judgement task per measure and its wording', '每个测量的判断任务及原文'), p('Yes', '全部')],
+        [p('4. Judgements per stimulus', '4. 每个刺激的判断次数'), p('Minimum, median, maximum', '最少、中位数、最多'), p('Yes', '全部')],
+        [p('5. Quality control', '5. 质量控制'), p('Checks, flags and exclusions', '注意力检查、标记规则与排除数量'), p('Yes', '全部')],
+        [p('6. Aggregation', '6. 聚合方法'), p('How judgements became scores', '个体判断如何变成分数'), p('Yes', '全部')],
+        [p('7. Demographics', '7. 人口统计'), p('Variables collected and their use', '收集了哪些变量、怎样使用'), p('Variables; you add their use', '变量列表；用途需补充')],
+        [p('8. Ethics and consent', '8. 伦理与同意'), p('Approval, consent, reuse and training consent', '伦理批准、知情同意、再利用与训练同意'), p('Consent questions; you add approval number', '同意题；伦理批号需补充')],
+        [p('9. Synthetic respondents', '9. 合成回答'), p('Whether AI answers were used and kept apart', '是否使用了 AI 回答、是否与真人分开'), p('Yes', '全部')],
+        [p('10. Data availability', '10. 数据可获得性'), p('Where data and materials are deposited, with DOI', '数据和材料存放在哪里、DOI'), p('DOI if you entered one in the dataset package', '在数据集包里填了 DOI 时自动写入')],
+      ]) }),
+      s('cite', p('How to cite', '如何引用'), [
+        p('Cite the SP-Survey paper and the software version for the platform, and mention "SP-Report v1" when you report with this checklist. The Cite button on the Results page copies BibTeX, APA or a methods sentence; every export contains references.bib and CITATION.cff.', '引用平台时请同时引用 SP-Survey 论文和所用软件版本；按本清单报告时，在方法部分注明「SP-Report v1」。结果页的「引用」按钮可一键复制 BibTeX、APA 或方法段落句子，每个导出包也带 references.bib 和 CITATION.cff。'),
+      ]),
+    ], related: ['results-export', 'quality-reliability', 'study-design'],
   },
   {
     id: 'skills-agents', group: 'platform', title: p('AI assistance, Skills & integrations', 'AI 辅助、Skills 与集成'),

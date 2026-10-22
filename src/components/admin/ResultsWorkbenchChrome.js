@@ -135,6 +135,7 @@ export function ResultsToolbar({
   exportItems,
   exportHelp,
   refreshAction,
+  citeAction = null,
 }) {
   const [anchor, setAnchor] = React.useState(null);
   return (
@@ -151,6 +152,7 @@ export function ResultsToolbar({
         <AdminActionButton id="results-export-button" startIcon={<Download />} endIcon={<ExpandMore />}
           aria-haspopup="menu" aria-expanded={Boolean(anchor)} aria-controls={anchor ? 'results-export-menu' : undefined}
           onClick={(e) => setAnchor(e.currentTarget)}>{t.resultsExportMenu}</AdminActionButton>
+        {citeAction}
         {refreshAction}
       </AdminActionBar>
       <Menu id="results-export-menu" anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)} MenuListProps={{ 'aria-labelledby': 'results-export-button' }}>

@@ -5,7 +5,8 @@ import {
   Paper, Stack, TextField, Tooltip, Typography,
 } from '@mui/material';
 import { Clear, OpenInNew, Search } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { uiPair } from '../lib/uiLanguages';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { listPublicResearchPapers } from '../lib/researchPaperStore';
 import { ensureAnalysisMeta } from '../lib/researchPaperMeta.mjs';
@@ -66,7 +67,7 @@ async function loadShortlistFallback() {
 }
 
 const PapersList = memo(function PapersList({ rows }) {
-  const { t } = useRegion();
+  const { t, language } = useRegion();
   const parentRef = useRef(null);
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -200,7 +201,7 @@ const PapersList = memo(function PapersList({ rows }) {
 
 /** Public browse of the urban-perception paper library. */
 export default function PapersLibraryPage() {
-  const { t } = useRegion();
+  const { t, language } = useRegion();
   const navigate = useNavigate();
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -329,6 +330,8 @@ export default function PapersLibraryPage() {
           <Typography variant="h4" fontWeight={800}>
             {t.papersTitle}
           </Typography>
+          <Chip size="small" component={RouterLink} to="/publications" clickable variant="outlined"
+            label={uiPair(language, 'Research using SP-Survey · how to cite', '用 SP-Survey 完成的研究 · 如何引用')} />
           {!loading && (
             <>
               <Chip size="small" label={tf(t.papersCount, { n: papers.length })} color="primary" variant="outlined" />

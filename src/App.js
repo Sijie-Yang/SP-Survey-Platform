@@ -26,6 +26,7 @@ const SpBenchPage = lazy(() => import('./pages/SpBenchPage'));
 const NewsPage = lazy(() => import('./pages/NewsPage'));
 const ContributePage = lazy(() => import('./pages/ContributePage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
+const PublicationsPage = lazy(() => import('./pages/PublicationsPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
@@ -124,6 +125,7 @@ const router = createBrowserRouter(createRoutesFromElements(
               <>
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/papers" element={<PapersLibraryPage />} />
+                <Route path="/publications" element={<PublicationsPage />} />
                 <Route path="/contribute" element={<ContributePage />} />
                 <Route path="/docs" element={<DocsPage />} />
                 <Route path="/docs/:docId" element={<DocsPage />} />

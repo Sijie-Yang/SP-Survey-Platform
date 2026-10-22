@@ -4,7 +4,8 @@
  * CITATION.cff, datapackage.json, the survey as run and a stimulus manifest.
  * Everything is derived deterministically from the stored responses.
  */
-import { buildResultsExportBundle, buildSiteResultsExportFiles, buildQuestionLongTable } from './questionSummaryExport.js';
+import { buildResultsExportBundle, buildSiteResultsExportFiles, collectShownStimuli } from './questionSummaryExport.js';
+import { platformCffReferenceLines, platformCitations } from './platformCitation.js';
 import { buildResponsesWideCsv } from './responsesWideExport.js';
 import { rowsToCsv, exportDateStamp } from './csvUtil.js';
 import { downloadZip } from './zipDownload.js';
@@ -181,30 +182,9 @@ export function createAnonymizer(options = {}, questions = []) {
 
 // ── Stimuli ─────────────────────────────────────────────────────────────────
 
-function fileNameOf(source) {
-  const clean = String(source).split(/[?#]/)[0];
-  const name = clean.split('/').filter(Boolean).pop() || clean;
-  try { return decodeURIComponent(name); } catch { return name; }
-}
-
 /** Every stimulus that was shown, with how often and in which questions. */
 export function collectStimuli(questions, responses, surveyConfig) {
-  const bySource = new Map();
-  (questions || []).forEach((q) => {
-    let table = null;
-    try { table = buildQuestionLongTable(q, responses, surveyConfig); } catch { table = null; }
-    (table?.rows || []).forEach((row) => {
-      String(row.shown_images || '').split('|').map((s) => s.trim()).filter(Boolean).forEach((source) => {
-        const entry = bySource.get(source) || { source, file_name: fileNameOf(source), times_shown: 0, questions: new Set() };
-        entry.times_shown += 1;
-        entry.questions.add(q.name);
-        bySource.set(source, entry);
-      });
-    });
-  });
-  return [...bySource.values()]
-    .sort((a, b) => a.source.localeCompare(b.source))
-    .map((e) => ({ ...e, questions: [...e.questions].sort() }));
+  return collectShownStimuli(questions, responses, surveyConfig);
 }
 
 function uniquePath(name, used) {
@@ -301,15 +281,7 @@ export function buildCitationCff(meta, { releaseDate = exportDateStamp(), url = 
     lines.push('keywords:');
     meta.keywords.forEach((k) => lines.push(`  - ${yamlString(k)}`));
   }
-  lines.push(
-    'references:',
-    '  - type: software',
-    '    title: "SP-Survey: Streetscape Perception Survey Platform"',
-    '    url: "https://sp-survey.org"',
-    '    repository-code: "https://github.com/Sijie-Yang/SP-Survey"',
-    '    authors:',
-    '      - name: "SP-Survey team, Urban Analytics Lab, National University of Singapore"',
-  );
+  lines.push('references:', ...platformCffReferenceLines());
   return `${lines.join('\n')}\n`;
 }
 
@@ -416,6 +388,8 @@ export function buildDatasetReadme(meta, {
     `${citeAuthors} (${year}). *${meta.title || 'SP-Survey dataset'}* (Version ${meta.version || '1.0'}) [Data set]. ${meta.doi ? `https://doi.org/${meta.doi}` : 'Collected with SP-Survey, https://sp-survey.org.'}`,
     '',
     'Machine-readable citation: `CITATION.cff`.',
+    '',
+    `Please also cite the platform the data were collected with: ${platformCitations().apa}`,
     '',
     '## Authors',
     '',
@@ -537,7 +511,7 @@ export function buildDatasetPackageFiles({
     ? buildSiteResultsExportFiles({ project, filteredResponses: rows, wideCsv, aiAnalysisFiles })
     : buildResultsExportBundle({
       project, surveyConfig, questions: keptQuestions, filteredResponses: rows, dateFilteredResponses: broader,
-      filters, excludeFlagged, wideCsv, report, aiAnalysisFiles,
+      filters, excludeFlagged, wideCsv, report, aiAnalysisFiles, datasetDoi: meta.doi || '',
       figureFiles: figureSvgFiles(figuresForSurvey(keptQuestions, rows), { projectName: meta.title || project?.name || '' }),
     });
 

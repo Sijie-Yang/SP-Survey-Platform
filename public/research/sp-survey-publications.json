@@ -1,0 +1,25 @@
+{
+  "note": "Papers that used SP-Survey. Add yours by pull request (one object per paper). Fields: title, authors, venue, year, doi (without https://doi.org/), url, status (published | under review | preprint), kind (method | study | dataset).",
+  "publications": [
+    {
+      "title": "SP-Survey: An Open-source Platform for Visual Assessment of Urban Environments",
+      "authors": "Sijie Yang, Xiucheng Liang, Youlong Gu, Matias Quintana, Koichi Ito, Jiatong Li, Jussi Torkko, Zicheng Fan, Filip Biljecki",
+      "venue": "Environment and Planning B: Urban Analytics and City Science",
+      "year": 2026,
+      "doi": "",
+      "url": "",
+      "status": "under review",
+      "kind": "method"
+    },
+    {
+      "title": "Thermal comfort in sight: Thermal affordance and its visual assessment for sustainable streetscape design",
+      "authors": "Sijie Yang, Adrian Chong, Pengyuan Liu, Filip Biljecki",
+      "venue": "Building and Environment",
+      "year": 2025,
+      "doi": "",
+      "url": "",
+      "status": "published",
+      "kind": "study"
+    }
+  ]
+}

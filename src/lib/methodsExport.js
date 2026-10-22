@@ -1,3 +1,4 @@
+import { PLATFORM_PAPER, PLATFORM_URL, PLATFORM_VERSION } from './platformCitation.js';
 import { responseRecordKey } from './responseIdentity.js';
 import { ANALYSIS_ALGORITHM_VERSION, ANALYSIS_NOTES } from './analysisVersion.js';
 import { flattenQuestions, getAttentionCheckQuestions, summarizeQuality } from './quality.js';
@@ -99,8 +100,8 @@ export function generateMethodsText({
   lines.push(...ANALYSIS_NOTES);
   lines.push('');
   lines.push(
-    `We collected perceptual survey data using the SP Survey Platform `
-    + `(${window.location.origin}). `
+    `We collected perceptual survey data using SP-Survey `
+    + `(${PLATFORM_PAPER.authors[0].family} et al., ${PLATFORM_PAPER.year}; version ${PLATFORM_VERSION}, ${PLATFORM_URL}). `
     + `Data were collected between ${formatDateRange(responses)}.`,
   );
 
