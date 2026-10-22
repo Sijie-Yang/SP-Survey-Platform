@@ -39,6 +39,10 @@ class FakeTransport:
         if tool == "survey_create_project":
             return {"success": True, "project": {"id": "p-new", "name": args["name"]}, "draftUpdatedAt": self.draft_token,
                     "urls": {"liveSurvey": "https://sp-survey.org/survey?project=p-new"}}
+        if tool == "survey_import_qualtrics":
+            json.loads(args["qsf"])
+            return {"success": True, "project": {"id": "p-qsf", "name": args.get("name") or "Pilot"},
+                    "qualtricsReport": {"title": "Pilot", "converted": 3, "skipped": [{"id": "QID7", "reason": "heat map has no native equivalent"}], "notes": ["display_logic"]}}
         if tool == "survey_get_draft":
             return {"success": True, "surveyConfig": {"pages": [{"elements": [{"name": "safe", "type": "imagepicker"}]}]},
                     "draftUpdatedAt": self.draft_token, "urls": {"liveSurvey": f"https://sp-survey.org/survey?project={args['projectId']}"}}

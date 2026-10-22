@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import json
 import mimetypes
 import zipfile
 from dataclasses import dataclass, field
@@ -120,6 +121,23 @@ class Client:
         res = self._t.call("survey_create_project", name=name, description=description or None, surveyConfig=survey_config)
         project = res.get("project") or {"id": res.get("projectId"), "name": name}
         p = Project.from_api(project)
+        p.raw = res
+        return p
+
+    def import_qualtrics(self, qsf: Union[str, Path, dict], name: Optional[str] = None) -> Project:
+        """Create a project from a Qualtrics .qsf file (path, JSON text or parsed dict).
+
+        Conversion happens on the platform, the same as the Builder's import button.
+        ``project.raw["qualtricsReport"]`` lists questions not converted and logic to rebuild.
+        """
+        if isinstance(qsf, dict):
+            text = json.dumps(qsf)
+        elif isinstance(qsf, Path) or (isinstance(qsf, str) and not qsf.lstrip().startswith("{")):
+            text = Path(qsf).read_text(encoding="utf-8-sig")
+        else:
+            text = qsf
+        res = self._t.call("survey_import_qualtrics", qsf=text, name=name)
+        p = Project.from_api(res.get("project") or {"id": res.get("projectId"), "name": name or (res.get("qualtricsReport") or {}).get("title", "")})
         p.raw = res
         return p
 

@@ -128,6 +128,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 - `survey_update_project` — name, description, metadata
 - `survey_duplicate_project` — optional `copyMedia: true`
 - `survey_export_project` / `survey_import_project`
+- `survey_import_qualtrics` — new project from a Qualtrics `.qsf` (JSON object or text); returns `qualtricsReport` with questions not converted and logic to rebuild
 - `survey_delete_project` — `confirm: true`
 
 **Templates & Main Page**

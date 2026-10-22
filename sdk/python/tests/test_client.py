@@ -82,3 +82,16 @@ def test_json_roundtrip_of_survey_config():
     assert names == ["intro", "consent", "which_looks_safer", "age", "gender"]
     q = cfg["pages"][1]["elements"][0]
     assert q["trialCount"] == 8 and q["imageCount"] == 2 and q["allowTie"] is True and q["choices"] == []
+
+
+def test_import_qualtrics_from_file(client, fake, tmp_path):
+    qsf = tmp_path / "pilot.qsf"
+    qsf.write_text(json.dumps({"SurveyEntry": {"SurveyName": "Pilot"}, "SurveyElements": []}), encoding="utf-8")
+    p = client.import_qualtrics(qsf)
+    assert p.id == "p-qsf"
+    assert p.raw["qualtricsReport"]["skipped"][0]["id"] == "QID7"
+    tool, args = fake.calls[-1]
+    assert tool == "survey_import_qualtrics"
+    assert json.loads(args["qsf"])["SurveyEntry"]["SurveyName"] == "Pilot"
+    client.import_qualtrics({"SurveyEntry": {}, "SurveyElements": []}, name="Renamed")
+    assert fake.calls[-1][1]["name"] == "Renamed"

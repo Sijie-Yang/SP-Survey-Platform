@@ -73,3 +73,47 @@ describe('MCP tools used by the Python SDK', () => {
     assert.match(result.content[0].text, /results:read/);
   });
 });
+
+describe('Qualtrics import over MCP', () => {
+  const call = async (args, scopes = ['surveys:write']) => {
+    const { handleMcpRequest } = await import('../mcp/server.mjs');
+    const req = new Request('https://sp-survey.org/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'survey_import_qualtrics', arguments: args } }) });
+    const env = { SUPABASE_URL: 'https://db.example', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_ANON_KEY: 'a' };
+    const res = await handleMcpRequest(req, env, { kind: 'mcp', userId: 'u1', scopes });
+    return (await res.json()).result;
+  };
+
+  it('needs surveys:write and rejects files that are not .qsf', async () => {
+    const denied = await call({ qsf: {} }, ['surveys:read']);
+    assert.equal(denied.isError, true);
+    const bad = await call({ qsf: '{"project":{}}' });
+    assert.equal(bad.isError, true);
+    assert.match(bad.content[0].text, /not a Qualtrics survey file/);
+  });
+
+  it('creates a project from the converted survey and returns the report', async () => {
+    const { QUALTRICS_SAMPLE } = await import('../../src/lib/__fixtures__/qualtricsSample.js');
+    const original = globalThis.fetch;
+    const posted = [];
+    globalThis.fetch = async (url, init = {}) => {
+      if (init.method === 'POST' && String(url).includes('/rest/v1/projects')) {
+        const row = JSON.parse(init.body);
+        posted.push(row);
+        return new Response(JSON.stringify([row]), { status: 201, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      const result = await call({ qsf: JSON.stringify(QUALTRICS_SAMPLE) });
+      const body = JSON.parse(result.content[0].text);
+      assert.equal(result.isError, false, result.content[0].text);
+      assert.equal(body.qualtricsReport.converted, 11);
+      assert.equal(posted.length, 1);
+      const config = Array.isArray(posted[0]) ? posted[0][0].survey_config : posted[0].survey_config;
+      assert.equal(config.title, 'Street perception pilot');
+      assert.ok(config.pages.some((p) => p.elements.some((e) => e.name === 'safety_matrix' && e.type === 'matrix')));
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});

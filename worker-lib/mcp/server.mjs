@@ -3,6 +3,7 @@
  * Tools call Agent project handlers — never nested LLM orchestration.
  */
 
+import { qsfToSurveyConfig } from '../../src/lib/qsfImport.js';
 import { OPERATION_ITEM_SCHEMA } from '../platformSchema.generated.mjs';
 import {
   acquireLease,
@@ -211,6 +212,18 @@ const TOOLS = [
         description: { type: 'string' },
         surveyConfig: { type: 'object' },
       },
+    },
+  },
+  {
+    name: 'survey_import_qualtrics',
+    description: 'Create a new project from a Qualtrics survey file (.qsf, passed as its JSON object or text). Common question types are converted deterministically; the result includes qualtricsReport listing questions not converted and logic to rebuild (display logic, randomizers, piped text).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        qsf: { description: 'The .qsf file content: a JSON object or a JSON string.' },
+        name: { type: 'string', description: 'Project name (default: the Qualtrics survey name).' },
+      },
+      required: ['qsf'],
     },
   },
   {
@@ -691,6 +704,31 @@ async function callTool(env, auth, request, name, args = {}) {
     case 'survey_import_project': {
       requireScope(auth, 'surveys:write');
       return toolResult(await importProject(env, mcpCtx(auth), args, request));
+    }
+    case 'survey_import_qualtrics': {
+      requireScope(auth, 'surveys:write');
+      let qsf = args.qsf;
+      try {
+        if (typeof qsf === 'string') qsf = JSON.parse(qsf);
+      } catch {
+        return toolResult({ error: 'qsf is not valid JSON.' }, true);
+      }
+      let converted;
+      try {
+        converted = qsfToSurveyConfig(qsf);
+      } catch (err) {
+        return toolResult({ error: err?.message || String(err) }, true);
+      }
+      const name = String(args.name || converted.report.title).trim().slice(0, 200) || 'Imported Qualtrics survey';
+      const createArgs = {
+        name,
+        description: `Imported from Qualtrics (${converted.report.converted} questions)`,
+        surveyConfig: { ...converted.surveyConfig, title: name },
+      };
+      const created = useService
+        ? await createViaService(env, auth.userId, createArgs, request)
+        : await createProject(env, auth.accessToken, auth.userId, createArgs, request);
+      return toolResult({ ...created, qualtricsReport: converted.report }, !!created?.error);
     }
     case 'survey_list_templates': {
       requireScope(auth, 'surveys:read');

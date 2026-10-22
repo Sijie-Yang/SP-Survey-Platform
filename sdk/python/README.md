@@ -29,6 +29,7 @@ Every method calls one tool of the platform's public MCP endpoint (`https://sp-s
 | Client method | Platform tool |
 | --- | --- |
 | `list_projects`, `create_project`, `create_from_template`, `update_project`, `delete_project` | `survey_*_project` |
+| `import_qualtrics(path_or_dict)` | `survey_import_qualtrics` (report in `project.raw["qualtricsReport"]`) |
 | `get_draft`, `replace_draft`, `apply_operations`, `validate`, `publish`, `versions`, `urls` | `survey_get_draft`, `survey_replace_draft`, `survey_apply_operations`, `survey_validate`, `survey_publish`, `survey_list_versions`, `survey_preview_urls` |
 | `upload_image`, `upload_images`, `list_media` | `media_upload`, `media_list` |
 | `responses`, `responses_wide`, `question_summary`, `image_scores`, `analysis_bundle`, `dataset_package` | `survey_export_responses` (`json`, `wide_csv`, `summary_csv`, `analysis_bundle`, `dataset_package`) |
