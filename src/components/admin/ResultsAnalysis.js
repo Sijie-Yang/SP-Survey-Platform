@@ -56,6 +56,7 @@ import DatasetPackageDialog from './DatasetPackageDialog';
 import FigureDownloadButton from './FigureDownloadButton';
 import { figureSvgFiles, figureZipFiles, figuresForSurvey } from '../../lib/journalFigures';
 import { downloadZip } from '../../lib/zipDownload';
+import SiliconAgreementCard from './SiliconAgreementCard';
 import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
 import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
@@ -2703,6 +2704,7 @@ export default function ResultsAnalysis({
   const [perceptionOpen, setPerceptionOpen] = useState(false);
   const [dataSource, setDataSource] = useState('human');
   const [siliconRunId, setSiliconRunId] = useState('');
+  const [siliconAgreementFiles, setSiliconAgreementFiles] = useState([]);
   const [demographicFilters, setDemographicFilters] = useState([]);
   const [savedReport, setSavedReport] = useState(null);
   const [reportError, setReportError] = useState(null);
@@ -3281,6 +3283,7 @@ export default function ResultsAnalysis({
       downloadResultsExportZip({
         aiAnalysisFiles,
         figureFiles: figureSvgFiles(figuresForSurvey(allQuestions, filteredResponses, { numberByName: answerableNumberByName }), { projectName: currentProject?.name || '' }),
+        siliconAgreementFiles: dataSource === 'human' ? siliconAgreementFiles : [],
         project: currentProject,
         surveyConfig,
         questions: allQuestions,
@@ -3692,6 +3695,14 @@ export default function ResultsAnalysis({
       {reportError && <Alert severity="error" sx={{
             mb: 2
           }} onClose={() => setReportError(null)}>{reportError}</Alert>}
+      {view === 'overview' && dataSource === 'human' && !adminMode && !siteConverted && answerableQuestions.length > 0 && filteredResponses.length > 0 && <SiliconAgreementCard
+          projectId={currentProject?.id}
+          projectName={currentProject?.name || ''}
+          questions={answerableQuestions}
+          humanRows={filteredResponses}
+          language={language}
+          numberByName={answerableNumberByName}
+          onResult={setSiliconAgreementFiles} />}
       {view === 'overview' && savedReport && <Box sx={{
             mb: 3
           }}>

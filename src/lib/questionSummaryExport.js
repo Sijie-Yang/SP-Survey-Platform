@@ -2467,6 +2467,7 @@ export function buildResultsExportBundle({
   report = null,
   aiAnalysisFiles = [],
   figureFiles = [],
+  siliconAgreementFiles = [],
 }) {
   const answerable = (questions || []).filter((q) => q?.name && !isDisplayOnly(q));
   const questionFiles = [];
@@ -2536,6 +2537,10 @@ export function buildResultsExportBundle({
   if (figureFiles?.length) {
     rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nfigures/{name}__*.svg    Journal-style figure per question (vector); captions in figures/captions.md\n` };
     rootFiles.push(...figureFiles);
+  }
+  if (siliconAgreementFiles?.length) {
+    rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nsilicon_agreement.csv       Silicon-sample run vs these human answers, per question (deterministic; see column metric)\nsilicon_agreement_gaps.csv  Items ranked most differently by the silicon run and by people\n` };
+    rootFiles.push(...siliconAgreementFiles);
   }
   return rootFiles;
 }
