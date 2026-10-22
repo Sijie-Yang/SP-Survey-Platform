@@ -5,6 +5,11 @@
  * Usage:
  *   node scripts/enrich-research-library.mjs
  *   node scripts/enrich-research-library.mjs --in path --out path [--also path2]
+ *   node scripts/enrich-research-library.mjs --in public/research/library.json --only-missing
+ *
+ * --only-missing keeps analysis_meta that already uses the current extraction
+ * version and extracts only for papers without it, so a rebuild does not touch
+ * every row.
  */
 import fs from 'fs';
 import path from 'path';
@@ -35,6 +40,8 @@ const defaultOut = defaultIn;
 const inPath = path.resolve(root, argValue('--in', defaultIn));
 const outPath = path.resolve(root, argValue('--out', defaultOut));
 const extraOuts = alsoOutputs().map((p) => path.resolve(root, p));
+const onlyMissing = process.argv.includes('--only-missing');
+const outPathResolved = argValue('--out', null) ? outPath : (onlyMissing ? inPath : outPath);
 
 const payload = JSON.parse(fs.readFileSync(inPath, 'utf8'));
 const papers = payload.papers || [];
@@ -59,8 +66,11 @@ const counters = {
   reporting: 0,
 };
 
+let extractedCount = 0;
 const enriched = papers.map((paper) => {
-  const analysis_meta = extractAnalysisMeta(paper, { extractedAt });
+  const keep = onlyMissing && paper.analysis_meta?.extraction_version === EXTRACTION_VERSION;
+  const analysis_meta = keep ? paper.analysis_meta : extractAnalysisMeta(paper, { extractedAt });
+  if (!keep) extractedCount += 1;
   const flags = analysis_meta.coverage_flags || {};
   const scope = analysis_meta.analysis_scope || 'uncertain';
   if (counters[scope] != null) counters[scope] += 1;
@@ -83,7 +93,7 @@ const next = {
   ...payload,
   analysis: {
     extraction_version: EXTRACTION_VERSION,
-    extracted_at: extractedAt,
+    extracted_at: extractedCount || !payload.analysis?.extracted_at ? extractedAt : payload.analysis.extracted_at,
     coverage: {
       total: enriched.length,
       ...counters,
@@ -98,7 +108,8 @@ function writeJson(filePath, data) {
   console.log(`Wrote ${filePath} (${data.papers?.length || 0} papers, meta ${EXTRACTION_VERSION})`);
 }
 
-writeJson(outPath, next);
+writeJson(outPathResolved, next);
 for (const extra of extraOuts) writeJson(extra, next);
 
+console.log(`Extracted ${extractedCount} / ${enriched.length} papers${onlyMissing ? ' (only missing)' : ''}`);
 console.log('Coverage:', next.analysis.coverage);
