@@ -4,6 +4,8 @@ import { parsePreviewSessionMessage } from '../lib/previewSession';
 
 const AuthContext = createContext(null);
 
+export const isResetPage = (loc) => loc.pathname === '/login' && new URLSearchParams(loc.search).get('reset') === '1';
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -29,8 +31,13 @@ export function AuthProvider({ children }) {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      // A reset link may land anywhere (Supabase falls back to the Site URL when
+      // /login is not an allowed redirect); always finish it on the login page.
+      if (event === 'PASSWORD_RECOVERY' && !isResetPage(window.location)) {
+        window.location.replace('/login?reset=1');
+      }
     });
 
     const onPreviewSession = (event) => {
