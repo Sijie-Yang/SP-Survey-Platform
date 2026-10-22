@@ -61,7 +61,7 @@ export default function PublicHeader({
       cancelled = true;
     };
   }, []);
-  const navigationItems = [['/docs', t.navDocs], ['/papers', t.navPaperLibrary], ['/news', t.navNews], ['/request-template', t.navRequestTemplate], ['/request-survey-design', t.navRequestDesign], ['/team', t.navTeam], ['/live', t.navLiveSurveys], ...(benchEnabled ? [['/bench', t.navSpBench || 'SP-Bench']] : [])];
+  const navigationItems = [['/docs', t.navDocs], ['/papers', t.navPaperLibrary], ['/news', t.navNews], ['/forum', t.navForum || 'SP-Forum'], ['/request-template', t.navRequestTemplate], ['/request-survey-design', t.navRequestDesign], ['/team', t.navTeam], ['/live', t.navLiveSurveys], ...(benchEnabled ? [['/bench', t.navSpBench || 'SP-Bench']] : [])];
   const activeItem = path => isActive(path) || location.pathname.startsWith(`${path}/`);
   useEffect(() => {
     setMenuAnchor(null);

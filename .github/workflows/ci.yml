@@ -64,6 +64,7 @@ jobs:
           node scripts/tests/survey-response-rows.mjs
           node scripts/tests/project-collaborators.mjs
           node scripts/tests/project-public-slug.mjs
+          node scripts/tests/forum.mjs
 
       - name: Worker module smoke import
         run: |

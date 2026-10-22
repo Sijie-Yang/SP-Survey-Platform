@@ -24,6 +24,7 @@ const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'));
 const McpOAuthPage = lazy(() => import('./pages/McpOAuthPage'));
 const SpBenchPage = lazy(() => import('./pages/SpBenchPage'));
 const NewsPage = lazy(() => import('./pages/NewsPage'));
+const ForumPage = lazy(() => import('./pages/ForumPage'));
 const ContributePage = lazy(() => import('./pages/ContributePage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
 const PublicationsPage = lazy(() => import('./pages/PublicationsPage'));
@@ -132,6 +133,8 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/tutorial" element={<Navigate to="/docs/2013-salesses-collaborative" replace />} />
                 <Route path="/news" element={<NewsPage />} />
                 <Route path="/news/:slug" element={<NewsPage />} />
+                <Route path="/forum" element={<ForumPage />} />
+                <Route path="/forum/:id" element={<ForumPage />} />
                 <Route path="/request-template" element={<RequestTemplatePage />} />
                 <Route path="/request-survey-design" element={<RequestSurveyDesignPage />} />
                 <Route path="/team" element={<TeamPage />} />

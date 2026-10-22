@@ -3,6 +3,7 @@ export const localeChrome = {
   'zh-TW': {
     navPaperLibrary: '論文庫',
     navNews: '新聞',
+    navForum: '論壇',
     navRequestTemplate: '申請模板',
     navRequestDesign: '申請設計',
     navTeam: '團隊',
