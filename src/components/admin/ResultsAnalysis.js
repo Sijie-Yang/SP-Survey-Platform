@@ -34,7 +34,8 @@ import { createResultsReport, deleteResultsReport, readResultsReport, reportStal
 import { ResultsFilterForm, ResultsFilterShell, ResultsReportCard, ResultsScopeChips, ResultsToolbar, ResultsViewTabs } from './ResultsWorkbenchChrome';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { buildResponsesWideCsv, downloadResponsesWideCsv } from '../../lib/responsesWideExport';
-import { downloadQuestionExportZip, downloadResultsExportZip, downloadSiteResultsZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
+import { collectShownStimuli, downloadQuestionExportZip, downloadResultsExportZip, downloadSiteResultsZip, downloadDataQualityCsv } from '../../lib/questionSummaryExport';
+import { methodsFacts } from '../../lib/journalMethods';
 import { DensityHistogramChart, DescriptiveStatsLine, SemanticProfileChart, WordFrequencyChart } from './analysisCharts';
 import { getPresetSkillAnalysis } from './skillAnalysis';
 import { TrueSkillMuChart, TrueSkillTable, TrueSkillBoardStack, TRUESKILL_SORT_COLUMNS, RANKING_EXTRA_COLUMNS } from './trueSkillAnalysisUi';
@@ -3205,6 +3206,16 @@ export default function ResultsAnalysis({
     return files;
   };
   const [datasetOpen, setDatasetOpen] = useState(false);
+  // Facts for the journal-style Methods draft in the Cite dialog (computed only when that tab opens).
+  const getMethodsFacts = useCallback(() => {
+    if (!surveyConfig || siteConverted) throw new Error('No survey to describe');
+    let stimuli = [];
+    try { stimuli = collectShownStimuli(answerableQuestions, filteredResponses, surveyConfig); } catch { stimuli = []; }
+    return methodsFacts({
+      surveyConfig, responses: filteredResponses, allResponses: dateFilteredResponses, excludeFlagged, stimuli,
+      templateMeta: currentProject?.templateMeta || null,
+    });
+  }, [surveyConfig, siteConverted, answerableQuestions, filteredResponses, dateFilteredResponses, excludeFlagged, currentProject]);
   const exportFilters = () => ({
     date_from: dateFrom || null,
     date_to: dateTo || null,
@@ -3314,7 +3325,7 @@ export default function ResultsAnalysis({
     <Box>
       <AdminPageHeader icon={<Assessment />} title={t.resultsTitle} description={t.resultsDescription} />
       {currentProject?.ownResponseSupabase?.enabled && <Alert severity="info" sx={{ mb: 2 }}>{uiPair(language, 'Responses for this project are stored in your Supabase, not on SP-Survey. This page does not copy or analyze them.', '本项目的回答写入你的 Supabase，不在 SP-Survey 上。此页不会复制或分析这些回答。')}</Alert>}
-      <ResultsToolbar citeAction={<CitePlatformButton language={language} />} refreshAction={<Tooltip title={t.resultsRefresh} placement="top" disableInteractive>
+      <ResultsToolbar citeAction={<CitePlatformButton language={language} getMethodsFacts={getMethodsFacts} />} refreshAction={<Tooltip title={t.resultsRefresh} placement="top" disableInteractive>
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
         </IconButton>

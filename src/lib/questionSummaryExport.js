@@ -8,6 +8,7 @@ import { allocationStatus } from './allocationStats.js';
 import { computeQuestionIrr } from './reliability.js';
 import { mediaIdentityKey, resolveMediaAnswerKey, stimulusUnitKey, stimulusUnitLabel } from './mediaIdentity.js';
 import { VARIANT_README_LINES, surveyVariantAnalysis, variantExportFiles } from './variantAnalysis.js';
+import { journalMethodsFiles, methodsFacts } from './journalMethods.js';
 /**
  * Unified Results Analysis export: per-question __long / __summary CSVs,
  * data_quality, manifest, README, and full ZIP file list.
@@ -2610,6 +2611,19 @@ export function buildResultsExportBundle({
   if (variantFiles.length) {
     rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\n${VARIANT_README_LINES.join('\n')}\n` };
     rootFiles.push(...variantFiles);
+  }
+  // Journal-style Methods drafts (EPB, CEUS, LUP), written by fixed templates from the same facts.
+  try {
+    let stimuli = [];
+    try { stimuli = collectShownStimuli(answerable, filteredResponses || [], surveyConfig); } catch { stimuli = []; }
+    const facts = methodsFacts({
+      surveyConfig, responses: filteredResponses || [], allResponses: dateFilteredResponses || filteredResponses || [],
+      excludeFlagged, stimuli, templateMeta: project?.templateMeta || null,
+    });
+    rootFiles.push(...journalMethodsFiles(facts, { doi: datasetDoi }));
+    rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nmethods_for_journals/*.md  Methods section drafts in the house style of EPB, CEUS and LUP; fill the [bracketed] parts\n` };
+  } catch {
+    /* the plain methods.txt is still there */
   }
   return rootFiles;
 }

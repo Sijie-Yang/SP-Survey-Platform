@@ -22,3 +22,18 @@ test('Chinese labels', () => {
   fireEvent.click(screen.getByRole('button', { name: '引用' }));
   expect(screen.getByRole('tab', { name: '方法段落' })).toBeInTheDocument();
 });
+
+test('drafts a Methods section in a journal style from the survey', () => {
+  const { syntheticResponses, syntheticSurveyConfig } = require('../../lib/__fixtures__/syntheticResults');
+  const { methodsFacts } = require('../../lib/journalMethods');
+  const config = syntheticSurveyConfig({ images: 8 });
+  const getMethodsFacts = jest.fn(() => methodsFacts({ surveyConfig: config, responses: syntheticResponses(10, { config }) }));
+  render(<CitePlatformButton language="en" getMethodsFacts={getMethodsFacts} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Cite' }));
+  expect(getMethodsFacts).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('tab', { name: 'Methods for a journal' }));
+  expect(screen.getByTestId('citation-text')).toHaveTextContent(/\(Yang et al\. 2026\)/);
+  fireEvent.mouseDown(screen.getByRole('combobox'));
+  fireEvent.click(screen.getByRole('option', { name: /Landscape and Urban Planning/ }));
+  expect(screen.getByTestId('citation-text')).toHaveTextContent(/2\.4\. Ethics/);
+});

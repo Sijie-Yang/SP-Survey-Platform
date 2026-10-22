@@ -15,6 +15,7 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 - Forgot-password and resend-confirmation on the login page; 404 page.
 - Image-version contrasts for counterfactual designs: when files are named `scene__version.jpg` or versions sit in folders, Results shows each version's mean per-scene difference from a baseline (95% CI, paired t, Holm-adjusted p, Cohen's d_z); the analysis pack adds `variant_contrasts.csv` and `variant_pairs.csv`.
 - Qualtrics import: the project sidebar's import button accepts a `.qsf` file and creates a project (multiple choice, matrix, slider, text entry, rank order, constant sum, descriptive text); a report lists what was not converted (display logic, randomizers, unsupported types).
+- Methods drafts in journal house style (Environment and Planning B, CEUS, Landscape and Urban Planning): **Cite → Methods for a journal** on Results, and `methods_for_journals/*.md` in the analysis pack. Fixed templates, no model; placeholders for recruitment and ethics.
 - SP-Forum at `/forum`: categories, search, open/closed threads, replies, edit and delete own posts; authors close and reopen their threads; admins pin, hide and post announcements. Posts show a display name, never the e-mail; outside images are shown as links.
 - Governance: CONTRIBUTING, RELEASING, architecture decision records, template contribution guide, issue and PR templates.
 
