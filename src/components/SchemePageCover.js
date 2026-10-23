@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { stripOwnResponseSupabase } from '../lib/ownResponseSupabase';
 import { buildSiteQuestions, siteMediaFolders } from '../lib/spSite';
 import { resolvePreviewMediaContextCached } from '../lib/previewMediaLibrary';
+import { hashString } from '../lib/templateCover';
 
 // The page is laid out at desktop width (tablet width on narrow cards), then
 // scaled down to the card.
@@ -33,7 +34,9 @@ export function loadSchemeTemplate(templateId) {
 
 /**
  * Card cover for an SP-Scheme template: the participant page itself, scaled
- * down and not interactive. Loads when the card scrolls into view; shows
+ * down and not interactive. Its randomness is seeded by the template id, so
+ * the page draws the same images and order on every load and the cover does
+ * not change between visits. Loads when the card scrolls into view; shows
  * `fallback` until then, or when the template has no page.
  */
 export default function SchemePageCover({ templateId, height = 190, fallback = null }) {
@@ -103,6 +106,7 @@ export default function SchemePageCover({ templateId, height = 190, fallback = n
             survey={{ title: site.config.title || '', description: site.config.description || '', language: site.config.locale || 'en', preview: true }}
             title={site.config.title || 'Survey page'}
             sandbox="allow-scripts"
+            randomSeed={hashString(templateId)}
             // Give the page a moment to draw before replacing the placeholder.
             onLoad={() => setTimeout(() => setReady(true), 400)}
           />

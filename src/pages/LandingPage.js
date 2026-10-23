@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import {
   Box, Container, Typography, Button, Card, CardContent,
   Chip, TextField, InputAdornment, CircularProgress, Divider,
-  Avatar, Stack, Dialog, DialogTitle, DialogContent, DialogActions,
+  Avatar, Stack, Dialog, DialogTitle, DialogContent, DialogActions, Skeleton,
 } from '@mui/material';
 import {
   Search, Article, MenuBook, Dataset, DesignServices,
@@ -179,6 +179,8 @@ export default function LandingPage() {
               dataset: tpl.dataset,
               thumbnail_url: coverCandidates[0],
               coverCandidates,
+              // The cover an admin set, as opposed to one picked from the library.
+              own_thumbnail: tpl.thumbnail_url || null,
               show_on_landing: tpl.show_on_landing,
             };
           }));
@@ -684,11 +686,14 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
   );
 }
 
-/** A larger card for an SP-Scheme example: cover, what it is, preview and use. */
+/**
+ * A larger card for an SP-Scheme example: cover, what it is, preview and use.
+ * The cover is the image an admin set for the template, otherwise the page
+ * itself (drawn the same way on every load), never a random library picture.
+ */
 function SchemeExampleCard({ template, onUse }) {
   const { t } = useRegion();
   const [previewOpen, setPreviewOpen] = useState(false);
-  const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);
   const title = String(template.name || '').replace(/^\s*sp[\s_-]?scheme\s*[:：·|-]?\s*/i, '') || template.name;
 
   return (
@@ -709,15 +714,11 @@ function SchemeExampleCard({ template, onUse }) {
           aria-label={`${t.landPreview}: ${title}`}
           sx={{ display: 'block', width: '100%', p: 0, border: 0, cursor: 'pointer', bgcolor: 'grey.100', borderBottom: '1px solid', borderColor: 'divider' }}
         >
-          <SchemePageCover
-            templateId={template.id}
-            height={190}
-            fallback={(
-              <Box sx={{ width: '100%', height: '100%', backgroundImage: `url(${thumb})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
-                <Box component="img" src={thumb} alt="" onError={onThumbError} sx={{ display: 'none' }} />
-              </Box>
-            )}
-          />
+          {template.own_thumbnail ? (
+            <Box component="img" src={template.own_thumbnail} alt="" sx={{ display: 'block', width: '100%', height: 190, objectFit: 'cover', objectPosition: 'top' }} />
+          ) : (
+            <SchemePageCover templateId={template.id} height={190} fallback={<Skeleton variant="rectangular" animation="wave" sx={{ width: '100%', height: '100%' }} />} />
+          )}
         </Box>
         <CardContent sx={{ p: 2.5, flex: 1, display: 'flex', flexDirection: 'column' }}>
           <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5, lineHeight: 1.35, ...CLAMP(2) }}>
