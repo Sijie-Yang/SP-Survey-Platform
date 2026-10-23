@@ -26,6 +26,7 @@ import { filterMediaByType } from '../lib/mediaUtils';
 import { coverCandidatesForTemplate, DEFAULT_TEMPLATE_COVER, hashString, loadCoverIndex, useCoverCandidate } from '../lib/templateCover';
 import { listPreviewMedia } from '../lib/previewMediaLibrary';
 import { paperTemplateDoc } from './paperTemplateDocs';
+import SchemePageCover from '../components/SchemePageCover';
 
 // SurveyJS is heavy and only needed when a template preview is opened.
 const SurveyPreview = lazy(() => import('../components/admin/SurveyPreview'));
@@ -706,18 +707,17 @@ function SchemeExampleCard({ template, onUse }) {
           type="button"
           onClick={() => setPreviewOpen(true)}
           aria-label={`${t.landPreview}: ${title}`}
-          sx={{
-            height: 190,
-            p: 0,
-            border: 0,
-            cursor: 'pointer',
-            bgcolor: 'grey.100',
-            backgroundImage: `url(${thumb})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center top',
-          }}
+          sx={{ display: 'block', width: '100%', p: 0, border: 0, cursor: 'pointer', bgcolor: 'grey.100', borderBottom: '1px solid', borderColor: 'divider' }}
         >
-          <Box component="img" src={thumb} alt="" onError={onThumbError} sx={{ display: 'none' }} />
+          <SchemePageCover
+            templateId={template.id}
+            height={190}
+            fallback={(
+              <Box sx={{ width: '100%', height: '100%', backgroundImage: `url(${thumb})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+                <Box component="img" src={thumb} alt="" onError={onThumbError} sx={{ display: 'none' }} />
+              </Box>
+            )}
+          />
         </Box>
         <CardContent sx={{ p: 2.5, flex: 1, display: 'flex', flexDirection: 'column' }}>
           <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5, lineHeight: 1.35, ...CLAMP(2) }}>

@@ -20,6 +20,8 @@ export default function SpSiteFrame({
   title = 'Survey',
   allowedHosts = [],
   style,
+  sandbox = 'allow-scripts allow-forms allow-modals allow-popups',
+  onLoad,
 }) {
   const frameRef = useRef(null);
   const answersRef = useRef({ ...initialAnswers });
@@ -108,8 +110,9 @@ export default function SpSiteFrame({
       title={title}
       data-testid="sp-site-frame"
       srcDoc={srcDoc}
-      sandbox="allow-scripts allow-forms allow-modals allow-popups"
+      sandbox={sandbox}
       allow="fullscreen"
+      onLoad={onLoad}
       style={{ border: 0, width: '100%', height: '100%', display: 'block', background: '#fff', ...style }}
     />
   );
