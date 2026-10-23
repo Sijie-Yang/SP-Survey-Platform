@@ -8,12 +8,13 @@ version = "0.1.0"
 description = "Python SDK for SP-Survey: build, run and analyse visual perception experiments from code or from an agent"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "CC-BY-4.0" }
+license = { text = "MIT" }
 authors = [{ name = "Urban Analytics Lab, National University of Singapore" }]
 keywords = ["survey", "perception", "urban", "streetscape", "pairwise", "trueskill", "benchmark"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering",
 ]
