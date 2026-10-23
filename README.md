@@ -5,7 +5,7 @@
 [![Website](https://img.shields.io/badge/🌐-sp--survey.org-blue)](https://sp-survey.org)
 [![GitHub](https://img.shields.io/badge/⭐-SP--Survey-black?logo=github)](https://github.com/Sijie-Yang/SP-Survey)
 [![Paper](https://img.shields.io/badge/📄-Paper-9cf)](https://www.sciencedirect.com/science/article/pii/S0360132325000514)
-[![License](https://img.shields.io/badge/License-CC_BY_4.0-green)](https://creativecommons.org/licenses/by/4.0/)
+[![License](https://img.shields.io/badge/License-MIT_%2B_CC_BY_4.0-green)](LICENSE)
 
 <img src="./public/fig_introduction.png" alt="SP-Survey" width="100%">
 
@@ -148,4 +148,4 @@ Bug reports, research templates and code are welcome. Start with [CONTRIBUTING.m
 
 ## License
 
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — Urban Analytics Lab, NUS
+Code: [MIT](LICENSE). Documentation, survey templates and research data: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See [LICENSE](LICENSE). — Urban Analytics Lab, NUS

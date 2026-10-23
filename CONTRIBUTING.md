@@ -56,7 +56,7 @@ CI runs all of these on every pull request. A few UI suites are slow and can tim
 
 ## Licence
 
-By contributing you agree that your contribution is released under the repository licence ([CC BY 4.0](LICENSE)).
+By contributing you agree that your contribution is released under the repository licence: code under MIT, documentation, templates and data under CC BY 4.0 (see [LICENSE](LICENSE)).
 
 ## Citing
 

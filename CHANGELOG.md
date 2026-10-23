@@ -4,6 +4,9 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 
 ## Unreleased
 
+### Changed
+- Licence: source code is now under MIT; documentation, survey templates and research data stay under CC BY 4.0.
+
 ### Added
 - Citable dataset package export (README, LICENSE, CITATION.cff, datapackage.json, stimuli manifest; identifiers stripped by default).
 - Journal-style figures (SVG/PNG) per question and an "All figures" ZIP.

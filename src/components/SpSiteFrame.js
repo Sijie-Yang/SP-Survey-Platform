@@ -20,6 +20,9 @@ export default function SpSiteFrame({
   title = 'Survey',
   allowedHosts = [],
   style,
+  sandbox = 'allow-scripts allow-forms allow-modals allow-popups',
+  onLoad,
+  randomSeed = null,
 }) {
   const frameRef = useRef(null);
   const answersRef = useRef({ ...initialAnswers });
@@ -33,8 +36,9 @@ export default function SpSiteFrame({
     return prepareSiteDocument(html, {
       boot: { questions: boot.questions || [], survey: boot.survey || {}, answers: boot.answers || {}, media: boot.media || {} },
       allowedHosts: boot.allowedHosts,
+      randomSeed,
     });
-  }, [html, bootKey]);
+  }, [html, bootKey, randomSeed]);
 
   useEffect(() => {
     const byName = () => new Map((latest.current.questions || []).map((q) => [q.name, q]));
@@ -108,8 +112,9 @@ export default function SpSiteFrame({
       title={title}
       data-testid="sp-site-frame"
       srcDoc={srcDoc}
-      sandbox="allow-scripts allow-forms allow-modals allow-popups"
+      sandbox={sandbox}
       allow="fullscreen"
+      onLoad={onLoad}
       style={{ border: 0, width: '100%', height: '100%', display: 'block', background: '#fff', ...style }}
     />
   );
