@@ -43,6 +43,15 @@ function normalizeCategory(raw) {
   return 'academic';
 }
 
+/**
+ * Templates built with SP-Scheme (an LLM-designed participant page uploaded as
+ * the whole survey). Recognised by name or id, so an admin features one by
+ * putting "SP-Scheme" in its name; no column or SQL needed.
+ */
+export function isSpSchemeTemplate(tpl) {
+  return /sp[\s_-]?scheme/i.test(`${tpl?.name || ''} ${tpl?.id || ''}`);
+}
+
 function getStaticTemplates() {
   return projectTemplates.map((tpl) => ({
     id: tpl.id,
@@ -200,11 +209,13 @@ export default function LandingPage() {
   const visible = templates.filter((tpl) => {
     const matchesSearch = !hasSearch ||
       [tpl.name, tpl.author, tpl.description, tpl.id].some((v) => v?.toLowerCase().includes(q));
-    const shouldShow = hasSearch ? true : (tpl.show_on_landing !== false);
+    const shouldShow = hasSearch ? true : (tpl.show_on_landing !== false && !isSpSchemeTemplate(tpl));
     return matchesSearch && shouldShow;
   });
 
-  const allByCategory = (cat) => templates.filter((tpl) => tpl.category === cat);
+  // SP-Scheme examples get their own section, so the library lists the rest.
+  const schemeExamples = templates.filter(isSpSchemeTemplate);
+  const allByCategory = (cat) => templates.filter((tpl) => tpl.category === cat && !isSpSchemeTemplate(tpl));
 
   const academic = visible.filter((tpl) => tpl.category === 'academic');
   const urban = visible.filter((tpl) => tpl.category === 'urban');
@@ -463,6 +474,27 @@ export default function LandingPage() {
 
       <Divider />
 
+      {!loadingTemplates && schemeExamples.length > 0 && (
+        <Box sx={{ bgcolor: 'grey.50', borderBottom: '1px solid', borderColor: 'divider' }} data-testid="sp-scheme-gallery">
+          <Container maxWidth="lg" sx={{ py: 8 }}>
+            <Box sx={{ textAlign: 'center', mb: 4 }}>
+              <Chip icon={<AutoAwesome />} label="SP-Scheme" color="secondary" variant="outlined" sx={{ mb: 1.5, fontWeight: 700 }} />
+              <Typography variant="h4" fontWeight={700} sx={{ mb: 1 }}>
+                {t.landSchemeTitle || 'Surveys designed by AI with SP-Scheme'}
+              </Typography>
+              <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 680, mx: 'auto' }}>
+                {t.landSchemeSubtitle || 'Each page was designed by a language model from the SP-Scheme spec, then uploaded as the whole survey. Participants get exactly this page; the platform records and analyses the answers. Preview one, or start your own from it.'}
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: `repeat(${Math.min(schemeExamples.length, 3)}, 1fr)` }, gap: 3 }}>
+              {schemeExamples.map((tpl) => (
+                <SchemeExampleCard key={tpl.id} template={tpl} onUse={() => navigate(workspacePath)} />
+              ))}
+            </Box>
+          </Container>
+        </Box>
+      )}
+
       <Container maxWidth="lg" sx={{ py: 8 }}>
         <Box sx={{ textAlign: 'center', mb: 5 }}>
           <Typography variant="h4" fontWeight={700} sx={{ mb: 1 }}>
@@ -648,6 +680,75 @@ function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
         <Button onClick={onClose}>{t.landClose}</Button>
       </DialogActions>
     </Dialog>
+  );
+}
+
+/** A larger card for an SP-Scheme example: cover, what it is, preview and use. */
+function SchemeExampleCard({ template, onUse }) {
+  const { t } = useRegion();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);
+  const title = String(template.name || '').replace(/^\s*sp[\s_-]?scheme\s*[:：·|-]?\s*/i, '') || template.name;
+
+  return (
+    <>
+      <Card data-testid={`sp-scheme-example-${template.id}`} sx={{
+        borderRadius: 2,
+        overflow: 'hidden',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.07)',
+        '&:hover': { boxShadow: '0 6px 20px rgba(0,0,0,0.12)' },
+        transition: 'box-shadow 0.2s',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+        <Box
+          component="button"
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          aria-label={`${t.landPreview}: ${title}`}
+          sx={{
+            height: 190,
+            p: 0,
+            border: 0,
+            cursor: 'pointer',
+            bgcolor: 'grey.100',
+            backgroundImage: `url(${thumb})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center top',
+          }}
+        >
+          <Box component="img" src={thumb} alt="" onError={onThumbError} sx={{ display: 'none' }} />
+        </Box>
+        <CardContent sx={{ p: 2.5, flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5, lineHeight: 1.35, ...CLAMP(2) }}>
+            {title}
+          </Typography>
+          {(template.author || template.year) && (
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
+              {[template.author, template.year].filter(Boolean).join(' · ')}
+            </Typography>
+          )}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, flex: 1, ...CLAMP(3) }}>
+            {template.description || ''}
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button size="small" variant="outlined" startIcon={<Preview />} onClick={() => setPreviewOpen(true)}>
+              {t.landPreview}
+            </Button>
+            <Button size="small" variant="contained" onClick={onUse} sx={{ ml: 'auto' }}>
+              {t.landUse}
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      <TemplatePreviewDialog
+        templateId={template.id}
+        templateName={title}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+      />
+    </>
   );
 }
 
