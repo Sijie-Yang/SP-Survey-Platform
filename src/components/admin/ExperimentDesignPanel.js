@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Alert, Autocomplete, Box, Button, ButtonBase, Checkbox, FormControlLabel, MenuItem, Radio, RadioGroup, Select, Stack,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography,
-} from '@mui/material';
+  Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography, Link } from '@mui/material';
 import { useRegion } from '../../contexts/RegionContext';
 import { isChineseLanguage, uiPair } from '../../lib/uiLanguages';
 import {
@@ -173,6 +172,13 @@ export default function ExperimentDesignPanel({ config, onChange, currentProject
         {uiPair(language,
           'Decide before publishing who sees which media. The platform splits the stimuli into versions so every image or set is seen about equally often, and Results analyses the data the same way. For a quick test or a small library you can skip this and let each question draw its own media.',
           '发布前先定好谁看哪些图。平台把刺激分成若干版本，保证每张图或每组被看的次数基本一样，结果页也按同一个设计来分析。只是试一下或者图不多，不用设计也可以，每道题各自随机抽图就够了。')}
+        {' '}
+        <Link href="/docs/experiment-design" target="_blank" rel="noopener" underline="hover">{uiPair(language, 'How to use it', '怎么用')}</Link>
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {uiPair(language,
+          'Before you start: upload the images to the media library (for fixed sets, one folder per set), add the image questions that will use them, then come back here. After choosing, close this window and press Preview to try one version.',
+          '开始前：先把图传到媒体库（固定组 = 每组一个文件夹），在页面里加好要用这些图的题，再回到这里。选好后关掉这个窗口，点「预览」试答一版。')}
       </Typography>
 
       <Box component="section" aria-label={uiPair(language, 'What do you want to do?', '你要做什么？')}>
@@ -319,6 +325,11 @@ export default function ExperimentDesignPanel({ config, onChange, currentProject
                 <Typography variant="body2" sx={{ mb: 0.5 }}>
                   {uiPair(language, 'Questions that follow this design (their own media settings are replaced):', '跟随这个设计的题（它们自己的抽图设置会被设计替代）：')}
                 </Typography>
+                {!followable.length && (
+                  <Alert severity="info" sx={{ mb: 1 }}>
+                    {uiPair(language, 'No question can follow a design yet. Add an image or media question first (choice, pick-any, rating, yes/no, slider or matrix), then come back and tick it here.', '还没有能跟随设计的题。先在页面里加一道图片/媒体题（选择、多选、打分、是否、滑块或矩阵），再回来勾选。')}
+                  </Alert>
+                )}
                 {followable.length ? (
                   <Stack direction="row" flexWrap="wrap" columnGap={2}>
                     {followable.map((q) => (

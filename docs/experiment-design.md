@@ -72,10 +72,22 @@ records `design_id`, `design_version`, `design_unit`, `design_role` (`main`, `an
 names in display order, e.g. `AB`), `design_slots`, `design_side` (the slot of a single image) and
 `design_expected` for catch trials.
 
+## Where it shows up in the Builder
+
+The settings bar shows one line under the buttons: whether a design is on (goal, units, versions, how
+many questions follow it) with a link to change it. A question that follows the design carries a
+"Follows the experiment design" chip in the page editor; in the question editor its own sampling
+settings are replaced by a note, and the per-question preview shows one version of the design
+(reset to draw another). The survey preview says which version it is showing. The public docs page
+is `/docs/experiment-design`.
+
 ## Questions that follow a design
 
 Image or media choice (pick one or pick any), rating, yes/no, slider, matrix and point-allocation
-questions can follow a design; their own media settings are replaced. All questions that follow the
+questions can follow a design; their own media settings are replaced. Slider, matrix and
+point-allocation answers (several numbers per image) are averaged for the design analysis. If a
+file is deleted from the library after publishing, the trials that need it are dropped whole rather
+than shown with an image missing. All questions that follow the
 design show the same units in the same order unless their view says otherwise. A choice question
 shows a set or a group of *k* library images together; a one-image question shows each image as its
 own trial. Questions are shown one after another (question 1 for all of a person's sets, then
@@ -91,9 +103,11 @@ The Results overview opens with the design card:
 1. **Did the design run as planned?** Participants per version, planned versus answered exposures,
    how versions were handed out, position balance, catch-trial scores.
 2. **Results by question**, each opening with one sentence on why that analysis fits the design,
-   then the main table and checks: position bias (per position when *k* > 2), repeats, condition
-   contrasts, anchors, and (for two-slot sets with a choice and a rating question) whether people
-   chose the image they rated higher.
+   then the main table and checks: position bias (per position when *k* > 2; for library choices
+   the expected share comes from the fitted model, so a strong image that sat on one side is not
+   reported as a position effect), repeats, condition contrasts (for library choices: one
+   Bradley–Terry fit per group and the rank correlation between groups), anchors, and (for two-slot
+   sets with a choice and a rating question) whether people chose the image they rated higher.
 3. A **Methods paragraph** to copy.
 
 The full export adds `experiment_design/`: `design.json`, `design_table.csv` (every version's

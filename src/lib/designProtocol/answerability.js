@@ -10,6 +10,7 @@ import {
   normalizeSliderDimension,
 } from '../sliderScale.js';
 import { getGenerationContract, GENERATION_CONTRACT_VERSION } from './generationContracts.js';
+import { normalizeDesign } from '../experimentDesign.js';
 
 function isKnownQuestionType(type) {
   return Object.prototype.hasOwnProperty.call(PLATFORM_SCHEMA.questionTypes || {}, type);
@@ -385,6 +386,8 @@ export function evaluateSurveyContract(surveyConfig, {
       : (baseline ? changedQuestionNames(baseline, transformed) : []),
   );
 
+  // Questions that follow the experiment design get their media from it, so an empty choice list is not a defect.
+  const designQuestions = new Set(normalizeDesign(transformed.experimentDesign)?.questions || []);
   if (!Array.isArray(transformed.pages)) {
     errors.push(issue({ path: 'surveyConfig.pages', reason: 'pages must be an array.' }));
   } else {
@@ -416,7 +419,8 @@ export function evaluateSurveyContract(surveyConfig, {
             }));
           } else questionNames.push(name);
         }
-        const found = assessQuestionAnswerability(element, { pageName: pageName || `p${pageIndex}`, index: elementIndex });
+        const found = assessQuestionAnswerability(element, { pageName: pageName || `p${pageIndex}`, index: elementIndex })
+          .filter((item) => !(designQuestions.has(name) && /\.choices$/.test(item.path || '')));
         const strict = strictNames.has(name) || (!name && (strictAll || mode === 'generate'));
         (strict ? errors : warnings).push(...found.map((item) => (
           strict ? item : { ...item, severity: 'warning', retryable: false, code: item.code || 'SURVEY_WARNING' }

@@ -800,6 +800,12 @@ export default function SurveyPreview({
               : ''}
           </Box>
         )}
+        {processedConfig?._spDesignAssignment && (
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 2 }} data-testid="preview-design-version">
+            <Chip size="small" color="success" variant="outlined" label={`Experiment design · version ${processedConfig._spDesignAssignment.version + 1} of ${processedConfig._spDesignAssignment.versions}`} />
+            <Typography variant="caption" color="text.secondary">Each preview draws a random version; participants get the least-used one.</Typography>
+          </Box>
+        )}
         {conditions.length > 1 && (
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', mb: 2 }}>
             <Typography variant="body2">Condition:</Typography>

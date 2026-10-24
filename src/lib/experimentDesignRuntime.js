@@ -55,16 +55,25 @@ export function designMediaForElement(design, assignment, element, poolIndex) {
     designId: design.id,
     version: assignment.version,
   });
+  // A trial whose file is no longer in the library is dropped whole: a pair with
+  // one image is not the trial the design planned, and Results would misread it.
   const missing = [];
-  const trialMediaSets = perQuestion.map(({ media }) => media.map((key) => {
-    const hit = poolIndex.get(key);
-    if (!hit) missing.push(key);
-    return hit || null;
-  }).filter(Boolean));
+  const trialMediaSets = [];
+  const trialMediaContexts = [];
+  perQuestion.forEach(({ media, context }) => {
+    const hits = media.map((key) => {
+      const hit = poolIndex.get(key);
+      if (!hit) missing.push(key);
+      return hit || null;
+    });
+    if (hits.some((h) => !h)) return;
+    trialMediaSets.push(hits);
+    trialMediaContexts.push(context);
+  });
   return {
     trialMediaSets,
-    trialMediaContexts: perQuestion.map(({ context }) => context),
-    trialCount: perQuestion.length,
+    trialMediaContexts,
+    trialCount: trialMediaSets.length,
     missing: [...new Set(missing)],
   };
 }

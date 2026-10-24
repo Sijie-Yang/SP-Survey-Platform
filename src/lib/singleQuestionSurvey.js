@@ -90,6 +90,8 @@ export function buildSingleQuestionSurvey({
   showNavigationButtons = false,
   trackUsed = false,
   folderTags = {},
+  // Trials decided elsewhere (the experiment design): used as they are, nothing is drawn.
+  presetTrials = null,
 }) {
   if (!question?.type) {
     throw new Error('Question type is required');
@@ -106,7 +108,14 @@ export function buildSingleQuestionSurvey({
   let images = [];
   let trialMediaSets = null;
 
-  if (
+  if (presetTrials?.trialMediaSets?.length) {
+    trialMediaSets = presetTrials.trialMediaSets.map((set) => (set || []).map((img) => ({ ...img })));
+    images = trialMediaSets[0] || [];
+    assignment = { images, flatMedia: images, trialMediaSets };
+    element.trialCount = trialMediaSets.length;
+    element.trialMediaSets = trialMediaSets;
+    element.trialMediaContexts = presetTrials.trialMediaContexts || trialMediaSets.map(() => ({}));
+  } else if (
     isRandomMediaQuestion(element)
     && trialCount > 1
     && randomMedia

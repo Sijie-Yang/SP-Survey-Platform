@@ -475,6 +475,30 @@ export const DOC_TOPICS = [
     ], related: ['choosing-analysis', 'results-export'],
   },
   {
+    id: 'experiment-design', group: 'platform', title: p('Experiment design: who sees which images', '实验设计：谁看哪些图'),
+    summary: p('Decide before publishing which images each participant sees, so every image or set is seen equally often, the assignment can be reproduced from a seed, and Results analyses the data the way it was collected.', '发布前定好每位参与者看哪些图：每张图或每组被看的次数一样多，同一个种子能重现分配，结果页按收集时的设计来分析。'),
+    flow: [p('Upload media (one folder per set)', '上传图片（固定组 = 每组一个文件夹）'), p('Add the image questions', '加好图片题'), p('Survey settings → Experiment design', '问卷设置 → 实验设计'), p('Preview, publish, read the design card', '预览、发布、看结果页的设计卡片')],
+    sections: [
+      s('when', p('When you need it', '什么时候需要'), [
+        p('Plain random draws (no design) are fine for a pilot or a small library. A design is for a study you will report: every image or set is seen the same number of times, two questions can use the same sets, the same seed gives the same assignment, Results checks that it ran as planned, and a Methods paragraph is written for you.', '只是试一下或图不多，每道题各自随机抽图就够了。要写进论文的研究才需要设计：每张图或每组被看的次数一样多，几道题可以共用同一批组，同一个种子得到同样的分配，结果页会检查是否按计划执行，还会替你写好 Methods 段落。'),
+      ]),
+      s('goals', p('Pick what you are doing', '选你要做什么'), [
+        p('The panel asks one question first. Everything else (how many each person sees, how many times each image should be seen, anchors, repeats, catch trials) is a setting with a plain sentence that echoes it back.', '面板先问一件事。其余（每人看几个、每个被看几次、锚点、重复、检查题）都是设置，并用一句话把你的设置复述出来。'),
+      ], { table: table([p('Goal', '目标'), p('Use it for', '适合'), p('What is guaranteed', '保证'), p('Main result', '主要结果')], [
+        [p('Rate many images', '给很多图打分'), p('A big library; each person rates part of it', '一个图库，每人只看其中一部分并打分'), p('Every image is seen floor/ceil of the average count', '每张图被看的次数一样多（差不超过 1）'), p('Mean per image with a 95% interval', '每张图的平均分和 95% 区间')],
+        [p('Choose from a library', '从图库里挑选'), p('Place Pulse–style rankings; 2–12 images on screen, pick one or tick any', 'Place Pulse 式排名；一屏 2–12 张，选一张或勾几张'), p('Every image appears equally often; nobody sees an image twice', '每张图出场次数一样多，一个人不会重复看到同一张'), p('Bradley–Terry / Luce scores with intervals; pick-any: share selected', 'Bradley–Terry / Luce 得分和区间；多选多：被选比例')],
+        [p('Compare fixed sets', '比较固定的几组图'), p('Before/after, A/B/C versions; several questions on the same set', '改造前后、A/B/C 版本；同一组下问几道题'), p('Every set seen equally; positions rotate exactly', '每组被看次数一样多，位置精确轮换'), p('Share choosing each slot; rating differences within a set', '每组各位置被选比例；同组内评分差')],
+      ]) }),
+      s('sets', p('Fixed sets and more than one question', '固定组与多道题'), [
+        p('A set is a folder with 2–12 images (or a row of a pasted table whose header names the slots, e.g. scene, day, night, rain). All sets share the same slot names. Each question that follows the design chooses what it shows: the whole set on one screen, each image as its own trial, or named slots only; and which trials it uses: all, or the first or second half of a person\'s sets. "One image per set per person" shows each person only one version of every set, rotated between people (a Latin square).', '一组 = 一个文件夹里的 2–12 张图（或贴表的一行，表头给槽位起名，如 scene, day, night, rain）。所有组的槽位名一样。每道跟随设计的题可以选"看什么"：整组一屏、一张一张看、或只看某几个槽位；以及"做哪些"：全部、前一半或后一半。"每人每组只看一张"让每人只看每组的一个版本，人与人之间轮换（拉丁方）。'),
+      ]),
+      s('results', p('What Results shows', '结果页显示什么'), [
+        p('The design card opens with "did it run as planned" (participants per version, planned vs answered exposures, position balance, catch-trial scores), then each question with one sentence on why that analysis fits the design, the main table, and checks (position bias, test–retest, group contrasts, anchors, consistency between a choice and a rating question), and a Methods paragraph to copy. The full export adds an experiment_design/ folder with the design table and every result as CSV.', '设计卡片先给"是否按计划执行"（各版本人数、计划与实际曝光、位置平衡、检查题得分），然后每道题先用一句话说明为什么用这个分析，再给主表和检查项（位置偏差、重测一致性、组间对比、锚点、选择题与打分题是否一致），最后是可复制的 Methods 段落。完整导出会多一个 experiment_design/ 文件夹，含设计表和所有结果的 CSV。'),
+        p('Everything is deterministic code; no language model is involved. Changing the design after collection starts gives it a new id; earlier responses are kept and counted as "outside this design".', '全部是确定性代码，不经过语言模型。开始收集后再改设计会换一个编号，已收集的回答保留并计作"设计之外"。'),
+      ]),
+    ], related: ['media-sampling', 'study-design', 'results-export', 'choosing-analysis'],
+  },
+  {
     id: 'qualtrics-import', group: 'platform', title: p('Import a Qualtrics survey', '导入 Qualtrics 问卷'),
     summary: p('Bring an existing Qualtrics questionnaire over as a new project, then add image questions around it.', '把已有的 Qualtrics 问卷转成新项目，再在里面加图片题。'),
     flow: [p('Qualtrics: Tools → Import/Export → Export Survey (.qsf)', 'Qualtrics：工具 → 导入/导出 → 导出调查（.qsf）'), p('Builder sidebar → Import project', '设计页侧栏 → 导入项目'), p('Read the import report', '查看导入报告'), p('Preview before sharing', '分享前先预览')],

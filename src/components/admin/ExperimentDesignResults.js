@@ -50,9 +50,10 @@ function why(design, q, language) {
       : `The design is "compare fixed sets": each pair is its own comparison, so the share choosing ${b} (over ${a}) is reported per pair with a 95% interval; the overall share is averaged per person first.`;
   }
   if (q.kind === 'rating' || q.kind === 'yesno') {
-    const base = zh
+    const base = (zh
       ? `每张图由不同的人各看一次，所以按图求${q.kind === 'yesno' ? '"是"的比例' : '平均分'}和 95% 区间。`
-      : `Each image is seen once by different people, so the ${q.kind === 'yesno' ? 'share answering yes' : 'mean score'} is reported per image with a 95% interval.`;
+      : `Each image is seen once by different people, so the ${q.kind === 'yesno' ? 'share answering yes' : 'mean score'} is reported per image with a 95% interval.`)
+      + (q.main?.averaged ? (zh ? '这题每张图有好几个数（滑块/行/分配），先取它们的平均。' : ' This question gives several numbers per image (sliders, rows or allocations); their average is used.') : '');
     if (design.type === 'fixed_pairs' && q.main?.slots) {
       const [a, ...rest] = q.main.slots;
       const diffWord = rest.map((b) => `${b} − ${a}`).join(zh ? '、' : ', ');
@@ -156,6 +157,13 @@ function QuestionBlock({ design, q, language }) {
   (m?.diffs || []).filter((d) => d.n).forEach((d) => minis.push([uiPair(language, `${d.slot} − ${d.vs} rating, all sets`, `所有组的评分差 ${d.slot} − ${d.vs}`), `${fmt(d.mean)}${ci(d.low, d.high)}`]));
   if (q.repeats?.kind === 'agreement') minis.push([uiPair(language, 'Same choice when repeated', '重复时选择一致'), `${pct(q.repeats.share)} · n=${q.repeats.n}`]);
   if (q.repeats?.kind === 'retest') minis.push([uiPair(language, 'Test–retest', '重测一致性'), `r = ${fmt(q.repeats.r)} · ${uiPair(language, 'mean |Δ|', '平均差')} ${fmt(q.repeats.meanAbsDiff)} · n=${q.repeats.n}`]);
+  if (q.conditions?.kind === 'bt_by_group') {
+    const c = q.conditions.correlation;
+    minis.push([
+      uiPair(language, 'Groups rank the images alike?', '两组人的排序一样吗'),
+      c ? `ρ = ${fmt(c.rho)} · ${uiPair(language, `${c.n} images`, `${c.n} 张图`)} · ${q.conditions.groups.map((g) => `${g.label} n=${g.participants}`).join(' · ')}` : uiPair(language, 'Not enough data per group yet', '每组数据还不够'),
+    ]);
+  }
   (q.conditions?.contrasts || []).forEach((c) => {
     const isShare = q.kind === 'choice' || q.kind === 'yesno' || q.kind === 'multi';
     minis.push([

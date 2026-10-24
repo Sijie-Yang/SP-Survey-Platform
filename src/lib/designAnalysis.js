@@ -13,7 +13,9 @@ import { tQuantile, tTwoSidedP } from './statDistributions.js';
 import { wilsonCI } from './stats.js';
 
 export const BOOTSTRAP_REPS = 200;
-const NUMERIC_TYPES = new Set(['imagerating', 'mediarating']);
+/** Question types whose answer is a number (or several numbers that are averaged). */
+const AVERAGED_TYPES = new Set(['imageslidergroup', 'mediaslidergroup', 'imagematrix', 'mediamatrix', 'imagepointallocation', 'mediapointallocation']);
+const NUMERIC_TYPES = new Set(['imagerating', 'mediarating', ...AVERAGED_TYPES]);
 const BOOLEAN_TYPES = new Set(['imageboolean', 'mediaboolean']);
 
 const participantOf = (row) => row.participant_id || row.id || '';
@@ -136,6 +138,11 @@ function numericValue(trial, type) {
   if (BOOLEAN_TYPES.has(type)) {
     const b = normalizeBooleanAnswer(raw);
     return b === '' ? null : b;
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    // Several sliders / rows / allocations for one image: their average.
+    const values = Object.values(raw).map((v) => (typeof v === 'number' ? v : parseFloat(v))).filter(Number.isFinite);
+    return values.length ? mean(values) : null;
   }
   const n = typeof raw === 'number' ? raw : parseFloat(raw);
   return Number.isFinite(n) ? n : null;
@@ -466,7 +473,7 @@ function analyseRating(design, records, type) {
   });
   const items = [...byItem.entries()].map(([unit, xs]) => ({ unit, ...meanCI(xs) }))
     .sort((a, b) => (b.mean ?? -Infinity) - (a.mean ?? -Infinity));
-  const out = { kind: 'item_means', answered: values.length, rows: items };
+  const out = { kind: 'item_means', answered: values.length, rows: items, averaged: AVERAGED_TYPES.has(type) };
   const names = designSlotNames(design);
   if (design.type === 'fixed_pairs' && names.length >= 2 && design.slotMode !== 'one') {
     // Within-person differences of every other slot against the first one (B − A, C − A, …).
@@ -571,9 +578,64 @@ function personValue(design, r, kind, type) {
   return numericValue(r.trial, type);
 }
 
+/** Spearman rank correlation of two score lists over the same items. */
+function spearman(a, b) {
+  const n = a.length;
+  if (n < 3) return null;
+  const rank = (xs) => {
+    const order = xs.map((x, i) => [x, i]).sort((p, q) => p[0] - q[0]);
+    const r = new Array(n);
+    order.forEach(([, i], pos) => { r[i] = pos + 1; });
+    return r;
+  };
+  const ra = rank(a);
+  const rb = rank(b);
+  const ma = mean(ra);
+  const mb = mean(rb);
+  let num = 0;
+  let da = 0;
+  let db = 0;
+  for (let i = 0; i < n; i += 1) {
+    num += (ra[i] - ma) * (rb[i] - mb);
+    da += (ra[i] - ma) ** 2;
+    db += (rb[i] - mb) ** 2;
+  }
+  return da && db ? num / Math.sqrt(da * db) : null;
+}
+
+/** Library choices by participant group: one Bradley–Terry fit per group, and how alike the rankings are. */
+function analyseChoiceByGroup(design, records, conditions) {
+  const items = mainUnits(design);
+  const idx = new Map(items.map((k, i) => [k, i]));
+  const groups = conditions.map((c) => {
+    const comparisons = [];
+    const people = new Set();
+    records.filter((r) => r.role === 'main' && r.condition === c.id).forEach((r) => {
+      const i = chosenIndex(r.trial);
+      if (typeof i !== 'number' || r.media.length < 2 || i >= r.media.length) return;
+      comparisons.push({ winner: r.media[i], losers: r.media.filter((_, j) => j !== i), participant: r.participant });
+      people.add(r.participant);
+    });
+    const scores = comparisons.length ? bradleyTerry(comparisons, items) : items.map(() => 0);
+    return { id: c.id, label: c.label || c.id, participants: people.size, comparisons: comparisons.length, scores };
+  });
+  const [g1, g2] = groups;
+  const shared = items.filter((k) => g1.comparisons && g2.comparisons);
+  const rho = shared.length >= 3 ? spearman(shared.map((k) => g1.scores[idx.get(k)]), shared.map((k) => g2.scores[idx.get(k)])) : null;
+  const rows = items.map((unit) => ({ unit, ...Object.fromEntries(groups.map((g) => [`score_${g.id}`, g.scores[idx.get(unit)]])) }));
+  return {
+    kind: 'bt_by_group',
+    groups: groups.map(({ scores, ...g }) => g),
+    correlation: rho == null ? null : { a: g1.label, b: g2.label, rho, n: shared.length },
+    rows,
+    contrasts: [],
+  };
+}
+
 /** Condition comparison on each participant's own summary. */
 function analyseConditions(design, records, kind, type, conditions) {
-  if (conditions.length < 2 || design.type === 'pool_pairs') return null;
+  if (conditions.length < 2) return null;
+  if (design.type === 'pool_pairs' && kind === 'choice') return analyseChoiceByGroup(design, records, conditions);
   const perPerson = new Map();
   records.filter((r) => r.role === 'main' && r.condition != null).forEach((r) => {
     const v = personValue(design, r, kind, type);
