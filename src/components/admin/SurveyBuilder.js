@@ -2,6 +2,7 @@ import { applySurveyThemePreset, matchesSurveyThemePreset, SURVEY_THEME_OPTIONS,
 import DescriptionMarkdownEditor from './DescriptionMarkdownEditor';
 import React, { useMemo, useState } from 'react';
 import RuntimeContextSettings from './RuntimeContextSettings';
+import ExperimentDesignPanel from './ExperimentDesignPanel';
 import {
   Box,
   Typography,
@@ -46,6 +47,7 @@ import {
   GTranslate,
   Tune,
   PaletteOutlined,
+  ScienceOutlined,
   Preview,
 } from '@mui/icons-material';
 import {
@@ -578,6 +580,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
             ['translations', uiPair(language, 'Translations', '翻译'), <GTranslate />],
             ['display', t.builderDisplaySettings, <Tune />],
             ['theme', t.builderThemeCustomization, <PaletteOutlined />],
+            ['design', uiPair(language, 'Experiment design', '实验设计'), <ScienceOutlined />],
           ].map(([id, label, icon]) => (
             <AdminActionButton
               key={id}
@@ -666,6 +669,16 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
 
                 <RuntimeContextSettings config={config} onChange={handleBasicInfoChange} />
               </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={settingsDialog === 'design'} onClose={closeSettings} fullWidth maxWidth="md">
+        <DialogTitle>{uiPair(language, 'Experiment design', '实验设计')}</DialogTitle>
+        <DialogContent dividers>
+          <ExperimentDesignPanel config={config} onChange={handleBasicInfoChange} currentProject={currentProject} />
         </DialogContent>
         <DialogActions>
           <Button onClick={closeSettings}>{t.resultsClose}</Button>

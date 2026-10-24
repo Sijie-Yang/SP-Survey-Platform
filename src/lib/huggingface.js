@@ -1,3 +1,4 @@
+import { shuffled as shuffleList } from './designRandom.js';
 /**
  * Hugging Face Dataset Integration
  * Provides functions to connect to and retrieve images from Hugging Face datasets
@@ -601,7 +602,7 @@ export const getRandomImagesFromHuggingFace = async (token, datasetName, count =
     console.log(`✅ Fetched ${response.images.length} images from batch`);
     
     // Randomly select the requested number of images from the batch
-    const shuffled = [...response.images].sort(() => 0.5 - Math.random());
+    const shuffled = shuffleList(response.images);
     const selectedImages = shuffled.slice(0, Math.min(count, shuffled.length));
     
     console.log(`🎯 Selected ${selectedImages.length} random images`);

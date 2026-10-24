@@ -507,6 +507,9 @@ function MediaAssignmentFields({
           <MenuItem value="category">{tr("Per category (tagged folders)")}</MenuItem>
         </Select>
       </FormControl>
+      {(isSet || isCategory) && !hasSlots && <FormControlLabel sx={{
+      mt: 0.5
+    }} control={<Switch checked={question.randomizeSetOrder === true} onChange={(e) => onChange('randomizeSetOrder', e.target.checked)} />} label={zh ? '每次随机排列位置（左右、先后）。不勾时按文件名顺序，同一张总在同一位置。' : 'Shuffle positions each time (left/right, first/second). Off keeps file-name order, so the same file always takes the same position.'} />}
       {isCategory && !hasSlots && !isCurated && <FormControl fullWidth sx={{
       mt: 1
     }}>
@@ -1701,7 +1704,7 @@ export default function QuestionEditor({
                       })()} onChange={(e) => handleQuestionChange('pairingMode', e.target.value)} label={tr("Sampling Mode")}>
                               <MenuItem value="random">{tr("Random — uniform from the pool")}</MenuItem>
                               <MenuItem value="balanced">{tr("Balanced — prefer least-exposed images")}</MenuItem>
-                              <MenuItem value="adaptive">{tr("Adaptive — μ bands + cold-start for new images")}</MenuItem>
+                              <MenuItem value="adaptive">{zh ? '自适应（目前同"平衡"：μ 分段需要评分数据）' : 'Adaptive (for now same as Balanced: μ bands need ratings)'}</MenuItem>
                             </Select>
                           </FormControl>;
                   })()}
@@ -1838,7 +1841,7 @@ export default function QuestionEditor({
                           <MenuItem value="random">{tr("Random — uniform from the pool")}</MenuItem>
                           <MenuItem value="balanced">{tr("Balanced — prefer least-exposed")} {editedQuestion.type === 'mediapicker' ? tr("media") : tr("images")}
                           </MenuItem>
-                          <MenuItem value="adaptive">{tr("Adaptive — μ bands + cold-start for new items")}</MenuItem>
+                          <MenuItem value="adaptive">{zh ? '自适应（目前同"平衡"：μ 分段需要评分数据）' : 'Adaptive (for now same as Balanced: μ bands need ratings)'}</MenuItem>
                         </Select>
                       </FormControl>}
                     <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />

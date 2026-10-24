@@ -61,6 +61,7 @@ import SiliconAgreementCard from './SiliconAgreementCard';
 import SpBenchTaskCard from './SpBenchTaskCard';
 import VariantContrastCard from './VariantContrastCard';
 import CitePlatformButton from './CitePlatformButton';
+import ExperimentDesignResults, { MediaExposureCard } from './ExperimentDesignResults';
 import { answeredYes, collectStimuli, downloadDatasetPackage, fetchStimulusFiles, freeTextQuestionNames, reuseConsentQuestions } from '../../lib/datasetPackage';
 import { saveDatasetRelease } from '../../lib/datasetReleaseStore';
 import { adaptResponsesForSkillField, adaptSkillAnswerEntries, skillFieldNativeQuestion } from '../../lib/skillNativeAdapter.mjs';
@@ -3709,6 +3710,15 @@ export default function ResultsAnalysis({
       {reportError && <Alert severity="error" sx={{
             mb: 2
           }} onClose={() => setReportError(null)}>{reportError}</Alert>}
+      {view === 'overview' && !siteConverted && filteredResponses.length > 0 && <ExperimentDesignResults
+          surveyConfig={surveyConfig}
+          responses={filteredResponses}
+          language={language} />}
+      {view === 'overview' && !siteConverted && answerableQuestions.length > 0 && filteredResponses.length > 0 && <MediaExposureCard
+          questions={answerableQuestions}
+          responses={filteredResponses}
+          surveyConfig={surveyConfig}
+          language={language} />}
       {view === 'overview' && dataSource === 'human' && !adminMode && !siteConverted && answerableQuestions.length > 0 && filteredResponses.length > 0 && <SiliconAgreementCard
           projectId={currentProject?.id}
           projectName={currentProject?.name || ''}

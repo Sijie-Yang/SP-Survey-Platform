@@ -1,3 +1,4 @@
+import { activeDesign, assignDesignVersion, designMediaForElement, designPoolIndex } from '../../lib/experimentDesignRuntime';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { alpha } from '@mui/material/styles';
 import { Model } from "survey-core";
@@ -294,6 +295,12 @@ export default function SurveyPreview({
           return assignment;
         };
         
+        // Experiment design: preview a random version (no server claim).
+        const design = activeDesign(configCopy);
+        const designAssignment = design ? await assignDesignVersion(design) : null;
+        const designPool = design ? designPoolIndex(mediaPool) : new Map();
+        if (designAssignment) configCopy._spDesignAssignment = designAssignment;
+
         // Process image questions and convert imageranking to ranking for SurveyJS
         if (configCopy.pages) {
           for (const page of configCopy.pages) {
@@ -341,7 +348,18 @@ export default function SurveyPreview({
                   console.log(`✅ Preview: Applied curated media for ${element.type} question "${element.name}"`);
                 }
                 
-                if (shouldInjectMedia(element)) {
+                const designMedia = designMediaForElement(design, designAssignment, element, designPool);
+                if (designMedia) {
+                  if (designMedia.missing.length) {
+                    nextMediaErrors.push(`Question "${element.name}": ${designMedia.missing.length} design file(s) are not in the media library (e.g. ${designMedia.missing.slice(0, 3).join(', ')}).`);
+                  }
+                  element.trialMediaSets = designMedia.trialMediaSets;
+                  element.trialMediaContexts = designMedia.trialMediaContexts;
+                  element.trialCount = designMedia.trialCount;
+                  const firstSet = designMedia.trialMediaSets[0] || [];
+                  mediaAssignmentLog.push(buildMediaAssignmentLogEntry(element, firstSet, null, null));
+                  applyMediaAssignmentToElement(element, { images: firstSet, flatMedia: firstSet, groupKey: null, groupId: null, setKey: null, setId: null });
+                } else if (shouldInjectMedia(element)) {
                   console.log(`🔄 Preview: Loading random images for ${element.type} question: ${element.name}`);
                   try {
                     let result;

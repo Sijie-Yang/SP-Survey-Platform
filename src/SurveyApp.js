@@ -25,7 +25,8 @@ import registerImageRankingWidget, {
 } from './components/SurveyCustomComponents';
 import { getBrowserId, generateCompletionCode } from './lib/browserId';
 import { applyMapTaskOrder } from './lib/mapAnnotation';
-import { countProjectResponses, fetchConditionCounts, fetchPairStats } from './lib/surveyPublicApi';
+import { claimDesignVersion, countProjectResponses, fetchConditionCounts, fetchPairStats } from './lib/surveyPublicApi';
+import { activeDesign, assignDesignVersion, designMediaForElement, designPoolIndex, designResponseMetadata } from './lib/experimentDesignRuntime';
 import { applyRuntimeVariables, conditionFromUrl, hasConditions, resolveRuntimeContext, runtimeMetadata } from './lib/surveyRuntimeContext';
 import { clearMediaWatchLog, mediaWatchMetadata } from './lib/mediaWatch';
 import {
@@ -68,6 +69,7 @@ import { tf } from './contexts/adminI18n';
 import SurveyProgressBridge, {
   normalizeShowProgressBar,
 } from './components/SurveyProgressBridge';
+import { shuffled as shuffleList } from './lib/designRandom.js';
 
 /** Fail-open if Supabase / network stalls (keeps Live Survey from hanging on one RPC). */
 function withTimeout(promise, ms, fallback) {
@@ -587,6 +589,18 @@ export default function SurveyApp() {
             ? (fromPreviewLibrary ? 'Assigning preview media…' : 'Assigning project media…')
             : 'Preparing survey…',
         );
+
+        // Experiment design: this participant's version of the design table.
+        const design = activeDesign(finalSurveyJson);
+        let designAssignment = null;
+        const designPool = design ? designPoolIndex(mediaPool) : null;
+        if (design) {
+          const researcherRun = parseInt(urlParams.get('repeat') || '0', 10) > 1 || finalSurveyJson.repeatConfig?.enabled;
+          designAssignment = await assignDesignVersion(design, {
+            claim: researcherRun ? null : (id, versions) => withTimeout(claimDesignVersion(projectId, id, versions), 6000, null),
+          });
+          if (designAssignment) finalSurveyJson._spDesignAssignment = designAssignment;
+        }
         
         // Process image questions and convert imageranking to ranking for SurveyJS
         if (finalSurveyJson.pages) {
@@ -642,7 +656,23 @@ export default function SurveyApp() {
                   console.log(`✅ Applied curated media for ${element.type} question "${element.name}"`);
                 }
                 
-                if (shouldInjectMedia(element)) {
+                const designMedia = designMediaForElement(design, designAssignment, element, designPool || new Map());
+                if (designMedia) {
+                  if (designMedia.missing.length) {
+                    console.warn(`Design media missing from the library for ${element.name}:`, designMedia.missing);
+                  }
+                  element.trialMediaSets = designMedia.trialMediaSets;
+                  element.trialMediaContexts = designMedia.trialMediaContexts;
+                  element.trialCount = designMedia.trialCount;
+                  const firstSet = designMedia.trialMediaSets[0] || [];
+                  const assignment = { images: firstSet, flatMedia: firstSet, groupKey: null, groupId: null, setKey: null, setId: null };
+                  const imageUrls = applyMediaAssignmentToElement(element, assignment);
+                  imageTracker[element.name] = imageUrls.length ? imageUrls : firstSet.map((img) => img.url);
+                  imageTracker[element.name + '__trials'] = designMedia.trialMediaSets.map(
+                    (set) => (set || []).map((img) => img.url).filter(Boolean),
+                  );
+                  console.log(`🧪 Design ${design.id} v${designAssignment.version}: ${designMedia.trialCount} trial(s) for ${element.name}`);
+                } else if (shouldInjectMedia(element)) {
                   console.log(`🔄 Loading random images for ${element.type} question: ${element.name}`);
                   try {
                     let result;
@@ -678,7 +708,7 @@ export default function SurveyApp() {
                         let selectedImages = assignment.flatMedia || assignment.images || [];
                         if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
                           const imageCount = element.imageCount || defaultMediaCount(element);
-                          selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+                          selectedImages = shuffleList(pool).slice(0, imageCount);
                         }
                         result = {
                           success: selectedImages.length > 0 || trialMediaSets.some((s) => s?.length),
@@ -697,7 +727,7 @@ export default function SurveyApp() {
                       // Skill questions: reuse pool images rather than falling back to demo media
                       if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
                         const imageCount = element.imageCount || defaultMediaCount(element);
-                        selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+                        selectedImages = shuffleList(pool).slice(0, imageCount);
                         assignment = { images: selectedImages, groupKey: null, groupId: null };
                         trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
                         console.log(`♻️ Pool exhausted, reusing ${selectedImages.length} images for skill question`);
@@ -1188,6 +1218,7 @@ export default function SurveyApp() {
               page_seconds: { ...pageTimingRef.current },
             },
             ...runtimeMetadata(runtimeContext),
+            ...designResponseMetadata(finalSurveyJson._spDesignAssignment),
             ...surveyLanguageMetadata({
               answerLanguage: answerLanguageRef.current,
               questionAnswerLanguages: questionLanguagesForSubmission(

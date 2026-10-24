@@ -1,4 +1,5 @@
 import { getImagesFromHuggingFace } from './huggingface';
+import { shuffled as shuffleList } from './designRandom.js';
 
 export const prepareDeploymentFolder = async (currentProject) => {
   try {
@@ -338,7 +339,7 @@ export default function SurveyAppClean() {
       const getImageKey = (image) => image?.name || image?.url;
       const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
       const pickRandomImagesFromPool = (pool, imageCount, excludeUsed) => {
-        const shuffled = [...pool].sort(() => 0.5 - Math.random());
+        const shuffled = shuffleList(pool);
         if (!excludeUsed) {
           return shuffled.slice(0, imageCount);
         }

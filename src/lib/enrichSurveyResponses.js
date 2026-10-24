@@ -75,7 +75,10 @@ export function enrichSurveyResponses({
             || displayedImages[questionName]
             || []);
         const mappedAnswer = mapImageChoiceAnswerToNames(trial?.answer ?? trial?.value, shownImages);
+        // Experiment design records (design_id, design_unit, …) travel with the trial.
+        const designFields = Object.fromEntries(Object.entries(trial || {}).filter(([key]) => key.startsWith('design_')));
         return {
+          ...designFields,
           ...(trial?.shown_media_set !== undefined ? { shown_media_set: trial.shown_media_set } : {}),
           ...(trial?.shown_media_categories !== undefined ? { shown_media_categories: trial.shown_media_categories } : {}),
           ...(trial?.shown_at ? { shown_at: trial.shown_at } : {}),

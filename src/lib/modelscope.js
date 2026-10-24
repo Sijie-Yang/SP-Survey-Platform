@@ -1,3 +1,4 @@
+import { shuffled as shuffleList } from './designRandom.js';
 /**
  * ModelScope (魔搭) Dataset Integration
  * Chinese-friendly alternative to HuggingFace for image datasets.
@@ -208,7 +209,7 @@ export const getRandomImagesFromModelScope = async (token, datasetName, count = 
     }
 
     // Shuffle and pick
-    const shuffled = [...allFiles].sort(() => 0.5 - Math.random());
+    const shuffled = shuffleList(allFiles);
     const selected = shuffled.slice(0, Math.min(count, shuffled.length));
 
     const images = selected.map((filePath, i) => ({

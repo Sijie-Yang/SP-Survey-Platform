@@ -7,7 +7,13 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 ### Changed
 - Licence: source code is now under MIT; documentation, survey templates and research data stay under CC BY 4.0.
 
+### Changed results
+- Random draws are now uniform (Fisher–Yates). Earlier shuffles (`sort(() => 0.5 - Math.random())`) favoured some orders and positions.
+- **Balanced** sampling now uses real exposure counts from stored responses (`get_pair_stats` in `supabase/experiment_design.sql`); before, the counts were never written, so it behaved like random. **Adaptive** balances exposure too until rating bands reach the browser.
+
 ### Added
+- Experiment design (Builder → Survey settings → Experiment design; [docs/experiment-design.md](docs/experiment-design.md)): rate many images, pairwise comparison from a library, or fixed pairs (several questions can follow the same pair). Balanced versions from a seed, least-completed version handed out by the server, exact left/right counterbalancing, optional anchors and repeats. Results opens with a design card (did it run as planned, analysis per question with the reason for it, Bradley–Terry / Wilson / paired B − A, position bias, test–retest, condition contrasts, cross-question consistency, Methods text) and the export adds `experiment_design/`.
+- Set and category questions can shuffle positions each time; Results shows how evenly each file was actually shown.
 - Citable dataset package export (README, LICENSE, CITATION.cff, datapackage.json, stimuli manifest; identifiers stripped by default).
 - Journal-style figures (SVG/PNG) per question and an "All figures" ZIP.
 - Silicon-vs-human agreement report on Results and in the analysis pack, with a linear calibration of silicon scores onto the human scale (slope, intercept, R², leave-one-out error; `silicon_calibration.csv`).
