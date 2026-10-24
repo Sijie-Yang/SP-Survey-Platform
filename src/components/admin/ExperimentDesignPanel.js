@@ -17,18 +17,18 @@ import MediaFolderScopeSelect from './MediaFolderScopeSelect';
 const GOALS = [
   {
     type: 'rate',
-    zh: ['给很多图打分', '一个图库，每人只看其中一部分并打分。例如街景安全感 1–7 分。'],
-    en: ['Rate many images', 'A library of images; each person rates part of it. E.g. street safety 1–7.'],
+    zh: ['给很多图打分', '一个图库，每人只看其中一部分并打分。例如街景安全感 1–7 分。', '和普通随机抽图的区别：每张图被看的次数一样多（你定几次就几次），不会有的图 9 次、有的 1 次。'],
+    en: ['Rate many images', 'A library of images; each person rates part of it. E.g. street safety 1–7.', 'Unlike plain random draws, every image is seen the same number of times (you choose how many).'],
   },
   {
     type: 'pool_pairs',
-    zh: ['从图库里两两比较', '每次从图库配一对让人选，最后排出每张图的名次。例如 Place Pulse。'],
-    en: ['Pairwise comparison from a library', 'Each trial pairs two library images; the result ranks every image. E.g. Place Pulse.'],
+    zh: ['从图库里两两比较', '每次从图库配一对让人选，最后排出每张图的名次。例如 Place Pulse。', '和普通随机配对的区别：每张图出场次数一样多，结果直接给出名次和区间。'],
+    en: ['Pairwise comparison from a library', 'Each trial pairs two library images; the result ranks every image. E.g. Place Pulse.', 'Unlike plain random pairing, every image appears equally often, and Results gives a ranking with intervals.'],
   },
   {
     type: 'fixed_pairs',
-    zh: ['比较固定的几对图', '你事先定好哪两张一对，例如改造前/后。同一对下可以问好几道题。'],
-    en: ['Compare fixed pairs', 'You decide which two images form a pair, e.g. before/after. Several questions can follow the same pair.'],
+    zh: ['比较固定的几对图', '你事先定好哪两张一对，例如改造前/后。同一对下可以问好几道题。', '和"分组"模式的区别：几道题共用同一批对子，左右各占正好一半，结果按对给出 B 比 A 好多少。'],
+    en: ['Compare fixed pairs', 'You decide which two images form a pair, e.g. before/after. Several questions can follow the same pair.', 'Unlike set mode, several questions share the same pairs, each side is shown exactly half the time, and Results gives B vs A per pair.'],
   },
 ];
 
@@ -141,8 +141,8 @@ export default function ExperimentDesignPanel({ config, onChange, currentProject
     <Stack gap={2}>
       <Typography variant="body2" color="text.secondary">
         {uiPair(language,
-          'Decide before publishing who sees which media. The platform splits the stimuli into versions so every image or pair is seen about equally often, and Results analyses the data the same way.',
-          '发布前先定好谁看哪些图。平台把刺激分成若干版本，保证每张图或每对被看的次数基本一样，结果页也按同一个设计来分析。')}
+          'Decide before publishing who sees which media. The platform splits the stimuli into versions so every image or pair is seen about equally often, and Results analyses the data the same way. For a quick test or a small library you can skip this and let each question draw its own media.',
+          '发布前先定好谁看哪些图。平台把刺激分成若干版本，保证每张图或每对被看的次数基本一样，结果页也按同一个设计来分析。只是试一下或者图不多，不用设计也可以，每道题各自随机抽图就够了。')}
       </Typography>
 
       <Box component="section" aria-label={uiPair(language, 'What do you want to do?', '你要做什么？')}>
@@ -150,14 +150,15 @@ export default function ExperimentDesignPanel({ config, onChange, currentProject
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: 1 }}>
           {GOALS.map((g) => {
             const active = design?.type === g.type;
-            const [name, hint] = zh ? g.zh : g.en;
+            const [name, hint, versus] = zh ? g.zh : g.en;
             return (
               <ButtonBase
                 key={g.type} id={`design-goal-${g.type}`} aria-pressed={active} onClick={() => chooseGoal(g.type)}
                 sx={{ display: 'block', textAlign: 'left', p: 1.5, border: 1, borderRadius: 1, borderColor: active ? 'primary.main' : 'divider', bgcolor: active ? 'action.selected' : 'transparent' }}
               >
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>{name}</Typography>
-                <Typography variant="caption" color="text.secondary">{hint}</Typography>
+                <Typography variant="caption" color="text.secondary" component="p">{hint}</Typography>
+                <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.5, fontStyle: 'italic' }}>{versus}</Typography>
               </ButtonBase>
             );
           })}

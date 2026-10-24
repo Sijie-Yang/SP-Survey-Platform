@@ -14,6 +14,10 @@ Open it in the Builder: **Survey settings → Experiment design**.
 | Pairwise comparison from a library | Place Pulse–style rankings | Each image appears equally often; no image twice in one person's set | Bradley–Terry scores with participant-bootstrap 95% intervals |
 | Compare fixed pairs | Before/after, A/B versions, several questions on the same pair | Each pair is seen equally often; left/right alternates so each side gets exactly half | Share choosing B per pair (Wilson 95%); B − A rating difference per person |
 
+Plain random draws (no design) still work and are enough for a quick test or a small library. A
+design adds what a paper needs: every image or pair seen the same number of times, the same
+assignment from the same seed, a check that it ran as planned, and a Methods paragraph.
+
 Groups of people are a layer on top of any goal: add conditions in **Basic info → Experimental
 conditions**. Conditions stay balanced, and Results compares them (Welch difference, 95% interval,
 Cohen's d) on each participant's own mean.
