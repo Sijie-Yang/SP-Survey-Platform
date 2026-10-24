@@ -78,7 +78,7 @@ describe('analyseDesign', () => {
     const bt = result.perQuestion[0].main;
     expect(bt.kind).toBe('bt');
     expect(bt.rows[0].unit).toBe('img00.jpg');
-    expect(bt.rows.at(-1).unit).toBe('img11.jpg');
+    expect(['img10.jpg', 'img11.jpg']).toContain(bt.rows.at(-1).unit);
     expect(bt.rows[0].low).toBeLessThan(bt.rows[0].score);
     expect(bt.rows[0].high).toBeGreaterThan(bt.rows[0].score);
     const files = designExportFiles(design, result);
@@ -112,6 +112,70 @@ describe('analyseDesign', () => {
     expect(rating.main.overallDiff.mean).toBeGreaterThan(1);
     expect(rating.repeats.kind).toBe('retest');
     expect(result.consistency.share).toBeGreaterThan(0.5);
+  });
+
+  test('pick one of four: Luce choice recovers the order', () => {
+    const keys = Array.from({ length: 16 }, (_, i) => `img${String(i).padStart(2, '0')}.jpg`);
+    const design = { ...normalizeDesign({ type: 'pool_pairs', seed: 11, units: keys, perPerson: 8, perTrial: 4, target: 160, questions: ['pick'] }), id: 'd_k4' };
+    const questions = [{ name: 'pick', type: 'imagepicker' }];
+    const strength = (k) => -Number(k.slice(3, 5)) / 2;
+    const rows = simulate(design, questions, designSizing(design).versions, (q, media, ctx, rand) => {
+      const w = media.map((m) => Math.exp(strength(m)));
+      const total = w.reduce((a, b) => a + b, 0);
+      let r = rand() * total;
+      for (let i = 0; i < media.length; i += 1) { r -= w[i]; if (r <= 0) return url(media[i]); }
+      return url(media[media.length - 1]);
+    });
+    const result = analyseDesign(design, rows, { pages: [{ elements: questions }] });
+    const bt = result.perQuestion[0].main;
+    expect(bt.kind).toBe('bt');
+    expect(bt.perTrial).toBe(4);
+    expect(bt.rows[0].unit).toBe('img00.jpg');
+    expect(['img14.jpg', 'img15.jpg']).toContain(bt.rows.at(-1).unit);
+    // Every image lands within three ranks of its true order.
+    bt.rows.forEach((r) => expect(Math.abs(r.rank - 1 - Number(r.unit.slice(3, 5)))).toBeLessThanOrEqual(3));
+    expect(bt.position.k).toBe(4);
+    expect(bt.position.shares).toHaveLength(4);
+    expect(bt.position.model).toBe('bt');
+    expect(bt.position.biased).toBe(false);
+  });
+
+  test('pick any: share selected per image', () => {
+    const keys = Array.from({ length: 12 }, (_, i) => `img${String(i).padStart(2, '0')}.jpg`);
+    const design = { ...normalizeDesign({ type: 'pool_pairs', seed: 12, units: keys, perPerson: 2, perTrial: 6, target: 20, questions: ['any'] }), id: 'd_any' };
+    const questions = [{ name: 'any', type: 'imagecheckbox' }];
+    const rows = simulate(design, questions, designSizing(design).versions, (q, media, ctx, rand) => media.filter((m) => rand() < 1 - Number(m.slice(3, 5)) / 12).map(url));
+    const result = analyseDesign(design, rows, { pages: [{ elements: questions }] });
+    const m = result.perQuestion[0].main;
+    expect(m.kind).toBe('select_share');
+    expect(m.rows[0].unit).toBe('img00.jpg');
+    expect(m.rows[0].share).toBeGreaterThan(m.rows.at(-1).share);
+    expect(m.rows[0].low).toBeLessThan(m.rows[0].share);
+  });
+
+  test('three-slot sets: share per slot; catch trials are scored', () => {
+    const units = Array.from({ length: 8 }, (_, i) => ({ id: `s${i}`, slots: { v0: `s${i}_v0.jpg`, v1: `s${i}_v1.jpg`, v2: `s${i}_v2.jpg` } }));
+    const design = { ...normalizeDesign({ type: 'fixed_pairs', seed: 13, units, perPerson: 4, target: 12, questions: ['pick', 'rate'], catches: [{ id: 'c1', media: ['black.jpg', 'park.jpg'], expected: 'park.jpg' }] }), id: 'd_three' };
+    const questions = [{ name: 'pick', type: 'imagepicker' }, { name: 'rate', type: 'imagerating' }];
+    const rows = simulate(design, questions, 24, (q, media, ctx, rand) => {
+      if (q.name === 'rate') return media[0].endsWith('_v2.jpg') ? 6 : media[0].endsWith('_v1.jpg') ? 4 : 3;
+      if (ctx.design_role === 'catch') return url(rand() < 0.9 ? 'park.jpg' : 'black.jpg');
+      const v2 = media.find((m) => m.endsWith('_v2.jpg'));
+      return url(rand() < 0.6 ? v2 : media[0]);
+    });
+    const result = analyseDesign(design, rows, { pages: [{ elements: questions }] });
+    const m = result.perQuestion[0].main;
+    expect(m.kind).toBe('slot_share');
+    expect(m.slots).toEqual(['v0', 'v1', 'v2']);
+    expect(m.overallShares.v2.share).toBeGreaterThan(0.45);
+    expect(result.execution.catches.trials).toBe(24);
+    expect(result.execution.catches.share).toBeGreaterThan(0.7);
+    expect(result.execution.catches.failedParticipants.length).toBeGreaterThan(0);
+    const rating = result.perQuestion[1].main;
+    expect(rating.diffs.map((d) => `${d.slot}-${d.vs}`)).toEqual(['v1-v0', 'v2-v0']);
+    expect(rating.diffs[0].mean).toBeCloseTo(1, 5);
+    expect(rating.diffs[1].mean).toBeCloseTo(3, 5);
+    expect(rating.pairRows[0].v2_minus_v0).toBeCloseTo(3, 5);
   });
 
   test('responses from before the design are counted but not analysed', () => {

@@ -11,8 +11,8 @@ Open it in the Builder: **Survey settings → Experiment design**.
 | Goal | Use it for | What is guaranteed | Main analysis |
 | --- | --- | --- | --- |
 | Rate many images | A large library; each person rates part of it | Each image is seen floor or ceil of the average number of times | Per-image mean with a 95% t interval |
-| Pairwise comparison from a library | Place Pulse–style rankings | Each image appears equally often; no image twice in one person's set | Bradley–Terry scores with participant-bootstrap 95% intervals |
-| Compare fixed pairs | Before/after, A/B versions, several questions on the same pair | Each pair is seen equally often; left/right alternates so each side gets exactly half | Share choosing B per pair (Wilson 95%); B − A rating difference per person |
+| Choose from a library | Place Pulse–style rankings; pick one of 2–12, or tick any that apply | Each image appears equally often; no image twice in one person's set | Pick one: Bradley–Terry / Luce scores with participant-bootstrap 95% intervals. Pick any: share of times each image was ticked (Wilson 95%) |
+| Compare fixed sets | Before/after, A/B/C versions, several questions on the same set | Each set is seen equally often; the display positions rotate so every slot takes every position exactly equally | Two slots: share choosing B per set (Wilson 95%) and B − A rating difference per person. More slots: share choosing each slot per set |
 
 Plain random draws (no design) still work and are enough for a quick test or a small library. A
 design adds what a paper needs: every image or pair seen the same number of times, the same
@@ -22,10 +22,30 @@ Groups of people are a layer on top of any goal: add conditions in **Basic info 
 conditions**. Conditions stay balanced, and Results compares them (Welch difference, 95% interval,
 Cohen's d) on each participant's own mean.
 
-Two optional extras work with every goal:
+Three optional extras work with every goal:
 
 - **Anchors** are shown to everyone (calibrate raters, compare with models).
 - **Repeats** show a few of a person's trials again at the end (test–retest agreement).
+- **Catch trials** are trials with a known right answer (a black image, an obvious pair). Results
+  scores them per participant and lists who failed.
+
+## Sets with more than two images
+
+A set is a folder with 2–12 images (or a row of a pasted table whose header names the slots, for
+example `scene, day, night, rain`). Slot names are shared by all sets. Two switches decide how a set
+is shown:
+
+- **Images per trial — all** shows the whole set together (a choice question) or each slot as its
+  own trial (a rating question). **One** shows each person only one image of every set, with the
+  slot rotating between people (a Latin square), for between-subjects comparisons.
+- **Positions — alternate** rotates the slots through the positions pass by pass so every slot takes
+  every position equally often, and neighbouring trials of one person differ too; **random**
+  shuffles with the seed; **fixed** keeps the header order (only when the order is part of the
+  stimulus).
+
+When more than one question follows a design, each question gets a **view**: which slots it shows
+(`all`, `each` one as its own trial, or named slots such as `day, night`) and which trials (`all`,
+or the first or second half of a person's sets, for two questions that must not share sets).
 
 ## How versions are built
 
@@ -47,16 +67,19 @@ versions. This needs `supabase/experiment_design.sql` (run once). Without it the
 the browser picks a random version, and Results says how many participants were assigned this way.
 
 Each response records `survey_metadata.experiment_design` (`id`, `version`, `claim`) and every trial
-records `design_id`, `design_version`, `design_unit`, `design_role` (`main`, `anchor`, `repeat`)
-and, for pairs, `design_order` (`ab` or `ba`) and `design_side`.
+records `design_id`, `design_version`, `design_unit`, `design_role` (`main`, `anchor`, `repeat`,
+`catch`), `design_media` (the design's keys for what was shown) and, for sets, `design_order` (slot
+names in display order, e.g. `AB`), `design_slots`, `design_side` (the slot of a single image) and
+`design_expected` for catch trials.
 
 ## Questions that follow a design
 
-Image or media choice, rating, yes/no, slider, matrix and point-allocation questions can follow a
-design; their own media settings are replaced. All questions that follow the design show the same
-units in the same order. A two-image choice question shows each pair once; a one-image question
-shows each image of a pair as its own trial. Questions are shown one after another (question 1 for
-all of a person's pairs, then question 2), not interleaved per pair.
+Image or media choice (pick one or pick any), rating, yes/no, slider, matrix and point-allocation
+questions can follow a design; their own media settings are replaced. All questions that follow the
+design show the same units in the same order unless their view says otherwise. A choice question
+shows a set or a group of *k* library images together; a one-image question shows each image as its
+own trial. Questions are shown one after another (question 1 for all of a person's sets, then
+question 2), not interleaved per set.
 
 Changing the design after collection starts gives it a new id. Earlier responses are kept and
 counted as "outside this design"; new participants follow the new design.
@@ -66,11 +89,11 @@ counted as "outside this design"; new participants follow the new design.
 The Results overview opens with the design card:
 
 1. **Did the design run as planned?** Participants per version, planned versus answered exposures,
-   how versions were handed out, left/right balance.
+   how versions were handed out, position balance, catch-trial scores.
 2. **Results by question**, each opening with one sentence on why that analysis fits the design,
-   then the main table and checks: position bias, repeats, condition contrasts, anchors, and (for
-   fixed pairs with a choice and a rating question) whether people chose the image they rated
-   higher.
+   then the main table and checks: position bias (per position when *k* > 2), repeats, condition
+   contrasts, anchors, and (for two-slot sets with a choice and a rating question) whether people
+   chose the image they rated higher.
 3. A **Methods paragraph** to copy.
 
 The full export adds `experiment_design/`: `design.json`, `design_table.csv` (every version's

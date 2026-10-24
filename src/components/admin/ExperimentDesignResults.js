@@ -28,21 +28,38 @@ const grid = { display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(au
 function why(design, q, language) {
   const zh = isChineseLanguage(language);
   if (q.kind === 'choice' && design.type === 'pool_pairs') {
+    const k = q.main?.perTrial || 2;
     return zh
-      ? '设计是"从图库里两两比较"：每张图会和很多不同的图比，所以用 Bradley–Terry 模型算每张图的得分（越高越常被选中）；区间是把参与者重新抽样得到的，同一个人的多次选择不会被当成互相独立。'
-      : 'The design is "pairwise comparison from a library": each image meets many others, so a Bradley–Terry model gives every image a score (higher = chosen more often). Intervals come from resampling participants, so one person\'s choices are not treated as independent.';
+      ? `设计是"从图库里挑选"：每张图会和很多不同的图同屏，所以用 Bradley–Terry 模型算每张图的得分（越高越常被选中）${k > 2 ? `；每次 ${k} 选 1，选中的那张算赢了同屏其他 ${k - 1} 张（Luce 选择模型）` : ''}；区间是把参与者重新抽样得到的，同一个人的多次选择不会被当成互相独立。`
+      : `The design is "choose from a library": each image appears alongside many others, so a Bradley–Terry model gives every image a score (higher = chosen more often)${k > 2 ? `; with ${k} on screen the chosen image counts as beating the other ${k - 1} (Luce choice model)` : ''}. Intervals come from resampling participants, so one person's choices are not treated as independent.`;
+  }
+  if (q.kind === 'multi') {
+    return zh
+      ? '这是多选多：每张图每次出现时要么被勾要么没被勾，所以按图报告"出现时被选的比例"和 Wilson 95% 区间，按比例排名次。'
+      : 'This is pick-any: each time an image appears it is either selected or not, so the share of appearances in which it was selected is reported per image with a Wilson 95% interval, ranked by that share.';
+  }
+  if (q.kind === 'choice' && q.main?.kind === 'slot_share') {
+    return zh
+      ? `设计是"比较固定的几组图"，每组 ${q.main.slots.length} 张：每组是一次独立的选择，所以按组统计每个位置（${q.main.slots.join('、')}）被选中的比例和 95% 区间。`
+      : `The design is "compare fixed sets" of ${q.main.slots.length}: each set is its own choice, so the share choosing each slot (${q.main.slots.join(', ')}) is reported per set with a 95% interval.`;
   }
   if (q.kind === 'choice') {
+    const [a, b] = q.main?.slots || ['A', 'B'];
     return zh
-      ? '设计是"比较固定的几对图"：每一对是一次独立的比较，所以按对统计第二张（B）被选中的比例和 95% 区间；总体比例先按人算再平均。'
-      : 'The design is "compare fixed pairs": each pair is its own comparison, so the share choosing the second image (B) is reported per pair with a 95% interval; the overall share is averaged per person first.';
+      ? `设计是"比较固定的几组图"：每一对是一次独立的比较，所以按对统计 ${b} 被选中的比例和 95% 区间（相对 ${a}）；总体比例先按人算再平均。`
+      : `The design is "compare fixed sets": each pair is its own comparison, so the share choosing ${b} (over ${a}) is reported per pair with a 95% interval; the overall share is averaged per person first.`;
   }
   if (q.kind === 'rating' || q.kind === 'yesno') {
     const base = zh
       ? `每张图由不同的人各看一次，所以按图求${q.kind === 'yesno' ? '"是"的比例' : '平均分'}和 95% 区间。`
       : `Each image is seen once by different people, so the ${q.kind === 'yesno' ? 'share answering yes' : 'mean score'} is reported per image with a 95% interval.`;
-    if (design.type === 'fixed_pairs') {
-      return base + (zh ? '同一个人给一对里两张都打了分，所以再算每对"B − A"的差，按人配对。' : ' The same person rated both images of a pair, so the B − A difference is computed per person.');
+    if (design.type === 'fixed_pairs' && q.main?.slots) {
+      const [a, ...rest] = q.main.slots;
+      const diffWord = rest.map((b) => `${b} − ${a}`).join(zh ? '、' : ', ');
+      return base + (zh ? `同一个人给一组里的图都打了分，所以再算每组"${diffWord}"的差，按人配对。` : ` The same person rated the images of a set, so the ${diffWord} difference${rest.length > 1 ? 's are' : ' is'} computed per person.`);
+    }
+    if (design.type === 'fixed_pairs' && design.slotMode === 'one') {
+      return base + (zh ? '每人每组只看了一张，所以组内的差异是人与人之间的比较（看哪个版本的人分更高）。' : ' Each person saw one image per set, so differences within a set are between people (who saw which version).');
     }
     return base;
   }
@@ -53,13 +70,18 @@ function MainTable({ design, q, language }) {
   const [all, setAll] = useState(false);
   const m = q.main;
   if (!m) return null;
-  const rows = m.kind === 'bt' || m.kind === 'pair_share' ? m.rows : m.rows;
+  const rows = m.rows;
   const shown = all ? rows : rows.slice(0, 8);
+  const slots = m.slots || [];
   const head = m.kind === 'bt'
     ? [uiPair(language, 'Rank', '名次'), uiPair(language, 'Image', '图'), uiPair(language, 'Score (95% CI)', '得分（95% 区间）'), uiPair(language, 'Chosen / shown', '被选 / 出现')]
-    : m.kind === 'pair_share'
-      ? [uiPair(language, 'Pair', '对'), uiPair(language, 'B chosen (95% CI)', 'B 被选比例（95% 区间）'), uiPair(language, 'n', '次数')]
-      : [uiPair(language, 'Image', '图'), uiPair(language, 'Mean (95% CI)', '平均（95% 区间）'), uiPair(language, 'n', '人数')];
+    : m.kind === 'select_share'
+      ? [uiPair(language, 'Rank', '名次'), uiPair(language, 'Image', '图'), uiPair(language, 'Selected when shown (95% CI)', '出现时被选比例（95% 区间）'), uiPair(language, 'Selected / shown', '被选 / 出现')]
+      : m.kind === 'pair_share'
+        ? [uiPair(language, 'Pair', '对'), uiPair(language, `${slots[1] || 'B'} chosen (95% CI)`, `${slots[1] || 'B'} 被选比例（95% 区间）`), uiPair(language, 'n', '次数')]
+        : m.kind === 'slot_share'
+          ? [uiPair(language, 'Set', '组'), ...slots.map((s) => uiPair(language, `${s} chosen`, `${s} 被选`)), uiPair(language, 'n', '次数')]
+          : [uiPair(language, 'Image', '图'), uiPair(language, 'Mean (95% CI)', '平均（95% 区间）'), uiPair(language, 'n', '人数')];
   return (
     <Box sx={{ overflowX: 'auto' }}>
       <Table size="small">
@@ -73,9 +95,20 @@ function MainTable({ design, q, language }) {
                 <TableCell>{fmt(r.score)}{ci(r.low, r.high)}</TableCell>
                 <TableCell>{r.wins} / {r.shown}</TableCell>
               </>}
-              {m.kind === 'pair_share' && <>
-                <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{r.label !== r.unit ? `${r.unit} · ${r.label}` : r.unit}<br />{`A ${short(r.a)} · B ${short(r.b)}`}</TableCell>
+              {m.kind === 'select_share' && <>
+                <TableCell>{r.rank}</TableCell>
+                <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{short(r.unit)}</TableCell>
                 <TableCell>{pct(r.share)}{ci(r.low, r.high, pct)}</TableCell>
+                <TableCell>{r.selected} / {r.shown}</TableCell>
+              </>}
+              {m.kind === 'pair_share' && <>
+                <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{r.label !== r.unit ? `${r.unit} · ${r.label}` : r.unit}<br />{`${slots[0] || 'A'} ${short(r.a)} · ${slots[1] || 'B'} ${short(r.b)}`}</TableCell>
+                <TableCell>{pct(r.share)}{ci(r.low, r.high, pct)}</TableCell>
+                <TableCell>{r.n}</TableCell>
+              </>}
+              {m.kind === 'slot_share' && <>
+                <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{r.label !== r.unit ? `${r.unit} · ${r.label}` : r.unit}<br />{slots.map((s) => `${s} ${short(r[`media_${s}`])}`).join(' · ')}</TableCell>
+                {slots.map((s) => <TableCell key={s}>{pct(r.shares[s].share)}{ci(r.shares[s].low, r.shares[s].high, pct)}</TableCell>)}
                 <TableCell>{r.n}</TableCell>
               </>}
               {m.kind === 'item_means' && <>
@@ -100,18 +133,31 @@ function QuestionBlock({ design, q, language }) {
   const m = q.main;
   const minis = [];
   if (m?.kind === 'pair_share') {
-    minis.push([uiPair(language, 'Overall, B chosen', '总体 B 被选'), `${pct(m.overall.mean)}${ci(m.overall.low, m.overall.high, pct)} · ${uiPair(language, `${m.overall.n} people`, `${m.overall.n} 人`)}`]);
+    const b = m.slots?.[1] || 'B';
+    minis.push([uiPair(language, `Overall, ${b} chosen`, `总体 ${b} 被选`), `${pct(m.overall.mean)}${ci(m.overall.low, m.overall.high, pct)} · ${uiPair(language, `${m.overall.n} people`, `${m.overall.n} 人`)}`]);
+  }
+  if (m?.kind === 'slot_share') {
+    minis.push([uiPair(language, 'Overall, chosen', '总体各位置被选'), m.slots.map((s) => `${s} ${pct(m.overallShares[s].share)}`).join(' · ')]);
+  }
+  if (m?.kind === 'select_share') {
+    minis.push([uiPair(language, 'Selected per screen', '每屏平均勾了几张'), `${fmt(m.meanSelected, 1)} · ${uiPair(language, `${m.answered} screens`, `${m.answered} 屏`)}`]);
   }
   if (m?.position) {
-    const biased = m.position.low > 0.5 || m.position.high < 0.5;
-    minis.push([uiPair(language, 'Position bias', '位置偏差'), `${uiPair(language, 'Left chosen', '左侧被选')} ${pct(m.position.share)}${ci(m.position.low, m.position.high, pct)} ${biased ? uiPair(language, '· people favour one side', '· 有明显偏向') : '✓'}`, biased ? 'warn' : null]);
+    const k = m.position.k || 2;
+    const biased = !!m.position.biased;
+    const modelled = m.position.model === 'bt';
+    const expectedWord = modelled ? uiPair(language, 'expected from the scores', '按得分应为') : uiPair(language, 'expected', '期望');
+    const text = k === 2
+      ? `${uiPair(language, 'Left chosen', '左侧被选')} ${pct(m.position.share)}${ci(m.position.low, m.position.high, pct)} (${expectedWord} ${pct(m.position.expected)})`
+      : `${uiPair(language, 'By position', '按位置')} ${m.position.shares.map((s, i) => `${i + 1}: ${pct(s.share)}`).join(' · ')} (${expectedWord} ${modelled ? m.position.shares.map((s) => pct(s.expected)).join(' · ') : pct(1 / k)})`;
+    minis.push([uiPair(language, 'Position bias', '位置偏差'), `${text} ${biased ? uiPair(language, '· people favour a position', '· 有明显偏向') : '✓'}`, biased ? 'warn' : null]);
   }
   if (m?.ties) minis.push([uiPair(language, 'No preference', '无偏好'), `${m.ties}`]);
-  if (m?.overallDiff?.n) minis.push([uiPair(language, 'B − A rating, all pairs', '所有对的评分差 B − A'), `${fmt(m.overallDiff.mean)}${ci(m.overallDiff.low, m.overallDiff.high)}`]);
+  (m?.diffs || []).filter((d) => d.n).forEach((d) => minis.push([uiPair(language, `${d.slot} − ${d.vs} rating, all sets`, `所有组的评分差 ${d.slot} − ${d.vs}`), `${fmt(d.mean)}${ci(d.low, d.high)}`]));
   if (q.repeats?.kind === 'agreement') minis.push([uiPair(language, 'Same choice when repeated', '重复时选择一致'), `${pct(q.repeats.share)} · n=${q.repeats.n}`]);
   if (q.repeats?.kind === 'retest') minis.push([uiPair(language, 'Test–retest', '重测一致性'), `r = ${fmt(q.repeats.r)} · ${uiPair(language, 'mean |Δ|', '平均差')} ${fmt(q.repeats.meanAbsDiff)} · n=${q.repeats.n}`]);
   (q.conditions?.contrasts || []).forEach((c) => {
-    const isShare = q.kind === 'choice' || q.kind === 'yesno';
+    const isShare = q.kind === 'choice' || q.kind === 'yesno' || q.kind === 'multi';
     minis.push([
       uiPair(language, `${c.label} − ${c.vs}`, `${c.label} − ${c.vs}`),
       `${isShare ? pct(c.diff) : fmt(c.diff)}${ci(c.low, c.high, isShare ? pct : fmt)}${c.d != null ? ` · d = ${fmt(c.d)}` : ''}${c.p != null ? (c.p < 0.001 ? ' · p < 0.001' : ` · p = ${fmt(c.p, 3)}`) : ''} · n ${c.na}/${c.nb}`,
@@ -129,7 +175,7 @@ function QuestionBlock({ design, q, language }) {
       {minis.length > 0 && <Box sx={{ ...grid, mb: 1 }}>{minis.map(([t, v, tone]) => <Mini key={t} title={t} tone={tone}>{v}</Mini>)}</Box>}
       {m && (m.rows?.length ? <MainTable design={design} q={q} language={language} /> : <Alert severity="info">{uiPair(language, 'No answers yet.', '还没有回答。')}</Alert>)}
       {m?.pairRows?.length > 0 && (
-        <Typography variant="caption" color="text.secondary">{uiPair(language, 'Per-pair B − A differences are in the export.', '每对的 B − A 差值在导出文件里。')}</Typography>
+        <Typography variant="caption" color="text.secondary">{uiPair(language, 'Per-set rating differences are in the export.', '每组的评分差值在导出文件里。')}</Typography>
       )}
     </Box>
   );
@@ -145,7 +191,7 @@ export default function ExperimentDesignResults({ surveyConfig, responses, langu
   const ex = analysis.execution;
   const conditions = (surveyConfig?.conditions || []).map((c) => (typeof c === 'string' ? { id: c, label: c } : c));
   const methods = designMethodsText(design, { zh, conditions });
-  const unitWord = design.type === 'fixed_pairs' ? uiPair(language, 'pair', '对') : uiPair(language, 'image', '张图');
+  const unitWord = design.type === 'fixed_pairs' ? (design.units[0] && Object.keys(design.units[0].slots || {}).length > 2 ? uiPair(language, 'set', '组') : uiPair(language, 'pair', '对')) : uiPair(language, 'image', '张图');
   const onPlan = ex.actual.min === ex.planned.min && ex.actual.max === ex.planned.max;
   const copy = async () => {
     try { await navigator.clipboard.writeText(methods); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
@@ -177,8 +223,14 @@ export default function ExperimentDesignResults({ surveyConfig, responses, langu
               : uiPair(language, 'Every participant got the version done least often ✓', '每个人都领到当时完成最少的版本 ✓')}
           </Mini>
           {ex.leftRight && (
-            <Mini title={uiPair(language, 'Left/right balance', '左右平衡')}>
-              {uiPair(language, `A on the left in ${pct(ex.leftRight.shareAB)} of trials`, `A 在左侧占 ${pct(ex.leftRight.shareAB)}`)} {Math.abs(ex.leftRight.shareAB - 0.5) < 0.05 ? '✓' : ''}
+            <Mini title={uiPair(language, 'Position balance', '位置平衡')}>
+              {uiPair(language, `${ex.leftRight.slot} first in ${pct(ex.leftRight.shareAB)} of trials`, `${ex.leftRight.slot} 在最前面占 ${pct(ex.leftRight.shareAB)}`)} {design.position === 'fixed' ? uiPair(language, '(fixed by design)', '（设计固定）') : Math.abs(ex.leftRight.shareAB - 0.5) < 0.05 ? '✓' : ''}
+            </Mini>
+          )}
+          {ex.catches && (
+            <Mini title={uiPair(language, 'Catch trials', '检查题')} tone={ex.catches.failedParticipants.length ? 'warn' : null}>
+              {uiPair(language, `${pct(ex.catches.share)} answered as expected (${ex.catches.correct}/${ex.catches.trials})`, `${pct(ex.catches.share)} 答对（${ex.catches.correct}/${ex.catches.trials}）`)}
+              {ex.catches.failedParticipants.length > 0 && <><br />{uiPair(language, `${ex.catches.failedParticipants.length} participant(s) missed at least one: ${ex.catches.failedParticipants.slice(0, 5).join(', ')}${ex.catches.failedParticipants.length > 5 ? '…' : ''}`, `${ex.catches.failedParticipants.length} 人至少错一道：${ex.catches.failedParticipants.slice(0, 5).join('、')}${ex.catches.failedParticipants.length > 5 ? '…' : ''}`)}</>}
             </Mini>
           )}
         </Box>
