@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { activeDesign, designMediaForElement, designPoolIndex } from '../../lib/experimentDesignRuntime';
+import { designSizing } from '../../lib/experimentDesign';
 import { isChineseLanguage, uiPair } from '../../lib/uiLanguages';
 import { Alert, Box, Button, CircularProgress, Dialog, DialogContent, DialogTitle, Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
 import DesktopWindowsIcon from '@mui/icons-material/DesktopWindows';
@@ -31,6 +33,7 @@ export default function QuestionParticipantPreview({
   const [error, setError] = useState('');
   const [pending, setPending] = useState(true);
   const [usingPreviewLibrary, setUsingPreviewLibrary] = useState(false);
+  const [designVersion, setDesignVersion] = useState(null);
   const conditions = normalizeConditions(surveyConfig);
   const showConditions = conditions.length > 1 && conditionVariants(question).length > 0;
   const conditionIds = conditions.map(c => c.id).join('|');
@@ -53,6 +56,8 @@ export default function QuestionParticipantPreview({
   // its object identity changes (autosave/polls replace it often).
   const projectRef = useRef(currentProject);
   projectRef.current = currentProject;
+  const surveyConfigRef = useRef(surveyConfig);
+  surveyConfigRef.current = surveyConfig;
   const builtOnce = useRef(false);
   const appearanceKey = JSON.stringify(previewAppearance(surveyConfig || currentProject?.config, currentProject?.theme));
   const appearance = useMemo(() => JSON.parse(appearanceKey), [appearanceKey]);
@@ -86,6 +91,19 @@ export default function QuestionParticipantPreview({
             elements: [draft]
           }]
         });
+        // A question that follows the experiment design previews one version of it, not a random draw.
+        let presetTrials = null;
+        let versionShown = null;
+        const design = media.fromPreviewLibrary ? null : activeDesign(surveyConfigRef.current);
+        if (design && design.questions.includes(draft.name)) {
+          const { versions } = designSizing(design);
+          const version = Math.floor(Math.random() * Math.max(1, versions));
+          const mapped = designMediaForElement(design, { id: design.id, version, versions, claim: 'local' }, questionConfig.pages[0].elements[0], designPoolIndex(media.images));
+          if (mapped?.trialCount) {
+            presetTrials = { trialMediaSets: mapped.trialMediaSets, trialMediaContexts: mapped.trialMediaContexts };
+            versionShown = { version, versions };
+          }
+        }
         const {
           surveyJson,
           shownImages,
@@ -95,8 +113,10 @@ export default function QuestionParticipantPreview({
           projectImages: media.images,
           randomMedia: true,
           showNavigationButtons: false,
-          folderTags
+          folderTags,
+          presetTrials
         });
+        setDesignVersion(versionShown);
         if (isRandomMediaQuestion(draft) && !isCuratedMediaMode(draft) && (!shownImages.length || shownImagesByTrial?.some(items => !items.length))) {
           throw new Error(uiPair(language, 'Not enough matching media for all trials. Check folders, sets, categories and reuse settings.', '当前抽图规则没有足够的匹配媒体完成所有轮次，请检查文件夹、分组、分类或去重设置。'));
         }
@@ -235,7 +255,9 @@ export default function QuestionParticipantPreview({
       display: 'block',
       mt: 1
     }}>
-      {zh ? `媒体：手动指定时保持固定；随机模式按当前规则从${usingPreviewLibrary ? '平台预览媒体库' : '项目媒体库'}为每轮抽取。返回上一轮保留原图与答案。` : `Media: manual selections stay fixed; random mode samples each trial from the ${usingPreviewLibrary ? 'platform preview library' : 'project media pool'} using the current rules. Returning to a trial keeps its media and answers.`}
+      {designVersion
+        ? (zh ? `媒体：这道题跟随实验设计，这里显示第 ${designVersion.version + 1} 版（共 ${designVersion.versions} 版）的试次。点「重置预览」换一版。` : `Media: this question follows the experiment design; shown here are the trials of version ${designVersion.version + 1} of ${designVersion.versions}. Reset preview to draw another version.`)
+        : (zh ? `媒体：手动指定时保持固定；随机模式按当前规则从${usingPreviewLibrary ? '平台预览媒体库' : '项目媒体库'}为每轮抽取。返回上一轮保留原图与答案。` : `Media: manual selections stay fixed; random mode samples each trial from the ${usingPreviewLibrary ? 'platform preview library' : 'project media pool'} using the current rules. Returning to a trial keeps its media and answers.`)}
       {getTrialCount(question) > 1 ? zh ? ` · ${getTrialCount(question)} 轮` : ` · ${getTrialCount(question)} trials` : ''}
     </Typography>
   </>;

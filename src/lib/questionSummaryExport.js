@@ -1,3 +1,6 @@
+import { analyseDesign, designExportFiles } from './designAnalysis.js';
+import { designMethodsText } from './experimentDesign.js';
+import { activeDesign } from './experimentDesignRuntime.js';
 import { AI_ANALYSIS_README_LINES } from './aiQuestionAnalysis.js';
 import { isNoPreference } from './choiceTie.js';
 import { choiceOutcome, summarizeChoiceOutcomes } from './choiceOutcomes.js';
@@ -2611,6 +2614,19 @@ export function buildResultsExportBundle({
   if (variantFiles.length) {
     rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\n${VARIANT_README_LINES.join('\n')}\n` };
     rootFiles.push(...variantFiles);
+  }
+  // Experiment design: the design table, the execution check and each question's main result.
+  try {
+    const design = activeDesign(surveyConfig);
+    if (design) {
+      const analysis = analyseDesign(design, filteredResponses || [], surveyConfig);
+      const files = designExportFiles(design, analysis);
+      files.push({ path: 'experiment_design/methods.txt', content: `${designMethodsText(design, { conditions: surveyConfig?.conditions || [] })}\n` });
+      rootFiles.push(...files);
+      rootFiles[0] = { ...rootFiles[0], content: `${rootFiles[0].content}\nexperiment_design/          The design (design.json), every version's trials (design_table.csv), planned vs shown per unit, each question's main result, and a Methods paragraph\n` };
+    }
+  } catch {
+    /* the per-question files are still there */
   }
   // Journal-style Methods drafts (EPB, CEUS, LUP), written by fixed templates from the same facts.
   try {

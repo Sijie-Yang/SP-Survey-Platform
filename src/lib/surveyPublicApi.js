@@ -40,13 +40,36 @@ export async function fetchPairStats(projectId) {
         exposures: Number(row.exposures) || 0,
         wins: Number(row.wins) || 0,
         losses: Number(row.losses) || 0,
-        mu: row.mu != null ? Number(row.mu) : 25,
+        // No μ from the server means no rating yet; adaptive sampling then balances exposure.
+        mu: row.mu != null && Number.isFinite(Number(row.mu)) ? Number(row.mu) : null,
         sigma: row.sigma != null ? Number(row.sigma) : null,
       };
     });
     return map;
   } catch (err) {
     console.warn('fetchPairStats failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Anonymous RPC: the design version done least often, recorded as started.
+ * null when the RPC is missing or fails; the caller then picks a version itself.
+ */
+export async function claimDesignVersion(projectId, designId, versions) {
+  if (!supabase || !projectId || !designId || !versions) return null;
+  try {
+    const { data, error } = await supabase.rpc('claim_design_version', {
+      p_project_id: projectId,
+      p_design_id: designId,
+      p_versions: versions,
+    });
+    if (error) throw error;
+    const version = Number(data?.version);
+    if (!Number.isInteger(version) || version < 0 || version >= versions) return null;
+    return { version, claimId: data?.claim_id ? String(data.claim_id) : null };
+  } catch (err) {
+    console.warn('claimDesignVersion failed:', err.message);
     return null;
   }
 }

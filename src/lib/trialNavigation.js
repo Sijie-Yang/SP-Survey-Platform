@@ -401,6 +401,12 @@ export function collectSurveyDataWithTrials(surveyModel) {
       };
     }
 
+    // Per-trial records (design unit, set id, …) stay with every trial, answered or not.
+    const contexts = q.trialMediaContexts || q.jsonObj?.trialMediaContexts;
+    if (Array.isArray(contexts)) {
+      trials.trials = trials.trials.map((t, i) => (contexts[i] ? { ...contexts[i], ...(t || {}) } : t));
+    }
+
     data[name] = trials;
     setStoredTrialsAnswer(name, trials, active);
   });

@@ -2,6 +2,7 @@ import { applySurveyThemePreset, matchesSurveyThemePreset, SURVEY_THEME_OPTIONS,
 import DescriptionMarkdownEditor from './DescriptionMarkdownEditor';
 import React, { useMemo, useState } from 'react';
 import RuntimeContextSettings from './RuntimeContextSettings';
+import ExperimentDesignPanel from './ExperimentDesignPanel';
 import {
   Box,
   Typography,
@@ -46,6 +47,7 @@ import {
   GTranslate,
   Tune,
   PaletteOutlined,
+  ScienceOutlined,
   Preview,
 } from '@mui/icons-material';
 import {
@@ -86,6 +88,8 @@ import {
 } from '../../lib/questionNames';
 // Old API functions removed - now using chatApi.js
 import { getSurveyValidationWarningStrings } from '../../lib/designProtocol';
+import { activeDesign } from '../../lib/experimentDesignRuntime';
+import { designSizing, designTypeName } from '../../lib/experimentDesign';
 
 /** Compact color picker row for Theme Customization */
 function ThemeColorField({ label, hint, value, onChange }) {
@@ -578,6 +582,7 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
             ['translations', uiPair(language, 'Translations', '翻译'), <GTranslate />],
             ['display', t.builderDisplaySettings, <Tune />],
             ['theme', t.builderThemeCustomization, <PaletteOutlined />],
+            ['design', uiPair(language, 'Experiment design', '实验设计'), <ScienceOutlined />],
           ].map(([id, label, icon]) => (
             <AdminActionButton
               key={id}
@@ -590,6 +595,28 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
             </AdminActionButton>
           ))}
       </AdminActionBar>
+
+      {!siteLocked && (() => {
+        const design = activeDesign(config);
+        const zh = uiPair(language, 'en', 'zh') === 'zh';
+        if (!design) {
+          return (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: -1, mb: 2 }}>
+              {zh ? '实验设计（可选）：先定好每人看哪些图，每张图被看的次数一样多，结果页按设计分析。' : 'Experiment design (optional): decide who sees which images, so every image is seen equally often and Results analyses it that way.'}{' '}
+              <Button size="small" onClick={() => setSettingsDialog('design')} sx={{ minWidth: 0, p: 0, verticalAlign: 'baseline' }}>{zh ? '设置' : 'Set up'}</Button>
+            </Typography>
+          );
+        }
+        const sizing = designSizing(design);
+        return (
+          <Typography variant="body2" sx={{ mt: -1, mb: 2 }} data-testid="design-status">
+            {zh
+              ? `实验设计已开启：${designTypeName(design.type, true)} · ${sizing.units} ${design.type === 'fixed_pairs' ? '组' : '张图'} · ${sizing.versions} 个版本 · ${design.questions.length} 道题跟随`
+              : `Experiment design on: ${designTypeName(design.type, false)} · ${sizing.units} ${design.type === 'fixed_pairs' ? 'sets' : 'images'} · ${sizing.versions} versions · ${design.questions.length} question(s) follow it`}{' '}
+            <Button size="small" onClick={() => setSettingsDialog('design')} sx={{ minWidth: 0, p: 0, verticalAlign: 'baseline' }}>{zh ? '修改' : 'Change'}</Button>
+          </Typography>
+        );
+      })()}
 
       {validationWarnings.length > 0 && (
         <Alert
@@ -666,6 +693,16 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
 
                 <RuntimeContextSettings config={config} onChange={handleBasicInfoChange} />
               </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSettings}>{t.resultsClose}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={settingsDialog === 'design'} onClose={closeSettings} fullWidth maxWidth="md">
+        <DialogTitle>{uiPair(language, 'Experiment design', '实验设计')}</DialogTitle>
+        <DialogContent dividers>
+          <ExperimentDesignPanel config={config} onChange={handleBasicInfoChange} currentProject={currentProject} />
         </DialogContent>
         <DialogActions>
           <Button onClick={closeSettings}>{t.resultsClose}</Button>

@@ -15,6 +15,8 @@ import {
   applyResolvedSlotsToElement, MEDIA_STAR_TYPES, isMediaStarType,
 } from './mediaSlots';
 
+import { shuffled as shuffleList } from './designRandom.js';
+
 export {
   hasMediaSlots, resolveMediaSlots, legacyAssignmentToSlots,
   applyResolvedSlotsToElement, MEDIA_STAR_TYPES, isMediaStarType,
@@ -553,7 +555,7 @@ function pickOnePerCategory(pool, element, globallyUsedImageKeys, folderTags = {
     const take = usesSampledCategoriesPerTrial(element)
       ? categorySampleCount(element, eligible.length)
       : 1;
-    const shuffled = [...eligible].sort(() => 0.5 - Math.random());
+    const shuffled = shuffleList(eligible);
     categories = shuffled.slice(0, take);
   }
 
@@ -566,15 +568,16 @@ function pickOnePerCategory(pool, element, globallyUsedImageKeys, folderTags = {
       });
     }
     if (!catPool.length) continue;
-    const shuffled = [...catPool].sort(() => 0.5 - Math.random());
+    const shuffled = shuffleList(catPool);
     const take = shuffled.slice(0, Math.min(perCategory, shuffled.length));
     if (!take.length) continue;
     images.push(...take);
     assignedCategories.push(cat);
   }
 
+  // Categories are drawn in name order; shuffle positions so no category always sits first.
   return {
-    images,
+    images: element.randomizeSetOrder ? shuffleList(images) : images,
     setKey: null,
     setId: null,
     groupKey: null,
@@ -608,12 +611,12 @@ function pickLeastExposed(candidates, imageCount, pairStats) {
     const key = getImageKey(img);
     return pairStats?.[key]?.exposures ?? 0;
   };
-  const sorted = [...candidates].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
+  const sorted = shuffleList(candidates).sort((a, b) => exposure(a) - exposure(b));
   // Prefer the least-exposed band, then shuffle within it for variety
   if (sorted.length <= imageCount) return sorted;
   const bandSize = Math.min(sorted.length, Math.max(imageCount * 2, Math.ceil(sorted.length / 2)));
   const band = sorted.slice(0, bandSize);
-  return [...band].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+  return shuffleList(band).slice(0, imageCount);
 }
 
 /**
@@ -632,10 +635,10 @@ function pickLeastExposed(candidates, imageCount, pairStats) {
 function pickSimilarMuSet(candidates, imageCount, pairStats) {
   if (!candidates?.length) return [];
   if (candidates.length <= imageCount) {
-    return [...candidates].sort(() => 0.5 - Math.random());
+    return shuffleList(candidates);
   }
 
-  const shuffleTake = (list, n) => [...list].sort(() => 0.5 - Math.random()).slice(0, n);
+  const shuffleTake = (list, n) => shuffleList(list).slice(0, n);
 
   const unseen = [];
   const rated = [];
@@ -656,7 +659,7 @@ function pickSimilarMuSet(candidates, imageCount, pairStats) {
 
   const buildMuBuckets = (ratedList) => {
     if (ratedList.length < imageCount) return [];
-    const sorted = [...ratedList].sort((a, b) => a.mu - b.mu || Math.random() - 0.5);
+    const sorted = shuffleList(ratedList).sort((a, b) => a.mu - b.mu);
     const numBuckets = Math.min(6, Math.max(2, Math.floor(sorted.length / imageCount)));
     const bucketSize = Math.ceil(sorted.length / numBuckets);
     const buckets = [];
@@ -769,22 +772,22 @@ export function pickRandomMediaForQuestion(
       const exposure = (s) => pairStats?.[s.setKey]?.exposures
         ?? pairStats?.[s.setId]?.exposures
         ?? 0;
-      const sorted = [...eligible].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
+      const sorted = shuffleList(eligible).sort((a, b) => exposure(a) - exposure(b));
       picked = sorted[0];
     } else if (pairingMode === 'adaptive' && pairStats) {
       // Adaptive on sets: prefer least-exposed sets (same as balanced without per-file μ)
       const exposure = (s) => pairStats?.[s.setKey]?.exposures
         ?? pairStats?.[s.setId]?.exposures
         ?? 0;
-      const sorted = [...eligible].sort((a, b) => exposure(a) - exposure(b) || Math.random() - 0.5);
+      const sorted = shuffleList(eligible).sort((a, b) => exposure(a) - exposure(b));
       picked = sorted[0];
     } else {
-      const shuffled = [...eligible].sort(() => 0.5 - Math.random());
+      const shuffled = shuffleList(eligible);
       picked = shuffled[0];
     }
 
     return {
-      images: element.randomizeSetOrder ? [...picked.members].sort(() => 0.5 - Math.random()) : picked.members,
+      images: element.randomizeSetOrder ? shuffleList(picked.members) : picked.members,
       setKey: picked.setKey,
       setId: picked.setId,
       groupKey: picked.setKey,
@@ -812,6 +815,17 @@ export function pickRandomMediaForQuestion(
   }
 
   if (pairingMode === 'adaptive' && candidates.length >= imageCount) {
+    // μ bands need ratings; until any image has one, balance exposure instead.
+    const hasRatings = candidates.some((img) => pairStats?.[getImageKey(img)]?.mu != null);
+    if (!hasRatings) {
+      return {
+        images: pickLeastExposed(candidates, imageCount, pairStats),
+        setKey: null,
+        setId: null,
+        groupKey: null,
+        groupId: null,
+      };
+    }
     return {
       images: pickSimilarMuSet(candidates, imageCount, pairStats),
       setKey: null,
@@ -821,7 +835,7 @@ export function pickRandomMediaForQuestion(
     };
   }
 
-  const shuffled = [...candidates].sort(() => 0.5 - Math.random());
+  const shuffled = shuffleList(candidates);
   return {
     images: shuffled.slice(0, imageCount),
     setKey: null,

@@ -65,7 +65,7 @@ function skillQuestionTypeLabel(question) {
 }
 
 // Sortable Question Item Component
-function SortableQuestionItem({ question, questionIndex, surveyQuestions = [], onEdit, onDelete, onDuplicate }) {
+function SortableQuestionItem({ question, questionIndex, surveyQuestions = [], followsDesign = false, onEdit, onDelete, onDuplicate }) {
   const { tr } = useQuestionEditorText();
   const {
     attributes,
@@ -178,6 +178,9 @@ function SortableQuestionItem({ question, questionIndex, surveyQuestions = [], o
               color="secondary"
               variant="outlined"
             />
+            {followsDesign && (
+              <Chip label={tr('Follows the experiment design')} size="small" color="success" variant="outlined" />
+            )}
             {Array.isArray(question.conditionVariants) && question.conditionVariants.length > 0 && (
               <Chip label={tr('Condition wording')} size="small" color="primary" variant="outlined" />
             )}
@@ -493,6 +496,7 @@ export default function PageEditor({ page, pageIndex, onSave, onCancel, images, 
                         question={question}
                         questionIndex={questionIndex}
                         surveyQuestions={(surveyConfig?.pages || [{ elements: editedPage.elements }]).flatMap((item) => (item.name === editedPage.name ? editedPage.elements : item.elements) || [])}
+                        followsDesign={surveyConfig?.experimentDesign?.enabled !== false && (surveyConfig?.experimentDesign?.questions || []).includes(question.name)}
                         onEdit={setSelectedQuestion}
                         onDuplicate={duplicateQuestion}
                         onDelete={deleteQuestion}

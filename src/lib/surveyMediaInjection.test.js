@@ -137,10 +137,11 @@ describe('surveyMediaInjection set/category picking', () => {
     const used = new Set();
     const first = pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags);
     expect(first.images).toHaveLength(2);
-    expect(first.categories).toEqual(['a']);
+    // Math.random is mocked to 0; a Fisher–Yates shuffle then moves the last category first.
+    expect(first.categories).toEqual(['b']);
     first.images.forEach((img) => used.add(img.media_id));
     const second = pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags);
-    expect(second.categories).toEqual(['b']);
+    expect(second.categories).toEqual(['a']);
     second.images.forEach((img) => used.add(img.media_id));
     expect(pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags).images).toEqual([]);
     const repeat = pickRandomMediaForQuestion(pool, { ...question, excludePreviouslyUsedImages: false }, used, new Set(), null, tags);

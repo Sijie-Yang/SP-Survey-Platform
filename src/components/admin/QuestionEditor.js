@@ -507,6 +507,9 @@ function MediaAssignmentFields({
           <MenuItem value="category">{tr("Per category (tagged folders)")}</MenuItem>
         </Select>
       </FormControl>
+      {(isSet || isCategory) && !hasSlots && <FormControlLabel sx={{
+      mt: 0.5
+    }} control={<Switch checked={question.randomizeSetOrder === true} onChange={(e) => onChange('randomizeSetOrder', e.target.checked)} />} label={zh ? '每次随机排列位置（左右、先后）。不勾时按文件名顺序，同一张总在同一位置。' : 'Shuffle positions each time (left/right, first/second). Off keeps file-name order, so the same file always takes the same position.'} />}
       {isCategory && !hasSlots && !isCurated && <FormControl fullWidth sx={{
       mt: 1
     }}>
@@ -1224,6 +1227,9 @@ export default function QuestionEditor({
   const mediaConstraints = getQuestionMediaConstraints(editedQuestion.type, editedQuestion);
   const isRankingQuestion = editedQuestion.type === 'ranking';
   const isCuratedMode = isCuratedSelectionMode(editedQuestion.imageSelectionMode);
+  // The experiment design decides this question's media; its own sampling settings are not used.
+  const followsDesign = surveyConfig?.experimentDesign?.enabled !== false
+    && (surveyConfig?.experimentDesign?.questions || []).includes(editedQuestion.name);
 
   // Load curated picker options for all stimulus types (project pool first)
   useEffect(() => {
@@ -1625,6 +1631,11 @@ export default function QuestionEditor({
             }}>{tr("Configure how stimuli are sampled, then set task-specific options and preview the participant view.")} </Typography>
 
               <SettingsSection step={1} title={tr("How stimuli are sampled")} hint={tr("Exclude reuse, assignment mode, random vs curated list, and stimulus count.")}>
+                {followsDesign ? (
+                  <Alert severity="success" sx={{ py: 0.75 }}>
+                    {tr('This question follows the experiment design: which images it shows, how many, and how often are set there (Survey settings → Experiment design). Its own sampling settings are not used.')}
+                  </Alert>
+                ) : (<>
                 <FormControlLabel control={<Switch checked={editedQuestion.excludePreviouslyUsedImages !== false} onChange={(e) => handleQuestionChange('excludePreviouslyUsedImages', e.target.checked)} />} label={tr(uiPair(language, 'Prefer unused media; if the filtered pool is too small, fall back to the unfiltered range', '优先不重复已展示的媒体；范围内不足时会回退到该范围未过滤池'))} />
 
                 {editedQuestion.type === 'skillquestion' ? (() => {
@@ -1701,7 +1712,7 @@ export default function QuestionEditor({
                       })()} onChange={(e) => handleQuestionChange('pairingMode', e.target.value)} label={tr("Sampling Mode")}>
                               <MenuItem value="random">{tr("Random — uniform from the pool")}</MenuItem>
                               <MenuItem value="balanced">{tr("Balanced — prefer least-exposed images")}</MenuItem>
-                              <MenuItem value="adaptive">{tr("Adaptive — μ bands + cold-start for new images")}</MenuItem>
+                              <MenuItem value="adaptive">{zh ? '自适应（目前同"平衡"：μ 分段需要评分数据）' : 'Adaptive (for now same as Balanced: μ bands need ratings)'}</MenuItem>
                             </Select>
                           </FormControl>;
                   })()}
@@ -1724,19 +1735,20 @@ export default function QuestionEditor({
                         </Select>
                       </FormControl>}
 
-                    {mediaConstraints.samplingModes && !editedQuestion.mediaSlots?.length && <SamplingModeSelect question={editedQuestion} onQuestionPatch={(patch) => setEditedQuestion((prev) => ({
+                    {!followsDesign && mediaConstraints.samplingModes && !editedQuestion.mediaSlots?.length && <SamplingModeSelect question={editedQuestion} onQuestionPatch={(patch) => setEditedQuestion((prev) => ({
                   ...prev,
                   ...patch
                 }))} />}
 
-                    {!editedQuestion.mediaSlots?.length && <StimulusCountField question={editedQuestion} onChange={handleQuestionChange} constraints={mediaConstraints} />}
+                    {!followsDesign && !editedQuestion.mediaSlots?.length && <StimulusCountField question={editedQuestion} onChange={handleQuestionChange} constraints={mediaConstraints} />}
 
-                    <TrialCountField question={editedQuestion} onChange={handleQuestionChange} />
+                    {!followsDesign && <TrialCountField question={editedQuestion} onChange={handleQuestionChange} />}
 
-                    {isCuratedMode && !editedQuestion.mediaSlots?.length && <CuratedMediaPicker availableImages={availableImages} selectedImages={selectedImages} maxCount={editedQuestion.imageCount || mediaConstraints.defaultCount || 1} loading={loadingImages} error={imageError} onToggle={handleImageSelection} title={tr("Select files")} />}
+                    {!followsDesign && isCuratedMode && !editedQuestion.mediaSlots?.length && <CuratedMediaPicker availableImages={availableImages} selectedImages={selectedImages} maxCount={editedQuestion.imageCount || mediaConstraints.defaultCount || 1} loading={loadingImages} error={imageError} onToggle={handleImageSelection} title={tr("Select files")} />}
 
                     {MEDIA_STAR_EDITOR_TYPES.includes(editedQuestion.type) && <MediaSlotsEditor currentProject={currentProject} question={editedQuestion} onChange={handleQuestionChange} availableImages={availableImages} />}
                   </>}
+                  </>)}
               </SettingsSection>
 
               <SettingsSection step={2} title={tr(editedQuestion.type === 'skillquestion' ? 'Wording & task options' : 'Task options')} hint={tr(editedQuestion.type === 'skillquestion' ? 'Labels and instructions participants see inside this task.' : 'Type-specific response and presentation options.')}>
@@ -1823,7 +1835,7 @@ export default function QuestionEditor({
 
                 {(editedQuestion.type === 'imagepicker' || editedQuestion.type === 'mediapicker') && <>
                     <FormControlLabel control={<Switch checked={editedQuestion.multiSelect || false} onChange={(e) => handleQuestionChange('multiSelect', e.target.checked)} />} label={tr(editedQuestion.type === 'mediapicker' ? 'Allow Multiple Selection — participants can choose more than one media item' : 'Allow Multiple Selection — participants can choose more than one image')} />
-                    {(editedQuestion.mediaAssignmentMode || 'individual') === 'individual' && <FormControl fullWidth variant="outlined">
+                    {!followsDesign && (editedQuestion.mediaAssignmentMode || 'individual') === 'individual' && <FormControl fullWidth variant="outlined">
                         <InputLabel sx={{
                     backgroundColor: 'white',
                     px: 1
@@ -1838,7 +1850,7 @@ export default function QuestionEditor({
                           <MenuItem value="random">{tr("Random — uniform from the pool")}</MenuItem>
                           <MenuItem value="balanced">{tr("Balanced — prefer least-exposed")} {editedQuestion.type === 'mediapicker' ? tr("media") : tr("images")}
                           </MenuItem>
-                          <MenuItem value="adaptive">{tr("Adaptive — μ bands + cold-start for new items")}</MenuItem>
+                          <MenuItem value="adaptive">{zh ? '自适应（目前同"平衡"：μ 分段需要评分数据）' : 'Adaptive (for now same as Balanced: μ bands need ratings)'}</MenuItem>
                         </Select>
                       </FormControl>}
                     <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />

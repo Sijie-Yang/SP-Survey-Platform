@@ -455,7 +455,9 @@ export const questionEditorZh = {
   "High end label": "高分端文字",
   "Scale minimum (sliders)": "滑块最小值",
   "Scale maximum (sliders)": "滑块最大值",
-  "Blocks (JSON) — see skill description": "内容块（JSON，请参阅交互任务说明）"
+  "Blocks (JSON) — see skill description": "内容块（JSON，请参阅交互任务说明）",
+  "Follows the experiment design": "跟随实验设计",
+  "This question follows the experiment design: which images it shows, how many, and how often are set there (Survey settings → Experiment design). Its own sampling settings are not used.": "这道题跟随实验设计：看哪些图、看几张、看几次都在那里设置（问卷设置 → 实验设计）。这里的抽图设置不生效。"
 };
 
 export function questionEditorText(text, language, values = {}) {
