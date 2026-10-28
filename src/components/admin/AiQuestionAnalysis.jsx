@@ -9,7 +9,7 @@ import { Alert, Box, Button, Chip, CircularProgress, Collapse, Table, TableBody,
 import { AutoAwesome } from '@mui/icons-material';
 import { useRegion } from '../../contexts/RegionContext';
 import { isChineseLanguage } from '../../lib/uiLanguages';
-import { computeAnalysisBlocks, evaluateAnalysis, generateQuestionAnalysis, pageMediaUrls, platformSummaryBlocks } from '../../lib/aiQuestionAnalysis';
+import { computeAnalysisBlocks, evaluateAnalysis, generateQuestionAnalysis, pageMediaUrls, platformAnalysis } from '../../lib/aiQuestionAnalysis';
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { writeQuestionAnalysis } from '../../lib/agentApi';
 import { ImageResolverContext } from './imageResolverContext';
@@ -130,12 +130,28 @@ function PerItemView({ block, zh, head }) {
   </Box>;
 }
 
+/** Which answer fields the platform analysed and which it skipped, and why. */
+function CoverageView({ block, zh }) {
+  return <Box data-testid="ai-analysis-coverage" sx={{ mb: 3, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
+    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>{zh ? block.title : 'Which fields the platform analysed'}</Typography>
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+      {zh ? block.note : `${block.analysed.length} fields analysed, ${block.skipped.length} skipped. Computed by platform code only, no model: the same records always give the same result.`}
+    </Typography>
+    {[...block.analysed, ...block.skipped].map((c) => <Box key={c.field} sx={{ display: 'flex', gap: 1, alignItems: 'baseline', mb: 0.5 }}>
+      <Chip size="small" label={c.status === 'analysed' ? (zh ? '已分析' : 'analysed') : (zh ? '跳过' : 'skipped')} color={c.status === 'analysed' ? 'success' : 'default'} variant="outlined" sx={{ flexShrink: 0, height: 20, fontSize: 11 }} />
+      <Typography variant="body2" sx={{ fontFamily: 'monospace', flexShrink: 0 }}>{c.field}</Typography>
+      <Typography variant="body2" color={c.status === 'analysed' ? 'text.primary' : 'text.secondary'} sx={{ minWidth: 0 }}>{c.what}</Typography>
+    </Box>)}
+  </Box>;
+}
+
 function BlockView({ block, zh }) {
   const title = block.title || '';
   const head = <>
     {title && <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>{title}</Typography>}
     {block.note && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{block.note}</Typography>}
   </>;
+  if (block.type === 'coverage') return <CoverageView block={block} zh={zh} />;
   if (block.type === 'per_item') return <PerItemView block={block} zh={zh} head={head} />;
   if (block.type === 'pairwise' || block.type === 'ranking') {
     const ranking = block.type === 'ranking';
@@ -216,8 +232,10 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
   const zh = isChineseLanguage(language);
   const [state, setState] = useState({ status: saved ? 'running' : 'idle', blocks: [], error: '' });
   const pageMedia = useMemo(() => pageMediaUrls(records), [records]);
-  // What the platform reads off the records by itself, shown before any model is involved.
-  const platformBlocks = useMemo(() => computeAnalysisBlocks(platformSummaryBlocks(records)), [records]);
+  // What the platform reads off the records by itself: always shown, never depends on the model.
+  const platform = useMemo(() => platformAnalysis(records, { pageHtml, question }), [records, pageHtml, question]);
+  const platformBlocks = useMemo(() => computeAnalysisBlocks(platform.blocks), [platform]);
+  const covered = platform.auto.blocks.length > 0;
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState(saved?.instructions || '');
   const [showCode, setShowCode] = useState(false);
@@ -227,17 +245,17 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
   // Re-run the saved code whenever the records change (filters, new responses).
   useEffect(() => {
     if (!saved?.code) {
-      setState({ status: 'idle', blocks: [], error: '' });
+      setState({ status: saved ? 'done' : 'idle', blocks: [], error: '' });
       return undefined;
     }
     let cancelled = false;
     setState((prev) => ({ ...prev, status: 'running' }));
-    evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml }).then((result) => {
+    evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml, question }).then((result) => {
       if (cancelled) return;
-      setState(result.ok ? { status: 'done', blocks: result.blocks, error: '' } : { status: 'error', blocks: [], error: result.error });
+      setState(result.error ? { status: 'error', blocks: [], error: result.error } : { status: 'done', blocks: result.modelBlocks, error: '' });
     });
     return () => { cancelled = true; };
-  }, [saved?.code, records, pageHtml]);
+  }, [saved, records, pageHtml, question]);
 
   const generate = async () => {
     setBusy(true);
@@ -253,14 +271,15 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
         request: (body) => writeQuestionAnalysis(body),
         runner: runAnalysisInSandbox,
       });
-      if (!result.ok) {
+      if (!result.ok || (result.modelError && !covered)) {
         setFailedCode(result.code || '');
-        setState({ status: 'error', blocks: [], error: result.error });
+        setState({ status: 'error', blocks: [], error: result.error || result.modelError });
         return;
       }
       await onSave(result.saved);
       setEditing(false);
-      setState({ status: 'done', blocks: result.blocks, error: '' });
+      if (result.modelError) setFailedCode(result.code || '');
+      setState(result.modelError ? { status: 'error', blocks: [], error: result.modelError } : { status: 'done', blocks: result.modelBlocks, error: '' });
     } catch (err) {
       setState({ status: 'error', blocks: [], error: err?.message || String(err) });
     } finally {
@@ -286,7 +305,12 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
     sx={{ mb: 1 }} />;
 
   const platformSummary = platformBlocks.length > 0 && <Box data-testid="ai-analysis-platform" sx={{ mb: 2 }}>
-    <Chip size="small" color="primary" variant="outlined" label={zh ? '平台自动汇总' : 'Platform summary'} sx={{ mb: 1 }} />
+    <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+      <Chip size="small" color="primary" variant="outlined" label={zh ? '平台分析 · 不经过模型' : 'Platform analysis · no model'} />
+      <Typography variant="caption" color="text.secondary">
+        {zh ? '平台代码直接从答案字段算出，每次结果一样。' : 'Computed by platform code from the answer fields; the same every time.'}
+      </Typography>
+    </Box>
     <AiAnalysisBlocks blocks={platformBlocks} media={pageMedia} />
   </Box>;
 
@@ -295,7 +319,11 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
       {platformSummary}
       <Box sx={{ p: 1.5, mb: 2, border: '1px dashed', borderColor: 'primary.light', borderRadius: 1, bgcolor: 'background.paper' }}>
         <Typography variant="body2" sx={{ mb: 1 }}>
-          {platformBlocks.length
+          {covered
+            ? (zh
+              ? '上面全部由平台算出。如果还想要平台没做的（例如某个被跳过的字段、按某种条件拆开比较），在下面写清楚，点“让模型补充”：模型只写补充部分，不会改动上面的结果。'
+              : 'Everything above is computed by the platform. For something it did not do (a skipped field, a split you need), describe it below and click "Ask the model to add": the model only adds to the analysis above, never changes it.')
+            : platformBlocks.length
             ? (zh
               ? `上表是平台直接从 ${records.length} 条记录算出来的。要更多分析（排名、分布、文字等），点“生成分析”：助手模型会读题目代码和几条记录，写一段分析代码，在隔离环境里跑；统计用平台自己的算法。生成后会保存，结果页和导出都会用它。`
               : `The table above is computed by the platform from the ${records.length} records. For more (rankings, distributions, text), "Generate analysis" has the Assistant model read the task's code and a few records and write analysis code, which runs in a sandbox; the statistics are the platform's own. It is saved and used here and in exports.`)
@@ -304,8 +332,8 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
               : `The platform does not know this question's format. "Generate analysis" has the Assistant model read the task's code and a few of the ${records.length} records and write analysis code, which runs in a sandbox; TrueSkill, means and confidence intervals use the platform's own algorithms. It is saved and used here and in exports.`)}
         </Typography>
         {notesField}
-        <Button size="small" variant="contained" startIcon={<AutoAwesome />} onClick={generate} disabled={!records.length} data-testid="ai-analysis-generate">
-          {zh ? '生成分析' : 'Generate analysis'}
+        <Button size="small" variant={covered ? 'outlined' : 'contained'} startIcon={<AutoAwesome />} onClick={generate} disabled={!records.length} data-testid="ai-analysis-generate">
+          {covered ? (zh ? '让模型补充' : 'Ask the model to add') : (zh ? '生成分析' : 'Generate analysis')}
         </Button>
       </Box>
       {children}
@@ -313,8 +341,9 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
   }
 
   return <Box data-testid="ai-analysis">
+    {covered && platformSummary}
     <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
-      <Chip size="small" color="secondary" variant="outlined" icon={<AutoAwesome />} label={zh ? 'AI 生成的分析' : 'AI-written analysis'} />
+      <Chip size="small" color="secondary" variant="outlined" icon={<AutoAwesome />} label={covered ? (zh ? '模型补充的分析' : 'Added by the model') : (zh ? 'AI 生成的分析' : 'AI-written analysis')} />
       <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 200 }}>
         {zh ? '题型和字段由模型推断，请核对代码；统计是平台算法。' : 'The question type and fields were inferred by the model, so check the code; the statistics are the platform\'s.'}
         {saved?.model ? ` · ${saved.model}` : ''}
@@ -343,10 +372,13 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
       </Typography>
     </Box>}
     {state.status === 'error' && <Alert severity="warning" sx={{ mb: 2 }}>
-      {zh ? `分析没有跑通（已自动让模型修过一次）：${state.error}。可以在说明里写清答案在哪个字段、表示什么，再生成一次。` : `The analysis did not run (the model already had one automatic fix): ${state.error}. Say in the notes where the answer is and what it means, then generate again.`}
+      {zh ? `模型写的分析没有跑通（已自动让模型修过一次）：${state.error}。${covered ? '上面平台的分析不受影响。' : ''}可以在说明里写清答案在哪个字段、表示什么，再生成一次。` : `The model's analysis did not run (it already had one automatic fix): ${state.error}.${covered ? ' The platform analysis above is not affected.' : ''} Say in the notes where the answer is and what it means, then generate again.`}
     </Alert>}
-    {state.status === 'error' && platformSummary}
-    {state.status === 'done' && <AiAnalysisBlocks blocks={state.blocks} media={pageMedia} />}
+    {state.status === 'error' && !covered && platformSummary}
+    {state.status === 'done' && <AiAnalysisBlocks blocks={covered ? state.blocks : [...platformBlocks, ...state.blocks]} media={pageMedia} />}
+    {state.status === 'done' && covered && !state.blocks.length && <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+      {zh ? '模型没有补充：它认为上面平台的分析已经覆盖了这道题。' : 'The model added nothing: it found the platform analysis above already covers this question.'}
+    </Typography>}
     {children}
   </Box>;
 }

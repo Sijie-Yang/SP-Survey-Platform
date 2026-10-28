@@ -341,7 +341,13 @@ describe('Platform summary of per-image item ratings', () => {
     const code = 'function analyze(records) { return { blocks: [{ type: "note", text: "n=" + records.length }] }; }';
     const run = await evaluateAnalysis(code, records, syncRunner);
     expect(run.ok).toBe(true);
-    expect(run.blocks.map((b) => b.type)).toEqual(['table', 'note']);
+    // The image × item table first, then the field coverage and field blocks, then the model's note.
+    const types = run.blocks.map((b) => b.type);
+    expect(types.slice(0, 2)).toEqual(['table', 'coverage']);
+    expect(types[types.length - 1]).toBe('note');
+    // Lists of shown URLs and JSON-in-text are not treated as answers.
+    const skipped = run.blocks[1].skipped.map((c) => c.field);
+    expect(skipped).toEqual(expect.arrayContaining(['shownUrls', 'result.text', 'scenes']));
     expect(run.blocks[0].table.rows).toHaveLength(4);
     const files = aiAnalysisExportFiles(QUESTION, { code }, run.blocks);
     const csv = files.find((f) => /\.csv$/.test(f.path));

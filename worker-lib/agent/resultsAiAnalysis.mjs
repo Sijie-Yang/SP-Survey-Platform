@@ -65,6 +65,10 @@ Return blocks. You only reshape data; SP-Survey runs the statistics:
 Every block may have a short "note".
 
 Rules:
+- If ALREADY ANALYSED BY THE PLATFORM is given, those analyses are shown already: do NOT repeat them (no pairwise or per_item block on the same answers).
+  Your job is what is missing: the fields it lists as skipped because it could not read them (complex structures such as hotspot clicks,
+  nested logic, conditional branches; not image names, time stamps or order numbers), and anything RESEARCHER NOTES ask for.
+  If nothing is missing, return { blocks: [] }.
 - Read the QUESTION to decide what the answer means, then pick the ONE block type that fits it. Usually one block; at most 3, all about this question.
 - Images: participants usually see a random subset of images in a random order. Results must be keyed by WHICH image (its file name), never by trial number or position. MEDIA says where image names appear. Use helpers.file(url) as the item so the platform can show the picture.
 - Use the question's own options (choices) as labels when the answer is a code.
@@ -94,6 +98,7 @@ export function normalizeAnalysisRequest(body) {
     otherQuestions: clip(body?.otherQuestions, 6000).trim(),
     media: clip(body?.media, 3000).trim(),
     pageCode: clip(body?.pageCode, 6000).trim(),
+    platformDone: clip(body?.platformDone, 4000).trim(),
     previous: clip(body?.previous, MAX_CODE_CHARS),
     error: clip(body?.error, 3000).trim(),
   };
@@ -115,6 +120,7 @@ export function buildAnalysisUserMessage(input) {
   if (input.otherQuestions) parts.push(`OTHER QUESTIONS ON THE PAGE (do not analyse these)\n${input.otherQuestions}`);
   if (input.media) parts.push(`MEDIA\n${input.media}`);
   if (input.pageCode) parts.push(`PAGE CODE (excerpt of the page's or task's script: how it draws its media and how it records the answers; use it to read what the fields mean)\n${input.pageCode}`);
+  if (input.platformDone) parts.push(`ALREADY ANALYSED BY THE PLATFORM (shown already; do not repeat)\n${input.platformDone}`);
   if (input.instructions) parts.push(`RESEARCHER NOTES (follow these)\n${input.instructions}`);
   parts.push(`RECORDS: ${input.recordCount || 'several'} in total`);
   if (input.fields) parts.push(`FIELDS (path  types  (records having it)  example)\n${input.fields}`);

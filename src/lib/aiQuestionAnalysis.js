@@ -14,6 +14,7 @@ import { descriptiveStats, wilsonCI } from './stats.js';
 import { computeBordaScores, kendallW, interpretKendallW } from './rankingStats.js';
 import { wordFrequency, textLengthStats } from './textStats.js';
 import { krippendorffAlpha, interpretAlpha } from './reliability.js';
+import { autoAnalysis, autoAnalysisSummary, coverageBlock } from './customAnswerProfile.js';
 
 export const AI_ANALYSIS_VERSION = 1;
 const SP_SITE_REQUESTS_KEY = '__sp_requests';
@@ -42,6 +43,13 @@ export function buildAnalysisRecords(rows, question, { site = false } = {}) {
       record.answer = responses[name];
       const shown = row?.displayed_images?.[name] || row?.displayed_images?.[`${name}__trials`];
       if (Array.isArray(shown) && shown.length) record.shown = shown;
+      // Short answers to the other questions of the same submission (grade, gender, group): used to split results.
+      const context = {};
+      Object.entries(responses).forEach(([key, value]) => {
+        if (key === name || key.startsWith('__') || Object.keys(context).length >= 20) return;
+        if ((typeof value === 'string' && value.trim() && value.length <= 60) || (typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean') context[key] = value;
+      });
+      if (Object.keys(context).length) record.context = context;
     }
     if (site || question?.pageOnly) {
       if (responses[SP_SITE_STATE_KEY] !== undefined) record.page_state = responses[SP_SITE_STATE_KEY];
@@ -426,7 +434,7 @@ export function computeAnalysisBlocks(blocks) {
     if (block.type === 'bar') {
       return { ...block, table: { columns: ['label', block.unit || 'value'], rows: block.items.map((item) => [item.label, round(item.value, 4)]) } };
     }
-    if (block.type === 'table') return { ...block, table: { columns: block.columns, rows: block.rows } };
+    if (block.type === 'table' || block.type === 'coverage') return { ...block, table: { columns: block.columns, rows: block.rows } };
     return { ...block, table: null };
   });
 }
@@ -739,19 +747,69 @@ export function platformSummaryBlocks(records) {
   }];
 }
 
-/** Run checked code on records (any runner) and compute: { ok, blocks, problems, error }. */
-export async function evaluateAnalysis(code, records, runner, { pageHtml = '' } = {}) {
+/**
+ * What the platform analyses by itself, with no model: the image × item
+ * table, then (for a question whose answers are objects, e.g. one per trial)
+ * the coverage of every field and one block per field it recognised.
+ * Deterministic: the same records always give the same blocks.
+ */
+export function platformAnalysis(records, { pageHtml = '', question = null } = {}) {
+  const mapped = mapRecordsToMedia(records, pageHtml);
+  const auto = autoAnalysis(mapped, { pageHtml, question });
+  const coverage = coverageBlock(auto);
+  // Same shape as checked model blocks, so the same statistics run on them.
+  const shaped = auto.blocks.map((block) => ({
+    note: '',
+    ...block,
+    ...(block.type === 'rating' ? { items: block.items || [], values: block.values || [], min: block.min ?? null, max: block.max ?? null } : null),
+    ...(block.type === 'choice' ? { values: block.values.map(String), multi: Boolean(block.multi), total: block.total || null } : null),
+    ...(block.type === 'per_item' ? { labels: block.labels || {}, measure: block.measure || 'number' } : null),
+  }));
+  return { auto, blocks: [...platformSummaryBlocks(records), ...(coverage ? [coverage] : []), ...shaped] };
+}
+
+/** The data a block carries, order-free: two blocks with the same signature show the same thing. */
+function blockSignature(block) {
+  const sorted = (list) => JSON.stringify([...list].sort());
+  if (block.type === 'pairwise') return `pairwise:${sorted(block.matches.map((m) => `${m.winner}>${m.loser}`))}`;
+  if (block.type === 'per_item') return `per_item:${sorted(block.values.map((v) => `${v.item}|${v.value}|${v.rater || ''}`))}`;
+  if (block.type === 'choice') return `choice:${sorted(block.values.map((v) => String(v).replace(/ \([^)]*\)$/, '')))}`;
+  if (block.type === 'rating') return `rating:${sorted((block.items?.length ? block.items.flatMap((i) => i.values) : block.values).map(Number))}`;
+  return null;
+}
+
+/**
+ * Run the platform's analysis and the saved code (if any) on the records:
+ * { ok, blocks, platformBlocks, modelBlocks, problems, error }. The platform
+ * part never depends on the model: when the code fails, it is still shown and
+ * `error` says what went wrong with the model's part.
+ */
+export async function evaluateAnalysis(code, records, runner, { pageHtml = '', question = null } = {}) {
+  const platform = platformAnalysis(records, { pageHtml, question });
+  const platformBlocks = computeAnalysisBlocks(platform.blocks);
+  const hasPlatform = platform.auto.blocks.length > 0;
+  const finish = (modelBlocks, problems, error = '') => {
+    const ok = !error || hasPlatform;
+    return { ok, error, problems, platformBlocks, modelBlocks, blocks: [...platformBlocks, ...modelBlocks] };
+  };
+  if (!String(code || '').trim()) return hasPlatform ? finish([], []) : { ...finish([], [], 'No analysis code.'), ok: false };
   const mapped = mapRecordsToMedia(records, pageHtml);
   const run = await runner(code, mapped);
-  if (!run?.ok) return { ok: false, error: run?.error || 'The code did not run.', blocks: [], problems: [] };
+  if (!run?.ok) return finish([], [], run?.error || 'The code did not run.');
   const { blocks, problems } = normalizeAnalysisResult(run.result);
-  if (!blocks.length) return { ok: false, error: problems.join(' ') || 'No usable result.', blocks: [], problems };
-  const remapped = remapBlocksToMedia(blocks, pageIdMediaMap(records, pageHtml), {
+  // A model block with exactly the data of a platform block would only repeat it; anything else is kept.
+  const done = new Set(platform.blocks.map(blockSignature).filter(Boolean));
+  const extra = blocks.filter((b) => !done.has(blockSignature(b)));
+  if (!extra.some((b) => b.type !== 'note')) {
+    // With the platform's analysis in place, "nothing to add" is a valid answer from the model.
+    // A model note (one sentence on what it assumed) is still worth showing.
+    return hasPlatform ? finish(computeAnalysisBlocks(extra), problems) : finish([], problems, problems.join(' ') || 'No usable result.');
+  }
+  const remapped = remapBlocksToMedia(extra, pageIdMediaMap(records, pageHtml), {
     mappedRecords: mapped !== records,
     libraryNames: new Set(pageMediaUrls(records).keys()),
   });
-  // What the platform reads off the records itself comes first, whatever the code did.
-  return { ok: true, blocks: computeAnalysisBlocks([...platformSummaryBlocks(records), ...remapped]), problems };
+  return finish(computeAnalysisBlocks(remapped), problems);
 }
 
 function csvCell(value) {
@@ -772,9 +830,10 @@ export function aiAnalysisExportFiles(question, saved, computedBlocks) {
   (computedBlocks || []).forEach((block, index) => {
     if (!block.table) return;
     const lines = [block.table.columns.map(csvCell).join(','), ...block.table.rows.map((row) => row.map(csvCell).join(','))];
-    files.push({ path: `${base}__${index + 1}_${block.type}.csv`, content: `﻿${lines.join('\r\n')}\r\n` });
+    // Platform blocks are marked so a reader knows no model was involved.
+    files.push({ path: `${base}__${index + 1}_${block.platform ? 'platform_' : ''}${block.type}.csv`, content: `﻿${lines.join('\r\n')}\r\n` });
   });
-  files.push({ path: `${base}__analyze.js`, content: `${aiAnalysisCodeHeader(question, saved)}${saved?.code || ''}\n` });
+  if (saved?.code) files.push({ path: `${base}__analyze.js`, content: `${aiAnalysisCodeHeader(question, saved)}${saved.code}\n` });
   return files;
 }
 
@@ -795,6 +854,8 @@ export const AI_ANALYSIS_README_LINES = [
   '-------------------',
   'questions/{name}__ai__{n}_{type}.csv   Results of the analysis the Assistant model wrote for a',
   '                                       question SP-Survey does not analyse by itself.',
+  'questions/{name}__ai__{n}_platform_{type}.csv   Computed by SP-Survey itself from the answer fields, no model',
+  '                                       involved (the _coverage file lists every field: analysed or skipped and why).',
   'questions/{name}__ai__analyze.js       The code it wrote. The question type was inferred by the model;',
   '                                       check it. Statistics are SP-Survey\'s own (TrueSkill, Borda,',
   '                                       Kendall W, Wilson 95% CI, descriptive stats, word frequency).',
@@ -1002,7 +1063,9 @@ export function mediaSummary(records) {
 export async function generateQuestionAnalysis({ question, records: rawRecords, otherQuestions = [], pageHtml = '', instructions = '', request, runner }) {
   // The model only ever sees library image names where the page took them by position.
   const records = mapRecordsToMedia(rawRecords, pageHtml);
+  const { auto } = platformAnalysis(rawRecords, { pageHtml, question });
   const base = {
+    platformDone: autoAnalysisSummary(auto),
     pageCode: analysisCodeExcerpt(pageHtml, records),
     question: questionBrief(question),
     otherQuestions: otherQuestionList(otherQuestions, question),
@@ -1013,20 +1076,26 @@ export async function generateQuestionAnalysis({ question, records: rawRecords, 
     instructions,
   };
   let reply = await request(base);
-  let evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml });
+  let evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml, question });
   let attempts = 1;
-  if (!evaluation.ok) {
+  // One automatic fix when the model's code failed (even if the platform part already stands).
+  if (evaluation.error) {
     reply = await request({ ...base, previous: reply.code, error: evaluation.error });
-    evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml });
+    evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml, question });
     attempts = 2;
   }
+  // Code that still fails is not kept: the platform's part stands on its own.
+  const code = evaluation.error ? '' : reply.code;
   return {
     ok: evaluation.ok,
     error: evaluation.ok ? '' : evaluation.error,
     attempts,
     code: reply.code,
-    saved: makeSavedAnalysis({ code: reply.code, model: reply.model, provider: reply.provider, instructions, questionTitle: question?.title }),
+    saved: makeSavedAnalysis({ code, model: reply.model, provider: reply.provider, instructions, questionTitle: question?.title }),
     blocks: evaluation.blocks,
+    platformBlocks: evaluation.platformBlocks,
+    modelBlocks: evaluation.modelBlocks,
+    modelError: evaluation.error,
     problems: evaluation.problems,
   };
 }
