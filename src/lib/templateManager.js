@@ -586,6 +586,175 @@ export async function updateProjectAdmin(id, updates, { expectedDraftUpdatedAt }
   return { success: true, project: data };
 }
 
+// Per-project keys that belong to the original only: SP-Bench task
+// publications and dataset releases point at the original's responses.
+const COPY_DROPPED_METADATA_KEYS = ['spBenchTasks', 'datasetRelease', 'copiedFrom'];
+// R2 keys end at a quote, whitespace, ), ?, # or < (JSON strings, CSS url(), HTML attributes).
+const KEY_TAIL = `[^"'\\s)?#<>\\\\]+`;
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function projectCopyName(name) {
+  const base = String(name || '').trim() || '未命名项目';
+  return `${base}（副本）`;
+}
+
+/**
+ * Plan an admin copy of a project: the new row plus the R2 objects to copy.
+ * Pure: reads `source` (rowToAdminProject shape), never changes it.
+ * Every reference to the original's media folder (`ownerId/projectId/…`)
+ * anywhere in config, media list, folder settings or metadata is listed for
+ * copying into `adminId/newId/…`.
+ */
+export function planProjectCopy(source, { adminId, newId, now, adminEmail = '' }) {
+  if (!source?.id) throw new Error('缺少要复制的项目');
+  if (!adminId) throw new Error('请先登录管理员账号');
+  const oldPrefix = source.user_id ? `${source.user_id}/${source.id}/` : null;
+  const newPrefix = `${adminId}/${newId}/`;
+  const metadata = { ...(source.metadata || {}) };
+  COPY_DROPPED_METADATA_KEYS.forEach((k) => { delete metadata[k]; });
+  metadata.copiedFrom = {
+    projectId: source.id,
+    projectName: source.name || '',
+    ownerId: source.user_id || null,
+    by: adminEmail || adminId,
+    at: now,
+  };
+  const parts = {
+    config: stripOwnResponseSupabase(source.config || {}),
+    preloadedImages: Array.isArray(source.preloadedImages) ? source.preloadedImages : [],
+    imageDatasetConfig: source.imageDatasetConfig || {},
+    metadata,
+  };
+  const keys = new Map(); // key as written → new key
+  if (oldPrefix) {
+    const re = new RegExp(`${escapeRegExp(oldPrefix)}${KEY_TAIL}`, 'g');
+    const text = JSON.stringify([parts.config, parts.preloadedImages, parts.imageDatasetConfig]);
+    (text.match(re) || []).forEach((written) => {
+      keys.set(written, newPrefix + written.slice(oldPrefix.length));
+    });
+  }
+  const copies = [...keys.entries()].map(([written, to]) => {
+    let from = written;
+    try { from = decodeURIComponent(written); } catch { /* keep as written */ }
+    let dest = to;
+    try { dest = decodeURIComponent(to); } catch { /* keep as written */ }
+    return { written, from, to: dest };
+  });
+  return { oldPrefix, newPrefix, parts, copies };
+}
+
+/** Rewrite references to copied objects only; failed ones keep pointing at the original. */
+export function rewriteCopiedReferences(value, oldPrefix, newPrefix, copiedWritten) {
+  if (!oldPrefix || !copiedWritten?.size) return value;
+  const re = new RegExp(`${escapeRegExp(oldPrefix)}${KEY_TAIL}`, 'g');
+  const text = JSON.stringify(value).replace(re, (m) => (
+    copiedWritten.has(m) ? newPrefix + m.slice(oldPrefix.length) : m
+  ));
+  return JSON.parse(text);
+}
+
+/**
+ * Admin: copy any project into a NEW project owned by the signed-in admin.
+ * The original row, its media and its responses are never written to;
+ * responses, collaborators, public link and published versions are not copied.
+ * Media under the original's folder is copied server-side into the admin's
+ * folder; anything that fails to copy keeps pointing at the original file.
+ */
+export async function copyProjectToAdmin(sourceId, { onProgress } = {}) {
+  if (!supabase) throw new Error('Supabase not configured');
+  const report = (message, done, total) => onProgress?.({ message, done, total });
+  const { data: auth } = await supabase.auth.getUser();
+  const admin = auth?.user;
+  if (!admin?.id) throw new Error('请先登录管理员账号');
+
+  report('正在读取原项目…');
+  const { data: row, error: readErr } = await supabase
+    .from('projects')
+    .select('*')
+    .eq('id', sourceId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!row) throw new Error('找不到原项目，可能已被删除');
+  const source = rowToAdminProject(row);
+
+  const now = new Date().toISOString();
+  const newId = 'proj_' + Date.now() + '_' + Math.random().toString(36).slice(2, 11);
+  const plan = planProjectCopy(source, { adminId: admin.id, newId, now, adminEmail: admin.email });
+
+  const copiedWritten = new Set();
+  const failed = [];
+  if (plan.copies.length) {
+    if (!isR2Configured()) {
+      plan.copies.forEach((c) => failed.push({ key: c.from, error: 'R2 未配置' }));
+    } else {
+      const total = plan.copies.length;
+      const BATCH_SIZE = 100;
+      report('正在复制图片…', 0, total);
+      for (let i = 0; i < total; i += BATCH_SIZE) {
+        const batch = plan.copies.slice(i, i + BATCH_SIZE);
+        const result = await copyImagesInR2(batch.map(({ from, to }) => ({ from, to })));
+        const ok = new Set((result.copied || []).map((c) => c.from));
+        batch.forEach((c) => {
+          if (ok.has(c.from)) copiedWritten.add(c.written);
+          else {
+            const err = (result.errors || []).find((e) => e.from === c.from);
+            failed.push({ key: c.from, error: err?.error || result.error || '复制失败' });
+          }
+        });
+        report('正在复制图片…', Math.min(i + batch.length, total), total);
+      }
+    }
+  }
+
+  const rewrite = (v) => rewriteCopiedReferences(v, plan.oldPrefix, plan.newPrefix, copiedWritten);
+  const config = rewrite(plan.parts.config);
+  const insert = {
+    id: newId,
+    user_id: admin.id,
+    name: projectCopyName(source.name),
+    description: source.description || '',
+    survey_config: config,
+    survey_config_draft: config,
+    draft_updated_at: now,
+    image_dataset_config: rewrite(plan.parts.imageDatasetConfig),
+    preloaded_images: rewrite(plan.parts.preloadedImages),
+    preloaded_at: source.preloadedAt || null,
+    preloaded_source: source.preloadedSource || null,
+    template_id: source.template_id || null,
+    metadata: plan.parts.metadata,
+    created_at: now,
+    updated_at: now,
+    last_writer: { source: 'admin-copy', fromProject: source.id, at: now },
+  };
+
+  report('正在创建副本…');
+  const { data: created, error: insertErr } = await supabase
+    .from('projects')
+    .insert(insert)
+    .select('id, name')
+    .maybeSingle();
+  if (insertErr || !created?.id) {
+    const copiedKeys = plan.copies.filter((c) => copiedWritten.has(c.written)).map((c) => c.to);
+    if (copiedKeys.length) {
+      try {
+        await deleteImagesFromR2(copiedKeys, { allowedPrefix: plan.newPrefix });
+      } catch (cleanupErr) {
+        console.warn('Copy cleanup failed:', cleanupErr);
+      }
+    }
+    throw insertErr || new Error('创建副本失败：数据库没有返回新项目');
+  }
+  return {
+    success: true,
+    project: { id: created.id, name: created.name },
+    copiedMedia: copiedWritten.size,
+    failedMedia: failed,
+  };
+}
+
 /**
  * Admin: permanently delete a project.
  */
