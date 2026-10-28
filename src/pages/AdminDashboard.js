@@ -2294,17 +2294,15 @@ function ProjectOverview() {
                           </Button>
                         </Tooltip>
                       )}
-                      <Tooltip title="复制一份到你自己名下，原项目不会被改动">
-                        <Button
+                      <Tooltip title="复制项目（复制一份到你名下，原项目不会被改动）">
+                        <IconButton
                           size="small"
-                          variant="outlined"
-                          startIcon={<LibraryAdd fontSize="small" />}
+                          color="primary"
                           aria-label={`复制项目：${p.name || p.id}`}
                           onClick={() => setCopyState({ project: p, status: 'confirm' })}
-                          sx={{ whiteSpace: 'nowrap', minWidth: 'auto' }}
                         >
-                          复制项目
-                        </Button>
+                          <LibraryAdd fontSize="small" />
+                        </IconButton>
                       </Tooltip>
                       <Tooltip title="预览调查">
                         <IconButton size="small" color="primary"
