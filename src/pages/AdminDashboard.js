@@ -14,13 +14,13 @@ import {
 import {
   Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
   EditNote, PhotoLibrary, DeleteForever, ExpandMore, PushPin, AutoFixHigh, Stop,
-  CloudDownload, OpenInNew, ContentCopy, Assessment,
+  CloudDownload, OpenInNew, ContentCopy, Assessment, LibraryAdd,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import {
   listAllTemplates, updateTemplate, deleteTemplate, renameTemplateId,
   normalizeTemplateId, templateImagePrefix,
-  listAllProjects, updateProjectAdmin, deleteProjectAdmin,
+  listAllProjects, updateProjectAdmin, deleteProjectAdmin, copyProjectToAdmin, projectCopyName,
   seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
   downloadOnlineTemplatesAsBuiltinZip, exportAllOnlineTemplatesAsBuiltinZip,
 } from '../lib/templateManager';
@@ -74,6 +74,7 @@ import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDi
 import AdminSpSchemeDiagnosisDialog from '../components/admin/AdminSpSchemeDiagnosisDialog';
 import { SP_SCHEME_KIND_LABELS, diagnoseSpSchemeProject } from '../lib/spSchemeDiagnosis';
 import { toAdminPreviewProject } from '../lib/adminPreviewProject';
+import { setActiveProject } from '../lib/projectManager';
 import SiteGrowthSection from '../components/SiteGrowthSection';
 import SiteFeedbackManagement from '../components/admin/SiteFeedbackManagement';
 import {
@@ -303,6 +304,7 @@ function SurveyBuilderDialog({ template, open, onClose, onSaved }) {
             onChange={setDraftConfig}
             currentProject={fakeProject}
             onNextStep={null}
+            hideAssistant
           />
         )}
       </Box>
@@ -1795,6 +1797,7 @@ function ProjectSurveyBuilderDialog({ project, open, onClose, onSaved }) {
             onChange={setDraftConfig}
             currentProject={previewProject}
             onNextStep={null}
+            hideAssistant
             onRepairComplete={async (fixed) => {
               setDraftConfig(fixed);
               await updateProjectAdmin(project.id, { survey_config: fixed });
@@ -1879,6 +1882,92 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
 
 // ─── Project Overview Tab ────────────────────────────────────────────────────
 
+function ProjectCopyDialog({ state, onCancel, onConfirm, onOpen }) {
+  if (!state) return null;
+  const { project, status, progress, result, error } = state;
+  const copyName = projectCopyName(project.name);
+  const busy = status === 'copying';
+  const draftDiffers = project.releaseManaged && project.publishedConfig
+    && JSON.stringify(project.publishedConfig) !== JSON.stringify(project.config);
+  return (
+    <Dialog open onClose={busy ? undefined : onCancel} maxWidth="sm" fullWidth>
+      <DialogTitle>复制项目到我名下</DialogTitle>
+      <DialogContent dividers>
+        {status === 'confirm' && (
+          <Stack spacing={1.5}>
+            <Typography variant="body2">
+              会新建一个项目「<b>{copyName}</b>」，归你（当前管理员）所有，出现在你自己的 Builder 项目列表里。
+              你可以在副本上随便改、随便试，<b>原项目不会有任何改动</b>。
+            </Typography>
+            <Box>
+              <Typography variant="subtitle2">会复制</Typography>
+              <Typography variant="body2" color="text.secondary">
+                调查内容（题目、设置、上传的 SP-Scheme 页面）、项目图片库（图片会复制到你的文件夹）、媒体文件夹设置、已保存的 AI 分析。
+              </Typography>
+            </Box>
+            <Box>
+              <Typography variant="subtitle2">不会复制</Typography>
+              <Typography variant="body2" color="text.secondary">
+                参与者的回答、协作者、自定义短链接、已发布的历史版本。副本是未发布的新项目，原项目的问卷链接照常收集数据。
+              </Typography>
+            </Box>
+            {draftDiffers && (
+              <Alert severity="info">
+                这个项目的草稿和参与者看到的发布版不同。副本复制的是草稿（Builder 里看到的版本）。
+              </Alert>
+            )}
+          </Stack>
+        )}
+        {busy && (
+          <Stack spacing={1.5} alignItems="center" sx={{ py: 2 }}>
+            <CircularProgress size={28} />
+            <Typography variant="body2">
+              {progress?.message || '正在复制…'}
+              {progress?.total ? ` ${progress.done || 0}/${progress.total}` : ''}
+            </Typography>
+          </Stack>
+        )}
+        {status === 'done' && (
+          <Stack spacing={1.5}>
+            <Alert severity="success">
+              已创建「{result.project.name}」，原项目没有改动。
+              {result.copiedMedia > 0 ? ` 复制了 ${result.copiedMedia} 个图片文件。` : ''}
+            </Alert>
+            {result.failedMedia?.length > 0 && (
+              <Alert severity="warning">
+                有 {result.failedMedia.length} 个文件没复制成功（可能原文件已不存在），副本里这些图片仍然指向原文件，只能看不能改，不影响原项目。
+              </Alert>
+            )}
+            <Typography variant="body2" color="text.secondary">
+              副本在你自己的 Builder 项目列表里，在这张表里也会带「副本」标记。
+            </Typography>
+          </Stack>
+        )}
+        {status === 'error' && (
+          <Alert severity="error">复制失败：{error}。原项目没有改动。</Alert>
+        )}
+      </DialogContent>
+      <DialogActions>
+        {status === 'confirm' && (
+          <>
+            <Button onClick={onCancel}>取消</Button>
+            <Button variant="contained" startIcon={<LibraryAdd />} onClick={onConfirm}>复制</Button>
+          </>
+        )}
+        {status === 'done' && (
+          <>
+            <Button onClick={onCancel}>留在这里</Button>
+            <Button variant="contained" startIcon={<OpenInNew />} onClick={() => onOpen(result.project.id)}>
+              在 Builder 打开副本
+            </Button>
+          </>
+        )}
+        {status === 'error' && <Button onClick={onCancel}>关闭</Button>}
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function ProjectOverview() {
   const [resultsTarget, setResultsTarget] = useState(null);
   // { project, autoDownload } for the SP-Scheme diagnosis dialog.
@@ -1897,6 +1986,9 @@ function ProjectOverview() {
   const [snack, setSnack]                 = useState({ open: false, msg: '', sev: 'success' });
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [repairingId, setRepairingId]     = useState(null);
+  // { project, status: 'confirm' | 'copying' | 'done' | 'error', progress, result, error }
+  const [copyState, setCopyState]         = useState(null);
+  const navigate = useNavigate();
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
@@ -1991,6 +2083,24 @@ function ProjectOverview() {
         }
       },
     });
+  };
+
+  const runCopy = async (project) => {
+    setCopyState({ project, status: 'copying', progress: null });
+    try {
+      const result = await copyProjectToAdmin(project.id, {
+        onProgress: (progress) => setCopyState((s) => (s ? { ...s, progress } : s)),
+      });
+      setCopyState({ project, status: 'done', result });
+      load();
+    } catch (err) {
+      setCopyState({ project, status: 'error', error: err.message || String(err) });
+    }
+  };
+
+  const openCopyInBuilder = (projectId) => {
+    setActiveProject(projectId);
+    navigate('/admin');
   };
 
   const handleDelete = (project) => {
@@ -2110,6 +2220,11 @@ function ProjectOverview() {
                       <OpenInNew sx={{ fontSize: 14 }} />
                     </Link>
                     <Typography variant="caption" color="text.secondary" display="block">{p.id}</Typography>
+                    {p.metadata?.copiedFrom?.projectId && (
+                      <Tooltip title={`复制自「${p.metadata.copiedFrom.projectName || p.metadata.copiedFrom.projectId}」（${p.metadata.copiedFrom.projectId}）`}>
+                        <Chip size="small" color="info" variant="outlined" label="副本" sx={{ mt: 0.5, mr: 0.5 }} />
+                      </Tooltip>
+                    )}
                     {dups.length > 0 && (
                       <Chip
                         size="small"
@@ -2179,6 +2294,18 @@ function ProjectOverview() {
                           </Button>
                         </Tooltip>
                       )}
+                      <Tooltip title="复制一份到你自己名下，原项目不会被改动">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<LibraryAdd fontSize="small" />}
+                          aria-label={`复制项目：${p.name || p.id}`}
+                          onClick={() => setCopyState({ project: p, status: 'confirm' })}
+                          sx={{ whiteSpace: 'nowrap', minWidth: 'auto' }}
+                        >
+                          复制项目
+                        </Button>
+                      </Tooltip>
                       <Tooltip title="预览调查">
                         <IconButton size="small" color="primary"
                           onClick={() => { setPreviewTarget(p); setPreviewOpen(true); }}>
@@ -2271,6 +2398,13 @@ function ProjectOverview() {
           onClose={() => setDiagnosisTarget(null)}
         />
       )}
+
+      <ProjectCopyDialog
+        state={copyState}
+        onCancel={() => setCopyState(null)}
+        onConfirm={() => runCopy(copyState.project)}
+        onOpen={openCopyInBuilder}
+      />
 
       <ProjectSurveyBuilderDialog
         project={configTarget}
