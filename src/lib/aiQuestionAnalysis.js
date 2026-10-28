@@ -45,7 +45,9 @@ export function buildAnalysisRecords(rows, question, { site = false } = {}) {
       if (Array.isArray(shown) && shown.length) record.shown = shown;
       // Short answers to the other questions of the same submission (grade, gender, group): used to split results.
       const context = {};
-      Object.entries(responses).forEach(([key, value]) => {
+      Object.entries(responses).forEach(([key, stored]) => {
+        // Submitted rows keep each answer as { type, answer, shown_images, ... }.
+        const value = stored && typeof stored === 'object' && !Array.isArray(stored) && 'answer' in stored && 'type' in stored ? stored.answer : stored;
         if (key === name || key.startsWith('__') || Object.keys(context).length >= 20) return;
         if ((typeof value === 'string' && value.trim() && value.length <= 60) || (typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean') context[key] = value;
       });

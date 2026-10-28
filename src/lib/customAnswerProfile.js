@@ -33,10 +33,13 @@ export function answerRows(records) {
     const participant = String(record?.participant_id || `row_${recordIndex + 1}`);
     const answer = record?.answer;
     let entries = [];
+    // Stored trials carry the page's object under `value`; submitted (enriched) trials carry it under `answer`.
+    const trialValue = (t) => (isPlainObject(t?.value) ? t.value : isPlainObject(t?.answer) && ('trial_index' in t || 'shown_images' in t || 'key' in t) ? t.answer : t?.value);
+    const trialShown = (t) => (t?.shown_media_ids?.length ? t.shown_media_ids : t?.shown_images) || [];
     if (isPlainObject(answer) && Array.isArray(answer.trials)) {
-      entries = answer.trials.map((t) => ({ value: t?.value, shown: (t?.shown_media_ids?.length ? t.shown_media_ids : t?.shown_images) || [] }));
+      entries = answer.trials.map((t) => ({ value: trialValue(t), shown: trialShown(t) }));
     } else if (Array.isArray(answer) && answer.every((a) => isPlainObject(a))) {
-      entries = answer.map((value) => ({ value, shown: [] }));
+      entries = answer.map((t) => (isPlainObject(t.answer) && ('trial_index' in t || 'shown_images' in t) ? { value: t.answer, shown: trialShown(t) } : { value: t, shown: [] }));
     } else if (isPlainObject(answer)) {
       entries = [{ value: answer, shown: Array.isArray(record?.shown) ? record.shown : [] }];
     }
@@ -219,7 +222,8 @@ export function autoAnalysis(records, { pageHtml = '', question = null } = {}) {
   const fields = profileFields(rows);
   // Answers to the other questions of the same submission (e.g. grade) are groups too.
   const contextNames = [];
-  rows.forEach((row) => Object.keys(row.context).forEach((k) => { if (!contextNames.includes(k) && !(k in row.fields)) contextNames.push(k); }));
+  const inAnswers = (k) => rows.some((row) => row.fields[k] !== undefined && row.fields[k] !== null && row.fields[k] !== '');
+  rows.forEach((row) => Object.keys(row.context).forEach((k) => { if (!contextNames.includes(k) && !inAnswers(k)) contextNames.push(k); }));
   contextNames.forEach((name) => {
     const values = [...new Set(rows.map((row) => row.context[name]).filter((v) => v !== null && v !== undefined && v !== '').map(String))];
     if (values.length >= 2 && values.length <= MAX_CATEGORIES) fields.push({ name, role: 'group', fromOtherQuestion: true, distinct: values.length, n: rows.length });

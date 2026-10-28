@@ -1,4 +1,5 @@
 import { answerRows, autoAnalysis, choiceLabels, coverageBlock, profileFields, slotOf } from './customAnswerProfile';
+import { enrichSurveyResponses } from './enrichSurveyResponses';
 import { buildAnalysisRecords, evaluateAnalysis, generateQuestionAnalysis, runAnalysisUnsandboxed } from './aiQuestionAnalysis';
 
 // The 儿童环境公平 SP-Scheme page: one entry per round, sent with
@@ -28,6 +29,12 @@ function row(participant, trials, grade) {
 }
 
 const ONE = [row('p_1793174875557_43cxkusef', TRIALS, '二年级')];
+// What a submitted row really holds: SurveyApp stores enrichSurveyResponses(...) output.
+function submittedRow(participant, trials, grade) {
+  const raw = row(participant, trials, grade);
+  const { enrichedResponses } = enrichSurveyResponses({ responses: raw.responses, questionTypeMap: { consent: 'boolean', grade: 'radiogroup', pair_task: 'custom' } });
+  return { ...raw, responses: enrichedResponses, raw_responses: raw.responses };
+}
 // A second, invented participant in another grade who answers the other way round, to check grouping.
 const flipped = TRIALS.map((t) => ({ ...t, compare: t.compare === 'a_safer' ? 'b_safer' : t.compare === 'b_safer' ? 'a_safer' : 'unclear', ratingA: t.ratingB, ratingB: t.ratingA }));
 const TWO = [...ONE, row('p_second', flipped, '五年级')];
@@ -226,4 +233,18 @@ test('a model copy keyed by URL and without raters is still recognised as a repe
   }`;
   const run = await evaluateAnalysis(code, buildAnalysisRecords(ONE, QUESTION), runner, { pageHtml: PAGE_HTML, question: QUESTION });
   expect(run.modelBlocks).toEqual([]);
+});
+
+test('submitted (enriched) rows give the same platform analysis, and other questions become groups', () => {
+  const stored = autoAnalysis(buildAnalysisRecords(ONE, QUESTION), { pageHtml: PAGE_HTML });
+  const submitted = autoAnalysis(buildAnalysisRecords([submittedRow('p_1793174875557_43cxkusef', TRIALS, '二年级')], QUESTION), { pageHtml: PAGE_HTML });
+  expect(submitted.coverage).toEqual(stored.coverage);
+  expect(submitted.blocks.map((b) => b.title)).toEqual(stored.blocks.map((b) => b.title));
+  // grade as its own question (not inside the trial objects): still found as a group.
+  const noGrade = TRIALS.map(({ grade, ...rest }) => rest);
+  const rows = [submittedRow('p1', noGrade, '二年级'), submittedRow('p2', noGrade, '五年级')];
+  const records = buildAnalysisRecords(rows, QUESTION);
+  expect(records[0].context).toMatchObject({ grade: '二年级', consent: true });
+  const auto = autoAnalysis(records.map((r) => ({ ...r, answer: { trials: r.answer.trials.map((t) => ({ ...t, answer: { ...t.answer, grade: undefined } })) } })), { pageHtml: PAGE_HTML });
+  expect(auto.blocks.some((b) => b.title === '按 grade 分组')).toBe(true);
 });
