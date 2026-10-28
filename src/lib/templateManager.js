@@ -513,6 +513,12 @@ function rowToAdminProject(row) {
     created_at:      row.created_at,
     updated_at:      row.updated_at,
     draftUpdatedAt:  row.draft_updated_at ?? null,
+    // What participants are served when the project is release-managed.
+    releaseManaged:   !!row.release_managed,
+    publishedConfig:  row.survey_config_published ?? null,
+    publishedMedia:   row.published_media ?? null,
+    publishedVersion: row.published_version ?? null,
+    publishedAt:      row.published_at ?? null,
   };
 }
 

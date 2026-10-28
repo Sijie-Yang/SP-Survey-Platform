@@ -71,6 +71,8 @@ import ContentSubmissionManagement from '../components/admin/ContentSubmissionMa
 import NewsManagement from '../components/admin/NewsManagement';
 import SharedAssistantSubsidy from '../components/admin/SharedAssistantSubsidy';
 import AdminProjectResultsDialog from '../components/admin/AdminProjectResultsDialog';
+import AdminSpSchemeDiagnosisDialog from '../components/admin/AdminSpSchemeDiagnosisDialog';
+import { SP_SCHEME_KIND_LABELS, diagnoseSpSchemeProject } from '../lib/spSchemeDiagnosis';
 import { toAdminPreviewProject } from '../lib/adminPreviewProject';
 import SiteGrowthSection from '../components/SiteGrowthSection';
 import SiteFeedbackManagement from '../components/admin/SiteFeedbackManagement';
@@ -1879,6 +1881,9 @@ function ProjectImagesDialog({ project, open, onClose, onSaved }) {
 
 function ProjectOverview() {
   const [resultsTarget, setResultsTarget] = useState(null);
+  // { project, autoDownload } for the SP-Scheme diagnosis dialog.
+  const [diagnosisTarget, setDiagnosisTarget] = useState(null);
+  const [schemeOnly, setSchemeOnly] = useState(false);
   const [projects, setProjects]           = useState([]);
   const [loading, setLoading]             = useState(false);
   const [editTarget, setEditTarget]       = useState(null);
@@ -1912,6 +1917,24 @@ function ProjectOverview() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Uploaded-page (SP-Scheme) projects: kind + whether anything looks wrong.
+  const schemeInfo = useMemo(() => {
+    const out = {};
+    projects.forEach((p) => {
+      try {
+        const d = diagnoseSpSchemeProject(p);
+        if (d.kind || d.checks.some((c) => c.level === 'error')) {
+          out[p.id] = { kind: d.kind, draftDiffers: d.draftDiffers, problems: d.checks.filter((c) => c.level !== 'ok').length };
+        }
+      } catch (err) {
+        console.warn('SP-Scheme diagnosis failed:', p.id, err);
+      }
+    });
+    return out;
+  }, [projects]);
+  const schemeCount = Object.values(schemeInfo).filter((i) => i.kind).length;
+  const visibleProjects = schemeOnly ? projects.filter((p) => schemeInfo[p.id]) : projects;
 
   const projectsWithDupIds = useMemo(
     () => projects
@@ -2008,6 +2031,13 @@ function ProjectOverview() {
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center">
         <Typography variant="h6">项目概览</Typography>
         <Box flex={1} />
+        <Chip
+          clickable
+          color={schemeOnly ? 'primary' : 'default'}
+          variant={schemeOnly ? 'filled' : 'outlined'}
+          label={`只看上传页面（SP-Scheme）项目 ${schemeCount}`}
+          onClick={() => setSchemeOnly((v) => !v)}
+        />
         <Button startIcon={<Refresh />} onClick={load} disabled={loading}>
           刷新
         </Button>
@@ -2042,6 +2072,7 @@ function ProjectOverview() {
             <TableHead>
               <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'grey.50' } }}>
                 <TableCell>项目名称</TableCell>
+                <TableCell>SP-Scheme</TableCell>
                 <TableCell>描述</TableCell>
                 <TableCell>用户 ID</TableCell>
                 <TableCell>来源模板</TableCell>
@@ -2051,15 +2082,16 @@ function ProjectOverview() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {projects.length === 0 && (
+              {visibleProjects.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                  <TableCell colSpan={8} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                     暂无项目数据
                   </TableCell>
                 </TableRow>
               )}
-              {projects.map(p => {
+              {visibleProjects.map(p => {
                 const dups = findDuplicateQuestionNames(p.config);
+                const scheme = schemeInfo[p.id];
                 return (
                 <TableRow key={p.id} hover>
                   <TableCell>
@@ -2085,6 +2117,27 @@ function ProjectOverview() {
                         label={`重复ID ${dups.length}`}
                         sx={{ mt: 0.5 }}
                       />
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {scheme ? (
+                      <Tooltip title={scheme.kind ? `${SP_SCHEME_KIND_LABELS[scheme.kind].hint} 点击查看诊断。` : '点击查看诊断。'}>
+                        <Stack spacing={0.5} alignItems="flex-start">
+                          <Chip
+                            size="small"
+                            clickable
+                            color={scheme.kind ? SP_SCHEME_KIND_LABELS[scheme.kind].color : 'error'}
+                            label={scheme.kind ? SP_SCHEME_KIND_LABELS[scheme.kind].label : '页面未发布'}
+                            onClick={() => setDiagnosisTarget({ project: p, autoDownload: false })}
+                          />
+                          {scheme.draftDiffers && <Chip size="small" variant="outlined" color="warning" label="草稿未发布" />}
+                          {scheme.problems > 0 && (
+                            <Typography variant="caption" color="warning.main">{scheme.problems} 项要看</Typography>
+                          )}
+                        </Stack>
+                      </Tooltip>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">—</Typography>
                     )}
                   </TableCell>
                   <TableCell>
@@ -2159,6 +2212,18 @@ function ProjectOverview() {
                           <Assessment fontSize="small" />
                         </IconButton>
                       </Tooltip>
+                      {(p.config?.spSite?.html || p.publishedConfig?.spSite?.html) && (
+                        <Tooltip title="下载用户上传的页面、图片和诊断（ZIP）">
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            aria-label={`下载上传文件：${p.name || p.id}`}
+                            onClick={() => setDiagnosisTarget({ project: p, autoDownload: true })}
+                          >
+                            <CloudDownload fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                       <Tooltip title="管理图片">
                         <IconButton size="small" color="info"
                           onClick={() => { setImagesTarget(p); setImagesOpen(true); }}>
@@ -2199,6 +2264,13 @@ function ProjectOverview() {
       />
 
       <AdminProjectResultsDialog project={resultsTarget} onClose={() => setResultsTarget(null)} />
+      {diagnosisTarget && (
+        <AdminSpSchemeDiagnosisDialog
+          project={diagnosisTarget.project}
+          autoDownload={diagnosisTarget.autoDownload}
+          onClose={() => setDiagnosisTarget(null)}
+        />
+      )}
 
       <ProjectSurveyBuilderDialog
         project={configTarget}
