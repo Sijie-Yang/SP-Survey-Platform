@@ -248,3 +248,14 @@ test('submitted (enriched) rows give the same platform analysis, and other quest
   const auto = autoAnalysis(records.map((r) => ({ ...r, answer: { trials: r.answer.trials.map((t) => ({ ...t, answer: { ...t.answer, grade: undefined } })) } })), { pageHtml: PAGE_HTML });
   expect(auto.blocks.some((b) => b.title === '按 grade 分组')).toBe(true);
 });
+
+test('a model choice block with the raw codes repeats the platform option counts', async () => {
+  const runner = async (code, records) => runAnalysisUnsandboxed(code, records);
+  const code = `function analyze(records) {
+    var values = [];
+    records.forEach(function (r) { r.answer.trials.forEach(function (t) { values.push(t.value.compare); }); });
+    return { blocks: [{ type: 'choice', title: 'compare', values: values }] };
+  }`;
+  const run = await evaluateAnalysis(code, buildAnalysisRecords(ONE, QUESTION), runner, { pageHtml: PAGE_HTML, question: QUESTION });
+  expect(run.modelBlocks).toEqual([]);
+});

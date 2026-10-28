@@ -777,7 +777,8 @@ function blockSignature(block) {
   const file = (v) => String(v ?? '').split(/[?#]/)[0].split('/').pop();
   if (block.type === 'pairwise') return `pairwise:${sorted(block.matches.map((m) => `${file(m.winner)}>${file(m.loser)}`))}`;
   if (block.type === 'per_item') return `per_item:${sorted(block.values.map((v) => `${file(v.item)}|${v.value}`))}`;
-  if (block.type === 'choice') return `choice:${sorted(block.values.map((v) => String(v).replace(/ \([^)]*\)$/, '')))}`;
+  // Platform choice values read "label (code)"; a model copy may use either the code or the label.
+  if (block.type === 'choice') return `choice:${sorted(block.values.map((v) => { const m = String(v).match(/^(.*) \(([^()]*)\)$/); return m ? m[2] : String(v); }))}`;
   if (block.type === 'rating') return `rating:${sorted((block.items?.length ? block.items.flatMap((i) => i.values) : block.values).map(Number))}`;
   return null;
 }
@@ -803,6 +804,9 @@ export async function evaluateAnalysis(code, records, runner, { pageHtml = '', q
   const { blocks, problems } = normalizeAnalysisResult(run.result);
   // A model block with exactly the data of a platform block would only repeat it; anything else is kept.
   const done = new Set(platform.blocks.map(blockSignature).filter(Boolean));
+  platform.blocks.filter((b) => b.type === 'choice').forEach((b) => {
+    done.add(`choice:${JSON.stringify(b.values.map((v) => String(v).replace(/ \([^()]*\)$/, '')).sort())}`);
+  });
   const extra = blocks.filter((b) => !done.has(blockSignature(b)));
   if (!extra.some((b) => b.type !== 'note')) {
     // With the platform's analysis in place, "nothing to add" is a valid answer from the model.
