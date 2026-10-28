@@ -14,7 +14,8 @@
   "isApproved": true,
   "showOnLanding": true,
   "thumbnailUrl": null,
-  "website": "https://www.media.mit.edu/projects/streetscore/overview/",
+  "website": "https://doi.org/10.1109/cvprw.2014.121",
+  "doi": "10.1109/cvprw.2014.121",
   "huggingfaceDataset": null,
   "createdAt": "2026-05-04T00:00:00+00:00",
   "config": {

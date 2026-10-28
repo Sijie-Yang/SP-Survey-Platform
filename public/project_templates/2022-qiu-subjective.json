@@ -13,7 +13,8 @@
   "isApproved": true,
   "showOnLanding": true,
   "thumbnailUrl": null,
-  "website": "https://doi.org/10.1016/j.landurbplan.2021.104358",
+  "website": "https://doi.org/10.1016/j.landurbplan.2022.104358",
+  "doi": "10.1016/j.landurbplan.2022.104358",
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {

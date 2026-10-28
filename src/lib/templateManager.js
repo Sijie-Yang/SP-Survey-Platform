@@ -27,6 +27,7 @@ import {
 } from './r2';
 import { normalizeMediaEntry, sanitizeMediaFolderConfig } from './mediaUtils';
 import { stripOwnResponseSupabase } from './ownResponseSupabase';
+import { templateDoi } from './researchTemplateMatch';
 import { downloadZip } from './zipDownload';
 import {
   buildBuiltinImportSnapshot,
@@ -341,9 +342,15 @@ export async function updateTemplate(id, updates) {
 
 /**
  * Admin: rename a template id and move its R2 image folder when present.
- * Also updates projects.template_id references.
+ * Also updates projects.template_id and research_papers.template_id references.
  * @param {Function} [onProgress] - ({ label, current, total }) => void
  */
+function isMissingTableError(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  return error?.code === '42P01' || error?.code === 'PGRST205'
+    || (msg.includes('research_papers') && (msg.includes('does not exist') || msg.includes('could not find')));
+}
+
 export async function renameTemplateId(oldId, newId, updates = {}, onProgress) {
   const report = (label, current = 0, total = 0) => {
     onProgress?.({ label, current, total });
@@ -479,6 +486,13 @@ export async function renameTemplateId(oldId, newId, updates = {}, onProgress) {
     .update({ template_id: normalized, updated_at: new Date().toISOString() })
     .eq('template_id', oldId);
   if (projErr) throw projErr;
+
+  // Papers linked to this template in the paper library follow the new id.
+  const { error: paperErr } = await supabase
+    .from('research_papers')
+    .update({ template_id: normalized, updated_at: new Date().toISOString() })
+    .eq('template_id', oldId);
+  if (paperErr && !isMissingTableError(paperErr)) throw paperErr;
 
   const { error: delErr } = await supabase.from('templates').delete().eq('id', oldId);
   if (delErr) throw delErr;
@@ -622,6 +636,8 @@ export function templateToBuiltinJson(template) {
     showOnLanding: !!(template?.show_on_landing ?? template?.showOnLanding),
     thumbnailUrl: template?.thumbnail_url || template?.thumbnailUrl || null,
     website: template?.website || null,
+    // The paper DOI links the template to its row in the paper library (research_papers.template_id).
+    ...(templateDoi(template) ? { doi: templateDoi(template) } : {}),
     huggingfaceDataset: template?.huggingfaceDataset || null,
     createdAt: template?.createdAt || new Date().toISOString(),
     config: stripOwnResponseSupabase(template?.config || {}),
