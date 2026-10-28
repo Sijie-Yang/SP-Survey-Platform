@@ -57,7 +57,8 @@ test('a saved plan shows the field → meaning → analysis table and the platfo
   expect(screen.getByText('哪张更安全：图片排名（TrueSkill）')).toBeTruthy();
   expect(screen.getByText('安全感：每张图的分数')).toBeTruthy();
   expect(screen.getByText('理由：标签被选的次数')).toBeTruthy();
-  expect(screen.getByText(/按年级分组：安全感 平均分/)).toBeTruthy();
+  expect(screen.getByText('参与者背景')).toBeTruthy();
+  expect(screen.queryByText(/按年级分组/)).toBeNull();
   // No code was needed, so there is nothing to view and no sandbox run.
   expect(screen.queryByText('View code')).toBeNull();
   expect(screen.getByText('Plan read by the model')).toBeTruthy();

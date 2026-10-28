@@ -170,11 +170,18 @@ describe('runPlan on the children page', () => {
     expect(duration.note).toMatch(/毫秒/);
   });
 
-  test('the grade from another question splits scores and choices by group', () => {
-    const bar = byTitle(/按年级分组：安全感评分 平均分/);
+  test('the grade from another question is listed in the background table; it only splits results when the researcher asked', () => {
+    const background = byTitle(/^参与者背景$/);
+    expect(background.columns).toEqual(['背景', '人数', '分布']);
+    expect(background.rows).toEqual([['年级', 2, '二年级 1（50%），五年级 1（50%）']]);
+    expect(background.note).toMatch(/在说明里写“按 X 比较”/);
+    expect(run.blocks.some((b) => /按年级分组/.test(b.title))).toBe(false);
+    const compare = runPlan(records, { ...plan, fields: plan.fields.map((f) => (f.path === '@grade' ? { ...f, compare: true } : f)) });
+    const bar = compare.blocks.find((b) => /按年级分组：安全感评分 平均分/.test(b.title));
     expect(bar.type).toBe('bar');
     expect(bar.items).toEqual([{ label: '二年级', value: 3.17 }, { label: '五年级', value: 2.67 }]);
-    const table = byTitle(/^按年级分组$/);
+    const table = compare.blocks.find((b) => /^按年级分组$/.test(b.title));
+    expect(compare.blocks.some((b) => /^参与者背景$/.test(b.title))).toBe(false);
     expect(table.columns).toEqual(['组', '人数', '作答次数', '安全感评分 平均', 'A 更安全 %', 'B 更安全 %', '差不多 %', '说不清 %']);
     expect(table.rows[0]).toEqual(['二年级', 1, 3, 3.17, 33.3, 33.3, 33.3, 0]);
     expect(table.note).toMatch(/来自同一份答卷里的另一道题/);
@@ -186,6 +193,7 @@ describe('runPlan on the children page', () => {
     expect(status).toEqual({ round: 'skipped', imageA: 'skipped', imageB: 'skipped', compare: 'analysed', ratingA: 'analysed', ratingB: 'analysed', reasonsA: 'analysed', reasonsB: 'analysed', startedAt: 'skipped', savedAt: 'skipped', durationMs: 'analysed', '@grade': 'analysed' });
     expect(run.coverage.find((c) => c.field === 'imageA').what).toMatch(/左图 A：图片名/);
     expect(run.coverage.find((c) => c.field === 'round').what).toBe('轮次编号');
+    expect(run.coverage.find((c) => c.field === '@grade').what).toBe('背景：各取值人数');
     const block = planBlock(plan, run);
     expect(block).toMatchObject({ type: 'coverage', title: '分析方案', summary: CHILD_PLAN.summary });
     expect(block.note).toMatch(/2 人 · 6 条作答/);
@@ -200,9 +208,9 @@ describe('runPlan on the children page', () => {
     expect(fromStored.blocks).toEqual(run.blocks);
   });
 
-  test('a group with one level is skipped with the reason, and a plan with no rows yields nothing', () => {
+  test('a comparison by a one-level attribute is skipped with the reason, and a plan with no rows yields nothing', () => {
     const oneGrade = buildAnalysisRecords(enrichedRows.map((r) => ({ ...r, responses: { ...r.responses, grade: { type: 'radiogroup', answer: '二年级' } } })), QUESTION);
-    const single = runPlan(oneGrade, plan);
+    const single = runPlan(oneGrade, { ...plan, fields: plan.fields.map((f) => (f.path === '@grade' ? { ...f, compare: true } : f)) });
     expect(single.coverage.find((c) => c.field === '@grade')).toMatchObject({ status: 'skipped', what: expect.stringMatching(/所有人都是“二年级”/) });
     expect(single.blocks.some((b) => /按年级分组/.test(b.title))).toBe(false);
     expect(runPlan([], plan)).toEqual({ blocks: [], coverage: [], rows: 0, participants: 0 });
@@ -287,9 +295,10 @@ describe('runPlan on a nested single-answer task', () => {
     expect(run.blocks.some((b) => /随机种子|pairIds/.test(b.title))).toBe(false);
     expect(run.blocks.find((b) => /完成全部任务的用时（秒）/.test(b.title)).values).toEqual([701, 702, 703]);
     expect(run.blocks.find((b) => /留言：文字回答/.test(b.title)).values).toEqual(['很安静的村子']);
-    // Gender read out of the JSON string splits the mean score.
-    const groups = run.blocks.find((b) => /^按性别分组$/.test(b.title));
-    expect(groups.rows.map((r) => r.slice(0, 3))).toEqual([['female', 2, 2], ['male', 1, 1]]);
+    // Gender read out of the JSON string is background, counted per person.
+    const background = run.blocks.find((b) => /^参与者背景$/.test(b.title));
+    expect(background.rows).toEqual([['性别', 3, 'female 2（67%），male 1（33%）']]);
+    expect(run.blocks.some((b) => /按性别分组/.test(b.title))).toBe(false);
   });
 
   test('the plan replaces the platform guess of the same table and is shown first', () => {
@@ -301,6 +310,104 @@ describe('runPlan on a nested single-answer task', () => {
     const bare = platformAnalysis(records, {});
     expect(bare.blocks.map((b) => b.type)).toEqual(['table']);
     expect(bare.run.blocks).toEqual([]);
+  });
+});
+
+// Peter's rural task as stored: each scene has its ten ratings as fields (scenes[].ratings.A1 …), the same
+// ratings again as a flat list (result.ratings[]), the profile both as an object and inside a JSON string.
+describe('runPlan on a task that stores the same ratings and profile twice', () => {
+  const ITEM_TEXT = { A1: '单从视觉上看，这处景观是美的。', M1: '这个场景让我感受到乡村日常生活的气息。', S3: '总体而言，这里是一个令我满意的乡村休闲地点。' };
+  function answer(p) {
+    const shown = [POOL[p % 4], POOL[(p + 1) % 4]];
+    const personal = { age: 20 + p * 7, gender: p % 2 ? 'female' : 'male', childhood: ['city', 'town', 'village'][p % 3], stress: 3 + p };
+    return {
+      scenes: shown.map((id, i) => ({ imageId: id, imageUrl: url(id), position: i + 1, ratings: Object.fromEntries(ITEMS.map((item) => [item, score(p, id, item)])) })),
+      result: { ratings: shown.flatMap((id) => ITEMS.map((item) => ({ itemId: item, imageUrl: url(id), value: score(p, id, item) }))), text: JSON.stringify({ personal, attention: { MIDCHECK: 6 } }) },
+      personal, groupOrder: p % 2 ? 'AB' : 'BA', elapsedSeconds: 600 + p,
+    };
+  }
+  const rows = [1, 2, 3, 4].map((p) => ({ id: `r${p}`, participant_id: `P${p}`, responses: { task: { type: 'skillquestion', answer: answer(p), shown_images: [] }, research_consent: { type: 'boolean', answer: true } } }));
+  const records = buildAnalysisRecords(rows, RURAL_QUESTION);
+  const inventory = fieldInventory(records);
+  const PLAN = {
+    summary: '每人看几张乡村景观，对每张按 10 个条目打 1–7 分。',
+    fields: [
+      { path: 'scenes[].imageId', use: 'skip', meaning: '图片编号' },
+      { path: 'scenes[].imageUrl', use: 'image', meaning: '被评的景观图' },
+      { path: 'scenes[].position', use: 'skip', meaning: '出现顺序' },
+      ...ITEMS.map((item) => ({ path: `scenes[].ratings.${item}`, use: 'score', meaning: `${ITEM_TEXT[item]}评分`, image: 'scenes[].imageUrl', measure: '乡村景观评分' })),
+      { path: 'result.ratings[].itemId', use: 'skip', meaning: '条目编号' },
+      { path: 'result.ratings[].imageUrl', use: 'image', meaning: '被评的景观图' },
+      // The model read the flat copy as another score of the same measure (as Qwen did on the real data).
+      { path: 'result.ratings[].value', use: 'score', meaning: '对特定景观指标的评分值', image: 'result.ratings[].imageUrl', measure: '乡村景观评分' },
+      // … and treated the JSON string as free text.
+      { path: 'result.text', use: 'text', meaning: '包含个人背景信息的 JSON 字符串' },
+      { path: 'result.text{json}.personal.age', use: 'group', meaning: '年龄' },
+      { path: 'result.text{json}.personal.gender', use: 'group', meaning: '性别' },
+      { path: 'result.text{json}.personal.childhood', use: 'group', meaning: '童年居住地' },
+      { path: 'result.text{json}.personal.stress', use: 'group', meaning: '压力程度评分' },
+      { path: 'result.text{json}.attention.MIDCHECK', use: 'skip', meaning: '注意力检查' },
+      { path: 'personal.age', use: 'group', meaning: '年龄' },
+      { path: 'personal.gender', use: 'group', meaning: '性别' },
+      { path: 'personal.childhood', use: 'group', meaning: '童年居住地' },
+      { path: 'personal.stress', use: 'group', meaning: '压力程度评分' },
+      { path: 'groupOrder', use: 'group', meaning: '实验分组顺序（AB 或 BA）' },
+      { path: 'elapsedSeconds', use: 'duration', meaning: '完成该问题所花费的时间（秒）', unit: 's' },
+      { path: '@research_consent', use: 'group', meaning: '是否同意参与研究' },
+    ],
+  };
+  const checked = checkPlan(PLAN, inventory);
+  const run = runPlan(records, checked.plan);
+  const what = (path) => run.coverage.find((c) => c.field === path);
+
+  test('the plan is complete and the JSON string is a container, not free text', () => {
+    expect(checked.missing).toEqual([]);
+    expect(checked.plan.fields.find((f) => f.path === 'result.text')).toMatchObject({ use: 'skip', why: 'JSON 字符串，里面的字段已单独列出' });
+    expect(run.blocks.some((b) => b.type === 'text')).toBe(false);
+  });
+
+  test('the ten per-scene rating fields become one image × item table; the flat copy of the same scores counts once', () => {
+    const tables = run.blocks.filter((b) => b.type === 'table' && /每张图在每个条目上的平均分/.test(b.title));
+    expect(tables).toHaveLength(1);
+    const [table] = tables;
+    expect(table.title).toBe('乡村景观评分：每张图在每个条目上的平均分');
+    expect(table.columns).toEqual(['image', ...ITEMS, 'n']);
+    expect(table.note).toMatch(/条目：A1=单从视觉上看，这处景观是美的。评分；M1=/);
+    expect(table.rows.map((r) => r[0])).toEqual(POOL.map((id) => `${id}__1a6d540f.jpg`));
+    const p027 = table.rows.find((r) => r[0].startsWith('P027B'));
+    const raters = [1, 2, 3, 4].filter((p) => [POOL[p % 4], POOL[(p + 1) % 4]].includes('P027B'));
+    expect(p027[p027.length - 1]).toBe(raters.length);
+    expect(p027[1]).toBeCloseTo(raters.reduce((a, p) => a + score(p, 'P027B', 'A1'), 0) / raters.length, 2);
+    expect(run.blocks.some((b) => b.type === 'per_item')).toBe(false);
+    expect(what('result.ratings[].value')).toMatchObject({ status: 'skipped', what: expect.stringMatching(/和「乡村景观评分」是同一批分数的另一份存法/) });
+    expect(what('scenes[].ratings.A1').status).toBe('analysed');
+  });
+
+  test('attributes make one background table, each listed once, with no group comparison unless asked', () => {
+    const background = run.blocks.find((b) => b.type === 'table' && b.title === '参与者背景');
+    expect(background.rows).toEqual([
+      ['年龄', 4, '27 1（25%），34 1（25%），41 1（25%），48 1（25%）'],
+      ['性别', 4, 'female 2（50%），male 2（50%）'],
+      ['童年居住地', 4, 'town 2（50%），city 1（25%），village 1（25%）'],
+      ['压力程度评分', 4, '4 1（25%），5 1（25%），6 1（25%），7 1（25%）'],
+      ['实验分组顺序（AB 或 BA）', 4, 'AB 2（50%），BA 2（50%）'],
+      ['是否同意参与研究', 4, 'true 4（100%）'],
+    ]);
+    expect(what('personal.age')).toMatchObject({ status: 'skipped', what: expect.stringMatching(/和「年龄」重复/) });
+    expect(what('personal.childhood').what).toMatch(/重复/);
+    expect(run.blocks.filter((b) => /分组/.test(b.title))).toEqual([]);
+    expect(run.blocks.filter((b) => b.type === 'bar')).toEqual([]);
+  });
+
+  test('a numeric attribute with many values is summarised, and a duration named in seconds is not suffixed twice', () => {
+    const many = runPlan(records.map((r, i) => ({ ...r, answer: { ...r.answer, answer: { ...r.answer.answer, personal: { ...r.answer.answer.personal, age: 18 + i * 9 }, result: { ...r.answer.answer.result, text: JSON.stringify({ personal: { age: 18 + i * 9 + 1 } }) } } } })), checked.plan);
+    // (the JSON copy now differs from the object, so both are listed; eight distinct ages across copies → still few: counts)
+    expect(many.blocks.find((b) => b.title === '参与者背景').rows.filter((r) => r[0] === '年龄')).toHaveLength(2);
+    const duration = run.blocks.find((b) => b.type === 'rating' && /所花费的时间/.test(b.title));
+    expect(duration.title).toBe('完成该问题所花费的时间（秒）');
+    expect(duration.values).toEqual([601, 602, 603, 604]);
+    const ages = runPlan(records.map((r, i) => ({ ...r, participant_id: `Q${i}`, answer: { ...r.answer, answer: { ...r.answer.answer, personal: { age: 18 + i * 5 } } } })).concat(records.map((r, i) => ({ ...r, participant_id: `Z${i}`, answer: { ...r.answer, answer: { ...r.answer.answer, personal: { age: 40 + i * 5 } } } }))), { fields: [{ path: 'personal.age', use: 'group', meaning: '年龄' }] });
+    expect(ages.blocks[0].rows).toEqual([['年龄', 8, '均值 36.5，SD 13.19，中位数 36.5，范围 18–55']]);
   });
 });
 

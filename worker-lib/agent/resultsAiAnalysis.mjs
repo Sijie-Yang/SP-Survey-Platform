@@ -97,7 +97,8 @@ Uses (pick the one that fits what the field holds):
              "options": { "<stored value>": { "label": "<option text>", "picks": "<image field>" or null for similar/can't tell } }.
   "option"   a single choice that is not between images (yes/no, category, condition). extras: "options": { "<value>": "<label>" } if the page has labels.
   "tags"     a multi-select list (reasons, keywords). extras: "image": <image field it describes> (if any), "measure": <shared name for the same tag list on different images>.
-  "group"    a participant attribute to split results by (grade, gender, age band, condition). Context fields (@grade) are answers to the other questions of the same submission.
+  "group"    a participant attribute or design condition (grade, gender, age, occupation, AB order). The platform lists these in ONE background table (counts, or mean for numbers).
+             Add "compare": true ONLY when RESEARCHER NOTES ask to compare results by it (e.g. 按年级比较); never on your own. Context fields (@grade) are answers to the other questions of the same submission.
   "duration" time spent, in ms or s. extras: "unit": "ms" | "s".
   "time"     a time stamp (startedAt, savedAt).
   "text"     free text.
@@ -109,6 +110,8 @@ Rules:
 - Use the question text, OTHER QUESTIONS and PAGE CODE (option arrays like { value: 'a_safer', label: 'A 更安全' }, RATE scales) to write meanings, labels and scales in the survey's own language. Never invent labels that are not in the page or question.
 - A score or tag list about one image says which image field it belongs to (ratingA → imageA). Scores of the same kind for different images share one "measure".
 - Fields fixed per participant that describe the person (grade, gender, age group, experimental group/order) are "group"; fields like round, trial index, savedAt, seeds, shown lists are "skip"/"time".
+- A string that holds JSON (its inner fields are listed below it as path{json}.…) is a container: "skip". When the same information is stored twice (a JSON copy and a plain object; a nested and a flat copy of the same ratings), analyse one and mark the other "skip" with why "重复".
+- When each image gets several scores stored as separate fields (scenes[].ratings.A1, scenes[].ratings.M1, …), give them the SAME measure and the SAME image field, each with its own meaning (the item text); the platform then makes one image × item table.
 - Reply with the JSON in one \`\`\`json block and nothing else.`;
 
 function clip(value, max) {

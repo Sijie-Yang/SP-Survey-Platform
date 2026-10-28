@@ -132,6 +132,7 @@ export function checkPlan(raw, inventory) {
   const plan = { summary: String(raw?.summary || '').slice(0, 300), fields: [] };
   const list = Array.isArray(raw?.fields) ? raw.fields : Array.isArray(raw) ? raw : [];
   const known = new Set(inventory.fields.map((f) => f.path));
+  const jsonParents = new Set(inventory.fields.map((f) => f.path).filter((p) => inventory.fields.some((f) => f.path.startsWith(`${p}{json}`))));
   const seen = new Set();
   list.forEach((entry, i) => {
     if (!isPlainObject(entry) || typeof entry.path !== 'string') { problems.push(`fields[${i}] has no path.`); return; }
@@ -139,15 +140,19 @@ export function checkPlan(raw, inventory) {
     if (seen.has(path)) return;
     seen.add(path);
     let use = String(entry.use || entry.role || '').toLowerCase().trim();
+    if (use === 'attribute' || use === 'person' || use === 'condition') use = 'group';
     if (!PLAN_USES.includes(use)) { problems.push(`${path}: use "${entry.use}" is not one of ${PLAN_USES.join(', ')}; treated as skip.`); use = 'skip'; }
     const e = { path, use, meaning: String(entry.meaning || entry.label || '').slice(0, 200).trim() };
     if (!known.has(path)) e.unknown = true;
+    // A string that holds JSON is a container: its inner fields are listed on their own.
+    if (use !== 'skip' && use !== 'custom' && jsonParents.has(path)) { e.use = 'skip'; e.why = 'JSON 字符串，里面的字段已单独列出'; }
+    if (use === 'group' && (entry.compare === true || entry.split === true)) e.compare = true;
     if (typeof entry.image === 'string' && entry.image.trim()) e.image = entry.image.trim();
     if (Array.isArray(entry.images)) e.images = entry.images.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim());
     if (typeof entry.item === 'string' && entry.item.trim()) e.item = entry.item.trim();
     if (typeof entry.measure === 'string' && entry.measure.trim()) e.measure = entry.measure.trim().slice(0, 80);
     if (typeof entry.unit === 'string') e.unit = /ms|milli/i.test(entry.unit) ? 'ms' : 's';
-    if (typeof entry.why === 'string') e.why = entry.why.slice(0, 200);
+    if (typeof entry.why === 'string' && !e.why) e.why = entry.why.slice(0, 200);
     if (isPlainObject(entry.scale)) { e.scale = {}; Object.entries(entry.scale).slice(0, 30).forEach(([k, v]) => { e.scale[String(k)] = String(v).slice(0, 80); }); }
     if (isPlainObject(entry.options)) {
       e.options = {};
@@ -169,35 +174,36 @@ export function checkPlan(raw, inventory) {
 
 // ── Reading values along a plan path ──
 
-/** All values at `path` in one row, each with the chain of objects it was read through (for sibling look-ups). */
+/** All values at `path` in one row, each with the array elements it was read through (for sibling look-ups). */
 function readPath(root, path) {
   const out = [];
-  const walk = (value, parts, chain) => {
-    if (!parts.length) { out.push({ value, chain }); return; }
+  // `elements`: the array elements entered at each "[]" on the way, so a sibling field of the same element can be read.
+  const walk = (value, parts, elements) => {
+    if (!parts.length) { out.push({ value, elements }); return; }
     const [head, ...rest] = parts;
     if (head === '[]') {
       if (!Array.isArray(value)) return;
-      value.forEach((el) => walk(el, rest, isPlainObject(el) ? [...chain, el] : chain));
+      value.forEach((el) => walk(el, rest, [...elements, el]));
       return;
     }
-    if (head === '{json}') { const inner = jsonInString(value); if (inner !== undefined) walk(inner, rest, isPlainObject(inner) ? [...chain, inner] : chain); return; }
+    if (head === '{json}') { const inner = jsonInString(value); if (inner !== undefined) walk(inner, rest, elements); return; }
     if (!isPlainObject(value)) return;
-    walk(value[head], rest, [...chain, value]);
+    walk(value[head], rest, elements);
   };
   const parts = String(path).replace(/\[\]/g, '.[].').replace(/\{json\}/g, '.{json}.').split('.').filter(Boolean);
   walk(root, parts, []);
   return out;
 }
 
-/** The value of a sibling path (image, item) for one observation of `basePath`. */
-function siblingValue(row, basePath, siblingPath, chain) {
+/** The value of a sibling path (image, item) for one observation of `basePath`: read inside the same array element when both sit in one list. */
+function siblingValue(row, basePath, siblingPath, elements) {
   if (!siblingPath) return undefined;
-  const baseArr = basePath.lastIndexOf('[]');
   const sibArr = siblingPath.lastIndexOf('[]');
-  if (baseArr >= 0 && sibArr >= 0 && basePath.slice(0, baseArr) === siblingPath.slice(0, sibArr)) {
-    const element = chain[chain.length - 1];
+  if (sibArr >= 0 && basePath.startsWith(siblingPath.slice(0, sibArr + 2))) {
+    const depth = (siblingPath.slice(0, sibArr + 2).match(/\[\]/g) || []).length;
+    const element = elements?.[depth - 1];
     const rest = siblingPath.slice(sibArr + 2).replace(/^\./, '');
-    const hits = readPath(element, rest);
+    const hits = element === undefined ? [] : readPath(element, rest);
     return hits.length ? hits[0].value : undefined;
   }
   const hits = readPath(row.value, siblingPath);
@@ -247,30 +253,52 @@ export function runPlan(records, plan, { imageItemTable = false } = {}) {
   const skip = (e, why) => { covered.add(e.path); coverage.push({ field: e.path, meaning: e.meaning || '', status: 'skipped', what: why }); };
   if (!rows.length) return { blocks, coverage, rows: 0, participants: 0 };
   const byUse = (use) => fields.filter((e) => e.use === use);
-  const imageOf = (row, entry, chain) => { const v = siblingValue(row, entry.path, entry.image, chain); return v ? fileName(v) : (row.shown.length === 1 ? row.shown[0] : ''); };
+  const imageOf = (row, entry, elements) => { const v = siblingValue(row, entry.path, entry.image, elements); return v ? fileName(v) : (row.shown.length === 1 ? row.shown[0] : ''); };
 
   // Scores: per image (and per item) or a plain distribution. Scores sharing a measure are one block.
   const scores = byUse('score');
   const scoreObs = new Map(); // entry.path -> [{ row, value, image, item }]
   scores.forEach((e) => {
     const obs = [];
-    rows.forEach((row) => readPath(row.value, e.path).forEach(({ value, chain }) => {
+    rows.forEach((row) => readPath(row.value, e.path).forEach(({ value, elements }) => {
       const n = typeof value === 'number' ? value : (typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN);
       if (!Number.isFinite(n)) return;
-      obs.push({ row, value: n, image: e.image || row.shown.length === 1 ? imageOf(row, e, chain) : '', item: e.item ? String(siblingValue(row, e.path, e.item, chain) ?? '') : '' });
+      obs.push({ row, value: n, image: e.image || row.shown.length === 1 ? imageOf(row, e, elements) : '', item: e.item ? String(siblingValue(row, e.path, e.item, elements) ?? '') : '' });
     }));
     scoreObs.set(e.path, obs);
   });
+  const pathTail = (path) => path.split(/[.\]]/).filter(Boolean).pop() || path;
   const scaleNote = (entries) => {
     const scale = entries.find((e) => e.scale)?.scale;
     return scale ? `分值含义：${Object.entries(scale).sort((a, b) => Number(a[0]) - Number(b[0])).map(([k, v]) => `${k}=${v}`).join('，')}。` : '';
   };
   const measures = new Map();
   scores.forEach((e) => { const key = e.measure || e.path; if (!measures.has(key)) measures.set(key, []); measures.get(key).push(e); });
+  // Several score fields of one measure about the same image field (scenes[].ratings.A1, .M1, …): each field is one item.
+  measures.forEach((entries) => {
+    const byImage = new Map();
+    entries.forEach((e) => { if (e.image && !e.item) { if (!byImage.has(e.image)) byImage.set(e.image, []); byImage.get(e.image).push(e); } });
+    byImage.forEach((list) => {
+      if (list.length < 2) return;
+      list.forEach((e) => { (scoreObs.get(e.path) || []).forEach((o) => { o.item = pathTail(e.path); }); e.itemFromPath = true; });
+    });
+  });
+  // A measure that mixes per-item scores with scores that name no item is two things: keep them apart (the second is often the same scores stored flat).
+  [...measures.entries()].forEach(([key, entries]) => {
+    const withItem = entries.filter((e) => e.item || e.itemFromPath);
+    if (!withItem.length || withItem.length === entries.length) return;
+    measures.set(key, withItem);
+    measures.set(`${key}（未标条目）`, entries.filter((e) => !e.item && !e.itemFromPath));
+  });
+  const seenMeasures = new Map(); // signature of the observations -> measure key, to spot the same scores stored twice
   measures.forEach((entries, key) => {
     const obs = entries.flatMap((e) => scoreObs.get(e.path) || []);
     if (!obs.length) { entries.forEach((e) => skip(e, '没有数值')); return; }
+    const signature = obs.map((o) => `${o.row.participant}|${o.row.trial}|${o.image}|${o.value}`).sort().join('\n');
+    if (seenMeasures.has(signature)) { entries.forEach((e) => skip(e, `和「${seenMeasures.get(signature)}」是同一批分数的另一份存法，只算一次`)); return; }
+    seenMeasures.set(signature, entries.length > 1 ? key : title(entries[0]));
     const heading = entries.length > 1 ? key : title(entries[0]);
+    const itemLegend = entries[0].itemFromPath ? `条目：${entries.map((e) => `${pathTail(e.path)}=${e.meaning || e.path}`).join('；')}。` : '';
     const withImage = obs.filter((o) => o.image);
     const withItem = withImage.filter((o) => o.item);
     if (withItem.length >= withImage.length * 0.8 && withItem.length) {
@@ -292,7 +320,7 @@ export function runPlan(records, plan, { imageItemTable = false } = {}) {
       blocks.push({
         type: 'table', platform: true,
         title: `${heading}：每张图在每个条目上的平均分`,
-        note: `${images.length} 张图 × ${items.length} 个条目；每位参与者对每张图的每个条目计一次，n = 评分人数。${scaleNote(entries)}`,
+        note: `${images.length} 张图 × ${items.length} 个条目；每位参与者对每张图的每个条目计一次，n = 评分人数。${itemLegend}${scaleNote(entries)}`,
         columns: ['image', ...items, 'n'],
         rows: images.map((img) => [img, ...items.map((it) => fmt(mean(byCell.get(`${img}\u0000${it}`) || []))), raters.get(img).size]),
       });
@@ -423,7 +451,8 @@ export function runPlan(records, plan, { imageItemTable = false } = {}) {
     const sameStart = rows.length > people.length && timeFields.some((t) => /start|begin|open/i.test(t.path) && people.every((p) => new Set(rows.filter((r) => r.participant === p).map((r) => rowFieldValue(r, t.path))).size === 1));
     const growing = rows.length > people.length && people.every((p) => { const list = raw.filter((o) => o.r.participant === p).map((o) => o.v); return list.length >= 2 && list.every((v, i) => i === 0 || v > list[i - 1]); });
     const cumulative = sameStart && growing;
-    blocks.push({ type: 'rating', platform: true, title: `${title(e)}（秒）`, items: [], min: null, max: null, values: seconds.map((s) => fmt(s, 2)), note: `${cumulative ? '注意：每个人所有轮次的开始时间都一样、用时逐轮变长，看起来是从打开页面起的累计时间，不是每轮各自的用时；要每轮用时，页面需要在每轮开始时重新记开始时间。' : ''}${unit === 'ms' ? '原始单位毫秒，已换算成秒。' : ''}${fast ? `${fast} 次少于 2 秒，可能没认真看。` : ''}` });
+    const name = /秒|second|\bs\)|（s）/i.test(title(e)) ? title(e) : `${title(e)}（秒）`;
+    blocks.push({ type: 'rating', platform: true, title: name, items: [], min: null, max: null, values: seconds.map((s) => fmt(s, 2)), note: `${cumulative ? '注意：每个人所有轮次的开始时间都一样、用时逐轮变长，看起来是从打开页面起的累计时间，不是每轮各自的用时；要每轮用时，页面需要在每轮开始时重新记开始时间。' : ''}${unit === 'ms' ? '原始单位毫秒，已换算成秒。' : ''}${fast ? `${fast} 次少于 2 秒，可能没认真看。` : ''}` });
     done(e, cumulative ? '用时分布（看起来是累计时间，见说明）' : '用时：均值、中位数、分布，标出过快作答');
   });
 
@@ -435,13 +464,54 @@ export function runPlan(records, plan, { imageItemTable = false } = {}) {
     done(e, '文字：词频和长度');
   });
 
-  // Groups: the main scores and picks split by group.
+  // Participant attributes: one background table (who took part), each attribute once.
   const groups = byUse('group');
   const picks = byUse('pick');
-  groups.forEach((g) => {
+  const people = [...new Set(rows.map((r) => r.participant))];
+  const personValue = (g) => {
+    const map = new Map();
+    rows.forEach((r) => { if (map.has(r.participant)) return; const v = rowFieldValue(r, g.path); if (present(v) && typeof v !== 'object') map.set(r.participant, v); });
+    return map;
+  };
+  const backgroundRows = [];
+  const seenAttributes = new Map(); // same values for everyone -> stored twice
+  groups.filter((g) => !g.compare).forEach((g) => {
+    const values = personValue(g);
+    if (!values.size) { skip(g, '没有值'); return; }
+    const signature = people.map((p) => `${p}=${values.has(p) ? String(values.get(p)) : ''}`).join('\n');
+    if (seenAttributes.has(signature)) { skip(g, `和「${seenAttributes.get(signature)}」重复（同一信息存了两份），只列一次`); return; }
+    seenAttributes.set(signature, title(g));
+    const list = [...values.values()];
+    const numeric = list.every((v) => typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))));
+    const distinct = new Set(list.map(String)).size;
+    let text;
+    if (numeric && distinct > 7) {
+      const nums = list.map(Number);
+      const sorted = [...nums].sort((a, b) => a - b);
+      const m = mean(nums);
+      const sd = nums.length > 1 ? Math.sqrt(nums.reduce((a, v) => a + (v - m) ** 2, 0) / (nums.length - 1)) : 0;
+      const median = sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+      text = `均值 ${fmt(m)}，SD ${fmt(sd)}，中位数 ${fmt(median)}，范围 ${sorted[0]}–${sorted[sorted.length - 1]}`;
+    } else {
+      const counts = new Map();
+      list.forEach((v) => { const k = optionLabel(g, v); counts.set(k, (counts.get(k) || 0) + 1); });
+      // Numbers (a 1–7 scale) in order of value; words by frequency.
+      const sorted = [...counts.entries()].sort((a, b) => (numeric ? Number(a[0]) - Number(b[0]) : b[1] - a[1] || String(a[0]).localeCompare(String(b[0]))));
+      text = sorted.slice(0, 8).map(([k, n]) => `${k} ${n}（${fmt(n / list.length * 100, 0)}%）`).join('，') + (sorted.length > 8 ? `，其余 ${sorted.length - 8} 种` : '');
+    }
+    backgroundRows.push([title(g), values.size, text]);
+    done(g, numeric && distinct > 7 ? '背景：均值、SD、中位数、范围' : '背景：各取值人数');
+  });
+  if (backgroundRows.length) {
+    blocks.push({ type: 'table', platform: true, title: '参与者背景', note: `${people.length} 人。每项按人统计一次。要按某项比较结果，在说明里写“按 X 比较”再生成。`, columns: ['背景', '人数', '分布'], rows: backgroundRows });
+  }
+
+  // Group comparisons: only the attributes the researcher asked to compare by.
+  groups.filter((g) => g.compare).forEach((g) => {
     const levelOf = (r) => { const v = rowFieldValue(r, g.path); return present(v) && typeof v !== 'object' ? optionLabel(g, v) : null; };
     const levels = [...new Set(rows.map(levelOf).filter(Boolean))].sort();
     if (levels.length < 2) { skip(g, levels.length === 1 ? `所有人都是“${levels[0]}”，没法分组比较；人多了有不同取值会自动分组` : '没有值'); return; }
+    if (levels.length > 8) { skip(g, `取值有 ${levels.length} 种，太多了没法逐组比较；在说明里给出分段（如 18–30、31–45）再生成`); return; }
     if (!scores.length && !picks.length) {
       blocks.push({ type: 'choice', platform: true, title: `${title(g)}：各组人数`, note: '', values: rows.map(levelOf).filter(Boolean), total: rows.length, multi: false });
       done(g, '各组人数（这道题没有分数或选择可按组比较）');
