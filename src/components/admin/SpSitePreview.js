@@ -1,7 +1,7 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { Alert, Box, Button, Typography } from '@mui/material';
 import SpSiteFrame from '../SpSiteFrame';
-import { buildSiteQuestions, siteMatchLevel, siteMediaFolders } from '../../lib/spSite';
+import { buildSiteQuestions, siteMatchLevel, siteMediaFolders, sitePreviewMediaFolders } from '../../lib/spSite';
 import { applyPageState, captureRecord, pageSaysFinished } from '../SpSiteSurvey';
 import { RegionContext } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
@@ -12,7 +12,7 @@ const VIEWPORT_WIDTH = { mobile: 390, tablet: 820 };
  * Builder preview of an SP-Scheme site: the same page participants get, with
  * media drawn the same way. Answers are checked and shown, never submitted.
  */
-export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = [], viewport = 'desktop', height = '78vh' }) {
+export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = [], previewLibrary = false, viewport = 'desktop', height = '78vh' }) {
   const language = useContext(RegionContext)?.language || 'en';
   const L = (en, zh) => uiPair(language, en, zh);
   // Memoized so media are drawn once per preview run, not on every render.
@@ -24,7 +24,7 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
   const [problems, setProblems] = useState([]);
   const [captured, setCaptured] = useState([]);
   const [pageState, setPageState] = useState({});
-  const media = useMemo(() => siteMediaFolders(mediaPool, config), [mediaPool, config]);
+  const media = useMemo(() => (previewLibrary ? sitePreviewMediaFolders(mediaPool, config) : siteMediaFolders(mediaPool, config)), [mediaPool, previewLibrary, config]);
   const match = useMemo(() => siteMatchLevel(config), [config]);
   const converted = Boolean(config?.spSite?.convertedFrom);
   const width = VIEWPORT_WIDTH[viewport] || '100%';

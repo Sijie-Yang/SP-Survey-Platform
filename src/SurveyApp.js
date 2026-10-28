@@ -112,6 +112,8 @@ export default function SurveyApp() {
   const answerLanguageRef = useRef('en');
   // The project's media library, for an SP-Scheme page that draws media itself.
   const siteMediaPoolRef = useRef([]);
+  // True when an SP-Scheme page's empty library was replaced by the platform preview library.
+  const sitePreviewLibraryRef = useRef(false);
   const questionLanguageRef = useRef({});
   const repeatSessionRef = useRef(null);
   const repeatParticipantRef = useRef(null);
@@ -450,6 +452,21 @@ export default function SurveyApp() {
       // Load survey configuration (platform mode: Supabase, self-hosted: local server)
       const adminConfig = projectData?._surveyConfig || await loadSurveyConfig(projectId);
       setCompletionMessage(adminConfig?.completionMessage || '');
+      // An SP-Scheme page with an empty media library gets the platform preview
+      // library, as other surveys do (never for a published, release-managed version).
+      sitePreviewLibraryRef.current = false;
+      if (adminConfig?.spSite?.html && !siteMediaPoolRef.current.length && !adminConfig._spPublishedVersion) {
+        try {
+          const { listPreviewMedia } = await import('./lib/previewMediaLibrary');
+          const preview = await withTimeout(listPreviewMedia(), 15000, []);
+          if (Array.isArray(preview) && preview.length) {
+            siteMediaPoolRef.current = preview;
+            sitePreviewLibraryRef.current = true;
+          }
+        } catch (err) {
+          console.warn('Preview media library unavailable for SP-Scheme page:', err?.message || err);
+        }
+      }
 
       // Live Surveys approved-window gate (projects without a listing stay open by link)
       setLoadingMessage('Checking survey availability…');
@@ -1181,7 +1198,7 @@ export default function SurveyApp() {
             survey_revision: revision.id,
             survey_response_contract: revision.contract,
             published_version: finalSurveyJson._spPublishedVersion || null,
-            ...(finalSurveyJson.spSite ? { sp_site: { id: finalSurveyJson.spSite.id || null, version: finalSurveyJson.spSite.version || null, allowed_hosts: finalSurveyJson.spSite.allowedHosts || [], match: siteMatchLevel(finalSurveyJson).level, captured_requests: Array.isArray(responses?.[SP_SITE_REQUESTS_KEY]) ? responses[SP_SITE_REQUESTS_KEY].length : 0 } } : {}),
+            ...(finalSurveyJson.spSite ? { sp_site: { id: finalSurveyJson.spSite.id || null, version: finalSurveyJson.spSite.version || null, allowed_hosts: finalSurveyJson.spSite.allowedHosts || [], match: siteMatchLevel(finalSurveyJson).level, captured_requests: Array.isArray(responses?.[SP_SITE_REQUESTS_KEY]) ? responses[SP_SITE_REQUESTS_KEY].length : 0, preview_media_library: sitePreviewLibraryRef.current } } : {}),
             survey_draft_updated_at: resumeDraft?.finalSurveyJson ? null : projectData?.draftUpdatedAt || null,
             timing: {
               total_seconds: totalSeconds,
@@ -1520,6 +1537,7 @@ export default function SurveyApp() {
           surveyJson={publishedSurveyJson}
           language={answerLanguageRef.current}
           mediaPool={siteMediaPoolRef.current}
+          previewLibrary={sitePreviewLibraryRef.current}
           status={surveyPhase}
           completionCode={completionInfo?.completionCode || ''}
         />

@@ -720,6 +720,7 @@ export default function SurveyPreview({
         config={processedConfig}
         spSite={config.spSite}
         mediaPool={siteMediaPool}
+        previewLibrary={usingPreviewLibrary}
         viewport={interactive ? viewport : 'desktop'}
       />
     );

@@ -36,6 +36,12 @@ describe('diagnoseSpSchemeProject', () => {
     expect(d.checks.some((c) => /streets.*4 张/.test(c.title))).toBe(true);
   });
 
+  it('says an empty library falls back to the preview library', () => {
+    const d = diagnoseSpSchemeProject(project({ preloadedImages: [] }));
+    expect(d.checks.some((c) => c.level === 'error')).toBe(false);
+    expect(d.checks.some((c) => /预览图库/.test(c.title))).toBe(true);
+  });
+
   it('flags a getMedia folder that holds no images', () => {
     const d = diagnoseSpSchemeProject(project({ preloadedImages: media('other', 3) }));
     expect(d.checks.find((c) => /streets/.test(c.title)).level).toBe('error');
@@ -65,6 +71,16 @@ describe('diagnoseSpSchemeProject', () => {
     expect(fixed.checks.find((c) => /photos/.test(c.title)).level).toBe('warn');
     const none = diagnoseSpSchemeProject(asIs("var pics = [{src:'https://x.org/a.jpg'}];"));
     expect(none.checks.find((c) => /没有向平台要图片/.test(c.title)).detail).toMatch(/1 个外部图片网址/);
+  });
+
+  it('counts questions whose images the platform draws', () => {
+    const pages = [{ name: 'p', elements: [{ type: 'imagepicker', name: 'safe_pair', imageCount: 2, trialCount: 5, randomImageSelection: true }] }];
+    const html = schemePage("SPSite.onReady(function(){ var q = SPSite.getQuestions(); SPSite.answer('safe_pair', 'a', { trial: 0 }); SPSite.complete(); });");
+    const d = diagnoseSpSchemeProject(project({ preloadedImages: [], config: { pages, spSite: { html } } }));
+    const check = d.checks.find((c) => /按题抽取/.test(c.title));
+    expect(check.level).toBe('ok');
+    expect(check.detail).toMatch(/safe_pair（每次 2 张，做 5 次）.*预览图库/);
+    expect(d.checks.some((c) => /没有向平台要图片/.test(c.title))).toBe(false);
   });
 
   it('reports a declared page that never submits', () => {

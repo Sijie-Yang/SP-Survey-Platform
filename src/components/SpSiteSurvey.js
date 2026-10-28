@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import SpSiteFrame from './SpSiteFrame';
-import { buildSiteQuestions, siteMatchLevel, siteMediaFolders } from '../lib/spSite';
+import { buildSiteQuestions, siteMatchLevel, siteMediaFolders, sitePreviewMediaFolders } from '../lib/spSite';
 import { collectSurveyDataWithTrials, isTrialsAnswer, persistTrialsAnswer } from '../lib/trialNavigation';
 
 /** Response key holding every request the page sent with data, exactly as sent. */
@@ -67,9 +67,9 @@ export function completesOn(url, pattern) {
  * normal submission path (drafts, enrichment, response contract) is unchanged.
  * Requests the page sends that no adapter maps are kept raw on the response.
  */
-export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = [], status = 'active', completionCode = '' }) {
+export default function SpSiteSurvey({ model, surveyJson, language, mediaPool = [], previewLibrary = false, status = 'active', completionCode = '' }) {
   const questions = useMemo(() => buildSiteQuestions(surveyJson, { language }), [surveyJson, language]);
-  const media = useMemo(() => siteMediaFolders(mediaPool, surveyJson), [mediaPool, surveyJson]);
+  const media = useMemo(() => (previewLibrary ? sitePreviewMediaFolders(mediaPool, surveyJson) : siteMediaFolders(mediaPool, surveyJson)), [mediaPool, previewLibrary, surveyJson]);
   const match = useMemo(() => siteMatchLevel(surveyJson), [surveyJson]);
   const initialAnswers = useMemo(() => {
     const names = new Set(questions.map((q) => q.name));

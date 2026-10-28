@@ -479,6 +479,36 @@ export function siteMediaFolders(pool = [], config = {}) {
   return out;
 }
 
+/** Folder names the page asks for with SPSite.getMedia('...') (literal names only). */
+export function pageMediaFolderNames(html) {
+  const names = new Set();
+  const re = /SPSite\s*\.\s*getMedia\s*\(\s*(['"`])([^'"`]*)\1\s*\)/g;
+  let m;
+  while ((m = re.exec(String(html || '')))) names.add(m[2].replace(/^\/+|\/+$/g, ''));
+  return [...names];
+}
+
+/**
+ * Media for a page whose project library is empty, from the platform preview
+ * library (as other surveys get): every folder the page asks for, or the
+ * linked ones, holds the whole preview library; a page without
+ * SPSite.getMedia gets it at the root, which fills its empty image lists.
+ */
+export function sitePreviewMediaFolders(pool = [], config = {}) {
+  const html = config?.spSite?.html || '';
+  const items = (Array.isArray(pool) ? pool : [])
+    .filter((item) => item?.url && !/video|audio/i.test(String(item.type || '')))
+    .slice(0, SITE_MEDIA_MAX_ITEMS)
+    .map((item) => ({ url: item.url, name: item.name || String(item.url).split('?')[0].split('/').pop(), type: item.type || 'image', folder: '' }));
+  if (!items.length) return {};
+  if (!pageReadsMedia(html)) return { '': items };
+  const names = new Set([...pageMediaFolderNames(html), ...siteMediaFolderNames(config).map((f) => (f === SITE_MEDIA_ROOT ? '' : f))]);
+  if (!names.size) names.add('');
+  const out = {};
+  names.forEach((name) => { out[name] = items; });
+  return out;
+}
+
 /**
  * How far an SP-Scheme site matches the platform: every question a native
  * type (full), some recorded as is (partial), or nothing declared (none: the

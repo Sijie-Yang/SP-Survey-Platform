@@ -8,6 +8,7 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 - Licence: source code is now under MIT; documentation, survey templates and research data stay under CC BY 4.0.
 
 ### Added
+- SP-Scheme pages that draw their own images (`SPSite.getMedia('folder')` or an empty image list) now fall back to the platform preview media library when the project library is empty, on the live link and in Builder preview, as native questions already did (never for a published, release-managed version). Responses record `sp_site.preview_media_library`. The admin diagnosis says so and also counts questions whose images the platform draws per question.
 - Admin 项目概览: projects that run an uploaded page are tagged (SP-Scheme page / imported as is / SP-Scheme questions, plus "draft not published"), with a filter and a diagnosis dialog (what participants are served, where the page's images come from, whether answers are recorded, latest responses). A download button rebuilds the upload as a ZIP: served `index.html`, embedded data files, the media the page can draw, settings, sample responses and a README with the checks.
 - Citable dataset package export (README, LICENSE, CITATION.cff, datapackage.json, stimuli manifest; identifiers stripped by default).
 - Journal-style figures (SVG/PNG) per question and an "All figures" ZIP.

@@ -3,7 +3,7 @@ import { Box } from '@mui/material';
 import SpSiteFrame from './SpSiteFrame';
 import { supabase } from '../lib/supabase';
 import { stripOwnResponseSupabase } from '../lib/ownResponseSupabase';
-import { buildSiteQuestions, siteMediaFolders } from '../lib/spSite';
+import { buildSiteQuestions, siteMediaFolders, sitePreviewMediaFolders } from '../lib/spSite';
 import { resolvePreviewMediaContextCached } from '../lib/previewMediaLibrary';
 import { hashString } from '../lib/templateCover';
 
@@ -25,8 +25,8 @@ export function loadSchemeTemplate(templateId) {
       if (error || !data?.survey_config?.spSite?.html) return null;
       const config = stripOwnResponseSupabase(data.survey_config);
       const preloadedImages = Array.isArray(data.preloaded_images) ? data.preloaded_images : [];
-      const { images } = await resolvePreviewMediaContextCached({ preloadedImages }).catch(() => ({ images: [] }));
-      return { config, pool: images || [] };
+      const { images, fromPreviewLibrary } = await resolvePreviewMediaContextCached({ preloadedImages }).catch(() => ({ images: [] }));
+      return { config, pool: images || [], previewLibrary: Boolean(fromPreviewLibrary) };
     })().catch(() => null));
   }
   return cache.get(templateId);
@@ -75,7 +75,10 @@ export default function SchemePageCover({ templateId, height = 190, fallback = n
   }, [visible, templateId]);
 
   const questions = useMemo(() => (site ? buildSiteQuestions(site.config) : []), [site]);
-  const media = useMemo(() => (site ? siteMediaFolders(site.pool, site.config) : {}), [site]);
+  const media = useMemo(() => {
+    if (!site) return {};
+    return site.previewLibrary ? sitePreviewMediaFolders(site.pool, site.config) : siteMediaFolders(site.pool, site.config);
+  }, [site]);
   const pageWidth = pageWidthFor(width);
   const scale = width ? width / pageWidth : 0;
 
