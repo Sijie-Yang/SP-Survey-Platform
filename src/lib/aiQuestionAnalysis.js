@@ -771,8 +771,10 @@ export function platformAnalysis(records, { pageHtml = '', question = null } = {
 /** The data a block carries, order-free: two blocks with the same signature show the same thing. */
 function blockSignature(block) {
   const sorted = (list) => JSON.stringify([...list].sort());
-  if (block.type === 'pairwise') return `pairwise:${sorted(block.matches.map((m) => `${m.winner}>${m.loser}`))}`;
-  if (block.type === 'per_item') return `per_item:${sorted(block.values.map((v) => `${v.item}|${v.value}|${v.rater || ''}`))}`;
+  // Items by file name (a URL and its file name are the same image); who answered does not change what is shown.
+  const file = (v) => String(v ?? '').split(/[?#]/)[0].split('/').pop();
+  if (block.type === 'pairwise') return `pairwise:${sorted(block.matches.map((m) => `${file(m.winner)}>${file(m.loser)}`))}`;
+  if (block.type === 'per_item') return `per_item:${sorted(block.values.map((v) => `${file(v.item)}|${v.value}`))}`;
   if (block.type === 'choice') return `choice:${sorted(block.values.map((v) => String(v).replace(/ \([^)]*\)$/, '')))}`;
   if (block.type === 'rating') return `rating:${sorted((block.items?.length ? block.items.flatMap((i) => i.values) : block.values).map(Number))}`;
   return null;

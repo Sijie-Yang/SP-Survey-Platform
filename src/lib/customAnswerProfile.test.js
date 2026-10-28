@@ -210,3 +210,20 @@ describe('model blocks next to the platform', () => {
     expect(run.platformBlocks[0].skipped.map((c) => c.field)).toContain('clicks');
   });
 });
+
+test('a model copy keyed by URL and without raters is still recognised as a repeat', async () => {
+  const runner = async (code, records) => runAnalysisUnsandboxed(code, records);
+  const code = `function analyze(records, helpers) {
+    var values = [], matches = [];
+    records.forEach(function (r) { r.answer.trials.forEach(function (t) {
+      var v = t.value;
+      values.push({ item: 'https://media.sp-survey.org/x/' + v.imageA, value: v.ratingA });
+      values.push({ item: 'https://media.sp-survey.org/x/' + v.imageB, value: v.ratingB });
+      if (v.compare === 'a_safer') matches.push({ winner: 'https://m/x/' + v.imageA, loser: v.imageB, category: 'safe' });
+      if (v.compare === 'b_safer') matches.push({ winner: v.imageB, loser: v.imageA });
+    }); });
+    return { blocks: [{ type: 'per_item', title: '评分', values: values, measure: 'number' }, { type: 'pairwise', title: '比较', matches: matches }] };
+  }`;
+  const run = await evaluateAnalysis(code, buildAnalysisRecords(ONE, QUESTION), runner, { pageHtml: PAGE_HTML, question: QUESTION });
+  expect(run.modelBlocks).toEqual([]);
+});
