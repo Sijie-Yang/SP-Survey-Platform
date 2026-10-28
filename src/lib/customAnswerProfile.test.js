@@ -259,3 +259,54 @@ test('a model choice block with the raw codes repeats the platform option counts
   const run = await evaluateAnalysis(code, buildAnalysisRecords(ONE, QUESTION), runner, { pageHtml: PAGE_HTML, question: QUESTION });
   expect(run.modelBlocks).toEqual([]);
 });
+
+// A single-answer custom task (the rural scenes study, 161 participants): the
+// submitted row wraps the answer as { type, answer, shown_images, shown_media, … }.
+// Seeds, id lists and the counterbalancing order are bookkeeping, not answers.
+describe('single-answer task stored with the submission wrapper', () => {
+  const ITEMS = ['A1', 'M1', 'S3'];
+  const POOL = ['P027B', 'P034B', 'P051B', 'P057B'];
+  const task = (p) => {
+    const shown = [POOL[p % 4], POOL[(p + 1) % 4]];
+    return {
+      type: 'skillquestion',
+      answer: {
+        result: { text: JSON.stringify({ personal: { age: 20 + p } }), ratings: shown.flatMap((id) => ITEMS.map((item) => ({ id: `${id}_${item}`, value: (p + ITEMS.indexOf(item)) % 7 + 1, itemId: item, imageId: id, imageUrl: `https://m/${id}__x.jpg` }))) },
+        pairIds: shown.map((id) => id.slice(0, 4)),
+        groupOrder: p % 2 ? 'AB' : 'BA',
+        samplingSeed: 45761945 + p * 7919231,
+        personal: { age: 20 + p, gender: p % 3 ? 'female' : 'male', stress: (p % 5) + 1 },
+        version: 'v6', complete: true,
+        shownUrls: shown.map((id) => `https://m/${id}__x.jpg`),
+        elapsedSeconds: 500 + p * 10,
+      },
+      shown_images: [], shown_media_ids: [], shown_media_set: null, shown_media_group: null, shown_media_categories: null, shown_media: [],
+    };
+  };
+  const rows = Array.from({ length: 12 }, (_, p) => ({ id: `r${p}`, participant_id: `P${p}`, responses: { research_consent: { type: 'boolean', answer: p > 0, shown_images: [], shown_media: [] }, task: task(p) } }));
+  const Q = { name: 'task', type: 'skillquestion', skillId: 'skill_rural', title: 'Rural scenes' };
+
+  test('the wrapper is removed, bookkeeping fields are skipped, the profile is summarised', () => {
+    const records = buildAnalysisRecords(rows, Q);
+    const auto = autoAnalysis(records, { imageItemTable: true });
+    const status = Object.fromEntries(auto.coverage.map((c) => [c.field, c]));
+    // Platform wrapper keys never appear as answer fields.
+    expect(Object.keys(status)).toEqual(expect.not.arrayContaining(['type', 'shown_media', 'shown_images', 'answer.result']));
+    expect(status.samplingSeed).toMatchObject({ status: 'skipped' });
+    expect(status.samplingSeed.what).toMatch(/种子/);
+    expect(status.pairIds).toMatchObject({ status: 'skipped' });
+    expect(status.shownUrls).toMatchObject({ status: 'skipped' });
+    expect(status['result.ratings'].what).toMatch(/图片 × 条目/);
+    // One row per participant: groupOrder is counted as an option, not used as a group with a meaningless mean.
+    expect(status.groupOrder.status).toBe('analysed');
+    expect(auto.blocks.some((b) => b.title.includes('samplingSeed'))).toBe(false);
+    expect(auto.blocks.some((b) => /按 .* 分组/.test(b.title) && /samplingSeed|research_consent/.test(b.note))).toBe(false);
+    expect(auto.blocks.find((b) => b.title === 'groupOrder：各选项次数').values.sort()).toEqual(['AB', 'AB', 'AB', 'AB', 'AB', 'AB', 'BA', 'BA', 'BA', 'BA', 'BA', 'BA']);
+    // personal.* is read: gender counts, age and stress as numbers.
+    expect(status['personal.gender'].status).toBe('analysed');
+    expect(auto.blocks.find((b) => b.title === 'personal.age：数值分布').values).toHaveLength(12);
+    expect(auto.blocks.find((b) => b.title.startsWith('elapsedSeconds'))).toBeTruthy();
+    // Booleans from other questions (consent) are not groups.
+    expect(auto.blocks.some((b) => b.title === '按 research_consent 分组')).toBe(false);
+  });
+});

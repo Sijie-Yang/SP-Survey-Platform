@@ -757,7 +757,8 @@ export function platformSummaryBlocks(records) {
  */
 export function platformAnalysis(records, { pageHtml = '', question = null } = {}) {
   const mapped = mapRecordsToMedia(records, pageHtml);
-  const auto = autoAnalysis(mapped, { pageHtml, question });
+  const summary = platformSummaryBlocks(records);
+  const auto = autoAnalysis(mapped, { pageHtml, question, imageItemTable: summary.length > 0 });
   const coverage = coverageBlock(auto);
   // Same shape as checked model blocks, so the same statistics run on them.
   const shaped = auto.blocks.map((block) => ({
@@ -767,7 +768,7 @@ export function platformAnalysis(records, { pageHtml = '', question = null } = {
     ...(block.type === 'choice' ? { values: block.values.map(String), multi: Boolean(block.multi), total: block.total || null } : null),
     ...(block.type === 'per_item' ? { labels: block.labels || {}, measure: block.measure || 'number' } : null),
   }));
-  return { auto, blocks: [...platformSummaryBlocks(records), ...(coverage ? [coverage] : []), ...shaped] };
+  return { auto, blocks: [...summary, ...(coverage ? [coverage] : []), ...shaped] };
 }
 
 /** The data a block carries, order-free: two blocks with the same signature show the same thing. */

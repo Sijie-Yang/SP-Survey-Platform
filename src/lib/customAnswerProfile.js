@@ -17,6 +17,8 @@ const TIME_NAME_RE = /(^|[_-])(at|ts|time|timestamp|date)$|At$|Time$|Timestamp$|
 const DURATION_WORD_RE = /duration|elapsed|latency|reaction|response_?time|^rt$|^rt_|_rt$/i;
 const DURATION_UNIT_RE = /Rt$|RT$|Ms$|_ms$|Sec$|Secs$|Seconds$|_sec$|_secs$|_seconds$/;
 const ORDER_NAME_RE = /^(round|trial|trial_?index|index|idx|order|step|seq|sequence|position|pos|n|num|no|number|screen|page)$/i;
+// Random seeds, hashes and identifiers are bookkeeping, never an answer.
+const ID_NAME_RE = /seed|hash|nonce|token|uuid|guid|^id$|_id$|Id$|^ids$|_ids$|Ids$/;
 const MAX_CATEGORIES = 20;
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
@@ -31,8 +33,12 @@ export function answerRows(records) {
   const rows = [];
   (records || []).forEach((record, recordIndex) => {
     const participant = String(record?.participant_id || `row_${recordIndex + 1}`);
-    const answer = record?.answer;
+    let answer = record?.answer;
     let entries = [];
+    // A submitted single answer is stored as { type, answer, shown_images, shown_media, ... }: read what is inside.
+    const wrapped = isPlainObject(answer) && 'answer' in answer && 'type' in answer && ('shown_images' in answer || 'shown_media' in answer) && !Array.isArray(answer.trials);
+    const wrapperShown = wrapped ? ((answer.shown_media_ids?.length ? answer.shown_media_ids : answer.shown_images) || []) : null;
+    if (wrapped) answer = answer.answer;
     // Stored trials carry the page's object under `value`; submitted (enriched) trials carry it under `answer`.
     const trialValue = (t) => (isPlainObject(t?.value) ? t.value : isPlainObject(t?.answer) && ('trial_index' in t || 'shown_images' in t || 'key' in t) ? t.answer : t?.value);
     const trialShown = (t) => (t?.shown_media_ids?.length ? t.shown_media_ids : t?.shown_images) || [];
@@ -41,7 +47,7 @@ export function answerRows(records) {
     } else if (Array.isArray(answer) && answer.every((a) => isPlainObject(a))) {
       entries = answer.map((t) => (isPlainObject(t.answer) && ('trial_index' in t || 'shown_images' in t) ? { value: t.answer, shown: trialShown(t) } : { value: t, shown: [] }));
     } else if (isPlainObject(answer)) {
-      entries = [{ value: answer, shown: Array.isArray(record?.shown) ? record.shown : [] }];
+      entries = [{ value: answer, shown: wrapperShown?.length ? wrapperShown : Array.isArray(record?.shown) ? record.shown : [] }];
     }
     entries.forEach((entry, trial) => {
       if (!isPlainObject(entry.value)) return;
@@ -123,8 +129,11 @@ export function profileFields(rows) {
     if (kind === 'object') return { ...base, role: 'object' };
     if (kind === 'string' && present.filter((v) => MEDIA_RE.test(v)).length >= present.length * 0.8) return { ...base, role: 'media' };
     if (kind === 'number') {
+      if (ID_NAME_RE.test(name)) return { ...base, role: 'id' };
       // Epoch milliseconds (savedAt: 1793174906097) are time stamps whatever the name.
       if (present.every((v) => v > 1e11)) return { ...base, role: 'time' };
+      // Large numbers that are different in nearly every record are identifiers or seeds, not a scale.
+      if (present.length >= 10 && distinct.length >= present.length * 0.9 && Math.max(...present) - Math.min(...present) > 1000) return { ...base, role: 'id' };
       if (DURATION_WORD_RE.test(name) || DURATION_UNIT_RE.test(name)) {
         const ms = /Ms$|_ms$|milli/i.test(name) || (!/Sec|_s$|seconds/i.test(name) && Math.max(...present) > 600);
         return { ...base, role: 'duration', unit: ms ? 'ms' : 's' };
@@ -136,6 +145,9 @@ export function profileFields(rows) {
     }
     if (kind === 'tags') {
       const flat = present.flat().map(String);
+      const distinctTags = new Set(flat).size;
+      // A list of ids (pairIds: ["P058", "P010", …]) records what was shown, not what was chosen.
+      if (ID_NAME_RE.test(name) || distinctTags > MAX_CATEGORIES) return { ...base, role: 'id_list' };
       // A list of image names or URLs records what was shown, not an answer.
       if (flat.length && flat.filter((v) => MEDIA_RE.test(v) || /^https?:\/\//.test(v)).length >= flat.length * 0.8) return { ...base, role: 'media_list' };
       return { ...base, role: 'tags' };
@@ -148,8 +160,10 @@ export function profileFields(rows) {
     }
     // Strings.
     if (distinct.length === 1) return { ...base, role: 'constant', value: present[0] };
+    if (ID_NAME_RE.test(name) && distinct.length > 6) return { ...base, role: 'id' };
     const perP = byParticipant(name);
-    const fixedPerParticipant = perP.size >= 2 && [...perP.values()].every((s) => s.size === 1);
+    // "Fixed per participant" only means something when a participant has several rows (trials).
+    const fixedPerParticipant = perP.size >= 2 && rows.length > perP.size && [...perP.values()].every((s) => s.size === 1);
     const meanLength = present.reduce((s, v) => s + String(v).length, 0) / present.length;
     if (meanLength >= 15) return { ...base, role: 'text' };
     // Few distinct values (or many repeats) are options; a handful of answers can still show 3 of 4 options.
@@ -215,7 +229,7 @@ const label = (labels, v) => (labels[v] && labels[v] !== v ? `${labels[v]} (${v}
  * blocks are normalized blocks (computeAnalysisBlocks runs the statistics);
  * coverage lists every field with what was done with it.
  */
-export function autoAnalysis(records, { pageHtml = '', question = null } = {}) {
+export function autoAnalysis(records, { pageHtml = '', question = null, imageItemTable = false } = {}) {
   const rows = answerRows(records);
   if (!rows.length) return { blocks: [], coverage: [], rows: 0, participants: 0 };
   const labels = choiceLabels(pageHtml, question);
@@ -225,7 +239,9 @@ export function autoAnalysis(records, { pageHtml = '', question = null } = {}) {
   const inAnswers = (k) => rows.some((row) => row.fields[k] !== undefined && row.fields[k] !== null && row.fields[k] !== '');
   rows.forEach((row) => Object.keys(row.context).forEach((k) => { if (!contextNames.includes(k) && !inAnswers(k)) contextNames.push(k); }));
   contextNames.forEach((name) => {
-    const values = [...new Set(rows.map((row) => row.context[name]).filter((v) => v !== null && v !== undefined && v !== '').map(String))];
+    const raw = rows.map((row) => row.context[name]).filter((v) => v !== null && v !== undefined && v !== '');
+    if (raw.some((v) => typeof v === 'boolean')) return; // consent-style flags are not groups
+    const values = [...new Set(raw.map(String))];
     if (values.length >= 2 && values.length <= MAX_CATEGORIES) fields.push({ name, role: 'group', fromOtherQuestion: true, distinct: values.length, n: rows.length });
   });
   const valueOf = (row, f) => (f.fromOtherQuestion ? row.context[f.name] : row.fields[f.name]);
@@ -399,7 +415,7 @@ export function autoAnalysis(records, { pageHtml = '', question = null } = {}) {
       blocks.push({ type: 'per_item', title: `${f.name}：每张图的分数`, note: `每次作答只显示一张图，分数算到那张图上。${scoreLabelNote([f])}`, values: rows.filter((r) => typeof r.fields[f.name] === 'number').map((r) => ({ item: r.shown[0], value: r.fields[f.name], rater: r.participant })), measure: 'number', platform: true });
       done(f, '分数，按显示的那张图汇总');
     } else {
-      blocks.push({ type: 'rating', title: `${f.name}：分数分布`, note: scoreLabelNote([f]), values, platform: true });
+      blocks.push({ type: 'rating', title: `${f.name}：数值分布`, note: scoreLabelNote([f]), values, platform: true });
       done(f, '数值：均值、SD、中位数、95% CI');
     }
   });
@@ -425,10 +441,17 @@ export function autoAnalysis(records, { pageHtml = '', question = null } = {}) {
     done(f, cumulative ? '用时：分布（看起来是累计时间，见说明）' : '用时：均值、中位数、分布，标出过快作答');
   });
 
-  // 7. Groups (e.g. grade): the main results split by group.
+  // 7. Groups (e.g. grade): the main results split by group. Without a score or a choice there is nothing to split,
+  //    so an in-answer group is just counted like an option.
   const groups = byRole('group');
   const mainScoreFields = pairedScores.length ? pairedScores : scores;
-  groups.forEach((g) => {
+  if (!mainScoreFields.length && !choice) {
+    groups.filter((g) => !g.fromOtherQuestion).forEach((f) => {
+      blocks.push({ type: 'choice', title: `${f.name}：各选项次数`, values: rows.map((r) => r.fields[f.name]).filter((v) => v !== null && v !== undefined && v !== '').map((v) => label(labels, String(v))), platform: true });
+      done(f, '选项：次数和比例（Wilson 95% CI）');
+    });
+  }
+  (mainScoreFields.length || choice ? groups : []).forEach((g) => {
     const levels = [...new Set(rows.map((r) => valueOf(r, g)).filter((v) => v !== null && v !== undefined && v !== '').map(String))].sort();
     const columns = ['组', '人数', '作答次数'];
     if (mainScoreFields.length) columns.push('平均分');
@@ -455,16 +478,17 @@ export function autoAnalysis(records, { pageHtml = '', question = null } = {}) {
     if (f.fromOtherQuestion) return;
     if (f.role === 'media') skip(f, '图片名：用来把分数、选择和标签对应到图上');
     else if (f.role === 'media_list') skip(f, '显示过的图片列表：不是作答内容');
+    else if (f.role === 'id_list') skip(f, '编号列表（显示过的刺激编号等）：不是作答内容');
     else if (f.role === 'time') skip(f, '时间戳：不是作答内容');
     else if (f.role === 'order') skip(f, '顺序号（第几轮）：不是作答内容');
     else if (f.role === 'constant') skip(f, `所有作答都是同一个值（${label(labels, String(f.value))}），没法比较${participants < 2 ? '；人多了如果有不同取值会自动分组' : ''}`);
     else if (f.role === 'empty') skip(f, '没有值');
-    else if (f.role === 'id') skip(f, '几乎每条都不同的编号，不是作答内容');
+    else if (f.role === 'id') skip(f, '编号、随机种子或哈希：不是作答内容');
     else if (f.role === 'text') {
       const values = rows.map((r) => r.fields[f.name]).filter((v) => typeof v === 'string' && v.trim());
       blocks.push({ type: 'text', title: `${f.name}：文字回答`, values, platform: true });
       done(f, '文字：词频和长度');
-    } else if (f.role === 'object') skip(f, '结构太复杂（嵌套对象/列表），平台没有展开，可让模型补充');
+    } else if (f.role === 'object') skip(f, imageItemTable ? '嵌套结构：里面每张图的评分已汇总在上面的"图片 × 条目"表里；其他内容可让模型补充' : '结构太复杂（嵌套对象/列表），平台没有展开，可让模型补充');
     else if (f.role === 'score' && f.media) skip(f, '没有找到同名的图片字段');
     else skip(f, '平台不认识这种字段');
   });

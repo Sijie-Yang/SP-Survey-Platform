@@ -132,16 +132,25 @@ function PerItemView({ block, zh, head }) {
 
 /** Which answer fields the platform analysed and which it skipped, and why. */
 function CoverageView({ block, zh }) {
+  const [showSkipped, setShowSkipped] = useState(false);
+  const Row = ({ c }) => <Box sx={{ display: 'flex', gap: 1, alignItems: 'baseline', mb: 0.5, minWidth: 0 }}>
+    <Typography variant="body2" sx={{ fontFamily: 'monospace', flexShrink: 0 }}>{c.field}</Typography>
+    <Typography variant="body2" color={c.status === 'analysed' ? 'text.primary' : 'text.secondary'} sx={{ minWidth: 0 }}>{c.what}</Typography>
+  </Box>;
   return <Box data-testid="ai-analysis-coverage" sx={{ mb: 3, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
     <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>{zh ? block.title : 'Which fields the platform analysed'}</Typography>
     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
       {zh ? block.note : `${block.analysed.length} fields analysed, ${block.skipped.length} skipped. Computed by platform code only, no model: the same records always give the same result.`}
     </Typography>
-    {[...block.analysed, ...block.skipped].map((c) => <Box key={c.field} sx={{ display: 'flex', gap: 1, alignItems: 'baseline', mb: 0.5 }}>
-      <Chip size="small" label={c.status === 'analysed' ? (zh ? '已分析' : 'analysed') : (zh ? '跳过' : 'skipped')} color={c.status === 'analysed' ? 'success' : 'default'} variant="outlined" sx={{ flexShrink: 0, height: 20, fontSize: 11 }} />
-      <Typography variant="body2" sx={{ fontFamily: 'monospace', flexShrink: 0 }}>{c.field}</Typography>
-      <Typography variant="body2" color={c.status === 'analysed' ? 'text.primary' : 'text.secondary'} sx={{ minWidth: 0 }}>{c.what}</Typography>
-    </Box>)}
+    {block.analysed.map((c) => <Row key={c.field} c={c} />)}
+    {block.skipped.length > 0 && <Button size="small" sx={{ mt: 0.5, px: 0.5 }} onClick={() => setShowSkipped((v) => !v)} data-testid="ai-analysis-coverage-skipped">
+      {showSkipped
+        ? (zh ? '收起跳过的字段' : 'Hide skipped fields')
+        : (zh ? `跳过了 ${block.skipped.length} 个字段（看原因）` : `${block.skipped.length} fields skipped (why)`)}
+    </Button>}
+    <Collapse in={showSkipped}>
+      <Box sx={{ mt: 0.5 }}>{block.skipped.map((c) => <Row key={c.field} c={c} />)}</Box>
+    </Collapse>
   </Box>;
 }
 
@@ -185,7 +194,7 @@ function BlockView({ block, zh }) {
       const max = block.max ?? Math.max(...nums);
       return <Box sx={{ mb: 3 }}>{head}
         <DescriptiveStatsLine nums={nums} />
-        {max > min && <DensityHistogramChart scores={nums} domainMin={min} domainMax={max} title={title || 'Distribution'} xLabel={title || 'value'} padB={36} />}
+        {max > min && <DensityHistogramChart scores={nums} domainMin={min} domainMax={max} title={zh ? '分布' : 'Distribution'} xLabel={(title || 'value').split('：')[0]} padB={36} />}
       </Box>;
     }
     const items = block.table.rows.map((row) => ({ label: row[0], value: row[2] ?? 0, extra: ` · SD ${fmt(row[3])} · n=${row[1]}` }));
