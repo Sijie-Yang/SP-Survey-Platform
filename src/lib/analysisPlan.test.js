@@ -364,6 +364,10 @@ describe('runPlan on a task that stores the same ratings and profile twice', () 
     expect(checked.missing).toEqual([]);
     expect(checked.plan.fields.find((f) => f.path === 'result.text')).toMatchObject({ use: 'skip', why: 'JSON 字符串，里面的字段已单独列出' });
     expect(run.blocks.some((b) => b.type === 'text')).toBe(false);
+    // A plan saved before this rule still marks it text: the executor skips it too.
+    const legacy = runPlan(records, { ...checked.plan, fields: checked.plan.fields.map((f) => (f.path === 'result.text' ? { ...f, use: 'text', why: undefined } : f)) });
+    expect(legacy.blocks.some((b) => b.type === 'text')).toBe(false);
+    expect(legacy.coverage.find((c) => c.field === 'result.text')).toMatchObject({ status: 'skipped', what: 'JSON 字符串，里面的字段已单独列出' });
   });
 
   test('the ten per-scene rating fields become one image × item table; the flat copy of the same scores counts once', () => {

@@ -460,6 +460,8 @@ export function runPlan(records, plan, { imageItemTable = false } = {}) {
   byUse('text').forEach((e) => {
     const values = rows.map((r) => rowFieldValue(r, e.path)).filter((v) => typeof v === 'string' && v.trim());
     if (!values.length) { skip(e, '没有文字'); return; }
+    // A plan saved before the container rule: a JSON string is not free text.
+    if (values.every((v) => jsonInString(v) !== undefined)) { skip(e, 'JSON 字符串，里面的字段已单独列出'); return; }
     blocks.push({ type: 'text', platform: true, title: `${title(e)}：文字回答`, note: '', values });
     done(e, '文字：词频和长度');
   });
