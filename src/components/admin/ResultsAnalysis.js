@@ -50,7 +50,7 @@ import PaperMethodsPanel, { PairwiseAnalysis } from './PaperMethodsPanel';
 import ConditionWordingSummary from './ConditionWordingSummary';
 import { tf } from '../../contexts/adminI18n';
 import AiQuestionAnalysis from './AiQuestionAnalysis';
-import { aiAnalysisExportFiles, buildAnalysisRecords, evaluateAnalysis, platformAnalysis, readSavedAnalyses } from '../../lib/aiQuestionAnalysis';
+import { aiAnalysisExportFiles, buildAnalysisRecords, evaluateAnalysis, readSavedAnalyses } from '../../lib/aiQuestionAnalysis';
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { saveQuestionAnalysis } from '../../lib/aiQuestionAnalysisStore';
 import DatasetPackageDialog from './DatasetPackageDialog';
@@ -2438,9 +2438,7 @@ export function QuestionCard({
   // An AI analysis the researcher generated turns the card back into an analysed one.
   const aiReady = unanalysedType && Boolean(onSaveAiAnalysis) && !isDisplayOnlyQuestion(question);
   const aiRecords = useMemo(() => (aiReady ? buildAnalysisRecords(allResponses, question, { site: siteSurvey }) : []), [aiReady, allResponses, question, siteSurvey]);
-  // The platform analyses custom answers by their fields itself; such a card is analysed without any model.
-  const platformCovered = useMemo(() => aiReady && aiRecords.length > 0 && platformAnalysis(aiRecords, { question }).auto.blocks.length > 0, [aiReady, aiRecords, question]);
-  const unanalysed = unanalysedType && !aiAnalysis && !platformCovered;
+  const unanalysed = unanalysedType && !aiAnalysis;
   // A custom task's own HTML tells the model what the recorded fields mean.
   const [taskHtml, setTaskHtml] = useState('');
   useEffect(() => {
@@ -2599,9 +2597,9 @@ export function QuestionCard({
         try {
           await new Promise(resolve => setTimeout(resolve, 30));
           let extra = [];
-          if (aiAnalysis?.code || platformCovered) {
+          if (aiAnalysis) {
             const records = buildAnalysisRecords(exportResponses || allResponses, question, { site: siteSurvey });
-            const run = await evaluateAnalysis(aiAnalysis?.code || '', records, runAnalysisInSandbox, { pageHtml, question });
+            const run = await evaluateAnalysis(aiAnalysis, records, runAnalysisInSandbox, { pageHtml });
             if (run.ok) extra = aiAnalysisExportFiles(question, aiAnalysis, run.error ? run.platformBlocks : run.blocks);
           }
           downloadQuestionExportZip(question, exportResponses || allResponses, surveyConfig, extra);
@@ -3200,11 +3198,10 @@ export default function ResultsAnalysis({
     const questions = [...allQuestions, ...sitePageCards];
     for (const question of questions) {
       const saved = savedAnalyses[question.name];
-      const customAnswers = question.type === 'custom' || question.pageOnly || siteConverted || (question.type === 'skillquestion' && !String(question.skillId || '').startsWith('preset_'));
-      if (!saved?.code && !customAnswers) continue;
+      if (!saved) continue;
       const records = buildAnalysisRecords(filteredResponses, question, { site: siteConverted });
       if (!records.length) continue;
-      const run = await evaluateAnalysis(saved?.code || '', records, runAnalysisInSandbox, { pageHtml: await analysisPageHtml(question, surveyConfig), question });
+      const run = await evaluateAnalysis(saved, records, runAnalysisInSandbox, { pageHtml: await analysisPageHtml(question, surveyConfig) });
       if (run.ok) files.push(...aiAnalysisExportFiles(question, saved, run.error ? run.platformBlocks : run.blocks));
     }
     return files;

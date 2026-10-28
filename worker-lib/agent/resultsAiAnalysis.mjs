@@ -78,6 +78,39 @@ Rules:
 - Plain modern JavaScript only. No fetch, no DOM, no imports, no async, no Math.random.
 - Reply with the function in one \`\`\`javascript block and nothing else.`;
 
+export const PLAN_SYSTEM_PROMPT = `You read ONE question of a perception survey on SP-Survey and say what each stored field means, so the platform can analyse it.
+The page stored one object per answer (or per trial); FIELDS lists every path in those objects. Do not write code. Reply with ONE JSON object:
+
+{
+  "summary": "one sentence: what the participant does in this question, in the survey's own language",
+  "fields": [
+    { "path": "<path exactly as in FIELDS>", "use": "<one of the uses below>", "meaning": "<what it is, in the survey's own words, e.g. 街景 A 的安全感评分（1–5）>", ...extras }
+  ]
+}
+
+Uses (pick the one that fits what the field holds):
+  "image"    the name/URL of an image (stimulus) shown. meaning: which one (e.g. 街景 A).
+  "score"    a number the participant gave (Likert, slider). extras: "image": <image field this score is about> (if any),
+             "item": <field naming the scale/item when several scores sit in a list, e.g. result.ratings[].itemId>,
+             "measure": <short name shared by scores of the same kind for different images, e.g. 安全感评分>, "scale": { "1": "很不安全", "5": "很安全" } (from the page/question).
+  "pick"     a choice BETWEEN two or more shown images (which is safer, left/right, A/B). extras: "images": [image fields chosen between],
+             "options": { "<stored value>": { "label": "<option text>", "picks": "<image field>" or null for similar/can't tell } }.
+  "option"   a single choice that is not between images (yes/no, category, condition). extras: "options": { "<value>": "<label>" } if the page has labels.
+  "tags"     a multi-select list (reasons, keywords). extras: "image": <image field it describes> (if any), "measure": <shared name for the same tag list on different images>.
+  "group"    a participant attribute to split results by (grade, gender, age band, condition). Context fields (@grade) are answers to the other questions of the same submission.
+  "duration" time spent, in ms or s. extras: "unit": "ms" | "s".
+  "time"     a time stamp (startedAt, savedAt).
+  "text"     free text.
+  "skip"     bookkeeping that is not an answer: ids, seeds, hashes, order/round numbers, version flags, lists of what was shown, containers whose fields are listed separately. extras: "why".
+  "custom"   an answer the uses above cannot express (clicks/hotspot coordinates, drawn shapes, nested branching). extras: "why". The platform will ask you for code for these afterwards.
+
+Rules:
+- EVERY path in FIELDS gets an entry (containers may be covered by their own fields). Nothing may be left out: a field you do not list will be sent back to you.
+- Use the question text, OTHER QUESTIONS and PAGE CODE (option arrays like { value: 'a_safer', label: 'A 更安全' }, RATE scales) to write meanings, labels and scales in the survey's own language. Never invent labels that are not in the page or question.
+- A score or tag list about one image says which image field it belongs to (ratingA → imageA). Scores of the same kind for different images share one "measure".
+- Fields fixed per participant that describe the person (grade, gender, age group, experimental group/order) are "group"; fields like round, trial index, savedAt, seeds, shown lists are "skip"/"time".
+- Reply with the JSON in one \`\`\`json block and nothing else.`;
+
 function clip(value, max) {
   const text = String(value ?? '');
   return text.length > max ? `${text.slice(0, max)}\n…` : text;
@@ -90,6 +123,7 @@ export function normalizeAnalysisRequest(body) {
   if (!question) throw Object.assign(new Error('question is required'), { status: 400, code: 'BAD_REQUEST' });
   if (!sample.trim()) throw Object.assign(new Error('sample records are required'), { status: 400, code: 'BAD_REQUEST' });
   return {
+    mode: body?.mode === 'plan' ? 'plan' : 'code',
     question,
     sample,
     fields,
@@ -102,6 +136,20 @@ export function normalizeAnalysisRequest(body) {
     previous: clip(body?.previous, MAX_CODE_CHARS),
     error: clip(body?.error, 3000).trim(),
   };
+}
+
+/** The JSON plan from the model's answer, or null. */
+export function parsePlanAnswer(text) {
+  const raw = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  const fenced = [...raw.matchAll(/```(?:json)?[^\n]*\n([\s\S]*?)(?:```|$)/gi)].map((m) => m[1].trim());
+  const candidates = [...fenced, raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)];
+  for (const c of candidates) {
+    try {
+      const parsed = JSON.parse(c);
+      if (parsed && typeof parsed === 'object' && (Array.isArray(parsed.fields) || Array.isArray(parsed))) return parsed;
+    } catch { /* next */ }
+  }
+  return null;
 }
 
 /** The function from the model's answer, or null. */
@@ -125,7 +173,10 @@ export function buildAnalysisUserMessage(input) {
   parts.push(`RECORDS: ${input.recordCount || 'several'} in total`);
   if (input.fields) parts.push(`FIELDS (path  types  (records having it)  example)\n${input.fields}`);
   parts.push(`SAMPLE RECORDS (shortened: long arrays and strings are cut)\n${input.sample}`);
-  if (input.previous) {
+  if (input.previous && input.mode === 'plan') {
+    parts.push(`YOUR PREVIOUS PLAN\n\`\`\`json\n${input.previous}\n\`\`\``);
+    parts.push(`IT IS INCOMPLETE\n${input.error || 'Some fields are missing.'}\nReturn the WHOLE corrected plan with every field.`);
+  } else if (input.previous) {
     parts.push(`YOUR PREVIOUS CODE\n\`\`\`javascript\n${input.previous}\n\`\`\``);
     parts.push(`IT FAILED ON THE REAL RECORDS\n${input.error || 'It returned no usable blocks.'}\nFix it. Return the whole corrected function.`);
   }
@@ -170,10 +221,18 @@ export async function handleResultsAiAnalysis(env, userId, body, deps = {}) {
     temperature: 0.1,
     maxTokens: Math.min(Number(modelRecord?.maxTokens) || 8192, 8192),
     messages: [
-      { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
+      { role: 'system', content: input.mode === 'plan' ? PLAN_SYSTEM_PROMPT : ANALYSIS_SYSTEM_PROMPT },
       { role: 'user', content: buildAnalysisUserMessage(input) },
     ],
   });
+  if (input.mode === 'plan') {
+    const plan = parsePlanAnswer(result?.content);
+    if (!plan) {
+      const head = String(result?.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+      throw Object.assign(new Error(`The model did not return a JSON plan${head ? ` (it began: "${head}")` : ' (its answer was empty)'}.`), { status: 502, code: 'ANALYSIS_UNPARSEABLE' });
+    }
+    return { success: true, provider, model, plan };
+  }
   const code = parseAnalysisAnswer(result?.content);
   if (!code) {
     const head = String(result?.content || '').replace(/\s+/g, ' ').trim().slice(0, 300);
