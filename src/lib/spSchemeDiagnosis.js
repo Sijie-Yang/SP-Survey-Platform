@@ -6,6 +6,7 @@
  * ZIP so the project can be inspected offline.
  */
 import { normalizeMediaEntry } from './mediaUtils';
+import { shouldInjectMedia } from './surveyMediaInjection';
 import {
   SITE_PAGE_FILES,
   buildSiteQuestions,
@@ -109,10 +110,24 @@ export function diagnoseSpSchemeProject(project = {}) {
   const referenced = pageReferencedFiles(html).size;
   const external = new Set(String(html).match(EXTERNAL_IMAGE_RE) || []).size;
 
+  // Questions whose images the platform draws itself (e.g. imagepicker with imageCount).
+  const drawn = [];
+  const walk = (elements) => (elements || []).forEach((el) => { if (el && shouldInjectMedia(el)) drawn.push(el); walk(el?.elements); });
+  (config.pages || []).forEach((page) => walk(page.elements));
+
   add(served.pool.length ? 'ok' : 'warn', `图库里有 ${served.pool.length} 个文件`,
     linked.length ? `页面关联的文件夹：${linked.join('、')}。页面能拿到其中 ${libraryCount} 张。` : '页面没有关联图库文件夹。');
 
-  if (calls.folders.length || calls.dynamic) {
+  if (drawn.length) {
+    add(served.pool.length || !served.published ? 'ok' : 'error', `${drawn.length} 道题的图片由平台按题抽取`,
+      `${drawn.slice(0, 6).map((el) => `${el.name}（每次 ${el.imageCount || 1} 张${el.trialCount > 1 ? `，做 ${el.trialCount} 次` : ''}）`).join('、')}。`
+      + (served.pool.length ? '每个参与者从项目图库随机抽。' : (served.published ? '但已发布版本的图库是空的，抽不到图。' : '项目图库是空的，会用平台预览图库里的图片（适合试跑）。')));
+  }
+  if (!served.pool.length && !served.published && (calls.folders.length || calls.dynamic || slots.some((slot) => !slot.count))) {
+    // Same rule as the participant page (SurveyApp): an empty library falls back to the preview library.
+    add('warn', '项目图库是空的：参与者会看到平台预览图库里的图片',
+      '适合试跑。正式收数据前，请把研究用的图片上传到项目图库（文件夹名和页面要的一致），否则答卷里记的是预览图。');
+  } else if (calls.folders.length || calls.dynamic) {
     calls.folders.forEach((folder) => {
       const n = mediaFor(given, folder).length;
       add(n ? 'ok' : 'error', `页面向平台要文件夹「${folder || '根目录'}」的图片：${n} 张`,
@@ -131,7 +146,7 @@ export function diagnoseSpSchemeProject(project = {}) {
             : '图库里没有可填的图片，列表会一直是空的。在 Builder 里关联图片所在的文件夹并重新发布。');
       }
     });
-  } else {
+  } else if (!drawn.length) {
     add('warn', '页面没有向平台要图片',
       '没有调用 SPSite.getMedia，也没有平台能识别的空图片列表（名字含 photo/image/img/pic/media 的 const xxx = []），所以平台不会给它随机图片。'
       + (referenced ? ` 页面自己按文件名引用了 ${referenced} 个媒体文件，其中 ${pageFiles} 个在图库里找到了。` : '')
