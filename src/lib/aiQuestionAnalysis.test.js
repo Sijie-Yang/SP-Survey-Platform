@@ -337,16 +337,19 @@ describe('Platform summary of per-image item ratings', () => {
     expect(platformSummaryBlocks([])).toEqual([]);
   });
 
-  test('the platform table comes first in an evaluated analysis and in the export', async () => {
+  test('the platform table comes first in an evaluated code-only analysis and in the export', async () => {
     const code = 'function analyze(records) { return { blocks: [{ type: "note", text: "n=" + records.length }] }; }';
     const run = await evaluateAnalysis(code, records, syncRunner);
     expect(run.ok).toBe(true);
+    // A legacy saved analysis is code only: the image × item table the platform recognises itself, then the model's note. No plan, so no coverage block.
     expect(run.blocks.map((b) => b.type)).toEqual(['table', 'note']);
     expect(run.blocks[0].table.rows).toHaveLength(4);
     const files = aiAnalysisExportFiles(QUESTION, { code }, run.blocks);
     const csv = files.find((f) => /\.csv$/.test(f.path));
+    expect(csv.path).toMatch(/platform_table/);
     expect(csv.content).toContain('image,A1,M1');
     expect(csv.content).toContain('P027B__1a6d540f.jpg');
+    expect(files.some((f) => /analyze\.js$/.test(f.path))).toBe(true);
   });
 
   test('the model gets the task code that records the answer and names the fields it stores', () => {

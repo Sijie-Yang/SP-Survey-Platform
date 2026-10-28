@@ -2437,8 +2437,8 @@ export function QuestionCard({
   const unanalysedType = siteSurvey || type === 'custom' || customTask;
   // An AI analysis the researcher generated turns the card back into an analysed one.
   const aiReady = unanalysedType && Boolean(onSaveAiAnalysis) && !isDisplayOnlyQuestion(question);
-  const unanalysed = unanalysedType && !aiAnalysis;
   const aiRecords = useMemo(() => (aiReady ? buildAnalysisRecords(allResponses, question, { site: siteSurvey }) : []), [aiReady, allResponses, question, siteSurvey]);
+  const unanalysed = unanalysedType && !aiAnalysis;
   // A custom task's own HTML tells the model what the recorded fields mean.
   const [taskHtml, setTaskHtml] = useState('');
   useEffect(() => {
@@ -2597,10 +2597,10 @@ export function QuestionCard({
         try {
           await new Promise(resolve => setTimeout(resolve, 30));
           let extra = [];
-          if (aiAnalysis?.code) {
+          if (aiAnalysis) {
             const records = buildAnalysisRecords(exportResponses || allResponses, question, { site: siteSurvey });
-            const run = await evaluateAnalysis(aiAnalysis.code, records, runAnalysisInSandbox, { pageHtml });
-            if (run.ok) extra = aiAnalysisExportFiles(question, aiAnalysis, run.blocks);
+            const run = await evaluateAnalysis(aiAnalysis, records, runAnalysisInSandbox, { pageHtml });
+            if (run.ok) extra = aiAnalysisExportFiles(question, aiAnalysis, run.error ? run.platformBlocks : run.blocks);
           }
           downloadQuestionExportZip(question, exportResponses || allResponses, surveyConfig, extra);
         } catch (err) {
@@ -3198,10 +3198,11 @@ export default function ResultsAnalysis({
     const questions = [...allQuestions, ...sitePageCards];
     for (const question of questions) {
       const saved = savedAnalyses[question.name];
-      if (!saved?.code) continue;
+      if (!saved) continue;
       const records = buildAnalysisRecords(filteredResponses, question, { site: siteConverted });
-      const run = await evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml: await analysisPageHtml(question, surveyConfig) });
-      if (run.ok) files.push(...aiAnalysisExportFiles(question, saved, run.blocks));
+      if (!records.length) continue;
+      const run = await evaluateAnalysis(saved, records, runAnalysisInSandbox, { pageHtml: await analysisPageHtml(question, surveyConfig) });
+      if (run.ok) files.push(...aiAnalysisExportFiles(question, saved, run.error ? run.platformBlocks : run.blocks));
     }
     return files;
   };

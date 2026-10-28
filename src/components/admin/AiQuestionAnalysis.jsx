@@ -9,7 +9,7 @@ import { Alert, Box, Button, Chip, CircularProgress, Collapse, Table, TableBody,
 import { AutoAwesome } from '@mui/icons-material';
 import { useRegion } from '../../contexts/RegionContext';
 import { isChineseLanguage } from '../../lib/uiLanguages';
-import { computeAnalysisBlocks, evaluateAnalysis, generateQuestionAnalysis, pageMediaUrls, platformSummaryBlocks } from '../../lib/aiQuestionAnalysis';
+import { computeAnalysisBlocks, evaluateAnalysis, generateQuestionAnalysis, pageMediaUrls, platformAnalysis, savedParts } from '../../lib/aiQuestionAnalysis';
 import { runAnalysisInSandbox } from '../../lib/aiAnalysisSandbox';
 import { writeQuestionAnalysis } from '../../lib/agentApi';
 import { ImageResolverContext } from './imageResolverContext';
@@ -93,7 +93,11 @@ function PerItemView({ block, zh, head }) {
       <Bars items={block.overall.map((o) => ({ label: o.label, value: o.count, extra: ` · 95% CI ${fmt(o.low, 1)}–${fmt(o.high, 1)}%` }))} total={block.values.length} />
     </Box>}
     {!category && <DescriptiveStatsLine nums={block.values.map((v) => v.value)} />}
-    {!category && block.items.length > 2 && <DensityHistogramChart scores={block.items.map((i) => i.mean)} domainMin={Math.min(...block.items.map((i) => i.mean))} domainMax={Math.max(...block.items.map((i) => i.mean))} title={zh ? '每张图的均值分布' : 'Distribution of per-image means'} xLabel={zh ? '均值' : 'mean'} padB={36} />}
+    {!category && block.items.length > 1 && block.items.length <= 20 && <Box sx={{ mb: 2 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>{zh ? '每张图的平均分（高到低）' : 'Mean per image (high to low)'}</Typography>
+      <Bars items={block.items.map((i) => ({ label: i.item, value: i.mean, extra: ` · n=${i.n}` }))} showCount={false} />
+    </Box>}
+    {!category && block.items.length > 20 && <DensityHistogramChart scores={block.items.map((i) => i.mean)} domainMin={Math.min(...block.items.map((i) => i.mean))} domainMax={Math.max(...block.items.map((i) => i.mean))} title={zh ? '每张图的均值分布' : 'Distribution of per-image means'} xLabel={zh ? '均值' : 'mean'} padB={36} />}
     <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
       <Table size="small">
         <TableHead><TableRow>
@@ -130,12 +134,52 @@ function PerItemView({ block, zh, head }) {
   </Box>;
 }
 
+/** The plan: what the model read each field as, and what the platform did with it. */
+function PlanView({ block, zh }) {
+  const [showSkipped, setShowSkipped] = useState(false);
+  const cell = { py: 0.5, verticalAlign: 'top' };
+  const rows = (list) => list.map((c) => <TableRow key={c.field}>
+    <TableCell sx={{ ...cell, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{c.field}</TableCell>
+    <TableCell sx={cell}>{c.meaning || <Typography variant="caption" color="text.secondary">–</Typography>}</TableCell>
+    <TableCell sx={{ ...cell, color: c.status === 'skipped' ? 'text.secondary' : 'text.primary' }}>
+      {c.status === 'custom' && <Chip size="small" label={zh ? '模型代码' : 'model code'} variant="outlined" sx={{ height: 18, fontSize: 11, mr: 0.5 }} />}
+      {c.what}
+    </TableCell>
+  </TableRow>);
+  return <Box data-testid="ai-analysis-coverage" sx={{ mb: 3, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.paper' }}>
+    <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>{zh ? block.title : 'Analysis plan'}</Typography>
+    {block.summary && <Typography variant="body2" sx={{ mb: 0.5 }}>{block.summary}</Typography>}
+    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+      {zh ? block.note : `${block.analysed.length} fields analysed, ${block.skipped.length} skipped. The model read what each field means; the platform computed the numbers from that plan, the same every time.`}
+    </Typography>
+    <TableContainer sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+      <Table size="small">
+        <TableHead><TableRow>
+          <TableCell sx={{ fontWeight: 600 }}>{zh ? '字段' : 'Field'}</TableCell>
+          <TableCell sx={{ fontWeight: 600 }}>{zh ? '含义（模型判断）' : 'Meaning (model)'}</TableCell>
+          <TableCell sx={{ fontWeight: 600 }}>{zh ? '分析（平台）' : 'Analysis (platform)'}</TableCell>
+        </TableRow></TableHead>
+        <TableBody>
+          {rows(block.analysed)}
+          {showSkipped && rows(block.skipped)}
+        </TableBody>
+      </Table>
+    </TableContainer>
+    {block.skipped.length > 0 && <Button size="small" sx={{ mt: 0.5, px: 0.5 }} onClick={() => setShowSkipped((v) => !v)} data-testid="ai-analysis-coverage-skipped">
+      {showSkipped
+        ? (zh ? '收起跳过的字段' : 'Hide skipped fields')
+        : (zh ? `跳过了 ${block.skipped.length} 个字段（看原因）` : `${block.skipped.length} fields skipped (why)`)}
+    </Button>}
+  </Box>;
+}
+
 function BlockView({ block, zh }) {
   const title = block.title || '';
   const head = <>
     {title && <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>{title}</Typography>}
     {block.note && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>{block.note}</Typography>}
   </>;
+  if (block.type === 'coverage') return <PlanView block={block} zh={zh} />;
   if (block.type === 'per_item') return <PerItemView block={block} zh={zh} head={head} />;
   if (block.type === 'pairwise' || block.type === 'ranking') {
     const ranking = block.type === 'ranking';
@@ -169,7 +213,7 @@ function BlockView({ block, zh }) {
       const max = block.max ?? Math.max(...nums);
       return <Box sx={{ mb: 3 }}>{head}
         <DescriptiveStatsLine nums={nums} />
-        {max > min && <DensityHistogramChart scores={nums} domainMin={min} domainMax={max} title={title || 'Distribution'} xLabel={title || 'value'} padB={36} />}
+        {max > min && <DensityHistogramChart scores={nums} domainMin={min} domainMax={max} title={zh ? '分布' : 'Distribution'} xLabel={(title || 'value').split('：')[0]} padB={36} />}
       </Box>;
     }
     const items = block.table.rows.map((row) => ({ label: row[0], value: row[2] ?? 0, extra: ` · SD ${fmt(row[3])} · n=${row[1]}` }));
@@ -216,8 +260,11 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
   const zh = isChineseLanguage(language);
   const [state, setState] = useState({ status: saved ? 'running' : 'idle', blocks: [], error: '' });
   const pageMedia = useMemo(() => pageMediaUrls(records), [records]);
-  // What the platform reads off the records by itself, shown before any model is involved.
-  const platformBlocks = useMemo(() => computeAnalysisBlocks(platformSummaryBlocks(records)), [records]);
+  // The image × item table the platform recognises by itself, plus (once a plan is saved) the plan's blocks: never depends on code running.
+  const plan = savedParts(saved).plan;
+  const platform = useMemo(() => platformAnalysis(records, { pageHtml, plan }), [records, pageHtml, plan]);
+  const platformBlocks = useMemo(() => computeAnalysisBlocks(platform.blocks), [platform]);
+  const covered = platform.run.blocks.length > 0;
   const [busy, setBusy] = useState(false);
   const [notes, setNotes] = useState(saved?.instructions || '');
   const [showCode, setShowCode] = useState(false);
@@ -226,18 +273,22 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
 
   // Re-run the saved code whenever the records change (filters, new responses).
   useEffect(() => {
-    if (!saved?.code) {
+    if (!saved) {
       setState({ status: 'idle', blocks: [], error: '' });
+      return undefined;
+    }
+    if (!savedParts(saved).code) {
+      setState({ status: 'done', blocks: [], error: '' });
       return undefined;
     }
     let cancelled = false;
     setState((prev) => ({ ...prev, status: 'running' }));
-    evaluateAnalysis(saved.code, records, runAnalysisInSandbox, { pageHtml }).then((result) => {
+    evaluateAnalysis(saved, records, runAnalysisInSandbox, { pageHtml }).then((result) => {
       if (cancelled) return;
-      setState(result.ok ? { status: 'done', blocks: result.blocks, error: '' } : { status: 'error', blocks: [], error: result.error });
+      setState(result.error ? { status: 'error', blocks: [], error: result.error } : { status: 'done', blocks: result.modelBlocks, error: '' });
     });
     return () => { cancelled = true; };
-  }, [saved?.code, records, pageHtml]);
+  }, [saved, records, pageHtml]);
 
   const generate = async () => {
     setBusy(true);
@@ -255,12 +306,13 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
       });
       if (!result.ok) {
         setFailedCode(result.code || '');
-        setState({ status: 'error', blocks: [], error: result.error });
+        setState({ status: 'error', blocks: [], error: result.error || result.modelError });
         return;
       }
       await onSave(result.saved);
       setEditing(false);
-      setState({ status: 'done', blocks: result.blocks, error: '' });
+      if (result.modelError) setFailedCode(result.code || '');
+      setState(result.modelError ? { status: 'error', blocks: [], error: result.modelError } : { status: 'done', blocks: result.modelBlocks, error: '' });
     } catch (err) {
       setState({ status: 'error', blocks: [], error: err?.message || String(err) });
     } finally {
@@ -286,7 +338,14 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
     sx={{ mb: 1 }} />;
 
   const platformSummary = platformBlocks.length > 0 && <Box data-testid="ai-analysis-platform" sx={{ mb: 2 }}>
-    <Chip size="small" color="primary" variant="outlined" label={zh ? '平台自动汇总' : 'Platform summary'} sx={{ mb: 1 }} />
+    <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1 }}>
+      <Chip size="small" color="primary" variant="outlined" label={covered ? (zh ? '按方案由平台计算' : 'Computed by the platform from the plan') : (zh ? '平台自动汇总' : 'Platform summary')} />
+      <Typography variant="caption" color="text.secondary">
+        {covered
+          ? (zh ? '模型只定字段含义；数字由平台算法算出，每次结果一样。' : 'The model only reads the fields; the numbers come from platform algorithms, the same every time.')
+          : (zh ? '平台直接从记录算出，不经过模型。' : 'Computed by the platform from the records, no model.')}
+      </Typography>
+    </Box>
     <AiAnalysisBlocks blocks={platformBlocks} media={pageMedia} />
   </Box>;
 
@@ -295,13 +354,9 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
       {platformSummary}
       <Box sx={{ p: 1.5, mb: 2, border: '1px dashed', borderColor: 'primary.light', borderRadius: 1, bgcolor: 'background.paper' }}>
         <Typography variant="body2" sx={{ mb: 1 }}>
-          {platformBlocks.length
-            ? (zh
-              ? `上表是平台直接从 ${records.length} 条记录算出来的。要更多分析（排名、分布、文字等），点“生成分析”：助手模型会读题目代码和几条记录，写一段分析代码，在隔离环境里跑；统计用平台自己的算法。生成后会保存，结果页和导出都会用它。`
-              : `The table above is computed by the platform from the ${records.length} records. For more (rankings, distributions, text), "Generate analysis" has the Assistant model read the task's code and a few records and write analysis code, which runs in a sandbox; the statistics are the platform's own. It is saved and used here and in exports.`)
-            : (zh
-              ? `平台不认识这道题的格式。点“生成分析”，助手模型会读题目代码和 ${records.length} 条记录里的几条，写一段分析代码，在隔离环境里跑；TrueSkill、均值和置信区间等统计用平台自己的算法。生成后会保存，结果页和导出都会用它。`
-              : `The platform does not know this question's format. "Generate analysis" has the Assistant model read the task's code and a few of the ${records.length} records and write analysis code, which runs in a sandbox; TrueSkill, means and confidence intervals use the platform's own algorithms. It is saved and used here and in exports.`)}
+          {zh
+            ? `这道题的记录是页面自己定的格式（${records.length} 条）。点“生成分析”：模型读题目和页面代码，写出每个字段是什么、属于哪张图、怎么分析（方案，漏了的字段会退回让它补齐）；然后平台按方案用自己的算法算出结果。方案会显示在结果上方，看着不对就在说明里纠正，再生成一次。`
+            : `This question's records are in the page's own format (${records.length}). "Generate analysis": the model reads the question and the page code and writes a plan (what each field is, which image it belongs to, how to analyse it; missing fields are sent back), then the platform computes the results from that plan with its own algorithms. The plan is shown above the results: if it read something wrong, correct it in the notes and generate again.`}
         </Typography>
         {notesField}
         <Button size="small" variant="contained" startIcon={<AutoAwesome />} onClick={generate} disabled={!records.length} data-testid="ai-analysis-generate">
@@ -313,10 +368,13 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
   }
 
   return <Box data-testid="ai-analysis">
+    {covered && platformSummary}
     <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 1.5 }}>
-      <Chip size="small" color="secondary" variant="outlined" icon={<AutoAwesome />} label={zh ? 'AI 生成的分析' : 'AI-written analysis'} />
+      <Chip size="small" color="secondary" variant="outlined" icon={<AutoAwesome />} label={covered ? (savedParts(saved).code ? (zh ? '模型补充的分析' : 'Added by the model') : (zh ? '方案由模型读出' : 'Plan read by the model')) : (zh ? 'AI 生成的分析' : 'AI-written analysis')} />
       <Typography variant="caption" color="text.secondary" sx={{ flex: 1, minWidth: 200 }}>
-        {zh ? '题型和字段由模型推断，请核对代码；统计是平台算法。' : 'The question type and fields were inferred by the model, so check the code; the statistics are the platform\'s.'}
+        {covered
+          ? (zh ? '字段含义由模型判断（见上方方案），数字由平台算出。理解不对就在说明里纠正，再生成。' : 'The model read the fields (plan above); the platform computed the numbers. If it read something wrong, correct it in the notes and generate again.')
+          : (zh ? '题型和字段由模型推断，请核对代码；统计是平台算法。' : 'The question type and fields were inferred by the model, so check the code; the statistics are the platform\'s.')}
         {saved?.model ? ` · ${saved.model}` : ''}
       </Typography>
       {(saved?.code || failedCode) && <Button size="small" onClick={() => setShowCode((v) => !v)}>{showCode ? (zh ? '收起代码' : 'Hide code') : (zh ? '查看代码' : 'View code')}</Button>}
@@ -339,14 +397,17 @@ export default function AiQuestionAnalysis({ question, records, otherQuestions =
     {state.status === 'running' && <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
       <CircularProgress size={18} />
       <Typography variant="body2" color="text.secondary">
-        {busy ? (zh ? '模型正在写分析代码，并在全部记录上试运行…' : 'The model is writing the analysis and trying it on every record…') : (zh ? '正在运行分析…' : 'Running the analysis…')}
+        {busy ? (zh ? '模型正在读题写分析方案，平台随后按方案在全部记录上计算…' : 'The model is reading the fields and writing the plan; the platform then computes it on every record…') : (zh ? '正在运行分析…' : 'Running the analysis…')}
       </Typography>
     </Box>}
     {state.status === 'error' && <Alert severity="warning" sx={{ mb: 2 }}>
-      {zh ? `分析没有跑通（已自动让模型修过一次）：${state.error}。可以在说明里写清答案在哪个字段、表示什么，再生成一次。` : `The analysis did not run (the model already had one automatic fix): ${state.error}. Say in the notes where the answer is and what it means, then generate again.`}
+      {zh ? `模型写的分析没有跑通（已自动让模型修过一次）：${state.error}。${covered ? '上面平台的分析不受影响。' : ''}可以在说明里写清答案在哪个字段、表示什么，再生成一次。` : `The model's analysis did not run (it already had one automatic fix): ${state.error}.${covered ? ' The platform analysis above is not affected.' : ''} Say in the notes where the answer is and what it means, then generate again.`}
     </Alert>}
-    {state.status === 'error' && platformSummary}
-    {state.status === 'done' && <AiAnalysisBlocks blocks={state.blocks} media={pageMedia} />}
+    {state.status === 'error' && !covered && platformSummary}
+    {state.status === 'done' && <AiAnalysisBlocks blocks={covered ? state.blocks : [...platformBlocks, ...state.blocks]} media={pageMedia} />}
+    {state.status === 'done' && covered && !state.blocks.length && savedParts(saved).code && <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+      {zh ? '模型代码没有补充新的内容。' : 'The model code added nothing beyond the plan.'}
+    </Typography>}
     {children}
   </Box>;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
-import { handleResultsAiAnalysis, parseAnalysisAnswer, buildAnalysisUserMessage, normalizeAnalysisRequest } from './resultsAiAnalysis.mjs';
+import { handleResultsAiAnalysis, parseAnalysisAnswer, parsePlanAnswer, buildAnalysisUserMessage, normalizeAnalysisRequest } from './resultsAiAnalysis.mjs';
 
 const settings = async () => ({ assistant_provider: 'deepseek', assistant_model: 'deepseek-v4-pro' });
 const deps = (chat) => ({
@@ -16,6 +16,33 @@ describe('Results AI analysis', () => {
     assert.match(code, /^function analyze\(records, helpers\)/);
     assert.match(parseAnalysisAnswer('function analyze(r) { return []; }'), /function analyze/);
     assert.equal(parseAnalysisAnswer('```json\n{"blocks":[]}\n```'), null);
+  });
+
+  it('takes the JSON plan out of the answer', () => {
+    const plan = parsePlanAnswer('<think>…</think>Here is the plan:\n```json\n{"summary": "two photos per round", "fields": [{"path": "compare", "use": "pick", "images": ["imageA", "imageB"]}]}\n```');
+    assert.equal(plan.summary, 'two photos per round');
+    assert.equal(plan.fields[0].path, 'compare');
+    assert.deepEqual(parsePlanAnswer('{"fields":[]}').fields, []);
+    assert.equal(parsePlanAnswer('```javascript\nfunction analyze() {}\n```'), null);
+    assert.equal(parsePlanAnswer(''), null);
+  });
+
+  it('in plan mode the plan prompt is used, the fields are sent and an incomplete plan is sent back whole', async () => {
+    const chat = mock.fn(async () => ({ content: '```json\n{"fields":[{"path":"a","use":"score","meaning":"rating"}]}\n```' }));
+    const res = await handleResultsAiAnalysis({}, 'user', {
+      mode: 'plan', question: 'name: q1', sample: '[{"a":1,"b":2}]', fields: 'a  number  (3/3)\nb  number  (3/3)',
+      previous: '{"fields":[{"path":"a","use":"score"}]}', error: 'These fields have no entry: b.',
+    }, deps(chat));
+    assert.deepEqual(res.plan, { fields: [{ path: 'a', use: 'score', meaning: 'rating' }] });
+    assert.equal(res.code, undefined);
+    const [call] = chat.mock.calls;
+    const messages = call.arguments[0].messages;
+    assert.match(messages[0].content, /what each stored field means/);
+    assert.match(messages[0].content, /EVERY path in FIELDS/);
+    assert.match(messages[1].content, /FIELDS \(path/);
+    assert.match(messages[1].content, /YOUR PREVIOUS PLAN/);
+    assert.match(messages[1].content, /IT IS INCOMPLETE\nThese fields have no entry: b\./);
+    assert.doesNotMatch(messages[1].content, /YOUR PREVIOUS CODE/);
   });
 
   it('needs a question and records', () => {

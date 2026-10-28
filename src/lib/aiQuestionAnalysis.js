@@ -14,8 +14,9 @@ import { descriptiveStats, wilsonCI } from './stats.js';
 import { computeBordaScores, kendallW, interpretKendallW } from './rankingStats.js';
 import { wordFrequency, textLengthStats } from './textStats.js';
 import { krippendorffAlpha, interpretAlpha } from './reliability.js';
+import { answerRows, checkPlan, fieldInventory, inventoryText, planBlock, planSummaryForCode, runPlan, PLAN_VERSION } from './analysisPlan.js';
 
-export const AI_ANALYSIS_VERSION = 1;
+export const AI_ANALYSIS_VERSION = PLAN_VERSION;
 const SP_SITE_REQUESTS_KEY = '__sp_requests';
 const SP_SITE_STATE_KEY = '__sp_page_state';
 
@@ -42,6 +43,15 @@ export function buildAnalysisRecords(rows, question, { site = false } = {}) {
       record.answer = responses[name];
       const shown = row?.displayed_images?.[name] || row?.displayed_images?.[`${name}__trials`];
       if (Array.isArray(shown) && shown.length) record.shown = shown;
+      // Short answers to the other questions of the same submission (grade, gender, group): used to split results.
+      const context = {};
+      Object.entries(responses).forEach(([key, stored]) => {
+        // Submitted rows keep each answer as { type, answer, shown_images, ... }.
+        const value = stored && typeof stored === 'object' && !Array.isArray(stored) && 'answer' in stored && 'type' in stored ? stored.answer : stored;
+        if (key === name || key.startsWith('__') || Object.keys(context).length >= 20) return;
+        if ((typeof value === 'string' && value.trim() && value.length <= 60) || (typeof value === 'number' && Number.isFinite(value)) || typeof value === 'boolean') context[key] = value;
+      });
+      if (Object.keys(context).length) record.context = context;
     }
     if (site || question?.pageOnly) {
       if (responses[SP_SITE_STATE_KEY] !== undefined) record.page_state = responses[SP_SITE_STATE_KEY];
@@ -426,7 +436,7 @@ export function computeAnalysisBlocks(blocks) {
     if (block.type === 'bar') {
       return { ...block, table: { columns: ['label', block.unit || 'value'], rows: block.items.map((item) => [item.label, round(item.value, 4)]) } };
     }
-    if (block.type === 'table') return { ...block, table: { columns: block.columns, rows: block.rows } };
+    if (block.type === 'table' || block.type === 'coverage') return { ...block, table: { columns: block.columns, rows: block.rows } };
     return { ...block, table: null };
   });
 }
@@ -739,19 +749,92 @@ export function platformSummaryBlocks(records) {
   }];
 }
 
-/** Run checked code on records (any runner) and compute: { ok, blocks, problems, error }. */
-export async function evaluateAnalysis(code, records, runner, { pageHtml = '' } = {}) {
+/** What a saved analysis holds: a plan (the model's reading of the fields) and/or code (sandboxed analyze()). */
+export function savedParts(saved) {
+  if (typeof saved === 'string') return { plan: null, code: saved };
+  if (!saved || typeof saved !== 'object') return { plan: null, code: '' };
+  return { plan: saved.plan && typeof saved.plan === 'object' && Array.isArray(saved.plan.fields) ? saved.plan : null, code: String(saved.code || '') };
+}
+
+/** True when the question's answers are objects the plan can read (a custom question, a custom task), not a page-only record. */
+export function hasPlannableAnswers(records) {
+  return answerRows(records).length > 0;
+}
+
+/**
+ * What the platform computes itself: the image × item table it recognises
+ * on its own, then (when a plan is saved) the plan's coverage and one block
+ * per field the plan maps. Deterministic: the same records and plan always
+ * give the same blocks.
+ */
+export function platformAnalysis(records, { pageHtml = '', plan = null } = {}) {
+  const mapped = mapRecordsToMedia(records, pageHtml);
+  const summary = platformSummaryBlocks(records);
+  const run = plan ? runPlan(mapped, plan, { imageItemTable: summary.length > 0 }) : { blocks: [], coverage: [], rows: 0, participants: 0 };
+  const coverage = plan ? planBlock(plan, run) : null;
+  // A plan that maps the ratings itself replaces the platform's own guess of the same table.
+  const keepSummary = !run.blocks.some((b) => b.type === 'table' && /每张图在每个条目上的平均分/.test(b.title));
+  // Same shape as checked model blocks, so the same statistics run on them.
+  const shaped = run.blocks.map((block) => ({
+    note: '',
+    ...block,
+    ...(block.type === 'rating' ? { items: block.items || [], values: block.values || [], min: block.min ?? null, max: block.max ?? null } : null),
+    ...(block.type === 'choice' ? { values: block.values.map(String), multi: Boolean(block.multi), total: block.total || null } : null),
+    ...(block.type === 'per_item' ? { labels: block.labels || {}, measure: block.measure || 'number' } : null),
+  }));
+  return { run, blocks: [...(keepSummary ? summary : []), ...(coverage ? [coverage] : []), ...shaped] };
+}
+
+/** The data a block carries, order-free: two blocks with the same signature show the same thing. */
+function blockSignature(block) {
+  const sorted = (list) => JSON.stringify([...list].sort());
+  // Items by file name (a URL and its file name are the same image); who answered does not change what is shown.
+  const file = (v) => String(v ?? '').split(/[?#]/)[0].split('/').pop();
+  if (block.type === 'pairwise') return `pairwise:${sorted(block.matches.map((m) => `${file(m.winner)}>${file(m.loser)}`))}`;
+  if (block.type === 'per_item') return `per_item:${sorted(block.values.map((v) => `${file(v.item)}|${v.value}`))}`;
+  // Platform choice values read "label (code)"; a model copy may use either the code or the label.
+  if (block.type === 'choice') return `choice:${sorted(block.values.map((v) => { const m = String(v).match(/^(.*) \(([^()]*)\)$/); return m ? m[2] : String(v); }))}`;
+  if (block.type === 'rating') return `rating:${sorted((block.items?.length ? block.items.flatMap((i) => i.values) : block.values).map(Number))}`;
+  return null;
+}
+
+/**
+ * Run the saved analysis (plan and/or code) on the records:
+ * { ok, blocks, platformBlocks, modelBlocks, problems, error }. The plan part
+ * never depends on code running: when the code fails, the plan's blocks are
+ * still shown and `error` says what went wrong with the code.
+ */
+export async function evaluateAnalysis(saved, records, runner, { pageHtml = '' } = {}) {
+  const { plan, code } = savedParts(saved);
+  const platform = platformAnalysis(records, { pageHtml, plan });
+  const platformBlocks = computeAnalysisBlocks(platform.blocks);
+  // The platform's own table or a plan's blocks stand without code.
+  const hasPlatform = platform.blocks.length > 0;
+  const finish = (modelBlocks, problems, error = '') => {
+    const ok = !error || hasPlatform;
+    return { ok, error, problems, platformBlocks, modelBlocks, blocks: [...platformBlocks, ...modelBlocks] };
+  };
+  if (!String(code || '').trim()) return hasPlatform ? finish([], []) : { ...finish([], [], 'No analysis code.'), ok: false };
   const mapped = mapRecordsToMedia(records, pageHtml);
   const run = await runner(code, mapped);
-  if (!run?.ok) return { ok: false, error: run?.error || 'The code did not run.', blocks: [], problems: [] };
+  if (!run?.ok) return finish([], [], run?.error || 'The code did not run.');
   const { blocks, problems } = normalizeAnalysisResult(run.result);
-  if (!blocks.length) return { ok: false, error: problems.join(' ') || 'No usable result.', blocks: [], problems };
-  const remapped = remapBlocksToMedia(blocks, pageIdMediaMap(records, pageHtml), {
+  // A model block with exactly the data of a platform block would only repeat it; anything else is kept.
+  const done = new Set(platform.blocks.map(blockSignature).filter(Boolean));
+  platform.blocks.filter((b) => b.type === 'choice').forEach((b) => {
+    done.add(`choice:${JSON.stringify(b.values.map((v) => String(v).replace(/ \([^()]*\)$/, '')).sort())}`);
+    // The plan shows labels; a model copy may list the stored codes instead.
+    if (Array.isArray(b.codes)) done.add(`choice:${JSON.stringify(b.codes.map(String).sort())}`);
+  });
+  const extra = blocks.filter((b) => !done.has(blockSignature(b)));
+  if (!extra.some((b) => b.type !== 'note')) {
+    return hasPlatform ? finish(computeAnalysisBlocks(extra), problems) : finish([], problems, problems.join(' ') || 'No usable result.');
+  }
+  const remapped = remapBlocksToMedia(extra, pageIdMediaMap(records, pageHtml), {
     mappedRecords: mapped !== records,
     libraryNames: new Set(pageMediaUrls(records).keys()),
   });
-  // What the platform reads off the records itself comes first, whatever the code did.
-  return { ok: true, blocks: computeAnalysisBlocks([...platformSummaryBlocks(records), ...remapped]), problems };
+  return finish(computeAnalysisBlocks(remapped), problems);
 }
 
 function csvCell(value) {
@@ -772,9 +855,10 @@ export function aiAnalysisExportFiles(question, saved, computedBlocks) {
   (computedBlocks || []).forEach((block, index) => {
     if (!block.table) return;
     const lines = [block.table.columns.map(csvCell).join(','), ...block.table.rows.map((row) => row.map(csvCell).join(','))];
-    files.push({ path: `${base}__${index + 1}_${block.type}.csv`, content: `﻿${lines.join('\r\n')}\r\n` });
+    // Platform blocks are marked so a reader knows no model was involved.
+    files.push({ path: `${base}__${index + 1}_${block.platform ? 'platform_' : ''}${block.type}.csv`, content: `﻿${lines.join('\r\n')}\r\n` });
   });
-  files.push({ path: `${base}__analyze.js`, content: `${aiAnalysisCodeHeader(question, saved)}${saved?.code || ''}\n` });
+  if (saved?.code) files.push({ path: `${base}__analyze.js`, content: `${aiAnalysisCodeHeader(question, saved)}${saved.code}\n` });
   return files;
 }
 
@@ -795,6 +879,8 @@ export const AI_ANALYSIS_README_LINES = [
   '-------------------',
   'questions/{name}__ai__{n}_{type}.csv   Results of the analysis the Assistant model wrote for a',
   '                                       question SP-Survey does not analyse by itself.',
+  'questions/{name}__ai__{n}_platform_{type}.csv   Computed by SP-Survey itself from the answer fields, no model',
+  '                                       involved (the _coverage file lists every field: analysed or skipped and why).',
   'questions/{name}__ai__analyze.js       The code it wrote. The question type was inferred by the model;',
   '                                       check it. Statistics are SP-Survey\'s own (TrueSkill, Borda,',
   '                                       Kendall W, Wilson 95% CI, descriptive stats, word frequency).',
@@ -806,9 +892,10 @@ export function readSavedAnalyses(project) {
   return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
 }
 
-export function makeSavedAnalysis({ code, model, provider, instructions = '', questionTitle = '' }) {
+export function makeSavedAnalysis({ code, plan = null, model, provider, instructions = '', questionTitle = '' }) {
   return {
     version: AI_ANALYSIS_VERSION,
+    ...(plan ? { plan } : {}),
     code: String(code || '').slice(0, 60000),
     model: model || '',
     provider: provider || '',
@@ -995,8 +1082,11 @@ export function mediaSummary(records) {
 }
 
 /**
- * Ask the model for the code, run it on every record, and when it fails send
- * the error back once for a fix (automatic; the researcher clicks once).
+ * Generate the analysis. For answers the plan can read (custom questions and
+ * tasks), the model writes a PLAN (what each field means); fields it leaves
+ * out are sent back once; the platform runs the plan. Fields the plan marks
+ * "custom" (and page-only records, which have no fields to plan) get model
+ * code instead, with one automatic fix round when it fails.
  * `request(body)` posts to the worker; `runner(code, records)` is the sandbox.
  */
 export async function generateQuestionAnalysis({ question, records: rawRecords, otherQuestions = [], pageHtml = '', instructions = '', request, runner }) {
@@ -1012,21 +1102,67 @@ export async function generateQuestionAnalysis({ question, records: rawRecords, 
     recordCount: records.length,
     instructions,
   };
-  let reply = await request(base);
-  let evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml });
-  let attempts = 1;
-  if (!evaluation.ok) {
-    reply = await request({ ...base, previous: reply.code, error: evaluation.error });
-    evaluation = await evaluateAnalysis(reply.code, records, runner, { pageHtml });
-    attempts = 2;
+  let plan = null;
+  let planProblems = [];
+  let planAttempts = 0;
+  let provider = '';
+  let model = '';
+  if (hasPlannableAnswers(records)) {
+    const inventory = fieldInventory(records);
+    const planBase = { ...base, mode: 'plan', fields: inventoryText(inventory) };
+    let reply = await request(planBase);
+    provider = reply.provider; model = reply.model;
+    let checked = checkPlan(reply.plan, inventory);
+    planAttempts = 1;
+    if (checked.missing.length || checked.unknown.length) {
+      const error = [
+        checked.missing.length ? `These fields have no entry: ${checked.missing.join(', ')}.` : '',
+        checked.unknown.length ? `These paths do not exist in FIELDS (copy paths exactly): ${checked.unknown.join(', ')}.` : '',
+      ].filter(Boolean).join(' ');
+      reply = await request({ ...planBase, previous: JSON.stringify(checked.plan, null, 1), error });
+      const again = checkPlan(reply.plan, inventory);
+      // Keep whichever plan covers more.
+      checked = again.missing.length <= checked.missing.length ? again : checked;
+      planAttempts = 2;
+    }
+    plan = checked.plan;
+    planProblems = [...checked.problems, ...(checked.missing.length ? [`Fields still not in the plan: ${checked.missing.join(', ')}`] : [])];
+    // Fields the plan could not express get code; otherwise no code is needed.
+    const customFields = plan.fields.filter((e) => e.use === 'custom');
+    if (!customFields.length) {
+      const evaluation = await evaluateAnalysis({ plan, code: '' }, records, runner, { pageHtml });
+      return {
+        ok: evaluation.ok, error: evaluation.ok ? '' : evaluation.error, attempts: planAttempts, code: '', plan,
+        saved: makeSavedAnalysis({ code: '', plan, model, provider, instructions, questionTitle: question?.title }),
+        blocks: evaluation.blocks, platformBlocks: evaluation.platformBlocks, modelBlocks: evaluation.modelBlocks, modelError: '', problems: [...planProblems, ...evaluation.problems],
+      };
+    }
+    const run = runPlan(records, plan);
+    base.platformDone = planSummaryForCode(plan, run);
   }
+  let reply = await request(base);
+  provider = reply.provider || provider; model = reply.model || model;
+  let evaluation = await evaluateAnalysis({ plan, code: reply.code }, records, runner, { pageHtml });
+  let attempts = planAttempts + 1;
+  // One automatic fix when the model's code failed (even if the plan part already stands).
+  if (evaluation.error) {
+    reply = await request({ ...base, previous: reply.code, error: evaluation.error });
+    evaluation = await evaluateAnalysis({ plan, code: reply.code }, records, runner, { pageHtml });
+    attempts += 1;
+  }
+  // Code that still fails is not kept: the plan's part stands on its own.
+  const code = evaluation.error ? '' : reply.code;
   return {
     ok: evaluation.ok,
     error: evaluation.ok ? '' : evaluation.error,
     attempts,
     code: reply.code,
-    saved: makeSavedAnalysis({ code: reply.code, model: reply.model, provider: reply.provider, instructions, questionTitle: question?.title }),
+    plan,
+    saved: makeSavedAnalysis({ code, plan, model, provider, instructions, questionTitle: question?.title }),
     blocks: evaluation.blocks,
-    problems: evaluation.problems,
+    platformBlocks: evaluation.platformBlocks,
+    modelBlocks: evaluation.modelBlocks,
+    modelError: evaluation.error,
+    problems: [...planProblems, ...evaluation.problems],
   };
 }
