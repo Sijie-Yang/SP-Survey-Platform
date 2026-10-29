@@ -25,7 +25,9 @@ import registerImageRankingWidget, {
 } from './components/SurveyCustomComponents';
 import { getBrowserId, generateCompletionCode } from './lib/browserId';
 import { applyMapTaskOrder } from './lib/mapAnnotation';
-import { countProjectResponses, fetchConditionCounts, fetchPairStats } from './lib/surveyPublicApi';
+import { countProjectResponses, fetchConditionCounts, fetchPairStats, recruitmentParticipantDone } from './lib/surveyPublicApi';
+import RecruitmentReturn from './components/RecruitmentReturn';
+import { normalizeRecruitment, readRecruitmentContext, recruitmentCodeFor, recruitmentDoneHere, recruitmentMetadata, recruitmentReturnUrl, rememberRecruitmentDone } from './lib/recruitment';
 import { applyRuntimeVariables, conditionFromUrl, hasConditions, resolveRuntimeContext, runtimeMetadata } from './lib/surveyRuntimeContext';
 import { clearMediaWatchLog, mediaWatchMetadata } from './lib/mediaWatch';
 import {
@@ -95,6 +97,9 @@ export default function SurveyApp() {
   const [surveyPhase, setSurveyPhase] = useState('loading'); // loading | active | submitting | completed | submit-error | closed
   const [completionInfo, setCompletionInfo] = useState(null);
   const [quotaClosed, setQuotaClosed] = useState(false);
+  // Recruitment platform (Prolific etc.): the setting and the platform participant on this link.
+  const recruitmentRef = useRef({ setting: null, context: null });
+  const [recruitmentDone, setRecruitmentDone] = useState(false);
   const [liveClosedMessage, setLiveClosedMessage] = useState(null);
   const [pendingSubmission, setPendingSubmission] = useState(null);
   const [recoverySaved, setRecoverySaved] = useState(true);
@@ -272,6 +277,7 @@ export default function SurveyApp() {
       // Only clear drafts AFTER a successful save (including idempotent dedupe).
       discardDraftForProject(projectIdRef.current, completeData.participant_id);
       clearPendingSubmission(projectIdRef.current, completeData.participant_id);
+      if (completeData.survey_metadata?.recruitment) rememberRecruitmentDone(projectIdRef.current, completeData.survey_metadata.recruitment);
       if (isRepeatMode && attemptIndex < repeatTotal) {
         submissionGuardRef.current = false;
         draftSavingEnabledRef.current = true;
@@ -490,6 +496,24 @@ export default function SurveyApp() {
         return;
       }
       setLiveClosedMessage(null);
+
+      // Recruitment platform: a platform participant who already completed is not asked again.
+      {
+        const setting = normalizeRecruitment(adminConfig);
+        const context = readRecruitmentContext(setting, window.location.search);
+        recruitmentRef.current = { setting, context, locale: adminConfig?.locale || '' };
+        setRecruitmentDone(false);
+        if (context) {
+          const done = recruitmentDoneHere(projectId, context)
+            || await withTimeout(recruitmentParticipantDone(projectId, context.platform, context.id), 8000, null);
+          if (done === true) {
+            setRecruitmentDone(true);
+            setSurveyPhase('closed');
+            setLoading(false);
+            return;
+          }
+        }
+      }
 
       // Response quota gate
       const responseQuota = Number(adminConfig?.responseQuota) || 0;
@@ -1205,6 +1229,7 @@ export default function SurveyApp() {
               page_seconds: { ...pageTimingRef.current },
             },
             ...runtimeMetadata(runtimeContext),
+            ...(isRepeatMode ? {} : recruitmentMetadata(recruitmentRef.current.context)),
             ...surveyLanguageMetadata({
               answerLanguage: answerLanguageRef.current,
               questionAnswerLanguages: questionLanguagesForSubmission(
@@ -1359,7 +1384,11 @@ export default function SurveyApp() {
 
   // A recorded-as-is page (converted, or declaring no questions) stays on screen
   // while it submits and after: it may still be showing the participant its own end.
-  const siteStaysOpen = Boolean(surveyModel && publishedSurveyJson?.spSite?.html
+  const recruitment = recruitmentRef.current;
+  const recruitmentReturn = completionInfo && !completionInfo.isRepeatMode
+    ? recruitmentReturnUrl(recruitment.setting, recruitment.context, 'complete') : '';
+  // A page that stays open still hands the participant back to the recruitment platform.
+  const siteStaysOpen = !recruitmentReturn && Boolean(surveyModel && publishedSurveyJson?.spSite?.html
     && (publishedSurveyJson.spSite.convertedFrom || siteMatchLevel(publishedSurveyJson).level === 'none')
     && !completionInfo?.isRepeatMode);
 
@@ -1372,6 +1401,19 @@ export default function SurveyApp() {
     );
   }
 
+  if (recruitmentDone || (quotaClosed && recruitment.context)) {
+    const outcome = recruitmentDone ? 'complete' : 'quota_full';
+    return (
+      <RecruitmentReturn
+        outcome={recruitmentDone ? 'already_done' : 'quota_full'}
+        returnUrl={recruitmentReturnUrl(recruitment.setting, recruitment.context, outcome)}
+        code={recruitmentCodeFor(recruitment.setting, outcome)}
+        platform={recruitment.setting?.platform}
+        locale={participantLocale || recruitment.locale}
+      />
+    );
+  }
+
   if (surveyPhase === 'closed' || quotaClosed) {
     return (
       <Box sx={{ maxWidth: 560, mx: 'auto', p: 4, textAlign: 'center' }}>
@@ -1381,6 +1423,19 @@ export default function SurveyApp() {
             || 'This survey is no longer accepting responses. Thank you for your interest.'}
         </Typography>
       </Box>
+    );
+  }
+
+  if (surveyPhase === 'completed' && completionInfo && recruitmentReturn) {
+    return (
+      <RecruitmentReturn
+        outcome="complete"
+        returnUrl={recruitmentReturn}
+        code={recruitmentCodeFor(recruitment.setting, 'complete')}
+        platform={recruitment.setting?.platform}
+        locale={participantLocale || recruitment.locale}
+        message={completionMessage}
+      />
     );
   }
 
