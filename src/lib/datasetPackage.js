@@ -121,7 +121,7 @@ export function answeredYes(row, name) {
 }
 
 // Device and recruitment fields that can identify a person.
-const IDENTIFYING_METADATA = ['completion_code', 'browser_id', 'user_agent', 'screen_resolution', 'url_params', 'ip', 'ip_hash'];
+const IDENTIFYING_METADATA = ['completion_code', 'browser_id', 'user_agent', 'screen_resolution', 'url_params', 'recruitment', 'ip', 'ip_hash'];
 const IDENTIFYING_ROW_FIELDS = ['idempotency_key', 'user_id', 'email', 'ip', 'ip_hash'];
 const TIMESTAMP_ROW_FIELDS = ['created_at', 'saved_at', 'updated_at'];
 const TIMESTAMP_METADATA = ['completion_time', 'survey_draft_updated_at', 'start_time', 'started_at'];

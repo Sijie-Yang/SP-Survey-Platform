@@ -6,7 +6,7 @@ import { CheckCircle, ContentCopy, Download, QrCode2 } from '@mui/icons-material
 import { useRegion } from '../../contexts/RegionContext';
 import { captureParamNames, normalizeConditions } from '../../lib/surveyRuntimeContext';
 const MAX_LINKS = 200;
-const valuesKey = projectId => `sp_param_link_values_${projectId || 'default'}`;
+export const parameterValuesKey = projectId => `sp_param_link_values_${projectId || 'default'}`;
 export function splitValues(text) {
   return [...new Set(String(text || '').split(/[\n,]+/).map(v => v.trim()).filter(Boolean))];
 }
@@ -31,9 +31,9 @@ export function buildParameterLinks(baseUrl, valuesByParam) {
     };
   });
 }
-function loadValues(projectId) {
+export function loadParameterValues(projectId) {
   try {
-    return JSON.parse(localStorage.getItem(valuesKey(projectId)) || '{}') || {};
+    return JSON.parse(localStorage.getItem(parameterValuesKey(projectId)) || '{}') || {};
   } catch {
     return {};
   }
@@ -59,14 +59,14 @@ export default function ParameterLinks({
   const zh = isChineseLanguage(language);
   const params = captureParamNames(surveyConfig);
   const hasConditions = normalizeConditions(surveyConfig).length > 1;
-  const [texts, setTexts] = useState(() => loadValues(projectId));
+  const [texts, setTexts] = useState(() => loadParameterValues(projectId));
   const [copied, setCopied] = useState('');
   useEffect(() => {
-    setTexts(loadValues(projectId));
+    setTexts(loadParameterValues(projectId));
   }, [projectId]);
   useEffect(() => {
     try {
-      localStorage.setItem(valuesKey(projectId), JSON.stringify(texts));
+      localStorage.setItem(parameterValuesKey(projectId), JSON.stringify(texts));
     } catch {/* private mode */}
   }, [texts, projectId]);
   const links = useMemo(() => surveyUrl ? buildParameterLinks(surveyUrl, Object.fromEntries(params.map(p => [p, splitValues(texts[p])]))) : [], [surveyUrl, params.join('|'), texts]); // eslint-disable-line react-hooks/exhaustive-deps

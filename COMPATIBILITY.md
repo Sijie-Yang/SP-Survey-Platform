@@ -177,3 +177,11 @@ Do not promise “no impact” if question names or storage ownership change.
 - R2 mutating routes require auth when Supabase is configured; clients must send `Authorization: Bearer <session>`.
 - BYOK keys must never appear in logs, SSE query strings, or MCP responses.
 - See `docs/agent-mcp.md` and `AGENTS.md`.
+
+## 13. Recruitment platforms (Prolific / Connect / other)
+
+- Survey config key `recruitment` ({ platform, completionCode, quotaFullCode, returnUrl, idParam }). Projects without it behave exactly as before.
+- Run `supabase/recruitment.sql` once (after `response_retry.sql`). It adds `recruitment_participant_done` and replaces `submit_survey_response` with the same behaviour plus "one response per platform participant id per project" (researcher practice runs exempt; later submissions are acknowledged with `duplicate_recruitment: true` and not stored).
+- Before the SQL is run the frontend still works: the load-time check returns null (participants are not blocked) and the duplicate rule is not enforced on the server.
+- Responses from platform participants carry `survey_metadata.recruitment` = { platform, id, study?, session?, outcome }. Wide CSV adds `recruit_platform`, `recruit_id`, `recruit_study`, `recruit_session`; dataset packages with pseudonymised ids drop it.
+- Projects that store responses in the researcher's own Supabase get the redirect but not the server-side duplicate rule (the platform database never sees those rows).
