@@ -10,6 +10,9 @@ import {
   computeMaxDiffTrueSkill,
 } from './trueskill.js';
 
+// Sampling mode as the platform runs it: anything other than 'random' is balanced.
+const samplingModeOf = (q) => (q?.pairingMode && q.pairingMode !== 'random' ? 'balanced' : 'random');
+
 function describeTrueSkillExport(question, result, kind = '') {
   const { rankings, matches, splitByCategory, categories } = result || {};
   if (!rankings?.length) return null;
@@ -118,7 +121,7 @@ export function generateMethodsText({
   );
 
   if (pairwiseQs.length) {
-    const modes = [...new Set(pairwiseQs.map((q) => q.pairingMode || 'random'))];
+    const modes = [...new Set(pairwiseQs.map((q) => samplingModeOf(q)))];
     lines.push(
       `Image choice questions (${pairwiseQs.length} question(s)) used `
       + `${modes.join('/')} pairing where configured. `
@@ -128,7 +131,7 @@ export function generateMethodsText({
   }
 
   if (maxDiffQs.length) {
-    const modes = [...new Set(maxDiffQs.map((q) => q.pairingMode || 'random'))];
+    const modes = [...new Set(maxDiffQs.map((q) => samplingModeOf(q)))];
     lines.push(
       `Best–Worst (MaxDiff) questions (${maxDiffQs.length} question(s)) used `
       + `${modes.join('/')} sampling where configured. `

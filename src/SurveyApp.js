@@ -25,7 +25,9 @@ import registerImageRankingWidget, {
 } from './components/SurveyCustomComponents';
 import { getBrowserId, generateCompletionCode } from './lib/browserId';
 import { applyMapTaskOrder } from './lib/mapAnnotation';
-import { countProjectResponses, fetchConditionCounts, fetchPairStats } from './lib/surveyPublicApi';
+import { claimBalanceNumber, completeBalanceClaim, countProjectResponses, fetchConditionCounts } from './lib/surveyPublicApi';
+import { balanceResponseMetadata, createBalancePlan, forgetBalanceNumber, localBalanceNumber, recallBalanceNumber, rememberBalanceNumber } from './lib/balancedDraw';
+import { shuffled } from './lib/shuffle';
 import { applyRuntimeVariables, conditionFromUrl, hasConditions, resolveRuntimeContext, runtimeMetadata } from './lib/surveyRuntimeContext';
 import { clearMediaWatchLog, mediaWatchMetadata } from './lib/mediaWatch';
 import {
@@ -33,7 +35,7 @@ import {
   ensureSkillDemoMedia, pickMediaForQuestion, trackMediaAssignment, getImageKey, usesSetMediaAssignment,
   applyMediaAssignmentToElement, hasMediaSlots,
   usesCategoryMediaAssignment, buildMediaAssignmentLogEntry, shouldInjectMedia, applyCuratedMediaIfNeeded,
-  resolveMediaFolderTags, pickTrialMediaSetsForQuestion, syncInjectedMediaOntoSurveyModel,
+  resolveMediaFolderTags, pickTrialMediaSetsForQuestion, syncInjectedMediaOntoSurveyModel, balanceGroupsForSurvey,
   clearInjectedMediaStore,
 } from './lib/surveyMediaInjection';
 import { getSkillMediaUrls } from './lib/skillMediaUtils';
@@ -130,7 +132,8 @@ export default function SurveyApp() {
   const surveyStartedAtRef = useRef(null);
   const pageEnteredAtRef = useRef(null);
   const pageTimingRef = useRef({});
-  const pairStatsRef = useRef(null);
+  // This participant's balanced-sampling plan (questions whose Sampling Mode is Balanced).
+  const balancePlanRef = useRef(null);
   const lastPageNameRef = useRef(null);
   const submissionGuardRef = useRef(false);
   const progressChromeEnabledRef = useRef(true);
@@ -272,6 +275,12 @@ export default function SurveyApp() {
       // Only clear drafts AFTER a successful save (including idempotent dedupe).
       discardDraftForProject(projectIdRef.current, completeData.participant_id);
       clearPendingSubmission(projectIdRef.current, completeData.participant_id);
+      // Balanced sampling: this participant's number is done and is never handed out again.
+      const balanceDone = completeData.survey_metadata?.balanced_draw;
+      if (balanceDone) {
+        forgetBalanceNumber(projectIdRef.current);
+        if (balanceDone.claim_id) completeBalanceClaim(balanceDone.claim_id);
+      }
       if (isRepeatMode && attemptIndex < repeatTotal) {
         submissionGuardRef.current = false;
         draftSavingEnabledRef.current = true;
@@ -395,7 +404,7 @@ export default function SurveyApp() {
           element,
           globallyUsedImageKeys,
           globallyUsedGroupKeys,
-          pairStatsRef.current,
+          balancePlanRef.current,
           folderTags,
         );
         // Slot path already tracks keys; legacy still needs trackMediaAssignment
@@ -505,9 +514,8 @@ export default function SurveyApp() {
       }
       setQuotaClosed(false);
 
-      // Pair stats for adaptive/balanced pairing (best-effort)
       setLoadingMessage('Preparing questions and media…');
-      pairStatsRef.current = await withTimeout(fetchPairStats(projectId), 8000, null);
+      balancePlanRef.current = null;
       
       // Build runtime Supabase config from project sources.
       // Priority: project.supabaseConfig (legacy/system status) -> imageDatasetConfig (current UI flow)
@@ -604,6 +612,30 @@ export default function SurveyApp() {
             ? (fromPreviewLibrary ? 'Assigning preview media…' : 'Assigning project media…')
             : 'Preparing survey…',
         );
+
+        // Balanced sampling: the participant's number decides which stretch of each balanced
+        // library they get, so every image ends up shown equally often. Surveys without a
+        // balanced question skip this entirely.
+        const balanceGroups = mediaPool.length
+          ? balanceGroupsForSurvey(finalSurveyJson, mediaPool, resolveMediaFolderTags(projectData, projectData?.config))
+          : [];
+        if (balanceGroups.length) {
+          const practiceRun = fromPreviewLibrary
+            || parseInt(urlParams.get('repeat') || '0', 10) > 1
+            || Boolean(finalSurveyJson.repeatConfig?.enabled);
+          let balance = practiceRun ? null : recallBalanceNumber(projectId);
+          if (!balance && !practiceRun) {
+            const claimed = await withTimeout(claimBalanceNumber(projectId), 6000, null);
+            if (claimed) {
+              balance = { n: claimed.n, claim: 'server', claim_id: claimed.claimId };
+              rememberBalanceNumber(projectId, balance);
+            }
+          }
+          if (!balance) balance = { n: localBalanceNumber(), claim: 'local', claim_id: null };
+          finalSurveyJson._spBalance = balance;
+          balancePlanRef.current = createBalancePlan(balanceGroups, { number: balance.n, seed: projectId });
+          console.log(`⚖️ Balanced sampling: participant number ${balance.n} (${balance.claim})`);
+        }
         
         // Process image questions and convert imageranking to ranking for SurveyJS
         if (finalSurveyJson.pages) {
@@ -681,7 +713,7 @@ export default function SurveyApp() {
                           elementTrialCount,
                           globallyUsedImageKeys,
                           globallyUsedGroupKeys,
-                          pairStatsRef.current,
+                          balancePlanRef.current,
                           folderTags,
                         );
                         element.trialMediaSets = trialMediaSets;
@@ -695,7 +727,7 @@ export default function SurveyApp() {
                         let selectedImages = assignment.flatMedia || assignment.images || [];
                         if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
                           const imageCount = element.imageCount || defaultMediaCount(element);
-                          selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+                          selectedImages = shuffled(pool).slice(0, imageCount);
                         }
                         result = {
                           success: selectedImages.length > 0 || trialMediaSets.some((s) => s?.length),
@@ -714,7 +746,7 @@ export default function SurveyApp() {
                       // Skill questions: reuse pool images rather than falling back to demo media
                       if (!selectedImages.length && pool.length > 0 && element.type === 'skillquestion' && !usesSetMediaAssignment(element)) {
                         const imageCount = element.imageCount || defaultMediaCount(element);
-                        selectedImages = [...pool].sort(() => 0.5 - Math.random()).slice(0, imageCount);
+                        selectedImages = shuffled(pool).slice(0, imageCount);
                         assignment = { images: selectedImages, groupKey: null, groupId: null };
                         trackMediaAssignment(assignment, element, globallyUsedImageKeys, globallyUsedGroupKeys);
                         console.log(`♻️ Pool exhausted, reusing ${selectedImages.length} images for skill question`);
@@ -1205,6 +1237,7 @@ export default function SurveyApp() {
               page_seconds: { ...pageTimingRef.current },
             },
             ...runtimeMetadata(runtimeContext),
+            ...balanceResponseMetadata(finalSurveyJson._spBalance),
             ...surveyLanguageMetadata({
               answerLanguage: answerLanguageRef.current,
               questionAnswerLanguages: questionLanguagesForSubmission(

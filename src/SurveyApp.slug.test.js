@@ -27,7 +27,7 @@ jest.mock('./lib/projectManager', () => {
 });
 jest.mock('./lib/supabase', () => ({ isSupabaseConfigured: () => false, saveSurveyResponse: jest.fn() }));
 jest.mock('./lib/liveSurveyManager', () => ({ getProjectLiveAccess: async () => ({ gated: false, allowed: true }), formatLiveWindow: () => '' }));
-jest.mock('./lib/surveyPublicApi', () => ({ fetchPairStats: async () => null, countProjectResponses: async () => 0, fetchConditionCounts: async () => null }));
+jest.mock('./lib/surveyPublicApi', () => ({ claimBalanceNumber: async () => null, completeBalanceClaim: async () => false, countProjectResponses: async () => 0, fetchConditionCounts: async () => null }));
 
 const { calls } = jest.requireMock('./lib/projectManager');
 
