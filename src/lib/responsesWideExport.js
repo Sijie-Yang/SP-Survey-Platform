@@ -125,6 +125,8 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
   }
 
   const hasCondition = responses.some((row) => row.survey_metadata?.condition != null);
+  // Recruitment platform participant (Prolific etc.), recorded only for people who arrived from one.
+  const hasRecruitment = responses.some((row) => row.survey_metadata?.recruitment?.id);
   const urlParamNames = [...new Set(responses.flatMap((row) => Object.keys(row.survey_metadata?.url_params || {})))].sort();
   // Requests an SP-Scheme page sent that no question mapped: kept raw, as JSON.
   const hasRawRequests = responses.some((row) => Array.isArray(row.responses?.[SP_RAW_REQUESTS_KEY]) && row.responses[SP_RAW_REQUESTS_KEY].length);
@@ -140,6 +142,7 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     'survey_revision',
     ...(hasCondition ? ['condition'] : []),
     ...urlParamNames.map((n) => `url_${n}`),
+    ...(hasRecruitment ? ['recruit_platform', 'recruit_id', 'recruit_study', 'recruit_session'] : []),
     ...headerCols,
     ...(hasRawRequests ? [SP_RAW_REQUESTS_KEY] : []), ...(hasPageState ? [SP_PAGE_STATE_KEY] : []),
   ];
@@ -160,6 +163,13 @@ export function buildResponsesWideCsv(responses, allQuestions, surveyConfig) {
     };
     if (hasCondition) obj.condition = row.survey_metadata?.condition ?? '';
     urlParamNames.forEach((n) => { obj[`url_${n}`] = row.survey_metadata?.url_params?.[n] ?? ''; });
+    if (hasRecruitment) {
+      const r = row.survey_metadata?.recruitment || {};
+      obj.recruit_platform = r.platform || '';
+      obj.recruit_id = r.id || '';
+      obj.recruit_study = r.study || '';
+      obj.recruit_session = r.session || '';
+    }
     if (hasRawRequests) {
       const raw = row.responses?.[SP_RAW_REQUESTS_KEY];
       obj[SP_RAW_REQUESTS_KEY] = Array.isArray(raw) && raw.length ? JSON.stringify(raw) : '';

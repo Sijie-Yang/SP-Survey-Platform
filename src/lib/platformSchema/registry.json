@@ -75,6 +75,17 @@
           "description": "Allow-listed URL parameter names stored (trimmed to 64 characters) as survey_metadata.url_params and SurveyJS variables {url_<name>}.",
           "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$" }
         },
+        "recruitment": {
+          "type": "object",
+          "description": "Recruitment platform for paid participants. platform: prolific | connect | other. prolific: completionCode (required) and quotaFullCode; connect: returnUrl (Connect completion redirect link); other: idParam (participant id link parameter) and optional returnUrl ({id} is replaced by the participant id). Participants who arrive with a platform id are recorded in survey_metadata.recruitment, sent back after their answers are saved, and can submit once per project.",
+          "properties": {
+            "platform": { "type": "string", "enum": ["prolific", "connect", "other"] },
+            "completionCode": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+            "quotaFullCode": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+            "returnUrl": { "type": "string" },
+            "idParam": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$" }
+          }
+        },
         "qualityChecks": {
           "type": "object",
           "description": "Opt-in quality flags. samePosition: { minTrials } flags responses whose two-image choices were all on the same side.",

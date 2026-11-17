@@ -135,3 +135,10 @@ test('the package carries journal figures with captions', () => {
   expect(paths.some((p) => p.startsWith('data/figures/comment'))).toBe(false);
   expect(files.find((f) => f.path === 'data/README.txt').content).toMatch(/figures\/\{name\}__\*\.svg/);
 });
+
+test('pseudonymised packages drop the recruitment platform id', () => {
+  const anon = createAnonymizer({ pseudonymizeIds: true });
+  const out = anon({ participant_id: 'p1', responses: {}, survey_metadata: { recruitment: { platform: 'prolific', id: '5f1a' }, condition: 'a' } });
+  expect(out.survey_metadata.recruitment).toBeUndefined();
+  expect(out.survey_metadata.condition).toBe('a');
+});

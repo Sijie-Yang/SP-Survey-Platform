@@ -3,13 +3,14 @@ import CustomSurveyLink from './CustomSurveyLink';
 import { legacySurveyShareUrl, surveyShareUrl } from '../../lib/publicSlug';
 import { isChineseLanguage, uiPair } from '../../lib/uiLanguages';
 import ParameterLinks from './ParameterLinks';
+import RecruitmentLinks from './RecruitmentLinks';
 import SurveyPreflight from './SurveyPreflight';
 import ProjectVersions from './ProjectVersions';
 import { validateSurveyConfig } from '../../lib/designProtocol/validate';
 import { markGuideProgress } from '../../lib/adminGuide';
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, Alert, Button, Card, Paper, Dialog, DialogTitle, DialogContent, DialogActions, CardContent, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
-import { ContentCopy, Launch, CheckCircle, Link as LinkIcon, OpenInNew, History, FactCheckOutlined, Tune, HelpOutline } from '@mui/icons-material';
+import { ContentCopy, Launch, CheckCircle, Link as LinkIcon, OpenInNew, History, FactCheckOutlined, Tune, HelpOutline, GroupAdd } from '@mui/icons-material';
 import { captureParamNames, normalizeConditions } from '../../lib/surveyRuntimeContext';
 import { useRegion } from '../../contexts/RegionContext';
 import { AdminActionBar, AdminActionButton, AdminPageHeader } from './AdminPageLayout';
@@ -34,7 +35,7 @@ export default function WebsiteSetup({
   const [shareDialog, setShareDialog] = useState(null);
   const [savedSlug, setSavedSlug] = useState(currentProject?.publicSlug || '');
   const hasParameterLinks = captureParamNames(surveyConfig).length > 0 || normalizeConditions(surveyConfig).length > 1;
-  const shareTools = [['versions', uiPair(language, 'Versions & release', '版本与发布'), <History />], ['checks', uiPair(language, 'Pre-share checks', '分享前检查'), <FactCheckOutlined />], ...(hasParameterLinks ? [['parameters', uiPair(language, 'Parameter links', '参数链接'), <Tune />]] : []), ['help', uiPair(language, 'Sharing guide', '分享指南'), <HelpOutline />]];
+  const shareTools = [['versions', uiPair(language, 'Versions & release', '版本与发布'), <History />], ['checks', uiPair(language, 'Pre-share checks', '分享前检查'), <FactCheckOutlined />], ...(hasParameterLinks ? [['parameters', uiPair(language, 'Parameter links', '参数链接'), <Tune />]] : []), ['recruitment', uiPair(language, 'Recruitment platform', '招募平台'), <GroupAdd />], ['help', uiPair(language, 'Sharing guide', '分享指南'), <HelpOutline />]];
   const origin = window.location.origin;
   useEffect(() => {
     setSavedSlug(currentProject?.publicSlug || '');
@@ -139,6 +140,7 @@ export default function WebsiteSetup({
           <DialogTitle>{label}</DialogTitle>
           <DialogContent dividers>
             {id === 'parameters' && <ParameterLinks surveyUrl={surveyUrl} surveyConfig={surveyConfig} projectId={currentProject?.id} />}
+            {id === 'recruitment' && <RecruitmentLinks surveyUrl={surveyUrl} surveyConfig={surveyConfig} projectId={currentProject?.id} />}
             {id === 'checks' && <SurveyPreflight surveyConfig={surveyConfig} currentProject={currentProject} />}
             {id === 'versions' && <ProjectVersions currentProject={currentProject} hasUnsavedChanges={hasUnsavedChanges} onReleased={onReleased} />}
             {id === 'help' && <>

@@ -2,6 +2,7 @@ import { applySurveyThemePreset, matchesSurveyThemePreset, SURVEY_THEME_OPTIONS,
 import DescriptionMarkdownEditor from './DescriptionMarkdownEditor';
 import React, { useMemo, useState } from 'react';
 import RuntimeContextSettings from './RuntimeContextSettings';
+import RecruitmentSettings from './RecruitmentSettings';
 import {
   Box,
   Typography,
@@ -665,6 +666,8 @@ export default function SurveyBuilder({ config, onChange, currentProject, onProj
                 />
 
                 <RuntimeContextSettings config={config} onChange={handleBasicInfoChange} />
+
+                <RecruitmentSettings config={config} onChange={handleBasicInfoChange} />
               </Box>
         </DialogContent>
         <DialogActions>

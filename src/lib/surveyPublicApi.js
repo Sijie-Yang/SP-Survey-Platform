@@ -46,6 +46,25 @@ export async function claimBalanceNumber(projectId) {
 }
 
 /**
+ * Anonymous RPC: has this recruitment-platform participant already completed the project?
+ * null when the check is unavailable (supabase/recruitment.sql not run, offline); the
+ * submission RPC still keeps only one response per platform id.
+ */
+export async function recruitmentParticipantDone(projectId, platform, participant) {
+  if (!supabase || !projectId || !platform || !participant) return null;
+  try {
+    const { data, error } = await supabase.rpc('recruitment_participant_done', {
+      p_project_id: projectId, p_platform: platform, p_participant: participant,
+    });
+    if (error) throw error;
+    return data === true;
+  } catch (err) {
+    console.warn('recruitmentParticipantDone failed:', err.message);
+    return null;
+  }
+}
+
+/**
  * Anonymous RPC: this participant finished, so their number is never handed out again.
  * The database also does this by itself when the response is stored on the platform;
  * this call covers projects that store responses elsewhere.
