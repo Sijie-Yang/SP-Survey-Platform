@@ -3,6 +3,7 @@
 
 import { paletteToSurveyJsVars } from '../themes/themeConfig';
 import { themeJson } from '../theme';
+import { shuffled } from './shuffle.js';
 
 const STORAGE_PREFIX = 'survey_config_';
 
@@ -146,8 +147,7 @@ export const convertToSurveyJS = (adminConfig) => {
         // Handle image questions
         if (element.type === 'imagepicker' && element.imageLinks) {
           // Randomly select images for the survey
-          const shuffled = [...element.imageLinks].sort(() => 0.5 - Math.random());
-          const selectedImages = shuffled.slice(0, element.imageCount || 4);
+          const selectedImages = shuffled(element.imageLinks).slice(0, element.imageCount || 4);
           
           question.choices = selectedImages.map((url, index) => ({
             value: `image_${index}`,

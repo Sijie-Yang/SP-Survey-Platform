@@ -23,7 +23,8 @@ jest.mock('./lib/supabase', () => ({
 }));
 jest.mock('./lib/liveSurveyManager', () => ({ getProjectLiveAccess: async () => ({ gated: false, allowed: true }), formatLiveWindow: () => '' }));
 jest.mock('./lib/surveyPublicApi', () => ({
-  fetchPairStats: async () => null,
+  claimBalanceNumber: async () => null,
+  completeBalanceClaim: async () => false,
   countProjectResponses: jest.fn(async () => 0),
   fetchConditionCounts: async () => null,
   recruitmentParticipantDone: jest.fn(async () => false),

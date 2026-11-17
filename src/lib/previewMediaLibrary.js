@@ -9,6 +9,7 @@ import { listImagesFromR2 } from './r2';
 import { loadPreviewMediaLibrary } from './previewMediaLibraryStorage';
 import { filterMediaByType, inferMediaType, normalizeMediaEntry } from './mediaUtils';
 import { isRandomMediaQuestion } from './surveyMediaInjection';
+import { shuffled } from './shuffle.js';
 
 /** Canonical R2 prefix (legacy name kept so existing uploads keep working). */
 export const PREVIEW_MEDIA_PREFIX = 'skill-preview/';
@@ -128,12 +129,12 @@ export async function listSkillPreviewMedia() {
 export function pickPreviewMedia(pool, mediaType, count) {
   const matching = filterMediaByType(pool, mediaType);
   if (!matching.length) return [];
-  const shuffled = [...matching].sort(() => 0.5 - Math.random());
   const n = Math.max(0, Number(count) || 0);
   if (!n) return [];
-  const picked = shuffled.slice(0, n);
+  const order = shuffled(matching);
+  const picked = order.slice(0, n);
   while (picked.length < n) {
-    picked.push(shuffled[picked.length % shuffled.length]);
+    picked.push(order[picked.length % order.length]);
   }
   return picked;
 }

@@ -65,6 +65,7 @@ jobs:
           node scripts/tests/project-collaborators.mjs
           node scripts/tests/project-public-slug.mjs
           node scripts/tests/forum.mjs
+          node scripts/tests/balanced-draws.mjs
 
       - name: Worker module smoke import
         run: |

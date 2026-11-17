@@ -338,7 +338,12 @@ export default function SurveyAppClean() {
       const getImageKey = (image) => image?.name || image?.url;
       const shouldExcludePreviouslyUsedImages = (element) => element.excludePreviouslyUsedImages !== false;
       const pickRandomImagesFromPool = (pool, imageCount, excludeUsed) => {
-        const shuffled = [...pool].sort(() => 0.5 - Math.random());
+        // Fisher–Yates: every order equally likely.
+        const shuffled = [...pool];
+        for (let i = shuffled.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
         if (!excludeUsed) {
           return shuffled.slice(0, imageCount);
         }
