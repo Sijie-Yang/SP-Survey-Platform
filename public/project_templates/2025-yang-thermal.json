@@ -12,7 +12,8 @@
   "isApproved": true,
   "showOnLanding": true,
   "thumbnailUrl": "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev/templates/2025-yang-thermal/5890_103.923391521569_1.33170633586357.jpg",
-  "website": "https://www.sciencedirect.com/science/article/abs/pii/S0360132325000514",
+  "website": "https://doi.org/10.1016/j.buildenv.2025.112569",
+  "doi": "10.1016/j.buildenv.2025.112569",
   "huggingfaceDataset": "sijiey/Thermal-Affordance-Dataset",
   "createdAt": "2025-10-17T01:04:49.114+00:00",
   "config": {

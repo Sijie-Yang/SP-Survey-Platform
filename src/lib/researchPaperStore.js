@@ -3,6 +3,12 @@
  */
 import { supabase } from './supabase';
 import { ensureAnalysisMeta } from './researchPaperMeta.mjs';
+import { libraryPaperToRow } from './researchLibrarySync';
+
+/** Escape LIKE wildcards so a DOI such as 10.1007/978-3_12 matches only itself. */
+export function escapeLikePattern(value) {
+  return String(value || '').replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
 
 function requireSupabase() {
   if (!supabase) throw new Error('Supabase not configured');
@@ -124,7 +130,8 @@ export async function upsertResearchCandidates(papers, {
       const { data } = await db
         .from('research_papers')
         .select('id, status, sources, abstract, s2_paper_id, crossref_doi, keywords, relevance_score, template_fit')
-        .ilike('doi', doi)
+        .ilike('doi', escapeLikePattern(doi))
+        .limit(1)
         .maybeSingle();
       existing = data;
     } else {
@@ -373,6 +380,61 @@ export async function updateResearchPaper(id, updates) {
   if (error) throw error;
   if (!data) throw new Error('Paper not updated (0 rows) — check admin RLS');
   return rowToPaper(data);
+}
+
+/**
+ * Apply a plan from planLibrarySync (file → online). Inserts missing papers,
+ * updates status / template link / inclusion record, and archives the online-only
+ * rows the admin selected. Never deletes.
+ * onProgress({ label, current, total }) is called as rows are written.
+ */
+export async function applyResearchLibrarySync(plan, { archiveIds = [], onProgress = null } = {}) {
+  const db = requireSupabase();
+  const { data: { user } } = await db.auth.getUser();
+  const result = { inserted: 0, updated: 0, archived: 0, skipped: 0, errors: [] };
+  const inserts = plan?.toInsert || [];
+  const updates = plan?.toUpdate || [];
+  const total = inserts.length + updates.length + (archiveIds.length ? 1 : 0);
+  let current = 0;
+  const report = (label) => {
+    if (typeof onProgress === 'function') onProgress({ label, current, total });
+  };
+
+  const now = () => new Date().toISOString();
+  for (const paper of inserts) {
+    const row = { ...libraryPaperToRow(paper), reviewed_by: user?.id || null, reviewed_at: now(), updated_at: now() };
+    let { error } = await db.from('research_papers').insert(row);
+    if (error && isMissingAnalysisMetaColumn(error)) {
+      const { analysis_meta: _omit, ...rest } = row;
+      ({ error } = await db.from('research_papers').insert(rest));
+    }
+    if (!error) result.inserted += 1;
+    else if (error.code === '23505') result.skipped += 1;
+    else result.errors.push(`${paper.title}: ${error.message}`);
+    current += 1;
+    if (current % 10 === 0 || current === inserts.length) report('新增论文');
+  }
+
+  for (const u of updates) {
+    const patch = { ...u.patch, updated_at: now() };
+    if ('status' in patch) {
+      patch.reviewed_by = user?.id || null;
+      patch.reviewed_at = now();
+    }
+    const { error } = await db.from('research_papers').update(patch).eq('id', u.id);
+    if (error) result.errors.push(`${u.title}: ${error.message}`);
+    else result.updated += 1;
+    current += 1;
+    if (current % 10 === 0 || current === inserts.length + updates.length) report('更新论文');
+  }
+
+  if (archiveIds.length) {
+    const { updated } = await updateResearchPapersStatus(archiveIds, 'archived');
+    result.archived = updated;
+    current += 1;
+    report('归档');
+  }
+  return result;
 }
 
 /** Permanently delete a research paper row (admin RLS). */

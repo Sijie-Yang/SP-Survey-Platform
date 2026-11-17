@@ -1,0 +1,770 @@
+{
+  "description": "Papers kept in or dropped from the paper library by hand, with reasons. Read by scripts/build-research-library.py. See research/library/README.md.",
+  "include": [
+    {
+      "doi": "10.1080/01944369008975742",
+      "title": "The Evaluative Image of the City",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 1990-nasar-evaluative; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "The Evaluative Image of the City",
+        "authors": [
+          "Nasar J.L."
+        ],
+        "year": 1990,
+        "venue": "Journal of the American Planning Association",
+        "abstract": "To improve community appearance, planners need to know how the public evaluates the cityscape: their evaluative image of the city. This article presents research aimed at uncovering this information. In two U.S. cities, Knoxville and Chattanooga, Tennessee, we interviewed 220 residents by phone and 180 visitors face-to-face, asking them to specify areas they liked and areas they disliked visually and to describe the physical features accounting for their evaluations. From each interview we prepared an evaluative map of the city. We then overlaid these maps to produce for each city and for residents and visitors separately a composite map—the evaluative image of the city. The evaluative maps suggest effects of city structure and experience, and they indicate five desirable features—naturalness, upkeep, openness, order, and historical significance. By showing the identity, location, and likability of visual features, evaluative maps provide a basis for a visual plan.",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "openalex"
+        }
+      }
+    },
+    {
+      "doi": "10.1016/0272-4944(95)90001-2",
+      "title": "The restorative benefits of nature: Toward an integrative framework",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 1995-kaplan-art; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "The restorative benefits of nature: Toward an integrative framework",
+        "authors": [
+          "Kaplan S."
+        ],
+        "year": 1995,
+        "venue": "Journal of Environmental Psychology",
+        "abstract": "",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "none"
+        }
+      }
+    },
+    {
+      "doi": "10.1080/13574800802451155",
+      "title": "Measuring the Unmeasurable: Urban Design Qualities Related to Walkability",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2009-ewing-measuring; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "Measuring the Unmeasurable: Urban Design Qualities Related to Walkability",
+        "authors": [
+          "Ewing R.",
+          "Handy S."
+        ],
+        "year": 2009,
+        "venue": "Journal of Urban Design",
+        "abstract": "This study attempts to comprehensively and objectively measure subjective qualities of the urban street environment. Using ratings from an expert panel, it was possible to measure five urban design qualities in terms of physical characteristics of streets and their edges: imageability, enclosure, human scale, transparency and complexity. The operational definitions do not always comport with the qualitative definitions, and provide new insights into the nature of these urban design qualities. The immediate purpose of this study is to arm researchers with operational definitions they can use to measure the street environment and test for significant associations with walking behaviour. A validation study is currently underway in New York City. Depending on the outcome of this and other follow-up research, the ultimate purpose would be to inform urban design practice.",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "openalex"
+        }
+      }
+    },
+    {
+      "doi": "10.1371/journal.pone.0068400",
+      "title": "The Collaborative Image of The City: Mapping the Inequality of Urban Perception",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2013-salesses-collaborative; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "The Collaborative Image of The City: Mapping the Inequality of Urban Perception",
+        "authors": [
+          "Salesses P.",
+          "Schechtner K.",
+          "Hidalgo C.A."
+        ],
+        "year": 2013,
+        "venue": "PLoS ONE",
+        "abstract": "A traveler visiting Rio, Manila or Caracas does not need a report to learn that these cities are unequal; she can see it directly from the taxicab window. This is because in most cities inequality is conspicuous, but also, because cities express different forms of inequality that are evident to casual observers. Cities are highly heterogeneous and often unequal with respect to the income of their residents, but also with respect to the cleanliness of their neighborhoods, the beauty of their architecture, and the liveliness of their streets, among many other evaluative dimensions. Until now, however, our ability to understand the effect of a city's built environment on social and economic outcomes has been limited by the lack of quantitative data on urban perception. Here, we build on the intuition that inequality is partly conspicuous to create quantitative measure of a city's contrasts. Using thousands of geo-tagged images, we measure the perception of safety, class and uniqueness; in the cities of Boston and New York in the United States, and Linz and Salzburg in Austria, finding that the range of perceptions elicited by the images of New York and Boston is larger than the range of perceptions elicited by images from Linz and Salzburg. We interpret this as evidence that the cityscapes of Boston and New York are more contrasting, or unequal, than those of Linz and Salzburg. Finally, we validate our measures by exploring the connection between them and homicides, finding a significant correlation between the perceptions of safety and class and the number of homicides in a NYC zip code, after controlling for the effects of income, population, area and age. Our results show that online images can be used to create reproducible quantitative measures of urban perception and characterize the inequality of different cities.",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "semantic_scholar"
+        }
+      }
+    },
+    {
+      "doi": "10.1109/cvprw.2014.121",
+      "title": "Streetscore -- Predicting the Perceived Safety of One Million Streetscapes",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2014-naik-streetscore; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "Streetscore -- Predicting the Perceived Safety of One Million Streetscapes",
+        "authors": [
+          "Naik N.",
+          "Philipoom J.",
+          "Raskar R.",
+          "Hidalgo C."
+        ],
+        "year": 2014,
+        "venue": "2014 IEEE Conference on Computer Vision and Pattern Recognition Workshops",
+        "abstract": "Social science literature has shown a strong connection between the visual appearance of a city's neighborhoods and the behavior and health of its citizens. Yet, this research is limited by the lack of methods that can be used to quantify the appearance of streetscapes across cities or at high enough spatial resolutions. In this paper, we describe 'Streetscore', a scene understanding algorithm that predicts the perceived safety of a streetscape, using training data from an online survey with contributions from more than 7000 participants. We first study the predictive power of commonly used image features using support vector regression, finding that Geometric Texton and Color Histograms along with GIST are the best performers when it comes to predict the perceived safety of a streetscape. Using Streetscore, we create high resolution maps of perceived safety for 21 cities in the Northeast and Midwest of the United States at a resolution of 200 images/square mile, scoring ~1 million images from Google Streetview. These datasets should be useful for urban planners, economists and social scientists looking to explain the social and economic consequences of urban perception.",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "openalex"
+        }
+      }
+    },
+    {
+      "doi": "10.1145/2531602.2531613",
+      "title": "Aesthetic capital",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2014-quercia-aesthetic; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "Aesthetic capital",
+        "authors": [
+          "Quercia D.",
+          "O'Hare N.K.",
+          "Cramer H."
+        ],
+        "year": 2014,
+        "venue": "Proceedings of the 17th ACM conference on Computer supported cooperative work &amp; social computing",
+        "abstract": "In the 1960s, Lynch's 'The Image of the City' explored what impression US city neighborhoods left on its inhabitants. The scale of urban perception studies until recently was considerably constrained by the limited number of study participants. We here present a crowdsourcing project that aims to investigate, at scale, which visual aspects of London neighborhoods make them appear beautiful, quiet, and/or happy. We collect votes from over 3.3K individuals and translate them into quantitative measures of urban perception. In so doing, we quantify each neighborhood's aesthetic capital. By then using state-of-the-art image processing techniques, we determine visual cues that may cause a street to be perceived as being beautiful, quiet, or happy. We identify effects of color, texture and visual words. For example, the amount of greenery is the most positively associated visual cue with each of three qualities; by contrast, broad streets, fortress-like buildings, and council houses tend to be associated with the opposite qualities (ugly, noisy, and unhappy).",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "openalex"
+        }
+      }
+    },
+    {
+      "doi": "10.1007/978-3-319-46448-0_12",
+      "title": "Deep Learning the City: Quantifying Urban Perception at a Global Scale",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2016-dubey-place; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "Deep Learning the City: Quantifying Urban Perception at a Global Scale",
+        "authors": [
+          "Dubey A.",
+          "Naik N.",
+          "Parikh D.",
+          "Raskar R.",
+          "Hidalgo C.A."
+        ],
+        "year": 2016,
+        "venue": "Lecture Notes in Computer Science",
+        "abstract": "Computer vision methods that quantify the perception of urban environment are increasingly being used to study the relationship between a city’s physical appearance and the behavior and health of its residents. Yet, the throughput of current methods is too limited to quantify the perception of cities across the world. To tackle this challenge, we introduce a new crowdsourced dataset containing 110,988 images from 56 cities, and 1,170,000 pairwise comparisons provided by 81,630 online volunteers along six perceptual attributes: safe, lively, boring, wealthy, depressing, and beautiful. Using this data, we train a Siamese-like convolutional neural architecture, which learns from a joint classification and ranking loss, to predict human judgments of pairwise image comparisons. Our results show that crowdsourcing combined with neural networks can produce urban perception data at the global scale.",
+        "keywords": [
+          "Perception",
+          "Attributes",
+          "Street View",
+          "Crowdsourcing"
+        ],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "publisher_pdf"
+        }
+      }
+    },
+    {
+      "doi": "10.1098/rsos.170170",
+      "title": "Using deep learning to quantify the beauty of outdoor places",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2017-seresinhe-scenic; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "Using deep learning to quantify the beauty of outdoor places",
+        "authors": [
+          "Seresinhe C.I.",
+          "Preis T.",
+          "Moat H.S."
+        ],
+        "year": 2017,
+        "venue": "Royal Society Open Science",
+        "abstract": "Beautiful outdoor locations are protected by governments and have recently been shown to be associated with better health. But what makes an outdoor space beautiful? Does a beautiful outdoor location differ from an outdoor location that is simply natural? Here, we explore whether ratings of over 200 000 images of Great Britain from the online game Scenic-Or-Not , combined with hundreds of image features extracted using the Places Convolutional Neural Network, might help us understand what beautiful outdoor spaces are composed of. We discover that, as well as natural features such as ‘Coast’, ‘Mountain’ and ‘Canal Natural’, man-made structures such as ‘Tower’, ‘Castle’ and ‘Viaduct’ lead to places being considered more scenic. Importantly, while scenes containing ‘Trees’ tend to rate highly, places containing more bland natural green features such as ‘Grass’ and ‘Athletic Fields’ are considered less scenic. We also find that a neural network can be trained to automatically identify scenic places, and that this network highlights both natural and built locations. Our findings demonstrate how online data combined with neural networks can provide a deeper understanding of what environments we might find beautiful and offer quantitative insights for policymakers charged with design and protection of our built and natural environments.",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "crossref"
+        }
+      }
+    },
+    {
+      "doi": "10.1016/j.trc.2021.103371",
+      "title": "Assessing bikeability with street view imagery and computer vision",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2021-ito-assessing; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "Assessing bikeability with street view imagery and computer vision",
+        "authors": [
+          "Ito K.",
+          "Biljecki F."
+        ],
+        "year": 2021,
+        "venue": "Transportation Research Part C: Emerging Technologies",
+        "abstract": "Studies evaluating bikeability usually compute spatial indicators shaping cycling conditions and conflate them in a quantitative index. Much research involves site visits or conventional geospatial approaches, and few studies have leveraged street view imagery (SVI) for conducting virtual audits. These have assessed a limited range of aspects, and not all have been automated using computer vision (CV). Furthermore, studies have not yet zeroed in on gauging the usability of these technologies thoroughly. We investigate, with experiments at a fine spatial scale and across multiple geographies (Singapore and Tokyo), whether we can use SVI and CV to assess bikeability comprehensively. Extending related work, we develop an exhaustive index of bikeability composed of 34 indicators. The results suggest that SVI and CV are adequate to evaluate bikeability in cities comprehensively. As they outperformed non-SVI counterparts by a wide margin, SVI indicators are also found to be superior in assessing urban bikeability and potentially can be used independently, replacing traditional techniques. However, the paper exposes some limitations, suggesting that the best way forward is combining both SVI and non-SVI approaches. The new bikeability index presents a contribution in transportation and urban analytics, and it is scalable to assess cycling appeal widely.",
+        "keywords": [
+          "Urban planning",
+          "Deep learning",
+          "GIS",
+          "OpenStreetMap",
+          "Bicycles",
+          "Google Street View"
+        ],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "publisher_pdf"
+        }
+      }
+    },
+    {
+      "doi": "10.3389/frsc.2023.1160995",
+      "title": "How to best map greenery from a human perspective? Comparing computational measurements with human perception",
+      "via": "template",
+      "added": "2026-10-15",
+      "reason": "Paper of template 2023-torkko-how; not in the 2026-07-12 Scopus export (the search starts at 2015 or misses the venue).",
+      "paper": {
+        "title": "How to best map greenery from a human perspective? Comparing computational measurements with human perception",
+        "authors": [
+          "Torkko J.",
+          "Poom A.",
+          "Willberg E.",
+          "Toivonen T."
+        ],
+        "year": 2023,
+        "venue": "Frontiers in Sustainable Cities",
+        "abstract": "Urban greenery has been shown to impact the quality of life in our urbanizing societies. While greenery is traditionally mapped top-down, alternative computational approaches have emerged for mapping greenery from the street level to mimic human sight. Despite the variety of these novel mapping approaches, it has remained unclear how well they reflect human perception in reality. We compared a range of both novel and traditional mapping methods with the self-reported perception of urban greenery at randomly selected study sites across Helsinki, the capital of Finland. The mapping methods included both image segmentation and point cloud-based methods to capture human perspective as well as traditional approaches taking the top-down perspective, i.e., land cover and remote sensing-based mapping methods. The results suggest that all the methods tested are strongly associated with the human perception of greenery at the street-level. However, mapped greenery values were consistently lower than the perceived values. Our results support the use of semantic image segmentation methods over color segmentation methods for greenery extraction to be closer to human perception. Point cloud-based approaches and top-down methods can be used as alternatives to image segmentation in case data coverage for the latter is limited. The results highlight a further research need for a comprehensive evaluation on how human perspective should be mimicked in different temporal and spatial conditions.",
+        "keywords": [],
+        "sources": [
+          "manual",
+          "crossref"
+        ],
+        "raw_meta": {
+          "metadata": "crossref",
+          "abstract_source": "crossref"
+        }
+      }
+    },
+    {
+      "doi": "10.3390/su18104781",
+      "title": "A Multi-Scale Analysis of Public Space in Peri-Urban Plain-Type Villages in Shanxi from a Spatial–Behavioral Coupling Perspective",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.cities.2025.106594",
+      "title": "Assessing the perception of urban landscape from the perspective of residents of multi-storey buildings",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.jobe.2026.115720",
+      "title": "Determining window size for view quality and building energy efficiency",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/buildings16112279",
+      "title": "Enhancing Adaptive Acoustic Comfort in Open-Plan Offices Through Green Window Views and Auditory Biophilic Elements",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1371/journal.pone.0351647",
+      "title": "Sensing nature in the city: The role of sight and sound in restorative tropical urban green spaces",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.scs.2026.107534",
+      "title": "Understanding multi-perspective urban green space patterns under urban expansion: Evidence from Guangzhou",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.scs.2025.106674",
+      "title": "Can ChatGPT-4o assess the perceptions of streetscape change? Evidence from Shanghai, China",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1080/20445911.2025.2495154",
+      "title": "Characteristics of fascination: using eye-tracking to explore the impact of spatial frequency on the allocation of attention to nature and urban scenes",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.cities.2025.105939",
+      "title": "Deep learning meets urban design: Assessing streetscape aesthetic and design quality through AI and cluster analysis",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.scs.2024.106099",
+      "title": "Heat exposure assessment and comfort path recommendations for leisure jogging based on street view imagery and GPS trajectories",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/buildings15010113",
+      "title": "Impact of Physical Features on Visual Walkability Perception in Urban Commercial Streets by Using Street-View Images and Deep Learning",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/buildings15091524",
+      "title": "Impact of Streetscape Built Environment Characteristics on Human Perceptions Using Street View Imagery and Deep Learning: A Case Study of Changbai Island, Shenyang",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.buildenv.2025.112660",
+      "title": "Is more vegetation always better? Evaluation of restorative benefits and preference for window views",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1038/s41598-025-27558-w",
+      "title": "Linking walkability and pedestrian crossing safety using simulated urban environments",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.trc.2025.105299",
+      "title": "Multiscale geographical random forest: A novel spatial ML approach for traffic safety modeling integrating street-view semantic visual features",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.buildenv.2025.113506",
+      "title": "Multisensory approaches to urban pollution: A controlled study of sound-odour interactions and their impact on physiology and perception",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/su172210223",
+      "title": "Resident Satisfaction-Based Evaluation Framework and Policy Optimization for Small-Town Infrastructure: Evidence from Wuhan, China",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.70917/fce-2025-009",
+      "title": "Structural Model for Evaluating Spatial Health Indicators of Public Spaces in Iraq",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1108/jstp-12-2024-0459",
+      "title": "Understanding perceived healing through biophilic hospital room virtual reality scenarios",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.autcon.2024.105885",
+      "title": "Virtual audit of microscale environmental components and materials using streetscape images with panoptic segmentation and image classification",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/land14040757",
+      "title": "Which Factors Enhance the Perceived Restorativeness of Streetscapes: Sound, Vision, or Their Combined Effects? Insights from Four Street Types in Nanjing, China",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/su16177676",
+      "title": "A Study on the Impact of Street Environment on Elderly Leisure Path Preferences Based on the Stated Preference Method (SP Method)",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.jer.2024.06.003",
+      "title": "A study of street trees and their effects on pedestrians’ perceptions during summer",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.scs.2024.105181",
+      "title": "Evaluating the bikeability of urban streets using dockless shared bike trajectory data",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1007/s44212-024-00052-w",
+      "title": "Fusing multi-source social media data and street view imagery to inform urban space quality: a study of user perceptions at Kampong Glam and Haji Lane",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.ufug.2024.128487",
+      "title": "How do species richness and colour diversity of plants affect public perception, preference and sense of restoration in urban green spaces?",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1061/jupddm.upeng-4770",
+      "title": "Spatial Quality Optimization Analysis of Streets in Historical Urban Areas Based on Street View Perception and Multisource Data",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.aap.2023.107400",
+      "title": "Towards safer streets: A framework for unveiling pedestrians’ perceived road safety using street view imagery",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/buildings14030651",
+      "title": "Urban Green Systems for Improving Pedestrian Thermal Comfort and Walkability in Future Climate Scenarios in London",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/rs16193661",
+      "title": "Urban Perception Evaluation and Street Refinement Governance Supported by Street View Visual Elements Analysis",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/su152014798",
+      "title": "A Spatial Analysis of Urban Streets under Deep Learning Based on Street View Imagery: Quantifying Perceptual and Elemental Perceptual Relationships",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.isci.2023.106132",
+      "title": "An interpretable machine learning framework for measuring urban perceptions from panoramic street view images",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/ijgi12050186",
+      "title": "Assessment of Perceived and Physical Walkability Using Street View Images and Deep Learning Technology",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1111/chso.12608",
+      "title": "Children's outdoor activities in the inner suburbs of Brisbane, Australia",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.7848/ksgpc.2023.41.1.13",
+      "title": "Measuring Individual Walking Accessibility based on Preference for Urban Walking Environment",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.buildenv.2023.110776",
+      "title": "Pedestrian visual satisfaction and dissatisfaction toward physical components of the walking environment based on types, characteristics, and combinations",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1080/15502724.2022.2077753",
+      "title": "Predicting Window View Preferences Using the Environmental Information Criteria",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/buildings13051332",
+      "title": "Research on Campus Space Features and Visual Quality Based on Street View Images: A Case Study on the Chongshan Campus of Liaoning University",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.scitotenv.2023.166101",
+      "title": "Simulation of vertical dispersion and pollution impact of artificial light at night in urban environment",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1121/10.0017203",
+      "title": "The interactive effects of traffic sound and window views on indoor soundscape perceptions in the residential area",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1007/s10708-021-10441-2",
+      "title": "Developing a street level walkability index in the Philippines using 3D photogrammetry modeling from drone surveys",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/ijerph19095477",
+      "title": "Effects of Environmental Features in Small Public Urban Green Spaces on Older Adults’ Mental Restoration: Evidence from Tokyo",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1109/tgrs.2021.3091380",
+      "title": "Efficient Pairwise 3-D Registration of Urban Scenes via Hybrid Structural Descriptors",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.14246/irspsd.10.3_108",
+      "title": "Formation of Sense of Place Trough Urban Design Project in Chiba, Japan: Relationships between Change of Emotional Values and Experiential Recognition of Place",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.14627/537724008",
+      "title": "From Intuition to Reasoning: Analyzing Correlative Attributes of Walkability in Urban Environments with Machine Learning",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.tra.2022.06.002",
+      "title": "How do design aspects influence the attractiveness of cycling streetscapes: Results of virtual reality experiments in the Netherlands",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.cities.2022.103650",
+      "title": "Individuals' perception of walkability: Results of a conjoint experiment using videos of virtual environments",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1177/03611981211072804",
+      "title": "Level of Pedestrian Stress in Urban Streetscapes",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1038/s41370-022-00489-8",
+      "title": "Measuring and modelling perceptions of the built environment for epidemiological research using crowd-sourcing and image-based deep learning models",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.geosus.2022.09.002",
+      "title": "Sustainable living neighbourhoods: Measuring public space quality and walking environment in Lisbon",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3389/fpsyg.2022.601523",
+      "title": "Trust in the Danger Zone: Individual Differences in Confidence in Robot Threat Assessments",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1109/tgrs.2021.3128403",
+      "title": "Using 2-Lines Congruent Sets for Coarse Registration of Terrestrial Point Clouds in Urban Scenes",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.trip.2021.100406",
+      "title": "Developing an index to evaluate the quality of pedestrian environment: Case study application in an Indian metro",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/rs13224497",
+      "title": "Gacm: A graph attention capsule model for the registration of tls point clouds in the urban scene",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.landurbplan.2021.104257",
+      "title": "Predicting perceptions of the built environment using GIS, satellite and street view image approaches",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.scitotenv.2021.148663",
+      "title": "The Street Walkability and Thermal Comfort Index (SWTCI): A new assessment tool combining street design measurements and thermal comfort",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/su13105364",
+      "title": "What could entrepreneurial vision do for sustainable development? Explore the cross-level impact of organizational members’ green shared vision on green creativity",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1080/12265934.2019.1652109",
+      "title": "Exposure and inequity: assessing commuter vulnerability and the quality of noise environment on urban arterials",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1177/0013916518807274",
+      "title": "Window View to the Sky as a Restorative Resource for Residents in Densely Populated Cities",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/rs11020211",
+      "title": "A novel approach for the detection of standing tree stems from plot-level terrestrial laser scanning data",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1007/s11116-017-9830-y",
+      "title": "I want to ride it where I like: measuring design preferences in cycling infrastructure",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1109/tgrs.2019.2925805",
+      "title": "Image-Guided Registration of Unordered Terrestrial Laser Scanning Point Clouds for Urban Scenes",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.3390/su11123467",
+      "title": "The pleasure of walking: An innovative methodology to assess appropriate walkable performance in urban areas to support transport planning",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1002/rob.21778",
+      "title": "A two-stage sampling for robust feature matching",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.jth.2016.08.012",
+      "title": "A new assessment model to evaluate the microscale sidewalk design factors at the neighbourhood level",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.ufug.2017.02.009",
+      "title": "Bringing nature to work: Preferences and perceptions of constructed indoor and natural outdoor workspaces",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.isprsjprs.2015.12.005",
+      "title": "Automatic registration of large-scale urban scene point clouds based on semantic feature points",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1016/j.apgeog.2016.09.024",
+      "title": "Measuring visual enclosure for street walkability: Using machine learning algorithms and Google Street View imagery",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    },
+    {
+      "doi": "10.1371/journal.pone.0146899",
+      "title": "Species distribution 2.0: An accurate timeand cost-effective method of prospection using street view imagery",
+      "via": "legacy_import",
+      "added": "2026-07-12",
+      "reason": "In the online library since the 2026-07-12 import under an earlier filter version (v4/v5); the final v6 rules do not select it. Kept so the file matches the online library."
+    }
+  ],
+  "exclude": [],
+  "template_links": []
+}

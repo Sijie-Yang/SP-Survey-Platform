@@ -59,9 +59,10 @@ function normalizePaper(p, i = 0) {
   return paper;
 }
 
+/** Fallback when the online table is unavailable: the library file the table is synced from. */
 async function loadShortlistFallback() {
-  const res = await fetch('/research/scopus-shortlist.json');
-  if (!res.ok) throw new Error(`Could not load shortlist (${res.status})`);
+  const res = await fetch('/research/library.json');
+  if (!res.ok) throw new Error(`Could not load paper library (${res.status})`);
   const payload = await res.json();
   return (payload.papers || []).map((p, i) => normalizePaper(p, i));
 }

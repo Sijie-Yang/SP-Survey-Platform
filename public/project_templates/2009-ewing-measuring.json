@@ -14,6 +14,7 @@
   "showOnLanding": true,
   "thumbnailUrl": null,
   "website": "https://doi.org/10.1080/13574800802451155",
+  "doi": "10.1080/13574800802451155",
   "huggingfaceDataset": null,
   "createdAt": "2026-10-02T00:00:00+00:00",
   "imageDatasetConfig": {

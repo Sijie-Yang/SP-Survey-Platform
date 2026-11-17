@@ -13,7 +13,8 @@
   "isApproved": true,
   "showOnLanding": true,
   "thumbnailUrl": "https://pub-6c5a1831a6254dd88b26e2dc199bfd94.r2.dev/templates/2025-li-street/image_000008.jpg",
-  "website": "https://www.sciencedirect.com/science/article/abs/pii/S0198971525001036",
+  "website": "https://doi.org/10.1016/j.compenvurbsys.2025.102350",
+  "doi": "10.1016/j.compenvurbsys.2025.102350",
   "huggingfaceDataset": "lajitong424/SMAP_svi",
   "createdAt": "2026-07-11T00:01:39.737+00:00",
   "config": {

@@ -14,7 +14,8 @@
   "isApproved": true,
   "showOnLanding": true,
   "thumbnailUrl": null,
-  "website": "https://arxiv.org/abs/1608.01769",
+  "website": "https://doi.org/10.1007/978-3-319-46448-0_12",
+  "doi": "10.1007/978-3-319-46448-0_12",
   "huggingfaceDataset": null,
   "createdAt": "2026-05-04T00:00:00+00:00",
   "config": {

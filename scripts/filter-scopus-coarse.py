@@ -2,11 +2,14 @@
 """
 Scopus coarse filter → library shortlist (v6).
 
+The shortlist is one input of the paper library; scripts/build-research-library.py
+combines it with research/library/overrides.json and template DOIs into
+public/research/library.json (what the site and the admin sync use).
+
 Usage:
   python3 scripts/filter-scopus-coarse.py \\
     --csv research/scopus/exports/2026-07-12.csv \\
-    --out research/scopus/shortlists/2026-07-12_library_coarse.json \\
-    --also public/research/scopus-shortlist.json
+    --out research/scopus/shortlists/2026-07-12_library_coarse.json
 """
 from __future__ import annotations
 
@@ -264,7 +267,6 @@ def main() -> None:
     also = [Path(p) for p in args.also]
     prev_paths = [Path(p) for p in args.prev] or [
         Path("research/scopus/shortlists/2026-07-12_library_coarse.json"),
-        Path("public/research/scopus-shortlist.json"),
     ]
 
     kept: list[dict] = []

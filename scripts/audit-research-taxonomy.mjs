@@ -4,7 +4,7 @@
  *
  * Usage:
  *   node scripts/audit-research-taxonomy.mjs
- *   node scripts/audit-research-taxonomy.mjs --in public/research/scopus-shortlist.json
+ *   node scripts/audit-research-taxonomy.mjs --in public/research/library.json
  */
 import fs from 'fs';
 import path from 'path';
@@ -29,7 +29,7 @@ function argValue(flag, fallback) {
 
 const inPath = path.resolve(
   root,
-  argValue('--in', 'public/research/scopus-shortlist.json'),
+  argValue('--in', 'public/research/library.json'),
 );
 const payload = JSON.parse(fs.readFileSync(inPath, 'utf8'));
 const papers = payload.papers || [];

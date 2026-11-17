@@ -3,7 +3,7 @@
 - `2026-07-12_library_coarse.*` — current coarse import (**v6**: urban image/street-vision + survey/human assess), includes `analysis_meta`
 - Older `*_candidates.*` — previous tighter shortlist (historical; abstract draft templates removed)
 
-Import file used by Admin UI / public fallback: `/public/research/scopus-shortlist.json`
+The shortlist is one input of the paper library. The site and Admin use `public/research/library.json`, built by `npm run research:library` (see `research/library/README.md`).
 
 Regenerate:
 
