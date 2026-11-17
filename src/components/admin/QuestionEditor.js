@@ -1696,12 +1696,11 @@ export default function QuestionEditor({
                         'aria-label': tr("Sampling Mode")
                       }} value={(() => {
                         const mode = editedQuestion.pairingMode || 'random';
-                        if (mode === 'uncertain' || mode === 'high_sigma') return 'balanced';
+                        if (mode === 'uncertain' || mode === 'high_sigma' || mode === 'adaptive') return 'balanced';
                         return mode;
                       })()} onChange={(e) => handleQuestionChange('pairingMode', e.target.value)} label={tr("Sampling Mode")}>
                               <MenuItem value="random">{tr("Random — uniform from the pool")}</MenuItem>
                               <MenuItem value="balanced">{tr("Balanced — prefer least-exposed images")}</MenuItem>
-                              <MenuItem value="adaptive">{tr("Adaptive — μ bands + cold-start for new images")}</MenuItem>
                             </Select>
                           </FormControl>;
                   })()}
@@ -1832,13 +1831,12 @@ export default function QuestionEditor({
                     'aria-label': tr("Sampling Mode")
                   }} value={(() => {
                     const mode = editedQuestion.pairingMode || 'random';
-                    if (mode === 'uncertain' || mode === 'high_sigma') return 'balanced';
+                    if (mode === 'uncertain' || mode === 'high_sigma' || mode === 'adaptive') return 'balanced';
                     return mode;
                   })()} onChange={(e) => handleQuestionChange('pairingMode', e.target.value)} label={tr("Sampling Mode")}>
                           <MenuItem value="random">{tr("Random — uniform from the pool")}</MenuItem>
                           <MenuItem value="balanced">{tr("Balanced — prefer least-exposed")} {editedQuestion.type === 'mediapicker' ? tr("media") : tr("images")}
                           </MenuItem>
-                          <MenuItem value="adaptive">{tr("Adaptive — μ bands + cold-start for new items")}</MenuItem>
                         </Select>
                       </FormControl>}
                     <AttentionCheckFields question={editedQuestion} onChange={handleQuestionChange} />

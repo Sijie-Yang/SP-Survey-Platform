@@ -91,6 +91,7 @@ Copy into the PR or release note:
 | `supabase/admin_projects_rls.sql` | `admins` + `is_platform_admin()` + admin SELECT/UPDATE/DELETE on `projects` |
 | `supabase/template_media_folders.sql` | `templates.image_dataset_config` for folder / set / category tags on templates |
 | `supabase/research_papers.sql` | Admin paper library + optional import audit (`research_papers`, `research_paper_scans`) |
+| `supabase/balanced_draws.sql` | Balanced sampling mode: `balance_claims` table, `claim_balance_number`, `complete_balance_claim`, and a trigger on `survey_responses` that marks a number as used |
 
 **Prod checklist for media folders:** confirm `supabase/template_media_folders.sql` has been run in the Supabase SQL Editor before relying on template folder/tag round-trip in production. Mark release notes: SQL run / not-run.
 
@@ -168,6 +169,14 @@ Do not promise “no impact” if question names or storage ownership change.
 - Hosted database: run `supabase/own_response_supabase.sql` once. It adds `projects.own_response_supabase` and `get_participant_response_sink`. It does not create the researcher's table.
 - Researcher table, shown in Share and pasted into their SQL editor: `sp_survey_responses` (override the table name there). Anon may INSERT only.
 - The URL and anon key are omitted from template export, builtin template JSON, and landing template config.
+
+## 11a. Balanced sampling mode
+
+- A question with `pairingMode: "balanced"` (old values `adaptive`, `uncertain`, `high_sigma` are read as `balanced`) takes its images from a participant number handed out by `claim_balance_number`. Run `supabase/balanced_draws.sql` once. Without it, or when the call fails, the browser picks its own number: the survey runs exactly as before (plain random) and the response says `balanced_draw.claim: "local"`.
+- Surveys with no balanced question make no extra call.
+- Projects that store responses in their own Supabase are balanced too: the browser tells the platform the number is used after the save succeeds (`complete_balance_claim`); the platform never sees the answers.
+- Not balanced, by design: questions that draw by category, questions with media slots, preview-library runs and researcher practice runs (`?repeat=`).
+- Old responses have no `balanced_draw` and read as random draws.
 
 ## 12. Agent / MCP / draft-publish
 

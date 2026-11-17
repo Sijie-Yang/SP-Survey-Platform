@@ -20,6 +20,9 @@ import { PLATFORM_PAPER, PLATFORM_SOFTWARE_AUTHORS, PLATFORM_URL, PLATFORM_VERSI
 import { ANALYSIS_ALGORITHM_VERSION } from './analysisVersion.js';
 import { flattenQuestions, getAttentionCheckQuestions } from './quality.js';
 
+// Sampling mode as the platform runs it: anything other than 'random' is balanced.
+const samplingModeOf = (q) => (q?.pairingMode && q.pairingMode !== 'random' ? 'balanced' : 'random');
+
 export const JOURNAL_STYLES = Object.freeze({
   epb: { id: 'epb', label: 'Environment and Planning B (SAGE)', short: 'EPB', publisher: 'sage', british: true, numbered: false, statements: ['data'] },
   ceus: { id: 'ceus', label: 'Computers, Environment and Urban Systems (Elsevier)', short: 'CEUS', publisher: 'elsevier', british: false, numbered: true, statements: ['data', 'code'] },
@@ -120,10 +123,13 @@ export function methodsFacts({ surveyConfig, responses = [], allResponses = null
   const sliders = measures.filter((q) => SLIDER_TYPES.has(q.type));
   const imageQuestions = measures.filter((q) => /^(image|media)/.test(q.type));
   const counts = stimuli.map((s) => Number(s.times_shown) || 0).filter((n) => n > 0).sort((a, b) => a - b);
+  // "Balanced" is only claimed when it really ran: every response got its number from the server.
+  // (Before any response exists, the text describes the configured plan.)
+  const balancedRan = !all.length || all.every((r) => r?.survey_metadata?.balanced_draw?.claim === 'server');
   return {
     title: surveyConfig?.title || '',
     nQuestions: measures.length,
-    pairwise: pairwise.map((q) => ({ name: q.name, title: titleOf(q), trials: Number(q.trialCount) || null, images: Number(q.imageCount) || 2, tie: !!q.allowTie, pairing: q.pairingMode || 'random' })),
+    pairwise: pairwise.map((q) => ({ name: q.name, title: titleOf(q), trials: Number(q.trialCount) || null, images: Number(q.imageCount) || 2, tie: !!q.allowTie, pairing: balancedRan ? samplingModeOf(q) : 'random' })),
     ratings: ratings.map((q) => ({ name: q.name, title: titleOf(q), min: q.rateMin ?? 1, max: q.rateMax ?? 5, minLabel: q.minRateDescription || '', maxLabel: q.maxRateDescription || '', trials: Number(q.trialCount) || null, image: q.type !== 'rating' })),
     sliders: sliders.map((q) => ({ name: q.name, title: titleOf(q), dims: (q.dimensions || []).map((d) => d.label || d.id), min: q.scaleMin ?? 0, max: q.scaleMax ?? 100 })),
     otherTypes: [...new Set(measures.filter((q) => !pairwise.includes(q) && !ratings.includes(q) && !sliders.includes(q)).map((q) => q.type))],
@@ -183,7 +189,7 @@ export function renderJournalMethods(facts, styleId = 'generic', { doi = '' } = 
   for (const g of groupBy(f.pairwise, (p) => [p.images, p.trials, p.pairing, p.tie].join('|'))) {
     const p = g[0];
     const what = g.length === 1 ? `In the ${quoted(g)} task` : `In ${numberWord(g.length)} pairwise-choice tasks (${quoted(g)})`;
-    instrument.push(`${what}, participants were shown ${p.images === 2 ? 'two images side by side' : `${p.images} images at a time`} and chose the one that better matched the question${p.trials ? ` over ${plural(p.trials, 'trial')}${g.length > 1 ? ' each' : ''}` : ''}; image pairs were drawn ${p.pairing === 'balanced' ? 'so that every image was compared a similar number of times' : p.pairing === 'adaptive' ? 'adaptively, favouring images whose scores were least certain' : 'at random'} for each participant${p.tie ? ', and a "no preference" option was available' : ''}.`);
+    instrument.push(`${what}, participants were shown ${p.images === 2 ? 'two images side by side' : `${p.images} images at a time`} and chose the one that better matched the question${p.trials ? ` over ${plural(p.trials, 'trial')}${g.length > 1 ? ' each' : ''}` : ''}; image pairs were drawn ${p.pairing === 'balanced' ? 'so that every image was shown the same number of times across participants' : 'at random'} for each participant${p.tie ? ', and a "no preference" option was available' : ''}.`);
   }
   for (const g of groupBy(f.ratings, (r) => [r.image, r.min, r.max, r.minLabel, r.maxLabel, r.trials].join('|'))) {
     const r = g[0];

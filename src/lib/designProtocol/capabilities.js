@@ -98,7 +98,7 @@ export const DESIGN_CAPABILITIES = {
       ],
     },
     relatedFields: [
-      'excludePreviouslyUsedImages', 'pairingMode (random|balanced|adaptive)',
+      'excludePreviouslyUsedImages', 'pairingMode (random|balanced: balanced shows every image equally often across participants)',
       'mediaType (any|image|video|audio)', 'mediaPresentation (stack|sequential)',
       'assignedMediaSetId / assignedMediaGroupId (runtime fill)', 'trialCount',
     ],

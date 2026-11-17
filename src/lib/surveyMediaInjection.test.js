@@ -137,10 +137,12 @@ describe('surveyMediaInjection set/category picking', () => {
     const used = new Set();
     const first = pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags);
     expect(first.images).toHaveLength(2);
-    expect(first.categories).toEqual(['a']);
+    // Which complete category comes first is up to the shuffle; the two draws must use both.
+    expect(['a', 'b']).toContain(first.categories[0]);
+    expect(first.categories).toHaveLength(1);
     first.images.forEach((img) => used.add(img.media_id));
     const second = pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags);
-    expect(second.categories).toEqual(['b']);
+    expect(second.categories).toEqual([first.categories[0] === 'a' ? 'b' : 'a']);
     second.images.forEach((img) => used.add(img.media_id));
     expect(pickRandomMediaForQuestion(pool, question, used, new Set(), null, tags).images).toEqual([]);
     const repeat = pickRandomMediaForQuestion(pool, { ...question, excludePreviouslyUsedImages: false }, used, new Set(), null, tags);
