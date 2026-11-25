@@ -26,6 +26,7 @@ import {
   spSchemeWorkflow,
   SP_SCHEME_WORKFLOW_SUMMARY,
 } from './spSchemeWorkflow.mjs';
+import { checkPublishMedia } from '../../src/lib/publishMediaCheck.mjs';
 
 function originFromRequest(request, env) {
   return env.APP_URL
@@ -465,6 +466,14 @@ export async function applyProjectOperations(
 }
 
 export async function publishProject(env, accessToken, projectId, body, ownerUserId = null) {
+  const row = await loadOwnedProject(env, accessToken, projectId, ownerUserId);
+  const mediaProblem = checkPublishMedia(
+    { ...draftConfig(row), imageDatasetConfig: row.image_dataset_config || draftConfig(row).imageDatasetConfig },
+    row.preloaded_images,
+  );
+  if (mediaProblem) {
+    throw Object.assign(new Error(mediaProblem.message), { status: 409, code: mediaProblem.code, questions: mediaProblem.questions });
+  }
   const result = await rpc(env, 'release_project_version', {
     p_project_id: projectId,
     p_expected_draft_updated_at: body?.expectedDraftUpdatedAt || null,
