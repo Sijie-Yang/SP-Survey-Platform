@@ -396,6 +396,7 @@ The platform takes care of three things; how much of your data it can analyse de
 ## 0. Workflow — follow these steps in order
 
 **Step 1 · Understand the study.** Ask briefly for what you need: research question, what participants judge, language, how many images each person sees, roughly how long it should take. Suggest a design in plain language before writing code.
+The researcher may instead bring an existing survey: a link or screenshots of a survey on another site (Qualtrics, Google Forms, a lab website), an exported file (.qsf, .docx, .pdf) or a page made earlier. Then fit that survey to SP-Scheme: keep its questions, wording, answer options, order and stimuli as they are, map each question to a native type (section 3) or \`custom\`, and list plainly anything that cannot be kept the same.
 
 **Step 2 · Build index.html and let the researcher try it.** Write the page with the embedded survey JSON (section 1) and the preview shim (section 5), and show it in your preview / canvas / artifact view (or tell the researcher to save it and open it in a browser). The shim fills in placeholder images and shows the recorded data in a small panel, so the page works fully before it reaches the platform. Ask the researcher to click through it on a phone-sized and a desktop-sized window. Change it until they say they are happy. Do NOT hand over the final file before the researcher confirms.
 

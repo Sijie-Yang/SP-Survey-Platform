@@ -77,7 +77,7 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
           elevation={0}
           sx={{
             mt: { xs: 3, md: 4 },
-            p: { xs: 2, sm: 3 },
+            p: { xs: 1.5, sm: 2.5 },
             borderRadius: '20px',
             border: '1px solid',
             borderColor: 'rgba(255,255,255,0.35)',
@@ -85,17 +85,24 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
             backdropFilter: 'blur(12px)',
             boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
             display: 'grid',
-            gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.65fr) minmax(0, 1fr)' },
-            gap: { xs: 2.5, md: 3 },
+            gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.65fr) minmax(0, 1fr)' },
+            gap: { xs: 2, md: 2.5 },
           }}
         >
-          <Box component="section" aria-labelledby="studio-choice-ai" sx={{ minWidth: 0 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+          <Box
+            component="section"
+            aria-labelledby="studio-choice-ai"
+            sx={{ minWidth: 0, p: { xs: 2, sm: 2.5 }, borderRadius: '14px', border: '1px solid', borderColor: 'divider' }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
               <AutoAwesome color="primary" />
-              <Typography id="studio-choice-ai" component="h2" variant="h6" sx={{ fontWeight: 700 }}>
+              <Typography id="studio-choice-ai" component="h2" variant="h6" sx={{ fontWeight: 700, fontSize: '1.15rem', lineHeight: 1.3 }}>
                 {L('Let AI make the survey', '让 AI 做问卷')}
               </Typography>
             </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              {L('Design a new survey, or bring one you already have (Qualtrics, Google Forms, a lab website, a past study): your AI fits it to SP-Scheme.', '可以做新调查，也可以把已有的调查（Qualtrics、Google 表单、实验室网站、以前的研究）交给 AI 改成 SP-Scheme。')}
+            </Typography>
             <StudioImportFlow showSteps onImported={onImported} />
           </Box>
 
@@ -104,7 +111,6 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
             aria-labelledby="studio-choice-classic"
             sx={{
               minWidth: 0,
-              alignSelf: 'start',
               p: { xs: 2, sm: 2.5 },
               borderRadius: '14px',
               border: '1px solid',
@@ -118,7 +124,7 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <ViewListOutlined color="action" />
-              <Typography id="studio-choice-classic" component="h2" variant="h6" sx={{ fontWeight: 700 }}>
+              <Typography id="studio-choice-classic" component="h2" variant="h6" sx={{ fontWeight: 700, fontSize: '1.15rem', lineHeight: 1.3 }}>
                 {L('Build it question by question', '自己逐题搭建')}
               </Typography>
             </Box>
