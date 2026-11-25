@@ -71,7 +71,8 @@ import {
   spSchemeSpec,
 } from '../agent/spSchemeAgent.mjs';
 import { DOWNLOAD_MAX_JSON_BYTES, DOWNLOAD_MAX_ROWS, createDownloadUrl } from '../agent/resultsDownload.mjs';
-import { isPlatformAdmin, publishTemplate } from '../agent/projectLifecycle.mjs';
+import { isPlatformAdmin, loadOwned, publishTemplate } from '../agent/projectLifecycle.mjs';
+import { checkPublishMedia } from '../../src/lib/publishMediaCheck.mjs';
 import { listNews, listWiki, saveNewsDraft, submitWiki } from '../research/siteContent.mjs';
 import { listPapers, PAPER_STATUSES, SAVE_MAX as PAPER_SAVE_MAX, savePapers } from '../research/paperLibrary.mjs';
 import { keepStoredSiteHtml, trimResultSiteHtml } from '../agent/siteDraft.mjs';
@@ -518,7 +519,8 @@ const TOOLS = [
     name: 'media_import_from_template',
     description:
       'PREFERRED way to seed project media: copy an existing published template\'s R2 media into an owned project. '
-      + 'Use this instead of generating or uploading synthetic images. Requires confirm:true.',
+      + 'Use this instead of generating or uploading synthetic images. A large template is copied over several calls: '
+      + 'when the reply has remaining > 0, call it again (copied files are skipped). Publish again afterwards. Requires confirm:true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1161,6 +1163,19 @@ async function callTool(env, auth, request, name, args = {}) {
     case 'survey_publish': {
       requireScope(auth, 'surveys:publish');
       if (!args.confirm) return toolResult({ error: 'Set confirm:true to publish.' }, true);
+      if (!args.restoreVersion) {
+        const row = await loadOwned(env, { ...mcpCtx(auth), projectId: args.projectId });
+        const config = row.survey_config_draft ?? row.survey_config ?? {};
+        const mediaProblem = checkPublishMedia({ ...config, imageDatasetConfig: row.image_dataset_config || config.imageDatasetConfig }, row.preloaded_images);
+        if (mediaProblem) {
+          return toolResult({
+            error: mediaProblem.message,
+            code: mediaProblem.code,
+            questions: mediaProblem.questions,
+            next: 'Put images in the project media library first (media_import_from_template, media_upload, or the media library in Studio), then call survey_publish again.',
+          }, true);
+        }
+      }
       let published;
       try {
         published = useService

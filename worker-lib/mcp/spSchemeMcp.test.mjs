@@ -371,6 +371,31 @@ describe('survey_publish and survey_preview_urls links', () => {
   });
 });
 
+describe('survey_publish with an empty media library', () => {
+  const picker = { pages: [{ name: 'p1', elements: [{ type: 'imagepicker', name: 'safer', imageCount: 2, imageSelectionMode: 'huggingface_random', randomImageSelection: true }] }] };
+  it('refuses to publish questions that draw images while the library is empty', async () => {
+    let released = false;
+    db = fakeSupabase({
+      projects: [projectRow({ survey_config_draft: picker, preloaded_images: [] })],
+      rpc: { release_project_version: () => { released = true; return { publishedVersion: 1 }; } },
+    });
+    const res = await callTool(baseEnv(), 'survey_publish', { projectId: 'proj_1_abc', expectedDraftUpdatedAt: 'x', confirm: true });
+    assert.equal(res.isError, true);
+    assert.equal(res.body.code, 'MEDIA_LIBRARY_EMPTY');
+    assert.deepEqual(res.body.questions, ['safer']);
+    assert.equal(released, false);
+  });
+
+  it('publishes once the library has images', async () => {
+    db = fakeSupabase({
+      projects: [projectRow({ survey_config_draft: picker, preloaded_images: [{ url: 'https://media.example/a.jpg', name: 'a.jpg' }] })],
+      rpc: { release_project_version: () => ({ publishedVersion: 1, publishedAt: 'now', releaseManaged: true }) },
+    });
+    const res = await callTool(baseEnv(), 'survey_publish', { projectId: 'proj_1_abc', expectedDraftUpdatedAt: 'x', confirm: true });
+    assert.equal(res.isError, false, JSON.stringify(res.body));
+  });
+});
+
 describe('survey_download_url and GET /api/mcp/download/<token>', () => {
   const rows = [
     { id: 'r1', project_id: 'proj_1_abc', participant_id: 'P1', created_at: '2026-11-02T00:00:00Z', responses: { __sp_page_state: { answers: { q1: 3 } } }, survey_metadata: { survey_revision: 'rev1' } },

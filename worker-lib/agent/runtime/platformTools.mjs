@@ -303,7 +303,7 @@ export function createPlatformTools({
     },
     {
       name: 'media_import_from_template',
-      description: 'Copy existing template media into the current project. Prefer this over uploads.',
+      description: 'Copy existing template media into the current project. Prefer this over uploads. When the reply has remaining > 0, call it again (copied files are skipped).',
       minPermission: 'media',
       domain: 'media',
       executionMode: 'exclusive',

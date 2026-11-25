@@ -5,6 +5,8 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 ## Unreleased
 
 ### Changed
+- Publishing through MCP or the in-site assistant is refused while the project media library is empty but questions (or an SP-Scheme page) draw images from it: a published version never uses preview images, so participants would see none. Studio and the classic editor already checked this.
+- Copying a template's media into a project (MCP media_import_from_template, project duplicate, save as template) now copies several files at a time and skips files already copied. The MCP import stops starting new copies after 35 s and registers what it copied, so a large template is copied over a few calls instead of timing out with nothing in the media library.
 - Weekly paper scan also backfills older papers: one publication year per week, walking back to 2000, as candidates only. Crossref year filters now use full dates. New docs/scheduled-jobs.md lists every recurring job.
 - Templates are edited only online: 平台管理 → 模板管理 no longer has 导入内置模板 or 导出全部, and `public/project_templates/` is a frozen backup (read only as a fallback).
 - Removed the GitHub Pages deploy workflow, which failed on every docs change; the site deploys through Cloudflare.
