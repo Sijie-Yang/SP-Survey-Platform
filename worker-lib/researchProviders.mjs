@@ -145,8 +145,9 @@ async function searchCrossref({ query, limit = 20, yearFrom, yearTo, mailto }) {
     select: 'DOI,title,author,published-print,published-online,container-title,abstract,URL,subject,type',
   });
   const filters = [];
-  if (yearFrom) filters.push(`from-pub-date:${yearFrom}`);
-  if (yearTo) filters.push(`until-pub-date:${yearTo}`);
+  if (yearFrom) filters.push(`from-pub-date:${yearFrom}-01-01`);
+  // Full dates so a one-year range (yearFrom = yearTo) covers the whole year.
+  if (yearTo) filters.push(`until-pub-date:${yearTo}-12-31`);
   if (filters.length) params.set('filter', filters.join(','));
 
   const headers = {
