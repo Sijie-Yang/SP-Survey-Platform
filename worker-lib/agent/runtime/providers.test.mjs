@@ -21,7 +21,7 @@ describe('providers', () => {
   });
 
   it('requires vision models for silicon', () => {
-    assert.equal(modelCapabilities('deepseek', 'deepseek-v4-flash-vision-exp').vision, true);
+    assert.equal(modelCapabilities('deepseek', 'deepseek-flash').vision, true);
     assert.throws(() => assertVisionModel('deepseek', 'deepseek-v4-pro'), /vision-language/);
   });
 
@@ -34,7 +34,7 @@ describe('providers', () => {
       const result = await listProviderModels('', 'openrouter');
       assert.equal(result.success, true);
       assert.equal(result.fetched, false);
-      assert.equal(result.models.length, 366);
+      assert.equal(result.models.length, 412);
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -70,7 +70,7 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
             textShadow: '0 1px 12px rgba(0,0,0,0.4)',
           }}
         >
-          {L('Let your AI write the survey page, drop it in, and send it to participants.', '让你的 AI 写好问卷页面，放进来，就能发给参与者。')}
+          {L('Describe the study, let AI write the survey page, and send it to participants.', '描述你的研究，让 AI 写好问卷页面，就能发给参与者。')}
         </Typography>
 
         <Paper
@@ -101,7 +101,7 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
               </Typography>
             </Box>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              {L('Design a new survey, or bring one you already have (Qualtrics, Google Forms, a lab website, a past study): your AI fits it to SP-Scheme.', '可以做新调查，也可以把已有的调查（Qualtrics、Google 表单、实验室网站、以前的研究）交给 AI 改成 SP-Scheme。')}
+              {L('Design a new survey, or bring one you already have (Qualtrics, Google Forms, a lab website, a past study): the AI fits it to SP-Scheme.', '可以做新调查，也可以把已有的调查（Qualtrics、Google 表单、实验室网站、以前的研究）交给 AI 改成 SP-Scheme。')}
             </Typography>
             <StudioImportFlow showSteps onImported={onImported} />
           </Box>

@@ -15,7 +15,7 @@ describe('shared route validators', () => {
   it('requires a vision model for Silicon', () => {
     assert.doesNotThrow(() => assertRoute({
       provider: 'deepseek',
-      model: 'deepseek-v4-flash-vision-exp',
+      model: 'deepseek-flash',
       requireVision: true,
       credential: { key_hint: 'sk-***abcd' },
       requireConfigured: true,
@@ -38,7 +38,7 @@ describe('shared route validators', () => {
   it('lets pi-ai clamp a stored reasoning level for the selected model', () => {
     assert.doesNotThrow(() => assertRoute({
       provider: 'deepseek',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       effort: 'medium',
     }));
   });

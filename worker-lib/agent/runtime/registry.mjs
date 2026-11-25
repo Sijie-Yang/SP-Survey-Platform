@@ -2,6 +2,7 @@ import {
   authUnsupported,
   catalogModel,
   catalogProvider,
+  currentModelId,
   extraHeaders,
   isApiKeyAuth,
   listCatalogProviders,
@@ -139,6 +140,8 @@ export function availableModelId(providerId, requested, {
     return resolveModelRoute(providerId, model.id, profile)?.supported !== false;
   });
   if (requested && models.some((model) => model.id === requested)) return requested;
+  const successor = currentModelId(providerId, requested);
+  if (successor && models.some((model) => model.id === successor)) return successor;
   const preferred = vision ? provider.defaultModels.silicon : provider.defaultModels.assistant;
   if (preferred && models.some((model) => model.id === preferred)) return preferred;
   return models[0]?.id || '';

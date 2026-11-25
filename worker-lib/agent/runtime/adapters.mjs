@@ -3,6 +3,9 @@ import { googleGenerativeAIApi } from '@earendil-works/pi-ai/api/google-generati
 import { mistralConversationsApi } from '@earendil-works/pi-ai/api/mistral-conversations.lazy';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
+// pi-ai 1.x reads the prompt and tools from the transcript, so every raw
+// Context goes through normalizeContext() before it reaches an API.
+import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
 import { classifyHttpError, parseRetryAfter, withRetry } from './retry.mjs';
 import { assertProviderResponseNotRedirect, assertSafeBaseUrl } from './ssrf.mjs';
 import { createRawToolArgCollector, parseRawToolArguments } from './toolArgs.mjs';
@@ -451,7 +454,7 @@ export async function modelRequest(options) {
       code: 'PROTOCOL_UNSUPPORTED',
     });
   }
-  const context = await toPiContext(options.messages || [], options.tools || [], options.signal);
+  const context = normalizeContext(await toPiContext(options.messages || [], options.tools || [], options.signal));
   return withRetry(
     async () => {
       try {

@@ -24,13 +24,13 @@ describe('catalog credential validation', () => {
       });
       assert.equal(result.success, true);
       assert.equal(result.validated, true);
-      assert.equal(result.model, 'deepseek-v3.2');
+      assert.equal(result.model, 'deepseek-v4-flash-0731');
       assert.equal(
         request.url,
-        'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions',
+        'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/chat/completions',
       );
       assert.equal(request.init.headers.get('authorization'), 'Bearer sk-sp-example-valid-key');
-      assert.equal(JSON.parse(request.init.body).model, 'deepseek-v3.2');
+      assert.equal(JSON.parse(request.init.body).model, 'deepseek-v4-flash-0731');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -73,7 +73,7 @@ describe('catalog credential validation', () => {
         provider: 'qwen-dashscope',
       });
       assert.equal(result.success, true);
-      assert.equal(result.model, 'deepseek-v3.2');
+      assert.equal(result.model, 'deepseek-v4-flash-0731');
       assert.equal(
         request.url,
         'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',

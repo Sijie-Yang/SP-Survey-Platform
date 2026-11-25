@@ -2,8 +2,8 @@
 /**
  * Deterministically materialize the model catalog consumed by the Worker.
  *
- * DeepSeek Harness 0.1.6-alpha.1 resolves its built-in providers through
- * @earendil-works/pi-ai 0.85.1. We read that exact installed npm artifact,
+ * DeepSeek Harness 0.2.2-rc.5 resolves its built-in providers through
+ * @earendil-works/pi-ai ^1.3.0 (dsh-llm-pi-ai); we pin 1.6.1. We read that exact installed npm artifact,
  * retain the model facts SP-Survey needs, and check in the result so requests
  * never depend on npm, GitHub, or models.dev.
  */
@@ -17,13 +17,13 @@ import {
   getBuiltinProviders,
 } from '@earendil-works/pi-ai/providers/all';
 
-const HARNESS_VERSION = '0.1.6-alpha.1';
-const HARNESS_COMMIT = '0a15e36e7f82b6ed45af6fa9759f29b40dcd965d';
-const PI_AI_VERSION = '0.85.1';
-const PI_AI_COMMIT = 'd981de1229ef899957bbe968bc8dcda02a21f477';
-const PI_AI_INTEGRITY = 'sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ==';
-const EXPECTED_PROVIDER_COUNT = 39;
-const EXPECTED_MODEL_COUNT = 1354;
+const HARNESS_VERSION = '0.2.2-rc.5';
+const HARNESS_COMMIT = null; // npm 0.2.2-rc.5 publishes no gitHead
+const PI_AI_VERSION = '1.6.1';
+const PI_AI_COMMIT = null; // npm 1.6.1 publishes no gitHead
+const PI_AI_INTEGRITY = 'sha512-EyorgVyA2s4MxNl7YOapzOpdxrc8HUgxHEIOo8QRMK35P7PCOsSiWzMLf6ixKl3/obkg7I3wGJWHq+FdbUz43g==';
+const EXPECTED_PROVIDER_COUNT = 43;
+const EXPECTED_MODEL_COUNT = 1696;
 const SUPPORTED_RUNTIME_APIS = new Set([
   'anthropic-messages',
   'google-generative-ai',
@@ -41,7 +41,7 @@ const NATIVE_AUTH = {
     auth: 'adc',
     authHint: 'Requires Application Default Credentials and a GCP project. An API key alone cannot configure Vertex.',
   },
-  'azure-openai-responses': {
+  azure: {
     auth: 'azure',
     authHint: 'Requires an Azure resource, deployment name, and api-version. An API key field alone is not enough.',
   },
@@ -86,12 +86,12 @@ const KEY_DOCS = {
 };
 
 const DEFAULT_MODELS = {
-  deepseek: { assistant: 'deepseek-v4-pro', silicon: 'deepseek-v4-flash-vision-exp' },
+  deepseek: { assistant: 'deepseek-flash', silicon: 'deepseek-flash' },
   openai: { assistant: 'gpt-5.6-sol', silicon: 'gpt-5.6-sol' },
   openrouter: { assistant: 'openai/gpt-5.6-sol', silicon: 'openai/gpt-5.6-sol' },
   anthropic: { assistant: 'claude-sonnet-5', silicon: 'claude-sonnet-5' },
   google: { assistant: 'gemini-3.8-flash', silicon: 'gemini-3.8-flash' },
-  mistral: { assistant: 'mistral-large-latest', silicon: 'pixtral-large-latest' },
+  mistral: { assistant: 'mistral-large-latest', silicon: 'mistral-large-latest' },
   minimax: { assistant: 'MiniMax-M3', silicon: 'MiniMax-M3' },
   'minimax-cn': { assistant: 'MiniMax-M3', silicon: 'MiniMax-M3' },
   'kimi-coding': { assistant: 'k3', silicon: 'k3' },
