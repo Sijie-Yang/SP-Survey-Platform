@@ -802,6 +802,8 @@ export async function listProjectMedia(env, ctx, projectId) {
   };
 }
 
+const IMPORT_COPY_BUDGET_MS = 35000;
+
 export async function importMediaFromTemplate(env, ctx, projectId, body = {}) {
   const row = await loadOwned(env, { ...ctx, projectId });
   const templateId = body.templateId || row.template_id;
@@ -813,10 +815,13 @@ export async function importMediaFromTemplate(env, ctx, projectId, body = {}) {
     throw Object.assign(new Error('R2 is not configured on this server.'), { status: 503 });
   }
   const ownerId = ctx.userId || row.user_id;
+  // Stop starting new copies well before the MCP client gives up (60 s), so the
+  // files copied so far are always registered; a second call copies the rest.
   const copy = await copyPrefixMedia(
     env,
     templateMediaPrefix(templateId),
     projectMediaPrefix(ownerId, projectId),
+    { deadlineMs: Date.now() + IMPORT_COPY_BUDGET_MS },
   );
   const now = new Date().toISOString();
   const preloaded = (copy.files || []).map((f) => {
@@ -844,7 +849,18 @@ export async function importMediaFromTemplate(env, ctx, projectId, body = {}) {
       updated_at: now,
     },
   });
-  return { success: true, projectId, templateId, ...copy };
+  const { files, ...summary } = copy;
+  return {
+    success: true,
+    projectId,
+    templateId,
+    ...summary,
+    registered: preloaded.length,
+    done: copy.remaining === 0 && !copy.errors?.length,
+    next: copy.remaining > 0
+      ? `${copy.remaining} file(s) not copied yet: call media_import_from_template again with the same projectId and templateId; files already copied are skipped.`
+      : 'All template media is in the project media library. Publish again so the participant link uses it.',
+  };
 }
 
 export async function deleteProjectMedia(env, ctx, projectId, body = {}) {

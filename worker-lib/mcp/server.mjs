@@ -518,7 +518,8 @@ const TOOLS = [
     name: 'media_import_from_template',
     description:
       'PREFERRED way to seed project media: copy an existing published template\'s R2 media into an owned project. '
-      + 'Use this instead of generating or uploading synthetic images. Requires confirm:true.',
+      + 'Use this instead of generating or uploading synthetic images. A large template is copied over several calls: '
+      + 'when the reply has remaining > 0, call it again (copied files are skipped). Publish again afterwards. Requires confirm:true.',
     inputSchema: {
       type: 'object',
       properties: {

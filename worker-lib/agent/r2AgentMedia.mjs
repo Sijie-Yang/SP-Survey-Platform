@@ -274,29 +274,48 @@ export async function deletePrefixMedia(env, prefix, keys = null) {
   return { configured: true, deleted: safe.length };
 }
 
-export async function copyPrefixMedia(env, fromPrefix, toPrefix) {
+const COPY_CONCURRENCY = 6; // Workers keep at most 6 connections open at a time
+
+/**
+ * Copy every object under fromPrefix to toPrefix, a few at a time. A file that
+ * is already at the destination with the same size is not copied again, so a
+ * copy cut short can simply be run again. With `deadlineMs`, no new copy starts
+ * after that time; `remaining` says how many files are still to copy.
+ * `files` lists every source file now at the destination (copied now or before).
+ */
+export async function copyPrefixMedia(env, fromPrefix, toPrefix, { deadlineMs = null, now = () => Date.now() } = {}) {
   const backend = getR2Backend(env);
-  if (!backend) return { configured: false, copied: 0, errors: [] };
+  if (!backend) return { configured: false, copied: 0, skipped: 0, remaining: 0, files: [], errors: [] };
   const listed = await backend.list(fromPrefix);
+  const existing = new Map();
+  (await backend.list(toPrefix)).forEach((o) => existing.set(o.key, o.size));
   const publicBase = String(env.R2_PUBLIC_URL || '').replace(/\/$/, '');
-  const copied = [];
   const errors = [];
-  for (const obj of listed) {
+  let copied = 0;
+  let skipped = 0;
+  let remaining = 0;
+  const results = await mapWithConcurrency(listed, COPY_CONCURRENCY, async (obj) => {
     const rel = obj.key.slice(fromPrefix.length);
     const to = `${toPrefix}${rel}`;
+    const file = { from: obj.key, to, url: publicBase ? `${publicBase}/${to}` : '', name: rel.split('/').pop() };
+    if (existing.has(to) && (obj.size == null || existing.get(to) === obj.size)) {
+      skipped += 1;
+      return file;
+    }
+    if (deadlineMs != null && now() >= deadlineMs) {
+      remaining += 1;
+      return null;
+    }
     try {
       await backend.copy(obj.key, to);
-      copied.push({
-        from: obj.key,
-        to,
-        url: publicBase ? `${publicBase}/${to}` : '',
-        name: rel.split('/').pop(),
-      });
+      copied += 1;
+      return file;
     } catch (err) {
       errors.push({ from: obj.key, to, error: err.message || String(err) });
+      return null;
     }
-  }
-  return { configured: true, copied: copied.length, files: copied, errors };
+  });
+  return { configured: true, copied, skipped, remaining, files: results.filter(Boolean), errors };
 }
 
 /**
