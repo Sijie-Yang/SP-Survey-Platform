@@ -1,13 +1,13 @@
 /**
- * The platform's own AI for SP-Scheme: the researcher describes a study (or
- * pastes an existing survey) and the Assistant model writes the index.html.
+ * Writes or changes an SP-Scheme page for the in-browser Assistant's
+ * SP-Scheme mode (tool sp_scheme_write_page).
  *
  * The model only writes text. Whether the page is usable is decided by the
  * same deterministic check Studio runs on a dropped file
  * (src/lib/spSchemeImport.js); when that check finds problems, the problems
  * go back to the model for a fixed number of repair rounds, and the best page
- * is returned with whatever problems remain. Studio then shows it in the
- * normal import card, so nothing is imported without the researcher's click.
+ * is returned with whatever problems remain. The tool saves it only when it
+ * passes.
  */
 
 import { strToU8 } from 'fflate';
@@ -17,8 +17,6 @@ import { prepareSpSchemeUpload, summarizeSpSchemeImport } from '../../src/lib/sp
 export const MAX_REQUEST_CHARS = 20000;
 export const MAX_CURRENT_HTML_CHARS = 200000;
 export const MAX_REPAIR_ROUNDS = 2;
-export const MAX_HISTORY_TURNS = 10;
-const MAX_HISTORY_CHARS = 2000;
 const MAX_REPLY_CHARS = 1200;
 const MAX_OUTPUT_TOKENS = 32000;
 
@@ -26,9 +24,8 @@ const BUILT_IN_RULES = `
 
 ## How to answer here
 
-You are the AI built into SP-Survey Studio. The researcher typed the request below into Studio; they cannot see code.
-- When you write or change the page: first one or two short sentences, in the researcher's language, saying what you made or changed; then one \`\`\`html block holding the whole index.html. Nothing after the block.
-- When the researcher only asks a question about the study or the page, answer briefly in plain words and do not send a page.
+You write the study page for SP-Survey's built-in Assistant. The request below comes from a researcher who cannot see code.
+- First one or two short sentences, in the researcher's language, saying what you made or changed; then one \`\`\`html block holding the whole index.html. Nothing after the block.
 - The page must work on its own: no external scripts, stylesheets, fonts or CDNs; plain HTML, CSS and JavaScript inline.
 - Do not hard-code image URLs. Declare the media folders the study needs; the researcher uploads the images afterwards.
 - Write what participants read in the language the researcher writes in, unless they ask for another language.
@@ -39,31 +36,12 @@ function fail(message, status = 400, code = 'BAD_REQUEST') {
   return Object.assign(new Error(message), { status, code });
 }
 
-export function normalizeGenerateRequest(body = {}) {
-  const request = String(body?.request || '').trim();
-  if (!request) throw fail('Describe the study you want first.');
-  if (request.length > MAX_REQUEST_CHARS) {
-    throw fail(`The description is too long (over ${MAX_REQUEST_CHARS} characters). Shorten it or attach the survey as a file to your own AI.`);
-  }
-  const currentHtml = typeof body?.currentHtml === 'string' ? body.currentHtml : '';
-  if (currentHtml.length > MAX_CURRENT_HTML_CHARS) {
-    throw fail('The current page is too large for the built-in AI to edit.');
-  }
-  const history = (Array.isArray(body?.history) ? body.history : [])
-    .filter((turn) => (turn?.role === 'user' || turn?.role === 'assistant') && String(turn?.text || '').trim())
-    .slice(-MAX_HISTORY_TURNS)
-    .map((turn) => ({ role: turn.role, content: String(turn.text).trim().slice(0, MAX_HISTORY_CHARS) }));
-  return { request, currentHtml, history };
-}
-
-/** What the model said outside the page: its short note to the researcher. */
+/** What the model said before the page: its short note to the researcher. */
 export function extractReply(text) {
   const raw = String(text || '');
-  const fence = raw.search(/```/);
-  const doc = raw.search(/<!doctype html|<html[\s>]/i);
-  const cut = [fence, doc].filter((i) => i >= 0);
+  const cut = [raw.search(/```/), raw.search(/<!doctype html|<html[\s>]/i)].filter((i) => i >= 0);
   const before = cut.length ? raw.slice(0, Math.min(...cut)) : raw;
-  return before.replace(/\s+\n/g, '\n').trim().slice(0, MAX_REPLY_CHARS);
+  return before.trim().slice(0, MAX_REPLY_CHARS);
 }
 
 /** The page inside the model's answer: the ```html block, or the bare document. */
@@ -135,62 +113,23 @@ export function buildFirstMessage({ request, currentHtml }) {
   ].join('\n');
 }
 
-async function resolveModelCall(env, userId, deps) {
-  const credentials = deps.credentials || await import('./credentials.mjs');
-  const subsidyLib = deps.subsidy || await import('./subsidy.mjs');
-  const registry = deps.registry || await import('./runtime/registry.mjs');
-  const validators = deps.validators || await import('./runtime/validators.mjs');
-
-  const settings = await credentials.loadUserAiSettings(env, userId);
-  const profiles = await credentials.listProviderProfiles(env, userId);
-  const candidates = [];
-  const ownProvider = settings.assistant_provider || settings.default_provider || '';
-  if (ownProvider) {
-    const profile = profiles.find((row) => row.provider === ownProvider) || {};
-    try {
-      candidates.push({ provider: ownProvider, model: registry.availableModelId(ownProvider, settings.assistant_model, { profile }) });
-    } catch {
-      // An unknown or removed provider: fall through to the shared model.
-    }
-  }
-  // No model of their own: the platform's shared (free) model, if the admin opened one.
-  const subsidy = await subsidyLib.loadActiveSubsidy(env);
-  for (const route of subsidyLib.normalizeSubsidyRoutes(subsidy?.allowed_routes)) {
-    candidates.push(route);
-  }
-
-  for (const { provider, model } of candidates) {
-    if (!provider || !model) continue;
-    let binding;
-    try {
-      binding = await credentials.resolveAssistantBinding(env, userId, provider, model, { receiverProfiles: profiles });
-    } catch (error) {
-      if (error?.code === 'CREDENTIALS_MISSING') continue;
-      throw error;
-    }
-    if (!binding?.credential?.apiKey) continue;
-    const profile = binding.profile || {};
-    const checked = validators.assertRoute({ provider, model, profile, requireConfigured: true, credential: binding.credential });
-    const modelRecord = registry.resolveModel(provider, model, profile);
-    return { provider, model, binding, checked, modelRecord };
-  }
-  throw fail('No AI model is available right now. Add your own model and key in AI & Integrations, or use your own AI with the copied instructions.', 400, 'CREDENTIALS_MISSING');
-}
-
 /**
- * Write (or change) a study page. Returns the best page found and Studio's
- * check of it; `rounds` counts the model calls.
+ * Write (or change) a page with the given model route. Returns the best page
+ * found, the model's short note on it and Studio's check; `rounds` counts the
+ * model calls.
+ * @param {{ chat: Function, route: object, request: string, currentHtml?: string }} input
+ *   route = { apiKey, provider, baseUrl, model, modelRecord, protocol, compat, extra }
  */
-export async function handleSpSchemeGenerate(env, userId, body, deps = {}) {
-  const input = normalizeGenerateRequest(body);
-  const call = await resolveModelCall(env, userId, deps);
-  const chat = deps.chatCompletions || (await import('./runtime/providers.mjs')).chatCompletions;
+export async function writeSpSchemePage({ chat, route, request, currentHtml = '' }) {
+  const text = String(request || '').trim();
+  if (!text) throw fail('Say what the page should be or what to change.');
+  if (text.length > MAX_REQUEST_CHARS) throw fail(`The request is too long (over ${MAX_REQUEST_CHARS} characters).`);
+  const html0 = typeof currentHtml === 'string' ? currentHtml : '';
+  if (html0.length > MAX_CURRENT_HTML_CHARS) throw fail('The current page is too large for the built-in AI to edit.');
 
   const messages = [
     { role: 'system', content: buildSpSchemeText() + BUILT_IN_RULES },
-    // Earlier turns as plain text only; the current page below is the source of truth.
-    ...input.history,
-    { role: 'user', content: buildFirstMessage(input) },
+    { role: 'user', content: buildFirstMessage({ request: text, currentHtml: html0 }) },
   ];
   let best = null;
   let reply = '';
@@ -198,27 +137,14 @@ export async function handleSpSchemeGenerate(env, userId, body, deps = {}) {
   for (let round = 0; round <= MAX_REPAIR_ROUNDS; round += 1) {
     rounds += 1;
     const result = await chat({
-      apiKey: call.binding.credential.apiKey,
-      provider: call.provider,
-      baseUrl: call.checked.route.baseUrl,
-      model: call.model,
-      modelRecord: call.modelRecord,
-      protocol: call.checked.route.protocol,
-      compat: call.modelRecord?.compat,
-      extra: call.checked.route.headers,
+      ...route,
       temperature: 0.2,
-      maxTokens: Math.min(Number(call.modelRecord?.maxTokens) || MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS),
+      maxTokens: Math.min(Number(route.modelRecord?.maxTokens) || MAX_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS),
       messages,
     });
     const answer = String(result?.content || '');
     const html = extractHtml(answer);
     if (round === 0) reply = extractReply(answer);
-    // A question about an existing page gets a plain answer and no new page.
-    if (round === 0 && !html && input.currentHtml && reply) {
-      return {
-        success: true, provider: call.provider, model: call.model, shared: call.binding.source === 'subsidy', rounds, html: '', reply, check: null,
-      };
-    }
     const summary = html
       ? checkGeneratedPage(html)
       : { ok: false, asIs: true, problems: [{ path: '', message: 'The answer did not contain an HTML page.' }] };
@@ -228,22 +154,20 @@ export async function handleSpSchemeGenerate(env, userId, body, deps = {}) {
     messages.push({ role: 'assistant', content: answer.slice(0, 200000) || '(empty answer)' });
     messages.push({ role: 'user', content: problemsMessage(fixes) });
   }
-  if (!best) {
-    throw fail('The AI did not return a page. Try again, or describe the study in a few more words.', 502, 'GENERATE_EMPTY');
-  }
+  if (!best) return { html: '', reply, rounds, passed: false, check: { ok: false, asIs: true, matchLevel: 'none', problems: [{ path: '', message: 'The AI did not return a page.' }] } };
+  const problems = pageFixList(best.summary);
   return {
-    success: true,
-    provider: call.provider,
-    model: call.model,
-    shared: call.binding.source === 'subsidy',
-    rounds,
     html: best.html,
     reply,
+    rounds,
+    passed: Boolean(best.summary.ok && !best.summary.asIs),
     check: {
       ok: best.summary.ok,
       asIs: best.summary.asIs,
       matchLevel: best.summary.matchLevel || 'none',
-      problems: pageFixList(best.summary),
+      title: best.summary.title || '',
+      questionCount: best.summary.questionCount || 0,
+      problems,
     },
   };
 }

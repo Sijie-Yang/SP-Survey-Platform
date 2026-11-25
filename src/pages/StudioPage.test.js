@@ -25,7 +25,22 @@ jest.mock('../lib/r2', () => ({
   r2KeyFromUrl: () => null,
 }));
 jest.mock('../lib/templateRequest', () => ({ compressImage: jest.fn() }));
-jest.mock('../lib/agentApi', () => ({ generateSpSchemePage: jest.fn() }));
+jest.mock('../components/admin/ChatAssistant', () => ({ __esModule: true, default: (props) => <div data-testid="chat-assistant">mode {props.assistantMode}</div> }));
+jest.mock('../hooks/useSurveyAssistant', () => {
+  const calls = [];
+  const send = jest.fn();
+  const setUserMessage = jest.fn();
+  const hook = (options) => {
+    calls.push(options);
+    return { assistantMode: options.defaultMode || 'agent', apiKeyValid: true, isLoading: false, handleSendMessage: send, setUserMessage };
+  };
+  return {
+    __esModule: true,
+    default: hook,
+    chatPropsFromAssistant: (a) => ({ assistantMode: a.assistantMode }),
+    __mock: { calls, send, setUserMessage },
+  };
+});
 jest.mock('../lib/studioData', () => ({
   isStudioLocalMode: jest.fn(),
   listStudioProjects: jest.fn(),
@@ -53,7 +68,7 @@ import { LEGACY_SURVEY_HTML } from '../lib/__fixtures__/legacySurvey';
 import { setActiveProject } from '../lib/projectManager';
 import { deleteImagesFromR2, uploadImageToR2 } from '../lib/r2';
 import { compressImage } from '../lib/templateRequest';
-import { generateSpSchemePage } from '../lib/agentApi';
+import { __mock as assistantMock } from '../hooks/useSurveyAssistant';
 import {
   countStudioResponses,
   createStudioProject,
@@ -165,82 +180,32 @@ test('the new-study screen offers the AI page and the classic editor as equal ch
   expect(screen.getByRole('link', { name: 'Start from a paper template' })).toHaveAttribute('href', '/admin');
 });
 
-test('the built-in AI writes the page from a description, and it goes through the normal check and import', async () => {
-  generateSpSchemePage.mockResolvedValueOnce({ success: true, html: buildExampleSite(), check: { ok: true, problems: [] } });
+test('describing a study creates it and hands the description to its AI assistant', async () => {
+  assistantMock.send.mockClear();
   const router = openAt('/studio');
   const box = screen.getByRole('textbox', { name: 'Describe your study' });
   expect(screen.getByRole('button', { name: 'Make it with AI' })).toBeDisabled();
-  fireEvent.change(box, { target: { value: 'Compare street photos for cycling safety' } });
+  fireEvent.change(box, { target: { value: 'Compare street photos for cycling safety\n20 pairs' } });
   fireEvent.click(screen.getByRole('button', { name: 'Make it with AI' }));
-  expect(generateSpSchemePage).toHaveBeenCalledWith({ request: 'Compare street photos for cycling safety' });
-  expect(await screen.findByTestId('studio-import-verdict')).toHaveTextContent('Matches SP-Scheme');
-  fireEvent.click(screen.getByRole('button', { name: 'Import' }));
   await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
-  expect(saveStudioProject.mock.calls[0][1].spSite.html).toContain('SPSite.onReady');
-  // The new study's AI assistant starts with this exchange.
-  const chat = await screen.findByTestId('studio-ai-chat');
-  expect(within(chat).getByText('Compare street photos for cycling safety')).toBeInTheDocument();
+  expect(createStudioProject).toHaveBeenCalledWith('Compare street photos for cycling safety');
+  expect(await screen.findByTestId('studio-assistant')).toBeInTheDocument();
+  await waitFor(() => expect(assistantMock.send).toHaveBeenCalledWith({ message: 'Compare street photos for cycling safety\n20 pairs', assistantMode: 'spscheme' }));
 });
 
-test('without a model the built-in AI says so and points to your own AI', async () => {
-  generateSpSchemePage.mockResolvedValueOnce({ success: false, code: 'CREDENTIALS_MISSING', error: 'none' });
-  openAt('/studio');
-  fireEvent.change(screen.getByRole('textbox', { name: 'Describe your study' }), { target: { value: 'x' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Make it with AI' }));
-  expect(await screen.findByText(/No AI model is available right now/)).toBeInTheDocument();
-  expect(screen.getByText('Drop the survey your AI built here')).toBeInTheDocument();
-});
-
-test('inside a study the AI assistant chats, saves checked pages, can undo, and answers questions', async () => {
-  const changed = buildExampleSite().replace('<body>', '<body><!-- changed -->');
-  generateSpSchemePage
-    .mockResolvedValueOnce({ success: true, html: changed, reply: 'Added an age question.', model: 'deepseek-flash', shared: true, check: { ok: true, problems: [] } })
-    .mockResolvedValueOnce({ success: true, html: '', reply: 'It has 3 questions.', model: 'deepseek-flash', shared: true, check: null });
+test('a study with a page has the built-in assistant in SP-Scheme mode; a classic study does not', async () => {
+  assistantMock.send.mockClear();
   openAt('/studio/p1');
-  const chat = await screen.findByTestId('studio-ai-chat');
-  const box = within(chat).getByRole('textbox', { name: 'Message to the AI' });
-  fireEvent.change(box, { target: { value: 'Add an age question' } });
-  fireEvent.click(within(chat).getByRole('button', { name: 'Send' }));
-  expect(await within(chat).findByText('Added an age question.')).toBeInTheDocument();
-  expect(within(chat).getByText('Saved. The preview shows the new page.')).toBeInTheDocument();
-  expect(within(chat).getByText('deepseek-flash (free)')).toBeInTheDocument();
-  const first = generateSpSchemePage.mock.calls[0][0];
-  expect(first.request).toBe('Add an age question');
-  expect(first.currentHtml).toContain('SPSite.onReady');
-  expect(first.history).toEqual([]);
-  await waitFor(() => expect(saveStudioProject).toHaveBeenCalledTimes(1));
-  expect(saveStudioProject.mock.calls[0][1].spSite.html).toContain('<!-- changed -->');
-
-  fireEvent.change(box, { target: { value: 'How many questions?' } });
-  fireEvent.click(within(chat).getByRole('button', { name: 'Send' }));
-  expect(await within(chat).findByText('It has 3 questions.')).toBeInTheDocument();
-  expect(generateSpSchemePage.mock.calls[1][0].history).toEqual([
-    { role: 'user', text: 'Add an age question' },
-    { role: 'assistant', text: 'Added an age question.' },
-  ]);
-  expect(saveStudioProject).toHaveBeenCalledTimes(1);
-
-  fireEvent.click(within(chat).getByRole('button', { name: 'Undo this change' }));
-  expect(await within(chat).findByText('Undone: the page before this change is back.')).toBeInTheDocument();
-  expect(saveStudioProject).toHaveBeenCalledTimes(2);
-  expect(saveStudioProject.mock.calls[1][1].spSite.html).not.toContain('<!-- changed -->');
+  expect(await screen.findByTestId('chat-assistant')).toHaveTextContent('mode spscheme');
+  expect(assistantMock.calls.at(-1).defaultMode).toBe('spscheme');
+  expect(assistantMock.calls.at(-1).currentProject.id).toBe('p1');
+  expect(assistantMock.send).not.toHaveBeenCalled();
 });
 
-test('a page from the AI that fails the check is not saved', async () => {
-  generateSpSchemePage.mockResolvedValueOnce({ success: true, html: '<!doctype html><html><body>hi</body></html>', reply: 'Done.', check: { ok: true, asIs: true, problems: [{ message: 'No questions are declared.' }] } });
-  openAt('/studio/p1');
-  const chat = await screen.findByTestId('studio-ai-chat');
-  fireEvent.change(within(chat).getByRole('textbox', { name: 'Message to the AI' }), { target: { value: 'x' } });
-  fireEvent.click(within(chat).getByRole('button', { name: 'Send' }));
-  expect(await within(chat).findByText(/Not saved: the page still has problems/)).toBeInTheDocument();
-  expect(within(chat).getByText('No questions are declared.')).toBeInTheDocument();
-  expect(saveStudioProject).not.toHaveBeenCalled();
-});
-
-test('a classic study has no AI assistant card', async () => {
+test('a classic study has no AI assistant card in Studio', async () => {
   openAt('/studio/p2');
   expect(await screen.findByTestId('studio-project-name')).toHaveTextContent('Classic one');
-  expect(screen.queryByTestId('studio-ai-chat')).toBeNull();
+  expect(screen.queryByTestId('studio-assistant')).toBeNull();
 });
 
 test('copying the instructions puts SP-Scheme on the clipboard', async () => {

@@ -5,7 +5,7 @@ import {
 } from './applySchema.mjs';
 
 export const DEFAULT_ASSISTANT_MODE = 'agent';
-export const ASSISTANT_MODES = Object.freeze(['agent', 'generate', 'adjust', 'question', 'review']);
+export const ASSISTANT_MODES = Object.freeze(['agent', 'spscheme', 'generate', 'adjust', 'question', 'review']);
 
 const READ_ONLY_TOOLS = new Set([
   'survey_capabilities',
@@ -19,6 +19,8 @@ const READ_ONLY_TOOLS = new Set([
 const MODE_PROMPTS = Object.freeze({
   agent: `Assistant mode: Agent.
 Act autonomously and select the tools needed to achieve the user's goal. A draft mutation is optional unless the goal requires changing the survey. Do not mutate the draft for explanation-only requests.`,
+  spscheme: `Assistant mode: SP-Scheme.
+The study is one SP-Scheme web page that holds every question. To create the study or change anything participants see, call sp_scheme_write_page once with the researcher's request written out in full (every detail they gave; for a change, exactly what to change). The platform writes the page, checks it and saves it only when it passes. Never use survey_apply_operations. Questions or explanations need no tool, or only survey_get_draft. After the tool returns, tell the researcher in one or two plain sentences what changed, or which problems stopped it from being saved.`,
   generate: `Assistant mode: Generate.
 Create a complete, usable survey. Load generate capabilities and the current draft, then save only with survey_submit_generated_draft. Pass expectedDraftUpdatedAt and surveyConfig { title, pages }. Do not send an operations array or replaceConfig. Do not finish with only advice or a partial configuration.`,
   adjust: `Assistant mode: Adjust.

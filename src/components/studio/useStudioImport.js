@@ -54,12 +54,6 @@ export default function useStudioImport() {
     }
   }, [prepareBytes]);
 
-  /** A page written by the built-in AI, checked like a dropped file. */
-  const loadHtml = useCallback((html, name = 'index.html') => {
-    if (busy.current) return;
-    prepareBytes(new TextEncoder().encode(String(html || '')), name);
-  }, [prepareBytes]);
-
   const startExample = useCallback(() => {
     if (busy.current) return;
     prepareBytes(buildExampleZip(), 'street-perception-example.zip');
@@ -116,7 +110,6 @@ export default function useStudioImport() {
     importing,
     progress,
     readFiles,
-    loadHtml,
     startExample,
     toggleHost,
     reset,

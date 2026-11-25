@@ -10,14 +10,13 @@ import {
   Typography,
 } from '@mui/material';
 import { AutoAwesome, ContentCopy, FileUploadOutlined, PlayCircleOutline } from '@mui/icons-material';
-import { generateSpSchemePage } from '../../lib/agentApi';
 import { useOptionalAuth } from '../../contexts/AuthContext';
 import { SP_SCHEME_VERSION, buildSpSchemeText } from '../../lib/spScheme';
 import { spSchemeProblems, spSchemeProblemsText, summarizeSpSchemeImport } from '../../lib/spSchemeImport';
-import { isStudioLocalMode } from '../../lib/studioData';
+import { createStudioProject, isStudioLocalMode } from '../../lib/studioData';
 import { copyOrDownload, useL } from './studioUi';
 import useStudioImport from './useStudioImport';
-import { writeStudioAiChat } from './StudioAiChat';
+import { queueStudioAssistantPrompt } from './StudioAssistant';
 
 const ACCEPT = '.html,.htm,.zip,text/html,application/zip';
 
@@ -92,40 +91,35 @@ export function StudioDropZone({ onFiles, disabled = false, dense = false }) {
   );
 }
 
-function aiErrorText(result, L) {
-  if (result?.code === 'CREDENTIALS_MISSING') {
-    return L(
-      'No AI model is available right now. Use your own AI below, or add a model in AI & Integrations.',
-      '现在没有可用的 AI 模型。可以用下面的方法交给你自己的 AI，或者在“AI 与集成”里添加模型。',
-    );
-  }
-  return L(`The AI could not write the page: ${result?.error || 'unknown error'}. Try again.`, `AI 没能写好页面：${result?.error || '未知错误'}。请再试一次。`);
+/** A short study name from the first line of the description. */
+export function studyNameFromPrompt(text, fallback) {
+  const first = String(text || '').split('\n').map((line) => line.trim()).find(Boolean) || '';
+  if (!first) return fallback;
+  return first.length > 40 ? `${first.slice(0, 40)}…` : first;
 }
 
 /**
- * The platform's own AI: describe the study (or paste an existing survey) and
- * it writes the SP-Scheme page; with `currentHtml` it changes that page. The
- * page then goes through the same check and import card as a dropped file.
+ * The new-study box: describe the study (or paste an existing survey); a new
+ * study opens with the built-in Assistant (SP-Scheme mode) already working on it.
  */
-export function StudioAiWriter({ importer, currentHtml = '', dense = false, onGenerated = () => {} }) {
+export function StudioAiWriter({ dense = false, onStarted = () => {} }) {
   const L = useL();
   const [text, setText] = useState('');
-  const [running, setRunning] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
-  const editing = Boolean(currentHtml);
-  const run = async () => {
+  const start = async () => {
     const request = text.trim();
-    if (!request || running) return;
-    setRunning(true);
+    if (!request || starting) return;
+    setStarting(true);
     setError('');
-    const result = await generateSpSchemePage({ request, ...(editing ? { currentHtml } : {}) });
-    setRunning(false);
-    if (!result?.success || !result.html) {
-      setError(aiErrorText(result, L));
+    const result = await createStudioProject(studyNameFromPrompt(request, L('New study', '新研究')));
+    setStarting(false);
+    if (!result?.success) {
+      setError(L(`The study could not be created: ${result?.error}`, `没能新建研究：${result?.error}`));
       return;
     }
-    onGenerated({ request, result });
-    importer.loadHtml(result.html, 'index.html');
+    queueStudioAssistantPrompt(result.project.id, request);
+    onStarted({ projectId: result.project.id, created: true });
   };
   return (
     <Box data-testid="studio-ai-writer" sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -135,33 +129,23 @@ export function StudioAiWriter({ importer, currentHtml = '', dense = false, onGe
         maxRows={10}
         fullWidth
         value={text}
-        disabled={running}
+        disabled={starting}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run(); }}
-        inputProps={{ 'aria-label': editing ? L('What should change', '要怎么改') : L('Describe your study', '描述你的研究'), maxLength: 20000 }}
-        placeholder={editing
-          ? L('What should change? For example: add a question about age; make the buttons larger.', '要怎么改？例如：加一道年龄题；按钮再大一点。')
-          : L(
-            'Describe your study, for example: participants compare two street photos and pick the one that looks safer for cycling, 20 pairs, then a few questions about themselves. You can also paste an existing survey.',
-            '描述你的研究，例如：参与者两两比较街景照片，选出哪条看起来骑车更安全，做 20 组，最后问几道个人信息。也可以直接贴上已有问卷的题目。',
-          )}
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) start(); }}
+        inputProps={{ 'aria-label': L('Describe your study', '描述你的研究'), maxLength: 20000 }}
+        placeholder={L(
+          'Describe your study, for example: participants compare two street photos and pick the one that looks safer for cycling, 20 pairs, then a few questions about themselves. You can also paste an existing survey.',
+          '描述你的研究，例如：参与者两两比较街景照片，选出哪条看起来骑车更安全，做 20 组，最后问几道个人信息。也可以直接贴上已有问卷的题目。',
+        )}
       />
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-        <Button variant="contained" startIcon={<AutoAwesome />} onClick={run} disabled={running || !text.trim()}>
-          {running ? L('Writing…', '正在写…') : editing ? L('Change it with AI', '让 AI 修改') : L('Make it with AI', '让 AI 生成')}
+        <Button variant="contained" startIcon={<AutoAwesome />} onClick={start} disabled={starting || !text.trim()}>
+          {starting ? L('Creating…', '正在新建…') : L('Make it with AI', '让 AI 生成')}
         </Button>
         <Typography variant="caption" color="text.secondary">
-          {L('The platform checks the page before you import it.', '导入前平台会先检查页面。')}
+          {L('Opens the study with the AI assistant; keep chatting there to change it.', '会新建研究并打开 AI 助手，之后可以在那里继续对话修改。')}
         </Typography>
       </Box>
-      {running && (
-        <Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-            {L('The AI is writing the page and the platform is checking it. This usually takes 1–3 minutes.', 'AI 正在写页面，平台会自动检查并让它修正，通常需要 1–3 分钟。')}
-          </Typography>
-          <LinearProgress />
-        </Box>
-      )}
       {error && <Alert severity="error">{error}</Alert>}
     </Box>
   );
@@ -378,26 +362,11 @@ export default function StudioImportFlow({ project = null, onImported, runImport
   // The built-in AI runs on the server, so it needs a signed-in researcher.
   // Inside a study the AI assistant card does this, so the box is only on the new-study screen.
   const canUseAi = Boolean(auth?.user?.id) && !isStudioLocalMode() && !project;
-  // The AI's first exchange, kept so the new study's AI assistant starts with it.
-  const aiSeed = useRef(null);
-  const readFiles = (files) => { aiSeed.current = null; importer.readFiles(files); };
+  const readFiles = (files) => importer.readFiles(files);
 
   const doImport = async () => {
     const result = await runImport(() => importer.runImport({ project, userId, fallbackName: L('New study', '新研究') }));
     if (result) {
-      const seed = aiSeed.current;
-      aiSeed.current = null;
-      if (seed && result.created && result.projectId) {
-        writeStudioAiChat(result.projectId, [
-          { role: 'user', text: seed.request },
-          {
-            role: 'assistant',
-            text: seed.result.reply || L('Here is the survey page.', '问卷页面做好了。'),
-            status: 'saved',
-            model: seed.result.model ? (seed.result.shared ? L(`${seed.result.model} (free)`, `${seed.result.model}（免费）`) : seed.result.model) : '',
-          },
-        ]);
-      }
       importer.reset();
       onImported?.(result);
     }
@@ -438,7 +407,7 @@ export default function StudioImportFlow({ project = null, onImported, runImport
         <>
           {canUseAi && (
             <>
-              <StudioAiWriter importer={importer} dense={dense} onGenerated={(seed) => { aiSeed.current = seed; }} />
+              <StudioAiWriter dense={dense} onStarted={(result) => onImported?.(result)} />
               <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
                 {L('Or use your own AI (ChatGPT, Claude, …)', '或者用你自己的 AI（ChatGPT、Claude 等）')}
               </Typography>
@@ -447,7 +416,7 @@ export default function StudioImportFlow({ project = null, onImported, runImport
           <StudioDropZone onFiles={readFiles} dense={dense || canUseAi} />
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
             <CopySpecButton variant={canUseAi ? 'outlined' : 'contained'} label={L('Copy the instructions for your AI', '复制给 AI 的说明')} />
-            <Button variant="outlined" startIcon={<PlayCircleOutline />} onClick={() => { aiSeed.current = null; importer.startExample(); }}>
+            <Button variant="outlined" startIcon={<PlayCircleOutline />} onClick={importer.startExample}>
               {L('Start from the example', '从示例开始')}
             </Button>
           </Box>

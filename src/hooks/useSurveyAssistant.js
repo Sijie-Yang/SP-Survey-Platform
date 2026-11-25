@@ -28,9 +28,17 @@ function loadProjectNumber(projectId, key, fallback) {
   const stored = window.localStorage.getItem(`${key}_${projectId}`);
   return stored ? parseInt(stored, 10) : fallback;
 }
-const ASSISTANT_MODES = new Set(['agent', 'generate', 'adjust', 'question', 'review']);
-function normalizeAssistantMode(value) {
-  return ASSISTANT_MODES.has(value) ? value : 'agent';
+// Two modes: SP-Scheme (writes the study page) and Classic ('agent': question by question).
+// Older stored modes (generate / adjust / question / review) open as Classic.
+const ASSISTANT_MODES = new Set(['agent', 'spscheme']);
+function normalizeAssistantMode(value, fallback = 'agent') {
+  if (ASSISTANT_MODES.has(value)) return value;
+  return ASSISTANT_MODES.has(fallback) ? fallback : 'agent';
+}
+/** SP-Scheme studies (a page, or Studio) default to SP-Scheme; classic surveys to Classic. */
+export function defaultAssistantMode(surveyConfig, preferred = null) {
+  if (preferred && ASSISTANT_MODES.has(preferred)) return preferred;
+  return surveyConfig?.spSite?.html ? 'spscheme' : 'agent';
 }
 export default function useSurveyAssistant({
   currentProject,
@@ -41,7 +49,8 @@ export default function useSurveyAssistant({
   editorSelectionSourceRef = null,
   hasUnsavedChanges = false,
   lastSavedConfig = null,
-  onPrepareWrite = null
+  onPrepareWrite = null,
+  defaultMode = null
 } = {}) {
   const platformMode = detectPlatformMode();
   const language = useContext(RegionContext)?.language || 'en';
@@ -52,7 +61,7 @@ export default function useSurveyAssistant({
   const [assistantDirectory, setAssistantDirectory] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState('');
   const [selectedEffort, setSelectedEffort] = useState('');
-  const [assistantMode, setAssistantMode] = useState(() => normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', 'agent')));
+  const [assistantMode, setAssistantMode] = useState(() => normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', ''), defaultAssistantMode(surveyConfig, defaultMode)));
   const [aiSessionId, setAiSessionId] = useState(() => readSessionId(typeof window !== 'undefined' ? window.sessionStorage : null, projectId));
   const [activeRunId, setActiveRunId] = useState(() => readPendingRun(typeof window !== 'undefined' ? window.sessionStorage : null, projectId)?.runId || '');
   const [pendingApproval, setPendingApproval] = useState(null);
@@ -90,6 +99,8 @@ export default function useSurveyAssistant({
   const projectIdRef = useRef(projectId);
   const generationRef = useRef(0);
   const surveyConfigRef = useRef(surveyConfig);
+  const defaultModeRef = useRef(defaultMode);
+  defaultModeRef.current = defaultMode;
   const onChangeRef = useRef(onSurveyConfigChange);
   const enabledRef = useRef(enabled);
   const handleAssistantModeChange = useCallback(value => {
@@ -333,7 +344,7 @@ export default function useSurveyAssistant({
     setMultiAgentReviewEnabled(loadProjectFlag(projectId, 'multiAgentReviewEnabled', false));
     setReviewMode(loadProjectString(projectId, 'reviewMode', '1v1'));
     setMaxReviewRounds(loadProjectNumber(projectId, 'maxReviewRounds', 3));
-    setAssistantMode(normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', 'agent')));
+    setAssistantMode(normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', ''), defaultAssistantMode(surveyConfigRef.current, defaultModeRef.current)));
     setReviewOptionsState(reviewOptionsFromSettings(reviewSettingsRef.current));
     const timer = setTimeout(() => {
       isLoadingProjectSettings.current = false;
@@ -767,6 +778,12 @@ export default function useSurveyAssistant({
           }
         }
       });
+      // The run reports the draft without the page HTML; an SP-Scheme run changed the page,
+      // so read the whole saved survey (page included) before showing it.
+      if (sendMode === 'spscheme' && result?.draftMutated && result?.persisted && request.projectId) {
+        const full = await loadSurveyConfigForProject(request.projectId).catch(() => null);
+        if (full) result.surveyConfig = full;
+      }
       if (result.sessionId) {
         writeSessionId(typeof window !== 'undefined' ? window.sessionStorage : null, request.projectId, result.sessionId);
       }

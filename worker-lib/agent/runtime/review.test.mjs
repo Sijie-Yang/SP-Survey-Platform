@@ -125,7 +125,7 @@ describe('review options and estimate', () => {
   });
 
   it('adds Review as a separate read-only mode without changing the other four', () => {
-    assert.deepEqual(ASSISTANT_MODES, ['agent', 'generate', 'adjust', 'question', 'review']);
+    assert.deepEqual(ASSISTANT_MODES, ['agent', 'spscheme', 'generate', 'adjust', 'question', 'review']);
     const review = getAssistantModePolicy('review', { goalRequiresDraftChange: true });
     assert.equal(review.readOnly, true);
     assert.equal(review.requireDraftChange, false);

@@ -1136,13 +1136,8 @@ export default function ChatAssistant({
                     '& .MuiSelect-select': { py: 0.5, pl: 0.75, pr: 2.5 },
                   }}
                 >
-                  <MenuItem value="agent">{t.aiSidebarModeAgent}</MenuItem>
-                  <MenuItem value="generate">{t.aiSidebarModeGenerate}</MenuItem>
-                  <MenuItem value="adjust">{t.aiSidebarModeAdjust}</MenuItem>
-                  <MenuItem value="question">{t.aiSidebarModeQuestion}</MenuItem>
-                  {reviewSettings?.enabled !== false || assistantMode === 'review' ? (
-                    <MenuItem value="review">{t.aiSidebarModeReview || 'Review'}</MenuItem>
-                  ) : null}
+                  <MenuItem value="spscheme">{t.aiSidebarModeSpScheme || 'SP-Scheme'}</MenuItem>
+                  <MenuItem value="agent">{t.aiSidebarModeClassic || 'Classic'}</MenuItem>
                 </Select>
               )}
               {isPlatformMode && modelOptions.length > 0 ? (

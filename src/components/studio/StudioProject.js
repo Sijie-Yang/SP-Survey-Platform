@@ -43,7 +43,7 @@ import { studioPublishProblems } from '../../lib/studioPublish';
 import { classicHasUnsavedEdits } from '../../lib/studioState';
 import StudioImportFlow, { CopySpecButton } from './StudioImport';
 import StudioMediaCard from './StudioMediaCard';
-import StudioAiChat from './StudioAiChat';
+import StudioAssistant from './StudioAssistant';
 import StudioLinkCard from './StudioLinkCard';
 import StudioResultsCard from './StudioResultsCard';
 import StudioSettingsDialog from './StudioSettingsDialog';
@@ -213,7 +213,7 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
   const releaseUnknown = Boolean(project?.releaseManaged) && release === null;
   // Read each render: the classic editor of this tab may hold edits Studio must not hide.
   const classicUnsaved = classicHasUnsavedEdits(projectId);
-  // The AI assistant writes SP-Scheme pages; classic surveys have the classic editor's assistant.
+  // The built-in Assistant (SP-Scheme mode) for page and empty studies; classic surveys use the classic editor.
   const aiChat = Boolean(auth?.user?.id) && !localMode && (kind === 'page' || kind === 'empty');
 
   /** Apply one change to a fresh read and show the result. Run it inside `queue`. */
@@ -466,12 +466,15 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 2, sm: 2.25 }, minWidth: 0 }}>
           {aiChat && (
-            <StudioAiChat
+            <StudioAssistant
+              key={project.id}
               project={project}
               config={config}
-              runImport={runImport}
-              busy={busy}
-              userId={auth?.user?.id || null}
+              onSaved={() => queue(async () => {
+                const next = await refresh();
+                if (next) savedRef.current(next);
+              })}
+              onSaveConfig={(next) => write(() => ({ config: next }))}
             />
           )}
           <StudioMediaCard project={project} config={config} busy={busy} queue={queue} applyWrite={applyWrite} />

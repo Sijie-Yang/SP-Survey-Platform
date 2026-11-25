@@ -24,7 +24,6 @@ import { handleAgentChat } from './chatHandler.mjs';
 import { handleSurveyTranslate } from './translate.mjs';
 import { handleResultsAiAnalysis } from './resultsAiAnalysis.mjs';
 import { handleSpSchemeFetchPage } from './spSchemeFetchPage.mjs';
-import { handleSpSchemeGenerate } from './spSchemeGenerate.mjs';
 import { useAgentRuntime } from './runtime/flags.mjs';
 import { startDesignerRun } from './runtime/designerChat.mjs';
 import {
@@ -587,14 +586,6 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
       }
       const body = await request.json();
       return jsonResponse(await handleResultsAiAnalysis(env, auth.userId, body));
-    }
-
-    if (pathname === '/api/agent/sp-scheme/generate' && request.method === 'POST') {
-      if (auth.kind !== 'supabase') {
-        return errorResponse(Object.assign(new Error('The built-in AI requires a browser session'), { status: 403 }));
-      }
-      const body = await request.json();
-      return jsonResponse(await handleSpSchemeGenerate(env, auth.userId, body));
     }
 
     if (pathname === '/api/agent/sp-scheme/fetch-page' && request.method === 'POST') {
