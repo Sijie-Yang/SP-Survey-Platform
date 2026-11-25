@@ -90,7 +90,10 @@ export function authorizationServerMetadata(request, env) {
     code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'],
     scopes_supported: [...DEFAULT_SCOPES, 'offline_access'],
-    client_id_metadata_document_supported: true,
+    // Clients register at registration_endpoint. Client ID metadata documents
+    // (a URL as client_id) are not supported: advertising them made claude.ai
+    // send a URL client_id that getClient() cannot find ("Unknown client_id").
+    client_id_metadata_document_supported: false,
   };
 }
 
