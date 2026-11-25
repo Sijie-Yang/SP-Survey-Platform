@@ -50,5 +50,5 @@ test('signed-in visitors open the workspace instead of signing in again', () => 
   mockAuthState.isAuthenticated = true;
   renderHeader();
   const link = screen.getByRole('link', { name: 'Open workspace' });
-  expect(link).toHaveAttribute('href', '/admin');
+  expect(link).toHaveAttribute('href', '/studio');
 });

@@ -10,6 +10,7 @@ import { ToastProvider } from './components/layout/ToastProvider';
 const QuestionPreviewPage = lazy(() => import('./components/admin/QuestionPreviewPage'));
 const SurveyApp = lazy(() => import('./SurveyApp'));
 const AdminApp = lazy(() => import('./AdminApp'));
+const StudioPage = lazy(() => import('./pages/StudioPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const LiveSurveysPage = lazy(() => import('./pages/LiveSurveysPage'));
@@ -48,6 +49,24 @@ function ProtectedAdmin() {
   }
 
   return <AdminApp />;
+}
+
+function ProtectedStudio() {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <StudioPage />;
 }
 
 function ProtectedAdminDashboard() {
@@ -144,6 +163,8 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/s/:slug" element={<SurveyApp />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/oauth/mcp" element={<McpOAuthPage />} />
+                <Route path="/studio" element={<ProtectedStudio />} />
+                <Route path="/studio/:projectId" element={<ProtectedStudio />} />
                 <Route path="/admin" element={<ProtectedAdmin />} />
                 <Route path="/admin/integrations" element={<ProtectedIntegrations />} />
                 <Route path="/admin-dashboard" element={<ProtectedAdminDashboard />} />

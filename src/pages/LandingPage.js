@@ -11,7 +11,7 @@ import {
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { researcherEntryPath } from '../lib/researcherEntry';
+import { WORKSPACE_PATH, researcherEntryPath } from '../lib/researcherEntry';
 import { supabase } from '../lib/supabase';
 import { stripOwnResponseSupabase } from '../lib/ownResponseSupabase';
 import { projectTemplates } from '../lib/projectTemplates';
@@ -350,7 +350,7 @@ export default function LandingPage() {
                 '&:hover': { bgcolor: '#fff' },
               }}
             >
-              {workspacePath === '/admin' ? t.navOpenWorkspace : t.landStartFree}
+              {workspacePath === WORKSPACE_PATH ? t.navOpenWorkspace : t.landStartFree}
             </Button>
             <Button
               variant="outlined"
@@ -590,7 +590,7 @@ export default function LandingPage() {
             onClick={() => navigate(workspacePath)}
             sx={{ bgcolor: 'white', color: 'primary.main', fontWeight: 700, px: 5, py: 1.5, '&:hover': { bgcolor: 'grey.100' } }}
           >
-            {workspacePath === '/admin' ? t.navOpenWorkspace : t.landGetStarted}
+            {workspacePath === WORKSPACE_PATH ? t.navOpenWorkspace : t.landGetStarted}
           </Button>
         </Container>
       </Box>

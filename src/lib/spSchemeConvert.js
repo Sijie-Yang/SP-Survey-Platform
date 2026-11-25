@@ -6,8 +6,8 @@
  * 2026-10-15; nothing in this file calls a model.
  */
 
-import { SP_SCHEME_FORMAT, SP_SCHEME_VERSION } from './spScheme';
-import { externalHostsIn, normalizeAllowedHosts, stripSitePreviewShim } from './spSite';
+import { SP_SCHEME_FORMAT, SP_SCHEME_VERSION } from './spScheme.js';
+import { externalHostsIn, normalizeAllowedHosts, stripSitePreviewShim } from './spSiteCore.js';
 
 export const CONVERT_MAX_HTML_CHARS = 200000;
 

@@ -148,7 +148,7 @@ export default function PublicHeader({
           }}>{label}</Button>)}
           </Box>}
           {wideNavigation && <><RegionSwitcher variant="public" />{githubLink}</>}
-          <Button component={RouterLink} to={entryPath} variant="outlined" size="small" aria-current={isActive(entryPath) ? 'page' : undefined} sx={{
+          <Button component={RouterLink} to={entryPath} variant="outlined" size="small" aria-current={activeItem(entryPath) ? 'page' : undefined} sx={{
           flexShrink: 0,
           whiteSpace: 'nowrap',
           fontWeight: 600,
@@ -156,7 +156,7 @@ export default function PublicHeader({
             xs: 12,
             sm: 13
           },
-          bgcolor: isActive(entryPath) ? 'action.selected' : 'transparent'
+          bgcolor: activeItem(entryPath) ? 'action.selected' : 'transparent'
         }}>
             {signedIn ? t.navOpenWorkspace : t.navResearcherLogin}
           </Button>

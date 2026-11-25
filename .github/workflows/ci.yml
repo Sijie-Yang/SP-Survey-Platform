@@ -72,6 +72,7 @@ jobs:
           node -e "import('./worker-lib/agent/router.mjs').then((m) => { if (typeof m.handleAgentAndMcpRoutes !== 'function') process.exit(1); })"
           node -e "import('./worker-lib/mcp/server.mjs').then((m) => { if (typeof m.handleMcpRequest !== 'function') process.exit(1); })"
           node -e "import('./worker-lib/silicon/handlers.mjs').then((m) => { if (typeof m.createSiliconRun !== 'function') process.exit(1); })"
+          node -e "import('./src/lib/spSchemeImport.js').then((m) => { if (typeof m.prepareSpSchemeUpload !== 'function') process.exit(1); })"
 
       - name: Production build
         run: npm run build

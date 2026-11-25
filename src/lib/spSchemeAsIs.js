@@ -4,8 +4,8 @@
  * in its own storage and every request it sends. No model is involved.
  */
 
-import { applyConversion, candidateHosts, planMediaUpload, rawConversionResult } from './spSchemeConvert';
-import { stripSitePreviewShim } from './spSite';
+import { applyConversion, candidateHosts, planMediaUpload, rawConversionResult } from './spSchemeConvert.js';
+import { stripSitePreviewShim } from './spSiteCore.js';
 
 /**
  * The page prepared for an as-is import: an empty SP-Scheme block replaces any
