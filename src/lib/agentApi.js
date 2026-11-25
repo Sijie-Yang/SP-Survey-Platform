@@ -102,6 +102,14 @@ export async function writeQuestionAnalysis(body) {
   });
 }
 
+/** Ask the built-in AI to write (or, with currentHtml, change) an SP-Scheme page. */
+export async function generateSpSchemePage(body) {
+  return agentFetch('/api/agent/sp-scheme/generate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 /** Fetch a published survey page on the server (no CORS), with its same-site scripts inlined. */
 export async function fetchSurveyPage(url) {
   return agentFetch('/api/agent/sp-scheme/fetch-page', {
