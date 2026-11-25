@@ -1,5 +1,7 @@
 # Contributing a research template
 
+> **Where templates live now.** Templates are stored online (Supabase) and published by platform admins with the MCP tool `template_publish`; the paper is added to the paper library with `paper_save` and linked by `templateId`. `public/project_templates/` is a frozen backup (see its README) and is no longer synced. The guidance below on content, deviations and stimuli still applies.
+
 A template turns a published perception study into a survey anyone can start from in one click. Good templates are the platform's most-cited feature, so they follow the paper closely and say plainly where they don't.
 
 ## What a template is

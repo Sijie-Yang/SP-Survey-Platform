@@ -5,6 +5,7 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 ## Unreleased
 
 ### Changed
+- Templates are edited only online: 平台管理 → 模板管理 no longer has 导入内置模板 or 导出全部, and `public/project_templates/` is a frozen backup (read only as a fallback).
 - Removed the GitHub Pages deploy workflow, which failed on every docs change; the site deploys through Cloudflare.
 - Licence: source code is now under MIT; documentation, survey templates and research data stay under CC BY 4.0.
 
