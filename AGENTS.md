@@ -42,6 +42,7 @@ Pure modules live under `src/lib/designProtocol/` (mirrored for Workers in `work
 - Bypass optimistic concurrency (`expectedDraftUpdatedAt`)
 - Confuse **Save as Template** / **Publish to Main Page** / **`survey_publish`** (participant release plus version snapshot)
 - Use `template_publish` unless the user is a platform admin (checked on the server) who owns the project; it publishes an approved template directly, online, with no repo sync (`surveys:publish`; overwriting `templateId` needs `overwrite: true`). Others use `survey_save_as_template` (review)
+- Admins keep the paper library, news and SP-Wiki online with `paper_save` (link a paper to its template with `templateId`), `news_save` (drafts) and `wiki_submit` (pending submissions). Take DOIs and author lists from the paper or Crossref, never from memory
 - Share or log signed upload/download links; they are credentials until they expire
 - Expose or log BYOK ciphertext/plaintext
 
