@@ -432,7 +432,7 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
                 {kind === 'page' ? (
                   <>
                     <Button variant="outlined" size="small" startIcon={<SwapHoriz />} onClick={() => setDialog('replace')} disabled={busy}>
-                      {L('Use another page', '换一个页面')}
+                      {L('Change the page', '修改页面')}
                     </Button>
                     <CopySpecButton
                       size="small"
@@ -504,7 +504,7 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
       />
 
       <Dialog open={dialog === 'replace'} onClose={() => { if (!busy) setDialog(''); }} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{L('Use another page', '换一个页面')}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>{L('Change the page', '修改页面')}</DialogTitle>
         <DialogContent>
           {dialog === 'replace' && (
             <StudioImportFlow
