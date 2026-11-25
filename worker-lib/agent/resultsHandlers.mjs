@@ -128,7 +128,7 @@ function hasAnswer(qData) {
   return true;
 }
 
-async function fetchAllResponses(env, projectId) {
+export async function fetchAllResponses(env, projectId) {
   return readAllResponsePages((offset, after) => supabaseRest(env, {
     path: '/rest/v1/survey_responses', serviceRole: true,
     query: `?project_id=eq.${encodeURIComponent(projectId)}&select=*&order=created_at.desc.nullslast,id.desc&limit=1000${after ? `&or=${encodeURIComponent(`(${responseCursorFilter(after)})`)}` : ''}`,

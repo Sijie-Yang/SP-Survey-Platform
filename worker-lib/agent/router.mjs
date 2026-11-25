@@ -136,6 +136,7 @@ import {
   DEFAULT_SCOPES,
 } from '../oauth/mcpOAuth.mjs';
 import { handleMcpRequest } from '../mcp/server.mjs';
+import { handleMcpTransferRoutes } from '../mcp/transferRoutes.mjs';
 
 /** OAuth token/revoke bodies are usually form-urlencoded (RFC 6749), not JSON. */
 async function parseOAuthBody(request) {
@@ -364,6 +365,12 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
     const auth = await resolveAuth(request, env, { allowMcp: true });
     if (!auth) return unauthorized(request, env);
     return handleMcpRequest(request, env, auth);
+  }
+
+  // Signed upload / download links handed out by MCP tools (the token is the credential).
+  if (pathname.startsWith('/api/mcp/')) {
+    const transfer = await handleMcpTransferRoutes(request, env);
+    if (transfer) return transfer;
   }
 
   // Agent API

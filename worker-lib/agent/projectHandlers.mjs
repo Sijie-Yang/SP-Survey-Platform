@@ -18,6 +18,8 @@ import {
 import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from './projectMeta.mjs';
 import { deleteOwnedProject } from './projectLifecycle.mjs';
 import { hydrateSkillContracts } from './skillContracts.mjs';
+import { keepStoredSiteHtml } from './siteDraft.mjs';
+import { spSchemeWorkflow, SP_SCHEME_WORKFLOW_SUMMARY } from './spSchemeWorkflow.mjs';
 
 function originFromRequest(request, env) {
   return env.APP_URL
@@ -62,9 +64,14 @@ export async function handleAgentDiscovery(request, env) {
   return {
     success: true,
     name: 'SP-Survey Platform Agent API',
-    workflow: 'Call survey_capabilities (image/media/skillquestion guides), then get draft, edit with apply_operations, validate, then explicitly publish for version-managed projects and share the participant URL. Prefer image*/media*/preset skillquestion for visual studies. Media: import from template or use project/preview library — never AI-generate uploads. Use survey_delete_project / survey_update_project for owned-project CRUD.',
+    // The SP-Scheme flow comes first: page → import → publish → link → data.
+    spSchemeWorkflow: spSchemeWorkflow(),
+    workflow: `${SP_SCHEME_WORKFLOW_SUMMARY} Classic per-question editing: call survey_capabilities (image/media/skillquestion guides), then get draft, edit with apply_operations, validate, then explicitly publish for version-managed projects and share the participant URL. Prefer image*/media*/preset skillquestion for visual studies. Media: import from template or use project/preview library — never AI-generate uploads. Use survey_delete_project / survey_update_project for owned-project CRUD.`,
     capabilities: DESIGN_CAPABILITIES,
     endpoints: {
+      mcp: 'POST /mcp (tools: sp_scheme_spec, sp_scheme_upload_url, sp_scheme_import, survey_publish, survey_download_url, …)',
+      mcpUpload: 'PUT /api/mcp/upload/:token (signed link from sp_scheme_upload_url; raw zip or html body, max 50 MB)',
+      mcpDownload: 'GET /api/mcp/download/:token (signed link from survey_download_url; returns a ZIP)',
       credentialsStatus: 'GET /api/agent/credentials/status',
       storeCredentials: 'POST /api/agent/credentials/openai',
       listProjects: 'GET /api/agent/projects',
@@ -192,7 +199,7 @@ export async function getDraft(env, accessToken, projectId, request, ownerUserId
     publishedAt: row.published_at,
     lastWriter: row.last_writer || null,
     validation: validateSurveyConfig(surveyConfig),
-    urls: buildProjectUrls(projectId, originFromRequest(request, env)),
+    urls: buildProjectUrls(projectId, originFromRequest(request, env), row),
   };
 }
 
@@ -266,9 +273,11 @@ export async function saveDraft(
     });
   }
   const row = await loadOwnedProject(env, accessToken, projectId, ownerUserId);
+  // A config read without its page HTML (survey_get_draft) keeps the stored page.
+  const incoming = keepStoredSiteHtml(body?.surveyConfig, draftConfig(row));
   const surveyConfig = await hydrateSkillContracts(
     env,
-    postProcessAiConfig(body?.surveyConfig),
+    postProcessAiConfig(incoming),
     row.user_id,
   );
   const validation = validateSurveyConfig(surveyConfig);
@@ -452,11 +461,11 @@ export async function validateProject(env, accessToken, projectId, body) {
   return { success: validation.valid, validation };
 }
 
-export async function previewUrls(env, accessToken, projectId, request) {
-  await loadOwnedProject(env, accessToken, projectId);
+export async function previewUrls(env, accessToken, projectId, request, ownerUserId = null) {
+  const row = await loadOwnedProject(env, accessToken, projectId, ownerUserId);
   return {
     success: true,
-    urls: buildProjectUrls(projectId, originFromRequest(request, env)),
+    urls: buildProjectUrls(projectId, originFromRequest(request, env), row),
   };
 }
 

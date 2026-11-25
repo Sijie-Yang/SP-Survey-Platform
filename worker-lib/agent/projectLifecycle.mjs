@@ -8,12 +8,14 @@ import {
   findSecretFields,
   isSafeProjectId,
   sanitizeForAgent,
+  stripOwnResponseSupabase,
   validateSurveyConfig,
   buildProjectUrls,
 } from '../designProtocol.mjs';
 import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from './projectMeta.mjs';
 import { hydrateSkillContracts } from './skillContracts.mjs';
 import {
+  copyObjects,
   copyPrefixMedia,
   deletePrefixMedia,
   isR2Ready,
@@ -70,7 +72,7 @@ function guessContentType(filename, contentType) {
   return 'image/jpeg';
 }
 
-function sanitizeMediaFolderConfig(cfg = {}) {
+export function sanitizeMediaFolderConfig(cfg = {}) {
   const allowed = new Set(['set', 'category']);
   const tagsIn = cfg?.mediaFolderTags && typeof cfg.mediaFolderTags === 'object'
     ? cfg.mediaFolderTags
@@ -398,16 +400,12 @@ function buildTemplateIdBase({ name, author, year }) {
   return `${safeYear}-${firstWord(author, 'user')}-${firstWord(name, 'template')}`;
 }
 
-export async function saveAsTemplate(env, ctx, projectId, body = {}) {
-  const row = await loadOwned(env, { ...ctx, projectId });
-  const meta = metadataFromRow(row);
-  const name = String(body?.name || row.name).trim();
-  const author = String(body?.author || meta.author || 'User').trim();
-  const year = String(body?.year || meta.year || new Date().getFullYear()).trim();
-  const baseId = buildTemplateIdBase({ name, author, year });
+/** The first free template id: base, base-2, base-3, … */
+async function reserveTemplateId(env, baseId) {
   let templateId = baseId;
   for (let n = 0; n < 8; n += 1) {
     const attempt = n === 0 ? baseId : `${baseId}-${n + 1}`;
+    // eslint-disable-next-line no-await-in-loop
     const existing = await supabaseRest(env, {
       path: '/rest/v1/templates',
       serviceRole: true,
@@ -418,6 +416,17 @@ export async function saveAsTemplate(env, ctx, projectId, body = {}) {
       break;
     }
   }
+  return templateId;
+}
+
+export async function saveAsTemplate(env, ctx, projectId, body = {}) {
+  const row = await loadOwned(env, { ...ctx, projectId });
+  const meta = metadataFromRow(row);
+  const name = String(body?.name || row.name).trim();
+  const author = String(body?.author || meta.author || 'User').trim();
+  const year = String(body?.year || meta.year || new Date().getFullYear()).trim();
+  const baseId = buildTemplateIdBase({ name, author, year });
+  const templateId = await reserveTemplateId(env, baseId);
 
   const surveyConfig = stripSecrets(draftConfig(row));
   const now = new Date().toISOString();
@@ -476,6 +485,164 @@ export async function saveAsTemplate(env, ctx, projectId, body = {}) {
     status: 'pending_review',
     mediaCopy,
     message: 'Template submitted for admin review. Sensitive fields were stripped.',
+  };
+}
+
+const TEMPLATE_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Platform admin, checked on the server against the admins table. */
+export async function isPlatformAdmin(env, userId) {
+  if (!userId) return false;
+  let rows;
+  try {
+    rows = await supabaseRest(env, {
+      path: '/rest/v1/admins',
+      serviceRole: true,
+      query: `?user_id=eq.${encodeURIComponent(userId)}&select=user_id`,
+    });
+  } catch {
+    throw Object.assign(new Error('Could not check admin rights. Try again later.'), { status: 503, code: 'ADMIN_CHECK_FAILED' });
+  }
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+function safeRelativeKey(rel) {
+  const parts = String(rel || '').split('/');
+  return parts.length > 0 && parts.every((part) => part && part !== '.' && part !== '..');
+}
+
+/**
+ * The project's media library as the template's own: every entry stored under
+ * the project's R2 prefix is copied to templates/<id>/ at the same relative
+ * path, keeping its name, type and folder (pages find files by folder/name).
+ * Entries stored elsewhere (template-owned or external URLs) are kept as they are.
+ */
+export function templateMediaPlan(preloadedImages, projectPrefix, templatePrefix, publicBase = '') {
+  const base = String(publicBase || '').replace(/\/$/, '');
+  const copies = new Map();
+  const entries = (Array.isArray(preloadedImages) ? preloadedImages : []).map((entry) => {
+    const key = String(entry?.key || entry?.media_id || '');
+    if (!key.startsWith(projectPrefix)) return entry;
+    const rel = key.slice(projectPrefix.length);
+    if (!safeRelativeKey(rel)) return entry;
+    const to = `${templatePrefix}${rel}`;
+    copies.set(key, to);
+    return { ...entry, key: to, media_id: to, url: base ? `${base}/${to}` : entry.url };
+  });
+  return { entries, copies: [...copies.entries()].map(([from, to]) => ({ from, to })) };
+}
+
+/**
+ * Admin only: publish a project as an approved template directly (no review
+ * queue), or overwrite an existing template from the project. Templates live in
+ * Supabase, so nothing needs to be synced to the repository.
+ */
+export async function publishTemplate(env, ctx, projectId, body = {}, request = null) {
+  if (!(await isPlatformAdmin(env, ctx.userId))) {
+    throw Object.assign(new Error('Only platform admins can publish templates directly. Use survey_save_as_template to submit this project for review.'), { status: 403, code: 'ADMIN_ONLY' });
+  }
+  const row = await loadOwned(env, { ...ctx, projectId });
+  const meta = metadataFromRow(row);
+  const text = (value, max = 500) => String(value ?? '').trim().slice(0, max);
+  const name = text(body.name, 200);
+  const author = text(body.author, 300);
+  const year = text(body.year, 20);
+  if (!name || !author || !year) {
+    throw Object.assign(new Error('name, author and year are required.'), { status: 400, code: 'TEMPLATE_FIELDS_REQUIRED' });
+  }
+  const showOnLanding = body.showOnLanding !== false;
+  const tags = Array.isArray(body.tags)
+    ? body.tags.map((t) => text(t, 60)).filter(Boolean).slice(0, 30)
+    : null;
+
+  let existing = null;
+  let templateId;
+  if (body.templateId != null && body.templateId !== '') {
+    templateId = String(body.templateId).trim();
+    if (templateId.length > 96 || !TEMPLATE_ID_RE.test(templateId)) {
+      throw Object.assign(new Error('templateId must be lowercase letters, digits and single hyphens.'), { status: 400, code: 'INVALID_TEMPLATE_ID' });
+    }
+    const rows = await supabaseRest(env, {
+      path: '/rest/v1/templates',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(templateId)}&select=id,description,category,tags,paper_url,huggingface_dataset,preloaded_images`,
+    });
+    existing = Array.isArray(rows) ? rows[0] : null;
+    if (!existing) throw Object.assign(new Error(`Template not found: ${templateId}`), { status: 404, code: 'TEMPLATE_NOT_FOUND' });
+  } else {
+    templateId = await reserveTemplateId(env, buildTemplateIdBase({ name, author, year }));
+  }
+
+  const ownerId = ctx.userId || row.user_id;
+  const plan = templateMediaPlan(
+    row.preloaded_images,
+    projectMediaPrefix(ownerId, projectId),
+    templateMediaPrefix(templateId),
+    env.R2_PUBLIC_URL,
+  );
+  if (plan.copies.length) {
+    if (!isR2Ready(env)) {
+      throw Object.assign(new Error('R2 is not configured on this server, so the project media cannot be copied.'), { status: 503 });
+    }
+    const copied = await copyObjects(env, plan.copies);
+    if (copied.error) {
+      // Undo new copies; keys the template already used stay (same files).
+      const keep = new Set((existing?.preloaded_images || []).map((e) => e?.key).filter(Boolean));
+      const undo = copied.copied.filter((key) => !keep.has(key));
+      if (undo.length) await deletePrefixMedia(env, templateMediaPrefix(templateId), undo).catch(() => {});
+      throw Object.assign(new Error(`Copying the project media to the template failed (${copied.error}). Nothing was published.`), { status: 502, code: 'TEMPLATE_MEDIA_COPY_FAILED' });
+    }
+  }
+
+  const now = new Date().toISOString();
+  const fields = {
+    name,
+    description: body.description != null ? text(body.description, 5000) : (existing?.description ?? String(row.description || '').trim()),
+    author,
+    year,
+    category: text(body.category, 120) || existing?.category || meta.category || 'Custom',
+    tags: tags || existing?.tags || meta.tags || [],
+    paper_url: body.paperUrl != null ? (text(body.paperUrl, 1000) || null) : (existing?.paper_url || meta.website || null),
+    huggingface_dataset: existing?.huggingface_dataset || meta.huggingfaceDataset || null,
+    // As in the browser: no credentials and no researcher-owned response database.
+    survey_config: stripOwnResponseSupabase(stripSecrets(draftConfig(row))),
+    preloaded_images: plan.entries,
+    preloaded_at: plan.entries.length ? now : null,
+    preloaded_source: plan.entries.length ? 'project' : null,
+    image_dataset_config: sanitizeMediaFolderConfig(row.image_dataset_config || {}),
+    is_approved: true,
+    show_on_landing: showOnLanding,
+    is_active: showOnLanding,
+    updated_at: now,
+  };
+  if (existing) {
+    await supabaseRest(env, {
+      path: '/rest/v1/templates',
+      method: 'PATCH',
+      serviceRole: true,
+      query: `?id=eq.${encodeURIComponent(templateId)}`,
+      body: fields,
+    });
+  } else {
+    await supabaseRest(env, {
+      path: '/rest/v1/templates',
+      method: 'POST',
+      serviceRole: true,
+      body: { id: templateId, ...fields, user_id: ownerId, is_pinned: false, created_at: now },
+    });
+  }
+  const origin = String(env.APP_URL || (request ? new URL(request.url).origin : '') || 'https://sp-survey.org').replace(/\/$/, '');
+  return {
+    success: true,
+    templateId,
+    created: !existing,
+    status: 'published',
+    showOnLanding,
+    mediaCount: plan.entries.length,
+    url: `${origin}/`,
+    message: showOnLanding
+      ? 'Template published. It is approved and shown in the homepage template library; it is stored online, so no repository sync is needed.'
+      : 'Template published and approved, but not shown on the homepage (showOnLanding: false). It is stored online, so no repository sync is needed.',
   };
 }
 

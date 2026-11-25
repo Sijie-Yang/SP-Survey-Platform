@@ -89,6 +89,7 @@ app.use(async (req, res, next) => {
     || pathName.startsWith('/api/agent/')
     || pathName.startsWith('/oauth/')
     || pathName === '/mcp'
+    || pathName.startsWith('/api/mcp/')
     || pathName.startsWith('/.well-known/');
   const isBenchRoute = pathName === '/api/bench' || pathName.startsWith('/api/bench/');
   const isAdminResultsRoute = pathName === '/api/admin/project-responses';

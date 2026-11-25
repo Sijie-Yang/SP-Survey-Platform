@@ -88,6 +88,12 @@ function buildS3Backend(env) {
         'PUT',
       );
     },
+    async get(key) {
+      const res = await client.fetch(objUrl(key));
+      if (res.status === 404) return null;
+      await ensureOk(res, 'GET');
+      return new Uint8Array(await res.arrayBuffer());
+    },
   };
 }
 
@@ -125,6 +131,11 @@ function getR2Backend(env) {
         await bucket.put(key, body, {
           httpMetadata: { contentType: contentType || 'application/octet-stream' },
         });
+      },
+      async get(key) {
+        const obj = await bucket.get(key);
+        if (!obj) return null;
+        return new Uint8Array(await obj.arrayBuffer());
       },
     };
   }
@@ -215,4 +226,41 @@ export async function putPrefixObject(env, key, body, contentType) {
     url: publicBase ? `${publicBase}/${key}` : '',
     contentType: contentType || 'application/octet-stream',
   };
+}
+
+/**
+ * Read one object's bytes, or null when it does not exist.
+ * @returns {Promise<{ configured: boolean, bytes: Uint8Array|null }>}
+ */
+export async function getPrefixObject(env, key) {
+  const backend = getR2Backend(env);
+  if (!backend?.get) return { configured: false, bytes: null };
+  return { configured: true, bytes: await backend.get(key) };
+}
+
+/**
+ * Copy single objects (`[{ from, to }]`). Stops at the first failure and
+ * reports what was copied so the caller can undo it.
+ */
+export async function copyObjects(env, pairs = []) {
+  const backend = getR2Backend(env);
+  if (!backend) return { configured: false, copied: [], error: null };
+  const copied = [];
+  for (const { from, to } of pairs) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await backend.copy(from, to);
+      copied.push(to);
+    } catch (err) {
+      return { configured: true, copied, error: `${from}: ${err.message || String(err)}` };
+    }
+  }
+  return { configured: true, copied, error: null };
+}
+
+/** Objects under a prefix with their upload time (for housekeeping). */
+export async function listPrefixObjects(env, prefix) {
+  const backend = getR2Backend(env);
+  if (!backend) return { configured: false, objects: [] };
+  return { configured: true, objects: await backend.list(prefix) };
 }
