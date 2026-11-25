@@ -5,7 +5,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { baseEnv, callTool, fakeSupabase } from '../mcp/fakePlatform.testkit.mjs';
-import { cleanPaperInput, normalizeDoi, runWeeklyPaperScan } from './paperLibrary.mjs';
+import { BACKFILL_FIRST_YEAR, cleanPaperInput, nextBackfillYear, normalizeDoi, runWeeklyPaperScan } from './paperLibrary.mjs';
 
 let db = null;
 afterEach(() => { db?.restore(); db = null; });
@@ -102,8 +102,8 @@ describe('weekly paper scan', () => {
   it('adds only new papers with a DOI, as candidates, and logs the scan', async () => {
     db = fakeSupabase({ papers: [known()] });
     const queries = [];
-    const search = async ({ query, yearFrom }) => {
-      queries.push({ query, yearFrom });
+    const search = async ({ query, yearFrom, yearTo }) => {
+      queries.push({ query, yearFrom, yearTo });
       return {
         sourcesUsed: ['crossref'],
         errors: [],
@@ -116,7 +116,14 @@ describe('weekly paper scan', () => {
     };
     const result = await runWeeklyPaperScan(baseEnv(), { now: new Date('2026-11-30T01:00:00Z'), search });
     assert.equal(queries.length > 1, true);
-    assert.ok(queries.every((q) => q.yearFrom === 2025));
+    const recent = queries.filter((q) => q.yearTo === null);
+    assert.equal(recent.length > 1, true);
+    assert.ok(recent.every((q) => q.yearFrom === 2025));
+    // Backfill starts two years back, one year only.
+    const older = queries.filter((q) => q.yearTo !== null);
+    assert.equal(older.length, recent.length);
+    assert.ok(older.every((q) => q.yearFrom === 2024 && q.yearTo === 2024));
+    assert.equal(result.backfill.year, 2024);
     assert.equal(result.found, 2);
     assert.equal(result.added, 1);
     assert.equal(result.known, 1);
@@ -126,6 +133,23 @@ describe('weekly paper scan', () => {
     assert.equal(added.scan_id, result.scanId);
     assert.equal(db.tables.research_papers.find((p) => p.id === 'p1').status, 'approved');
     assert.equal(db.tables.research_paper_scans[0].preset, 'weekly');
+    assert.equal(db.tables.research_paper_scans[1].preset, 'backfill');
+    assert.equal(db.tables.research_paper_scans[1].year_from, 2024);
+  });
+
+  it('walks the backfill back one year per run and stops at the first year', async () => {
+    const now = new Date('2026-11-30T01:00:00Z');
+    db = fakeSupabase({ papers: [], extraTables: { research_paper_scans: [
+      { id: 's1', preset: 'weekly', year_from: 2025, hit_count: 5 },
+      { id: 's2', preset: 'backfill', year_from: 2024, hit_count: 7 },
+      { id: 's3', preset: 'backfill', year_from: 2023, hit_count: 0, error_summary: 'crossref: timeout' },
+    ] } });
+    // 2023 failed completely, so it is tried again.
+    assert.equal(await nextBackfillYear(baseEnv(), now), 2023);
+    db.tables.research_paper_scans.push({ id: 's4', preset: 'backfill', year_from: 2023, hit_count: 3 });
+    assert.equal(await nextBackfillYear(baseEnv(), now), 2022);
+    db.tables.research_paper_scans.push({ id: 's5', preset: 'backfill', year_from: BACKFILL_FIRST_YEAR, hit_count: 1 });
+    assert.equal(await nextBackfillYear(baseEnv(), now), null);
   });
 });
 

@@ -251,13 +251,50 @@ export async function savePapers(env, ctx, papers) {
   };
 }
 
+/** The backfill walks back one publication year per week and stops here. */
+export const BACKFILL_FIRST_YEAR = 2000;
+
 /**
- * Weekly scan (Worker cron): search Semantic Scholar + Crossref with the preset
- * queries for papers from last year on, and add the ones not in the library as
- * "candidate". Papers already in the library are left exactly as they are.
+ * Next older year to backfill: one before the oldest year already backfilled
+ * (a scan whose searches all failed does not count), starting two years back
+ * because the recent scan already covers last year and this year. null when
+ * the backfill has reached BACKFILL_FIRST_YEAR.
+ */
+export async function nextBackfillYear(env, now = new Date()) {
+  const scans = await rows(env, '/rest/v1/research_paper_scans', '?preset=eq.backfill&select=year_from,hit_count,error_summary&limit=1000');
+  const done = scans
+    .filter((s) => Number.isInteger(s.year_from) && (s.hit_count > 0 || !s.error_summary))
+    .map((s) => s.year_from);
+  const year = done.length ? Math.min(...done) - 1 : now.getUTCFullYear() - 2;
+  return year >= BACKFILL_FIRST_YEAR ? year : null;
+}
+
+/**
+ * Weekly job (Worker cron, see docs/scheduled-jobs.md). Two searches with the
+ * same preset queries, both adding only new papers with a DOI as "candidate":
+ *  1. recent: last year and this year;
+ *  2. backfill: one older year, walking back a year each week to 2000.
+ * Existing papers are never changed; each search is logged in
+ * research_paper_scans (preset "weekly" or "backfill").
  */
 export async function runWeeklyPaperScan(env, { now = new Date(), search = searchBothProviders, limit = 20 } = {}) {
   const yearFrom = now.getUTCFullYear() - 1;
+  const recent = await scanYears(env, { now, search, limit, yearFrom, yearTo: null, preset: 'weekly', mode: 'latest', sourceTag: 'weekly_scan' });
+  let backfill = null;
+  try {
+    const year = await nextBackfillYear(env, now);
+    if (year) backfill = await scanYears(env, { now, search, limit, yearFrom: year, yearTo: year, preset: 'backfill', mode: 'classic', sourceTag: 'backfill_scan' });
+  } catch (err) {
+    backfill = { warnings: [`backfill: ${err?.message || err}`] };
+  }
+  return {
+    ...recent,
+    backfill: backfill ? { year: backfill.yearFrom ?? null, found: backfill.found ?? 0, added: backfill.added ?? 0, known: backfill.known ?? 0 } : null,
+    warnings: [...recent.warnings, ...(backfill?.warnings || [])],
+  };
+}
+
+async function scanYears(env, { now, search, limit, yearFrom, yearTo, preset, mode, sourceTag }) {
   const queries = Object.values(PRESET_QUERIES);
   const found = [];
   const sourcesUsed = new Set();
@@ -268,7 +305,7 @@ export async function runWeeklyPaperScan(env, { now = new Date(), search = searc
         query,
         limit,
         yearFrom,
-        yearTo: null,
+        yearTo,
         semanticScholarApiKey: env.SEMANTIC_SCHOLAR_API_KEY || '',
         crossrefMailto: env.CROSSREF_MAILTO || '',
       });
@@ -297,9 +334,10 @@ export async function runWeeklyPaperScan(env, { now = new Date(), search = searc
       prefer: 'return=representation',
       body: {
         query: queries.join(' | ').slice(0, 2000),
-        preset: 'weekly',
+        preset,
         year_from: yearFrom,
-        mode: 'latest',
+        year_to: yearTo,
+        mode,
         hit_count: byDoi.size,
         sources_used: [...sourcesUsed],
         error_summary: warnings.length ? warnings.join('; ').slice(0, 2000) : null,
@@ -331,7 +369,7 @@ export async function runWeeklyPaperScan(env, { now = new Date(), search = searc
         keywords: Array.isArray(paper.keywords) ? paper.keywords.slice(0, 40) : [],
         relevance_score: Number(paper.relevance_score) || 0,
         template_fit: paper.template_fit || 'unknown',
-        sources: [...new Set(['weekly_scan', ...(paper.sources || [])])],
+        sources: [...new Set([sourceTag, ...(paper.sources || [])])],
         raw_meta: paper.raw_meta || {},
         status: 'candidate',
         scan_id: scanId,

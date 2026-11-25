@@ -1006,8 +1006,9 @@ export default {
     await handleBenchQueueBatch(batch, env);
   },
 
-  // Weekly (wrangler.jsonc triggers.crons): new papers go into the paper
-  // library as "candidate"; nothing is published.
+  // Weekly (wrangler.jsonc triggers.crons, docs/scheduled-jobs.md): new and
+  // older (backfill, one year per week) papers go into the paper library as
+  // "candidate"; nothing is published.
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(runWeeklyPaperScan(env).then(
       (result) => console.log('[weekly paper scan]', JSON.stringify({ ...result, warnings: result.warnings.slice(0, 10) })),
