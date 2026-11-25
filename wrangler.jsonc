@@ -42,6 +42,10 @@
     "MCP_RESOURCE": "https://sp-survey.org/mcp",
     "SUPABASE_URL": "https://wskhzjfrhjueiqauhpmb.supabase.co"
   },
+  // Weekly paper scan (Monday 01:00 UTC): adds new papers as "candidate".
+  "triggers": {
+    "crons": ["0 1 * * 1"]
+  },
   "queues": {
     "producers": [
       { "binding": "AGENT_QUEUE", "queue": "sp-agent-runs" }

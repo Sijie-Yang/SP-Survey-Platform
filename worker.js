@@ -29,6 +29,7 @@ import { handleAgentAndMcpRoutes } from './worker-lib/agent/router.mjs';
 import { processAgentQueue } from './worker-lib/agent/runtime/runDispatcher.mjs';
 import { getUserFromBearer } from './worker-lib/auth/supabaseJwt.mjs';
 import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
+import { runWeeklyPaperScan } from './worker-lib/research/paperLibrary.mjs';
 import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
 import { supabaseRest } from './worker-lib/supabaseUserClient.mjs';
 import { handleAdminResultsRoutes } from './worker-lib/adminResults.mjs';
@@ -1003,5 +1004,14 @@ export default {
       return;
     }
     await handleBenchQueueBatch(batch, env);
+  },
+
+  // Weekly (wrangler.jsonc triggers.crons): new papers go into the paper
+  // library as "candidate"; nothing is published.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runWeeklyPaperScan(env).then(
+      (result) => console.log('[weekly paper scan]', JSON.stringify({ ...result, warnings: result.warnings.slice(0, 10) })),
+      (error) => console.error('[weekly paper scan] failed', error?.message || error),
+    ));
   },
 };

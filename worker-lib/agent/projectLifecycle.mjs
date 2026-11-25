@@ -330,6 +330,30 @@ export async function getTemplate(env, ctx, templateId) {
       website: t.paper_url || '',
     }),
     surveyConfig: stripSecrets(t.survey_config || {}),
+    media: templateMediaSummary(t),
+  };
+}
+
+/**
+ * Where a template's images are served from: count per origin, and how many
+ * still point at the site's own /project_templates/ folder (repository files).
+ */
+export function templateMediaSummary(t) {
+  const urls = (Array.isArray(t?.preloaded_images) ? t.preloaded_images : [])
+    .map((entry) => String((entry && typeof entry === 'object' ? entry.url : entry) || ''))
+    .filter(Boolean);
+  const byOrigin = {};
+  urls.forEach((url) => {
+    let origin = 'relative';
+    try { origin = new URL(url).origin; } catch { /* relative path */ }
+    byOrigin[origin] = (byOrigin[origin] || 0) + 1;
+  });
+  const configText = JSON.stringify(t?.survey_config || {});
+  return {
+    count: urls.length,
+    byOrigin,
+    repoFileRefs: urls.filter((url) => url.includes('/project_templates/')).length
+      + (configText.match(/\/project_templates\//g) || []).length,
   };
 }
 

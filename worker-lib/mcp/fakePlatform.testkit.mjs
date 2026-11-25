@@ -65,6 +65,17 @@ function matches(row, params) {
       if (field == null || String(field) !== value.slice(3)) return false;
     } else if (value === 'is.null') {
       if (field != null) return false;
+    } else if (value === 'not.is.null') {
+      if (field == null) return false;
+    } else if (value.startsWith('ilike.')) {
+      // PostgREST ilike: * is the wildcard, \ escapes; no wildcard = case-insensitive equality.
+      const pattern = value.slice(6);
+      const escaped = pattern.replace(/\\(.)|([.+?^${}()|[\]\\])|\*/g, (m, esc, special) => {
+        if (esc) return esc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (special) return `\\${special}`;
+        return '.*';
+      });
+      if (field == null || !new RegExp(`^${escaped}$`, 'i').test(String(field))) return false;
     } else if (value.startsWith('in.(')) {
       const list = value.slice(4, -1).split(',');
       if (!list.includes(String(field))) return false;
@@ -104,13 +115,17 @@ function responsePage(rows, url) {
   return Number.isFinite(limit) && limit > 0 ? out.slice(0, limit) : out;
 }
 
-export function fakeSupabase({ projects = [], templates = [], admins = [], responses = [], rpc = {}, missingColumns = [], failPatch = null, responseCount = null } = {}) {
+export function fakeSupabase({ projects = [], templates = [], admins = [], responses = [], papers = [], extraTables = {}, rpc = {}, missingColumns = [], failPatch = null, responseCount = null } = {}) {
   const tables = {
     projects: projects.map(clone),
     templates: templates.map(clone),
     admins: admins.map(clone),
     survey_responses: responses.map(clone),
+    research_papers: papers.map(clone),
+    research_paper_scans: [],
+    ...Object.fromEntries(Object.entries(extraTables).map(([key, list]) => [key, list.map(clone)])),
   };
+  let nextId = 1;
   const calls = [];
   const original = globalThis.fetch;
   const reply = (status, body) => new Response(body == null ? '' : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -152,7 +167,7 @@ export function fakeSupabase({ projects = [], templates = [], admins = [], respo
       return reply(200, hits.map((row) => pick(row, select)));
     }
     if (method === 'POST') {
-      const rows = Array.isArray(body) ? body : [body];
+      const rows = (Array.isArray(body) ? body : [body]).map((row) => (row.id == null ? { ...row, id: `gen_${nextId++}` } : row));
       for (const row of rows) {
         if (table.some((r) => r.id === row.id)) return reply(409, { message: 'duplicate key value', code: '23505' });
       }

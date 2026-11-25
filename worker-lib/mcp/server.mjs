@@ -71,7 +71,9 @@ import {
   spSchemeSpec,
 } from '../agent/spSchemeAgent.mjs';
 import { DOWNLOAD_MAX_JSON_BYTES, DOWNLOAD_MAX_ROWS, createDownloadUrl } from '../agent/resultsDownload.mjs';
-import { publishTemplate } from '../agent/projectLifecycle.mjs';
+import { isPlatformAdmin, publishTemplate } from '../agent/projectLifecycle.mjs';
+import { listNews, listWiki, saveNewsDraft, submitWiki } from '../research/siteContent.mjs';
+import { listPapers, PAPER_STATUSES, SAVE_MAX as PAPER_SAVE_MAX, savePapers } from '../research/paperLibrary.mjs';
 import { keepStoredSiteHtml, trimResultSiteHtml } from '../agent/siteDraft.mjs';
 import { sameDraftStamp } from '../agent/projectHandlers.mjs';
 
@@ -229,6 +231,120 @@ const TOOLS = [
     },
   },
   {
+    name: 'paper_list',
+    description:
+      'PLATFORM ADMINS ONLY. Read the paper library (shown on /papers when status is "approved"; "candidate" papers, including the weekly scan\'s, wait for review). '
+      + 'Filter by search (words in the title), doi, status, templateId, or linked (true: has a template, false: none). Up to 200 per call; page with offset. Needs surveys:read.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Words in the title.' },
+        doi: { type: 'string' },
+        status: { type: 'string', enum: PAPER_STATUSES },
+        templateId: { type: 'string' },
+        linked: { type: 'boolean' },
+        limit: { type: 'number', description: 'Default 50, at most 200.' },
+        offset: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'paper_save',
+    description:
+      `PLATFORM ADMINS ONLY. Add or update up to ${PAPER_SAVE_MAX} papers in the paper library. Each paper is found by id, else DOI, else exact title + year; `
+      + 'a found paper gets only the fields you give, a new one needs a title and starts as "candidate" unless you give status. '
+      + 'status "approved" shows it on /papers. templateId links the paper to an existing template (that is how a template and its paper are aligned; use "" to unlink). '
+      + 'Take DOI, authors, year and venue from the paper or Crossref, never from memory. Every paper is reported as inserted, updated or error. Needs surveys:publish and confirm:true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        papers: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Existing paper id (to change its DOI or title).' },
+              doi: { type: 'string' },
+              title: { type: 'string' },
+              authors: { type: 'array', items: { type: 'string' } },
+              year: { type: 'number' },
+              venue: { type: 'string' },
+              abstract: { type: 'string' },
+              paperUrl: { type: 'string' },
+              keywords: { type: 'array', items: { type: 'string' } },
+              status: { type: 'string', enum: PAPER_STATUSES },
+              templateId: { type: 'string' },
+            },
+          },
+        },
+        confirm: { type: 'boolean' },
+      },
+      required: ['papers', 'confirm'],
+    },
+  },
+  {
+    name: 'news_list',
+    description: 'PLATFORM ADMINS ONLY. List news posts (drafts, published, archived), newest change first. Needs surveys:read.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['draft', 'published', 'archived'] },
+        limit: { type: 'number', description: 'Default 30, at most 100.' },
+      },
+    },
+  },
+  {
+    name: 'news_save',
+    description:
+      'PLATFORM ADMINS ONLY. Save a news post (English required, Chinese optional, Markdown body) as a DRAFT; an admin publishes it in 平台管理 → News. '
+      + 'With id or an existing slug the same post is updated. A published post is changed only with confirmLive:true, when Peter asked for that edit in the chat; it stays published. '
+      + 'Never state facts you have not checked (e.g. say a paper is under review unless it is published). Needs surveys:publish and confirm:true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        slug: { type: 'string', description: 'URL name; default from titleEn.' },
+        titleEn: { type: 'string' },
+        titleZh: { type: 'string' },
+        summaryEn: { type: 'string' },
+        summaryZh: { type: 'string' },
+        bodyEn: { type: 'string', description: 'Markdown.' },
+        bodyZh: { type: 'string', description: 'Markdown.' },
+        coverUrl: { type: 'string', description: 'https image URL, e.g. a template image on media.sp-survey.org.' },
+        confirmLive: { type: 'boolean' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['titleEn', 'bodyEn', 'confirm'],
+    },
+  },
+  {
+    name: 'wiki_list',
+    description: 'PLATFORM ADMINS ONLY. List SP-Wiki pages online (/docs/<page_key>), the built-in page keys, and wiki submissions with their status, to decide whether to add a page, edit one, or revise a submission. Needs surveys:read.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'wiki_submit',
+    description:
+      'PLATFORM ADMINS ONLY. Propose an SP-Wiki page in one language (Markdown): a new page, an edit of an existing page (pageKey), or a revision of a waiting submission (submissionId). '
+      + 'It is saved as a pending submission; an admin approves it in 平台管理 → Doc / News 审核, which publishes it. Write one page per language. Needs surveys:publish and confirm:true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        language: { type: 'string', enum: ['en', 'zh'] },
+        title: { type: 'string' },
+        summary: { type: 'string' },
+        body: { type: 'string', description: 'Markdown, 20 to 80,000 characters.' },
+        changeReason: { type: 'string', description: 'Why the page or edit is needed (at least 10 characters).' },
+        sourceNotes: { type: 'string', description: 'Sources: DOIs, links.' },
+        pageKey: { type: 'string', description: 'Existing page to edit.' },
+        submissionId: { type: 'string', description: 'Waiting submission to revise.' },
+        templateId: { type: 'string' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['language', 'title', 'body', 'changeReason', 'confirm'],
+    },
+  },
+  {
     name: 'survey_list_projects',
     description: 'List projects owned by the authenticated user.',
     inputSchema: { type: 'object', properties: {} },
@@ -332,7 +448,7 @@ const TOOLS = [
   },
   {
     name: 'survey_get_template',
-    description: 'Read one template (metadata + sanitized surveyConfig).',
+    description: 'Read one template (metadata, sanitized surveyConfig, and media: how many images it has and where they are served from).',
     inputSchema: {
       type: 'object',
       properties: { templateId: { type: 'string' } },
@@ -790,6 +906,31 @@ async function callTool(env, auth, request, name, args = {}) {
         return toolResult({ error: `This replaces the template ${String(args.templateId).slice(0, 96)} (its survey, details and media) for everyone. Set overwrite:true to do that, or leave templateId out to publish a new template.`, code: 'OVERWRITE_REQUIRED' }, true);
       }
       return toolResult(await publishTemplate(env, mcpCtx(auth), args.projectId, args, request));
+    }
+    case 'paper_list': {
+      requireScope(auth, 'surveys:read');
+      if (!(await isPlatformAdmin(env, auth.userId))) return toolResult({ error: 'Only platform admins can read the paper library here.', code: 'ADMIN_ONLY' }, true);
+      return toolResult(await listPapers(env, args));
+    }
+    case 'paper_save': {
+      requireScope(auth, 'surveys:publish');
+      if (!(await isPlatformAdmin(env, auth.userId))) return toolResult({ error: 'Only platform admins can change the paper library.', code: 'ADMIN_ONLY' }, true);
+      if (!args.confirm) return toolResult({ error: 'Set confirm:true to save these papers.' }, true);
+      const saved = await savePapers(env, mcpCtx(auth), args.papers);
+      return toolResult(saved, saved.errors > 0 && saved.inserted + saved.updated === 0);
+    }
+    case 'news_list':
+    case 'news_save':
+    case 'wiki_list':
+    case 'wiki_submit': {
+      const writes = name === 'news_save' || name === 'wiki_submit';
+      requireScope(auth, writes ? 'surveys:publish' : 'surveys:read');
+      if (!(await isPlatformAdmin(env, auth.userId))) return toolResult({ error: 'Only platform admins can use news and wiki tools.', code: 'ADMIN_ONLY' }, true);
+      if (writes && !args.confirm) return toolResult({ error: 'Set confirm:true to save.' }, true);
+      if (name === 'news_list') return toolResult(await listNews(env, args));
+      if (name === 'news_save') return toolResult(await saveNewsDraft(env, mcpCtx(auth), args));
+      if (name === 'wiki_list') return toolResult(await listWiki(env));
+      return toolResult(await submitWiki(env, mcpCtx(auth), args));
     }
     case 'survey_list_projects': {
       requireScope(auth, 'surveys:read');
