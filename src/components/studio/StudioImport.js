@@ -349,33 +349,25 @@ export default function StudioImportFlow({ project = null, onImported, runImport
           {showSteps && (
             <Box
               component="ol"
-              sx={{
-                listStyle: 'none',
-                p: 0,
-                m: 0,
-                mt: 2,
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' },
-                gap: 1,
-              }}
+              sx={{ listStyle: 'none', p: 0, m: 0, mt: 2, display: 'grid', gap: 0.75 }}
             >
               {[
-                [L('Copy the instructions to your AI', '复制说明给 AI'), L('Claude or ChatGPT both work.', 'Claude、ChatGPT 都行。')],
+                [L('Copy the instructions to your AI', '复制说明给 AI'), L('Add your idea or existing survey.', '再给它你的想法或已有调查。')],
                 [L('Drop the page it built here', '把它做好的页面拖进来'), L('Try it yourself in the preview.', '在预览里自己填一遍。')],
                 [L('Publish and get the link', '发布，拿链接'), L('Answers are saved for you.', '回答自动保存。')],
               ].map(([title, hint], i) => (
-                <Box component="li" key={title} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start', minWidth: 0 }}>
+                <Box component="li" key={title} sx={{ display: 'flex', gap: 1, alignItems: 'center', minWidth: 0 }}>
                   <Box sx={{
                     width: 22, height: 22, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center',
-                    bgcolor: 'primary.main', color: 'primary.contrastText', fontSize: 12, fontWeight: 700, mt: '1px',
+                    bgcolor: 'primary.main', color: 'primary.contrastText', fontSize: 12, fontWeight: 700,
                   }}
                   >
                     {i + 1}
                   </Box>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 700, lineHeight: 1.4 }}>{title}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.4 }}>{hint}</Typography>
-                  </Box>
+                  <Typography variant="body2" sx={{ minWidth: 0, lineHeight: 1.45 }}>
+                    <Box component="span" sx={{ fontWeight: 700 }}>{title}</Box>
+                    <Box component="span" sx={{ color: 'text.secondary' }}>{` · ${hint}`}</Box>
+                  </Typography>
                 </Box>
               ))}
             </Box>
