@@ -7,12 +7,12 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   TableSortLabel,
   Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
-  DialogActions, TextField, Switch, Alert, Snackbar, Checkbox,
+  DialogActions, TextField, Switch, Alert, Snackbar,
   CircularProgress, Tooltip, Stack, Select, MenuItem, FormControl, InputLabel,
   LinearProgress, Accordion, AccordionSummary, AccordionDetails, Link, useMediaQuery,
 } from '@mui/material';
 import {
-  Delete, Edit, ArrowBack, Refresh, CloudUpload, Home, Preview,
+  Delete, Edit, ArrowBack, Refresh, Home, Preview,
   EditNote, PhotoLibrary, DeleteForever, ExpandMore, PushPin, AutoFixHigh, Stop,
   CloudDownload, OpenInNew, ContentCopy, Assessment, LibraryAdd,
 } from '@mui/icons-material';
@@ -21,11 +21,8 @@ import {
   listAllTemplates, updateTemplate, deleteTemplate, renameTemplateId,
   normalizeTemplateId, templateImagePrefix,
   listAllProjects, updateProjectAdmin, deleteProjectAdmin, copyProjectToAdmin, projectCopyName,
-  seedBuiltinTemplates, previewBuiltinTemplateImport, checkIsAdmin,
-  downloadOnlineTemplatesAsBuiltinZip, exportAllOnlineTemplatesAsBuiltinZip,
+  checkIsAdmin,
 } from '../lib/templateManager';
-import { useRegion } from '../contexts/RegionContext';
-import { tf } from '../contexts/adminI18n';
 import { findDuplicateQuestionNames, repairDuplicateQuestionNames } from '../lib/questionNames';
 import {
   listAllLiveSurveys,
@@ -651,7 +648,6 @@ function TemplateSortLabel({ column, label, align, sortBy, sortOrder, onSort }) 
 
 function TemplateManagement() {
   const { user } = useAuth();
-  const { t: ti } = useRegion();
   const [templates, setTemplates]         = useState([]);
   const [coverById, setCoverById]         = useState({});
   const [loading, setLoading]             = useState(false);
@@ -664,14 +660,7 @@ function TemplateManagement() {
   const [imagesTarget, setImagesTarget]   = useState(null);
   const [imagesOpen, setImagesOpen]       = useState(false);
   const [snack, setSnack]                 = useState({ open: false, msg: '', sev: 'success' });
-  const [seeding, setSeeding]             = useState(false);
   const [seedLog, setSeedLog]             = useState('');
-  const [seedConfirmOpen, setSeedConfirmOpen] = useState(false);
-  const [seedPreview, setSeedPreview]     = useState(null);
-  const [seedPreviewLoading, setSeedPreviewLoading] = useState(false);
-  const [exportingAll, setExportingAll] = useState(false);
-  /** Selected builtin template ids in the import confirm dialog. */
-  const [seedSelectedIds, setSeedSelectedIds] = useState(() => new Set());
   const [sortBy, setSortBy]               = useState('year');
   const [sortOrder, setSortOrder]         = useState('desc');
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -937,160 +926,6 @@ function TemplateManagement() {
     });
   };
 
-  const handleOpenSeedConfirm = async () => {
-    setSeedPreviewLoading(true);
-    setSeedPreview(null);
-    setSeedSelectedIds(new Set());
-    setSeedConfirmOpen(true);
-    try {
-      // Pass full online templates so preview can content-diff against builtin JSON.
-      const preview = await previewBuiltinTemplateImport(templates);
-      setSeedPreview(preview);
-      // Default: select new imports; leave updates unchecked so overwrite is intentional.
-      setSeedSelectedIds(new Set((preview.toInsert || []).map((item) => item.id)));
-    } catch (err) {
-      showSnack(err.message, 'error');
-      setSeedConfirmOpen(false);
-    } finally {
-      setSeedPreviewLoading(false);
-    }
-  };
-
-  const seedSelectableItems = useMemo(() => {
-    if (!seedPreview) return [];
-    return [
-      ...(seedPreview.toInsert || []).map((item) => ({ ...item, action: 'insert' })),
-      ...(seedPreview.toUpdate || []).map((item) => ({ ...item, action: 'update' })),
-    ];
-  }, [seedPreview]);
-
-  const seedUnchangedItems = useMemo(
-    () => (seedPreview?.toUnchanged || []).map((item) => ({ ...item, action: 'unchanged' })),
-    [seedPreview],
-  );
-
-  const toggleSeedSelected = (id) => {
-    setSeedSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const setSeedSelectionForAction = (action, checked) => {
-    setSeedSelectedIds((prev) => {
-      const next = new Set(prev);
-      seedSelectableItems
-        .filter((item) => item.action === action && !(checked && item.conflict))
-        .forEach((item) => {
-          if (checked) next.add(item.id);
-          else next.delete(item.id);
-        });
-      return next;
-    });
-  };
-
-  const handleConfirmSeed = async () => {
-    const idsToImport = seedSelectableItems
-      .map((item) => item.id)
-      .filter((id) => seedSelectedIds.has(id));
-    if (!idsToImport.length) return;
-    const selectedInsert = (seedPreview?.toInsert || []).filter((i) => seedSelectedIds.has(i.id)).length;
-    const selectedUpdate = (seedPreview?.toUpdate || []).filter((i) => seedSelectedIds.has(i.id)).length;
-    const overwriteConflictIds = (seedPreview?.toConflict || [])
-      .map((item) => item.id)
-      .filter((id) => seedSelectedIds.has(id));
-    setSeeding(true);
-    setSeedLog('');
-    setSeedConfirmOpen(false);
-    try {
-      const result = await seedBuiltinTemplates({
-        idsToImport,
-        overwriteConflictIds,
-        onProgress: ({ inserted, updated, skipped, total, current }) => {
-          setSeedLog(
-            `进度: 新增 ${inserted} / 更新 ${updated ?? 0} / 跳过 ${skipped} / 共 ${total} — ${current}`,
-          );
-        },
-      });
-      showSnack(
-        `导入完成: 新增 ${result.inserted} 条, 更新 ${result.updated ?? 0} 条`
-        + (result.skipped ? `, 跳过 ${result.skipped} 条` : '')
-        + `（勾选 ${selectedInsert} 新 / ${selectedUpdate} 更新）`,
-      );
-      const parts = [];
-      if (result.errors?.length) parts.push('错误: ' + result.errors.join('; '));
-      if (result.warnings?.length) parts.push('提示: ' + result.warnings.join('; '));
-      setSeedLog(parts.join('\n') || '');
-      load();
-    } catch (err) {
-      showSnack(err.message, 'error');
-    } finally {
-      setSeeding(false);
-      setSeedPreview(null);
-      setSeedSelectedIds(new Set());
-    }
-  };
-
-  /** Online templates corresponding to current seed selection (for reverse-save ZIP). */
-  const selectedOnlineForBuiltinDownload = useMemo(() => {
-    const ids = [...seedSelectedIds];
-    return templates.filter(
-      (t) => ids.includes(t.id) && t?.name && t?.config,
-    );
-  }, [templates, seedSelectedIds]);
-
-  const handleDownloadOnlineAsBuiltin = (onlineTemplates) => {
-    try {
-      const result = downloadOnlineTemplatesAsBuiltinZip(onlineTemplates);
-      showSnack(
-        `已下载 ${result.count} 个线上模板为内置 ZIP（解压到 public/project_templates/ 后提交）`,
-      );
-      setSeedLog(`已下载线上→仓库 ZIP：${result.filenames.join(', ')}`);
-    } catch (err) {
-      showSnack(err.message, 'error');
-    }
-  };
-
-  const handleDownloadSelectedOnlineAsBuiltin = () => {
-    handleDownloadOnlineAsBuiltin(selectedOnlineForBuiltinDownload);
-  };
-
-  const handleExportAllOnlineAsBuiltin = async () => {
-    setExportingAll(true);
-    try {
-      const result = await exportAllOnlineTemplatesAsBuiltinZip();
-      showSnack(tf(ti.tplExportAllDone, { count: result.count }));
-      const lines = [tf(ti.tplExportAllLog, { count: result.count, files: result.filenames.join(', ') })];
-      if (result.skipped.length) {
-        lines.push(tf(ti.tplExportAllSkipped, { count: result.skipped.length, ids: result.skipped.join(', ') }));
-      }
-      setSeedLog(lines.join('\n'));
-    } catch (err) {
-      showSnack(err.message, 'error');
-    } finally {
-      setExportingAll(false);
-    }
-  };
-
-  const exportAllButton = (
-    <Tooltip title={ti.tplExportAllTooltip}>
-      <span>
-        <Button
-          variant="outlined"
-          color="secondary"
-          startIcon={exportingAll ? <CircularProgress size={16} color="inherit" /> : <CloudDownload />}
-          onClick={handleExportAllOnlineAsBuiltin}
-          disabled={exportingAll || seeding || bulkFeat.active}
-          data-testid="export-all-online-templates"
-        >
-          {ti.tplExportAll}
-        </Button>
-      </span>
-    </Tooltip>
-  );
-
   return (
     <Box>
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
@@ -1103,7 +938,7 @@ function TemplateManagement() {
               color="secondary"
               startIcon={bulkFeat.active ? <CircularProgress size={16} color="inherit" /> : <AutoFixHigh />}
               onClick={() => handleBulkFeatures({ runL0: true, runSeg: true })}
-              disabled={bulkFeat.active || seeding || loading}
+              disabled={bulkFeat.active || loading}
             >
               一键提取全部 Features
             </Button>
@@ -1119,17 +954,6 @@ function TemplateManagement() {
             停止
           </Button>
         )}
-        <Tooltip title="对比内置包与线上：可将内置导入线上，或把线上版本下载回仓库">
-          <Button
-            variant="outlined"
-            startIcon={seeding || seedPreviewLoading ? <CircularProgress size={16} /> : <CloudUpload />}
-            onClick={handleOpenSeedConfirm}
-            disabled={seeding || seedPreviewLoading || bulkFeat.active}
-          >
-            导入内置模板
-          </Button>
-        </Tooltip>
-        {exportAllButton}
         <Button startIcon={<Refresh />} onClick={load} disabled={loading || bulkFeat.active}>
           刷新
         </Button>
@@ -1333,300 +1157,6 @@ function TemplateManagement() {
         onClose={() => { setImagesOpen(false); setImagesTarget(null); }}
         onSaved={(opts) => { load(); if (!opts?.silent) showSnack('模板图片已更新'); }}
       />
-
-      <Dialog
-        open={seedConfirmOpen}
-        onClose={() => !seeding && setSeedConfirmOpen(false)}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>内置模板 ↔ 线上</DialogTitle>
-        <DialogContent dividers>
-          {seedPreviewLoading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-              <CircularProgress />
-            </Box>
-          ) : seedPreview ? (
-            <Stack spacing={2}>
-              <Typography variant="body2" color="text.secondary">
-                对比仓库 <code>public/project_templates/</code> 与线上模板。
-                「导入内置→线上」用内置覆盖线上；若差异不合理、应以线上为准，勾选后点「下载线上→仓库」导出 ZIP，解压进仓库再提交。
-                默认只勾选「新建」。
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {ti.tplSeedKeepsStatus}
-              </Typography>
-              {(seedPreview.toConflict || []).length > 0 && (
-                <Alert severity="error" variant="outlined">
-                  {tf(ti.tplSeedConflictSummary, {
-                    count: seedPreview.toConflict.length,
-                    exportedAt: seedPreview.exportedAt || '—',
-                  })}
-                </Alert>
-              )}
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
-                <Chip
-                  size="small"
-                  color="success"
-                  label={`新建 ${seedPreview.toInsert?.length || 0}（已选 ${(seedPreview.toInsert || []).filter((i) => seedSelectedIds.has(i.id)).length}）`}
-                />
-                <Chip
-                  size="small"
-                  color="warning"
-                  label={`有差异 ${(seedPreview.toUpdate || []).length}（已选 ${(seedPreview.toUpdate || []).filter((i) => seedSelectedIds.has(i.id)).length}）`}
-                />
-                <Chip
-                  size="small"
-                  color="default"
-                  variant="outlined"
-                  label={`已一致 ${seedPreview.toUnchanged?.length || 0}`}
-                />
-                <Button
-                  size="small"
-                  onClick={() => setSeedSelectedIds(new Set(
-                    seedSelectableItems.filter((item) => !item.conflict).map((item) => item.id),
-                  ))}
-                >
-                  {ti.tplSeedSelectAll}
-                </Button>
-                <Button size="small" onClick={() => setSeedSelectionForAction('insert', true)}>全选新建</Button>
-                <Button size="small" onClick={() => setSeedSelectionForAction('update', true)}>全选有差异</Button>
-                <Button size="small" onClick={() => setSeedSelectedIds(new Set())}>清空</Button>
-                {(seedPreview.toConflict || []).length > 0 && (
-                  <Chip
-                    size="small"
-                    color="error"
-                    label={tf(ti.tplSeedConflictChip, { count: seedPreview.toConflict.length })}
-                  />
-                )}
-                {(seedPreview.invalid.length + seedPreview.errors.length) > 0 && (
-                  <Chip
-                    size="small"
-                    color="default"
-                    label={`无法处理 ${seedPreview.invalid.length + seedPreview.errors.length} 个`}
-                  />
-                )}
-              </Stack>
-
-              {seedSelectableItems.length > 0 ? (
-                <Stack spacing={1} sx={{ maxHeight: 480, overflow: 'auto' }}>
-                  {seedSelectableItems.map((item) => {
-                    const checked = seedSelectedIds.has(item.id);
-                    const isUpdate = item.action === 'update';
-                    const diffs = item.diffs || [];
-                    return (
-                      <Paper
-                        key={`${item.action}-${item.id}`}
-                        variant="outlined"
-                        sx={{
-                          p: 1.25,
-                          bgcolor: checked ? 'action.selected' : 'background.paper',
-                        }}
-                      >
-                        <Stack direction="row" spacing={1} alignItems="flex-start">
-                          <Checkbox
-                            size="small"
-                            checked={checked}
-                            onChange={() => toggleSeedSelected(item.id)}
-                            sx={{ mt: -0.5 }}
-                          />
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                              <Chip
-                                size="small"
-                                color={isUpdate ? 'warning' : 'success'}
-                                label={
-                                  isUpdate
-                                    ? (item.willRefreshImages ? '有差异+图片' : '有差异')
-                                    : '新建'
-                                }
-                              />
-                              {item.conflict && (
-                                <Chip size="small" color="error" label={ti.tplSeedConflict} />
-                              )}
-                              {!isUpdate && !item.isApproved && (
-                                <Chip size="small" variant="outlined" color="warning" label={ti.tplSeedPending} />
-                              )}
-                              {!isUpdate && item.isApproved && !item.showOnLanding && (
-                                <Chip size="small" variant="outlined" label={ti.tplSeedHidden} />
-                              )}
-                              <Typography variant="body2" fontWeight={600} noWrap>
-                                {item.name}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {item.id} · {item.filename}
-                                {item.pageCount != null ? ` · ${item.pageCount} 页` : ''}
-                                {item.imageCount ? ` · 图包 ${item.imageCount}` : ''}
-                              </Typography>
-                              {isUpdate && (
-                                <Tooltip title="反向：下载此模板的线上版本到仓库 ZIP">
-                                  <Button
-                                    size="small"
-                                    variant="text"
-                                    color="secondary"
-                                    startIcon={<CloudDownload fontSize="small" />}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const online = templates.find((t) => t.id === item.id);
-                                      if (online) handleDownloadOnlineAsBuiltin([online]);
-                                      else showSnack('线上找不到该模板', 'error');
-                                    }}
-                                    sx={{ ml: 'auto', minHeight: 24, py: 0 }}
-                                  >
-                                    下载线上
-                                  </Button>
-                                </Tooltip>
-                              )}
-                            </Stack>
-                            {item.conflict && (
-                              <Alert severity="error" sx={{ mt: 0.75, py: 0 }}>
-                                {tf(ti.tplSeedConflictDetail, {
-                                  online: item.conflict.onlineUpdatedAt,
-                                  exported: item.conflict.exportedUpdatedAt,
-                                })}
-                              </Alert>
-                            )}
-                            {isUpdate && diffs.length > 0 && (
-                              <Accordion
-                                disableGutters
-                                elevation={0}
-                                sx={{
-                                  mt: 0.75,
-                                  bgcolor: 'transparent',
-                                  '&:before': { display: 'none' },
-                                }}
-                              >
-                                <AccordionSummary
-                                  expandIcon={<ExpandMore fontSize="small" />}
-                                  sx={{ minHeight: 32, px: 0, '& .MuiAccordionSummary-content': { my: 0.5 } }}
-                                >
-                                  <Typography variant="caption" color="text.secondary">
-                                    {diffs.length} 处差异（内置 vs 线上）· {item.reason}
-                                  </Typography>
-                                </AccordionSummary>
-                                <AccordionDetails sx={{ px: 0, pt: 0, pb: 0.5 }}>
-                                  <Stack spacing={0.75}>
-                                    {diffs.map((d) => (
-                                      <Box
-                                        key={`${item.id}-${d.field}`}
-                                        sx={{
-                                          p: 1,
-                                          borderRadius: 1,
-                                          bgcolor: 'grey.50',
-                                          border: '1px solid',
-                                          borderColor: 'divider',
-                                        }}
-                                      >
-                                        <Typography variant="caption" fontWeight={700} display="block">
-                                          {d.label}
-                                        </Typography>
-                                        <Typography variant="caption" color="text.secondary" display="block">
-                                          线上：{d.online}
-                                        </Typography>
-                                        <Typography variant="caption" color="primary.dark" display="block">
-                                          内置：{d.builtin}
-                                        </Typography>
-                                        {Array.isArray(d.paths) && d.paths.length > 0 && (
-                                          <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2 }}>
-                                            {d.paths.map((p) => (
-                                              <Typography
-                                                key={p.path}
-                                                component="li"
-                                                variant="caption"
-                                                color="text.secondary"
-                                                sx={{ fontFamily: 'ui-monospace, monospace' }}
-                                              >
-                                                {p.path}: {p.online} → {p.builtin}
-                                              </Typography>
-                                            ))}
-                                          </Box>
-                                        )}
-                                      </Box>
-                                    ))}
-                                  </Stack>
-                                </AccordionDetails>
-                              </Accordion>
-                            )}
-                          </Box>
-                        </Stack>
-                      </Paper>
-                    );
-                  })}
-                </Stack>
-              ) : (
-                <Alert severity="success" variant="outlined">
-                  没有需要新建或覆盖的模板
-                  {(seedUnchangedItems.length > 0)
-                    ? `（${seedUnchangedItems.length} 个已与线上一致）`
-                    : ''}
-                  。
-                </Alert>
-              )}
-
-              {seedUnchangedItems.length > 0 && (
-                <Accordion disableGutters elevation={0} sx={{ '&:before': { display: 'none' } }}>
-                  <AccordionSummary expandIcon={<ExpandMore />}>
-                    <Typography variant="body2" color="text.secondary">
-                      已一致（{seedUnchangedItems.length}）— 展开查看，不会被勾选导入
-                    </Typography>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ pt: 0 }}>
-                    <Stack spacing={0.5}>
-                      {seedUnchangedItems.map((item) => (
-                        <Typography key={item.id} variant="caption" color="text.secondary">
-                          {item.id} · {item.name}
-                        </Typography>
-                      ))}
-                    </Stack>
-                  </AccordionDetails>
-                </Accordion>
-              )}
-
-              {seedPreview.invalid.length > 0 && (
-                <Alert severity="warning">
-                  无效模板: {seedPreview.invalid.map((i) => `${i.filename} (${i.reason})`).join('；')}
-                </Alert>
-              )}
-              {seedPreview.errors.length > 0 && (
-                <Alert severity="error">
-                  加载失败: {seedPreview.errors.map((e) => `${e.filename} (${e.reason})`).join('；')}
-                </Alert>
-              )}
-            </Stack>
-          ) : null}
-        </DialogContent>
-        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
-          <Button onClick={() => setSeedConfirmOpen(false)} disabled={seeding}>
-            取消
-          </Button>
-          <Box flex={1} />
-          <Tooltip title="把勾选模板的线上版本导出为内置 JSON ZIP（不含图片），解压到 public/project_templates/">
-            <span>
-              <Button
-                variant="outlined"
-                color="secondary"
-                startIcon={<CloudDownload />}
-                onClick={handleDownloadSelectedOnlineAsBuiltin}
-                disabled={seeding || seedPreviewLoading || selectedOnlineForBuiltinDownload.length === 0}
-              >
-                {selectedOnlineForBuiltinDownload.length
-                  ? `下载线上→仓库（${selectedOnlineForBuiltinDownload.length}）`
-                  : '下载线上→仓库'}
-              </Button>
-            </span>
-          </Tooltip>
-          {exportAllButton}
-          <Button
-            variant="contained"
-            onClick={handleConfirmSeed}
-            disabled={seeding || seedPreviewLoading || seedSelectedIds.size === 0}
-          >
-            {seedSelectedIds.size
-              ? `导入内置→线上（${seedSelectedIds.size}）`
-              : '请先勾选模板'}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Snackbar
         open={snack.open}
