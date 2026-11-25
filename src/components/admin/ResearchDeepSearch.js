@@ -14,6 +14,7 @@ import { draftTemplateFromPaper } from '../../lib/researchSearch';
 import {
   listAllResearchPapers,
   updateResearchPaper,
+  updateResearchPapersStatus,
   upsertResearchCandidates,
   deleteResearchPaper,
 } from '../../lib/researchPaperStore';
@@ -25,6 +26,51 @@ import {
   filterTemplatesByQuery,
   paperDoi,
 } from '../../lib/researchTemplateMatch';
+
+/** Candidates waiting for review (weekly scan, MCP), newest first. */
+export function CandidatePapers({ rows, busyIds, onDecide }) {
+  if (!rows.length) return null;
+  const shown = rows.slice(0, 100);
+  return (
+    <Paper variant="outlined" sx={{ mb: 2, p: 1.5 }} data-testid="candidate-papers">
+      <Typography variant="subtitle2" fontWeight={700}>
+        待审核候选 {rows.length} 篇
+      </Typography>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+        每周一自动检索加入（也可能来自 MCP）。通过后显示在 /papers；拒绝后不再出现。
+        {rows.length > shown.length ? ` 这里显示最新 ${shown.length} 篇。` : ''}
+      </Typography>
+      <Table size="small">
+        <TableBody>
+          {shown.map((paper) => {
+            const busy = busyIds.has(paper.id);
+            const url = paper.paper_url || (paper.doi ? `https://doi.org/${paper.doi}` : '');
+            return (
+              <TableRow key={paper.id}>
+                <TableCell sx={{ pl: 0 }}>
+                  <Typography variant="body2" fontWeight={600}>
+                    {url ? <a href={url} target="_blank" rel="noopener noreferrer">{paper.title}</a> : paper.title}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {[paper.year, paper.venue, (paper.sources || []).map(sourceLabel).join(' · ')].filter(Boolean).join(' · ')}
+                  </Typography>
+                </TableCell>
+                <TableCell align="right" sx={{ whiteSpace: 'nowrap', pr: 0, width: 168 }}>
+                  <Button size="small" color="success" startIcon={<ThumbUp fontSize="small" />} disabled={busy} onClick={() => onDecide(paper, 'approved')}>
+                    通过
+                  </Button>
+                  <Button size="small" color="inherit" startIcon={<ThumbDown fontSize="small" />} disabled={busy} onClick={() => onDecide(paper, 'rejected')}>
+                    拒绝
+                  </Button>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </Paper>
+  );
+}
 
 const ROW_H = 52;
 const COLS = '48px minmax(0, 1fr) 52px 48px 72px 100px 72px 168px';
@@ -263,6 +309,8 @@ export default function ResearchDeepSearch() {
   const [linkQuery, setLinkQuery] = useState('');
   const [linkSaving, setLinkSaving] = useState(false);
   const [linkFilter, setLinkFilter] = useState('all'); // all | linked | unlinked
+  const [candidates, setCandidates] = useState([]);
+  const [decidingIds, setDecidingIds] = useState(() => new Set());
 
   const showSnack = (msg, sev = 'success') => setSnack({ open: true, msg, sev });
 
@@ -281,8 +329,12 @@ export default function ResearchDeepSearch() {
   const loadLists = useCallback(async () => {
     setListLoading(true);
     try {
-      const approved = await listAllResearchPapers({ status: 'approved' });
+      const [approved, waiting] = await Promise.all([
+        listAllResearchPapers({ status: 'approved' }),
+        listAllResearchPapers({ status: 'candidate' }),
+      ]);
       setLibrary(sortPapersStable(approved));
+      setCandidates([...waiting].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))));
     } catch (err) {
       showSnack(err.message || String(err), 'error');
     } finally {
@@ -293,6 +345,24 @@ export default function ResearchDeepSearch() {
   useEffect(() => {
     loadLists();
   }, [loadLists]);
+
+  const decideCandidate = useCallback(async (paper, status) => {
+    setDecidingIds((prev) => new Set(prev).add(paper.id));
+    try {
+      await updateResearchPapersStatus([paper.id], status);
+      setCandidates((prev) => prev.filter((p) => p.id !== paper.id));
+      if (status === 'approved') setLibrary((prev) => sortPapersStable([...prev, { ...paper, status }]));
+      showSnack(status === 'approved' ? '已通过，显示在 /papers' : '已拒绝');
+    } catch (err) {
+      showSnack(err.message || String(err), 'error');
+    } finally {
+      setDecidingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(paper.id);
+        return next;
+      });
+    }
+  }, []);
 
   const filteredLibrary = useMemo(() => {
     let rows = library;
@@ -640,7 +710,7 @@ export default function ResearchDeepSearch() {
       </Stack>
 
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-        论文库自带模板匹配：点行内链接图标可搜索/更换模板；「批量匹配模板」按 DOI / 标题+年自动提案。Fit 标记是否适合做成模板。模板本身按读完论文后手搓进 `public/project_templates/`，不从摘要自动生成。
+        论文库自带模板匹配：点行内链接图标可搜索/更换模板；「批量匹配模板」按 DOI / 标题+年自动提案。Fit 标记是否适合做成模板。模板在线上发布（模板管理或 MCP template_publish），读完论文后搭建，不从摘要自动生成。
       </Typography>
 
       {importing && importProgress && (
@@ -670,6 +740,8 @@ export default function ResearchDeepSearch() {
           </Typography>
         </Alert>
       )}
+
+      {!listLoading && <CandidatePapers rows={candidates} busyIds={decidingIds} onDecide={decideCandidate} />}
 
       {listLoading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
