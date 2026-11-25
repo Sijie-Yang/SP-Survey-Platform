@@ -542,6 +542,11 @@ export async function publishTemplate(env, ctx, projectId, body = {}, request = 
     throw Object.assign(new Error('Only platform admins can publish templates directly. Use survey_save_as_template to submit this project for review.'), { status: 403, code: 'ADMIN_ONLY' });
   }
   const row = await loadOwned(env, { ...ctx, projectId });
+  // A browser session (Supabase JWT) can read projects it collaborates on, and
+  // an admin can read every project; only the owner may publish one.
+  if (!ctx.userId || row.user_id !== ctx.userId) {
+    throw Object.assign(new Error('Only the project owner can publish it as a template.'), { status: 403, code: 'FORBIDDEN' });
+  }
   const meta = metadataFromRow(row);
   const text = (value, max = 500) => String(value ?? '').trim().slice(0, max);
   const name = text(body.name, 200);
@@ -573,7 +578,7 @@ export async function publishTemplate(env, ctx, projectId, body = {}, request = 
     templateId = await reserveTemplateId(env, buildTemplateIdBase({ name, author, year }));
   }
 
-  const ownerId = ctx.userId || row.user_id;
+  const ownerId = row.user_id;
   const plan = templateMediaPlan(
     row.preloaded_images,
     projectMediaPrefix(ownerId, projectId),

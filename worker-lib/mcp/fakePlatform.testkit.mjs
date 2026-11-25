@@ -86,7 +86,25 @@ function pick(row, select) {
  * Install a fetch stub over in-memory tables. Returns the state and restore().
  * `rpc[name](body)` may be given to answer /rest/v1/rpc/<name>.
  */
-export function fakeSupabase({ projects = [], templates = [], admins = [], responses = [], rpc = {}, missingColumns = [], failPatch = null } = {}) {
+// Rows after the PostgREST cursor `(created_at.lt."t",and(created_at.eq."t",id.lt."i"),...)`,
+// newest first, as resultsHandlers asks for them.
+function responsePage(rows, url) {
+  const sorted = [...rows].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || String(b.id).localeCompare(String(a.id)));
+  const cursor = url.searchParams.get('or');
+  let out = sorted;
+  if (cursor) {
+    const stamp = (cursor.match(/created_at\.eq\.("(?:[^"\\]|\\.)*")/) || [])[1];
+    const id = (cursor.match(/id\.lt\.("(?:[^"\\]|\\.)*")/) || [])[1];
+    const at = stamp ? JSON.parse(stamp) : null;
+    const lastId = id ? JSON.parse(id) : null;
+    const index = sorted.findIndex((row) => String(row.created_at || '') === String(at || '') && String(row.id) === String(lastId));
+    out = index >= 0 ? sorted.slice(index + 1) : [];
+  }
+  const limit = Number(url.searchParams.get('limit'));
+  return Number.isFinite(limit) && limit > 0 ? out.slice(0, limit) : out;
+}
+
+export function fakeSupabase({ projects = [], templates = [], admins = [], responses = [], rpc = {}, missingColumns = [], failPatch = null, responseCount = null } = {}) {
   const tables = {
     projects: projects.map(clone),
     templates: templates.map(clone),
@@ -120,9 +138,18 @@ export function fakeSupabase({ projects = [], templates = [], admins = [], respo
       return reply(400, { message: `column projects.${select} does not exist`, code: '42703' });
     }
     if (method === 'GET') {
-      // One page of responses; the cursor page is empty.
-      if (name === 'survey_responses' && url.searchParams.get('or')) return reply(200, []);
-      return reply(200, table.filter((row) => matches(row, params)).map((row) => pick(row, select)));
+      const hits = table.filter((row) => matches(row, params));
+      const prefer = String(init.headers?.Prefer || init.headers?.prefer || '');
+      if (prefer.includes('count=exact')) {
+        // A count request (Range 0-0): the total is in Content-Range.
+        const total = responseCount ?? hits.length;
+        return new Response(JSON.stringify(hits.slice(0, 1).map((row) => pick(row, select))), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'content-range': `0-0/${total}` },
+        });
+      }
+      if (name === 'survey_responses') return reply(200, responsePage(hits, url).map((row) => pick(row, select)));
+      return reply(200, hits.map((row) => pick(row, select)));
     }
     if (method === 'POST') {
       const rows = Array.isArray(body) ? body : [body];

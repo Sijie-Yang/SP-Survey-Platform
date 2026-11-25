@@ -128,11 +128,28 @@ function hasAnswer(qData) {
   return true;
 }
 
-export async function fetchAllResponses(env, projectId) {
-  return readAllResponsePages((offset, after) => supabaseRest(env, {
-    path: '/rest/v1/survey_responses', serviceRole: true,
-    query: `?project_id=eq.${encodeURIComponent(projectId)}&select=*&order=created_at.desc.nullslast,id.desc&limit=1000${after ? `&or=${encodeURIComponent(`(${responseCursorFilter(after)})`)}` : ''}`,
-  }));
+/**
+ * Every response row of a project, newest first.
+ * With `maxRows`, loading stops at maxRows + 1 rows (413 TOO_MANY_RESPONSES);
+ * with `maxBytes`, it stops once the rows read so far exceed that many bytes of
+ * JSON (413 PAYLOAD_TOO_LARGE). Nothing partial is ever returned.
+ */
+export async function fetchAllResponses(env, projectId, { maxRows = 0, maxBytes = 0 } = {}) {
+  let bytesRead = 0;
+  return readAllResponsePages(async (offset, after) => {
+    const pageSize = maxRows ? Math.min(1000, maxRows + 1 - offset) : 1000;
+    const page = await supabaseRest(env, {
+      path: '/rest/v1/survey_responses',
+      serviceRole: true,
+      query: `?project_id=eq.${encodeURIComponent(projectId)}&select=*&order=created_at.desc.nullslast,id.desc&limit=${Math.max(pageSize, 1)}${after ? `&or=${encodeURIComponent(`(${responseCursorFilter(after)})`)}` : ''}`,
+      // At least room for the empty last page ("[]").
+      ...(maxBytes ? { maxBodyBytes: Math.max(maxBytes - bytesRead, 2), onBodyBytes: (n) => { bytesRead += n; } } : {}),
+    });
+    if (maxRows && Array.isArray(page) && offset + page.length > maxRows) {
+      throw Object.assign(new Error(`More than ${maxRows} responses.`), { status: 413, code: 'TOO_MANY_RESPONSES', maxRows });
+    }
+    return page;
+  }, maxRows ? { maxRows } : undefined);
 }
 
 async function fetchSiliconResponses(env, projectId, runId) {

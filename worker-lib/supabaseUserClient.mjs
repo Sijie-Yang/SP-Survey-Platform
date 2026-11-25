@@ -10,6 +10,35 @@ function anonKey(env) {
   return env.SUPABASE_ANON_KEY || env.REACT_APP_SUPABASE_ANON_KEY;
 }
 
+/**
+ * The body as text, reading at most `maxBytes` (when given). `onBytes` gets
+ * the byte count of the body that was read.
+ */
+async function readBodyText(res, maxBytes, onBytes) {
+  if (!res.body) {
+    if (onBytes) onBytes(0);
+    return '';
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  for (;;) {
+    // eslint-disable-next-line no-await-in-loop
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (maxBytes && bytes > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw Object.assign(new Error(`The database reply is larger than ${maxBytes} bytes.`), { status: 413, code: 'PAYLOAD_TOO_LARGE' });
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  text += decoder.decode();
+  if (onBytes) onBytes(bytes);
+  return text;
+}
+
 export async function supabaseRest(env, {
   path,
   method = 'GET',
@@ -19,6 +48,10 @@ export async function supabaseRest(env, {
   prefer,
   query = '',
   signal,
+  // Optional: stop reading a reply larger than this (413 PAYLOAD_TOO_LARGE),
+  // and learn how many bytes the reply had.
+  maxBodyBytes = 0,
+  onBodyBytes = null,
 }) {
   const root = baseUrl(env);
   if (!root) {
@@ -52,7 +85,9 @@ export async function supabaseRest(env, {
     signal,
   });
 
-  const text = await res.text();
+  const text = res.ok && (maxBodyBytes || onBodyBytes)
+    ? await readBodyText(res, maxBodyBytes, onBodyBytes)
+    : await res.text();
   let data = null;
   try {
     data = text ? JSON.parse(text) : null;

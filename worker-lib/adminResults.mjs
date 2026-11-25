@@ -2,7 +2,8 @@ import { getUserFromBearer, jsonResponse } from './auth/supabaseJwt.mjs';
 import { supabaseRest } from './supabaseUserClient.mjs';
 import { loadSurveyResponsePage, RESPONSE_INTERACTIVE_BATCH, RESPONSE_INTERACTIVE_KEY_PAGE } from './surveyResponsePages.mjs';
 
-async function countProjectResponses(env, projectId, signal) {
+/** Exact response count of a project (service role), or null when it cannot be read. */
+export async function countProjectResponses(env, projectId, signal) {
   try {
     const root = (env.SUPABASE_URL || env.REACT_APP_SUPABASE_URL || '').replace(/\/$/, '');
     const key = env.SUPABASE_SERVICE_ROLE_KEY;

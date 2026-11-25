@@ -19,7 +19,13 @@ import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from '.
 import { deleteOwnedProject } from './projectLifecycle.mjs';
 import { hydrateSkillContracts } from './skillContracts.mjs';
 import { keepStoredSiteHtml } from './siteDraft.mjs';
-import { spSchemeWorkflow, SP_SCHEME_WORKFLOW_SUMMARY } from './spSchemeWorkflow.mjs';
+import {
+  MAX_IMPORT_MEDIA_FILES,
+  MAX_STAGED_BYTES,
+  MAX_UNZIPPED_BYTES,
+  spSchemeWorkflow,
+  SP_SCHEME_WORKFLOW_SUMMARY,
+} from './spSchemeWorkflow.mjs';
 
 function originFromRequest(request, env) {
   return env.APP_URL
@@ -60,6 +66,25 @@ function draftConfig(row) {
   return row.survey_config_draft ?? row.survey_config ?? {};
 }
 
+/**
+ * Whether two draft stamps name the same time. The database compares exactly;
+ * this is the early check, so text forms of one time ("…Z" / "…+00:00") match.
+ */
+export function sameDraftStamp(a, b) {
+  if (a == null || b == null) return false;
+  if (String(a) === String(b)) return true;
+  const ta = Date.parse(String(a));
+  const tb = Date.parse(String(b));
+  return Number.isFinite(ta) && Number.isFinite(tb) && ta === tb;
+}
+
+/** PostgREST filters `&col=eq.value` (or `is.null`) for each guard. */
+export function guardQuery(guards = {}) {
+  return Object.entries(guards || {})
+    .map(([col, value]) => (value == null ? `&${col}=is.null` : `&${col}=eq.${encodeURIComponent(value)}`))
+    .join('');
+}
+
 export async function handleAgentDiscovery(request, env) {
   return {
     success: true,
@@ -70,8 +95,8 @@ export async function handleAgentDiscovery(request, env) {
     capabilities: DESIGN_CAPABILITIES,
     endpoints: {
       mcp: 'POST /mcp (tools: sp_scheme_spec, sp_scheme_upload_url, sp_scheme_import, survey_publish, survey_download_url, …)',
-      mcpUpload: 'PUT /api/mcp/upload/:token (signed link from sp_scheme_upload_url; raw zip or html body, max 50 MB)',
-      mcpDownload: 'GET /api/mcp/download/:token (signed link from survey_download_url; returns a ZIP)',
+      mcpUpload: `PUT /api/mcp/upload/:token (signed link from sp_scheme_upload_url; raw zip or html body with Content-Length, max ${MAX_STAGED_BYTES / 1048576} MB; a zip expands to at most ${MAX_UNZIPPED_BYTES / 1048576} MB with at most ${MAX_IMPORT_MEDIA_FILES} media files)`,
+      mcpDownload: 'GET /api/mcp/download/:token (signed link from survey_download_url, owner only; returns a ZIP; HEAD checks it without building it)',
       credentialsStatus: 'GET /api/agent/credentials/status',
       storeCredentials: 'POST /api/agent/credentials/openai',
       listProjects: 'GET /api/agent/projects',
@@ -251,6 +276,12 @@ export async function deleteProject(env, accessToken, projectId, userId = null) 
   }, projectId);
 }
 
+/**
+ * Save the draft. `options` is for server code only, never from a client:
+ * - replacePage: the new config may carry a new spSite.html (sp_scheme_import)
+ * - extraColumns: more columns written by the same PATCH (service path only)
+ * - extraGuards: more `col = value` conditions on that PATCH
+ */
 export async function saveDraft(
   env,
   accessToken,
@@ -258,6 +289,7 @@ export async function saveDraft(
   body,
   writerSource = 'codex',
   ownerUserId = null,
+  { replacePage = false, extraColumns = null, extraGuards = null } = {},
 ) {
   const secretFields = findSecretFields(body?.surveyConfig);
   if (secretFields.length) {
@@ -272,9 +304,20 @@ export async function saveDraft(
       code: 'MISSING_EXPECTED_DRAFT_UPDATED_AT',
     });
   }
+  if (extraColumns && !ownerUserId) {
+    throw Object.assign(new Error('extraColumns needs the service path'), { status: 500 });
+  }
   const row = await loadOwnedProject(env, accessToken, projectId, ownerUserId);
+  // A stale draft is a conflict before anything else is checked.
+  if (row.draft_updated_at && !sameDraftStamp(body.expectedDraftUpdatedAt, row.draft_updated_at)) {
+    throw Object.assign(new Error('Project draft changed. Re-read before updating.'), {
+      status: 409,
+      code: 'CONFLICT',
+      draftUpdatedAt: row.draft_updated_at,
+    });
+  }
   // A config read without its page HTML (survey_get_draft) keeps the stored page.
-  const incoming = keepStoredSiteHtml(body?.surveyConfig, draftConfig(row));
+  const incoming = keepStoredSiteHtml(body?.surveyConfig, draftConfig(row), { replacePage });
   const surveyConfig = await hydrateSkillContracts(
     env,
     postProcessAiConfig(incoming),
@@ -298,8 +341,10 @@ export async function saveDraft(
       query: `?id=eq.${encodeURIComponent(projectId)}`
         + (ownerId ? `&user_id=eq.${encodeURIComponent(ownerId)}` : '')
         + `&draft_updated_at=eq.${encodeURIComponent(expected)}`
+        + guardQuery(extraGuards)
         + '&select=id',
       body: {
+        ...(extraColumns || {}),
         survey_config: merged,
         survey_config_draft: merged,
         draft_updated_at: now,

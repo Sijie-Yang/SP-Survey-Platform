@@ -1,7 +1,7 @@
 /**
  * The two signed-link routes behind the MCP tools:
  *
- *   PUT /api/mcp/upload/<token>     raw zip or html body (max 50 MB) → staged for sp_scheme_import
+ *   PUT /api/mcp/upload/<token>     raw zip or html body (max MAX_STAGED_BYTES) → staged for sp_scheme_import
  *   GET /api/mcp/download/<token>   the project's data as one ZIP (survey_download_url)
  *
  * The token is the only credential: signed, short-lived and bound to the user
@@ -31,27 +31,28 @@ function errorJson(error) {
   return json({ ok: false, error: message, code: error?.code || 'ERROR' }, status);
 }
 
-/** Read at most `max` bytes of the body; null when it is larger. */
-async function readBodyCapped(request, max) {
-  if (!request.body) return new Uint8Array(0);
+/**
+ * The body as one buffer of exactly `length` bytes (the declared
+ * Content-Length): no list of chunks and no second copy.
+ * @returns {Promise<Uint8Array|null>} null when the body is not that long
+ */
+async function readBodyExact(request, length) {
+  const out = new Uint8Array(length);
+  if (!request.body) return length === 0 ? out : null;
   const reader = request.body.getReader();
-  const chunks = [];
-  let total = 0;
+  let offset = 0;
   for (;;) {
     // eslint-disable-next-line no-await-in-loop
     const { done, value } = await reader.read();
     if (done) break;
-    total += value.byteLength;
-    if (total > max) {
+    if (offset + value.byteLength > length) {
       await reader.cancel().catch(() => {});
       return null;
     }
-    chunks.push(value);
+    out.set(value, offset);
+    offset += value.byteLength;
   }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  chunks.forEach((chunk) => { out.set(chunk, offset); offset += chunk.byteLength; });
-  return out;
+  return offset === length ? out : null;
 }
 
 function tokenFrom(pathname, prefix) {
@@ -63,21 +64,28 @@ async function handleUpload(request, env, token) {
   if (request.method !== 'PUT') return json({ ok: false, error: 'Use PUT with the file as the request body.', code: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'PUT' });
   const claims = await verifyTransferToken(env, token, 'upload');
   if (!isR2Ready(env)) return json({ ok: false, error: 'R2 is not configured on this server.', code: 'R2_NOT_CONFIGURED' }, 503);
-  const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > MAX_STAGED_BYTES) {
-    return json({ ok: false, error: `The file is larger than ${MAX_STAGED_BYTES / 1048576} MB.`, code: 'UPLOAD_TOO_LARGE' }, 413);
+  // The size must be known before reading, so the body fills one buffer of that size.
+  const lengthHeader = request.headers.get('content-length');
+  if (lengthHeader == null || lengthHeader === '') {
+    return json({ ok: false, error: 'Send the file with its size (Content-Length), for example curl -X PUT --data-binary @study.zip \'<uploadUrl>\'.', code: 'LENGTH_REQUIRED' }, 411);
   }
-  const bytes = await readBodyCapped(request, MAX_STAGED_BYTES);
-  if (!bytes) return json({ ok: false, error: `The file is larger than ${MAX_STAGED_BYTES / 1048576} MB.`, code: 'UPLOAD_TOO_LARGE' }, 413);
-  if (!bytes.byteLength) return json({ ok: false, error: 'The request body is empty. Send the file with --data-binary @file.', code: 'EMPTY_UPLOAD' }, 400);
+  const declared = Number(lengthHeader);
+  if (!Number.isSafeInteger(declared) || declared < 0) {
+    return json({ ok: false, error: 'Content-Length is not a valid size.', code: 'BAD_REQUEST' }, 400);
+  }
+  if (declared > MAX_STAGED_BYTES) {
+    return json({ ok: false, error: `The file is larger than ${MAX_STAGED_BYTES / 1048576} MB. Leave large media out of the zip and upload it to the project's media library in the site.`, code: 'UPLOAD_TOO_LARGE' }, 413);
+  }
+  if (declared === 0) return json({ ok: false, error: 'The request body is empty. Send the file with --data-binary @file.', code: 'EMPTY_UPLOAD' }, 400);
+  const bytes = await readBodyExact(request, declared);
+  if (!bytes) return json({ ok: false, error: 'The body does not match its Content-Length. Send the file again.', code: 'BAD_REQUEST' }, 400);
   return json(await storeStagedUpload(env, claims, bytes));
 }
 
 async function handleDownload(request, env, token) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return json({ ok: false, error: 'Use GET.', code: 'METHOD_NOT_ALLOWED' }, 405, { allow: 'GET' });
   const claims = await verifyTransferToken(env, token, 'download');
-  const response = await handleDataDownload(env, claims);
-  return request.method === 'HEAD' ? new Response(null, { status: response.status, headers: response.headers }) : response;
+  return handleDataDownload(env, claims, { method: request.method });
 }
 
 /** Response for /api/mcp/upload/* and /api/mcp/download/*, or null for any other path. */

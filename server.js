@@ -57,12 +57,35 @@ app.use(cors({
   credentials: true
 }));
 
+// MCP upload links (PUT /api/mcp/upload/<token>) carry a zip or page as the raw
+// body, whatever its content type (curl --data-binary sends
+// x-www-form-urlencoded). Keep the exact bytes: read them as a Buffer before the
+// JSON/form parsers can touch them. The Worker route enforces the real cap
+// (MAX_STAGED_BYTES in worker-lib/agent/spSchemeAgent.mjs, 25 MB); this limit
+// sits just above it.
+const MCP_UPLOAD_BODY_LIMIT = '26mb';
+const mcpUploadBody = express.raw({ type: () => true, limit: MCP_UPLOAD_BODY_LIMIT });
+app.use('/api/mcp/upload', (req, res, next) => mcpUploadBody(req, res, (error) => {
+  if (!error) return next();
+  const tooLarge = error.status === 413 || error.type === 'entity.too.large';
+  return res.status(tooLarge ? 413 : (error.status || 400)).json({
+    ok: false,
+    error: tooLarge ? 'The file is larger than 25 MB.' : 'The upload could not be read.',
+    code: tooLarge ? 'UPLOAD_TOO_LARGE' : 'BAD_REQUEST',
+  });
+}));
+
 app.use(express.json({ limit: '100mb' }));
 // Codex / OAuth clients post token+revoke as application/x-www-form-urlencoded.
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 function buildBridgeBody(req, headers) {
   if (['GET', 'HEAD'].includes(req.method)) return undefined;
+  // Raw bodies (MCP uploads) pass through unchanged, with their own length.
+  if (Buffer.isBuffer(req.body)) {
+    headers.set('content-length', String(req.body.length));
+    return req.body;
+  }
   // Incoming content-length no longer matches after we rebuild the body.
   headers.delete('content-length');
 
@@ -3266,7 +3289,8 @@ if (fs.existsSync(BUILD_PATH)) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+// `node server.js` starts the server; tests require it for `app` without listening.
+if (require.main === module) app.listen(PORT, () => {
   console.log(`🚀 File management server running on http://localhost:${PORT}`);
   console.log(`📁 Templates directory: ${TEMPLATES_PATH}`);
   console.log(`📁 Projects directory: ${PROJECTS_PATH}`);
@@ -3301,3 +3325,5 @@ app.listen(PORT, () => {
     console.log(`   → Open http://localhost:${PORT} in your browser`);
   }
 });
+
+module.exports = { app, buildBridgeBody };

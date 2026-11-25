@@ -27,18 +27,43 @@ export function trimResultSiteHtml(result) {
 }
 
 /**
- * The incoming config, with the stored page put back when the agent sent the
- * same page (same spSite.id) without its HTML (as survey_get_draft returns it).
- * A config without spSite removes the page, as in the Builder.
- * @throws 400 when spSite has no HTML and does not name the stored page
+ * The incoming config, with the stored page put back: a draft write can keep
+ * the page or remove it, but only sp_scheme_import may change it.
+ *
+ * - spSite without its HTML (as survey_get_draft returns it), or with the
+ *   stored HTML, keeps the stored page when it names the stored page (same
+ *   spSite.id). The page's html, id and allowedHosts are always taken from
+ *   storage, so a draft write cannot widen the hosts the page may load from.
+ * - A config without spSite removes the page, as in the Builder.
+ * - New or different page HTML is refused unless `replacePage` is set (the
+ *   import, after its own check).
+ * @throws 400 SITE_HTML_MISSING / SITE_HTML_CHANGED
  */
-export function keepStoredSiteHtml(incoming, stored) {
+export function keepStoredSiteHtml(incoming, stored, { replacePage = false } = {}) {
   const site = incoming?.spSite;
   if (!site || typeof site !== 'object') return incoming;
-  if (typeof site.html === 'string' && site.html) return incoming;
+  if (replacePage && typeof site.html === 'string' && site.html) return incoming;
   const storedSite = stored?.spSite;
-  if (storedSite?.id && site.id === storedSite.id && typeof storedSite.html === 'string' && storedSite.html) {
-    return { ...incoming, spSite: { ...site, html: storedSite.html } };
+  const storedHtml = typeof storedSite?.html === 'string' && storedSite.html ? storedSite.html : '';
+  const sentHtml = typeof site.html === 'string' && site.html ? site.html : '';
+  if (sentHtml && sentHtml !== storedHtml) {
+    throw Object.assign(new Error(
+      'The page (spSite.html) cannot be changed with a draft write. Call sp_scheme_import with the new page (and projectId) instead; keep spSite.id as survey_get_draft returned it to keep the current page.',
+    ), { status: 400, code: 'SITE_HTML_CHANGED' });
+  }
+  // Here any HTML sent is the stored page itself.
+  if (storedHtml && (sentHtml || (storedSite.id && site.id === storedSite.id))) {
+    const { allowedHosts, ...rest } = site;
+    void allowedHosts;
+    return {
+      ...incoming,
+      spSite: {
+        ...rest,
+        id: storedSite.id,
+        html: storedHtml,
+        ...(storedSite.allowedHosts !== undefined ? { allowedHosts: storedSite.allowedHosts } : {}),
+      },
+    };
   }
   throw Object.assign(new Error(
     'spSite has no page HTML. Keep spSite.id as survey_get_draft returned it to keep the current page, remove spSite to remove the page, or call sp_scheme_import to change the page.',
