@@ -17,21 +17,28 @@ import {
   Typography,
 } from '@mui/material';
 import { AutoAwesome, CheckCircle, ContentCopy, Link as LinkIcon, Download, FactCheck, FolderZip, UploadFile, Web } from '@mui/icons-material';
-import { strToU8, zipSync } from 'fflate';
+import { strToU8 } from 'fflate';
 import { useRegion } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
 import {
   SP_SCHEME_VERSION,
-  applySpSchemePackage,
   buildExampleZip,
   buildSpSchemeText,
   readSpSchemeUpload,
-  validateSpSchemePackage,
 } from '../../lib/spScheme';
-import { SITE_MEDIA_ROOT, externalHostsIn, extractEmbeddedScheme, findImageSlots } from '../../lib/spSite';
+import { SITE_MEDIA_ROOT, extractEmbeddedScheme, findImageSlots } from '../../lib/spSite';
 import { listAllKnownFolders } from '../../lib/mediaUtils';
 import { fetchSurveyPage } from '../../lib/agentApi';
-import { planUploadMedia, prepareAsIsImport } from '../../lib/spSchemeAsIs';
+import {
+  bundleSpSchemeFiles,
+  finalizeSpSchemeImport,
+  mediaPlanFolders,
+  prepareSpSchemeUpload,
+  revalidateSpSchemeUpload,
+  spSchemeMediaPlan,
+  spSchemeProblems,
+  spSchemeProblemsText,
+} from '../../lib/spSchemeImport';
 import { uploadPlannedMedia } from '../../lib/spSchemeMediaImport';
 import { uploadImageToR2 } from '../../lib/r2';
 import { useOptionalAuth } from '../../contexts/AuthContext';
@@ -106,47 +113,14 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     }
   };
 
-  const revalidate = (pkg, siteHtml, allowedHosts) => {
-    setReport(validateSpSchemePackage(pkg, { siteHtml, allowedHosts }));
-  };
-
-  const hostList = (html) => externalHostsIn(html).map(({ host, kinds }) => ({ host, why: kinds.join(', '), needed: kinds.some((k) => k !== 'request') }));
-
-  // What an upload becomes: an SP-Scheme page as uploaded, or any other page
-  // as it is (no questions declared; the platform only records what it saves
-  // and sends). Nothing here involves a model.
-  const prepare = (read, name) => {
-    const up = { name, ...read };
-    if (!read.siteHtml) return { up, found: [] };
-    const found = hostList(read.siteHtml);
-    const first = validateSpSchemePackage(read.pkg, { siteHtml: read.siteHtml, allowedHosts: found.map((h) => h.host) });
-    if (first.ok) return { up: { ...up, mediaPlan: planUploadMedia(read.mediaFiles) }, found };
-    const prepared = prepareAsIsImport(read.siteHtml, { mediaFiles: read.mediaFiles || [], dataFiles: read.dataFiles || [] });
-    return {
-      up: {
-        ...up,
-        originalHtml: read.siteHtml,
-        siteHtml: prepared.html,
-        pkg: prepared.pkg,
-        mediaPlan: prepared.mediaPlan,
-        // declared: the page carries an SP-Scheme block with problems, listed so they can be fixed.
-        asIs: { declared: Boolean(first.summary), errors: first.errors, problems: prepared.problems },
-      },
-      found: prepared.hosts,
-    };
-  };
-
+  // What an upload becomes (an SP-Scheme page as uploaded, or any other page
+  // as it is) is decided in spSchemeImport.js, shared with Studio and the MCP.
   const settle = (read, name, { sourceHost = null } = {}) => {
-    let { up, found } = prepare(read, name);
-    if (sourceHost) {
-      up = { ...up, sourceHost };
-      found = withSourceHost(found, up);
-    }
-    const ticked = found.filter((h) => h.needed).map((h) => h.host);
-    setHosts(found);
-    setAllowed(ticked);
-    setUpload(up);
-    revalidate(up.pkg, up.siteHtml, ticked);
+    const prepared = prepareSpSchemeUpload(read, { name, sourceHost });
+    setHosts(prepared.hosts);
+    setAllowed(prepared.allowed);
+    setUpload(prepared.upload);
+    setReport(prepared.report);
   };
 
   const check = (bytes, name = '') => {
@@ -163,15 +137,11 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
   const toggleHost = (host) => {
     const next = allowed.includes(host) ? allowed.filter((h) => h !== host) : [...allowed, host];
     setAllowed(next);
-    if (upload) revalidate(upload.pkg, upload.siteHtml, next);
+    if (upload) setReport(revalidateSpSchemeUpload(upload, next));
   };
 
-  // A page imported from the web keeps loading its images and data from its own site.
-  const withSourceHost = (list, up) => {
-    if (!up?.sourceHost) return list;
-    const rest = list.filter((h) => h.host !== up.sourceHost);
-    return [{ host: up.sourceHost, why: L('the page\'s own site (images, data)', '页面原站点（图片、数据）'), needed: true }, ...rest];
-  };
+  // Why the page uses a domain: its own site for a link import, else what it loads from there.
+  const hostWhy = (h) => (h.source ? L('the page\'s own site (images, data)', '页面原站点（图片、数据）') : (h.kinds || []).join(', '));
 
   const [pageUrl, setPageUrl] = useState('');
   const [fetchingPage, setFetchingPage] = useState(false);
@@ -204,14 +174,8 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     })));
     setPasted('');
     setOpen(true);
-    if (files.length === 1) {
-      check(contents[0], files[0].name);
-      return;
-    }
-    const bundle = {};
-    files.forEach((file, i) => { bundle[file.name] = contents[i]; });
-    const page = files.find((file) => /\.html?$/i.test(file.name));
-    check(zipSync(bundle), page ? `${page.name} + ${files.length - 1}` : `${files.length} files`);
+    const bundled = bundleSpSchemeFiles(files.map((file, i) => ({ name: file.name, bytes: contents[i] })));
+    check(bundled.bytes, bundled.name);
   };
 
   const onFile = (event) => {
@@ -244,10 +208,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
 
   const [copied, setCopied] = useState(false);
   const copyForFix = async () => {
-    const fixErrors = upload?.asIs ? (upload.asIs.declared ? upload.asIs.errors : []) : (report?.summary ? report?.errors || [] : []);
-    const errorsText = fixErrors.length
-      ? `\n\n## Problems to fix in my index.html\n${fixErrors.map((e) => `- ${e.message}${e.path ? ` (${e.path})` : ''}`).join('\n')}\n`
-      : '';
+    const errorsText = spSchemeProblemsText(spSchemeProblems(report, upload));
     try {
       await navigator.clipboard.writeText(schemeText + errorsText);
     } catch {
@@ -262,7 +223,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
     setOpen(false);
   };
 
-  const mediaPlan = upload?.mediaPlan?.files?.length ? upload.mediaPlan : null;
+  const mediaPlan = spSchemeMediaPlan(upload);
   const canUploadMedia = Boolean(currentProject?.id && onProjectUpdate && user?.id);
 
   const doImport = async () => {
@@ -285,11 +246,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
             : L(`${result.failures.length} file(s) failed to upload (e.g. ${result.failures[0].name}: ${result.failures[0].error}). Nothing was imported; try again.`, `${result.failures.length} 个文件上传失败（如 ${result.failures[0].name}：${result.failures[0].error}）。问卷尚未导入，请重试。`));
         }
       }
-      const next = applySpSchemePackage(report, { baseConfig: config });
-      // Imported as it is: Results and the export treat every record as the page's own.
-      if (next.spSite && upload?.asIs) next.spSite.convertedFrom = upload.name || 'index.html';
-      // The zip's folders are the page's folders unless the page named its own.
-      if (next.spSite && mediaPlan && !next.spSite.mediaFolders?.length) next.spSite.mediaFolders = [...mediaPlan.folders.values()].map((f) => f.full);
+      const next = finalizeSpSchemeImport(report, upload, config);
       onChange(next);
       setOpen(false);
       setReport(null);
@@ -545,7 +502,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                     ? L(`On import, the ${mediaPlan.files.length} stimulus files from the zip are uploaded to this project's media library:`, `导入时会把 zip 里的 ${mediaPlan.files.length} 个刺激文件上传到本项目的媒体库：`)
                     : L('Open this survey inside a project to upload the zip\'s stimulus files on import.', '请在项目里打开这份问卷，导入时才能上传 zip 里的刺激文件。')}
                   <Box component="ul" sx={{ m: '4px 0 0', pl: 2.5 }}>
-                    {[...mediaPlan.folders.values()].map((f) => (
+                    {mediaPlanFolders(mediaPlan).map((f) => (
                       <Typography component="li" variant="body2" key={f.full}>{f.full} · {f.count}</Typography>
                     ))}
                   </Box>
@@ -568,7 +525,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                       key={h.host}
                       sx={{ display: 'flex' }}
                       control={<Checkbox size="small" checked={allowed.includes(h.host)} onChange={() => toggleHost(h.host)} />}
-                      label={<Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{h.host}{h.why ? <Typography component="span" variant="caption" color="text.secondary"> · {h.why}</Typography> : null}</Typography>}
+                      label={<Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{h.host}{hostWhy(h) ? <Typography component="span" variant="caption" color="text.secondary"> · {hostWhy(h)}</Typography> : null}</Typography>}
                     />
                   ))}
                 </Box>

@@ -61,6 +61,21 @@ import {
   siliconRunProjectId,
 } from '../silicon/handlers.mjs';
 import { normalizeProjectMetadata, metadataFromRow, projectCardFromRow } from '../agent/projectMeta.mjs';
+import {
+  MAX_IMPORT_MEDIA_FILES,
+  MAX_STAGED_BYTES,
+  MAX_STAGED_UPLOADS,
+  MAX_UNZIPPED_BYTES,
+  createSpSchemeUploadUrl,
+  importSpScheme,
+  spSchemeSpec,
+} from '../agent/spSchemeAgent.mjs';
+import { DOWNLOAD_MAX_JSON_BYTES, DOWNLOAD_MAX_ROWS, createDownloadUrl } from '../agent/resultsDownload.mjs';
+import { publishTemplate } from '../agent/projectLifecycle.mjs';
+import { keepStoredSiteHtml, trimResultSiteHtml } from '../agent/siteDraft.mjs';
+import { sameDraftStamp } from '../agent/projectHandlers.mjs';
+
+const MB = (bytes) => `${Math.round(bytes / 1048576)} MB`;
 
 function mcpCtx(auth) {
   if (auth.kind === 'mcp') {
@@ -124,10 +139,94 @@ const TOOLS = [
   {
     name: 'survey_capabilities',
     description:
-      'Read SP-Survey design rules, FULL question-type catalog (image*/media*/skillquestion presets + examples), operations, and scopes. '
-      + 'Call this before designing surveys that need images, video, audio, or interactive skills. '
+      'Read how to work with SP-Survey. spSchemeWorkflow comes first: the recommended way to run a study is one SP-Scheme web page '
+      + '(sp_scheme_spec → sp_scheme_import → survey_publish → share links.participant → survey_download_url). '
+      + 'Also returns design rules, the FULL question-type catalog (image*/media*/skillquestion presets + examples), operations, and scopes for classic per-question editing. '
       + 'Includes MEDIA SOURCE RULES: never AI-generate media to upload; use template import / project pool / preview media library.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'sp_scheme_spec',
+    description:
+      'START HERE for a new study. Returns the SP-Scheme spec (text): how to build the whole study as one web page (index.html) that the platform records and analyses, '
+      + 'plus the 5-step recipe (steps): build the page → sp_scheme_import → fix any problems → survey_publish → survey_download_url.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'sp_scheme_upload_url',
+    description:
+      `Get a signed PUT link (30 minutes) for a zip holding index.html and the files it uses (images/…), or a large index.html: at most ${MB(MAX_STAGED_BYTES)}, `
+      + `and a zip may expand to at most ${MB(MAX_UNZIPPED_BYTES)} with at most ${MAX_IMPORT_MEDIA_FILES} media files. `
+      + 'Run the returned curl line (it sends Content-Length, which the link requires), then call sp_scheme_import with { uploadId }. Keeps file bytes out of the chat. '
+      + `Needs surveys:write and media:write. Only your ${MAX_STAGED_UPLOADS} most recent staged uploads are kept.`,
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'sp_scheme_import',
+    description:
+      'Import an SP-Scheme page as a study, with the same check as SP-Survey Studio. Pass exactly one of html (the page as text) or uploadId (a zip or page staged with sp_scheme_upload_url). '
+      + 'Without projectId a new project is created (name, else the page title); with projectId the page of that owned project is replaced. '
+      + 'The zip\'s stimulus files go to the project media library in their folders. A file is known by its exact folder and file name, as in Studio: on a re-import, a file of the same size is left as it is (not uploaded), and one of another or unrecorded size replaces the old entry, whose file is deleted unless the published version still uses it (media.new / replaced / unchanged). '
+      + 'When the page does not pass the check, nothing is written: the reply has imported:false and the problems to fix. '
+      + 'When an import fails after it started writing, what it wrote is removed again; if that cleanup fails too, the error says "cleanup incomplete". '
+      + 'A page that does not follow SP-Scheme is imported as it is (answers recorded, not analysed); summary says so. '
+      + 'allowHosts (optional) lists exactly the external hosts the page may load scripts/styles from (default: the ones it needs). '
+      + 'With projectId, pass expectedDraftUpdatedAt (from survey_get_draft or the last import) so edits you have not seen are not overwritten; it is required once the project is published. '
+      + `Limits: ${MAX_IMPORT_MEDIA_FILES} media files and ${MB(MAX_UNZIPPED_BYTES)} unzipped. `
+      + 'Returns summary, links { studio, preview, participant } and draftUpdatedAt for survey_publish.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Owned project whose page to replace. Omit to create a new project.' },
+        expectedDraftUpdatedAt: { type: 'string', description: 'With projectId: the draftUpdatedAt you last saw. Required for a published project.' },
+        name: { type: 'string', description: 'Name for a new project (default: the page title).' },
+        html: { type: 'string', description: 'The whole index.html as text (single-file pages).' },
+        uploadId: { type: 'string', description: 'From sp_scheme_upload_url, after the curl upload.' },
+        allowHosts: { type: 'array', items: { type: 'string' }, description: 'Host names the page may load scripts and styles from.' },
+      },
+    },
+  },
+  {
+    name: 'survey_download_url',
+    description:
+      'Get a signed GET link (15 minutes) to download all data of a project you own as one ZIP for analysis: README.txt (what every file and column means), '
+      + 'responses_wide.csv, responses_raw.json, stimuli.csv, survey.json, page.html (for pages), references.bib, CITATION.cff. '
+      + 'Same rows as Studio and the Results page: silicon runs never; the researcher\'s practice runs with includePractice:true, or when the survey itself includes them (includeResearcherPractice). '
+      + `At most ${DOWNLOAD_MAX_ROWS} responses and ${MB(DOWNLOAD_MAX_JSON_BYTES)} of response data per download; larger projects use the CSV export on the Results page in the site. `
+      + 'Only the project owner can get a link. Run the returned curl line.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string' },
+        includePractice: { type: 'boolean', description: 'Include the researcher\'s own practice runs (default false; they are always included when the survey sets includeResearcherPractice).' },
+      },
+      required: ['projectId'],
+    },
+  },
+  {
+    name: 'template_publish',
+    description:
+      'PLATFORM ADMINS ONLY (checked on the server), and only for a project the admin owns. Publish it directly as an approved template (shown in the homepage library unless showOnLanding:false), '
+      + 'or, with templateId and overwrite:true, overwrite that template from the project (survey config, details and media). Templates are stored online; no repository sync is needed. '
+      + 'Everyone else uses survey_save_as_template (admin review). Needs surveys:publish and confirm:true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string' },
+        templateId: { type: 'string', description: 'Existing template to overwrite (needs overwrite:true). Omit to create a new one.' },
+        overwrite: { type: 'boolean', description: 'Required with templateId: confirms that the template is replaced.' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        author: { type: 'string' },
+        year: { type: 'string' },
+        category: { type: 'string' },
+        paperUrl: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        showOnLanding: { type: 'boolean', description: 'Show it in the homepage template library (default true).' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['projectId', 'name', 'author', 'year', 'confirm'],
+    },
   },
   {
     name: 'survey_list_projects',
@@ -510,7 +609,7 @@ const TOOLS = [
   },
   {
     name: 'survey_get_draft',
-    description: 'Read a project draft and draftUpdatedAt concurrency token.',
+    description: 'Read a project draft and draftUpdatedAt concurrency token. An imported page (spSite.html) is shown as { id, bytes, note } to keep this small; survey_replace_draft keeps the stored page while spSite.id is unchanged, and sp_scheme_import replaces it.',
     inputSchema: {
       type: 'object',
       properties: { projectId: { type: 'string' } },
@@ -544,7 +643,8 @@ const TOOLS = [
   },
   {
     name: 'survey_replace_draft',
-    description: 'Replace the full surveyConfig (escape hatch). Saves update the draft. Version-managed projects require survey_publish to update the participant link.',
+    description: 'Replace the full surveyConfig (escape hatch). Saves update the draft. Version-managed projects require survey_publish to update the participant link. '
+      + 'An imported page (spSite) is kept while spSite.id is unchanged (its html and allowedHosts always come from storage) and removed when spSite is left out; only sp_scheme_import can change the page.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -583,7 +683,7 @@ const TOOLS = [
   },
   {
     name: 'survey_preview_urls',
-    description: 'Get admin and live survey URLs for a project.',
+    description: 'Get the links of a project: participant (the link to share; the custom /s/<slug> link when set), studio (the owner\'s project page with preview, media, link and data), admin and liveSurvey.',
     inputSchema: {
       type: 'object',
       properties: { projectId: { type: 'string' } },
@@ -592,7 +692,7 @@ const TOOLS = [
   },
   {
     name: 'survey_publish',
-    description: 'Release the saved draft and media manifest to the participant link, enabling version management. Review the draft first. Homepage listing still uses Publish to Main Page in Admin.',
+    description: 'Release the saved draft and media manifest to the participant link, enabling version management. Review the draft first. Returns links.participant (the link to share) and links.studio. Homepage listing still uses Publish to Main Page in Admin.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -665,6 +765,32 @@ async function callTool(env, auth, request, name, args = {}) {
         skillAnalysisGuide: buildSkillAnalysisGuideText(),
         skillAnalysisGuideBlurb: skillAnalysisGuideBlurb(),
       });
+    case 'sp_scheme_spec': {
+      requireScope(auth, 'surveys:read');
+      return toolResult(spSchemeSpec());
+    }
+    case 'sp_scheme_upload_url': {
+      requireScope(auth, 'surveys:write');
+      requireScope(auth, 'media:write');
+      return toolResult(await createSpSchemeUploadUrl(env, mcpCtx(auth), request));
+    }
+    case 'sp_scheme_import': {
+      requireScope(auth, 'surveys:write');
+      requireScope(auth, 'media:write');
+      return toolResult(await importSpScheme(env, mcpCtx(auth), args, request));
+    }
+    case 'survey_download_url': {
+      requireScope(auth, 'results:read');
+      return toolResult(await createDownloadUrl(env, mcpCtx(auth), args, request));
+    }
+    case 'template_publish': {
+      requireScope(auth, 'surveys:publish');
+      if (!args.confirm) return toolResult({ error: 'Set confirm:true to publish this project as a template.' }, true);
+      if (args.templateId != null && args.templateId !== '' && args.overwrite !== true) {
+        return toolResult({ error: `This replaces the template ${String(args.templateId).slice(0, 96)} (its survey, details and media) for everyone. Set overwrite:true to do that, or leave templateId out to publish a new template.`, code: 'OVERWRITE_REQUIRED' }, true);
+      }
+      return toolResult(await publishTemplate(env, mcpCtx(auth), args.projectId, args, request));
+    }
     case 'survey_list_projects': {
       requireScope(auth, 'surveys:read');
       if (useService) return toolResult(await listOwnedViaService(env, auth.userId));
@@ -677,9 +803,9 @@ async function callTool(env, auth, request, name, args = {}) {
         const { createProject: create } = await import('../agent/projectHandlers.mjs');
         // Temporarily mint: use service role path by inserting with user id
         const result = await createViaService(env, auth.userId, args, request);
-        return toolResult(result);
+        return toolResult(trimResultSiteHtml(result));
       }
-      return toolResult(await createProject(env, auth.accessToken, auth.userId, args, request));
+      return toolResult(trimResultSiteHtml(await createProject(env, auth.accessToken, auth.userId, args, request)));
     }
     case 'survey_update_project': {
       requireScope(auth, 'surveys:write');
@@ -828,8 +954,9 @@ async function callTool(env, auth, request, name, args = {}) {
     }
     case 'survey_get_draft': {
       requireScope(auth, 'surveys:read');
-      if (useService) return toolResult(await getDraftViaService(env, auth.userId, args.projectId, request));
-      return toolResult(await getDraft(env, auth.accessToken, args.projectId, request));
+      // The page HTML (up to 3 MB) stays out of the agent's context.
+      if (useService) return toolResult(trimResultSiteHtml(await getDraftViaService(env, auth.userId, args.projectId, request)));
+      return toolResult(trimResultSiteHtml(await getDraft(env, auth.accessToken, args.projectId, request)));
     }
     case 'survey_validate': {
       requireScope(auth, 'surveys:read');
@@ -847,16 +974,17 @@ async function callTool(env, auth, request, name, args = {}) {
     case 'survey_apply_operations': {
       requireScope(auth, 'surveys:write');
       if (useService) {
-        return toolResult(await applyOpsViaService(env, auth.userId, args.projectId, args));
+        return toolResult(trimResultSiteHtml(await applyOpsViaService(env, auth.userId, args.projectId, args)));
       }
-      return toolResult(await applyProjectOperations(env, auth.accessToken, args.projectId, args, 'codex'));
+      return toolResult(trimResultSiteHtml(await applyProjectOperations(env, auth.accessToken, args.projectId, args, 'codex')));
     }
     case 'survey_replace_draft': {
       requireScope(auth, 'surveys:write');
+      // Both paths keep the stored page when spSite comes back without its HTML.
       if (useService) {
-        return toolResult(await saveDraftViaService(env, auth.userId, args.projectId, args));
+        return toolResult(trimResultSiteHtml(await saveDraftViaService(env, auth.userId, args.projectId, args)));
       }
-      return toolResult(await saveDraft(env, auth.accessToken, args.projectId, args, 'codex'));
+      return toolResult(trimResultSiteHtml(await saveDraft(env, auth.accessToken, args.projectId, args, 'codex')));
     }
     case 'survey_acquire_lease': {
       requireScope(auth, 'surveys:write');
@@ -881,20 +1009,29 @@ async function callTool(env, auth, request, name, args = {}) {
     case 'survey_preview_urls': {
       requireScope(auth, 'surveys:read');
       if (useService) {
-        await assertOwned(env, auth.userId, args.projectId);
+        const row = await linkRow(env, mcpCtx(auth), args.projectId);
+        if (!row) throw Object.assign(new Error('Project not found'), { status: 404, code: 'PROJECT_NOT_FOUND' });
         const { buildProjectUrls } = await import('../designProtocol.mjs');
         const origin = env.APP_URL || new URL(request.url).origin;
-        return toolResult({ success: true, urls: buildProjectUrls(args.projectId, origin) });
+        return toolResult({ success: true, urls: buildProjectUrls(args.projectId, origin, row) });
       }
       return toolResult(await previewUrls(env, auth.accessToken, args.projectId, request));
     }
     case 'survey_publish': {
       requireScope(auth, 'surveys:publish');
       if (!args.confirm) return toolResult({ error: 'Set confirm:true to publish.' }, true);
-      if (useService) {
-        return toolResult(await publishViaService(env, auth.userId, args.projectId, args));
+      let published;
+      try {
+        published = useService
+          ? await publishViaService(env, auth.userId, args.projectId, args)
+          : await publishProject(env, auth.accessToken, args.projectId, args);
+      } catch (error) {
+        if (/draft has no pages/i.test(String(error?.message || ''))) {
+          return toolResult(await noPagesError(env, mcpCtx(auth), args.projectId), true);
+        }
+        throw error;
       }
-      return toolResult(await publishProject(env, auth.accessToken, args.projectId, args));
+      return toolResult({ ...published, links: await publishLinks(env, mcpCtx(auth), args.projectId, request) });
     }
     case 'survey_list_versions': {
       requireScope(auth, 'surveys:read');
@@ -933,6 +1070,63 @@ async function assertOwned(env, userId, projectId) {
   if (!rows?.[0]) {
     throw Object.assign(new Error('Project not found'), { status: 404, code: 'PROJECT_NOT_FOUND' });
   }
+}
+
+/** The id and custom-link slug of an owned project (null when not found). */
+async function linkRow(env, ctx, projectId) {
+  const { isSafeProjectId } = await import('../designProtocol.mjs');
+  if (!isSafeProjectId(projectId)) {
+    throw Object.assign(new Error('Invalid project id'), { status: 400, code: 'INVALID_PROJECT_ID' });
+  }
+  const owner = ctx.serviceRole ? `&user_id=eq.${encodeURIComponent(ctx.userId)}` : '';
+  // Older databases have no public_slug column yet: fall back to the id link.
+  for (const select of ['id,public_slug', 'id']) {
+    let rows;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      rows = await supabaseRest(env, {
+        path: '/rest/v1/projects',
+        accessToken: ctx.accessToken,
+        serviceRole: Boolean(ctx.serviceRole),
+        query: `?id=eq.${encodeURIComponent(projectId)}${owner}&select=${select}`,
+      });
+    } catch (error) {
+      if (select === 'id') throw error;
+      continue;
+    }
+    return Array.isArray(rows) && rows[0] ? rows[0] : null;
+  }
+  return null;
+}
+
+async function publishLinks(env, ctx, projectId, request) {
+  const { buildProjectUrls } = await import('../designProtocol.mjs');
+  const row = await linkRow(env, ctx, projectId).catch(() => null);
+  const urls = buildProjectUrls(projectId, env.APP_URL || new URL(request.url).origin, row);
+  return { participant: urls.participant, studio: urls.studio };
+}
+
+// release_project_version refuses a draft without pages. A page imported as it
+// is has none, until supabase/release_site_pages.sql has been run once.
+async function noPagesError(env, ctx, projectId) {
+  let sitePage = false;
+  try {
+    const { loadOwned } = await import('../agent/projectLifecycle.mjs');
+    const row = await loadOwned(env, { ...ctx, projectId });
+    const config = row.survey_config_draft ?? row.survey_config ?? {};
+    sitePage = typeof config?.spSite?.html === 'string' && config.spSite.html.length > 0;
+  } catch {
+    sitePage = false;
+  }
+  return sitePage
+    ? {
+      error: 'This page cannot be published yet: the database still uses the release check that requires declared question pages. A platform admin must run supabase/release_site_pages.sql once in the Supabase SQL editor; then call survey_publish again.',
+      code: 'SITE_PAGES_SQL_REQUIRED',
+    }
+    : {
+      error: 'The draft has no pages. Import a page with sp_scheme_import or add questions, then publish.',
+      code: 'DRAFT_HAS_NO_PAGES',
+    };
 }
 
 async function updateMetaViaService(env, userId, body) {
@@ -992,7 +1186,7 @@ async function getDraftViaService(env, userId, projectId, request) {
     draftUpdatedAt: row.draft_updated_at || row.updated_at,
     publishedVersion: row.published_version || 0,
     validation: validateSurveyConfig(surveyConfig),
-    urls: buildProjectUrls(projectId, env.APP_URL || new URL(request.url).origin),
+    urls: buildProjectUrls(projectId, env.APP_URL || new URL(request.url).origin, row),
   };
 }
 
@@ -1059,11 +1253,6 @@ async function saveDraftViaService(env, userId, projectId, body) {
   if (findSecretFields(body?.surveyConfig).length) {
     throw Object.assign(new Error('Do not send credentials through the agent API.'), { status: 400 });
   }
-  const { hydrateSkillContracts } = await import('../agent/skillContracts.mjs');
-  const hydratedConfig = await hydrateSkillContracts(env, postProcessAiConfig(body.surveyConfig), userId);
-  const validation = validateSurveyConfig(hydratedConfig);
-  if (!validation.valid) throw Object.assign(new Error('Survey validation failed.'), { status: 400, validation });
-
   const rows = await supabaseRest(env, {
     path: '/rest/v1/projects',
     serviceRole: true,
@@ -1077,20 +1266,32 @@ async function saveDraftViaService(env, userId, projectId, body) {
       draftUpdatedAt: row?.draft_updated_at || null,
     });
   }
-  if (row?.draft_updated_at && body.expectedDraftUpdatedAt !== row.draft_updated_at) {
+  // A stale draft is a conflict before the page or the config is checked.
+  if (row?.draft_updated_at && !sameDraftStamp(body.expectedDraftUpdatedAt, row.draft_updated_at)) {
     throw Object.assign(new Error('Project draft changed. Re-read before updating.'), {
       status: 409,
       code: 'CONFLICT',
       draftUpdatedAt: row.draft_updated_at,
     });
   }
-  const merged = restoreStoredSecrets(hydratedConfig, row.survey_config_draft ?? row.survey_config);
+  // A config read without its page HTML (survey_get_draft) keeps the stored page;
+  // only sp_scheme_import changes it.
+  const incoming = keepStoredSiteHtml(body?.surveyConfig, row?.survey_config_draft ?? row?.survey_config);
+  const { hydrateSkillContracts } = await import('../agent/skillContracts.mjs');
+  const hydratedConfig = await hydrateSkillContracts(env, postProcessAiConfig(incoming), userId);
+  const validation = validateSurveyConfig(hydratedConfig);
+  if (!validation.valid) throw Object.assign(new Error('Survey validation failed.'), { status: 400, validation });
+
+  const merged = restoreStoredSecrets(hydratedConfig, row?.survey_config_draft ?? row?.survey_config);
   const now = new Date().toISOString();
-  await supabaseRest(env, {
+  const saved = await supabaseRest(env, {
     path: '/rest/v1/projects',
     method: 'PATCH',
     serviceRole: true,
-    query: `?id=eq.${encodeURIComponent(projectId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    // Guarded on the stamp read above, so a save in between is not overwritten.
+    query: `?id=eq.${encodeURIComponent(projectId)}&user_id=eq.${encodeURIComponent(userId)}`
+      + (row?.draft_updated_at ? `&draft_updated_at=eq.${encodeURIComponent(row.draft_updated_at)}` : '')
+      + '&select=id',
     body: {
       survey_config: merged,
       survey_config_draft: merged,
@@ -1098,7 +1299,14 @@ async function saveDraftViaService(env, userId, projectId, body) {
       updated_at: now,
       last_writer: { source: 'codex', at: now },
     },
+    prefer: 'return=representation',
   });
+  if (!Array.isArray(saved) || !saved.length) {
+    throw Object.assign(new Error('Project draft changed. Re-read before updating.'), {
+      status: 409,
+      code: 'CONFLICT',
+    });
+  }
   return { success: true, projectId, draftUpdatedAt: now, validation, surveyConfig: sanitizeForAgent(merged) };
 }
 

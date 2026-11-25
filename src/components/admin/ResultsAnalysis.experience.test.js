@@ -243,3 +243,27 @@ test('an advanced custom task is greyed and marked analyse yourself, a built-in 
   expect(screen.getByText(/^Interactive · /)).toBeTruthy();
   expect(screen.queryByText('Analyse yourself')).toBeNull();
 });
+
+test('without AI handlers (Studio) the analysis and explain buttons are not shown', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  expect(screen.queryByRole('button', { name: 'Analyze current results' })).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: /^Questions$/i }));
+  await screen.findByRole('button', { name: 'Expand analysis: q' });
+  expect(screen.queryByRole('button', { name: 'Explain this question' })).toBeNull();
+});
+
+test('with the AI handlers (classic editor) both buttons are there', async () => {
+  fetchAdminResponsePage.mockResolvedValueOnce(responses).mockResolvedValue([]);
+  const onExplainQuestion = jest.fn();
+  render(<RegionProvider><ResultsAnalysis currentProject={{ id: 'p' }} surveyConfig={config} adminMode
+    onAnalyzeCurrent={() => {}} onExplainQuestion={onExplainQuestion} /></RegionProvider>);
+  await screen.findByText(/2 \/ 2 submissions in analysis/);
+  expect(screen.getByRole('button', { name: 'Analyze current results' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: /^Questions$/i }));
+  const expand = await screen.findByRole('button', { name: 'Expand analysis: q' });
+  if (expand.getAttribute('aria-expanded') !== 'true') fireEvent.click(expand);
+  fireEvent.click(await screen.findByRole('button', { name: 'Explain this question' }));
+  expect(onExplainQuestion).toHaveBeenCalledTimes(1);
+});

@@ -10,13 +10,13 @@
  * those native types. Responses, analysis and export therefore stay unchanged.
  */
 
-import { DESIGN_CAPABILITIES } from './designProtocol/capabilities';
-import { listGenerationContracts } from './designProtocol/generationContracts';
-import { findSecretFields } from './designProtocol/secrets';
-import { postProcessAiConfig, normalizeBuilderSurveyJson } from './designProtocol/normalize';
-import { validateSurveyConfig } from './designProtocol/validate';
-import { getPresetSkill } from './presetSkills';
-import { questionHasTrait } from './platformSchema';
+import { DESIGN_CAPABILITIES } from './designProtocol/capabilities.js';
+import { listGenerationContracts } from './designProtocol/generationContracts.js';
+import { findSecretFields } from './designProtocol/secrets.js';
+import { postProcessAiConfig, normalizeBuilderSurveyJson } from './designProtocol/normalize.js';
+import { validateSurveyConfig } from './designProtocol/validate.js';
+import { getPresetSkill } from './presetSkills.js';
+import { questionHasTrait } from './platformSchema/index.js';
 import {
   ANSWER_SHAPES,
   SP_SITE_SCRIPT_HOSTS,
@@ -31,9 +31,9 @@ import {
   siteMatchLevel,
   stripSitePreviewShim,
   utf8Bytes,
-} from './spSite';
+} from './spSiteCore.js';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { MEDIA_FILE_RE } from './mediaUtils';
+import { MEDIA_FILE_RE } from './mediaUtils.js';
 
 export const SP_SCHEME_VERSION = '2.0';
 export const SP_SCHEME_FORMAT = 'sp-scheme-package';
@@ -401,7 +401,7 @@ The platform takes care of three things; how much of your data it can analyse de
 
 **Step 3 · Hand over the same page, as a zip.** The file the researcher approved IS the deliverable; do not rebuild or simplify it. Put \`index.html\` and every file it uses (images, CSS, JS, data) into one zip, keeping their folders. Stimulus images must be real image files in the zip (for example \`images/street_01.jpg\`), never pictures your code draws (SVG, canvas or CSS art) to stand in for photos: on import they go into the project's media library under the same folders, and the page finds them by the same relative paths. The platform treats the media library as the folder index.html sits in.
 If you cannot make files, give the whole page in one \`\`\`html code block and tell the researcher: "save this as index.html, put it in a zip together with the images it uses".
-Then tell them: in SP-Survey open Survey Builder → SP-Scheme → Upload, choose the zip, read the check report, and click Import. If the report lists problems, the researcher will paste them back to you; return a corrected page.
+Then tell them how to import it: open SP-Survey Studio, click "New study" (新建研究), drag the zip (or index.html) in, read the check and click Import. An agent connected to the SP-Survey MCP server calls \`sp_scheme_import\` instead (a zip goes up through \`sp_scheme_upload_url\` first). If the check lists problems, they come back to you; return a corrected page.
 
 ## 1. The embedded survey JSON
 
@@ -520,6 +520,10 @@ ${EXAMPLE_SITE_HTML.trim()}
 // Project zips may carry their stimulus images (uploaded to the media library on import).
 const MAX_ZIP_BYTES = 200 * 1024 * 1024;
 const MAX_UNZIPPED_BYTES = 300 * 1024 * 1024;
+
+function sizeLimitText(bytes) {
+  return bytes >= 1048576 ? `${Math.round(bytes / 1048576)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 const MANIFEST_NAME = 'sp-scheme.json';
 const ASSET_MIME = { css: 'text/css', js: 'text/javascript', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 
@@ -621,9 +625,11 @@ function readMediaFiles(entries, inlined = []) {
  * Read an uploaded package: index.html on its own, a .zip holding it (plus
  * optional sp-scheme.json and local assets), or a bare sp-scheme.json.
  * @param {Uint8Array} bytes
+ * @param {{ maxZipBytes?: number, maxUnzippedBytes?: number }} [limits] lower caps for
+ *   callers with less memory (the Worker); the defaults suit the browser.
  * @returns {{ pkg: object|null, siteHtml: string|null, siteFile: string|null, files: string[], fromZip: boolean, manifestSource: string|null }}
  */
-export function readSpSchemeUpload(bytes) {
+export function readSpSchemeUpload(bytes, { maxZipBytes = MAX_ZIP_BYTES, maxUnzippedBytes = MAX_UNZIPPED_BYTES } = {}) {
   if (!isZipBytes(bytes)) {
     const text = strFromU8(bytes);
     if (looksLikeHtml(text)) {
@@ -632,20 +638,24 @@ export function readSpSchemeUpload(bytes) {
     }
     return { pkg: parseSpSchemePackage(text), siteHtml: null, siteFile: null, files: [], fromZip: false, manifestSource: 'json' };
   }
-  if (bytes.length > MAX_ZIP_BYTES) throw new Error('The zip is larger than 200 MB. Upload large media to the Media Dataset first and leave it out of the zip.');
+  if (bytes.length > maxZipBytes) throw new Error(`The zip is larger than ${sizeLimitText(maxZipBytes)}. Upload large media to the Media Dataset first and leave it out of the zip.`);
   let total = 0;
   let entries;
+  let tooLarge = null;
   try {
     entries = unzipSync(bytes, {
       filter: (file) => {
         if (file.name.endsWith('/') || /(^|\/)(__MACOSX|\.DS_Store)/.test(file.name)) return false;
         total += file.originalSize || 0;
-        if (total > MAX_UNZIPPED_BYTES) throw new Error('The zip expands to more than 300 MB.');
+        if (total > maxUnzippedBytes) {
+          tooLarge = new Error(`The zip expands to more than ${sizeLimitText(maxUnzippedBytes)}.`);
+          throw tooLarge;
+        }
         return /\.(json|html?|md|txt|csv|tsv|py|css|js|svg)$/i.test(file.name) || MEDIA_FILE_RE.test(file.name);
       },
     });
   } catch (err) {
-    throw new Error(/300 MB/.test(err.message) ? err.message : 'The zip could not be opened.');
+    throw err === tooLarge ? err : new Error('The zip could not be opened.');
   }
   const names = Object.keys(entries);
   const shallowest = (list) => list.sort((a, b) => a.split('/').length - b.split('/').length)[0];

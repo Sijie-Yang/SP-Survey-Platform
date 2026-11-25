@@ -990,7 +990,7 @@ export const adminI18n = {
     navLiveSurveys: 'Live surveys',
     navSpBench: 'SP-Bench',
     navResearcherLogin: 'Researcher login',
-    navOpenWorkspace: 'Open workspace',
+    navOpenWorkspace: 'Open Studio',
     footerDevelopedBy: 'Developed by',
     footerCite: 'Cite & publications',
 
@@ -2312,7 +2312,7 @@ export const adminI18n = {
     navLiveSurveys: '在线调查',
     navSpBench: 'SP-Bench',
     navResearcherLogin: '研究者登录',
-    navOpenWorkspace: '进入工作区',
+    navOpenWorkspace: '进入工作台',
     footerDevelopedBy: '开发团队',
     footerCite: '引用与论文',
 

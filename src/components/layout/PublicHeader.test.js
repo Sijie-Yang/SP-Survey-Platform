@@ -46,9 +46,9 @@ test('signed-out visitors see researcher login', () => {
   expect(link).toHaveAttribute('href', '/login');
 });
 
-test('signed-in visitors open the workspace instead of signing in again', () => {
+test('signed-in visitors open Studio instead of signing in again', () => {
   mockAuthState.isAuthenticated = true;
   renderHeader();
-  const link = screen.getByRole('link', { name: 'Open workspace' });
-  expect(link).toHaveAttribute('href', '/admin');
+  const link = screen.getByRole('link', { name: 'Open Studio' });
+  expect(link).toHaveAttribute('href', '/studio');
 });

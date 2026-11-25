@@ -35,7 +35,7 @@ function renderLogin(path) {
   localStorage.setItem('sp-survey-language', 'en');
   const router = createMemoryRouter([
     { path: '/login', element: <LoginPage /> },
-    { path: '/admin', element: <div>workspace</div> },
+    { path: '/studio', element: <div>workspace</div> },
     { path: '/skills', element: <div>skills</div> },
   ], { initialEntries: [path] });
   render(

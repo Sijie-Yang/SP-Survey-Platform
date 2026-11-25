@@ -24,15 +24,17 @@ import {
   visiblePresence,
 } from '../../lib/projectCollaborators';
 
+// Theme tokens, like the other top bar buttons, so every theme keeps its contrast.
 const circleButtonSx = {
   border: 1,
-  borderColor: 'rgba(255, 255, 255, 0.5)',
+  borderColor: 'divider',
+  color: 'text.primary',
   borderRadius: '50%',
   width: 32,
   height: 32,
   '&:hover': {
-    borderColor: 'rgba(255, 255, 255, 0.8)',
-    bgcolor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'text.secondary',
+    bgcolor: 'action.hover',
   },
 };
 
@@ -162,8 +164,9 @@ export default function ProjectCollaboratorsBar({
                     color: '#fff',
                     fontSize: 12,
                     fontWeight: 700,
-                    borderColor: 'rgba(255,255,255,0.85)',
-                    '&:hover': { bgcolor: color, borderColor: '#fff' },
+                    // A ring in the bar's own colour keeps overlapping circles apart.
+                    borderColor: 'background.paper',
+                    '&:hover': { bgcolor: color, borderColor: 'background.paper' },
                   }}
                 >
                   {presenceInitials(person.displayName, person.email)}

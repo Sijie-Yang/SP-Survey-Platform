@@ -14,14 +14,16 @@ import {
   Typography,
 } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
+import { useL } from '../components/studio/studioUi';
 import { approveMcpOAuth } from '../lib/agentApi';
 
+/** What each permission lets the AI tool do, in plain words: [en, zh]. */
 const SCOPE_LABELS = {
-  'surveys:read': 'Read your projects and survey configs',
-  'surveys:write': 'Create and edit surveys (saves update the live share URL)',
-  'surveys:publish': 'Optional version snapshots for rollback (not required for share links)',
-  'media:write': 'Upload and manage project media in your storage prefix',
-  'results:read': 'List, export, and summarize survey responses for your projects',
+  'surveys:read': ['Read your studies and their surveys', '查看你的研究和问卷'],
+  'surveys:write': ['Create studies, import survey pages and edit drafts', '新建研究、导入问卷页面、修改草稿'],
+  'surveys:publish': ['Publish a version for participants; admins can also publish templates', '发布给参与者的正式版本；管理员还可以发布模板'],
+  'media:write': ['Upload images into your studies', '往你的研究里上传图片'],
+  'results:read': ['Read and download responses for analysis', '查看和下载回答，用来分析'],
 };
 
 const PENDING_KEY = 'mcp_oauth_pending_query';
@@ -61,6 +63,7 @@ export default function McpOAuthPage() {
   const { isAuthenticated, loading } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const L = useL();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -118,7 +121,7 @@ export default function McpOAuthPage() {
     setError(null);
     try {
       if (!clientId || !redirectUri || !codeChallenge) {
-        throw new Error('Missing OAuth parameters from Codex. Close this window and run codex mcp login again.');
+        throw new Error(L('The sign-in link is incomplete. Close this window and connect again from your AI tool.', '登录链接不完整。请关掉这个窗口，回到 AI 工具里重新连接。'));
       }
       const result = await approveMcpOAuth({
         client_id: clientId,
@@ -130,7 +133,7 @@ export default function McpOAuthPage() {
         state,
       });
       if (!result.success || !result.code) {
-        throw new Error(result.error || 'Failed to approve');
+        throw new Error(result.error || L('Could not approve.', '没能授权。'));
       }
       try { sessionStorage.removeItem(PENDING_KEY); } catch { /* ignore */ }
       const target = new URL(redirectUri);
@@ -138,7 +141,7 @@ export default function McpOAuthPage() {
       if (state) target.searchParams.set('state', state);
       window.location.href = target.toString();
     } catch (err) {
-      setError(err.message || 'Authorization failed');
+      setError(err.message || L('Authorization failed.', '授权失败。'));
       setBusy(false);
     }
   };
@@ -159,13 +162,12 @@ export default function McpOAuthPage() {
       <Box sx={{ maxWidth: 560, mx: 'auto', p: 3, mt: 6 }}>
         <Card variant="outlined">
           <CardContent>
-            <Typography variant="h5" gutterBottom>Authorize ChatGPT (Codex)</Typography>
+            <Typography variant="h5" gutterBottom>{L('Connect an AI tool to SP-Survey', '把 AI 工具连接到 SP-Survey')}</Typography>
             <Alert severity="warning" sx={{ mb: 2 }}>
-              Missing OAuth parameters. Close this window and run{' '}
-              <code>codex mcp login sp_survey</code> again from Codex.
+              {L('The sign-in link is incomplete. Close this window and connect again from your AI tool (Claude, ChatGPT, Codex…).', '登录链接不完整。请关掉这个窗口，回到 AI 工具（Claude、ChatGPT、Codex 等）里重新连接。')}
             </Alert>
             <Button variant="contained" onClick={() => navigate('/admin/integrations')}>
-              Open Integrations
+              {L('Open Integrations', '打开集成设置')}
             </Button>
           </CardContent>
         </Card>
@@ -177,12 +179,15 @@ export default function McpOAuthPage() {
     <Box sx={{ maxWidth: 560, mx: 'auto', p: 3, mt: 6, bgcolor: 'background.default', minHeight: '100vh' }}>
       <Card variant="outlined">
         <CardContent>
-          <Typography variant="h5" gutterBottom>Authorize ChatGPT (Codex)</Typography>
+          <Typography variant="h5" gutterBottom>{L('Connect an AI tool to SP-Survey', '把 AI 工具连接到 SP-Survey')}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Allow this client to access your SP-Survey projects?
+            {L(
+              'An AI tool (Claude, ChatGPT, Codex…) asks to work on your studies with your account. Keep every box ticked so it can build, publish and analyse a study end to end.',
+              'AI 工具（Claude、ChatGPT、Codex 等）请求用你的账号操作你的研究。全部勾选，它才能从建问卷、发布一直做到分析数据。',
+            )}
           </Typography>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>Permissions</Typography>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>{L('Permissions', '权限')}</Typography>
           <FormGroup>
             {Object.keys(SCOPE_LABELS).map((scope) => (
               <FormControlLabel
@@ -196,21 +201,22 @@ export default function McpOAuthPage() {
                 label={(
                   <Box>
                     <Typography variant="body2" fontWeight={600}>{scope}</Typography>
-                    <Typography variant="caption" color="text.secondary">{SCOPE_LABELS[scope]}</Typography>
+                    <Typography variant="caption" color="text.secondary">{L(...SCOPE_LABELS[scope])}</Typography>
                   </Box>
                 )}
               />
             ))}
           </FormGroup>
           <Alert severity="info" sx={{ my: 2 }}>
-            Codex saves update the live share / preview URL immediately. Homepage listing still uses
-            Admin → Publish to Main Page. <code>surveys:publish</code> is only for optional
-            version snapshots.
+            {L(
+              'Until a study is published as a version, saved changes are live on its participant link right away. You can disconnect the tool any time in Integrations.',
+              '研究在发布正式版本之前，保存的修改会马上出现在参与者链接上。随时可以在「集成设置」里断开这个工具。',
+            )}
           </Alert>
           <Stack direction="row" spacing={1} justifyContent="flex-end">
-            <Button disabled={busy} onClick={handleDeny}>Deny</Button>
+            <Button disabled={busy} onClick={handleDeny}>{L('Deny', '拒绝')}</Button>
             <Button variant="contained" disabled={busy || scopes.size === 0} onClick={handleApprove}>
-              Approve
+              {L('Approve', '允许')}
             </Button>
           </Stack>
         </CardContent>

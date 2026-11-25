@@ -9,6 +9,84 @@ Silicon pretests use VLM personas and isolated `silicon_*` tables. They never wr
 
 Billing is not included. You use your own AI account in both paths.
 
+## From page to data (SP-Scheme)
+
+The recommended way for an agent (Claude Code, Codex, Cursor) to run a study is
+the same one SP-Survey Studio uses: the whole study is one web page built to the
+SP-Scheme spec. The agent never handles file bytes in the chat; zips and data go
+through short-lived signed links and `curl`.
+
+1. `sp_scheme_spec` returns the spec (`text`) and this recipe (`steps`). Build
+   `index.html` to the spec. If it uses stimulus files, zip it with them, keeping
+   their folders (`images/street_01.jpg`).
+2. Import it:
+   - one page: `sp_scheme_import { html }`
+   - a zip: `sp_scheme_upload_url`, then
+     ```bash
+     curl -X PUT --data-binary @study.zip '<uploadUrl>'
+     ```
+     then `sp_scheme_import { uploadId }`.
+
+   Without `projectId` a new project is created; with `projectId` the page of
+   that project is replaced (pass `expectedDraftUpdatedAt`, the `draftUpdatedAt`
+   you last saw, so edits you have not seen are not overwritten; it is required
+   once the project is published). The zip's files go to the project media
+   library in their folders (same keys and entries as an upload in the browser).
+   A file is known by its exact folder and name, as in Studio: on a re-import a
+   file of the same size is left as it is, and one of another (or unrecorded)
+   size replaces the old entry. The old file is deleted after the import is
+   saved, unless the published version still uses it. `media` reports `new`,
+   `replaced`, `unchanged` and `uploaded`.
+3. Read `summary`. When `imported` is `false`, the page did not pass the check
+   and nothing was written: fix `fixHint.problems` and import again. When
+   `summary.asIs` is `true`, the page did not follow SP-Scheme and was imported
+   as it is: answers are recorded but not analysed; fix `summary.problems` and
+   import again for analysis. If an import fails after it started writing, it
+   removes what it wrote (uploaded files, library entries, a project it created);
+   if that cleanup fails too, the error says `Cleanup incomplete` and what is
+   left.
+4. `survey_publish { projectId, expectedDraftUpdatedAt, confirm: true }`
+   (`draftUpdatedAt` comes back from the import). Share `links.participant`
+   (the custom `/s/<slug>` link when the project has one). `links.studio` is the
+   owner's project page (preview, media, link, data).
+5. Later, `survey_download_url { projectId }`, then
+   ```bash
+   curl -L -o data.zip '<downloadUrl>'
+   ```
+   The ZIP holds `README.txt` (what every file and column means),
+   `responses_wide.csv`, `responses_raw.json`, `stimuli.csv`, `survey.json`,
+   `page.html` (for a page), `references.bib` and `CITATION.cff`. It has the same
+   rows as Studio's download and the Results page: silicon pretest runs never;
+   the researcher's own practice runs with `includePractice: true`, and always
+   when the survey itself includes them (`includeResearcherPractice`). Only the
+   project owner can get a link. One download holds at most 20,000 responses
+   and 32 MB of response data; for larger projects use the CSV export on the
+   project's Results page in the site.
+
+Signed links are HMAC-SHA256 tokens bound to the user (and the project for
+downloads). Upload links last 30 minutes. An upload must send its size
+(`Content-Length`; `curl --data-binary` does) and may be at most 25 MB; a zip
+may expand to at most 60 MB and carry at most 500 media files (each at most
+40 MB). These limits keep an import inside a Worker's 128 MB. Download links
+last 15 minutes. Anyone holding a download link can fetch the data until it
+expires, so do not share it.
+
+Staged uploads (`_mcp-staging/<userId>/<uploadId>`) are deleted after a
+successful import. A failed or abandoned one stays for retries; it is removed
+once it is more than 2 hours old (when you next ask for an upload link or
+upload), and only your 5 most recent staged uploads are kept.
+
+`survey_get_draft` shows an imported page as `spSite.html: { id, bytes, note }`
+to keep the agent's context small. `survey_replace_draft` keeps the stored page
+while `spSite.id` is unchanged (its HTML and `allowedHosts` always come from
+storage) and removes it when `spSite` is left out; new page HTML is refused
+there (`SITE_HTML_CHANGED`). Only `sp_scheme_import` changes the page. A stale
+`expectedDraftUpdatedAt` is answered with `CONFLICT` before the page is checked.
+
+Publishing a page that has no question pages needs
+`supabase/release_site_pages.sql` once (see the checklist below). Until then
+`survey_publish` answers with `SITE_PAGES_SQL_REQUIRED`.
+
 ## Deploy checklist
 
 ### 1. Supabase SQL
@@ -21,6 +99,19 @@ Run in order:
 4. `supabase/ai_runtime.sql`
 5. `supabase/silicon_samples.sql`
 6. `supabase/question_skills_analysis_html.sql` (optional legacy `analysis_html` support)
+7. `supabase/release_site_pages.sql` (after `project_collaborators.sql`; lets SP-Scheme pages be published)
+
+### R2 lifecycle rule (recommended)
+
+Staged MCP uploads live in the media bucket under `_mcp-staging/`. The Worker
+removes them after a successful import, and removes failed or abandoned ones
+after 2 hours only when the same user asks for another upload link. Add an R2
+object lifecycle rule (Cloudflare dashboard → R2 → bucket → Settings → Object
+lifecycle rules) that deletes objects with the prefix `_mcp-staging/` after
+1 day, so nothing is left behind. The bucket is served publicly at
+`R2_PUBLIC_URL`: a staged file can be fetched there by anyone who knows its
+random uploadId until it is deleted; a rule on the media domain that blocks
+`/_mcp-staging/*` closes that too.
 
 ### 2. Wrangler secrets / vars
 
@@ -33,6 +124,7 @@ wrangler secret put SUPABASE_ANON_KEY
 wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 # optional:
 # wrangler secret put BYOK_ENCRYPTION_KEY_ID   # default 1
+# wrangler secret put MCP_SIGNING_SECRET       # signs MCP upload/download links; default: a key derived from SUPABASE_SERVICE_ROLE_KEY
 ```
 
 After deploy, verify: `https://sp-survey.org/oauth/db-check`
@@ -113,13 +205,23 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 ## MCP tools
 
+**SP-Scheme: page to data** (recommended)
+
+| Tool | Scope | What it does |
+|------|-------|--------------|
+| `sp_scheme_spec` | `surveys:read` | The SP-Scheme spec text and the five-step recipe |
+| `sp_scheme_upload_url` | `surveys:write` + `media:write` | Signed PUT link (30 min; 25 MB, unzipped 60 MB, 500 media files) for a zip or page; returns a `curl` line |
+| `sp_scheme_import` | `surveys:write` + `media:write` | `{ html }` or `{ uploadId }`, optional `projectId` (+ `expectedDraftUpdatedAt`, required once published), `name`, `allowHosts`; same check as Studio. A page that fails the check writes nothing; a later failure removes what was written, or says `Cleanup incomplete` |
+| `survey_publish` | `surveys:publish` | Release; returns `links.participant` and `links.studio` |
+| `survey_download_url` | `results:read` | Owner only. Signed GET link (15 min) to one data ZIP (at most 20,000 responses / 32 MB of response data); returns a `curl` line |
+
 **Design**
 
-- `survey_capabilities` — **call first**; question types + `mediaAssignment`
+- `survey_capabilities` — `spSchemeWorkflow` first, then question types + `mediaAssignment` for classic per-question editing
 - `survey_get_draft`, `survey_validate`
-- `survey_apply_operations`, `survey_replace_draft`
+- `survey_apply_operations`, `survey_replace_draft` (keeps or removes an imported page; only `sp_scheme_import` changes it)
 - `survey_acquire_lease`, `survey_release_lease`
-- `survey_preview_urls`
+- `survey_preview_urls` — `participant` (slug-aware), `studio`, `admin`, `liveSurvey`
 - `survey_publish` / `survey_list_versions` / `survey_rollback` — release drafts, inspect history, or restore as a new release; publish and rollback require `expectedDraftUpdatedAt` from the reviewed draft
 
 **Project lifecycle (own projects only)**
@@ -135,6 +237,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 - `survey_list_templates`, `survey_get_template`, `survey_create_from_template`
 - `survey_save_as_template` — `confirm: true`; pending admin review
+- `template_publish` — **platform admins only** (checked on the server against `admins`), for a project the admin **owns** (also with a browser session); `surveys:publish` and `confirm: true`. Publishes the project as an approved template shown on the homepage (`showOnLanding`, default true), or, with `templateId` and `overwrite: true`, overwrites that template from the project (config, details, media copied to `templates/<id>/`). Templates are created online in Supabase, so no repository sync or pull request is needed. Everyone else uses `survey_save_as_template`.
 - `survey_apply_main_page` — `confirm: true` + `onlineStart`/`onlineEnd`
 
 **Media** (`media:write` for mutate)
@@ -175,7 +278,7 @@ The summary tool remains a lightweight inspection endpoint; use the exported tab
 
 - `credentials_status` (hint only)
 
-Do not confuse: **save = draft (managed projects)** · **`survey_publish` = participant release** · **`survey_save_as_template` = template review** · **`survey_apply_main_page` = homepage listing**.
+Do not confuse: **save = draft (managed projects)** · **`survey_publish` = participant release** · **`survey_save_as_template` = template review** · **`template_publish` = admin publishes a template directly** · **`survey_apply_main_page` = homepage listing**.
 
 Visual pipeline: upload → tag folders (`survey_update_media_dataset`) → design with `mediaAssignmentMode` set/category → validate.
 
@@ -213,6 +316,9 @@ The sync is deterministic and records the Harness/pi-ai versions, commits, npm i
 - BYOK keys are AES-256-GCM encrypted; plaintext never returned after store
 - R2 mutating routes require auth and `{userId}/` prefix ownership when Supabase is configured
 - `surveys:publish` is required to update a managed participant release or restore a version
+- MCP upload/download links are signed (HMAC-SHA256), expire (30 / 15 minutes) and are bound to the user, and downloads to one project whose ownership is checked again. They are not tied to the OAuth grant: revoking MCP access does not cancel a link already issued before it expires. Staged uploads live under `_mcp-staging/<userId>/`; they are deleted after a successful import, failed or abandoned ones after 2 hours (see the lifecycle rule above), and at most 5 are kept per user
+- `survey_download_url` and `template_publish` work only on projects the caller owns, also with a Supabase session (collaborators and admins can read other projects, but get no link and cannot publish them)
+- `template_publish` checks the `admins` table on the server; the client cannot claim admin rights
 
 ## Local development
 
@@ -220,7 +326,7 @@ The sync is deterministic and records the Harness/pi-ai versions, commits, npm i
 npm run dev   # CRA :3000 + Express :3001 (agent bridge included)
 ```
 
-Express proxies `/api/agent/*`, `/oauth/*`, `/mcp`, and `/.well-known/*` to the same Worker handlers.
+Express proxies `/api/agent/*`, `/oauth/*`, `/mcp`, `/api/mcp/*` and `/.well-known/*` to the same Worker handlers. Upload links (`PUT /api/mcp/upload/<token>`) keep the raw body byte for byte, whatever its content type.
 
 
 ## Custom interaction authoring (2026-09-10)

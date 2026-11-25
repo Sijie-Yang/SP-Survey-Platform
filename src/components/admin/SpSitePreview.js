@@ -11,8 +11,11 @@ const VIEWPORT_WIDTH = { mobile: 390, tablet: 820 };
 /**
  * Builder preview of an SP-Scheme site: the same page participants get, with
  * media drawn the same way. Answers are checked and shown, never submitted.
+ * `hideImportNotice` drops the long notice about how the page was imported
+ * (Studio says it in its own words) and instead says in one line when the
+ * preview shows the platform's sample images.
  */
-export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = [], previewLibrary = false, viewport = 'desktop', height = '78vh' }) {
+export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = [], previewLibrary = false, viewport = 'desktop', height = '78vh', hideImportNotice = false }) {
   const language = useContext(RegionContext)?.language || 'en';
   const L = (en, zh) => uiPair(language, en, zh);
   // Memoized so media are drawn once per preview run, not on every render.
@@ -40,7 +43,12 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
 
   return (
     <Box data-testid="sp-site-preview">
-      <Alert severity={!converted && match.level === 'full' ? 'info' : 'warning'} sx={{ mb: 1.5 }} data-testid="sp-site-match">
+      {hideImportNotice && previewLibrary && (
+        <Alert severity="info" sx={{ mb: 1.5 }} data-testid="sp-site-sample-images">
+          {L("The preview uses the platform's sample images. Upload your own images.", '预览用的是平台示例图片，请上传自己的图片。')}
+        </Alert>
+      )}
+      {!hideImportNotice && <Alert severity={!converted && match.level === 'full' ? 'info' : 'warning'} sx={{ mb: 1.5 }} data-testid="sp-site-match">
         {converted && L(
           'This page was imported as it is (it does not match SP-Scheme). Participants see exactly this page; what it saves and sends is recorded as it is and nothing is analysed, so export the records and analyse them yourself. Nothing is submitted from the preview.',
           '这个页面是原样导入的（不符合 SP-Scheme）。参与者看到的就是这个页面；它保存和发出的数据原样记录，平台不做分析，请导出记录后自行分析。预览不会提交数据。',
@@ -61,7 +69,7 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
           'This page declares no questions. The platform records every request the page sends, as it is, and exports it; nothing is analysed. Participants finish with the bar under the page, or when the page sends its own "finish" request.',
           '这个页面没有声明任何题目。平台会原样记录页面发出的每个请求并导出，不做任何分析。参与者通过页面下方的提交栏完成，或者页面自己发出“完成”请求时自动完成。',
         )}
-      </Alert>
+      </Alert>}
       {problems.length > 0 && (
         <Alert severity="warning" sx={{ mb: 1.5 }} data-testid="sp-site-problems">
           <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>

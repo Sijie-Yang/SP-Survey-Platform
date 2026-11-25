@@ -63,7 +63,8 @@ export function pageMediaCalls(html) {
   return { folders: [...folders], dynamic };
 }
 
-function mediaFor(given, folder) {
+/** The files a page gets for SPSite.getMedia(folder) from the served folders (as the SDK resolves it). */
+export function mediaFor(given, folder) {
   if (given[folder]) return given[folder];
   const hit = Object.keys(given).find((k) => k !== SITE_PAGE_FILES && (k === folder || k.endsWith(`/${folder}`)));
   return hit ? given[hit] : [];

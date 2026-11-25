@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box, CircularProgress } from '@mui/material';
@@ -7,9 +7,11 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RegionProvider } from './contexts/RegionContext';
 import { createCustomTheme, DEFAULT_THEME_KEY } from './themes/themeConfig';
 import { ToastProvider } from './components/layout/ToastProvider';
+import { loginRedirectPath } from './lib/researcherEntry';
 const QuestionPreviewPage = lazy(() => import('./components/admin/QuestionPreviewPage'));
 const SurveyApp = lazy(() => import('./SurveyApp'));
 const AdminApp = lazy(() => import('./AdminApp'));
+const StudioPage = lazy(() => import('./pages/StudioPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const LiveSurveysPage = lazy(() => import('./pages/LiveSurveysPage'));
@@ -34,6 +36,7 @@ const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
 function ProtectedAdmin() {
   const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -44,10 +47,30 @@ function ProtectedAdmin() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // After signing in, the researcher lands on the same link (project and tab included).
+    return <Navigate to={loginRedirectPath(location)} replace />;
   }
 
   return <AdminApp />;
+}
+
+function ProtectedStudio() {
+  const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to={loginRedirectPath(location)} replace />;
+  }
+
+  return <StudioPage />;
 }
 
 function ProtectedAdminDashboard() {
@@ -144,6 +167,8 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/s/:slug" element={<SurveyApp />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/oauth/mcp" element={<McpOAuthPage />} />
+                <Route path="/studio" element={<ProtectedStudio />} />
+                <Route path="/studio/:projectId" element={<ProtectedStudio />} />
                 <Route path="/admin" element={<ProtectedAdmin />} />
                 <Route path="/admin/integrations" element={<ProtectedIntegrations />} />
                 <Route path="/admin-dashboard" element={<ProtectedAdminDashboard />} />

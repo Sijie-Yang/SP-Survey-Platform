@@ -8,9 +8,9 @@ import { buildResponsesWideCsv } from '../../lib/responsesWideExport';
 
 afterEach(() => localStorage.clear());
 
-function Harness({ initial = {}, onSaved }) {
+function Harness({ initial = {}, onSaved, hideClassicHints = false }) {
   const [config, setConfig] = useState(initial);
-  return <RegionProvider><RecruitmentSettings config={config} onChange={(k, v) => { const next = { ...config, [k]: v }; setConfig(next); onSaved(next); }} /></RegionProvider>;
+  return <RegionProvider><RecruitmentSettings config={config} hideClassicHints={hideClassicHints} onChange={(k, v) => { const next = { ...config, [k]: v }; setConfig(next); onSaved(next); }} /></RegionProvider>;
 }
 
 test('draft → stored setting keeps only what the chosen platform uses', () => {
@@ -53,6 +53,26 @@ test('share panel: Prolific link with placeholders, one link per country', () =>
 test('share panel without a platform explains where to set one', () => {
   render(<RegionProvider><RecruitmentLinks surveyUrl="https://sp-survey.org/s/park" projectId="p1" surveyConfig={{}} /></RegionProvider>);
   expect(screen.getByTestId('recruitment-links-empty')).toHaveTextContent('Survey Builder → Basic Information');
+});
+
+test('without the classic hints (Studio) the settings do not point to classic screens', () => {
+  let saved = null;
+  render(<Harness hideClassicHints initial={{ recruitment: { platform: 'prolific', completionCode: 'C1ABC' } }} onSaved={(c) => { saved = c; }} />);
+  expect(screen.queryByText(/Share → Recruitment platform/)).toBeNull();
+  const code = screen.getByRole('textbox', { name: 'Completion code' });
+  fireEvent.change(code, { target: { value: 'C2XYZ' } });
+  fireEvent.blur(code);
+  expect(saved.recruitment).toEqual({ platform: 'prolific', completionCode: 'C2XYZ' });
+});
+
+test('without the classic hints (Studio) the links panel shows only what helps', () => {
+  const { container } = render(<RegionProvider><RecruitmentLinks hideClassicHints surveyUrl="https://sp-survey.org/s/park" projectId="p1" surveyConfig={{}} /></RegionProvider>);
+  expect(container).toBeEmptyDOMElement();
+  render(<RegionProvider><RecruitmentLinks hideClassicHints surveyUrl="https://sp-survey.org/s/park" projectId="p1"
+    surveyConfig={{ recruitment: { platform: 'prolific', completionCode: '' } }} /></RegionProvider>);
+  expect(screen.getByTestId('recruitment-main-link')).toBeInTheDocument();
+  expect(screen.queryByText(/Survey Builder → Basic Information/)).toBeNull();
+  expect(screen.queryByText('Several countries or groups')).toBeNull();
 });
 
 test('wide export adds recruit_* columns only when someone came from a platform', () => {

@@ -530,8 +530,13 @@ BEGIN
         - 'supabaseAnonKey' - 'openaiApiKey' - 'apiKey',
       'preloadedAt', v_project.preloaded_at, 'preloadedSource', v_project.preloaded_source);
   END IF;
-  IF v_config IS NULL OR jsonb_typeof(v_config->'pages') IS DISTINCT FROM 'array'
-     OR jsonb_array_length(v_config->'pages') = 0 THEN RAISE EXCEPTION 'draft has no pages'; END IF;
+  -- A page imported with SP-Scheme (spSite.html) may have no question pages (see release_site_pages.sql).
+  IF v_config IS NULL OR NOT (
+       COALESCE(CASE WHEN jsonb_typeof(v_config->'pages') = 'array'
+                     THEN jsonb_array_length(v_config->'pages') > 0 END, false)
+       OR COALESCE(jsonb_typeof(v_config->'spSite'->'html') = 'string'
+                   AND length(v_config->'spSite'->>'html') > 0, false)
+     ) THEN RAISE EXCEPTION 'draft has no pages'; END IF;
   SELECT GREATEST(v_project.published_version, COALESCE(MAX(version), 0)) + 1
     INTO v_version FROM public.project_config_versions WHERE project_id = p_project_id;
   INSERT INTO public.project_config_versions(project_id, version, config, media_snapshot, published_by, change_summary)

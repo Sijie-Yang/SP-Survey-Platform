@@ -6,7 +6,7 @@ import {
   OPERATION_TYPES,
   PLATFORM_SCHEMA_HASH,
   QUESTION_TYPE_IDS,
-} from '../platformSchema';
+} from '../platformSchema/index.js';
 
 export const AGENT_SCOPES = {
   READ: 'surveys:read',

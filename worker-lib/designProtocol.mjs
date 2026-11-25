@@ -13,6 +13,7 @@ import {
   PLATFORM_SCHEMA_HASH,
   QUESTION_TYPE_IDS,
 } from './platformSchema.generated.mjs';
+import { surveyShareUrl } from '../src/lib/publicSlug.js';
 
 const OWN_RESPONSE_KEYS = new Set(['ownresponsesupabase', 'own_response_supabase']);
 
@@ -646,12 +647,21 @@ export function createDefaultSurveyConfig(name, description = '') {
   return defaults;
 }
 
-export function buildProjectUrls(projectId, clientOrigin) {
+/**
+ * Links for one project. `participant` is the link to share: the custom short
+ * link (/s/<slug>) when the project has one, else /survey?project=<id>.
+ * `studio` is the owner's one-screen project page (preview, media, link, data).
+ * @param {{ public_slug?: string, publicSlug?: string }} [project] row or card with the slug
+ */
+export function buildProjectUrls(projectId, clientOrigin, project = null) {
   const origin = String(clientOrigin || '').replace(/\/$/, '') || 'https://sp-survey.org';
   const encodedId = encodeURIComponent(projectId);
+  const liveSurvey = `${origin}/survey?project=${encodedId}`;
   return {
     admin: `${origin}/admin`,
-    liveSurvey: `${origin}/survey?project=${encodedId}`,
+    liveSurvey,
+    studio: `${origin}/studio/${encodedId}`,
+    participant: surveyShareUrl(origin, { ...(project || {}), id: projectId }) || liveSurvey,
   };
 }
 

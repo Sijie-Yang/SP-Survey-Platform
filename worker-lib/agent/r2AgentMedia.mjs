@@ -11,6 +11,52 @@ function encodeS3Key(key) {
     .join('/');
 }
 
+/** Run `fn` over `items`, at most `limit` at a time. Results keep the input order. */
+export async function mapWithConcurrency(items, limit, fn) {
+  const list = Array.from(items || []);
+  const results = new Array(list.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const i = next;
+      next += 1;
+      // eslint-disable-next-line no-await-in-loop
+      results[i] = await fn(list[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), list.length) }, worker));
+  return results;
+}
+
+const DELETE_BATCH = 1000; // S3 DeleteObjects and the R2 binding take at most 1000 keys
+const DELETE_CONCURRENCY = 4;
+
+function chunks(list, size) {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+function xmlEscape(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+function xmlUnescape(text) {
+  return String(text).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+// Content-MD5 where the runtime has MD5 (Workers do); S3 asks for it on DeleteObjects.
+async function contentMd5(bytes) {
+  try {
+    const digest = new Uint8Array(await crypto.subtle.digest('MD5', bytes));
+    let binary = '';
+    digest.forEach((b) => { binary += String.fromCharCode(b); });
+    return btoa(binary);
+  } catch {
+    return null;
+  }
+}
+
 function parseListXml(xml) {
   const objects = [];
   const contents = xml.match(/<Contents>[\s\S]*?<\/Contents>/g) || [];
@@ -62,10 +108,51 @@ function buildS3Backend(env) {
       return all;
     },
     async delete(keys) {
-      for (const k of keys) {
+      const deleteOne = async (k) => {
         const res = await client.fetch(objUrl(k), { method: 'DELETE' });
         if (!res.ok && res.status !== 404) await ensureOk(res, 'DELETE');
+      };
+      const failed = [];
+      for (const batch of chunks(keys, DELETE_BATCH)) {
+        let retry = batch;
+        if (batch.length > 1) {
+          // One DeleteObjects request per 1000 keys; keys it could not delete,
+          // or the whole batch if the request fails, go one by one.
+          try {
+            const xml = `<?xml version="1.0" encoding="UTF-8"?><Delete><Quiet>true</Quiet>${batch.map((k) => `<Object><Key>${xmlEscape(k)}</Key></Object>`).join('')}</Delete>`;
+            const body = new TextEncoder().encode(xml);
+            const md5 = await contentMd5(body);
+            const res = await client.fetch(`${endpoint}/${bucketName}?delete`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/xml', ...(md5 ? { 'Content-MD5': md5 } : {}) },
+              body,
+            });
+            if (res.ok) {
+              const text = await res.text();
+              const errors = text.match(/<Error>[\s\S]*?<\/Error>/g) || [];
+              retry = errors
+                .map((block) => (block.match(/<Key>([\s\S]*?)<\/Key>/) || [])[1])
+                .filter(Boolean)
+                .map(xmlUnescape);
+            } else {
+              await res.text().catch(() => '');
+            }
+          } catch {
+            retry = batch;
+          }
+        }
+        if (retry.length) {
+          // eslint-disable-next-line no-await-in-loop
+          await mapWithConcurrency(retry, DELETE_CONCURRENCY, async (k) => {
+            try {
+              await deleteOne(k);
+            } catch (err) {
+              failed.push(`${k}: ${err.message || err}`);
+            }
+          });
+        }
       }
+      if (failed.length) throw new Error(`R2 DELETE failed for ${failed.length} object(s): ${failed.slice(0, 3).join('; ')}`);
     },
     async copy(from, to) {
       await ensureOk(
@@ -87,6 +174,12 @@ function buildS3Backend(env) {
         }),
         'PUT',
       );
+    },
+    async get(key) {
+      const res = await client.fetch(objUrl(key));
+      if (res.status === 404) return null;
+      await ensureOk(res, 'GET');
+      return new Uint8Array(await res.arrayBuffer());
     },
   };
 }
@@ -114,7 +207,10 @@ function getR2Backend(env) {
         return all;
       },
       async delete(keys) {
-        await bucket.delete(keys);
+        for (const batch of chunks(keys, DELETE_BATCH)) {
+          // eslint-disable-next-line no-await-in-loop
+          await bucket.delete(batch);
+        }
       },
       async copy(from, to) {
         const src = await bucket.get(from);
@@ -125,6 +221,11 @@ function getR2Backend(env) {
         await bucket.put(key, body, {
           httpMetadata: { contentType: contentType || 'application/octet-stream' },
         });
+      },
+      async get(key) {
+        const obj = await bucket.get(key);
+        if (!obj) return null;
+        return new Uint8Array(await obj.arrayBuffer());
       },
     };
   }
@@ -215,4 +316,41 @@ export async function putPrefixObject(env, key, body, contentType) {
     url: publicBase ? `${publicBase}/${key}` : '',
     contentType: contentType || 'application/octet-stream',
   };
+}
+
+/**
+ * Read one object's bytes, or null when it does not exist.
+ * @returns {Promise<{ configured: boolean, bytes: Uint8Array|null }>}
+ */
+export async function getPrefixObject(env, key) {
+  const backend = getR2Backend(env);
+  if (!backend?.get) return { configured: false, bytes: null };
+  return { configured: true, bytes: await backend.get(key) };
+}
+
+/**
+ * Copy single objects (`[{ from, to }]`). Stops at the first failure and
+ * reports what was copied so the caller can undo it.
+ */
+export async function copyObjects(env, pairs = []) {
+  const backend = getR2Backend(env);
+  if (!backend) return { configured: false, copied: [], error: null };
+  const copied = [];
+  for (const { from, to } of pairs) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await backend.copy(from, to);
+      copied.push(to);
+    } catch (err) {
+      return { configured: true, copied, error: `${from}: ${err.message || String(err)}` };
+    }
+  }
+  return { configured: true, copied, error: null };
+}
+
+/** Objects under a prefix with their upload time (for housekeeping). */
+export async function listPrefixObjects(env, prefix) {
+  const backend = getR2Backend(env);
+  if (!backend) return { configured: false, objects: [] };
+  return { configured: true, objects: await backend.list(prefix) };
 }

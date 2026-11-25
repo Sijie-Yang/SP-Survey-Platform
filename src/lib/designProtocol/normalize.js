@@ -3,9 +3,9 @@
  * Pure module — no I/O.
  */
 
-import { ANNOTATION_TOOLS, normalizeAllowedTools } from '../annotationTools';
+import { ANNOTATION_TOOLS, normalizeAllowedTools } from '../annotationTools.js';
 import { PLATFORM_SCHEMA } from '../platformSchema/index.js';
-import { normalizeSliderQuestion } from '../sliderScale';
+import { normalizeSliderQuestion } from '../sliderScale.js';
 
 const OWN_RESPONSE_KEYS = new Set(['ownresponsesupabase', 'own_response_supabase']);
 

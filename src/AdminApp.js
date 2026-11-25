@@ -1,7 +1,7 @@
 import { reportFromAnalysisResult } from './lib/resultsReportStore';
 import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useRegion } from './contexts/RegionContext';
-import { UI_LANGUAGES } from './lib/uiLanguages';
+import { UI_LANGUAGES, uiPair } from './lib/uiLanguages';
 import { tf } from './contexts/adminI18n';
 import RegionSwitcher from './components/admin/RegionSwitcher';
 import {
@@ -36,8 +36,6 @@ import {
   FolderOpen,
   Save,
   CleaningServices,
-  Star,
-  GitHub,
   Palette,
   Check,
   Logout,
@@ -47,6 +45,7 @@ import {
   OpenInNew,
   MoreVert,
   Home,
+  SpaceDashboardOutlined,
 } from '@mui/icons-material';
 import { themes, createCustomTheme } from './themes/themeConfig';
 import ConfirmDialog from './components/layout/ConfirmDialog';
@@ -64,14 +63,21 @@ import {
   migrateExistingConfig,
   getActiveProject,
   setActiveProject,
+  clearActiveProject,
   saveProjectDraftOptimistic,
   saveProjectFull,
 } from './lib/projectManager';
 import { useAuth } from './contexts/AuthContext';
 import { supabase } from './lib/supabase';
 import { checkIsAdmin } from './lib/templateManager';
-import { useNavigate } from 'react-router-dom';
-import { useAdminTabHistory } from './lib/adminTabHistory';
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
+import { ADMIN_TAB_HISTORY_MAX, useAdminTabHistory } from './lib/adminTabHistory';
+import {
+  parseAdminDeepLink,
+  savedAdminTab,
+  stripAdminDeepLink,
+  studioPathForProject,
+} from './lib/adminDeepLink';
 import useSurveyAssistant from './hooks/useSurveyAssistant';
 import { useSiliconTasks } from './hooks/useSiliconTasks';
 import { useCollectingSurveyCount } from './hooks/useCollectingSurveyCount';
@@ -186,6 +192,40 @@ function AdminWorkspaceTabs({ value, onChange, siliconEnabled = true }) {
   );
 }
 
+// Top bar controls follow the public header: neutral outline on the paper bar,
+// theme tokens only so every theme (including dark) keeps its contrast.
+const toolbarOutlineSx = {
+  border: '1px solid',
+  borderColor: 'divider',
+  color: 'text.primary',
+  bgcolor: 'transparent',
+  '&:hover': {
+    borderColor: 'text.secondary',
+    bgcolor: 'action.hover',
+  },
+};
+
+const toolbarButtonSx = {
+  ...toolbarOutlineSx,
+  px: 1.25,
+  py: 0.35,
+  minWidth: 0,
+  flexShrink: 0,
+  whiteSpace: 'nowrap',
+  fontWeight: 700,
+  textTransform: 'none',
+};
+
+// Below 1200px the text buttons show only their icon (the tooltip names them),
+// which leaves room for the project name.
+const toolbarIconUntilWideSx = {
+  '& .MuiButton-startIcon': { mr: { xs: 0, lg: 1 }, ml: { xs: 0, lg: -0.5 } },
+};
+
+function ToolbarLabel({ children }) {
+  return <Box component="span" sx={{ display: { xs: 'none', lg: 'inline' } }}>{children}</Box>;
+}
+
 function formatSaveStatusLabel(t, saveStatus, lastSavedAt) {
   if (saveStatus === 'saving') return t.saveStatusSaving;
   if (saveStatus === 'error') return t.saveStatusError;
@@ -207,8 +247,13 @@ function AdminLoadingLabel() {
 export default function AdminApp() {
   const { t, language, setLanguage } = useRegion();
   const compactToolbar = useMediaQuery('(max-width:899px)');
+  // The Studio button hides below 600px; the More menu offers it there.
+  const phoneToolbar = useMediaQuery('(max-width:599px)');
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const [isAdminUser, setIsAdminUser] = useState(false);
 
   // Theme state
@@ -278,9 +323,10 @@ export default function AdminApp() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const autoSaveTimerRef = useRef(null);
   const saveInFlightRef = useRef(false);
+  // The save that is running now, so leaving the editor can wait for it.
+  const savePromiseRef = useRef(null);
   const [latestImageDatasetConfig, setLatestImageDatasetConfig] = useState(null);
   const [lastSavedConfig, setLastSavedConfig] = useState(null);
-  const [githubStars, setGithubStars] = useState(null);
   
   // Project state management - save each project's editing state
   // ✅ Now using sessionStorage (session-only, no quota issues!)
@@ -391,32 +437,14 @@ export default function AdminApp() {
     // Load project states
     const savedStates = loadProjectStatesFromStorage();
     setProjectStates(savedStates);
-    
-    // Initialize project system
-    initializeProjectSystem();
-  }, []);
 
-  // Fetch GitHub stars count
-  useEffect(() => {
-    const fetchGithubStars = async () => {
-      try {
-        const response = await fetch('https://api.github.com/repos/Sijie-Yang/SP-Survey');
-        if (response.ok) {
-          const data = await response.json();
-          setGithubStars(data.stargazers_count);
-        } else {
-          setGithubStars(null);
-        }
-      } catch (error) {
-        console.error('Failed to fetch GitHub stars:', error);
-        setGithubStars(null);
-      }
-    };
-    
-    fetchGithubStars();
-    // Refresh every 5 minutes
-    const interval = setInterval(fetchGithubStars, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    // /admin?project=<id>&tab=<name> (links from Studio): make that project the
+    // active one before the project system reads it.
+    const deepLink = parseAdminDeepLink(locationRef.current.search);
+    if (deepLink.projectId) setActiveProject(deepLink.projectId);
+
+    // Initialize project system
+    initializeProjectSystem({ deepLink });
   }, []);
 
   // Monitor surveyConfig changes, detect unsaved changes
@@ -599,11 +627,39 @@ export default function AdminApp() {
     console.log('📝 Demo images cleanup skipped (no longer using localStorage)');
   };
 
-  const initializeProjectSystem = async () => {
+  // Show the start tab and drop any deep-link parameters in one history
+  // replace, so the address bar ends on plain /admin.
+  const settleStartupLocation = (tab = null) => {
+    const loc = locationRef.current;
+    const search = stripAdminDeepLink(loc.search);
+    const shownTab = typeof loc.state?.adminTab === 'number' ? loc.state.adminTab : 0;
+    const sameTab = tab == null || (shownTab === tab && !loc.state?.adminOverlay);
+    if (search === loc.search && sameTab) return;
+    navigate(
+      { pathname: loc.pathname, search, hash: loc.hash },
+      {
+        replace: true,
+        preventScrollReset: true,
+        state: tab == null ? loc.state : { ...(loc.state || {}), adminTab: tab, adminOverlay: null },
+      },
+    );
+  };
+
+  // Tab to open a project on: the link's tab, else the one remembered for it.
+  const startupTab = (projectId, deepLink) => {
+    if (deepLink?.tab != null) return deepLink.tab;
+    const savedState = loadProjectStatesFromStorage()[projectId];
+    return savedState
+      ? savedAdminTab(savedState, { tabsVersion: ADMIN_TABS_VERSION, maxTab: ADMIN_TAB_HISTORY_MAX })
+      : 0;
+  };
+
+  const initializeProjectSystem = async ({ deepLink = null } = {}) => {
     const slowTimer = setTimeout(() => {
       setProjectLoading(false);
       setSnackbar({ open: true, message: t.projectSystemTimeout, severity: 'warning' });
     }, 15000);
+    let openTab = null;
     try {
       setProjectLoading(true);
       
@@ -614,8 +670,9 @@ export default function AdminApp() {
         // Load the migrated project
         setCurrentProject(migratedProject);
         
-        // Try to restore saved state first
-        const stateRestored = restoreProjectState(migratedProject.id);
+        // Restore the cached copy only when it holds unsaved edits (see below).
+        const stateRestored = restoreProjectState(migratedProject.id, { onlyWhenUnsaved: true, restoreTab: false });
+        openTab = startupTab(migratedProject.id, deepLink);
         
         if (!stateRestored) {
           // If no saved state, load from file
@@ -630,26 +687,42 @@ export default function AdminApp() {
         });
       } else {
         // Check if there's an active project
-        const activeProject = await getActiveProject();
+        // On the platform a project read without an owner came through the
+        // participant view: it is someone else's, so it does not open here.
+        const loadedProject = await getActiveProject();
+        const activeProject = loadedProject && isSupabaseConfigured() && !loadedProject.userId ? null : loadedProject;
+        if (loadedProject && !activeProject) clearActiveProject();
         console.log('🔍 Active project from sessionStorage:', activeProject?.id, activeProject?.name);
         
         if (activeProject) {
           setCurrentProject(activeProject);
           
-          // Try to restore saved state first (includes tabValue)
-          const stateRestored = restoreProjectState(activeProject.id);
+          // Restore the cached copy only when it holds unsaved edits. A clean
+          // copy can be older than the stored draft (Studio or an agent may
+          // have saved since), and the next autosave would write it back.
+          const stateRestored = restoreProjectState(activeProject.id, { onlyWhenUnsaved: true, restoreTab: false });
+          openTab = startupTab(activeProject.id, deepLink);
           
           if (!stateRestored) {
-            // If no saved state, load from file
+            // No unsaved edits: load the stored draft
             const config = await loadSurveyConfig(activeProject.id);
             setSurveyConfig(config || demoSurveyConfig);
-            setTabValue(0, { replace: true });
           }
-          // If state was restored, tabValue is already set by restoreProjectState
         } else {
           // No projects yet - show empty state
           console.log('🔍 No active project, showing null state');
           setSurveyConfig(null);
+          if (deepLink?.projectId) {
+            setSnackbar({
+              open: true,
+              message: uiPair(
+                language,
+                'This project could not be opened. It may have been deleted, or your account may not have access.',
+                '打不开这个项目。它可能已被删除，或者你的账号没有权限。',
+              ),
+              severity: 'warning',
+            });
+          }
         }
       }
     } catch (error) {
@@ -658,6 +731,7 @@ export default function AdminApp() {
     } finally {
       clearTimeout(slowTimer);
       setProjectLoading(false);
+      settleStartupLocation(openTab);
     }
   };
 
@@ -863,7 +937,7 @@ export default function AdminApp() {
 
   // Restore project state
   const restoreProjectState = (projectId, options = {}) => {
-    const { onlyWhenUnsaved = false } = options;
+    const { onlyWhenUnsaved = false, restoreTab = true } = options;
     // Always read from localStorage directly to avoid stale state issues
     const allStates = loadProjectStatesFromStorage();
     const savedState = allStates[projectId];
@@ -879,12 +953,13 @@ export default function AdminApp() {
       setSurveyConfig(savedState.surveyConfig);
       setLastSavedConfig(savedState.lastSavedConfig);
       setHasUnsavedChanges(savedState.hasUnsavedChanges);
-      let restoredTab = savedState.tabValue !== undefined ? savedState.tabValue : 0;
-      // v1 tabs had no Introduction (0=Media…4=Practice). Shift once when upgrading.
-      if ((savedState.tabsVersion || 1) < ADMIN_TABS_VERSION) {
-        restoredTab = Math.min(restoredTab + 1, ADMIN_TAB_MAX);
+      if (restoreTab) {
+        // v1 tabs had no Introduction (0=Media…4=Practice); savedAdminTab shifts them once.
+        setTabValue(
+          savedAdminTab(savedState, { tabsVersion: ADMIN_TABS_VERSION, maxTab: ADMIN_TAB_HISTORY_MAX }),
+          { replace: true },
+        );
       }
-      setTabValue(restoredTab, { replace: true });
       return true;
     }
     
@@ -1198,7 +1273,7 @@ export default function AdminApp() {
     saveInFlightRef.current = true;
     setSaveStatus('saving');
     const configAtStart = surveyConfigRef.current;
-
+    const run = (async () => {
     try {
       const projectToSave = {
         ...currentProject,
@@ -1261,7 +1336,7 @@ export default function AdminApp() {
             severity: 'success',
           });
         }
-        return { success: true, draftUpdatedAt: savedProject.draftUpdatedAt };
+        return { success: true, draftUpdatedAt: savedProject.draftUpdatedAt, editedDuringSave };
       }
 
       setSaveStatus('error');
@@ -1290,12 +1365,50 @@ export default function AdminApp() {
     } finally {
       saveInFlightRef.current = false;
     }
+    })();
+    savePromiseRef.current = run;
+    return run;
   }, [currentProject, projectStates, surveyConfig, latestImageDatasetConfig]);
 
   performSaveRef.current = performSave;
 
   const handleManualSave = async () => {
     await performSave({ silent: false });
+  };
+
+  // True once nothing is left unsaved: waits for a save that is already
+  // running, then saves the edits made since (or retries a failed save).
+  const saveBeforeLeaving = async () => {
+    if (!currentProject) return true;
+    if (saveInFlightRef.current && savePromiseRef.current) {
+      const running = await savePromiseRef.current.catch(() => null);
+      if (running?.success && !running.editedDuringSave) return true;
+    } else if (!hasUnsavedChangesRef.current) {
+      return true;
+    }
+    const result = await performSaveRef.current?.({ silent: true });
+    return Boolean(result?.success);
+  };
+
+  // Studio and the home page read the stored draft, so pending edits are saved first.
+  const leaveEditor = async (path, notSavedMessage) => {
+    if (!(await saveBeforeLeaving())) {
+      setSnackbar({ open: true, message: notSavedMessage, severity: 'warning' });
+      return;
+    }
+    navigate(path);
+  };
+
+  const openStudio = () => leaveEditor(
+    studioPathForProject(currentProject?.id),
+    uiPair(language, 'Your latest changes are not saved yet. Save them, then open Studio again.', '最新的修改还没保存。请先保存，再打开工作台。'),
+  );
+
+  const goHome = (event) => {
+    // A new tab or window leaves this editor open, so nothing needs saving.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    leaveEditor('/', uiPair(language, 'Your latest changes are not saved yet. Save them, then leave.', '最新的修改还没保存。请先保存，再离开。'));
   };
 
   // Debounced auto-save to Supabase / file server
@@ -1342,9 +1455,11 @@ export default function AdminApp() {
     <Box sx={{ flexGrow: 1, minHeight: '100vh', display: 'flow-root', bgcolor: 'background.default', color: 'text.primary' }}>
         <AppBar
           position="fixed"
-          color="primary"
+          color="inherit"
           sx={{
             zIndex: (theme) => theme.zIndex.drawer + 1,
+            bgcolor: 'background.paper',
+            color: 'text.primary',
           }}
         >
           <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 }, minWidth: 0 }}>
@@ -1355,90 +1470,41 @@ export default function AdminApp() {
               data-tour="projects"
               aria-expanded={sidebarOpen}
               aria-controls="admin-project-sidebar"
-              sx={{ mr: { xs: 0, sm: 2 } }}
+              sx={{ mr: { xs: 0, sm: 1 } }}
             >
               <MenuIcon />
             </IconButton>
           </Tooltip>
           
           <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, minWidth: 0 }}>
-            <Box
-              component="img"
-              src="/logo-header.png"
-              alt="SP-Survey"
-              sx={{
-                height: { xs: 26, sm: 35 },
-                maxWidth: { xs: 92, sm: 150 },
-                objectFit: 'contain'
-              }}
-            />
-            
-            {/* Custom GitHub Stars Badge */}
-            <Box
-              component="a"
-              href="https://github.com/Sijie-Yang/SP-Survey"
-              target="_blank"
-              rel="noopener noreferrer"
-              sx={{
-                ml: 1.5,
-                display: { xs: 'none', lg: 'flex' },
-                alignItems: 'center',
-                gap: 0.5,
-                px: 1,
-                py: 0.4,
-                borderRadius: '16px',
-                background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0.1) 100%)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.3)',
-                textDecoration: 'none',
-                color: 'inherit',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.2) 100%)',
-                  transform: 'translateY(-2px)',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                  '& .github-icon': {
-                    transform: 'rotate(360deg)'
-                  },
-                  '& .star-icon': {
-                    transform: 'scale(1.2) rotate(72deg)',
-                    filter: 'drop-shadow(0 0 6px #ffd700)'
-                  }
-                }
-              }}
-            >
-              <GitHub 
-                className="github-icon"
-                sx={{ 
-                  fontSize: '1.1rem',
-                  transition: 'transform 0.6s ease'
-                }} 
-              />
-              <Star 
-                className="star-icon"
-                sx={{ 
-                  fontSize: '1rem',
-                  color: '#ffd700',
-                  filter: 'drop-shadow(0 0 3px rgba(255, 215, 0, 0.6))',
-                  transition: 'all 0.3s ease'
-                }} 
-              />
-              <Typography 
-                variant="body2" 
-                sx={{ 
-                  fontWeight: 'bold',
-                  fontSize: '0.85rem',
-                  lineHeight: 1
-                }}
+            <Tooltip title={t.navMainPage}>
+              <Box
+                component={RouterLink}
+                to="/"
+                onClick={goHome}
+                aria-label={t.navMainPage}
+                data-testid="admin-logo-home"
+                sx={{ display: 'flex', alignItems: 'center', flexShrink: 1, minWidth: 0, borderRadius: 1 }}
               >
-                {githubStars !== null ? githubStars : '...'}
-              </Typography>
-            </Box>
+                <Box
+                  component="img"
+                  src={theme.palette.mode === 'dark' ? '/logo-header.png' : '/logo-web-header.png'}
+                  alt="SP-Survey"
+                  sx={{
+                    height: { xs: 26, sm: 32 },
+                    width: { xs: 112, sm: 138 },
+                    maxWidth: '100%',
+                    objectFit: 'contain',
+                    objectPosition: 'left center',
+                    display: 'block',
+                  }}
+                />
+              </Box>
+            </Tooltip>
             
             {currentProject && (
-              <Box sx={{ ml: { xs: 1, sm: 2 }, display: 'flex', minWidth: 0, flex: '1 1 140px', alignItems: 'center', overflow: 'hidden' }}>
-                <FolderOpen sx={{ mr: 1, fontSize: '1.2rem', display: { xs: 'none', sm: 'inline-flex' }, flexShrink: 0 }} />
+              <Box sx={{ ml: { xs: 1, sm: 1.5 }, pl: { xs: 1, sm: 1.5 }, borderLeft: 1, borderColor: 'divider', display: 'flex', minWidth: 0, flex: '1 1 140px', alignItems: 'center', overflow: 'hidden' }}>
+                <FolderOpen sx={{ mr: 1, fontSize: '1.2rem', color: 'text.secondary', display: { xs: 'none', sm: 'inline-flex' }, flexShrink: 0 }} />
                 <OpenProjectHeader project={currentProject} />
               </Box>
             )}
@@ -1446,14 +1512,14 @@ export default function AdminApp() {
           
           {/* Backend Server Status Monitor — only shown in self-hosted mode */}
           {!process.env.REACT_APP_SUPABASE_URL && (
-            <Box sx={{ mr: { xs: 0, sm: 2 } }}>
+            <Box sx={{ mr: { xs: 0, sm: 1 } }}>
               <BackendStatus />
             </Box>
           )}
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: { xs: 0, sm: 1 }, flexShrink: 0 }}>
             {currentProject && (
-              <Typography variant="caption" sx={{ display: { xs: 'none', lg: 'block' }, opacity: 0.9, minWidth: 140, textAlign: 'right' }}>
+              <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', lg: 'block' }, minWidth: 88, textAlign: 'right', whiteSpace: 'nowrap' }}>
                 {formatSaveStatusLabel(t, saveStatus, lastSavedAt)}
               </Typography>
             )}
@@ -1469,20 +1535,17 @@ export default function AdminApp() {
                 data-tour="save"
                 disabled={!currentProject}
                 size="small"
-                sx={{ 
-                  border: 1,
-                  borderColor: hasUnsavedChanges ? 'warning.main' : 'rgba(255, 255, 255, 0.5)',
-                  bgcolor: hasUnsavedChanges ? 'warning.main' : 'transparent',
-                  color: hasUnsavedChanges ? 'warning.contrastText' : 'inherit',
-                  '&:hover': hasUnsavedChanges ? {
-                    borderColor: 'warning.dark',
-                    bgcolor: 'warning.dark'
-                  } : {
-                    borderColor: 'rgba(255, 255, 255, 0.8)',
-                    bgcolor: 'rgba(255, 255, 255, 0.1)'
-                  },
+                sx={{
+                  ...toolbarOutlineSx,
                   transition: 'all 0.3s ease',
                   ...(hasUnsavedChanges && {
+                    borderColor: 'warning.main',
+                    bgcolor: 'warning.main',
+                    color: 'warning.contrastText',
+                    '&:hover': {
+                      borderColor: 'warning.dark',
+                      bgcolor: 'warning.dark',
+                    },
                     animation: 'pulse 2s infinite',
                     '@keyframes pulse': {
                       '0%': { opacity: 1 },
@@ -1503,14 +1566,7 @@ export default function AdminApp() {
                 data-tour="preview"
                 disabled={!currentProject || !surveyConfig}
                 size="small"
-                sx={{
-                  border: 1,
-                  borderColor: 'rgba(255, 255, 255, 0.5)',
-                  '&:hover': {
-                    borderColor: 'rgba(255, 255, 255, 0.8)',
-                    bgcolor: 'rgba(255, 255, 255, 0.1)'
-                  }
-                }}
+                sx={toolbarOutlineSx}
               >
                 <Preview fontSize="small" />
               </IconButton>
@@ -1537,20 +1593,14 @@ export default function AdminApp() {
                     aria-expanded={aiSidebarOpen}
                     aria-controls={AI_SIDEBAR_ID}
                     sx={{
+                      ...toolbarButtonSx,
                       ml: 0.5,
-                      px: 1.25,
-                      py: 0.35,
-                      minWidth: 0,
-                      fontWeight: 700,
                       letterSpacing: 0.4,
-                      border: '1px solid',
-                      borderColor: aiSidebarOpen ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.65)',
-                      bgcolor: aiSidebarOpen ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.12)',
-                      textTransform: 'none',
-                      '&:hover': {
-                        borderColor: 'rgba(255, 255, 255, 0.95)',
-                        bgcolor: 'rgba(255, 255, 255, 0.22)',
-                      },
+                      ...(aiSidebarOpen && {
+                        borderColor: 'primary.main',
+                        color: 'primary.main',
+                        bgcolor: 'action.selected',
+                      }),
                     }}
                   >
                     {t.aiLabel}
@@ -1565,17 +1615,7 @@ export default function AdminApp() {
                     color="inherit"
                     size="small"
                     onClick={() => openAiSidebar('tasks')}
-                    sx={{
-                      ml: 0.5,
-                      px: 1.25,
-                      py: 0.35,
-                      minWidth: 0,
-                      fontWeight: 700,
-                      textTransform: 'none',
-                      border: '1px solid',
-                      borderColor: 'rgba(255, 255, 255, 0.65)',
-                      bgcolor: 'rgba(255, 255, 255, 0.12)',
-                    }}
+                    sx={{ ...toolbarButtonSx, ml: 0.5 }}
                   >
                     {tf(t.siliconTasksBadge, { count: siliconTasks.activeCount })}
                   </Button>
@@ -1587,73 +1627,57 @@ export default function AdminApp() {
               onClick={() => { if (!sidebarOpen) toggleProjectSidebar(); }}
             />
             <Box sx={{ display: { xs: 'none', md: 'block' } }}>
-              <RegionSwitcher />
+              <RegionSwitcher variant="public" />
             </Box>
           </Box>
           
-          <Button
-            color="inherit"
-            size="small"
-            startIcon={<Home />}
-            onClick={() => navigate('/')}
-            data-testid="admin-main-page"
-            sx={{
-              display: { xs: 'none', sm: 'inline-flex' },
-              mr: 0.5,
-              px: 1.25,
-              py: 0.35,
-              minWidth: 0,
-              fontWeight: 700,
-              border: '1px solid',
-              borderColor: 'rgba(255, 255, 255, 0.65)',
-              bgcolor: 'rgba(255, 255, 255, 0.12)',
-              textTransform: 'none',
-              '&:hover': {
-                borderColor: 'rgba(255, 255, 255, 0.95)',
-                bgcolor: 'rgba(255, 255, 255, 0.22)',
-              },
-            }}
+          <Tooltip title={currentProject
+            ? uiPair(language, 'Open this study in Studio', '在工作台打开这个研究')
+            : uiPair(language, 'Open Studio', '打开工作台')}
           >
-            {t.navMainPage}
-          </Button>
+            <Button
+              color="inherit"
+              size="small"
+              startIcon={<SpaceDashboardOutlined />}
+              onClick={openStudio}
+              data-testid="admin-studio"
+              sx={{
+                ...toolbarButtonSx,
+                ...toolbarIconUntilWideSx,
+                display: { xs: 'none', sm: 'inline-flex' },
+                mr: 0.5,
+              }}
+            >
+              <ToolbarLabel>{uiPair(language, 'Studio', '工作台')}</ToolbarLabel>
+            </Button>
+          </Tooltip>
 
-          <Button
-            color="inherit"
-            size="small"
-            startIcon={<OpenInNew />}
-            onClick={() => {
-              if (currentProject) {
-                window.open(`/survey?project=${currentProject.id}`, '_blank');
-              } else {
-                window.open('/survey', '_blank');
-              }
-            }}
-            disabled={!currentProject || !surveyConfig}
-            data-tour="live"
-            sx={{
-              display: { xs: 'none', md: 'inline-flex' },
-              mr: 1,
-              px: 1.25,
-              py: 0.35,
-              minWidth: 0,
-              fontWeight: 700,
-              letterSpacing: 0.2,
-              border: '1px solid',
-              borderColor: 'rgba(255, 255, 255, 0.65)',
-              bgcolor: 'rgba(255, 255, 255, 0.12)',
-              textTransform: 'none',
-              '&:hover': {
-                borderColor: 'rgba(255, 255, 255, 0.95)',
-                bgcolor: 'rgba(255, 255, 255, 0.22)',
-              },
-              '&.Mui-disabled': {
-                borderColor: 'rgba(255, 255, 255, 0.25)',
-                color: 'rgba(255, 255, 255, 0.4)',
-              },
-            }}
-          >
-            {t.viewLive}
-          </Button>
+          <Tooltip title={t.viewLive}>
+            <Box component="span" sx={{ display: { xs: 'none', md: 'inline-flex' }, mr: 1, flexShrink: 0 }}>
+              <Button
+                color="inherit"
+                size="small"
+                startIcon={<OpenInNew />}
+                onClick={() => {
+                  if (currentProject) {
+                    window.open(`/survey?project=${currentProject.id}`, '_blank');
+                  } else {
+                    window.open('/survey', '_blank');
+                  }
+                }}
+                disabled={!currentProject || !surveyConfig}
+                data-tour="live"
+                aria-label={t.viewLive}
+                sx={{
+                  ...toolbarButtonSx,
+                  ...toolbarIconUntilWideSx,
+                  letterSpacing: 0.2,
+                }}
+              >
+                <ToolbarLabel>{t.viewLive}</ToolbarLabel>
+              </Button>
+            </Box>
+          </Tooltip>
 
           <Tooltip title={t.moreTools}>
             <IconButton
@@ -1665,7 +1689,7 @@ export default function AdminApp() {
               aria-controls={toolsMenuAnchor ? 'workspace-tools-menu' : undefined}
               aria-haspopup="true"
               aria-expanded={toolsMenuAnchor ? 'true' : undefined}
-              sx={{ border: 1, borderColor: 'rgba(255,255,255,0.4)', '&:hover': { bgcolor: 'rgba(255,255,255,0.15)' } }}
+              sx={toolbarOutlineSx}
             >
               <MoreVert fontSize="small" />
             </IconButton>
@@ -1680,6 +1704,12 @@ export default function AdminApp() {
         onClose={handleToolsMenuClose}
         PaperProps={{ sx: { mt: 1, minWidth: 240 } }}
       >
+        {phoneToolbar && (
+          <MenuItem onClick={() => { handleToolsMenuClose(); openStudio(); }}>
+            <ListItemIcon><SpaceDashboardOutlined fontSize="small" /></ListItemIcon>
+            <ListItemText primary={uiPair(language, 'Studio', '工作台')} />
+          </MenuItem>
+        )}
         {compactToolbar && assistantEnabled && <MenuItem onClick={() => { handleToolsMenuClose(); openAiSidebar('assistant'); }}>{t.aiLabel}</MenuItem>}
         {compactToolbar && siliconEnabled && (
           <MenuItem onClick={() => { handleToolsMenuClose(); openAiSidebar('tasks'); }}>

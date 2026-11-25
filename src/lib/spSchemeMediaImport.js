@@ -4,8 +4,8 @@
  * survey's questions can draw them like any other project media.
  */
 
-import { uploadMediaBatch } from './mediaUploadBatch';
-import { inferMediaType } from './mediaUtils';
+import { uploadMediaBatch } from './mediaUploadBatch.js';
+import { inferMediaType } from './mediaUtils.js';
 
 const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg' };
 

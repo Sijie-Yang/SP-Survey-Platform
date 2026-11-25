@@ -44,17 +44,19 @@ Design and run a study from **ChatGPT (Codex)**, **Claude Code**, or **Cursor** 
 1. Sign in at **[sp-survey.org/admin](https://sp-survey.org/admin)**
 2. Open toolbar **AI** → **AI & Integrations**
 3. Follow the setup for your client (Codex / Claude Code / Cursor), then approve OAuth in your browser
-4. Start a **new** agent chat and ask it to use `sp_survey` (topic, question types, media now or later)
-5. Share the live survey link with participants — **saves update the link immediately**
-6. Ask the agent to summarize / export results for a project when data comes in
+4. Start a **new** agent chat and ask it to use `sp_survey`. By default the agent builds the whole study as one SP-Scheme page (`sp_scheme_spec`), imports it with its images (`sp_scheme_import`; a zip of up to 25 MB goes up with `sp_scheme_upload_url` and `curl`) and shows you the check
+5. It publishes with `survey_publish` and gives you `links.participant`, the link to share (`links.studio` opens the project in Studio)
+6. When data comes in, it downloads everything as one ZIP (`survey_download_url` and `curl`, owner only, up to 20,000 responses) and analyses the files directly; `README.txt` in the ZIP explains every file and column
 
 Example prompt:
 
 ```text
-Using sp_survey MCP, create a survey about <your topic description>.
-Add question types <question type description>.
-I have media datasets <description> at <folder location>. (can be done later)
+Using the sp_survey MCP, build a study about <your topic description> as an SP-Scheme page
+(start with sp_scheme_spec). Use the photos in <folder> as stimuli.
+Import it, show me the check, then publish it and give me the participant link.
 ```
+
+Later: `Using sp_survey, download the data of <study name> and analyse it.`
 
 **Codex** (`~/.codex/config.toml`):
 
@@ -92,7 +94,7 @@ claude mcp add --transport http sp_survey "https://sp-survey.org/mcp" --scope us
 
 Then **Settings → Tools & MCP → Connect / Authenticate**.
 
-MCP covers project lifecycle, draft editing (`survey_apply_operations`), media upload / set–category tags, and results list/export/summary. Full tool catalog and deploy notes: [`docs/agent-mcp.md`](./docs/agent-mcp.md) · agent workflow: [`AGENTS.md`](./AGENTS.md).
+MCP covers the SP-Scheme flow (spec, page import, publish, data download), project lifecycle, classic draft editing (`survey_apply_operations`), media upload / set–category tags, and results list/export/summary. Platform admins can also publish a project they own straight to the template library with `template_publish`; templates are created online, so no repository sync is needed (everyone else submits with `survey_save_as_template` for review). Full tool catalog and deploy notes: [`docs/agent-mcp.md`](./docs/agent-mcp.md) · agent workflow: [`AGENTS.md`](./AGENTS.md).
 
 ---
 

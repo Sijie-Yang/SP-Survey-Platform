@@ -182,6 +182,7 @@ export default function SurveyPreview({
   mediaMaxHeight = null,
   labels = DEFAULT_PREVIEW_LABELS,
   studio = null,
+  hideSiteImportNotice = false,
 }) {
   useEffect(() => { markGuideProgress(currentProject?.id, 'preview'); }, [currentProject?.id]);
   const previewRef = useRef(null);
@@ -722,6 +723,7 @@ export default function SurveyPreview({
         mediaPool={siteMediaPool}
         previewLibrary={usingPreviewLibrary}
         viewport={interactive ? viewport : 'desktop'}
+        hideImportNotice={hideSiteImportNotice}
       />
     );
   }

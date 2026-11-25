@@ -9,8 +9,13 @@ import { buildParameterLinks, loadParameterValues, parameterValuesKey, splitValu
 
 const mono = { fontFamily: 'monospace', wordBreak: 'break-all', fontSize: 13 };
 
-/** Share tab: the link to paste on the recruitment platform, plus one per group (e.g. per country). */
-export default function RecruitmentLinks({ surveyUrl, surveyConfig, projectId }) {
+/**
+ * Share tab: the link to paste on the recruitment platform, plus one per group (e.g. per country).
+ * `hideClassicHints` leaves out what points to classic-editor screens (Survey Builder →
+ * Basic Information): the empty and incomplete notices, which the settings shown with it
+ * already cover, and the group advice when no link parameter is set (Studio).
+ */
+export default function RecruitmentLinks({ surveyUrl, surveyConfig, projectId, hideClassicHints = false }) {
   const { language } = useRegion();
   const t = (en, zh) => uiPair(language, en, zh);
   const setting = normalizeRecruitment(surveyConfig);
@@ -42,6 +47,7 @@ export default function RecruitmentLinks({ surveyUrl, surveyConfig, projectId })
   );
 
   if (!setting) {
+    if (hideClassicHints) return null;
     return (
       <Alert severity="info" data-testid="recruitment-links-empty">
         {t('No recruitment platform is set. To recruit paid participants from Prolific, CloudResearch Connect or another panel, open the survey settings (Survey Builder → Basic Information) and choose a platform under "Recruitment platform".',
@@ -74,7 +80,7 @@ export default function RecruitmentLinks({ surveyUrl, surveyConfig, projectId })
 
   return (
     <Box data-testid="recruitment-links">
-      {missing.length > 0 && (
+      {missing.length > 0 && !hideClassicHints && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {t('The recruitment setting is incomplete, so participants will not be sent back yet. Finish it in Survey Builder → Basic Information.', '招募平台设置还没填完，参与者暂时不会被跳回平台。请到「问卷构建 → 基本信息」补全。')}
         </Alert>
@@ -99,13 +105,13 @@ export default function RecruitmentLinks({ surveyUrl, surveyConfig, projectId })
           '只有带着平台 ID 进来的人才会被跳回；你自己打开普通链接只会看到感谢页。每个平台 ID 只能提交一次。结果导出多出 recruit_platform、recruit_id 两列。')}
       </Typography>
 
-      <Typography variant="subtitle2" fontWeight={700}>{t('Several countries or groups', '多个国家 / 分组')}</Typography>
-      {!params.length ? (
+      {(params.length > 0 || !hideClassicHints) && <Typography variant="subtitle2" fontWeight={700}>{t('Several countries or groups', '多个国家 / 分组')}</Typography>}
+      {!params.length ? (!hideClassicHints && (
         <Typography variant="body2" color="text.secondary">
           {t('Create one study per country on the platform, each with its own places. To tell them apart in the results, add a link parameter such as country under "URL parameters to record" in the survey settings; this panel then builds one link per country.',
             '在平台上每个国家建一个研究，各设人数。要在结果里区分国家，请在问卷设置的“记录的链接参数”里加上 country 之类的参数，这里就会为每个国家生成一个链接。')}
         </Typography>
-      ) : <>
+      )) : <>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           {t('One study per country on the platform, each with its own link below. Results can be grouped by this value.', '平台上每个国家建一个研究，各用下面对应的链接。结果页可以按这个值分组。')}
         </Typography>

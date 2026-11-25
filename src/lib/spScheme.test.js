@@ -25,6 +25,14 @@ describe('SP-Scheme text', () => {
     expect(text).not.toMatch(/customInteractions|SPSkill|skill_save/);
   });
 
+  test('says where the page goes: Studio for the researcher, sp_scheme_import for an agent', () => {
+    const text = buildSpSchemeText();
+    expect(text).toContain('SP-Survey Studio');
+    expect(text).toContain('新建研究');
+    expect(text).toContain('`sp_scheme_import`');
+    expect(text).not.toContain('Survey Builder → SP-Scheme → Upload');
+  });
+
   test('carries sampling rules and native answer shapes', () => {
     const text = buildSpSchemeText();
     expect(text).toContain('huggingface_random');
@@ -79,6 +87,14 @@ describe('readSpSchemeUpload', () => {
 
   test('rejects a zip with neither page nor manifest', () => {
     expect(() => readSpSchemeUpload(zipSync({ 'a.txt': strToU8('x') }))).toThrow('neither index.html nor sp-scheme.json');
+  });
+
+  test('callers with less memory can lower the zip limits', () => {
+    const zip = zipSync({ 'index.html': strToU8(`<html><body>${'x'.repeat(4000)}</body></html>`) }, { level: 9 });
+    expect(readSpSchemeUpload(zip).siteHtml).toContain('xxxx');
+    expect(() => readSpSchemeUpload(zip, { maxZipBytes: 10 })).toThrow('The zip is larger than 1 KB.');
+    expect(() => readSpSchemeUpload(zip, { maxUnzippedBytes: 2048 })).toThrow('The zip expands to more than 2 KB.');
+    expect(() => readSpSchemeUpload(new Uint8Array([0x50, 0x4b, 3, 4, 0, 0]))).toThrow('The zip could not be opened.');
   });
 });
 

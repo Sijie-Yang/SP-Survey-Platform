@@ -11,7 +11,7 @@ import {
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { researcherEntryPath } from '../lib/researcherEntry';
+import { WORKSPACE_PATH, researcherEntryPath, templateUsePath } from '../lib/researcherEntry';
 import { supabase } from '../lib/supabase';
 import { stripOwnResponseSupabase } from '../lib/ownResponseSupabase';
 import { projectTemplates } from '../lib/projectTemplates';
@@ -70,6 +70,8 @@ export default function LandingPage() {
   const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuth();
   const workspacePath = researcherEntryPath(!authLoading && isAuthenticated);
+  // Templates are listed in the classic editor's sidebar.
+  const templatePath = templateUsePath(!authLoading && isAuthenticated);
   const { t } = useRegion();
   const githubStars = useGithubStars();
   const [templates, setTemplates] = useState([]);
@@ -350,7 +352,7 @@ export default function LandingPage() {
                 '&:hover': { bgcolor: '#fff' },
               }}
             >
-              {workspacePath === '/admin' ? t.navOpenWorkspace : t.landStartFree}
+              {workspacePath === WORKSPACE_PATH ? t.navOpenWorkspace : t.landStartFree}
             </Button>
             <Button
               variant="outlined"
@@ -491,7 +493,7 @@ export default function LandingPage() {
             </Box>
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: `repeat(${Math.min(schemeExamples.length, 3)}, 1fr)` }, gap: 3 }}>
               {schemeExamples.map((tpl) => (
-                <SchemeExampleCard key={tpl.id} template={tpl} onUse={() => navigate(workspacePath)} />
+                <SchemeExampleCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
               ))}
             </Box>
           </Container>
@@ -554,7 +556,7 @@ export default function LandingPage() {
                   {list.length > 0 ? (
                     <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
                       {list.map((tpl) => (
-                        <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(workspacePath)} />
+                        <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
                       ))}
                     </Box>
                   ) : (
@@ -590,7 +592,7 @@ export default function LandingPage() {
             onClick={() => navigate(workspacePath)}
             sx={{ bgcolor: 'white', color: 'primary.main', fontWeight: 700, px: 5, py: 1.5, '&:hover': { bgcolor: 'grey.100' } }}
           >
-            {workspacePath === '/admin' ? t.navOpenWorkspace : t.landGetStarted}
+            {workspacePath === WORKSPACE_PATH ? t.navOpenWorkspace : t.landGetStarted}
           </Button>
         </Container>
       </Box>

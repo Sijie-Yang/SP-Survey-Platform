@@ -541,7 +541,7 @@ export const DOC_TOPICS = [
         p('Layout Studio arranges the whole survey: pages, cards, spacing and text styles. It does not record answers. While you edit one question, open Participant preview in the question editor to see that question as a participant would. The top-bar Preview Survey shows the whole survey. Practice is where you answer and inspect what was recorded.', '版式工作台用来安排整份问卷：页面、卡片、间距和文字样式。它不记录回答。编辑某一道题时，在题目编辑器里打开「参与者预览」，查看参与者会看到的这一题。顶部的「预览问卷」展示整份问卷。「试填」用来亲自作答，并查看记录下来的内容。'),
       ]),
       s('home', p('Can I open the public home without signing out?', '不退出登录也能打开公开首页吗？'), [
-        p('Yes. In the workspace toolbar, Main page opens the public home and keeps you signed in. On public pages, the header shows Open workspace instead of asking you to sign in again.', '可以。工作区顶部的「首页」会打开公开主页，同时保持登录。在公开页面上，页眉显示「进入工作区」，不会再要求你重新登录。'),
+        p('Yes. In the classic editor, the logo at the top left opens the public home and keeps you signed in. Your latest changes are saved first. On public pages, the header shows Open Studio instead of asking you to sign in again.', '可以。在经典编辑器里，点左上角的标志会打开公开主页，同时保持登录，离开前会先保存最新的修改。在公开页面上，页眉显示「进入工作台」，不会再要求你重新登录。'),
       ]),
       s('back', p('What does the browser Back button do while I am building?', '搭建问卷时，浏览器的返回按钮会怎样？'), [
         p('Moving between workspace steps is remembered in the browser history, and the address stays on the workspace. Back returns to the previous step, such as from Builder to Dataset, instead of leaving on the first press. After those recorded steps are gone, another Back can leave the workspace.', '在工作区各步骤之间移动时，浏览器会记住这些步骤，地址仍留在工作区。按返回会回到上一步，例如从「设计」回到「媒体」，而不是第一次就离开。这些已记录的步骤走完之后，再按一次返回才会离开工作区。'),

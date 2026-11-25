@@ -66,13 +66,17 @@ function restorePage({ responses, contracts: received, mode }, loadSession) {
 const SUPABASE_URL = (process.env.REACT_APP_SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
-/** Exact row count for the loading bar. Null when the count header is unavailable. */
-export async function countOwnerResponses(projectId, { signal } = {}) {
+/**
+ * Exact row count for the loading bar. Null when the count header is unavailable.
+ * `filters` adds PostgREST filters, e.g. { 'survey_metadata->>practice_mode': 'eq.true' }.
+ */
+export async function countOwnerResponses(projectId, { signal, filters = null } = {}) {
   const { data: { session } = {} } = supabase ? await supabase.auth.getSession() : {};
   const token = session?.access_token || SUPABASE_ANON_KEY;
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !token || !projectId) return null;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/survey_responses?${new URLSearchParams({
+      ...(filters || {}),
       project_id: `eq.${projectId}`,
       select: 'id',
     })}`, {
