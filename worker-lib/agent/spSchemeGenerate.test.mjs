@@ -4,6 +4,7 @@ import { buildExampleSite } from '../../src/lib/spScheme.js';
 import {
   checkGeneratedPage,
   extractHtml,
+  extractReply,
   handleSpSchemeGenerate,
   normalizeGenerateRequest,
 } from './spSchemeGenerate.mjs';
@@ -88,6 +89,33 @@ describe('built-in SP-Scheme AI', () => {
     assert.equal(calls.length, 1);
     assert.match(calls[0].messages[1].content, /current index\.html/);
     assert.match(calls[0].messages[1].content, /Make the button green/);
+  });
+
+  it('keeps the short note before the page as the reply', () => {
+    assert.equal(extractReply(`Added an age question.\n\`\`\`html\n${PLAIN}\n\`\`\``), 'Added an age question.');
+    assert.equal(extractReply(PLAIN), '');
+  });
+
+  it('sends earlier turns as text and answers a question without a new page', async () => {
+    const { deps: d, calls } = deps({ answers: ['It has 3 questions.'] });
+    const out = await handleSpSchemeGenerate({}, 'user-1', {
+      request: 'How many questions are there?',
+      currentHtml: GOOD,
+      history: [
+        { role: 'user', text: 'Make a cycling study' },
+        { role: 'assistant', text: 'Made it.' },
+        { role: 'system', text: 'ignored' },
+      ],
+    }, d);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].messages.slice(1, 3), [
+      { role: 'user', content: 'Make a cycling study' },
+      { role: 'assistant', content: 'Made it.' },
+    ]);
+    assert.equal(calls[0].messages.length, 4);
+    assert.equal(out.html, '');
+    assert.equal(out.reply, 'It has 3 questions.');
+    assert.equal(out.check, null);
   });
 
   it('prefers the researcher\'s own model and fails plainly when no model exists', async () => {

@@ -177,6 +177,9 @@ test('the built-in AI writes the page from a description, and it goes through th
   fireEvent.click(screen.getByRole('button', { name: 'Import' }));
   await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
   expect(saveStudioProject.mock.calls[0][1].spSite.html).toContain('SPSite.onReady');
+  // The new study's AI assistant starts with this exchange.
+  const chat = await screen.findByTestId('studio-ai-chat');
+  expect(within(chat).getByText('Compare street photos for cycling safety')).toBeInTheDocument();
 });
 
 test('without a model the built-in AI says so and points to your own AI', async () => {
@@ -188,18 +191,56 @@ test('without a model the built-in AI says so and points to your own AI', async 
   expect(screen.getByText('Drop the survey your AI built here')).toBeInTheDocument();
 });
 
-test('on a study with a page the built-in AI changes that page', async () => {
-  generateSpSchemePage.mockResolvedValueOnce({ success: true, html: buildExampleSite() });
+test('inside a study the AI assistant chats, saves checked pages, can undo, and answers questions', async () => {
+  const changed = buildExampleSite().replace('<body>', '<body><!-- changed -->');
+  generateSpSchemePage
+    .mockResolvedValueOnce({ success: true, html: changed, reply: 'Added an age question.', model: 'deepseek-flash', shared: true, check: { ok: true, problems: [] } })
+    .mockResolvedValueOnce({ success: true, html: '', reply: 'It has 3 questions.', model: 'deepseek-flash', shared: true, check: null });
   openAt('/studio/p1');
-  fireEvent.click(await screen.findByRole('button', { name: 'Change the page' }));
-  const dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByRole('textbox', { name: 'What should change' }), { target: { value: 'Add an age question' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Change it with AI' }));
-  await waitFor(() => expect(generateSpSchemePage).toHaveBeenCalledTimes(1));
-  const body = generateSpSchemePage.mock.calls[0][0];
-  expect(body.request).toBe('Add an age question');
-  expect(body.currentHtml).toContain('SPSite.onReady');
-  expect(await within(dialog).findByText(/Importing replaces the current survey page/)).toBeInTheDocument();
+  const chat = await screen.findByTestId('studio-ai-chat');
+  const box = within(chat).getByRole('textbox', { name: 'Message to the AI' });
+  fireEvent.change(box, { target: { value: 'Add an age question' } });
+  fireEvent.click(within(chat).getByRole('button', { name: 'Send' }));
+  expect(await within(chat).findByText('Added an age question.')).toBeInTheDocument();
+  expect(within(chat).getByText('Saved. The preview shows the new page.')).toBeInTheDocument();
+  expect(within(chat).getByText('deepseek-flash (free)')).toBeInTheDocument();
+  const first = generateSpSchemePage.mock.calls[0][0];
+  expect(first.request).toBe('Add an age question');
+  expect(first.currentHtml).toContain('SPSite.onReady');
+  expect(first.history).toEqual([]);
+  await waitFor(() => expect(saveStudioProject).toHaveBeenCalledTimes(1));
+  expect(saveStudioProject.mock.calls[0][1].spSite.html).toContain('<!-- changed -->');
+
+  fireEvent.change(box, { target: { value: 'How many questions?' } });
+  fireEvent.click(within(chat).getByRole('button', { name: 'Send' }));
+  expect(await within(chat).findByText('It has 3 questions.')).toBeInTheDocument();
+  expect(generateSpSchemePage.mock.calls[1][0].history).toEqual([
+    { role: 'user', text: 'Add an age question' },
+    { role: 'assistant', text: 'Added an age question.' },
+  ]);
+  expect(saveStudioProject).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(within(chat).getByRole('button', { name: 'Undo this change' }));
+  expect(await within(chat).findByText('Undone: the page before this change is back.')).toBeInTheDocument();
+  expect(saveStudioProject).toHaveBeenCalledTimes(2);
+  expect(saveStudioProject.mock.calls[1][1].spSite.html).not.toContain('<!-- changed -->');
+});
+
+test('a page from the AI that fails the check is not saved', async () => {
+  generateSpSchemePage.mockResolvedValueOnce({ success: true, html: '<!doctype html><html><body>hi</body></html>', reply: 'Done.', check: { ok: true, asIs: true, problems: [{ message: 'No questions are declared.' }] } });
+  openAt('/studio/p1');
+  const chat = await screen.findByTestId('studio-ai-chat');
+  fireEvent.change(within(chat).getByRole('textbox', { name: 'Message to the AI' }), { target: { value: 'x' } });
+  fireEvent.click(within(chat).getByRole('button', { name: 'Send' }));
+  expect(await within(chat).findByText(/Not saved: the page still has problems/)).toBeInTheDocument();
+  expect(within(chat).getByText('No questions are declared.')).toBeInTheDocument();
+  expect(saveStudioProject).not.toHaveBeenCalled();
+});
+
+test('a classic study has no AI assistant card', async () => {
+  openAt('/studio/p2');
+  expect(await screen.findByTestId('studio-project-name')).toHaveTextContent('Classic one');
+  expect(screen.queryByTestId('studio-ai-chat')).toBeNull();
 });
 
 test('copying the instructions puts SP-Scheme on the clipboard', async () => {
@@ -256,7 +297,7 @@ test('a study that is not release-managed is live: saves go live, publishing fix
   expect(publish).toBeEnabled();
   fireEvent.mouseOver(publish);
   expect(await screen.findByRole('tooltip')).toHaveTextContent('After you publish, participants see only this version. Later changes take effect when you publish again.');
-  expect(screen.getByRole('button', { name: 'Change the page' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Use another page' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Copy for your AI to edit' })).toBeInTheDocument();
   expect(screen.getByTestId('studio-share-url')).toHaveTextContent(`${window.location.origin}/survey?project=p1`);
   expect(screen.getByTestId('studio-link-live')).toHaveTextContent('Participants see the latest saved version.');
@@ -355,7 +396,7 @@ test('a published study whose draft differs from the release offers a new versio
 test('a classic study is edited in the classic editor', async () => {
   openAt('/studio/p2');
   expect(await screen.findByText(/^Question by question/)).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Change the page' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Use another page' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Edit in the classic editor' }));
   expect(await screen.findByTestId('classic-editor')).toHaveTextContent('?project=p2&tab=builder');
   expect(setActiveProject).toHaveBeenCalledWith('p2');
@@ -387,7 +428,7 @@ test('while a write runs, publish, settings, rename and upload wait', async () =
   await waitFor(() => expect(screen.getByRole('button', { name: 'Settings' })).toBeDisabled());
   expect(screen.getByRole('button', { name: 'Publish a fixed version' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Upload images' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Change the page' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Use another page' })).toBeDisabled();
   expect(screen.getByTestId('studio-project-name')).toHaveAttribute('aria-disabled', 'true');
   finish();
   await waitFor(() => expect(screen.getByRole('button', { name: 'Settings' })).toBeEnabled());
@@ -454,7 +495,7 @@ test('the replace dialog cannot be closed while the import runs', async () => {
   let finishSave;
   saveStudioProject.mockImplementationOnce(() => new Promise((resolve) => { finishSave = () => resolve({ success: true }); }));
   openAt('/studio/p1');
-  fireEvent.click(await screen.findByRole('button', { name: 'Change the page' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Use another page' }));
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByTestId('studio-file'), { target: { files: [new File([buildExampleSite()], 'index.html', { type: 'text/html' })] } });
   fireEvent.click(await within(dialog).findByRole('button', { name: 'Import' }));
@@ -479,7 +520,7 @@ test('dropping the same zip again says how many images were new, replaced or alr
     'study/images/c.jpg': new Uint8Array([7, 8, 9]),
   });
   openAt('/studio/p1');
-  fireEvent.click(await screen.findByRole('button', { name: 'Change the page' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Use another page' }));
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByTestId('studio-file'), { target: { files: [new File([zip], 'study.zip', { type: 'application/zip' })] } });
   fireEvent.click(await within(dialog).findByRole('button', { name: 'Import' }));

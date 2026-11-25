@@ -17,6 +17,7 @@ import { spSchemeProblems, spSchemeProblemsText, summarizeSpSchemeImport } from 
 import { isStudioLocalMode } from '../../lib/studioData';
 import { copyOrDownload, useL } from './studioUi';
 import useStudioImport from './useStudioImport';
+import { writeStudioAiChat } from './StudioAiChat';
 
 const ACCEPT = '.html,.htm,.zip,text/html,application/zip';
 
@@ -106,7 +107,7 @@ function aiErrorText(result, L) {
  * it writes the SP-Scheme page; with `currentHtml` it changes that page. The
  * page then goes through the same check and import card as a dropped file.
  */
-export function StudioAiWriter({ importer, currentHtml = '', dense = false }) {
+export function StudioAiWriter({ importer, currentHtml = '', dense = false, onGenerated = () => {} }) {
   const L = useL();
   const [text, setText] = useState('');
   const [running, setRunning] = useState(false);
@@ -123,6 +124,7 @@ export function StudioAiWriter({ importer, currentHtml = '', dense = false }) {
       setError(aiErrorText(result, L));
       return;
     }
+    onGenerated({ request, result });
     importer.loadHtml(result.html, 'index.html');
   };
   return (
@@ -374,12 +376,28 @@ export default function StudioImportFlow({ project = null, onImported, runImport
   const active = Boolean(importer.prepared || importer.readError);
   const userId = auth?.user?.id || (isStudioLocalMode() ? 'local' : null);
   // The built-in AI runs on the server, so it needs a signed-in researcher.
-  const canUseAi = Boolean(auth?.user?.id) && !isStudioLocalMode();
-  const currentHtml = project?._surveyConfig?.spSite?.html || '';
+  // Inside a study the AI assistant card does this, so the box is only on the new-study screen.
+  const canUseAi = Boolean(auth?.user?.id) && !isStudioLocalMode() && !project;
+  // The AI's first exchange, kept so the new study's AI assistant starts with it.
+  const aiSeed = useRef(null);
+  const readFiles = (files) => { aiSeed.current = null; importer.readFiles(files); };
 
   const doImport = async () => {
     const result = await runImport(() => importer.runImport({ project, userId, fallbackName: L('New study', '新研究') }));
     if (result) {
+      const seed = aiSeed.current;
+      aiSeed.current = null;
+      if (seed && result.created && result.projectId) {
+        writeStudioAiChat(result.projectId, [
+          { role: 'user', text: seed.request },
+          {
+            role: 'assistant',
+            text: seed.result.reply || L('Here is the survey page.', '问卷页面做好了。'),
+            status: 'saved',
+            model: seed.result.model ? (seed.result.shared ? L(`${seed.result.model} (free)`, `${seed.result.model}（免费）`) : seed.result.model) : '',
+          },
+        ]);
+      }
       importer.reset();
       onImported?.(result);
     }
@@ -399,7 +417,7 @@ export default function StudioImportFlow({ project = null, onImported, runImport
       e.preventDefault();
       e.stopPropagation();
       setDragging(false);
-      if (!importer.importing) importer.readFiles(e.dataTransfer.files);
+      if (!importer.importing) readFiles(e.dataTransfer.files);
     },
   };
 
@@ -420,16 +438,16 @@ export default function StudioImportFlow({ project = null, onImported, runImport
         <>
           {canUseAi && (
             <>
-              <StudioAiWriter importer={importer} currentHtml={currentHtml} dense={dense} />
+              <StudioAiWriter importer={importer} dense={dense} onGenerated={(seed) => { aiSeed.current = seed; }} />
               <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
                 {L('Or use your own AI (ChatGPT, Claude, …)', '或者用你自己的 AI（ChatGPT、Claude 等）')}
               </Typography>
             </>
           )}
-          <StudioDropZone onFiles={importer.readFiles} dense={dense || canUseAi} />
+          <StudioDropZone onFiles={readFiles} dense={dense || canUseAi} />
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
             <CopySpecButton variant={canUseAi ? 'outlined' : 'contained'} label={L('Copy the instructions for your AI', '复制给 AI 的说明')} />
-            <Button variant="outlined" startIcon={<PlayCircleOutline />} onClick={importer.startExample}>
+            <Button variant="outlined" startIcon={<PlayCircleOutline />} onClick={() => { aiSeed.current = null; importer.startExample(); }}>
               {L('Start from the example', '从示例开始')}
             </Button>
           </Box>

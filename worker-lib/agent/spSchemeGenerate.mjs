@@ -17,6 +17,9 @@ import { prepareSpSchemeUpload, summarizeSpSchemeImport } from '../../src/lib/sp
 export const MAX_REQUEST_CHARS = 20000;
 export const MAX_CURRENT_HTML_CHARS = 200000;
 export const MAX_REPAIR_ROUNDS = 2;
+export const MAX_HISTORY_TURNS = 10;
+const MAX_HISTORY_CHARS = 2000;
+const MAX_REPLY_CHARS = 1200;
 const MAX_OUTPUT_TOKENS = 32000;
 
 const BUILT_IN_RULES = `
@@ -24,7 +27,8 @@ const BUILT_IN_RULES = `
 ## How to answer here
 
 You are the AI built into SP-Survey Studio. The researcher typed the request below into Studio; they cannot see code.
-- Answer with the complete page only: one \`\`\`html block holding the whole index.html, nothing before or after it.
+- When you write or change the page: first one or two short sentences, in the researcher's language, saying what you made or changed; then one \`\`\`html block holding the whole index.html. Nothing after the block.
+- When the researcher only asks a question about the study or the page, answer briefly in plain words and do not send a page.
 - The page must work on its own: no external scripts, stylesheets, fonts or CDNs; plain HTML, CSS and JavaScript inline.
 - Do not hard-code image URLs. Declare the media folders the study needs; the researcher uploads the images afterwards.
 - Write what participants read in the language the researcher writes in, unless they ask for another language.
@@ -45,7 +49,21 @@ export function normalizeGenerateRequest(body = {}) {
   if (currentHtml.length > MAX_CURRENT_HTML_CHARS) {
     throw fail('The current page is too large for the built-in AI to edit.');
   }
-  return { request, currentHtml };
+  const history = (Array.isArray(body?.history) ? body.history : [])
+    .filter((turn) => (turn?.role === 'user' || turn?.role === 'assistant') && String(turn?.text || '').trim())
+    .slice(-MAX_HISTORY_TURNS)
+    .map((turn) => ({ role: turn.role, content: String(turn.text).trim().slice(0, MAX_HISTORY_CHARS) }));
+  return { request, currentHtml, history };
+}
+
+/** What the model said outside the page: its short note to the researcher. */
+export function extractReply(text) {
+  const raw = String(text || '');
+  const fence = raw.search(/```/);
+  const doc = raw.search(/<!doctype html|<html[\s>]/i);
+  const cut = [fence, doc].filter((i) => i >= 0);
+  const before = cut.length ? raw.slice(0, Math.min(...cut)) : raw;
+  return before.replace(/\s+\n/g, '\n').trim().slice(0, MAX_REPLY_CHARS);
 }
 
 /** The page inside the model's answer: the ```html block, or the bare document. */
@@ -170,9 +188,12 @@ export async function handleSpSchemeGenerate(env, userId, body, deps = {}) {
 
   const messages = [
     { role: 'system', content: buildSpSchemeText() + BUILT_IN_RULES },
+    // Earlier turns as plain text only; the current page below is the source of truth.
+    ...input.history,
     { role: 'user', content: buildFirstMessage(input) },
   ];
   let best = null;
+  let reply = '';
   let rounds = 0;
   for (let round = 0; round <= MAX_REPAIR_ROUNDS; round += 1) {
     rounds += 1;
@@ -191,6 +212,13 @@ export async function handleSpSchemeGenerate(env, userId, body, deps = {}) {
     });
     const answer = String(result?.content || '');
     const html = extractHtml(answer);
+    if (round === 0) reply = extractReply(answer);
+    // A question about an existing page gets a plain answer and no new page.
+    if (round === 0 && !html && input.currentHtml && reply) {
+      return {
+        success: true, provider: call.provider, model: call.model, shared: call.binding.source === 'subsidy', rounds, html: '', reply, check: null,
+      };
+    }
     const summary = html
       ? checkGeneratedPage(html)
       : { ok: false, asIs: true, problems: [{ path: '', message: 'The answer did not contain an HTML page.' }] };
@@ -210,6 +238,7 @@ export async function handleSpSchemeGenerate(env, userId, body, deps = {}) {
     shared: call.binding.source === 'subsidy',
     rounds,
     html: best.html,
+    reply,
     check: {
       ok: best.summary.ok,
       asIs: best.summary.asIs,
