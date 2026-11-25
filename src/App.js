@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, createRoutesFromElements, RouterProvider, Route, Navigate, useLocation } from 'react-router-dom';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box, CircularProgress } from '@mui/material';
@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { RegionProvider } from './contexts/RegionContext';
 import { createCustomTheme, DEFAULT_THEME_KEY } from './themes/themeConfig';
 import { ToastProvider } from './components/layout/ToastProvider';
+import { loginRedirectPath } from './lib/researcherEntry';
 const QuestionPreviewPage = lazy(() => import('./components/admin/QuestionPreviewPage'));
 const SurveyApp = lazy(() => import('./SurveyApp'));
 const AdminApp = lazy(() => import('./AdminApp'));
@@ -35,6 +36,7 @@ const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
 function ProtectedAdmin() {
   const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -45,7 +47,8 @@ function ProtectedAdmin() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // After signing in, the researcher lands on the same link (project and tab included).
+    return <Navigate to={loginRedirectPath(location)} replace />;
   }
 
   return <AdminApp />;
@@ -53,6 +56,7 @@ function ProtectedAdmin() {
 
 function ProtectedStudio() {
   const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -63,7 +67,7 @@ function ProtectedStudio() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginRedirectPath(location)} replace />;
   }
 
   return <StudioPage />;

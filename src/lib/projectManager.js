@@ -721,6 +721,10 @@ export const setActiveProject = (projectId) => {
 
 export const getActiveProjectId = () => sessionStorage.getItem(ACTIVE_PROJECT_KEY);
 
+export const clearActiveProject = () => {
+  sessionStorage.removeItem(ACTIVE_PROJECT_KEY);
+};
+
 export const getActiveProject = async () => {
   const activeId = getActiveProjectId();
   return activeId ? await getProjectById(activeId) : null;

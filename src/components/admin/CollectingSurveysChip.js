@@ -11,12 +11,14 @@ const chipSx = {
   minWidth: 0,
   fontWeight: 700,
   textTransform: 'none',
+  // Theme tokens, like the other top bar buttons, so every theme keeps its contrast.
   border: '1px solid',
-  borderColor: 'rgba(255, 255, 255, 0.65)',
-  bgcolor: 'rgba(255, 255, 255, 0.12)',
+  borderColor: 'divider',
+  color: 'text.primary',
+  bgcolor: 'transparent',
   '&:hover': {
-    borderColor: 'rgba(255, 255, 255, 0.95)',
-    bgcolor: 'rgba(255, 255, 255, 0.22)',
+    borderColor: 'text.secondary',
+    bgcolor: 'action.hover',
   },
 };
 

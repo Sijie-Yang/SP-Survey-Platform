@@ -63,6 +63,7 @@ import {
   migrateExistingConfig,
   getActiveProject,
   setActiveProject,
+  clearActiveProject,
   saveProjectDraftOptimistic,
   saveProjectFull,
 } from './lib/projectManager';
@@ -225,13 +226,6 @@ function ToolbarLabel({ children }) {
   return <Box component="span" sx={{ display: { xs: 'none', lg: 'inline' } }}>{children}</Box>;
 }
 
-// Shared toolbar children still carry the old white-on-blue outline; restyle
-// them here so the paper bar stays readable without touching those components.
-const toolbarChildSx = {
-  '& [data-testid="collecting-surveys-chip"]': toolbarOutlineSx,
-  '& [data-testid="project-collaborators"] > .MuiIconButton-root': toolbarOutlineSx,
-};
-
 function formatSaveStatusLabel(t, saveStatus, lastSavedAt) {
   if (saveStatus === 'saving') return t.saveStatusSaving;
   if (saveStatus === 'error') return t.saveStatusError;
@@ -329,6 +323,8 @@ export default function AdminApp() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const autoSaveTimerRef = useRef(null);
   const saveInFlightRef = useRef(false);
+  // The save that is running now, so leaving the editor can wait for it.
+  const savePromiseRef = useRef(null);
   const [latestImageDatasetConfig, setLatestImageDatasetConfig] = useState(null);
   const [lastSavedConfig, setLastSavedConfig] = useState(null);
   
@@ -691,7 +687,11 @@ export default function AdminApp() {
         });
       } else {
         // Check if there's an active project
-        const activeProject = await getActiveProject();
+        // On the platform a project read without an owner came through the
+        // participant view: it is someone else's, so it does not open here.
+        const loadedProject = await getActiveProject();
+        const activeProject = loadedProject && isSupabaseConfigured() && !loadedProject.userId ? null : loadedProject;
+        if (loadedProject && !activeProject) clearActiveProject();
         console.log('🔍 Active project from sessionStorage:', activeProject?.id, activeProject?.name);
         
         if (activeProject) {
@@ -1273,7 +1273,7 @@ export default function AdminApp() {
     saveInFlightRef.current = true;
     setSaveStatus('saving');
     const configAtStart = surveyConfigRef.current;
-
+    const run = (async () => {
     try {
       const projectToSave = {
         ...currentProject,
@@ -1336,7 +1336,7 @@ export default function AdminApp() {
             severity: 'success',
           });
         }
-        return { success: true, draftUpdatedAt: savedProject.draftUpdatedAt };
+        return { success: true, draftUpdatedAt: savedProject.draftUpdatedAt, editedDuringSave };
       }
 
       setSaveStatus('error');
@@ -1365,6 +1365,9 @@ export default function AdminApp() {
     } finally {
       saveInFlightRef.current = false;
     }
+    })();
+    savePromiseRef.current = run;
+    return run;
   }, [currentProject, projectStates, surveyConfig, latestImageDatasetConfig]);
 
   performSaveRef.current = performSave;
@@ -1373,24 +1376,39 @@ export default function AdminApp() {
     await performSave({ silent: false });
   };
 
-  // Studio reads the stored draft, so save pending edits before leaving.
-  const openStudio = async () => {
-    if (currentProject && hasUnsavedChanges) {
-      const result = await performSave({ silent: true });
-      if (!result?.success) {
-        setSnackbar({
-          open: true,
-          message: uiPair(
-            language,
-            'Your latest changes are not saved yet. Save them, then open Studio again.',
-            '最新的修改还没保存。请先保存，再打开工作台。',
-          ),
-          severity: 'warning',
-        });
-        return;
-      }
+  // True once nothing is left unsaved: waits for a save that is already
+  // running, then saves the edits made since (or retries a failed save).
+  const saveBeforeLeaving = async () => {
+    if (!currentProject) return true;
+    if (saveInFlightRef.current && savePromiseRef.current) {
+      const running = await savePromiseRef.current.catch(() => null);
+      if (running?.success && !running.editedDuringSave) return true;
+    } else if (!hasUnsavedChangesRef.current) {
+      return true;
     }
-    navigate(studioPathForProject(currentProject?.id));
+    const result = await performSaveRef.current?.({ silent: true });
+    return Boolean(result?.success);
+  };
+
+  // Studio and the home page read the stored draft, so pending edits are saved first.
+  const leaveEditor = async (path, notSavedMessage) => {
+    if (!(await saveBeforeLeaving())) {
+      setSnackbar({ open: true, message: notSavedMessage, severity: 'warning' });
+      return;
+    }
+    navigate(path);
+  };
+
+  const openStudio = () => leaveEditor(
+    studioPathForProject(currentProject?.id),
+    uiPair(language, 'Your latest changes are not saved yet. Save them, then open Studio again.', '最新的修改还没保存。请先保存，再打开工作台。'),
+  );
+
+  const goHome = (event) => {
+    // A new tab or window leaves this editor open, so nothing needs saving.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    leaveEditor('/', uiPair(language, 'Your latest changes are not saved yet. Save them, then leave.', '最新的修改还没保存。请先保存，再离开。'));
   };
 
   // Debounced auto-save to Supabase / file server
@@ -1444,7 +1462,7 @@ export default function AdminApp() {
             color: 'text.primary',
           }}
         >
-          <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 }, minWidth: 0, ...toolbarChildSx }}>
+          <Toolbar sx={{ gap: { xs: 0.5, sm: 1 }, px: { xs: 1, sm: 2 }, minWidth: 0 }}>
           <Tooltip title={t.toggleSidebar}>
             <IconButton
               color="inherit"
@@ -1463,6 +1481,7 @@ export default function AdminApp() {
               <Box
                 component={RouterLink}
                 to="/"
+                onClick={goHome}
                 aria-label={t.navMainPage}
                 data-testid="admin-logo-home"
                 sx={{ display: 'flex', alignItems: 'center', flexShrink: 1, minWidth: 0, borderRadius: 1 }}

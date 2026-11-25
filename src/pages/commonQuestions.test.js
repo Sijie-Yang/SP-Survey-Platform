@@ -20,7 +20,8 @@ test('common questions are one platform wiki topic in both languages', () => {
   expect(en).toMatch(/helper on your own computer/);
   expect(en).toMatch(/Layout Studio/);
   expect(en).toMatch(/Participant preview/);
-  expect(en).toMatch(/Main page opens the public home/);
+  expect(en).toMatch(/logo at the top left opens the public home/);
+  expect(en).toMatch(/header shows Open Studio/);
   expect(en).toMatch(/from Builder to Dataset/);
   expect(en).toMatch(/https:\/\/sp-survey\.org\/s\/\{slug\}/);
   expect(en).toMatch(/\/survey\?project=\{id\}/);

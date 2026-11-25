@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -22,23 +22,31 @@ import { useOptionalAuth } from '../../contexts/AuthContext';
 import { useToast } from '../layout/ToastProvider';
 import { buildSpSchemeText } from '../../lib/spScheme';
 import { setActiveProject } from '../../lib/projectManager';
+import { adminProjectPath, studioPathForProject } from '../../lib/adminDeepLink';
 import {
   isStudioLocalMode,
   loadStudioProject,
+  loadStudioRelease,
   publishStudioProject,
   removeStudioProject,
-  saveStudioProject,
-  updateStudioProject,
+  writeStudioProject,
 } from '../../lib/studioData';
-import { libraryFolders, pageForAiText, projectConfig, projectKind, projectStatus } from '../../lib/studioProject';
+import {
+  libraryFolders,
+  pageForAiText,
+  pageHtmlForAi,
+  projectConfig,
+  projectKind,
+  projectStatus,
+} from '../../lib/studioProject';
 import { studioPublishProblems } from '../../lib/studioPublish';
-import { classicEditorPath, studioPath } from '../../lib/studioState';
+import { classicHasUnsavedEdits } from '../../lib/studioState';
 import StudioImportFlow, { CopySpecButton } from './StudioImport';
 import StudioMediaCard from './StudioMediaCard';
 import StudioLinkCard from './StudioLinkCard';
 import StudioResultsCard from './StudioResultsCard';
 import StudioSettingsDialog from './StudioSettingsDialog';
-import { StatusChip, StudioCard, useL } from './studioUi';
+import { StatusChip, StudioCard, useL, useWriteQueue } from './studioUi';
 
 function timeAgo(value, L) {
   const t = Date.parse(value || '');
@@ -52,7 +60,7 @@ function timeAgo(value, L) {
 }
 
 /** The project name; click to rename, saved on Enter or when leaving the field. */
-function ProjectName({ name, onRename }) {
+function ProjectName({ name, onRename, disabled = false }) {
   const L = useL();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(name);
@@ -64,6 +72,7 @@ function ProjectName({ name, onRename }) {
     if (next && next !== name) onRename(next);
     else setValue(name);
   };
+  const start = () => { if (!disabled) setEditing(true); };
 
   if (editing) {
     return (
@@ -83,25 +92,26 @@ function ProjectName({ name, onRename }) {
     );
   }
   return (
-    <Tooltip title={L('Click to rename', '点击改名')}>
+    <Tooltip title={disabled ? '' : L('Click to rename', '点击改名')}>
       <Typography
         component="h1"
         role="button"
-        tabIndex={0}
-        onClick={() => setEditing(true)}
-        onKeyDown={(e) => { if (e.key === 'Enter') setEditing(true); }}
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled || undefined}
+        onClick={start}
+        onKeyDown={(e) => { if (e.key === 'Enter') start(); }}
         data-testid="studio-project-name"
         sx={{
           fontSize: { xs: 20, sm: 22 },
           fontWeight: 700,
           lineHeight: 1.3,
-          cursor: 'text',
+          cursor: disabled ? 'default' : 'text',
           overflowWrap: 'anywhere',
           display: 'inline-flex',
           alignItems: 'center',
           gap: 0.75,
           '& .studio-rename': { opacity: 0, transition: 'opacity .15s' },
-          '&:hover .studio-rename, &:focus-visible .studio-rename': { opacity: 1 },
+          '&:hover .studio-rename, &:focus-visible .studio-rename': { opacity: disabled ? 0 : 1 },
         }}
       >
         {name || L('Untitled study', '未命名研究')}
@@ -117,6 +127,10 @@ function problemText(problem, L) {
       return L('There is no survey yet. Drop the page your AI built, or build questions in the classic editor.', '还没有问卷。先把 AI 做好的页面拖进来，或者用经典编辑器搭题。');
     case 'folder-empty':
       return L(`The page uses the folder ${problem.folder}, but it has no images yet. Upload images first.`, `页面要用 ${problem.folder} 文件夹，但里面还没有图片。请先上传图片。`);
+    case 'folder-unlinked':
+      return L(`The page uses the folder ${problem.folder}, but the folder is not linked to the page yet. Click "Link" in the image library.`, `页面要用 ${problem.folder} 文件夹，但它还没有连接到页面。请在图片库里点「连接」。`);
+    case 'slots-empty':
+      return L("The page's image list is still empty. Upload images first.", '页面的图片列表还是空的。请先上传图片。');
     case 'media':
       return L(`The question "${problem.question}" does not have enough images. Add images in the image library.`, `题目「${problem.question}」的图片不够。请在图片库里补充图片。`);
     case 'config':
@@ -126,94 +140,150 @@ function problemText(problem, L) {
   }
 }
 
-/** One study on one screen: what participants see, images, link, results. */
-export default function StudioProject({ projectId, onProjectsChanged = () => {} }) {
+function publishErrorText(result, L) {
+  if (result.code === 'site-pages-sql') {
+    return L('To publish this page, run supabase/release_site_pages.sql once in Supabase first.', '这个页面要发布，需要先在 Supabase 里运行一次 supabase/release_site_pages.sql。');
+  }
+  if (result.code === 'site-pages-unsupported') {
+    return L('This kind of page cannot be published yet. Please contact the administrator.', '暂时不能发布这种页面，请联系管理员。');
+  }
+  return L(`Publishing failed: ${result.error}`, `发布失败：${result.error}`);
+}
+
+function writeErrorText(result, L) {
+  if (result.error === 'not found') return L('This study was not found.', '找不到这个研究。');
+  return L(`Saving failed: ${result.error}`, `保存失败：${result.error}`);
+}
+
+function importedText(result, replaced, L) {
+  const done = replaced ? L('The page was replaced.', '页面已替换。') : L('Imported.', '已导入。');
+  const { uploaded = 0, unchanged = 0, replaced: swapped = 0 } = result || {};
+  const parts = [
+    uploaded ? L(`${uploaded} new image(s) uploaded.`, `新上传了 ${uploaded} 张图片。`) : '',
+    swapped ? L(`${swapped} image(s) with the same name replaced the old ones.`, `${swapped} 张同名图片替换了旧的。`) : '',
+    unchanged ? L(`${unchanged} image(s) were already in the image library and were not uploaded again.`, `图片库里已经有其中 ${unchanged} 张，没有重复上传。`) : '',
+  ];
+  return [done, ...parts.filter(Boolean)].join(' ');
+}
+
+/**
+ * One study on one screen: what participants see, images, link, results.
+ * Every write goes through one queue and works on a fresh read of the study;
+ * Publish, Settings, rename and upload wait while a write runs.
+ */
+export default function StudioProject({ projectId, onProjectsChanged = () => {}, onProjectSaved = () => {} }) {
   const L = useL();
   const navigate = useNavigate();
   const auth = useOptionalAuth();
   const { toastSuccess, toastError } = useToast();
   const localMode = isStudioLocalMode();
+  const { busy, queue } = useWriteQueue();
   const [project, setProject] = useState(null);
+  // The version participants get: undefined while unknown or not release-managed, null when it could not be read.
+  const [release, setRelease] = useState(undefined);
   const [loading, setLoading] = useState(true);
   const [viewport, setViewport] = useState('desktop');
   const [dialog, setDialog] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [publishIssue, setPublishIssue] = useState(null);
+  const savedRef = useRef(onProjectSaved);
+  savedRef.current = onProjectSaved;
 
-  const reload = useCallback(async () => {
+  const refresh = useCallback(async () => {
     const next = await loadStudioProject(projectId);
     setProject(next);
     setLoading(false);
+    setRelease(undefined);
+    if (next?.releaseManaged && !localMode) setRelease(await loadStudioRelease(projectId));
     return next;
-  }, [projectId]);
+  }, [projectId, localMode]);
 
   useEffect(() => {
     setLoading(true);
     setProject(null);
     setDialog('');
     setPublishIssue(null);
-    reload();
-  }, [reload]);
+    refresh();
+  }, [refresh]);
 
   const config = useMemo(() => projectConfig(project), [project]);
   const kind = projectKind(config);
-  const status = projectStatus(project);
+  const status = projectStatus(project, release || null);
+  const releaseUnknown = Boolean(project?.releaseManaged) && release === null;
+  // Read each render: the classic editor of this tab may hold edits Studio must not hide.
+  const classicUnsaved = classicHasUnsavedEdits(projectId);
 
-  const afterWrite = async (result, okMessage = '') => {
-    if (result?.success === false) {
-      toastError(L(`Saving failed: ${result.error}`, `保存失败：${result.error}`));
-      return result;
+  /** Apply one change to a fresh read and show the result. Run it inside `queue`. */
+  const applyWrite = useCallback(async (change) => {
+    const result = await writeStudioProject(projectId, change);
+    if (result.success) {
+      setProject(result.project);
+      if (!result.unchanged) savedRef.current(result.project);
     }
-    await reload();
-    onProjectsChanged();
-    if (okMessage) toastSuccess(okMessage);
     return result;
-  };
+  }, [projectId]);
 
-  const saveConfig = async (next) => afterWrite(await saveStudioProject(project, next));
-  const saveFields = async (patch) => afterWrite(await updateStudioProject(project.id, patch));
+  // `quiet`: the caller shows the error itself (the settings dialog).
+  const write = (change, { quiet = false } = {}) => queue(async () => {
+    const result = await applyWrite(change);
+    if (!result.success && !quiet) toastError(writeErrorText(result, L));
+    return result.success ? result : { ...result, error: writeErrorText(result, L) };
+  });
+  const saveFields = (fields, options) => write(() => ({ fields }), options);
+  const saveConfigPatch = (patch, options) => write((_, current) => ({ config: { ...current, ...patch } }), options);
 
-  const openClassic = (tab = '') => {
+  const runImport = (task) => queue(async () => {
+    const result = await task();
+    if (result) {
+      const next = await refresh();
+      if (next) savedRef.current(next);
+    }
+    return result;
+  });
+
+  const openClassic = (tab = null) => {
     setActiveProject(project.id);
-    navigate(classicEditorPath(project.id, tab));
+    navigate(adminProjectPath(project.id, tab));
   };
 
-  const publish = async () => {
-    if (publishing) return;
+  const publish = () => queue(async () => {
     setPublishing(true);
     setPublishIssue(null);
     try {
-      const problems = await studioPublishProblems(project, config);
+      // Check and publish what is stored now, after every write before this one.
+      const fresh = await loadStudioProject(projectId);
+      if (!fresh) {
+        setPublishIssue({ error: L('This study was not found.', '找不到这个研究。') });
+        return;
+      }
+      setProject(fresh);
+      const problems = await studioPublishProblems(fresh, projectConfig(fresh));
       if (problems.length) {
         setPublishIssue({ problems });
         return;
       }
-      const result = await publishStudioProject(project.id);
+      const result = await publishStudioProject(projectId);
       if (!result.success) {
-        setPublishIssue({
-          error: result.code === 'site-pages-sql'
-            ? L('To publish this page, run supabase/release_site_pages.sql once in Supabase first.', '这个页面要发布，需要先在 Supabase 里运行一次 supabase/release_site_pages.sql。')
-            : L(`Publishing failed: ${result.error}`, `发布失败：${result.error}`),
-        });
+        setPublishIssue({ error: publishErrorText(result, L) });
         return;
       }
-      await reload();
-      onProjectsChanged();
+      const next = await refresh();
+      if (next) savedRef.current(next);
       toastSuccess(L('Published. The participant link is ready.', '已发布，参与者链接已经可以用了。'));
     } catch (err) {
       setPublishIssue({ error: L(`Publishing failed: ${err?.message || err}`, `发布失败：${err?.message || err}`) });
     } finally {
       setPublishing(false);
     }
-  };
+  });
 
-  const remove = async () => {
+  const remove = () => queue(async () => {
     const result = await removeStudioProject(project.id, { userId: project.userId || auth?.user?.id || null });
     if (!result.success) return result;
     onProjectsChanged();
-    navigate(studioPath(), { replace: true });
+    navigate(studioPathForProject(), { replace: true });
     return result;
-  };
+  });
 
   if (loading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress aria-label={L('Loading', '加载中')} /></Box>;
@@ -225,7 +295,7 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {} 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           {L('It may have been deleted, or it belongs to another account.', '它可能已经被删除，或者属于别的账号。')}
         </Typography>
-        <Button component={RouterLink} to={studioPath()} variant="contained">{L('New study', '新建研究')}</Button>
+        <Button component={RouterLink} to={studioPathForProject()} variant="contained">{L('New study', '新建研究')}</Button>
       </Box>
     );
   }
@@ -237,18 +307,31 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {} 
     project.lastModified ? L(`changed ${timeAgo(project.lastModified, L)}`, `上次修改 ${timeAgo(project.lastModified, L)}`) : '',
   ].filter(Boolean).join(' · ');
 
+  const upToDate = status.state === 'published' && !releaseUnknown;
+  const publishLabel = publishing
+    ? L('Publishing…', '正在发布…')
+    : {
+      live: L('Publish a fixed version', '发布正式版本'),
+      pending: L('Publish new version', '发布新版本'),
+      published: L('Publish new version', '发布新版本'),
+    }[status.state] || L('Publish and get the link', '发布并获取链接');
+  const publishHelp = status.state === 'live'
+    ? L('After you publish, participants see only this version. Later changes take effect when you publish again.', '发布后参与者只看到这个版本，之后的修改要再发布才生效。')
+    : '';
   const publishButton = localMode ? (
     <Typography variant="body2" color="text.secondary" data-testid="studio-local-note">
       {L('Local mode: saved changes are live right away.', '本地模式：保存后即上线。')}
     </Typography>
-  ) : status.state === 'published' ? (
+  ) : upToDate ? (
     <Button variant="contained" disabled startIcon={<Check />} data-testid="studio-publish">{L('Published', '已发布')}</Button>
   ) : (
-    <Button variant="contained" onClick={publish} disabled={publishing} data-testid="studio-publish" sx={{ px: 2.5 }}>
-      {publishing
-        ? L('Publishing…', '正在发布…')
-        : status.state === 'pending' ? L('Publish new version', '发布新版本') : L('Publish and get the link', '发布并获取链接')}
-    </Button>
+    <Tooltip title={publishHelp}>
+      <span>
+        <Button variant="contained" onClick={publish} disabled={busy} data-testid="studio-publish" sx={{ px: 2.5 }}>
+          {publishLabel}
+        </Button>
+      </span>
+    </Tooltip>
   );
 
   return (
@@ -267,17 +350,33 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {} 
         }}
       >
         <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
-          <ProjectName name={project.name} onRename={(name) => saveFields({ name })} />
+          <ProjectName name={project.name} disabled={busy} onRename={(name) => saveFields({ name })} />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>{meta}</Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
           {!localMode && <StatusChip status={status} long size="medium" />}
-          <Button variant="outlined" startIcon={<SettingsOutlined />} onClick={() => setDialog('settings')} sx={{ color: 'text.primary', borderColor: 'divider' }}>
+          <Button
+            variant="outlined"
+            startIcon={<SettingsOutlined />}
+            onClick={() => setDialog('settings')}
+            disabled={busy}
+            sx={{ color: 'text.primary', borderColor: 'divider' }}
+          >
             {L('Settings', '设置')}
           </Button>
           {publishButton}
         </Box>
       </Box>
+
+      {classicUnsaved && (
+        <Alert severity="warning" sx={{ mx: { xs: 2, sm: 3.5 }, mt: { xs: 2, sm: 2.5 } }} data-testid="studio-classic-unsaved">
+          {L('The classic editor still has changes that are not saved. ', '经典编辑器里还有未保存的修改，')}
+          <Link component="button" type="button" onClick={() => openClassic()} sx={{ verticalAlign: 'baseline' }}>
+            {L('Open the classic editor', '打开经典编辑器')}
+          </Link>
+          {L(' to save or drop them.', '保存或放弃。')}
+        </Alert>
+      )}
 
       <Box
         sx={{
@@ -311,7 +410,12 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {} 
         >
           {kind === 'empty' ? (
             <Box>
-              <StudioImportFlow project={project} dense onImported={() => afterWrite(null, L('Imported.', '已导入。'))} />
+              <StudioImportFlow
+                project={project}
+                dense
+                runImport={runImport}
+                onImported={(result) => toastSuccess(importedText(result, false, L))}
+              />
               <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
                 {L('Or build it question by question: ', '也可以一题一题地搭：')}
                 <Link component="button" type="button" onClick={() => openClassic('builder')} sx={{ verticalAlign: 'baseline' }}>
@@ -324,12 +428,12 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {} 
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
                 {kind === 'page' ? (
                   <>
-                    <Button variant="outlined" size="small" startIcon={<SwapHoriz />} onClick={() => setDialog('replace')}>
+                    <Button variant="outlined" size="small" startIcon={<SwapHoriz />} onClick={() => setDialog('replace')} disabled={busy}>
                       {L('Use another page', '换一个页面')}
                     </Button>
                     <CopySpecButton
                       size="small"
-                      text={() => pageForAiText(buildSpSchemeText(), config.spSite.html)}
+                      text={() => pageForAiText(buildSpSchemeText(), pageHtmlForAi(config.spSite))}
                       filename="sp-scheme-and-page.md"
                       label={L('Copy for your AI to edit', '复制给 AI 修改')}
                     />
@@ -344,22 +448,36 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {} 
                 {L('Try it yourself. Nothing you enter here is saved as a response.', '自己填一遍试试。在这里填的内容不会算作回答。')}
               </Typography>
               <Box sx={{ minWidth: 0 }}>
-                <SurveyPreview config={config} currentProject={project} interactive viewport={viewport} showMediaAssignment={false} />
+                <SurveyPreview
+                  config={config}
+                  currentProject={project}
+                  interactive
+                  viewport={viewport}
+                  showMediaAssignment={false}
+                  hideSiteImportNotice
+                />
               </Box>
             </>
           )}
         </StudioCard>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 2, sm: 2.25 }, minWidth: 0 }}>
-          <StudioMediaCard project={project} config={config} onUploaded={() => afterWrite(null)} />
+          <StudioMediaCard project={project} config={config} busy={busy} queue={queue} applyWrite={applyWrite} />
           <StudioLinkCard
             project={project}
             config={config}
+            status={status}
             localMode={localMode}
-            onSaveConfig={saveConfig}
-            onProjectChanged={() => afterWrite(null)}
+            onSaveConfig={saveConfigPatch}
+            onProjectPatched={(patch) => setProject((prev) => (prev ? { ...prev, ...patch } : prev))}
           />
-          <StudioResultsCard project={project} config={config} localMode={localMode} onProjectChanged={() => afterWrite(null)} />
+          <StudioResultsCard
+            project={project}
+            config={config}
+            status={status}
+            localMode={localMode}
+            onProjectUpdated={(patch) => setProject((prev) => (prev ? { ...prev, ...patch } : prev))}
+          />
         </Box>
       </Box>
 
@@ -368,27 +486,28 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {} 
         project={project}
         config={config}
         onClose={() => setDialog('')}
-        onSaveProject={saveFields}
-        onSaveConfig={saveConfig}
+        onSaveProject={(fields) => saveFields(fields, { quiet: true })}
+        onSaveConfig={(patch) => saveConfigPatch(patch, { quiet: true })}
         onDelete={remove}
       />
 
-      <Dialog open={dialog === 'replace'} onClose={() => setDialog('')} maxWidth="sm" fullWidth>
+      <Dialog open={dialog === 'replace'} onClose={() => { if (!busy) setDialog(''); }} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>{L('Use another page', '换一个页面')}</DialogTitle>
         <DialogContent>
           {dialog === 'replace' && (
             <StudioImportFlow
               project={project}
               dense
-              onImported={async () => {
+              runImport={runImport}
+              onImported={(result) => {
                 setDialog('');
-                await afterWrite(null, L('The page was replaced.', '页面已替换。'));
+                toastSuccess(importedText(result, true, L));
               }}
             />
           )}
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setDialog('')} color="inherit">{L('Close', '关闭')}</Button>
+          <Button onClick={() => setDialog('')} color="inherit" disabled={busy}>{L('Close', '关闭')}</Button>
         </DialogActions>
       </Dialog>
 

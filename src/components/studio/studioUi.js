@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Box, Chip, Paper, Tooltip, Typography } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { AutoAwesome, ListAlt } from '@mui/icons-material';
@@ -9,6 +9,22 @@ import { uiPair } from '../../lib/uiLanguages';
 export function useL() {
   const { language } = useRegion();
   return useCallback((en, zh) => uiPair(language, en, zh), [language]);
+}
+
+/**
+ * One write at a time: `queue(task)` runs `task` after every task queued
+ * before it, and `busy` is true while any task waits or runs.
+ */
+export function useWriteQueue() {
+  const tail = useRef(Promise.resolve());
+  const [pending, setPending] = useState(0);
+  const queue = useCallback((task) => {
+    setPending((n) => n + 1);
+    const run = tail.current.then(() => task());
+    tail.current = run.catch(() => {});
+    return run.finally(() => setPending((n) => n - 1));
+  }, []);
+  return { busy: pending > 0, queue };
 }
 
 export const SOFT_SHADOW = '0 2px 12px rgba(0,0,0,0.06)';
@@ -40,14 +56,15 @@ export function StudioCard({ title, action = null, children, sx = {}, ...rest })
   );
 }
 
-const STATUS_TONE = { draft: 'warning', pending: 'warning', published: 'success' };
+const STATUS_TONE = { draft: 'warning', pending: 'warning', published: 'success', live: 'success' };
 
-/** Draft / published / changes waiting, as a small soft chip. */
+/** Draft / live / published / changes waiting, as a small soft chip. */
 export function StatusChip({ status, long = false, size = 'small' }) {
   const L = useL();
   const { state, version } = status || { state: 'draft', version: 0 };
   const label = {
     draft: long ? L('Draft, not published yet', '草稿，还没发布') : L('Draft', '草稿'),
+    live: long ? L('Live · saves go live', '已上线 · 保存即生效') : L('Live', '已上线'),
     published: long ? L(`Published v${version}`, `已发布 v${version}`) : L('Published', '已发布'),
     pending: long ? L('Changes not published yet', '有改动还没发布') : L('Changed', '有改动'),
     local: L('Local', '本地'),

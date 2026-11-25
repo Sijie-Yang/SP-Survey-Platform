@@ -18,22 +18,28 @@ import { StudioCard, useL } from './studioUi';
 
 const ResultsAnalysis = lazy(() => import('../admin/ResultsAnalysis'));
 
-/** Response count, one-click download, and the full analysis in a dialog. */
-export default function StudioResultsCard({ project, config, localMode = false, onProjectChanged }) {
+/**
+ * Response count, one-click download, and the full analysis in a dialog. The
+ * count is what the download holds (practice runs only when the survey
+ * includes them). `status` is projectStatus(); `onProjectUpdated(patch)`
+ * receives what the analysis saved on the project.
+ */
+export default function StudioResultsCard({ project, config, status, localMode = false, onProjectUpdated }) {
   const L = useL();
   const [count, setCount] = useState(undefined);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
 
+  const includePractice = config?.includeResearcherPractice === true;
   useEffect(() => {
     let cancelled = false;
     setCount(undefined);
-    countStudioResponses(project.id)
+    countStudioResponses(project.id, { includeResearcherPractice: includePractice })
       .then((n) => { if (!cancelled) setCount(n); })
       .catch(() => { if (!cancelled) setCount(null); });
     return () => { cancelled = true; };
-  }, [project.id]);
+  }, [project.id, includePractice]);
 
   const download = async () => {
     setDownloading(true);
@@ -48,6 +54,7 @@ export default function StudioResultsCard({ project, config, localMode = false, 
   };
 
   const none = count === 0;
+  const canOpen = localMode || (status?.state && status.state !== 'draft');
 
   return (
     <StudioCard title={L('Results', '结果')} data-testid="studio-results">
@@ -59,7 +66,7 @@ export default function StudioResultsCard({ project, config, localMode = false, 
       </Box>
       {none ? (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-          {localMode
+          {canOpen
             ? L('No responses yet. Send the link to participants.', '还没有回答。把链接发给参与者。')
             : L('No responses yet. After you publish, send the link to participants.', '还没有回答。发布后把链接发给参与者。')}
         </Typography>
@@ -89,7 +96,7 @@ export default function StudioResultsCard({ project, config, localMode = false, 
         <Box sx={{ p: { xs: 1.5, sm: 3 }, bgcolor: 'background.default', flex: 1 }}>
           {open && (
             <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress aria-label={L('Loading', '加载中')} /></Box>}>
-              <ResultsAnalysis currentProject={project} surveyConfig={config} onProjectUpdated={onProjectChanged} />
+              <ResultsAnalysis currentProject={project} surveyConfig={config} onProjectUpdated={onProjectUpdated} />
             </Suspense>
           )}
         </Box>

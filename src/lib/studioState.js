@@ -1,38 +1,46 @@
 /**
  * Studio and the classic editor share one project. The classic editor keeps a
  * per-tab working copy in sessionStorage (`project_editing_states`); after
- * Studio writes a project that copy is stale, so Studio drops it and the
- * classic editor loads the saved draft instead.
+ * Studio writes a project a clean copy is stale, so Studio drops it and the
+ * classic editor loads the saved draft instead. A copy that holds unsaved
+ * edits is kept: only the researcher can decide to save or drop those, and
+ * Studio tells them so (classicHasUnsavedEdits).
+ *
+ * Links between the two live in adminDeepLink.js (adminProjectPath, studioPathForProject).
  */
 
 const EDITING_STATES_KEY = 'project_editing_states';
 
-/** Forget the classic editor's working copy of this project (no-op when there is none). */
-export function forgetClassicEditingState(projectId) {
-  if (!projectId) return;
+function readEditingStates() {
   try {
     const raw = sessionStorage.getItem(EDITING_STATES_KEY);
-    if (!raw) return;
-    const states = JSON.parse(raw);
-    if (!states || typeof states !== 'object' || !Object.prototype.hasOwnProperty.call(states, projectId)) return;
-    delete states[projectId];
-    sessionStorage.setItem(EDITING_STATES_KEY, JSON.stringify(states));
+    const states = raw ? JSON.parse(raw) : null;
+    return states && typeof states === 'object' ? states : null;
   } catch {
-    // Storage unavailable or unreadable: nothing to forget.
+    return null;
   }
 }
 
-const CLASSIC_TABS = new Set(['media', 'builder', 'share', 'results']);
-
-/** The classic editor opened on one project (and optionally one tab). */
-export function classicEditorPath(projectId, tab = '') {
-  if (!projectId) return '/admin';
-  const params = new URLSearchParams({ project: projectId });
-  if (CLASSIC_TABS.has(tab)) params.set('tab', tab);
-  return `/admin?${params.toString()}`;
+/**
+ * Forget the classic editor's clean working copy of this project (no-op when
+ * there is none). A copy with unsaved edits is kept unless `evenUnsaved` (the
+ * project is gone).
+ */
+export function forgetClassicEditingState(projectId, { evenUnsaved = false } = {}) {
+  if (!projectId) return;
+  const states = readEditingStates();
+  if (!states || !Object.prototype.hasOwnProperty.call(states, projectId)) return;
+  if (!evenUnsaved && states[projectId]?.hasUnsavedChanges === true) return;
+  delete states[projectId];
+  try {
+    sessionStorage.setItem(EDITING_STATES_KEY, JSON.stringify(states));
+  } catch {
+    // Storage unavailable: nothing to forget.
+  }
 }
 
-/** Studio's own page for a project. */
-export function studioPath(projectId = '') {
-  return projectId ? `/studio/${encodeURIComponent(projectId)}` : '/studio';
+/** True when the classic editor (this tab) holds edits of this project that are not saved yet. */
+export function classicHasUnsavedEdits(projectId) {
+  if (!projectId) return false;
+  return readEditingStates()?.[projectId]?.hasUnsavedChanges === true;
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Button,
@@ -17,16 +17,24 @@ import RecruitmentSettings from '../admin/RecruitmentSettings';
 import RecruitmentLinks from '../admin/RecruitmentLinks';
 import CustomSurveyLink from '../admin/CustomSurveyLink';
 import { legacySurveyShareUrl, surveyShareUrl } from '../../lib/publicSlug';
-import { projectStatus } from '../../lib/studioProject';
 import { StudioCard, useL } from './studioUi';
 
-/** The participant link, its QR code, recruitment platforms and a short link. */
-export default function StudioLinkCard({ project, config, localMode = false, onSaveConfig, onProjectChanged }) {
+/**
+ * The participant link, its QR code, recruitment platforms and a short link.
+ * `status` is projectStatus(): there is a link as soon as participants can open
+ * the survey (live, published or with changes waiting).
+ * `onSaveConfig(patch)` saves fields of the survey config (queued by the project screen).
+ */
+export default function StudioLinkCard({ project, config, status, localMode = false, onSaveConfig, onProjectPatched = () => {} }) {
   const L = useL();
   const [copied, setCopied] = useState(false);
   const [dialog, setDialog] = useState('');
-  const status = projectStatus(project);
-  const live = localMode || status.state !== 'draft';
+  // The recruitment setting as the researcher edits it. Saves run in the
+  // background and never reset what is being typed.
+  const [recruitment, setRecruitment] = useState(config?.recruitment);
+  const recruitmentConfig = useMemo(() => ({ ...config, recruitment }), [config, recruitment]);
+  const state = status?.state || 'draft';
+  const hasLink = localMode || state !== 'draft';
   const origin = window.location.origin;
   const url = localMode ? legacySurveyShareUrl(origin, project.id) : surveyShareUrl(origin, { id: project.id, publicSlug: project.publicSlug });
 
@@ -40,9 +48,20 @@ export default function StudioLinkCard({ project, config, localMode = false, onS
     }
   };
 
+  const openMore = () => {
+    setRecruitment(config?.recruitment);
+    setDialog('more');
+  };
+
+  const changeRecruitment = (field, value) => {
+    if (field !== 'recruitment') return;
+    setRecruitment(value);
+    onSaveConfig({ recruitment: value });
+  };
+
   return (
     <StudioCard title={L('Link', '链接')} data-testid="studio-link">
-      {!live ? (
+      {!hasLink ? (
         <Box sx={{ bgcolor: 'action.hover', borderRadius: '8px', px: 1.5, py: 1.25 }}>
           <Typography variant="body2" color="text.secondary">
             {L('After you publish, the participant link and QR code appear here.', '发布后这里出现参与者链接和二维码。')}
@@ -67,7 +86,12 @@ export default function StudioLinkCard({ project, config, localMode = false, onS
               </IconButton>
             </Tooltip>
           </Box>
-          {!localMode && status.state === 'pending' && (
+          {!localMode && state === 'live' && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }} data-testid="studio-link-live">
+              {L('Participants see the latest saved version.', '参与者打开链接看到的是最新保存的版本。')}
+            </Typography>
+          )}
+          {!localMode && state === 'pending' && (
             <Typography variant="body2" color="warning.dark" sx={{ mt: 1 }} data-testid="studio-link-pending">
               {L(`Participants now see v${status.version}. Your changes take effect after you publish.`, `参与者现在看到的是 v${status.version}；你的修改发布后才生效。`)}
             </Typography>
@@ -76,7 +100,7 @@ export default function StudioLinkCard({ project, config, localMode = false, onS
             <Button size="small" variant="outlined" startIcon={<QrCode2 />} onClick={() => setDialog('qr')}>
               {L('QR code', '二维码')}
             </Button>
-            <Button size="small" variant="outlined" startIcon={<GroupAddOutlined />} onClick={() => setDialog('more')}>
+            <Button size="small" variant="outlined" startIcon={<GroupAddOutlined />} onClick={openMore}>
               {L('Recruitment and short link', '招募与短链接')}
             </Button>
           </Box>
@@ -96,12 +120,14 @@ export default function StudioLinkCard({ project, config, localMode = false, onS
       <Dialog open={dialog === 'more'} onClose={() => setDialog('')} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>{L('Recruitment and short link', '招募与短链接')}</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <RecruitmentSettings config={config} onChange={(field, value) => onSaveConfig({ ...config, [field]: value })} />
-          <RecruitmentLinks surveyUrl={url} surveyConfig={config} projectId={project.id} />
+          <RecruitmentSettings config={recruitmentConfig} onChange={changeRecruitment} hideClassicHints />
+          {recruitment?.platform && (
+            <RecruitmentLinks surveyUrl={url} surveyConfig={recruitmentConfig} projectId={project.id} hideClassicHints />
+          )}
           {!localMode && (
             <>
               <Divider />
-              <CustomSurveyLink projectId={project.id} savedSlug={project.publicSlug || ''} onSaved={onProjectChanged} />
+              <CustomSurveyLink projectId={project.id} savedSlug={project.publicSlug || ''} onSaved={(slug) => onProjectPatched({ publicSlug: slug || '' })} />
             </>
           )}
         </DialogContent>

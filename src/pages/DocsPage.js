@@ -248,7 +248,7 @@ function GuideArticle({ doc, guide, language }) {
           <Typography variant="body2" sx={{ my: 1, lineHeight: 1.8 }}>{doc.id === '1990-nasar-evaluative'
             ? (zh ? `登录后台，在项目侧栏的模板库搜索“${doc.name}”，选择模板创建项目。地图题使用研究范围，不需要上传图片。` : `Sign in, find “${doc.name}” in the project sidebar’s template library, and create a project from it. The map questions use the study extent and do not need uploaded images.`)
             : (zh ? `登录后台，在项目侧栏的模板库搜索“${doc.name}”，选择模板创建项目，再替换研究媒体与设置。` : `Sign in, find “${doc.name}” in the project sidebar’s template library, create a project from it, then supply your media and study settings.`)}</Typography>
-          <Button component={RouterLink} to="/admin" size="small">{zh ? '进入工作台' : 'Open workspace'}</Button>
+          <Button component={RouterLink} to="/admin" size="small">{zh ? '打开经典编辑器' : 'Open the classic editor'}</Button>
         </Box>
       </>}
       {id === 'scoring' && doc.id === '2009-ewing-measuring' && <Button component={RouterLink} to="/docs/icc" sx={{ mb: 1 }}>{zh ? '阅读 ICC(2,1) 与 ICC(2,k) 的算法说明 →' : 'Read how ICC(2,1) and ICC(2,k) are calculated →'}</Button>}
@@ -285,7 +285,7 @@ function TemplateReference({ doc, language }) {
       <TemplateSettings template={template} language={language} />
       <Typography component="h2" variant="h6">{zh ? '模板配置的分析方法' : 'Analysis methods configured in the template'}</Typography>
       <Stack component="ul" sx={{ pl: 2.5 }}>{normalizeRecommendation(template.config).items.map((item, i) => <Typography key={i} component="li" variant="body2" sx={{ my: 0.5, overflowWrap: 'anywhere' }}>{item.method} · {item.questions.join(', ')}{item.scale ? ` · ${item.scale}` : ''}</Typography>)}</Stack>
-      <Button component={RouterLink} to="/admin" variant="outlined">{zh ? '进入工作台使用模板' : 'Open workspace to use templates'}</Button>
+      <Button component={RouterLink} to="/admin" variant="outlined">{zh ? '在经典编辑器里使用模板' : 'Use templates in the classic editor'}</Button>
     </>}
     {preview && template && <Suspense fallback={<CircularProgress size={24} />}><TemplateDocPreview template={template} doc={doc} language={language} onClose={() => setPreview(false)} /></Suspense>}
   </>;

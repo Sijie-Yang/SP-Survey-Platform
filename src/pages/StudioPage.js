@@ -9,6 +9,7 @@ import StudioNewStudy from '../components/studio/StudioNewStudy';
 import StudioProject from '../components/studio/StudioProject';
 import { useL } from '../components/studio/studioUi';
 import { isStudioLocalMode, listStudioProjects } from '../lib/studioData';
+import { sortProjectsNewestFirst } from '../lib/studioProject';
 
 const HEADER_HEIGHT = 64;
 
@@ -32,6 +33,12 @@ export default function StudioPage() {
     } catch {
       setProjects([]);
     }
+  }, []);
+
+  // After a write on the study's page, its row in the list changes in place.
+  const projectSaved = useCallback((saved) => {
+    if (!saved?.id) return;
+    setProjects((prev) => (prev ? sortProjectsNewestFirst(prev.map((p) => (p.id === saved.id ? { ...p, ...saved } : p))) : prev));
   }, []);
 
   useEffect(() => { reloadProjects(); }, [reloadProjects]);
@@ -85,7 +92,7 @@ export default function StudioPage() {
           )}
           <Box sx={{ flex: 1, minHeight: 0 }}>
             {projectId
-              ? <StudioProject key={projectId} projectId={projectId} onProjectsChanged={reloadProjects} />
+              ? <StudioProject key={projectId} projectId={projectId} onProjectsChanged={reloadProjects} onProjectSaved={projectSaved} />
               : <StudioNewStudy onProjectsChanged={reloadProjects} />}
           </Box>
         </Box>

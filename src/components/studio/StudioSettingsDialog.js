@@ -22,7 +22,11 @@ function quotaValue(raw) {
   return Number.isFinite(n) ? Math.max(1, n) : null;
 }
 
-/** Name, description, response limit, delete. Each field saves when you leave it. */
+/**
+ * Name, description, response limit, delete. Each field saves when you leave
+ * it. `onSaveProject(fields)` and `onSaveConfig(patch)` resolve to
+ * `{ success, error }` with the error already worded for the researcher.
+ */
 export default function StudioSettingsDialog({ open, project, config, onClose, onSaveProject, onSaveConfig, onDelete }) {
   const L = useL();
   const [name, setName] = useState(project.name || '');
@@ -32,18 +36,20 @@ export default function StudioSettingsDialog({ open, project, config, onClose, o
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');
 
+  // Filled when the dialog opens. A save that lands while the researcher types
+  // in another field must not reset what they are typing.
   useEffect(() => {
     if (!open) return;
     setName(project.name || '');
     setDescription(project.description || '');
     setQuota(config?.responseQuota ?? '');
     setError('');
-  }, [open, project.name, project.description, config?.responseQuota]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (action) => {
     setError('');
     const result = await action();
-    if (result && result.success === false) setError(L(`Saving failed: ${result.error}`, `保存失败：${result.error}`));
+    if (result && result.success === false) setError(result.error || L('Saving failed.', '保存失败。'));
   };
 
   const saveName = () => {
@@ -57,7 +63,7 @@ export default function StudioSettingsDialog({ open, project, config, onClose, o
   const saveQuota = () => {
     const next = quotaValue(quota);
     setQuota(next ?? '');
-    if (next !== (config?.responseQuota ?? null)) run(() => onSaveConfig({ ...config, responseQuota: next }));
+    if (next !== (config?.responseQuota ?? null)) run(() => onSaveConfig({ responseQuota: next }));
   };
 
   const remove = async () => {
@@ -103,7 +109,7 @@ export default function StudioSettingsDialog({ open, project, config, onClose, o
               {L('Delete this study', '删除这个研究')}
             </Button>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
-              {L('Deletes the survey and its settings. This cannot be undone.', '会删除问卷和它的设置，不能恢复。')}
+              {L('Deletes the survey, its images and its settings. This cannot be undone.', '会删除问卷、图片和设置，不能恢复。')}
             </Typography>
           </Box>
         </DialogContent>
@@ -114,7 +120,10 @@ export default function StudioSettingsDialog({ open, project, config, onClose, o
       <ConfirmDialog
         open={confirming}
         title={L('Delete this study?', '删除这个研究？')}
-        message={L(`"${project.name || ''}" will be deleted. This cannot be undone.`, `「${project.name || ''}」会被删除，不能恢复。`)}
+        message={L(
+          `The survey, images and settings of "${project.name || ''}" will be deleted. This cannot be undone.`,
+          `「${project.name || ''}」的问卷、图片和设置都会被删除，不能恢复。`,
+        )}
         confirmLabel={L('Delete', '删除')}
         cancelLabel={L('Cancel', '取消')}
         confirmColor="error"

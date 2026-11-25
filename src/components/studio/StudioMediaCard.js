@@ -16,21 +16,26 @@ import {
 import { CloudUploadOutlined, FolderOutlined } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useOptionalAuth } from '../../contexts/AuthContext';
-import { MEDIA_ACCEPT } from '../../lib/mediaUtils';
+import { IMAGE_COMPRESS_TARGET_BYTES, MEDIA_ACCEPT } from '../../lib/mediaUtils';
 import { pickUploadMedia, uploadMediaBatch } from '../../lib/mediaUploadBatch';
 import { setActiveProject } from '../../lib/projectManager';
 import { uploadImageToR2 } from '../../lib/r2';
-import { isStudioLocalMode, saveStudioProject } from '../../lib/studioData';
+import { compressImage } from '../../lib/templateRequest';
+import { adminProjectPath } from '../../lib/adminDeepLink';
+import { isStudioLocalMode } from '../../lib/studioData';
 import {
+  appendUploadedMedia,
   cleanFolderName,
   defaultUploadFolder,
   libraryFolders,
   libraryThumbnails,
+  linkUploadFolder,
   looseFileCount,
   missingPageFolders,
   pageFolders,
+  pageUsesFolders,
+  surveyImageNeed,
 } from '../../lib/studioProject';
-import { classicEditorPath } from '../../lib/studioState';
 import { StudioCard, useL } from './studioUi';
 
 const MAX_FOLDERS_SHOWN = 6;
@@ -41,11 +46,24 @@ function newId() {
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-/** Pick a folder (or type a new one), choose files, upload. Saves the media list as it goes. */
-export function StudioUploadDialog({ open, project, config, initialFolder = '', onClose, onUploaded }) {
+// Photos are made smaller before upload, like the classic media library does by default.
+function prepareUpload(raw, type) {
+  return type === 'image' && !/\.(gif|svg)$/i.test(raw.name) ? compressImage(raw, IMAGE_COMPRESS_TARGET_BYTES) : raw;
+}
+
+/**
+ * Pick a folder (or type a new one), choose files, upload. The media list is
+ * saved as it goes, each time on a fresh read of the study; a folder the page
+ * reads is linked to it in the same save. The folder field only shows when the
+ * page reads folders.
+ * @param {(task) => Promise} queue runs the upload after the study's other writes
+ * @param {(change) => Promise} applyWrite one write on a fresh read (used inside the queue)
+ */
+export function StudioUploadDialog({ open, project, config, initialFolder = '', queue, applyWrite, onClose }) {
   const L = useL();
   const auth = useOptionalAuth();
   const inputRef = useRef(null);
+  const showFolder = Boolean(initialFolder) || pageUsesFolders(config);
   const folders = useMemo(
     () => [...new Set([...pageFolders(config), ...libraryFolders(project).map((f) => f.folder)])],
     [config, project],
@@ -57,6 +75,7 @@ export function StudioUploadDialog({ open, project, config, initialFolder = '', 
   const [error, setError] = useState('');
   const uploading = progress !== null;
   const userId = auth?.user?.id || (isStudioLocalMode() ? 'local' : null);
+  const target = showFolder ? cleanFolderName(folder) : defaultUploadFolder(config);
 
   const choose = (list) => {
     const picked = pickUploadMedia(list);
@@ -74,32 +93,30 @@ export function StudioUploadDialog({ open, project, config, initialFolder = '', 
   };
 
   const upload = async () => {
-    const target = cleanFolderName(folder);
-    if (!files.length || !userId) return;
+    if (!files.length || !userId || !target) return;
     setError('');
     setProgress(0);
-    let latest = project;
     try {
-      const result = await uploadMediaBatch({
+      const result = await queue(() => uploadMediaBatch({
         files,
         prefix: `${userId}/${project.id}/`,
         folder: target,
-        prepare: (raw) => raw,
+        prepare: prepareUpload,
         upload: uploadImageToR2,
         makeId: newId,
         onProgress: ({ processed }) => setProgress(processed),
         persist: async (uploaded) => {
-          latest = {
-            ...project,
-            preloadedImages: [...(project.preloadedImages || []), ...uploaded],
-            preloadedAt: new Date().toISOString(),
-            preloadedSource: 'r2',
-          };
-          const saved = await saveStudioProject(latest, config);
+          const saved = await applyWrite((fresh, current) => ({
+            fields: {
+              preloadedImages: appendUploadedMedia(fresh.preloadedImages, uploaded),
+              preloadedAt: new Date().toISOString(),
+              preloadedSource: 'r2',
+            },
+            config: linkUploadFolder(current, target),
+          }));
           if (!saved.success) throw new Error(saved.error || 'Save failed');
         },
-      });
-      if (result.uploaded.length && !result.saveError) onUploaded(latest);
+      }));
       if (result.saveError) {
         setError(L(`The images were uploaded, but saving the list failed: ${result.saveError}`, `图片已上传，但保存图片清单失败：${result.saveError}`));
       } else if (result.failures.length) {
@@ -125,22 +142,24 @@ export function StudioUploadDialog({ open, project, config, initialFolder = '', 
     <Dialog open={open} onClose={close} maxWidth="xs" fullWidth>
       <DialogTitle sx={{ fontWeight: 700 }}>{L('Upload images', '上传图片')}</DialogTitle>
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '8px !important' }}>
-        <Autocomplete
-          freeSolo
-          options={folders}
-          value={folder}
-          inputValue={folder}
-          onInputChange={(_, value) => setFolder(value)}
-          onChange={(_, value) => setFolder(value || '')}
-          disabled={uploading}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label={L('Folder', '文件夹')}
-              helperText={L('Choose a folder, or type a new name.', '选一个文件夹，或者输入新的名字。')}
-            />
-          )}
-        />
+        {showFolder && (
+          <Autocomplete
+            freeSolo
+            options={folders}
+            value={folder}
+            inputValue={folder}
+            onInputChange={(_, value) => setFolder(value)}
+            onChange={(_, value) => setFolder(value || '')}
+            disabled={uploading}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={L('Folder', '文件夹')}
+                helperText={L('Choose a folder, or type a new name.', '选一个文件夹，或者输入新的名字。')}
+              />
+            )}
+          />
+        )}
         <Box>
           <input
             ref={inputRef}
@@ -177,7 +196,7 @@ export function StudioUploadDialog({ open, project, config, initialFolder = '', 
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={close} color="inherit" disabled={uploading}>{L('Cancel', '取消')}</Button>
-        <Button variant="contained" onClick={upload} disabled={!files.length || !cleanFolderName(folder) || uploading || !userId}>
+        <Button variant="contained" onClick={upload} disabled={!files.length || !target || uploading || !userId}>
           {L('Upload', '上传')}
         </Button>
       </DialogActions>
@@ -185,22 +204,36 @@ export function StudioUploadDialog({ open, project, config, initialFolder = '', 
   );
 }
 
-/** Image library: thumbnails, folders with counts, and what the page still needs. */
-export default function StudioMediaCard({ project, config, onUploaded }) {
+function missingText({ folder, reason }, L) {
+  if (reason === 'unlinked') {
+    return L(`The page uses the folder ${folder}, but it is not linked to the page yet.`, `页面要用 ${folder} 文件夹，但它还没有连接到页面。`);
+  }
+  if (reason === 'slots') return L("The page's image list is still empty.", '页面的图片列表还是空的。');
+  return L(`The page uses the folder ${folder}, but it has no images yet.`, `页面要用 ${folder} 文件夹，但里面还没有图片。`);
+}
+
+/**
+ * Image library: thumbnails, folders with counts, and what the survey still
+ * needs. `busy` while another write of the study runs.
+ */
+export default function StudioMediaCard({ project, config, busy = false, queue, applyWrite }) {
   const L = useL();
   const [upload, setUpload] = useState(null);
   const folders = useMemo(() => libraryFolders(project), [project]);
   const thumbs = useMemo(() => libraryThumbnails(project, 4), [project]);
   const loose = useMemo(() => looseFileCount(project), [project]);
   const missing = useMemo(() => missingPageFolders(project, config), [project, config]);
+  const need = useMemo(() => surveyImageNeed(config), [config]);
   const total = (project?.preloadedImages || []).length;
+
+  const link = (folder) => queue(() => applyWrite((_, current) => ({ config: linkUploadFolder(current, folder) })));
 
   return (
     <StudioCard
       title={L('Image library', '图片库')}
       data-testid="studio-media"
       action={(
-        <Button size="small" startIcon={<CloudUploadOutlined />} onClick={() => setUpload({ folder: '' })}>
+        <Button size="small" startIcon={<CloudUploadOutlined />} onClick={() => setUpload({ folder: '' })} disabled={busy}>
           {L('Upload images', '上传图片')}
         </Button>
       )}
@@ -245,21 +278,36 @@ export default function StudioMediaCard({ project, config, onUploaded }) {
         </Box>
       )}
 
-      {missing.map((folder) => (
+      {need > total && (
         <Alert
-          key={folder}
+          severity="warning"
+          sx={{ mt: 1, alignItems: 'center' }}
+          data-testid="studio-image-need"
+          action={<Button color="inherit" size="small" onClick={() => setUpload({ folder: '' })} disabled={busy}>{L('Upload', '上传')}</Button>}
+        >
+          {L(`This survey needs at least ${need} images.`, `这个问卷至少需要 ${need} 张图片。`)}
+        </Alert>
+      )}
+
+      {missing.map((item) => (
+        <Alert
+          key={`${item.reason}-${item.folder}`}
           severity="warning"
           sx={{ mt: 1, alignItems: 'center' }}
           data-testid="studio-missing-folder"
-          action={<Button color="inherit" size="small" onClick={() => setUpload({ folder })}>{L('Upload', '上传')}</Button>}
+          action={item.reason === 'unlinked' ? (
+            <Button color="inherit" size="small" onClick={() => link(item.folder)} disabled={busy}>{L('Link', '连接')}</Button>
+          ) : (
+            <Button color="inherit" size="small" onClick={() => setUpload({ folder: item.folder })} disabled={busy}>{L('Upload', '上传')}</Button>
+          )}
         >
-          {L(`The page uses the folder ${folder}, but it has no images yet.`, `页面要用 ${folder} 文件夹，但里面还没有图片。`)}
+          {missingText(item, L)}
         </Alert>
       ))}
 
       <Link
         component={RouterLink}
-        to={classicEditorPath(project.id, 'media')}
+        to={adminProjectPath(project.id, 'media')}
         onClick={() => setActiveProject(project.id)}
         variant="caption"
         underline="hover"
@@ -275,8 +323,9 @@ export default function StudioMediaCard({ project, config, onUploaded }) {
           project={project}
           config={config}
           initialFolder={upload.folder}
+          queue={queue}
+          applyWrite={applyWrite}
           onClose={() => setUpload(null)}
-          onUploaded={onUploaded}
         />
       )}
     </StudioCard>

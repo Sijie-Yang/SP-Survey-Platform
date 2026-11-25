@@ -168,6 +168,8 @@ function importErrorText(error, L) {
       return L(`The study could not be created: ${detail}`, `没能新建研究：${detail}`);
     case 'signin':
       return L('Sign in first to import a page with images.', '请先登录，再导入带图片的页面。');
+    case 'missing':
+      return L('This study was not found.', '找不到这个研究。');
     default:
       return L(`Import failed: ${detail}`, `导入失败：${detail}`);
   }
@@ -285,8 +287,10 @@ export function StudioImportResult({ importer, replacing = false, onImport, onCa
 /**
  * Drop zone, "copy instructions" and "start from the example"; after a drop,
  * the result in plain words and the import. `project` null creates a project.
+ * `runImport(task)` runs the import (the project screen queues it behind its
+ * other writes); it resolves to the task's result.
  */
-export default function StudioImportFlow({ project = null, onImported, showSteps = false, dense = false }) {
+export default function StudioImportFlow({ project = null, onImported, runImport = (task) => task(), showSteps = false, dense = false }) {
   const L = useL();
   const importer = useStudioImport();
   const auth = useOptionalAuth();
@@ -295,7 +299,7 @@ export default function StudioImportFlow({ project = null, onImported, showSteps
   const userId = auth?.user?.id || (isStudioLocalMode() ? 'local' : null);
 
   const doImport = async () => {
-    const result = await importer.runImport({ project, userId, fallbackName: L('New study', '新研究') });
+    const result = await runImport(() => importer.runImport({ project, userId, fallbackName: L('New study', '新研究') }));
     if (result) {
       importer.reset();
       onImported?.(result);

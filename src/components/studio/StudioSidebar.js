@@ -3,12 +3,13 @@ import { Box, Button, CircularProgress, Divider, List, ListItemButton, ListItemI
 import { Add, ViewListOutlined } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { projectKind, projectStatus } from '../../lib/studioProject';
-import { studioPath } from '../../lib/studioState';
+import { adminProjectPath, studioPathForProject } from '../../lib/adminDeepLink';
+import { setActiveProject } from '../../lib/projectManager';
 import { KindIcon, StatusChip, useL } from './studioUi';
 
 export const STUDIO_SIDEBAR_WIDTH = 264;
 
-// The list only tells drafts from published studies; waiting changes show on the study's page.
+// The list tells drafts, live studies and published studies apart; waiting changes show on the study's page.
 function listStatus(project) {
   const status = projectStatus(project);
   return status.state === 'pending' ? { ...status, state: 'published' } : status;
@@ -25,7 +26,7 @@ export default function StudioSidebar({ projects, selectedId = null, localMode =
     >
       <Button
         component={RouterLink}
-        to={studioPath()}
+        to={studioPathForProject(null)}
         onClick={onNavigate}
         startIcon={<Add />}
         variant="outlined"
@@ -63,7 +64,7 @@ export default function StudioSidebar({ projects, selectedId = null, localMode =
                 <ListItemButton
                   key={project.id}
                   component={RouterLink}
-                  to={studioPath(project.id)}
+                  to={studioPathForProject(project.id)}
                   onClick={onNavigate}
                   selected={selected}
                   aria-current={selected ? 'page' : undefined}
@@ -90,7 +91,17 @@ export default function StudioSidebar({ projects, selectedId = null, localMode =
       </Box>
 
       <Divider sx={{ my: 1 }} />
-      <ListItemButton component={RouterLink} to="/admin" onClick={onNavigate} sx={{ borderRadius: '8px', flexGrow: 0 }}>
+      <ListItemButton
+        component={RouterLink}
+        to={adminProjectPath(selectedId)}
+        onClick={() => {
+          // The classic editor opens the study selected here.
+          if (selectedId) setActiveProject(selectedId);
+          onNavigate();
+        }}
+        data-testid="studio-classic-link"
+        sx={{ borderRadius: '8px', flexGrow: 0 }}
+      >
         <ListItemIcon sx={{ minWidth: 34 }}><ViewListOutlined fontSize="small" /></ListItemIcon>
         <ListItemText
           primary={L('Classic editor', '经典编辑器')}

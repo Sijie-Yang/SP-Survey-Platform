@@ -1,6 +1,10 @@
 /**
  * Studio's reads and writes, on top of projectManager. Every write drops the
- * classic editor's working copy of the project (see studioState.js).
+ * classic editor's clean working copy of the project (see studioState.js).
+ *
+ * Writes are patches: writeStudioProject reads the project fresh, applies the
+ * change and saves once, so a write never puts back an older name, media list
+ * or page that another write (or another tab, or an agent) saved meanwhile.
  *
  * Local mode (no Supabase, server.js on :3001): projects live in files and
  * every save is live; there is no publishing.
@@ -11,16 +15,20 @@ import {
   createProject,
   deleteProject,
   getProjectById,
+  getProjectReleaseState,
   getUserProjects,
   publishProjectConfig,
+  saveProjectDraftOptimistic,
   saveProjectFull,
-  updateProject,
 } from './projectManager';
 import { countOwnerResponses } from './adminResults';
 import { deleteImagesFromR2, isR2Configured, listImagesFromR2 } from './r2';
 import { loadSurveyConfig } from './surveyStorage';
+import { checkIsAdmin } from './templateManager';
+import { sameReleaseValue } from './releaseComparison';
 import { forgetClassicEditingState } from './studioState';
-import { sortProjectsNewestFirst } from './studioProject';
+import { projectConfig, sortProjectsNewestFirst } from './studioProject';
+import { loadStudioResponses, studioExportRows } from './studioResults';
 
 const LOCAL_API = 'http://localhost:3001/api';
 
@@ -48,13 +56,35 @@ export async function listStudioProjects() {
   }
 }
 
-/** One project with its draft config, or null. */
+/**
+ * One project with its draft config, or null. Someone else's project comes
+ * back through the participant view, without an owner: that is not one the
+ * researcher can edit, so it counts as not found.
+ */
 export async function loadStudioProject(projectId) {
   const project = await getProjectById(projectId);
   if (!project) return null;
+  if (!isStudioLocalMode() && !project.userId) return null;
   if (project._surveyConfig) return project;
   const config = await loadSurveyConfig(projectId);
   return { ...project, _surveyConfig: config || {} };
+}
+
+/**
+ * The version participants get, to tell whether the draft has changes they
+ * do not see. undefined: not release-managed (or local mode); null: it could
+ * not be read.
+ * @returns {Promise<{ config: object, media: object } | null | undefined>}
+ */
+export async function loadStudioRelease(projectId) {
+  if (isStudioLocalMode() || !projectId) return undefined;
+  try {
+    const state = await getProjectReleaseState(projectId);
+    if (!state?.release_managed) return undefined;
+    return { config: state.survey_config_published || {}, media: state.published_media || {} };
+  } catch {
+    return null;
+  }
 }
 
 function storedProject(project) {
@@ -69,11 +99,52 @@ export async function saveStudioProject(project, config) {
   return result;
 }
 
-/** Change project fields (name, description); the config is kept. */
-export async function updateStudioProject(projectId, patch) {
-  const result = await updateProject(projectId, patch);
-  if (result.success) forgetClassicEditingState(projectId);
-  return result;
+/**
+ * Change the stored project: read it fresh, apply `change`, save once.
+ * `change(project, config)` returns `{ fields?, config? }` (or nothing):
+ * fields of the project row (name, description, media list) and the next
+ * draft config. A config-only change carries the draft stamp it was made on;
+ * when another write landed in between, the change is applied again to the
+ * newer draft.
+ * @returns {Promise<{ success: boolean, project?: object, error?: string, unchanged?: boolean }>}
+ */
+export async function writeStudioProject(projectId, change, { attempts = 3 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const fresh = await loadStudioProject(projectId);
+    if (!fresh) return { success: false, error: 'not found' };
+    const current = projectConfig(fresh);
+    const { fields = null, config = null } = change(fresh, current) || {};
+    const configChanged = Boolean(config) && !sameReleaseValue(config, current);
+    if (!fields && !configChanged) return { success: true, project: fresh, unchanged: true };
+    const nextConfig = configChanged ? config : current;
+    let result;
+    if (!fields && !isStudioLocalMode()) {
+      // eslint-disable-next-line no-await-in-loop
+      result = await saveProjectDraftOptimistic(projectId, nextConfig, { expectedDraftUpdatedAt: fresh.draftUpdatedAt || null });
+      if (result.conflict) continue; // eslint-disable-line no-continue
+      if (result.code === 'DRAFT_SAVE_RPC_MISSING') {
+        // eslint-disable-next-line no-await-in-loop
+        result = await saveProjectFull(storedProject(fresh), nextConfig);
+      }
+    } else {
+      // eslint-disable-next-line no-await-in-loop
+      result = await saveProjectFull(storedProject({ ...fresh, ...fields }), nextConfig);
+    }
+    if (!result?.success) return { success: false, error: result?.error || 'Save failed' };
+    forgetClassicEditingState(projectId);
+    return {
+      success: true,
+      project: {
+        ...fresh,
+        ...(fields || {}),
+        _surveyConfig: nextConfig,
+        draftUpdatedAt: result.draftUpdatedAt || fresh.draftUpdatedAt || null,
+        lastModified: new Date().toISOString(),
+      },
+    };
+  }
+  return { success: false, conflict: true, error: 'The study was being changed somewhere else at the same time. Try again.' };
 }
 
 export async function createStudioProject(name) {
@@ -94,33 +165,46 @@ async function removeProjectImages(userId, projectId) {
   }
 }
 
-/** Delete the project and, like the classic editor, its own images. */
+/**
+ * Delete the project, then its own images. The row goes first, so a failed
+ * delete never leaves a study whose images are gone.
+ */
 export async function removeStudioProject(projectId, { userId = null } = {}) {
-  await removeProjectImages(userId, projectId).catch(() => null);
   const result = await deleteProject(projectId);
-  if (result.success && isStudioLocalMode()) {
+  if (!result.success) return result;
+  if (isStudioLocalMode()) {
     // deleteProject leaves the local file in place.
     await localJson(`/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' }).catch(() => null);
   }
-  forgetClassicEditingState(projectId);
+  forgetClassicEditingState(projectId, { evenUnsaved: true });
+  await removeProjectImages(userId, projectId).catch(() => null);
   return result;
 }
 
-/** How many responses the project has (practice runs included), or null when unknown. */
-export async function countStudioResponses(projectId) {
+/**
+ * How many responses the download holds: researcher practice runs only when
+ * the survey includes them (silicon runs live in their own table). Null when
+ * it cannot be told.
+ */
+export async function countStudioResponses(projectId, config = {}) {
   if (!projectId) return null;
-  if (!isStudioLocalMode()) return countOwnerResponses(projectId);
-  try {
-    const data = await localJson(`/responses?${new URLSearchParams({ projectId, countOnly: '1' })}`);
-    return Number.isFinite(Number(data?.count)) ? Number(data.count) : null;
-  } catch {
-    return null;
+  if (isStudioLocalMode()) {
+    try {
+      return studioExportRows(await loadStudioResponses(projectId), config).length;
+    } catch {
+      return null;
+    }
   }
+  const total = await countOwnerResponses(projectId);
+  if (!total || config?.includeResearcherPractice === true) return total;
+  const practice = await countOwnerResponses(projectId, { filters: { 'survey_metadata->>practice_mode': 'eq.true' } });
+  return practice === null ? null : Math.max(0, total - practice);
 }
 
 /**
- * Publish the current draft. `code: 'site-pages-sql'` when the database
- * still refuses drafts that only hold a page (no question pages).
+ * Publish the current draft. When the database still refuses drafts that only
+ * hold a page (no question pages): `code: 'site-pages-sql'` for a platform
+ * admin, who can run the SQL, and `'site-pages-unsupported'` for everyone else.
  */
 export async function publishStudioProject(projectId) {
   const result = await publishProjectConfig(projectId, '');
@@ -129,5 +213,7 @@ export async function publishStudioProject(projectId) {
     return result;
   }
   const message = String(result.error || '');
-  return { ...result, code: /draft has no pages/i.test(message) ? 'site-pages-sql' : 'failed' };
+  if (!/draft has no pages/i.test(message)) return { ...result, code: 'failed' };
+  const admin = await checkIsAdmin().catch(() => false);
+  return { ...result, code: admin ? 'site-pages-sql' : 'site-pages-unsupported' };
 }

@@ -5,7 +5,7 @@ import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import StreetscapeAtmosphere from '../StreetscapeAtmosphere';
 import { setActiveProject } from '../../lib/projectManager';
 import { createStudioProject } from '../../lib/studioData';
-import { classicEditorPath, studioPath } from '../../lib/studioState';
+import { adminProjectPath, studioPathForProject } from '../../lib/adminDeepLink';
 import StudioImportFlow from './StudioImport';
 import { useL } from './studioUi';
 
@@ -33,12 +33,12 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
     // The classic editor also opens the active project when the link param is not read.
     setActiveProject(result.project.id);
     onProjectsChanged();
-    navigate(classicEditorPath(result.project.id));
+    navigate(adminProjectPath(result.project.id));
   };
 
   const onImported = ({ projectId }) => {
     onProjectsChanged();
-    navigate(studioPath(projectId));
+    navigate(studioPathForProject(projectId));
   };
 
   return (
@@ -128,7 +128,7 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
             <Button variant="outlined" onClick={openClassic} disabled={creating} sx={{ bgcolor: 'background.paper' }}>
               {creating ? L('Creating…', '正在新建…') : L('Create and open the classic editor', '新建并打开经典编辑器')}
             </Button>
-            <Link component={RouterLink} to="/" variant="body2" underline="hover">
+            <Link component={RouterLink} to="/admin" variant="body2" underline="hover" data-testid="studio-template-link">
               {L('Start from a paper template', '从论文模板开始')}
             </Link>
             {error && <Alert severity="error" sx={{ alignSelf: 'stretch' }}>{error}</Alert>}

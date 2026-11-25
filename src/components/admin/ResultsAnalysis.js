@@ -3330,7 +3330,7 @@ export default function ResultsAnalysis({
         <IconButton aria-label={t.resultsRefresh} onClick={fetchResponses} disabled={loading} size="small">
           <Refresh />
         </IconButton>
-      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={handleAnalyze} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={exportItems} exportHelp={siteConverted ? t.resultsExportSiteHelp : undefined} />
+      </Tooltip>} t={t} onOpenFilters={() => setFiltersOpen(true)} onAnalyze={onAnalyzeCurrent ? handleAnalyze : undefined} analyzeDisabled={analysisBusy || loading || !filteredResponses.length} analyzeBusy={analysisBusy} exportItems={exportItems} exportHelp={siteConverted ? t.resultsExportSiteHelp : undefined} />
       <Paper variant="outlined" sx={{
         p: {
           xs: 1.5,
@@ -3735,7 +3735,7 @@ export default function ResultsAnalysis({
       {view === 'overview' && savedReport && <Box sx={{
             mb: 3
           }}>
-          <ResultsReportCard t={t} report={savedReport} onDelete={handleDeleteReport} updateDisabled={analysisBusy || loading || !filteredResponses.length} staleness={reportState} onUpdate={handleAnalyze} onViewEvidence={finding => {
+          <ResultsReportCard t={t} report={savedReport} onDelete={handleDeleteReport} updateDisabled={analysisBusy || loading || !filteredResponses.length} staleness={reportState} onUpdate={onAnalyzeCurrent ? handleAnalyze : undefined} onViewEvidence={finding => {
               setSelectedQuestionName(finding.questionName || finding.evidence?.questionName || '');
               setView('questions');
             }} />
@@ -3809,7 +3809,7 @@ export default function ResultsAnalysis({
                 }}>
                   {page.title || page.name}
                 </Typography>
-                {pageQuestions.map(question => <QuestionCard key={question.name} defaultExpanded={compactLayout || question.name === selectedQuestionName} onExplain={handleExplainQuestion} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={handleSaveAiAnalysis} {...readyQuestionCards.get(question.name)} />)}
+                {pageQuestions.map(question => <QuestionCard key={question.name} defaultExpanded={compactLayout || question.name === selectedQuestionName} onExplain={onExplainQuestion ? handleExplainQuestion : undefined} aiAnalysis={savedAnalyses[question.name] || null} onSaveAiAnalysis={handleSaveAiAnalysis} {...readyQuestionCards.get(question.name)} />)}
               </Box>;
             })}
         </>}

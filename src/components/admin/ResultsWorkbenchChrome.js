@@ -126,6 +126,7 @@ export function ResultsFilterForm({
   );
 }
 
+/** Filters, export and the AI analysis button (only when `onAnalyze` is given). */
 export function ResultsToolbar({
   t,
   onOpenFilters,
@@ -142,11 +143,11 @@ export function ResultsToolbar({
     <>
       <AdminActionBar
         label={t.resultsTitle}
-        primaryAction={(
+        primaryAction={onAnalyze ? (
           <Button size="small" variant="contained" startIcon={<AutoAwesome />} disabled={analyzeDisabled} onClick={onAnalyze}>
             {analyzeBusy ? t.resultsPreparingExport : t.resultsAnalyze}
           </Button>
-        )}
+        ) : null}
       >
         <AdminActionButton startIcon={<FilterList />} onClick={onOpenFilters}>{t.resultsFilters}</AdminActionButton>
         <AdminActionButton id="results-export-button" startIcon={<Download />} endIcon={<ExpandMore />}

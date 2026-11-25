@@ -29,8 +29,12 @@ export function draftToRecruitment(draft) {
   return out;
 }
 
-/** Builder settings: which recruitment platform participants come from, and how they go back. */
-export default function RecruitmentSettings({ config, onChange }) {
+/**
+ * Builder settings: which recruitment platform participants come from, and how they go back.
+ * `hideClassicHints` leaves out the hint that points to classic-editor screens
+ * (Share, Versions & release), for places that show the links next to it (Studio).
+ */
+export default function RecruitmentSettings({ config, onChange, hideClassicHints = false }) {
   const { language } = useRegion();
   const t = (en, zh) => uiPair(language, en, zh);
   const [draft, setDraft] = useState(() => draftFrom(config));
@@ -99,7 +103,7 @@ export default function RecruitmentSettings({ config, onChange }) {
 
         {setting && (missing.length
           ? <Alert severity="warning">{t('Fill in the field above before sharing; until then participants are not sent back.', '请先填好上面的必填项；填好之前参与者不会被跳回平台。')}</Alert>
-          : <Alert severity="info">{t('Next: Share → Recruitment platform gives the link to paste on the platform. If this survey uses Versions & release, publish again after changing this setting.', '下一步：到「分享 → 招募平台」复制要贴到平台上的链接。如果问卷用了「版本与发布」，改完这里要重新发布一次。')}</Alert>)}
+          : !hideClassicHints && <Alert severity="info">{t('Next: Share → Recruitment platform gives the link to paste on the platform. If this survey uses Versions & release, publish again after changing this setting.', '下一步：到「分享 → 招募平台」复制要贴到平台上的链接。如果问卷用了「版本与发布」，改完这里要重新发布一次。')}</Alert>)}
       </Stack>
     </Box>
   );
