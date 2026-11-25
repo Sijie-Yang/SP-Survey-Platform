@@ -5,13 +5,14 @@ import {
   resolveModels,
   resolveProvider,
 } from './runtime/registry.mjs';
+import { currentModelId } from './runtime/catalog.mjs';
 
 export function normalizeSubsidyRoutes(routes = []) {
   const seen = new Set();
   const out = [];
   for (const item of Array.isArray(routes) ? routes : []) {
     const provider = String(item?.provider || '').trim();
-    const model = String(item?.model || '').trim();
+    const model = currentModelId(provider, String(item?.model || '').trim());
     if (!provider || !model) continue;
     const key = `${provider}::${model}`;
     if (seen.has(key)) continue;

@@ -21,20 +21,20 @@ import {
 
 describe('catalog registry', () => {
   it('exactly matches the pinned Harness provider and model inventory', () => {
-    assert.equal(CATALOG_VERSION, 'harness-0.1.6-alpha.1/pi-ai-0.85.1/ff87cfcb3c1d+sp1');
-    assert.equal(CATALOG_SOURCE.harnessVersion, '0.1.6-alpha.1');
-    assert.equal(CATALOG_SOURCE.piAiVersion, '0.85.1');
-    assert.equal(CATALOG_SOURCE.providerCount, 39);
-    assert.equal(CATALOG_SOURCE.modelCount, 1354);
+    assert.equal(CATALOG_VERSION, 'harness-0.2.2-rc.5/pi-ai-1.6.1/ee2e407f473c+sp1');
+    assert.equal(CATALOG_SOURCE.harnessVersion, '0.2.2-rc.5');
+    assert.equal(CATALOG_SOURCE.piAiVersion, '1.6.1');
+    assert.equal(CATALOG_SOURCE.providerCount, 43);
+    assert.equal(CATALOG_SOURCE.modelCount, 1696);
     assert.match(CATALOG_PAYLOAD_SHA256, /^[a-f0-9]{64}$/);
     const ids = CATALOG_PROVIDERS.map((p) => p.id);
-    for (const id of ['deepseek', 'openai', 'openrouter', 'anthropic', 'amazon-bedrock', 'google-vertex', 'azure-openai-responses', 'openai-codex']) {
+    for (const id of ['deepseek', 'openai', 'openrouter', 'anthropic', 'amazon-bedrock', 'google-vertex', 'azure', 'openai-codex']) {
       assert.equal(ids.includes(id), true, id);
     }
-    assert.equal(CATALOG_SOURCE.generatedProviderCount, 40);
-    assert.equal(CATALOG_SOURCE.generatedModelCount, 1372);
-    assert.equal(CATALOG_PROVIDERS.length, 40);
-    assert.equal(CATALOG_PROVIDERS.reduce((sum, provider) => sum + provider.models.length, 0), 1372);
+    assert.equal(CATALOG_SOURCE.generatedProviderCount, 44);
+    assert.equal(CATALOG_SOURCE.generatedModelCount, 1717);
+    assert.equal(CATALOG_PROVIDERS.length, 44);
+    assert.equal(CATALOG_PROVIDERS.reduce((sum, provider) => sum + provider.models.length, 0), 1717);
     for (const provider of CATALOG_PROVIDERS) {
       assert.equal(new Set(provider.models.map((model) => model.id)).size, provider.models.length);
       for (const modelId of Object.values(provider.defaultModels)) {
@@ -50,7 +50,7 @@ describe('catalog registry', () => {
       dashScope.models.map((model) => model.id),
       source.models.map((model) => model.id),
     );
-    assert.equal(dashScope.models.length, 18);
+    assert.equal(dashScope.models.length, 21);
     assert.equal(
       dashScope.models.every((model) => model.baseUrl === 'https://dashscope.aliyuncs.com/compatible-mode/v1'),
       true,
@@ -64,7 +64,7 @@ describe('catalog registry', () => {
   });
 
   it('resolves vision from catalog input, not name regex', () => {
-    assert.equal(modelAcceptsImage('deepseek', 'deepseek-v4-flash-vision-exp'), true);
+    assert.equal(modelAcceptsImage('deepseek', 'deepseek-flash'), true);
     assert.equal(modelAcceptsImage('deepseek', 'deepseek-v4-pro'), false);
     assert.equal(resolveModel('openai', 'gpt-5.6-sol').vision, true);
     assert.equal(resolveModel('openai', 'gpt-5.6-sol').runtimeApi, 'openai-responses');
@@ -84,11 +84,11 @@ describe('catalog registry', () => {
 
   it('uses pi-ai thinking-level support instead of requiring a custom map', () => {
     assert.deepEqual(
-      effortOptions('qwen-token-plan-cn', 'deepseek-v3.2'),
+      effortOptions('qwen-token-plan-cn', 'qwen3.6-flash'),
       ['off', 'minimal', 'low', 'medium', 'high'],
     );
     assert.deepEqual(
-      Object.keys(resolveModel('deepseek', 'deepseek-v4-flash').reasoningEfforts),
+      Object.keys(resolveModel('deepseek', 'deepseek-flash').reasoningEfforts),
       ['off', 'low', 'high', 'max'],
     );
   });
@@ -97,12 +97,12 @@ describe('catalog registry', () => {
     const models = resolveModels('deepseek', {
       models: [{ id: 'deepseek-chat', name: 'Legacy snapshot' }],
     });
-    assert.equal(models.length, 3);
+    assert.equal(models.length, 2);
     assert.equal(models.some((model) => model.id === 'deepseek-chat'), false);
-    assert.equal(availableModelId('deepseek', 'deepseek-chat'), 'deepseek-v4-pro');
+    assert.equal(availableModelId('deepseek', 'deepseek-chat'), 'deepseek-flash');
     assert.equal(
       availableModelId('deepseek', 'deepseek-vl', { vision: true }),
-      'deepseek-v4-flash-vision-exp',
+      'deepseek-flash',
     );
   });
 

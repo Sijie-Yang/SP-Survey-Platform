@@ -98,7 +98,7 @@ describe('pi-ai runtime adapter', () => {
       return completionSse();
     };
     try {
-      const route = resolveModelRoute('qwen-token-plan-cn', 'deepseek-v3.2');
+      const route = resolveModelRoute('qwen-token-plan-cn', 'qwen3.6-flash');
       await modelRequest({
         ...openAiOptions(),
         provider: 'qwen-token-plan-cn',
@@ -123,7 +123,7 @@ describe('pi-ai runtime adapter', () => {
       return completionSse();
     };
     try {
-      const route = resolveModelRoute('qwen-dashscope', 'deepseek-v4-flash');
+      const route = resolveModelRoute('qwen-dashscope', 'deepseek-v4.1-flash');
       await modelRequest({
         ...openAiOptions(),
         provider: 'qwen-dashscope',
@@ -189,7 +189,7 @@ describe('pi-ai runtime adapter', () => {
     }
   });
 
-  it('lets pi-ai clamp DeepSeek V4 Flash medium effort to high', async () => {
+  it('lets pi-ai clamp DeepSeek Flash medium effort to high', async () => {
     const originalFetch = globalThis.fetch;
     let body;
     globalThis.fetch = async (_url, init) => {
@@ -197,7 +197,7 @@ describe('pi-ai runtime adapter', () => {
       return completionSse();
     };
     try {
-      const route = resolveModelRoute('deepseek', 'deepseek-v4-flash');
+      const route = resolveModelRoute('deepseek', 'deepseek-flash');
       await modelRequest({
         ...openAiOptions(),
         provider: 'deepseek',

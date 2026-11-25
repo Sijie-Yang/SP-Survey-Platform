@@ -21,27 +21,40 @@ describe('assistant subsidy policy', () => {
     ]), [{ provider: 'qwen-dashscope', model: 'qwen-plus' }]);
   });
 
+  it('moves saved routes off retired model ids to their successors', () => {
+    assert.deepEqual(normalizeSubsidyRoutes([
+      { provider: 'qwen-dashscope', model: 'deepseek-v3.2' },
+      { provider: 'deepseek', model: 'deepseek-v4-flash' },
+      { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp' },
+      { provider: 'my-proxy', model: 'local-model' },
+    ]), [
+      { provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' },
+      { provider: 'deepseek', model: 'deepseek-flash' },
+      { provider: 'my-proxy', model: 'local-model' },
+    ]);
+  });
+
   it('treats missing donor, empty routes, or expiry as inactive', () => {
     assert.equal(isSubsidyActive({
       enabled: true,
       donor_user_id: 'admin-1',
-      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }],
     }, now), true);
     assert.equal(isSubsidyActive({
       enabled: true,
       donor_user_id: 'admin-1',
-      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }],
       expires_at: '2026-09-17T11:00:00.000Z',
     }, now), false);
     assert.equal(isSubsidyActive({
       enabled: true,
       donor_user_id: null,
-      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }],
     }, now), false);
     assert.equal(isSubsidyActive({
       enabled: false,
       donor_user_id: 'admin-1',
-      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }],
     }, now), false);
   });
 
@@ -49,11 +62,11 @@ describe('assistant subsidy policy', () => {
     const row = {
       enabled: true,
       donor_user_id: 'admin-1',
-      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }],
     };
-    assert.equal(subsidyAllowsRoute(row, 'qwen-dashscope', 'deepseek-v3.2', now), true);
+    assert.equal(subsidyAllowsRoute(row, 'qwen-dashscope', 'deepseek-v4.1-flash', now), true);
     assert.equal(subsidyAllowsRoute(row, 'qwen-dashscope', 'qwen-vl-max', now), false);
-    assert.equal(subsidyAllowsRoute({ ...row, expires_at: '2026-09-17T11:00:00.000Z' }, 'qwen-dashscope', 'deepseek-v3.2', now), false);
+    assert.equal(subsidyAllowsRoute({ ...row, expires_at: '2026-09-17T11:00:00.000Z' }, 'qwen-dashscope', 'deepseek-v4.1-flash', now), false);
   });
 
   it('exposes only allowed models as shared and keeps user-owned providers intact', () => {
@@ -76,7 +89,7 @@ describe('assistant subsidy policy', () => {
     const subsidy = {
       enabled: true,
       donor_user_id: 'admin-1',
-      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }],
     };
     const { directory: next, subsidizedRoutes } = applySubsidyToDirectory(directory, subsidy, {}, now);
     const qwen = next.find((item) => item.id === 'qwen-dashscope');
@@ -84,19 +97,19 @@ describe('assistant subsidy policy', () => {
     assert.equal(qwen.shared, true);
     assert.equal(qwen.userConfigured, false);
     assert.equal(qwen.configured, true);
-    assert.ok(qwen.models.some((model) => model.id === 'deepseek-v3.2' && model.shared));
+    assert.ok(qwen.models.some((model) => model.id === 'deepseek-v4.1-flash' && model.shared));
     assert.equal(qwen.models.some((model) => model.id === 'qwen-vl-max'), false);
     assert.equal(deepseek.userConfigured, true);
     assert.equal(deepseek.shared, undefined);
-    assert.deepEqual(subsidizedRoutes, [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2', shared: true }]);
-    assert.deepEqual(publicSubsidyView(subsidy, now).routes, [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }]);
+    assert.deepEqual(subsidizedRoutes, [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash', shared: true }]);
+    assert.deepEqual(publicSubsidyView(subsidy, now).routes, [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }]);
   });
 
   it('binds subsidy credentials to the donor route, not the receiver override', () => {
     const subsidy = {
       enabled: true,
       donor_user_id: 'admin-1',
-      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v3.2' }],
+      allowed_routes: [{ provider: 'qwen-dashscope', model: 'deepseek-v4.1-flash' }],
     };
     const donor = { provider: 'qwen-dashscope', base_url: 'https://donor.example/v1', protocol: 'openai-completions' };
     const receiver = { provider: 'qwen-dashscope', base_url: 'https://receiver.example/v1', protocol: 'openai-responses' };
@@ -104,7 +117,7 @@ describe('assistant subsidy policy', () => {
       userCred: null,
       subsidy,
       provider: 'qwen-dashscope',
-      model: 'deepseek-v3.2',
+      model: 'deepseek-v4.1-flash',
       receiverProfile: receiver,
       donorProfile: donor,
     });
@@ -116,7 +129,7 @@ describe('assistant subsidy policy', () => {
       userCred: { apiKey: 'sk-user', provider: 'qwen-dashscope' },
       subsidy,
       provider: 'qwen-dashscope',
-      model: 'deepseek-v3.2',
+      model: 'deepseek-v4.1-flash',
       receiverProfile: receiver,
       donorProfile: donor,
     });
