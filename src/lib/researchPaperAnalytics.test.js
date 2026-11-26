@@ -84,17 +84,17 @@ describe('researchPaperMeta + analytics v4', () => {
       },
     };
     const out = meta.ensureAnalysisMeta(paper);
-    expect(out.extraction_version).toBe('v4');
+    expect(out.extraction_version).toBe(meta.EXTRACTION_VERSION);
     expect(out.response_protocols).toEqual(expect.arrayContaining(['pairwise']));
     expect(out.analysis_scope).toBe('human_evaluation');
   });
 
-  test('ensureAnalysisMeta reuses valid v4 meta', () => {
+  test('ensureAnalysisMeta reuses meta of the current version', () => {
     const paper = {
       title: 'x',
       abstract: 'y',
       analysis_meta: {
-        extraction_version: 'v4',
+        extraction_version: meta.EXTRACTION_VERSION,
         analysis_scope: 'human_evaluation',
         perception_constructs: ['safety'],
         visual_data_sources: [],
@@ -226,6 +226,26 @@ describe('researchPaperMeta + analytics v4', () => {
     const pairwise = trend.series.find((s) => s.id === 'pairwise');
     expect(pairwise).toBeTruthy();
     expect(pairwise.slope).toBeGreaterThan(0);
+  });
+
+  test('v5 tags: emotion, soundscape, place identity, video, on-site, conjoint', () => {
+    const a = meta.extractAnalysisMeta({
+      title: 'Audio-visual walk',
+      abstract: 'An in situ walking interview and video clips measured soundscape and emotional responses.',
+    });
+    expect(a.perception_constructs).toEqual(expect.arrayContaining(['emotion', 'soundscape']));
+    expect(a.presentation_modes).toEqual(expect.arrayContaining(['video', 'on_site']));
+    const b = meta.extractAnalysisMeta({
+      title: 'Heat stress streets',
+      abstract: 'Heat stress mapping from street view imagery.',
+    });
+    expect(b.perception_constructs).not.toContain('emotion');
+    const c = meta.extractAnalysisMeta({
+      title: 'Imageability conjoint',
+      abstract: 'A conjoint survey of sense of place where respondents rated each image.',
+    });
+    expect(c.perception_constructs).toContain('place_identity');
+    expect(c.response_protocols).toEqual(expect.arrayContaining(['discrete_choice', 'rating_scale']));
   });
 
   test('street view alone does not create street scale tag', () => {

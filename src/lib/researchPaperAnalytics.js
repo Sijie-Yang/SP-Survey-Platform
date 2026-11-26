@@ -383,6 +383,8 @@ export const STIMULUS_TERMS = [
   { id: 'vr', label: 'VR', match: (m) => (m.presentation_modes || []).includes('immersive_vr') },
   { id: 'panorama', label: 'Panorama / 360°', match: (m) => (m.presentation_modes || []).includes('panorama_360') },
   { id: 'rendered', label: 'Rendered scenes', match: (m) => (m.visual_data_sources || []).includes('rendered_synthetic') },
+  { id: 'video', label: 'Video', match: (m) => (m.presentation_modes || []).includes('video') },
+  { id: 'on_site', label: 'On site', match: (m) => (m.presentation_modes || []).includes('on_site') },
 ];
 
 export function stimulusIds(meta = {}) {
