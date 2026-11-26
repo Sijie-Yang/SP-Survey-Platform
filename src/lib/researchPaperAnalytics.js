@@ -267,128 +267,6 @@ export function buildPaperLibraryAnalytics(papers = [], opts = {}) {
   };
 }
 
-export function compareSeriesToBaseline(subsetRows = [], baselineRows = []) {
-  const baseMap = new Map((baselineRows || []).map((r) => [r.id, r]));
-  const ids = new Set([
-    ...(subsetRows || []).map((r) => r.id),
-    ...(baselineRows || []).map((r) => r.id),
-  ]);
-  return [...ids]
-    .map((id) => {
-      const sub = (subsetRows || []).find((r) => r.id === id);
-      const base = baseMap.get(id);
-      const count = sub?.count || 0;
-      const share = sub?.share || 0;
-      const baselineShare = base?.share || 0;
-      return {
-        id,
-        label: sub?.label || base?.label || id,
-        dimension: sub?.dimension || base?.dimension,
-        count,
-        share,
-        corpusShare: share,
-        taggedShare: sub?.taggedShare,
-        eligibleTotal: sub?.eligibleTotal,
-        taggedTotal: sub?.taggedTotal,
-        baselineCount: base?.count || 0,
-        baselineShare,
-        deltaPp: (share - baselineShare) * 100,
-      };
-    })
-    .filter((r) => r.count > 0 || r.baselineCount > 0)
-    .sort((a, b) => b.share - a.share || b.count - a.count || a.label.localeCompare(b.label));
-}
-
-export function buildCoOccurrenceMatrix(
-  papers = [],
-  rowField,
-  colField,
-  {
-    rowDimension,
-    colDimension,
-    maxRows = 8,
-    maxCols = 8,
-    humanOnly = false,
-  } = {},
-) {
-  const list = humanOnly ? humanEvaluationPapers(papers) : (papers || []);
-  const rowTerms = TAXONOMY[rowField] || [];
-  const colTerms = TAXONOMY[colField] || [];
-  const rowCounts = new Map(rowTerms.map((t) => [t.id, 0]));
-  const colCounts = new Map(colTerms.map((t) => [t.id, 0]));
-  const cellCounts = new Map();
-  let bothTagged = 0;
-
-  for (const paper of list) {
-    const meta = ensureAnalysisMeta(paper);
-    const rows = meta[rowField] || [];
-    const cols = meta[colField] || [];
-    if (rows.length && cols.length) bothTagged += 1;
-    for (const r of rows) rowCounts.set(r, (rowCounts.get(r) || 0) + 1);
-    for (const c of cols) colCounts.set(c, (colCounts.get(c) || 0) + 1);
-    for (const r of rows) {
-      for (const c of cols) {
-        const key = `${r}|${c}`;
-        cellCounts.set(key, (cellCounts.get(key) || 0) + 1);
-      }
-    }
-  }
-
-  const topRows = [...rowCounts.entries()]
-    .filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxRows)
-    .map(([id]) => id);
-  const topCols = [...colCounts.entries()]
-    .filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxCols)
-    .map(([id]) => id);
-
-  let max = 0;
-  const cells = [];
-  for (const r of topRows) {
-    const rowTotal = rowCounts.get(r) || 0;
-    for (const c of topCols) {
-      const count = cellCounts.get(`${r}|${c}`) || 0;
-      if (count > max) max = count;
-      cells.push({
-        rowId: r,
-        colId: c,
-        count,
-        rowShare: rowTotal ? count / rowTotal : 0,
-        rowDimension,
-        colDimension,
-        rowLabel: taxonomyLabel(rowField, r),
-        colLabel: taxonomyLabel(colField, c),
-      });
-    }
-  }
-
-  return {
-    rowField,
-    colField,
-    rowDimension,
-    colDimension,
-    humanOnly,
-    effectiveN: bothTagged,
-    cohortSize: list.length,
-    rows: topRows.map((id) => ({
-      id,
-      label: taxonomyLabel(rowField, id),
-      count: rowCounts.get(id) || 0,
-    })),
-    cols: topCols.map((id) => ({
-      id,
-      label: taxonomyLabel(colField, id),
-      count: colCounts.get(id) || 0,
-    })),
-    cells,
-    max,
-    total: list.length,
-  };
-}
-
 export function buildYearShareTrends(
   papers = [],
   field,
@@ -482,149 +360,125 @@ export function buildYearShareTrends(
   };
 }
 
-export function buildLibrarySpotlights(analytics, { scopeLabel = 'Library' } = {}) {
-  if (!analytics?.total) return [];
-  const spots = [];
-  const topPerception = analytics.perception?.[0];
-  const topSource = analytics.visualSource?.[0];
-  const topProtocol = analytics.responseProtocol?.[0];
+/**
+ * "看什么" (stimulus) is a derived, chart-only dimension that merges the
+ * three street-view source tags into one bar and folds presentation modes in,
+ * so readers see one plain list instead of two overlapping charts.
+ * It is computed from existing analysis_meta, so no re-extraction is needed.
+ */
+export const STIMULUS_TERMS = [
+  {
+    id: 'street_view',
+    label: 'Street-view images',
+    match: (m) => (m.visual_data_sources || []).some((id) => (
+      id === 'google_street_view' || id === 'other_street_view' || id === 'unspecified_street_view'
+    )),
+  },
+  {
+    id: 'photo',
+    label: 'Photos',
+    match: (m) => (m.visual_data_sources || []).includes('researcher_photos')
+      || (m.presentation_modes || []).includes('static_2d'),
+  },
+  { id: 'vr', label: 'VR', match: (m) => (m.presentation_modes || []).includes('immersive_vr') },
+  { id: 'panorama', label: 'Panorama / 360°', match: (m) => (m.presentation_modes || []).includes('panorama_360') },
+  { id: 'rendered', label: 'Rendered scenes', match: (m) => (m.visual_data_sources || []).includes('rendered_synthetic') },
+];
 
-  if (topPerception) {
-    spots.push({
-      id: 'perception',
-      eyebrow: `${scopeLabel} · top construct`,
-      title: topPerception.label,
-      detail: `${topPerception.count} papers · ${Math.round(topPerception.share * 100)}%`,
-      filter: { dimension: 'perception', id: topPerception.id, label: topPerception.label },
-      tone: 'teal',
-    });
-  }
-  if (topSource) {
-    spots.push({
-      id: 'visualSource',
-      eyebrow: `${scopeLabel} · visual source`,
-      title: topSource.label,
-      detail: `${topSource.count} papers · ${Math.round(topSource.share * 100)}%`,
-      filter: { dimension: 'visualSource', id: topSource.id, label: topSource.label },
-      tone: 'amber',
-    });
-  }
-  if (topProtocol) {
-    spots.push({
-      id: 'responseProtocol',
-      eyebrow: `${scopeLabel} · response protocol`,
-      title: topProtocol.label,
-      detail: `${topProtocol.count} papers · ${Math.round(topProtocol.share * 100)}%`,
-      filter: { dimension: 'responseProtocol', id: topProtocol.id, label: topProtocol.label },
-      tone: 'moss',
-    });
-  }
+export function stimulusIds(meta = {}) {
+  return STIMULUS_TERMS.filter((t) => t.match(meta)).map((t) => t.id);
+}
 
-  const byYear = analytics.byYear || [];
-  const maxYear = analytics.maxYear ?? currentAnalyticsYear();
-  const windowStart = maxYear - 4;
-  const recent = byYear.filter((r) => {
-    const y = Number(r.id);
-    return y >= windowStart && y <= maxYear;
+/** The cards shown on the public paper library page, in order. */
+export const SIMPLE_CARDS = [
+  { dimension: 'perception', field: 'perception_constructs', trend: true },
+  { dimension: 'responseProtocol', field: 'response_protocols', trend: true, lowCoverageNote: true },
+  { dimension: 'stimulus', field: null, trend: false },
+  { dimension: 'scale', field: 'spatial_scales', trend: false },
+  { dimension: 'countries', field: 'study_countries', trend: false },
+];
+
+/** Years shown one by one; anything older goes into one "earlier" bar. */
+export const SIMPLE_YEAR_SPAN = 12;
+
+function metaIdsFor(paper, dimension) {
+  const meta = ensureAnalysisMeta(paper);
+  if (dimension === 'stimulus') return stimulusIds(meta);
+  const field = DIMENSION_FIELD[dimension];
+  return field ? meta[field] || [] : [];
+}
+
+/**
+ * Everything the simple library panel needs, computed on ONE paper set
+ * (whatever the reader has filtered down to). No baseline overlay, no tabs.
+ */
+export function buildSimpleLibraryView(papers = [], { maxYear = currentAnalyticsYear(), topN = 6 } = {}) {
+  const list = papers || [];
+  const total = list.length;
+
+  const yearCounts = new Map();
+  let dated = 0;
+  for (const p of list) {
+    const y = Number(p.year);
+    if (!Number.isFinite(y) || y > maxYear || y < 1900) continue;
+    dated += 1;
+    yearCounts.set(y, (yearCounts.get(y) || 0) + 1);
+  }
+  const firstShown = maxYear - SIMPLE_YEAR_SPAN + 1;
+  let earlier = 0;
+  for (const [y, n] of yearCounts) if (y < firstShown) earlier += n;
+  const years = [];
+  if (earlier) years.push({ id: null, label: `≤${firstShown - 1}`, count: earlier, earlier: true });
+  for (let y = firstShown; y <= maxYear; y += 1) {
+    years.push({ id: String(y), label: String(y), count: yearCounts.get(y) || 0 });
+  }
+  const recentFrom = maxYear - 4;
+  let recent = 0;
+  for (const [y, n] of yearCounts) if (y >= recentFrom) recent += n;
+  const allYears = [...yearCounts.keys()];
+
+  const cards = SIMPLE_CARDS.map((card) => {
+    const counts = new Map();
+    let tagged = 0;
+    for (const p of list) {
+      const ids = metaIdsFor(p, card.dimension);
+      if (ids.length) tagged += 1;
+      for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    let rising = new Set();
+    if (card.trend && card.field) {
+      const trend = buildYearShareTrends(list, card.field, {
+        dimension: card.dimension, maxYear, topN: 20,
+      });
+      rising = new Set(
+        trend.series.filter((s) => s.slope > 0.02 && s.recentCount >= 5).map((s) => s.id),
+      );
+    }
+    const labelOf = (id) => (card.dimension === 'stimulus'
+      ? (STIMULUS_TERMS.find((t) => t.id === id)?.label || id)
+      : taxonomyLabel(card.field, id) || id);
+    const rows = [...counts.entries()]
+      .map(([id, count]) => ({ id, label: labelOf(id), count, rising: rising.has(id), dimension: card.dimension }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, topN);
+    return {
+      dimension: card.dimension,
+      tagged,
+      total,
+      lowCoverage: !!card.lowCoverageNote && total > 0 && tagged / total < 0.3,
+      rows,
+    };
   });
-  if (recent.length) {
-    const recentCount = recent.reduce((s, r) => s + r.count, 0);
-    const denom = byYear.reduce((s, r) => s + r.count, 0) || analytics.total;
-    const share = denom ? recentCount / denom : 0;
-    spots.push({
-      id: 'tempo',
-      eyebrow: `${scopeLabel} · tempo`,
-      title: `${Math.round(share * 100)}% in ${windowStart}–${maxYear}`,
-      detail: `${recentCount} of ${denom} dated papers`,
-      filter: null,
-      tone: 'ink',
-    });
-  }
-
-  return spots.slice(0, 4);
-}
-
-function buildTrendsBundle(papers) {
-  return {
-    responseProtocol: buildYearShareTrends(papers, 'response_protocols', {
-      dimension: 'responseProtocol',
-      topN: 5,
-    }),
-    perception: buildYearShareTrends(papers, 'perception_constructs', {
-      dimension: 'perception',
-      topN: 5,
-    }),
-    methods: buildYearShareTrends(papers, 'research_methods', {
-      dimension: 'researchMethods',
-      topN: 4,
-    }),
-  };
-}
-
-export function buildLibraryDashboard(allPapers = [], subsetPapers = null) {
-  const library = allPapers || [];
-  const subset = subsetPapers == null ? library : subsetPapers;
-  const baseline = buildPaperLibraryAnalytics(library);
-  const focused = buildPaperLibraryAnalytics(subset);
-  const isSubset = subset.length !== library.length;
-  const humanFocused = humanEvaluationPapers(subset);
-  const humanLibrary = humanEvaluationPapers(library);
 
   return {
-    baseline,
-    focused,
-    isSubset,
-    subsetTotal: subset.length,
-    libraryTotal: library.length,
-    humanFocusedTotal: humanFocused.length,
-    humanLibraryTotal: humanLibrary.length,
-    spotlights: buildLibrarySpotlights(
-      isSubset ? focused : baseline,
-      { scopeLabel: isSubset ? 'Focused subset' : 'Library' },
-    ),
-    compared: {
-      perception: compareSeriesToBaseline(focused.perception, baseline.perception),
-      visualSource: compareSeriesToBaseline(focused.visualSource, baseline.visualSource),
-      presentation: compareSeriesToBaseline(focused.presentation, baseline.presentation),
-      scale: compareSeriesToBaseline(focused.scale, baseline.scale),
-      responseProtocol: compareSeriesToBaseline(focused.responseProtocol, baseline.responseProtocol),
-      measurementChannel: compareSeriesToBaseline(focused.measurementChannel, baseline.measurementChannel),
-      recruitment: compareSeriesToBaseline(focused.recruitment, baseline.recruitment),
-      researchMethods: compareSeriesToBaseline(focused.researchMethods, baseline.researchMethods),
-      countries: compareSeriesToBaseline(focused.countries, baseline.countries),
-      regions: compareSeriesToBaseline(focused.regions, baseline.regions),
-    },
-    matrices: {
-      perceptionByProtocol: buildCoOccurrenceMatrix(
-        subset,
-        'perception_constructs',
-        'response_protocols',
-        {
-          rowDimension: 'perception',
-          colDimension: 'responseProtocol',
-          maxRows: 8,
-          maxCols: 6,
-          humanOnly: true,
-        },
-      ),
-      sourceByScale: buildCoOccurrenceMatrix(
-        subset,
-        'visual_data_sources',
-        'spatial_scales',
-        {
-          rowDimension: 'visualSource',
-          colDimension: 'scale',
-          maxRows: 6,
-          maxCols: 6,
-          humanOnly: false,
-        },
-      ),
-    },
-    trends: {
-      focused: buildTrendsBundle(subset),
-      baseline: buildTrendsBundle(library),
-    },
-    reporting: focused.reporting,
+    total,
+    dated,
+    yearMin: allYears.length ? Math.min(...allYears) : null,
+    yearMax: allYears.length ? Math.max(...allYears) : null,
+    recentFrom,
+    recentShare: dated ? recent / dated : 0,
+    years,
+    cards,
   };
 }
 
@@ -667,6 +521,7 @@ export function paperMatchesMetaFilters(paper, filters = []) {
     if (f.dimension === 'year') return String(paper.year) === String(f.id);
     if (f.dimension === 'venue') return String(paper.venue || '') === String(f.id);
     if (f.dimension === 'sample_size') return meta.sample_size?.bin === f.id;
+    if (f.dimension === 'stimulus') return stimulusIds(meta).includes(f.id);
     const field = DIMENSION_FIELD[f.dimension] || f.dimension;
     const ids = meta[field] || [];
     return ids.includes(f.id);
@@ -677,6 +532,9 @@ export function filterLabel(filter) {
   if (!filter) return '';
   if (filter.dimension === 'year') return `Year ${filter.id}`;
   if (filter.dimension === 'venue') return filter.id;
+  if (filter.dimension === 'stimulus') {
+    return STIMULUS_TERMS.find((t) => t.id === filter.id)?.label || filter.label || filter.id;
+  }
   if (filter.dimension === 'sample_size') {
     return `Sample ${taxonomyLabel('sample_size', filter.id) || filter.id}`;
   }

@@ -143,13 +143,6 @@ describe('researchPaperMeta + analytics v4', () => {
     expect(snap).not.toHaveProperty('survey');
     expect(snap).not.toHaveProperty('elicitation');
 
-    const compared = analytics.compareSeriesToBaseline(
-      snap.perception,
-      snap.perception,
-    );
-    expect(compared[0]).toHaveProperty('share');
-    expect(compared[0]).toHaveProperty('baselineShare');
-
     const safetyOnly = papers.filter((p) => analytics.paperMatchesMetaFilters(p, [
       { dimension: 'perception', id: 'safety' },
     ]));
@@ -167,39 +160,37 @@ describe('researchPaperMeta + analytics v4', () => {
     expect(cleaned.find((f) => f.dimension === 'year').id).toBe('2024');
   });
 
-  test('human-only heatmap excludes computational papers', () => {
+  test('simple library view: six plain cards on one paper set', () => {
     const papers = [
-      {
-        title: 'Pair safety',
-        year: 2023,
-        abstract: 'Pairwise comparison of streetscape perceived safety using Google Street View.',
-      },
-      {
-        title: 'ML only',
-        year: 2024,
-        abstract: 'Deep learning predicts safety from street view imagery with no participants.',
-      },
-      {
-        title: 'Pair green',
-        year: 2025,
-        abstract: 'Pairwise comparison of greenness using Google Street View with respondents.',
-      },
+      { title: 'A', year: 2025, abstract: 'Google Street View perceived safety, pairwise comparison with 200 respondents in Singapore.' },
+      { title: 'B', year: 2024, abstract: 'Baidu street view greenery rating with a Likert scale in Beijing, China.' },
+      { title: 'C', year: 2020, abstract: 'Immersive virtual reality restorative indoor office environment questionnaire.' },
+      { title: 'D', year: 1999, abstract: 'Street view imagery of streetscape aesthetics.' },
+      { title: 'E', year: 2031, abstract: 'Future paper on greenery.' },
     ].map((p) => ({ ...p, analysis_meta: meta.extractAnalysisMeta(p) }));
 
-    const matrix = analytics.buildCoOccurrenceMatrix(
-      papers,
-      'perception_constructs',
-      'response_protocols',
-      { rowDimension: 'perception', colDimension: 'responseProtocol', humanOnly: true },
+    const view = analytics.buildSimpleLibraryView(papers, { maxYear: 2026 });
+    expect(view.total).toBe(5);
+    expect(view.dated).toBe(4);
+    expect(view.yearMax).toBe(2025);
+    expect(view.years[0]).toMatchObject({ earlier: true, count: 1 });
+    expect(view.years[view.years.length - 1].label).toBe('2026');
+    expect(view.cards.map((c) => c.dimension)).toEqual(
+      ['perception', 'responseProtocol', 'stimulus', 'scale', 'countries'],
     );
-    expect(matrix.humanOnly).toBe(true);
-    expect(matrix.cohortSize).toBeLessThan(papers.length);
-    expect(matrix.cols.every((c) => c.id !== 'questionnaire')).toBe(true);
+    const stimulus = view.cards.find((c) => c.dimension === 'stimulus');
+    // three street-view source tags merge into one bar
+    expect(stimulus.rows.find((r) => r.id === 'street_view').count).toBe(3);
+    expect(stimulus.rows.some((r) => r.id === 'vr')).toBe(true);
 
-    const dash = analytics.buildLibraryDashboard(papers, papers);
-    expect(dash.matrices.perceptionByProtocol.humanOnly).toBe(true);
-    expect(dash.trends.focused).toBeTruthy();
-    expect(dash.trends.baseline).toBeTruthy();
+    const streetOnly = papers.filter((p) => analytics.paperMatchesMetaFilters(p, [
+      { dimension: 'stimulus', id: 'street_view' },
+    ]));
+    expect(streetOnly.map((p) => p.title)).toEqual(['A', 'B', 'D']);
+    expect(analytics.normalizeMetaFilters([
+      { dimension: 'stimulus', id: 'vr' },
+      { dimension: 'stimulus', id: 'photo' },
+    ])).toHaveLength(1);
   });
 
   test('trends follow provided paper set and ignore future years', () => {

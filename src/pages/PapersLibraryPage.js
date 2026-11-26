@@ -10,7 +10,9 @@ import { uiPair } from '../lib/uiLanguages';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { listPublicResearchPapers } from '../lib/researchPaperStore';
 import { ensureAnalysisMeta } from '../lib/researchPaperMeta.mjs';
-import { normalizeMetaFilters, paperMatchesMetaFilters } from '../lib/researchPaperAnalytics';
+import { filterLabel, normalizeMetaFilters, paperMatchesMetaFilters } from '../lib/researchPaperAnalytics';
+import { cardTitle } from '../components/papers/paperLibraryLabels';
+import { isChineseLanguage } from '../lib/uiLanguages';
 import PaperLibraryAnalytics from '../components/papers/PaperLibraryAnalytics';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
@@ -202,6 +204,7 @@ const PapersList = memo(function PapersList({ rows }) {
 /** Public browse of the urban-perception paper library. */
 export default function PapersLibraryPage() {
   const { t, language } = useRegion();
+  const zh = isChineseLanguage(language);
   const navigate = useNavigate();
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -276,16 +279,6 @@ export default function PapersLibraryPage() {
     });
   }, [papers, activeFilter, metaFilters, templateFilter]);
 
-  /** Metadata-only subset for analytics (text search / template filter must not drift method charts). */
-  const metaSubset = useMemo(
-    () => papers.filter((p) => {
-      if (templateFilter === 'with' && !p.template_id) return false;
-      if (templateFilter === 'without' && p.template_id) return false;
-      return paperMatchesMetaFilters(p, metaFilters);
-    }),
-    [papers, metaFilters, templateFilter],
-  );
-
   const runSearch = useCallback(() => {
     setActiveFilter((searchRef.current?.value || '').trim());
   }, []);
@@ -315,10 +308,6 @@ export default function PapersLibraryPage() {
     });
   }, []);
 
-  const setMetaFiltersReplace = useCallback((nextFilters) => {
-    setMetaFilters(normalizeMetaFilters(nextFilters));
-  }, []);
-
   const clearMetaFilters = useCallback(() => setMetaFilters([]), []);
 
   return (
@@ -333,17 +322,7 @@ export default function PapersLibraryPage() {
           <Chip size="small" component={RouterLink} to="/publications" clickable variant="outlined"
             label={uiPair(language, 'Research using SP-Survey · how to cite', '用 SP-Survey 完成的研究 · 如何引用')} />
           {!loading && (
-            <>
-              <Chip size="small" label={tf(t.papersCount, { n: papers.length })} color="primary" variant="outlined" />
-              <Chip
-                size="small"
-                label={tf(t.papersWithTemplate, { n: linkedTemplateCount })}
-                color={linkedTemplateCount ? 'success' : 'default'}
-                variant={templateFilter === 'with' ? 'filled' : 'outlined'}
-                onClick={() => setTemplateFilter((prev) => (prev === 'with' ? 'all' : 'with'))}
-                title={t.papersWithTemplateTitle}
-              />
-            </>
+            <Chip size="small" label={tf(t.papersCount, { n: papers.length })} color="primary" variant="outlined" />
           )}
         </Stack>
         <Typography variant="body1" color="text.secondary" sx={{ mb: 2, maxWidth: 720 }}>
@@ -370,30 +349,6 @@ export default function PapersLibraryPage() {
           </Button>
         </Stack>
 
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
-          <Chip
-            size="small"
-            label={t.papersAll}
-            color={templateFilter === 'all' ? 'primary' : 'default'}
-            variant={templateFilter === 'all' ? 'filled' : 'outlined'}
-            onClick={() => setTemplateFilter('all')}
-          />
-          <Chip
-            size="small"
-            label={tf(t.papersHasTemplate, { n: linkedTemplateCount })}
-            color={templateFilter === 'with' ? 'success' : 'default'}
-            variant={templateFilter === 'with' ? 'filled' : 'outlined'}
-            onClick={() => setTemplateFilter('with')}
-          />
-          <Chip
-            size="small"
-            label={tf(t.papersNoTemplate, { n: papers.length - linkedTemplateCount })}
-            color={templateFilter === 'without' ? 'primary' : 'default'}
-            variant={templateFilter === 'without' ? 'filled' : 'outlined'}
-            onClick={() => setTemplateFilter('without')}
-          />
-        </Stack>
-
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
           <TextField
             size="small"
@@ -407,12 +362,52 @@ export default function PapersLibraryPage() {
           <Button size="small" variant="contained" startIcon={<Search />} onClick={runSearch}>
             {t.papersSearch}
           </Button>
-          {activeFilter ? (
-            <Button size="small" startIcon={<Clear />} onClick={clearSearch}>
-              {t.papersClearSearch}
-            </Button>
-          ) : null}
+          <Chip
+            label={tf(zh ? '只看有模板的（{n}）' : 'Only with template ({n})', { n: linkedTemplateCount })}
+            color={templateFilter === 'with' ? 'success' : 'default'}
+            variant={templateFilter === 'with' ? 'filled' : 'outlined'}
+            onClick={() => setTemplateFilter((prev) => (prev === 'with' ? 'all' : 'with'))}
+            title={t.papersWithTemplateTitle}
+            sx={{ fontWeight: 700 }}
+          />
         </Stack>
+
+        {(activeFilter || metaFilters.length > 0 || templateFilter !== 'all') && (
+          <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={700}>
+              {zh ? '当前筛选：' : 'Filters:'}
+            </Typography>
+            {activeFilter ? (
+              <Chip size="small" label={`“${activeFilter}”`} onDelete={clearSearch} />
+            ) : null}
+            {templateFilter !== 'all' ? (
+              <Chip
+                size="small"
+                color="success"
+                label={templateFilter === 'with' ? (zh ? '有模板' : 'Has template') : (zh ? '无模板' : 'No template')}
+                onDelete={() => setTemplateFilter('all')}
+              />
+            ) : null}
+            {metaFilters.map((f) => (
+              <Chip
+                key={`${f.dimension}:${f.id}`}
+                size="small"
+                color="primary"
+                variant="outlined"
+                label={`${cardTitle(zh, f.dimension)}：${f.label || filterLabel(f)}`}
+                onDelete={() => toggleMetaFilter(f)}
+                sx={{ fontWeight: 700 }}
+              />
+            ))}
+            <Button
+              size="small"
+              startIcon={<Clear />}
+              onClick={() => { clearSearch(); clearMetaFilters(); setTemplateFilter('all'); }}
+            >
+              {zh ? '全部清除' : 'Clear all'}
+            </Button>
+          </Stack>
+        )}
 
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
@@ -425,12 +420,10 @@ export default function PapersLibraryPage() {
         ) : (
           <>
             <PaperLibraryAnalytics
-              papers={papers}
-              subsetPapers={metaSubset}
+              papers={filtered}
               filters={metaFilters}
               onToggleFilter={toggleMetaFilter}
-              onSetFilters={setMetaFiltersReplace}
-              onClearFilters={clearMetaFilters}
+              zh={zh}
             />
             <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.75 }}>
               {activeFilter || metaFilters.length || templateFilter !== 'all'
@@ -438,7 +431,6 @@ export default function PapersLibraryPage() {
                 : tf(t.papersCount, { n: filtered.length })}
               {templateFilter === 'with' ? t.papersHasTemplateSuffix : ''}
               {templateFilter === 'without' ? t.papersNoTemplateSuffix : ''}
-              {metaFilters.length ? ` · ${metaSubset.length}` : ''}
               {activeFilter ? ` · “${activeFilter}”` : ''}
             </Typography>
             <PapersList rows={filtered} />
