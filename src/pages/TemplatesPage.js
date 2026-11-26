@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Box, Container, Typography, Button, Chip, TextField, InputAdornment,
-  CircularProgress, Stack,
+  CircularProgress, Stack, MenuItem,
 } from '@mui/material';
 import { Search, Article, DesignServices } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -11,37 +11,49 @@ import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
 import {
-  isSpSchemeTemplate, matchesTemplateSearch, TemplateRow, useTemplateLibrary,
+  matchesTemplateSearch, TemplateRow, useTemplateLibrary,
 } from '../components/templates/TemplateLibrary';
-
-/** The type filter: one row of buttons, kept in the URL (?type=). */
-export const TEMPLATE_TYPES = ['all', 'academic', 'urban', 'ai', 'scheme'];
+import {
+  dimensionLabel, facetCounts, facetLabel, parseFacets, templateSource,
+} from '../lib/templateFacets';
 
 export const PAGE_SIZE = 50;
 
-export function filterTemplates(templates, type, query) {
+/** Source buttons; "all" leaves out demos, which have their own button. */
+export const SOURCES = ['all', 'paper', 'ai', 'demo'];
+/** Dimensions offered as dropdown filters, in this order. */
+export const FILTER_DIMENSIONS = ['task', 'modality', 'concept', 'participants', 'country'];
+
+/**
+ * filters: { source, q, task, modality, concept, participants, country };
+ * every dropdown that is set must match one of the template's values.
+ */
+export function filterTemplates(templates, filters = {}) {
+  const source = SOURCES.includes(filters.source) ? filters.source : 'all';
   return templates.filter((tpl) => {
-    if (!matchesTemplateSearch(tpl, query)) return false;
-    const scheme = isSpSchemeTemplate(tpl);
-    if (type === 'scheme') return scheme;
-    if (type === 'all' || !TEMPLATE_TYPES.includes(type)) return true;
-    return !scheme && tpl.category === type;
+    if (!matchesTemplateSearch(tpl, filters.q)) return false;
+    const src = templateSource(tpl);
+    if (source === 'all' ? src === 'demo' : src !== source) return false;
+    const facets = parseFacets(tpl.tags);
+    return FILTER_DIMENSIONS.every((key) => !filters[key] || (facets[key] || []).includes(filters[key]));
   });
 }
 
 /**
- * /templates — every published template, newest first, with one search box
- * and one row of type buttons. The homepage shows only the newest few.
+ * /templates — every published template, newest first: one search box, a
+ * row of source buttons and a few dropdowns (see src/lib/templateFacets.js).
+ * The homepage shows only the newest few.
  */
 export default function TemplatesPage() {
   const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuth();
   const templatePath = templateUsePath(!authLoading && isAuthenticated);
-  const { t } = useRegion();
+  const { t, language } = useRegion();
+  const zh = String(language || '').startsWith('zh');
   const { templates, loading } = useTemplateLibrary();
   const [params, setParams] = useSearchParams();
-  const type = TEMPLATE_TYPES.includes(params.get('type')) ? params.get('type') : 'all';
-  const query = params.get('q') || '';
+  const filters = Object.fromEntries(['source', 'q', ...FILTER_DIMENSIONS].map((k) => [k, params.get(k) || '']));
+  if (!SOURCES.includes(filters.source)) filters.source = 'all';
 
   const update = (key, value) => {
     const next = new URLSearchParams(params);
@@ -49,18 +61,16 @@ export default function TemplatesPage() {
     setParams(next, { replace: true });
   };
 
-  const labels = {
-    all: t.tplAll || 'All',
-    academic: t.landCatAcademic,
-    urban: t.landCatUrban,
-    ai: t.landCatAi,
-    scheme: 'SP-Scheme',
-  };
-  const countFor = (key) => filterTemplates(templates, key, '').length;
-  const shown = filterTemplates(templates, type, query);
+  const sourceLabel = (key) => (key === 'all' ? (t.tplAll || 'All') : facetLabel('source', key, zh));
+  const countFor = (source) => filterTemplates(templates, { ...filters, source, q: filters.q }).length;
+  const shown = filterTemplates(templates, filters);
+  // Dropdown options: values used by templates of the chosen source, most used first.
+  const inSource = filterTemplates(templates, { source: filters.source });
   // Long lists render in pages of PAGE_SIZE; a new filter starts from the top again.
   const [limit, setLimit] = useState(PAGE_SIZE);
-  useEffect(() => { setLimit(PAGE_SIZE); }, [type, query]);
+  const filterKey = JSON.stringify(filters);
+  useEffect(() => { setLimit(PAGE_SIZE); }, [filterKey]);
+  const anyDropdown = FILTER_DIMENSIONS.some((k) => filters[k]);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
@@ -95,7 +105,7 @@ export default function TemplatesPage() {
         <TextField
           fullWidth
           placeholder={t.landSearchTemplates}
-          value={query}
+          value={filters.q}
           onChange={(e) => update('q', e.target.value)}
           InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
           inputProps={{ 'aria-label': t.landSearchTemplates }}
@@ -103,22 +113,56 @@ export default function TemplatesPage() {
           size="small"
         />
 
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 3 }} role="group" aria-label={t.tplTypeFilter || 'Template type'}>
-          {TEMPLATE_TYPES.map((key) => {
-            const n = countFor(key);
-            if (key !== 'all' && n === 0 && !loading) return null;
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }} role="group" aria-label={t.tplTypeFilter || 'Template type'}>
+          {SOURCES.map((key) => (
+            <Chip
+              key={key}
+              label={loading ? sourceLabel(key) : `${sourceLabel(key)} ${countFor(key)}`}
+              color={filters.source === key ? 'primary' : 'default'}
+              variant={filters.source === key ? 'filled' : 'outlined'}
+              onClick={() => update('source', key)}
+              aria-pressed={filters.source === key}
+              sx={{ fontWeight: 600 }}
+            />
+          ))}
+        </Stack>
+
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mb: 3 }}>
+          {FILTER_DIMENSIONS.map((key) => {
+            const options = facetCounts(inSource, key);
+            if (!options.length && !filters[key]) return null;
             return (
-              <Chip
+              <TextField
                 key={key}
-                label={loading ? labels[key] : `${labels[key]} ${n}`}
-                color={type === key ? 'primary' : 'default'}
-                variant={type === key ? 'filled' : 'outlined'}
-                onClick={() => update('type', key)}
-                aria-pressed={type === key}
-                sx={{ fontWeight: 600 }}
-              />
+                select
+                size="small"
+                label={dimensionLabel(key, zh)}
+                value={filters[key]}
+                onChange={(e) => update(key, e.target.value)}
+                sx={{ minWidth: 132 }}
+                SelectProps={{ MenuProps: { PaperProps: { sx: { maxHeight: 360 } } } }}
+              >
+                <MenuItem value="">{t.tplAll || 'All'}</MenuItem>
+                {options.map(([value, n]) => (
+                  <MenuItem key={value} value={value}>{facetLabel(key, value, zh)} ({n})</MenuItem>
+                ))}
+              </TextField>
             );
           })}
+          {anyDropdown && (
+            <Button size="small" onClick={() => {
+              const next = new URLSearchParams(params);
+              FILTER_DIMENSIONS.forEach((k) => next.delete(k));
+              setParams(next, { replace: true });
+            }}>
+              {t.tplClearFilters || 'Clear filters'}
+            </Button>
+          )}
+          {!loading && (
+            <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+              {tf(t.tplCount || '{n} templates', { n: shown.length })}
+            </Typography>
+          )}
         </Stack>
 
         {loading ? (
@@ -126,13 +170,13 @@ export default function TemplatesPage() {
         ) : shown.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 8 }}>
             <Typography color="text.secondary">
-              {query ? tf(t.landNoTemplates, { q: query }) : (t.tplNoneOfType || 'No templates of this type yet.')}
+              {filters.q ? tf(t.landNoTemplates, { q: filters.q }) : (t.tplNoneOfType || 'No templates of this type yet.')}
             </Typography>
           </Box>
         ) : (
           <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
             {shown.slice(0, limit).map((tpl) => (
-              <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
+              <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} onFacet={update} />
             ))}
             {shown.length > limit && (
               <Box sx={{ textAlign: 'center', pt: 3 }}>

@@ -378,7 +378,7 @@ export default function LandingPage() {
             </Box>
             {schemeExamples.length > homeSchemes.length && (
               <Box sx={{ textAlign: 'center', mt: 4 }}>
-                <Button variant="outlined" onClick={() => navigate('/templates?type=scheme')}>
+                <Button variant="outlined" onClick={() => navigate('/templates?source=ai')}>
                   {tf(t.landSchemeViewAll || 'View all {n} SP-Scheme examples →', { n: schemeExamples.length })}
                 </Button>
               </Box>

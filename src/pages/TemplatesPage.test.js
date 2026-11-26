@@ -15,17 +15,28 @@ const list = [
   { id: 'd', name: 'AI image rating', year: 2024, category: 'ai' },
 ];
 
-test('type buttons split the library; SP-Scheme examples only under SP-Scheme', () => {
-  expect(filterTemplates(list, 'all', '').map((t) => t.id)).toEqual(['a', 'b', 'c', 'd']);
-  expect(filterTemplates(list, 'ai', '').map((t) => t.id)).toEqual(['d']);
-  expect(filterTemplates(list, 'scheme', '').map((t) => t.id)).toEqual(['c']);
-  expect(filterTemplates(list, 'nonsense', '').length).toBe(4);
+test('source buttons and dropdowns filter the library; demos only under Demo', () => {
+  const tagged = [
+    { id: 'a', name: 'Place Pulse', author: 'Dubey', year: 2016, rawCategory: 'Academic Research', tags: ['task:pairwise', 'concept:safety', 'country:USA'] },
+    { id: 'b', name: 'Street greenery', author: 'Li', year: 2025, rawCategory: 'Academic Research', tags: ['task:rating', 'concept:greenery'] },
+    { id: 'c', name: 'SP-Scheme: Walkability', year: 2026, rawCategory: 'Custom', tags: [] },
+    { id: 'd', name: 'Gehl criteria', year: 2010, rawCategory: 'Urban Theory', tags: ['task:multi_rating'] },
+    { id: 'e', name: 'Cats', year: 2026, rawCategory: 'Demo', tags: ['task:pairwise'] },
+  ];
+  const ids = (f) => filterTemplates(tagged, f).map((t) => t.id);
+  expect(ids({})).toEqual(['a', 'b', 'c', 'd']);
+  expect(ids({ source: 'paper' })).toEqual(['a', 'b']);
+  expect(ids({ source: 'ai' })).toEqual(['c', 'd']);
+  expect(ids({ source: 'demo' })).toEqual(['e']);
+  expect(ids({ task: 'pairwise' })).toEqual(['a']);
+  expect(ids({ source: 'demo', task: 'pairwise' })).toEqual(['e']);
+  expect(ids({ concept: 'greenery', task: 'pairwise' })).toEqual([]);
+  expect(ids({ country: 'USA' })).toEqual(['a']);
 });
 
 test('search matches name, author and year', () => {
-  expect(filterTemplates(list, 'all', 'dubey').map((t) => t.id)).toEqual(['a']);
-  expect(filterTemplates(list, 'all', '2025').map((t) => t.id)).toEqual(['b']);
-  expect(filterTemplates(list, 'urban', 'pulse')).toEqual([]);
+  expect(filterTemplates(list, { q: 'dubey' }).map((t) => t.id)).toEqual(['a']);
+  expect(filterTemplates(list, { q: '2025' }).map((t) => t.id)).toEqual(['b']);
 });
 
 test('newest first: year, then time online; admin pin does not reorder', () => {
@@ -46,8 +57,8 @@ test('rows show short author lists and search also finds the paper title and jou
   expect(shortAuthors(['Ito, Koichi'])).toBe('Ito');
   expect(shortAuthors([])).toBe('');
   const withPaper = [{ id: 'x', name: 'Bikeability', category: 'urban', paper: { title: 'Assessing bikeability with street view imagery', venue: 'Transportation Research Part C', authors: ['Ito K.'] } }];
-  expect(filterTemplates(withPaper, 'all', 'transportation research').length).toBe(1);
-  expect(filterTemplates(withPaper, 'all', 'street view imagery').length).toBe(1);
+  expect(filterTemplates(withPaper, { q: 'transportation research' }).length).toBe(1);
+  expect(filterTemplates(withPaper, { q: 'street view imagery' }).length).toBe(1);
 });
 
 test('one public name: the paper title when linked; change requests name the template', () => {

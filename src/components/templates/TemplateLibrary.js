@@ -7,6 +7,7 @@ import {
   Article, Dataset, Preview, MenuBook, EditNote,
 } from '@mui/icons-material';
 import TemplateChangeRequestDialog from './TemplateChangeRequestDialog';
+import { facetLabel, parseFacets, templateSource } from '../../lib/templateFacets';
 import { supabase } from '../../lib/supabase';
 import { stripOwnResponseSupabase } from '../../lib/ownResponseSupabase';
 import { projectTemplates } from '../../lib/projectTemplates';
@@ -142,7 +143,7 @@ async function loadTemplates() {
       // Lightweight first pass — avoid downloading every template's full media catalog.
       const { data, error } = await supabase
         .from('templates')
-        .select('id, name, description, author, year, category, paper_url, dataset, thumbnail_url, show_on_landing, created_at')
+        .select('id, name, description, author, year, category, paper_url, dataset, thumbnail_url, show_on_landing, created_at, tags')
         .eq('is_approved', true)
         .order('year', { ascending: false });
       if (!error && data?.length > 0) {
@@ -177,6 +178,8 @@ async function loadTemplates() {
             show_on_landing: tpl.show_on_landing,
             created_at: tpl.created_at || null,
             paper: papers[tpl.id] || null,
+            tags: Array.isArray(tpl.tags) ? tpl.tags : [],
+            rawCategory: tpl.category || '',
           };
         }));
         return sortNewestFirst(normalized);
@@ -474,15 +477,23 @@ export function TemplateCard({ template, onUse }) {
  * the paper's full title, then authors · year · journal · type, with small
  * icon actions and "Use" on the right.
  */
-export function TemplateRow({ template, onUse }) {
-  const { t } = useRegion();
+export function TemplateRow({ template, onUse, onFacet }) {
+  const { t, language } = useRegion();
+  const zh = String(language || '').startsWith('zh');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
-  const scheme = isSpSchemeTemplate(template);
-  const isAI = template.category === 'ai';
-  const isUrban = template.category === 'urban';
-  const typeColor = scheme ? 'secondary.main' : isAI ? 'primary.main' : isUrban ? 'warning.dark' : 'success.dark';
-  const typeLabel = scheme ? 'SP-Scheme' : isAI ? t.landChipAi : isUrban ? t.landChipUrban : t.landChipAcademic;
+  const source = templateSource(template);
+  const typeColor = source === 'ai' ? 'secondary.main' : source === 'demo' ? 'text.disabled' : 'success.dark';
+  const typeLabel = facetLabel('source', source, zh);
+  const facets = parseFacets(template.tags);
+  // Shown under the title, each one a filter link: how it asks, what it shows, what it measures.
+  const facetBits = [
+    ...(facets.task || []).map((v) => ['task', v]),
+    ...(facets.modality || []).map((v) => ['modality', v]),
+    ...(facets.concept || []).slice(0, 4).map((v) => ['concept', v]),
+    ...(facets.city || facets.country || []).slice(0, 2).map((v) => [facets.city ? 'city' : 'country', v]),
+  ];
+  const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);
   const paper = template.paper;
   const title = templateDisplayName(template);
   const byline = paper
@@ -507,6 +518,16 @@ export function TemplateRow({ template, onUse }) {
           '&:hover': { bgcolor: 'action.hover' },
         }}
       >
+        <Box sx={{ flex: 1, minWidth: 0, display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
+        <Box
+          component="button"
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          aria-label={`${t.landPreview}: ${title}`}
+          sx={{ flexShrink: 0, width: 56, height: 40, mt: 0.25, p: 0, border: 0, borderRadius: 0.75, overflow: 'hidden', cursor: 'pointer', bgcolor: 'grey.100' }}
+        >
+          <Box component="img" src={thumb} alt="" onError={onThumbError} loading="lazy" sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
+        </Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             component="h2"
@@ -526,6 +547,24 @@ export function TemplateRow({ template, onUse }) {
             {(byline || paper?.venue) ? ' · ' : ''}
             <Box component="span" sx={{ color: typeColor, fontWeight: 600 }}>{typeLabel}</Box>
           </Typography>
+          {facetBits.length > 0 && (
+            <Box sx={{ mt: 0.25, fontSize: '0.75rem', color: 'text.secondary', ...CLAMP(1) }}>
+              {facetBits.map(([key, value], i) => (
+                <React.Fragment key={`${key}:${value}`}>
+                  {i > 0 && ' · '}
+                  <Box
+                    component={onFacet && key !== 'city' ? 'button' : 'span'}
+                    type={onFacet && key !== 'city' ? 'button' : undefined}
+                    onClick={onFacet && key !== 'city' ? () => onFacet(key, value) : undefined}
+                    sx={{ p: 0, border: 0, bgcolor: 'transparent', font: 'inherit', color: 'inherit', cursor: onFacet && key !== 'city' ? 'pointer' : 'default', '&:hover': onFacet && key !== 'city' ? { color: 'primary.main', textDecoration: 'underline' } : undefined }}
+                  >
+                    {facetLabel(key, value, zh)}
+                  </Box>
+                </React.Fragment>
+              ))}
+            </Box>
+          )}
+        </Box>
         </Box>
         <Stack direction="row" spacing={0.25} alignItems="center" sx={{ flexShrink: 0, justifyContent: { xs: 'flex-end', sm: 'flex-start' } }}>
           {paperTemplateDoc(template.id) && (

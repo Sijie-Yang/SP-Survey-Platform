@@ -53,6 +53,8 @@ const landing = {
     tplRequestEmailHint: '方便我们回覆你',
     tplRequestSend: '發送',
     tplShowMore: '顯示更多（還有 {n} 個）',
+    tplClearFilters: '清除篩選',
+    tplCount: '共 {n} 個',
     tplTypeFilter: '模板類型',
     tplNoneOfType: '這一類還沒有模板。',
     landTemplatesSubtitle: '從已發表研究中使用的同儕審查問卷設計開始',
