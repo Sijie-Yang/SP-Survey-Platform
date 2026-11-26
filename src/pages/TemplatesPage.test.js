@@ -28,12 +28,12 @@ test('search matches name, author and year', () => {
   expect(filterTemplates(list, 'urban', 'pulse')).toEqual([]);
 });
 
-test('newest first: pinned, then year, then time online', () => {
+test('newest first: year, then time online; admin pin does not reorder', () => {
   const sorted = sortNewestFirst([
     { id: 'old', year: 2016, created_at: '2026-11-20' },
     { id: 'new-early', year: 2026, created_at: '2026-01-01' },
     { id: 'new-late', year: 2026, created_at: '2026-11-26' },
     { id: 'pinned', year: 2013, is_pinned: true },
   ]);
-  expect(sorted.map((t) => t.id)).toEqual(['pinned', 'new-late', 'new-early', 'old']);
+  expect(sorted.map((t) => t.id)).toEqual(['new-late', 'new-early', 'old', 'pinned']);
 });

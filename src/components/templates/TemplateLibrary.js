@@ -45,11 +45,13 @@ export function isSpSchemeTemplate(tpl) {
   return /sp[\s_-]?scheme/i.test(`${tpl?.name || ''} ${tpl?.id || ''}`);
 }
 
-/** Newest first: pinned ones, then paper year, then when it went online. */
+/**
+ * Newest first: paper year, then when it went online. (The admin pin only
+ * orders the editor's template list, not the public library.)
+ */
 export function sortNewestFirst(list) {
   return [...list].sort((a, b) =>
-    (Number(!!b.is_pinned) - Number(!!a.is_pinned))
-    || ((Number(b.year) || 0) - (Number(a.year) || 0))
+    ((Number(b.year) || 0) - (Number(a.year) || 0))
     || String(b.created_at || '').localeCompare(String(a.created_at || '')));
 }
 
@@ -82,7 +84,7 @@ async function loadTemplates() {
       // Lightweight first pass — avoid downloading every template's full media catalog.
       const { data, error } = await supabase
         .from('templates')
-        .select('id, name, description, author, year, category, paper_url, dataset, thumbnail_url, show_on_landing, is_pinned, created_at')
+        .select('id, name, description, author, year, category, paper_url, dataset, thumbnail_url, show_on_landing, created_at')
         .eq('is_approved', true)
         .order('year', { ascending: false });
       if (!error && data?.length > 0) {
@@ -115,7 +117,6 @@ async function loadTemplates() {
             // The cover an admin set, as opposed to one picked from the library.
             own_thumbnail: tpl.thumbnail_url || null,
             show_on_landing: tpl.show_on_landing,
-            is_pinned: !!tpl.is_pinned,
             created_at: tpl.created_at || null,
           };
         }));
