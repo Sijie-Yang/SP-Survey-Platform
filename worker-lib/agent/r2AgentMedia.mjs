@@ -351,20 +351,47 @@ export async function getPrefixObject(env, key) {
  * Copy single objects (`[{ from, to }]`). Stops at the first failure and
  * reports what was copied so the caller can undo it.
  */
-export async function copyObjects(env, pairs = []) {
+/**
+ * Copy the given { from, to } keys, a few at a time. With `fromPrefix` and
+ * `toPrefix` (every pair lies under them), a file already at its destination
+ * with the source's size is not copied again, so a copy cut short can simply be
+ * run again. With `deadlineMs`, no new copy starts after that time.
+ * Returns copied (keys copied now), skipped (count), remaining (count not
+ * started) and error (the first failure, or null).
+ */
+export async function copyObjects(env, pairs = [], {
+  fromPrefix = null, toPrefix = null, deadlineMs = null, now = () => Date.now(),
+} = {}) {
   const backend = getR2Backend(env);
-  if (!backend) return { configured: false, copied: [], error: null };
+  if (!backend) return { configured: false, copied: [], skipped: 0, remaining: 0, error: null };
+  const sourceSize = new Map();
+  const existing = new Map();
+  if (fromPrefix != null && toPrefix != null && pairs.length) {
+    (await backend.list(fromPrefix)).forEach((o) => sourceSize.set(o.key, o.size));
+    (await backend.list(toPrefix)).forEach((o) => existing.set(o.key, o.size));
+  }
   const copied = [];
-  for (const { from, to } of pairs) {
+  let skipped = 0;
+  let remaining = 0;
+  let error = null;
+  await mapWithConcurrency(pairs, COPY_CONCURRENCY, async ({ from, to }) => {
+    if (existing.has(to) && sourceSize.has(from) && existing.get(to) === sourceSize.get(from)) {
+      skipped += 1;
+      return;
+    }
+    if (error || (deadlineMs != null && now() >= deadlineMs)) {
+      remaining += 1;
+      return;
+    }
     try {
-      // eslint-disable-next-line no-await-in-loop
       await backend.copy(from, to);
       copied.push(to);
     } catch (err) {
-      return { configured: true, copied, error: `${from}: ${err.message || String(err)}` };
+      if (!error) error = `${from}: ${err.message || String(err)}`;
+      remaining += 1;
     }
-  }
-  return { configured: true, copied, error: null };
+  });
+  return { configured: true, copied, skipped, remaining, error };
 }
 
 /** Objects under a prefix with their upload time (for housekeeping). */
