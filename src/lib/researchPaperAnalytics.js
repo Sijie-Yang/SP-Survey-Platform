@@ -9,6 +9,8 @@ import {
   REPORTING_SIGNALS,
   isHumanEvaluationMeta,
 } from './researchPaperMeta.mjs';
+import { PAPER_FACET_KEYS, paperFacets } from './paperFacets';
+import { FACET_DIMENSIONS, facetLabel } from './templateFacets';
 
 /** Canonical chart/filter dimension → analysis_meta field */
 export const DIMENSION_FIELD = {
@@ -361,53 +363,58 @@ export function buildYearShareTrends(
 }
 
 /**
- * "看什么" (stimulus) is a derived, chart-only dimension that merges the
- * three street-view source tags into one bar and folds presentation modes in,
- * so readers see one plain list instead of two overlapping charts.
- * It is computed from existing analysis_meta, so no re-extraction is needed.
+ * The cards on the public paper library page, in order. They use the same
+ * facet vocabulary as templates (paperFacets.js): reviewed facets when an
+ * admin has read the paper, otherwise a guess from the keyword tags.
  */
-export const STIMULUS_TERMS = [
-  {
-    id: 'street_view',
-    label: 'Street-view images',
-    match: (m) => (m.visual_data_sources || []).some((id) => (
-      id === 'google_street_view' || id === 'other_street_view' || id === 'unspecified_street_view'
-    )),
-  },
-  {
-    id: 'photo',
-    label: 'Photos',
-    match: (m) => (m.visual_data_sources || []).includes('researcher_photos')
-      || (m.presentation_modes || []).includes('static_2d'),
-  },
-  { id: 'vr', label: 'VR', match: (m) => (m.presentation_modes || []).includes('immersive_vr') },
-  { id: 'panorama', label: 'Panorama / 360°', match: (m) => (m.presentation_modes || []).includes('panorama_360') },
-  { id: 'rendered', label: 'Rendered scenes', match: (m) => (m.visual_data_sources || []).includes('rendered_synthetic') },
-  { id: 'video', label: 'Video', match: (m) => (m.presentation_modes || []).includes('video') },
-  { id: 'on_site', label: 'On site', match: (m) => (m.presentation_modes || []).includes('on_site') },
-];
-
-export function stimulusIds(meta = {}) {
-  return STIMULUS_TERMS.filter((t) => t.match(meta)).map((t) => t.id);
-}
-
-/** The cards shown on the public paper library page, in order. */
 export const SIMPLE_CARDS = [
-  { dimension: 'perception', field: 'perception_constructs', trend: true },
-  { dimension: 'responseProtocol', field: 'response_protocols', trend: true, lowCoverageNote: true },
-  { dimension: 'stimulus', field: null, trend: false },
-  { dimension: 'scale', field: 'spatial_scales', trend: false },
-  { dimension: 'countries', field: 'study_countries', trend: false },
+  { dimension: 'concept', trend: true },
+  { dimension: 'task', trend: true, lowCoverageNote: true },
+  { dimension: 'modality', trend: true },
+  { dimension: 'participants', trend: false, lowCoverageNote: true },
+  { dimension: 'sample', trend: false, lowCoverageNote: true, fixedOrder: true },
+  { dimension: 'country', trend: false },
 ];
 
 /** Years shown one by one; anything older goes into one "earlier" bar. */
 export const SIMPLE_YEAR_SPAN = 12;
 
-function metaIdsFor(paper, dimension) {
-  const meta = ensureAnalysisMeta(paper);
-  if (dimension === 'stimulus') return stimulusIds(meta);
-  const field = DIMENSION_FIELD[dimension];
-  return field ? meta[field] || [] : [];
+const FACET_DIMS = new Set(PAPER_FACET_KEYS);
+
+export function isPaperFacetDimension(dimension) {
+  return FACET_DIMS.has(dimension);
+}
+
+/**
+ * Ids whose share of papers grew over the last years (same rule as before:
+ * later half of the window beats the earlier half by > 2 points, ≥ 5 papers).
+ */
+function risingIds(list, idsOf, maxYear, windowYears = 8, minYearN = 8) {
+  const totals = new Map();
+  const tags = new Map();
+  for (const p of list) {
+    const y = Number(p.year);
+    if (!Number.isFinite(y) || y > maxYear) continue;
+    totals.set(y, (totals.get(y) || 0) + 1);
+    if (!tags.has(y)) tags.set(y, new Map());
+    const m = tags.get(y);
+    for (const id of idsOf(p)) m.set(id, (m.get(id) || 0) + 1);
+  }
+  const years = [...totals.keys()].sort((a, b) => a - b).slice(-windowYears);
+  const stable = years.filter((y) => totals.get(y) >= minYearN);
+  const use = stable.length >= 2 ? stable : years;
+  if (use.length < 2) return new Set();
+  const ids = new Set();
+  for (const y of years) for (const id of (tags.get(y) || new Map()).keys()) ids.add(id);
+  const out = new Set();
+  const half = Math.max(1, Math.floor(use.length / 2));
+  for (const id of ids) {
+    const share = (y) => ((tags.get(y) || new Map()).get(id) || 0) / totals.get(y);
+    const avg = (arr) => arr.reduce((sum, y) => sum + share(y), 0) / arr.length;
+    const recent = years.reduce((sum, y) => sum + ((tags.get(y) || new Map()).get(id) || 0), 0);
+    if (avg(use.slice(Math.floor(use.length / 2))) - avg(use.slice(0, half)) > 0.02 && recent >= 5) out.add(id);
+  }
+  return out;
 }
 
 /**
@@ -439,29 +446,27 @@ export function buildSimpleLibraryView(papers = [], { maxYear = currentAnalytics
   for (const [y, n] of yearCounts) if (y >= recentFrom) recent += n;
   const allYears = [...yearCounts.keys()];
 
+  const facetsOf = new Map(list.map((p) => [p, paperFacets(p)]));
+  const reviewed = list.filter((p) => facetsOf.get(p).reviewed).length;
+
   const cards = SIMPLE_CARDS.map((card) => {
+    const idsOf = (p) => facetsOf.get(p)[card.dimension] || [];
     const counts = new Map();
     let tagged = 0;
     for (const p of list) {
-      const ids = metaIdsFor(p, card.dimension);
+      const ids = idsOf(p);
       if (ids.length) tagged += 1;
       for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
     }
-    let rising = new Set();
-    if (card.trend && card.field) {
-      const trend = buildYearShareTrends(list, card.field, {
-        dimension: card.dimension, maxYear, topN: 20,
-      });
-      rising = new Set(
-        trend.series.filter((s) => s.slope > 0.02 && s.recentCount >= 5).map((s) => s.id),
-      );
-    }
-    const labelOf = (id) => (card.dimension === 'stimulus'
-      ? (STIMULUS_TERMS.find((t) => t.id === id)?.label || id)
-      : taxonomyLabel(card.field, id) || id);
+    const rising = card.trend ? risingIds(list, idsOf, maxYear) : new Set();
+    const order = (FACET_DIMENSIONS.find((d) => d.key === card.dimension)?.values || []).map((v) => v.id);
     const rows = [...counts.entries()]
-      .map(([id, count]) => ({ id, label: labelOf(id), count, rising: rising.has(id), dimension: card.dimension }))
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .map(([id, count]) => ({
+        id, label: facetLabel(card.dimension, id, false), count, rising: rising.has(id), dimension: card.dimension,
+      }))
+      .sort((a, b) => (card.fixedOrder
+        ? order.indexOf(a.id) - order.indexOf(b.id)
+        : b.count - a.count || a.label.localeCompare(b.label)))
       .slice(0, topN);
     return {
       dimension: card.dimension,
@@ -475,6 +480,7 @@ export function buildSimpleLibraryView(papers = [], { maxYear = currentAnalytics
   return {
     total,
     dated,
+    reviewed,
     yearMin: allYears.length ? Math.min(...allYears) : null,
     yearMax: allYears.length ? Math.max(...allYears) : null,
     recentFrom,
@@ -523,7 +529,7 @@ export function paperMatchesMetaFilters(paper, filters = []) {
     if (f.dimension === 'year') return String(paper.year) === String(f.id);
     if (f.dimension === 'venue') return String(paper.venue || '') === String(f.id);
     if (f.dimension === 'sample_size') return meta.sample_size?.bin === f.id;
-    if (f.dimension === 'stimulus') return stimulusIds(meta).includes(f.id);
+    if (isPaperFacetDimension(f.dimension)) return (paperFacets(paper)[f.dimension] || []).includes(f.id);
     const field = DIMENSION_FIELD[f.dimension] || f.dimension;
     const ids = meta[field] || [];
     return ids.includes(f.id);
@@ -534,9 +540,7 @@ export function filterLabel(filter) {
   if (!filter) return '';
   if (filter.dimension === 'year') return `Year ${filter.id}`;
   if (filter.dimension === 'venue') return filter.id;
-  if (filter.dimension === 'stimulus') {
-    return STIMULUS_TERMS.find((t) => t.id === filter.id)?.label || filter.label || filter.id;
-  }
+  if (isPaperFacetDimension(filter.dimension)) return facetLabel(filter.dimension, filter.id, false);
   if (filter.dimension === 'sample_size') {
     return `Sample ${taxonomyLabel('sample_size', filter.id) || filter.id}`;
   }

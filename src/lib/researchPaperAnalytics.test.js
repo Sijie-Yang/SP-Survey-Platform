@@ -160,7 +160,7 @@ describe('researchPaperMeta + analytics v4', () => {
     expect(cleaned.find((f) => f.dimension === 'year').id).toBe('2024');
   });
 
-  test('simple library view: six plain cards on one paper set', () => {
+  test('simple library view: six facet cards on one paper set', () => {
     const papers = [
       { title: 'A', year: 2025, abstract: 'Google Street View perceived safety, pairwise comparison with 200 respondents in Singapore.' },
       { title: 'B', year: 2024, abstract: 'Baidu street view greenery rating with a Likert scale in Beijing, China.' },
@@ -172,25 +172,57 @@ describe('researchPaperMeta + analytics v4', () => {
     const view = analytics.buildSimpleLibraryView(papers, { maxYear: 2026 });
     expect(view.total).toBe(5);
     expect(view.dated).toBe(4);
+    expect(view.reviewed).toBe(0);
     expect(view.yearMax).toBe(2025);
     expect(view.years[0]).toMatchObject({ earlier: true, count: 1 });
     expect(view.years[view.years.length - 1].label).toBe('2026');
     expect(view.cards.map((c) => c.dimension)).toEqual(
-      ['perception', 'responseProtocol', 'stimulus', 'scale', 'countries'],
+      ['concept', 'task', 'modality', 'participants', 'sample', 'country'],
     );
-    const stimulus = view.cards.find((c) => c.dimension === 'stimulus');
+    const modality = view.cards.find((c) => c.dimension === 'modality');
     // three street-view source tags merge into one bar
-    expect(stimulus.rows.find((r) => r.id === 'street_view').count).toBe(3);
-    expect(stimulus.rows.some((r) => r.id === 'vr')).toBe(true);
+    expect(modality.rows.find((r) => r.id === 'street_view').count).toBe(3);
+    expect(modality.rows.some((r) => r.id === 'vr')).toBe(true);
+    expect(view.cards.find((c) => c.dimension === 'concept').rows.some((r) => r.id === 'greenery')).toBe(true);
+    expect(view.cards.find((c) => c.dimension === 'country').rows.map((r) => r.id)).toEqual(
+      expect.arrayContaining(['China', 'Singapore']),
+    );
 
     const streetOnly = papers.filter((p) => analytics.paperMatchesMetaFilters(p, [
-      { dimension: 'stimulus', id: 'street_view' },
+      { dimension: 'modality', id: 'street_view' },
     ]));
     expect(streetOnly.map((p) => p.title)).toEqual(['A', 'B', 'D']);
     expect(analytics.normalizeMetaFilters([
-      { dimension: 'stimulus', id: 'vr' },
-      { dimension: 'stimulus', id: 'photo' },
+      { dimension: 'modality', id: 'vr' },
+      { dimension: 'modality', id: 'scene_photo' },
     ])).toHaveLength(1);
+  });
+
+  test('reviewed facets win over rule tags and survive re-extraction', () => {
+    // eslint-disable-next-line global-require
+    const facets = require('./paperFacets');
+    const cleaned = facets.cleanPaperFacets({
+      survey: 'yes', task: ['multi_rating', 'nonsense'], sample: ['lt100', 'gt1000'], country: ['United Kingdom'],
+    });
+    expect(cleaned.problems).toHaveLength(1);
+    expect(cleaned.facets.sample).toEqual(['lt100']);
+    expect(facets.cleanPaperFacets({ colour: ['x'] }).problems[0]).toMatch(/unknown facet/);
+
+    const paper = {
+      title: 'X', year: 2024, abstract: 'Pairwise comparison of Google Street View safety with 300 respondents.',
+      analysis_meta: { extraction_version: 'v1', facets: { ...cleaned.facets, reviewed_at: '2026-11-26T00:00:00Z' } },
+    };
+    const metaOut = meta.ensureAnalysisMeta(paper);
+    expect(metaOut.extraction_version).toBe(meta.EXTRACTION_VERSION);
+    expect(metaOut.facets.task).toEqual(['multi_rating']);
+    const shown = facets.paperFacets({ ...paper, analysis_meta: metaOut });
+    expect(shown.reviewed).toBe(true);
+    expect(shown.task).toEqual(['multi_rating']);
+    expect(shown.modality).toEqual([]); // reviewed and not stated: no rule guess
+    expect(shown.country).toEqual(['UK']);
+    expect(analytics.paperMatchesMetaFilters({ ...paper, analysis_meta: metaOut }, [
+      { dimension: 'task', id: 'pairwise' },
+    ])).toBe(false);
   });
 
   test('trends follow provided paper set and ignore future years', () => {

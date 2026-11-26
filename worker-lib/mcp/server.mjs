@@ -272,6 +272,8 @@ const TOOLS = [
         status: { type: 'string', enum: PAPER_STATUSES },
         templateId: { type: 'string' },
         linked: { type: 'boolean' },
+        reviewed: { type: 'boolean', description: 'true: facets were saved by an admin; false: still guessed from keywords.' },
+        detail: { type: 'boolean', description: 'Also return each abstract and its current facets (for tagging).' },
         limit: { type: 'number', description: 'Default 50, at most 200.' },
         offset: { type: 'number' },
       },
@@ -303,6 +305,12 @@ const TOOLS = [
               keywords: { type: 'array', items: { type: 'string' } },
               status: { type: 'string', enum: PAPER_STATUSES },
               templateId: { type: 'string' },
+              facets: {
+                type: 'object',
+                description: 'Tags from reading the paper, same vocabulary as template_tags (no source): '
+                  + '{"survey":"yes"|"no", "concept":[...], "task":[...], "modality":[...], "participants":[...], "sample":["lt100"|"100to1000"|"gt1000"], "country":["China"], "city":["Wuhan"]}. '
+                  + 'Leave a dimension empty when the paper does not say it. Replaces earlier facets; null removes them.',
+              },
             },
           },
         },

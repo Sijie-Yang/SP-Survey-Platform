@@ -1,71 +1,75 @@
+import { facetLabel } from '../../lib/templateFacets';
+
 /**
- * Plain bilingual names for the paper library cards and their bars.
- * Keys are `${dimension}:${id}`; anything missing falls back to the English
- * taxonomy label.
+ * Names for the paper library cards and their bars. Bars use the template
+ * facet vocabulary (templateFacets.js); countries are stored in English and
+ * get a Chinese name here when we know one.
  */
-const ZH = {
-  'perception:safety': '安全感',
-  'perception:greenness': '绿化',
-  'perception:walkability': '步行友好',
-  'perception:aesthetics': '美观',
-  'perception:thermal': '热舒适',
-  'perception:comfort': '舒适',
-  'perception:preference': '视觉偏好',
-  'perception:enclosure': '围合 / 开敞',
-  'perception:liveliness': '活力',
-  'perception:restorativeness': '恢复性',
-  'perception:complexity': '视觉复杂度',
-  'perception:oppressiveness': '压抑感',
-  'perception:emotion': '情绪 / 压力',
-  'perception:soundscape': '声景',
-  'perception:place_identity': '场所感 / 城市意象',
-  'responseProtocol:rating_scale': '打分',
-  'responseProtocol:pairwise': '两两比较',
-  'responseProtocol:ranking': '排序',
-  'responseProtocol:discrete_choice': '选择实验',
-  'responseProtocol:categorical_annotation': '分类标注',
-  'responseProtocol:open_ended': '开放回答',
-  'stimulus:street_view': '街景图',
-  'stimulus:photo': '照片',
-  'stimulus:vr': 'VR',
-  'stimulus:panorama': '全景 / 360°',
-  'stimulus:rendered': '渲染图',
-  'stimulus:video': '视频',
-  'stimulus:on_site': '现场体验',
-  'scale:street': '街道',
-  'scale:neighborhood': '社区',
-  'scale:city': '城市整体',
-  'scale:building': '建筑立面',
-  'scale:indoor': '室内',
-  'scale:campus': '校园',
-  'countries:china': '中国',
-  'countries:usa': '美国',
-  'countries:uk': '英国',
-  'countries:japan': '日本',
-  'countries:korea': '韩国',
-  'countries:singapore': '新加坡',
-  'countries:australia': '澳大利亚',
-  'countries:netherlands': '荷兰',
-  'countries:germany': '德国',
-  'countries:france': '法国',
-  'countries:spain': '西班牙',
-  'countries:italy': '意大利',
-  'countries:sweden': '瑞典',
-  'countries:austria': '奥地利',
+const COUNTRY_ZH = {
+  China: '中国',
+  USA: '美国',
+  UK: '英国',
+  Japan: '日本',
+  'South Korea': '韩国',
+  Singapore: '新加坡',
+  Australia: '澳大利亚',
+  Netherlands: '荷兰',
+  Germany: '德国',
+  France: '法国',
+  Spain: '西班牙',
+  Italy: '意大利',
+  Sweden: '瑞典',
+  Austria: '奥地利',
+  Canada: '加拿大',
+  Chile: '智利',
+  Portugal: '葡萄牙',
+  Finland: '芬兰',
+  Israel: '以色列',
+  Malaysia: '马来西亚',
+  'Sri Lanka': '斯里兰卡',
+  'Hong Kong': '中国香港',
+  Taiwan: '中国台湾',
+  Brazil: '巴西',
+  India: '印度',
+  Iran: '伊朗',
+  Turkey: '土耳其',
+  Switzerland: '瑞士',
+  Denmark: '丹麦',
+  Norway: '挪威',
+  Belgium: '比利时',
+  Poland: '波兰',
+  Greece: '希腊',
+  'New Zealand': '新西兰',
+  Mexico: '墨西哥',
+  Colombia: '哥伦比亚',
+  Vietnam: '越南',
+  Thailand: '泰国',
+  Indonesia: '印度尼西亚',
+  Egypt: '埃及',
+  'South Africa': '南非',
+  'Saudi Arabia': '沙特阿拉伯',
+  'United Arab Emirates': '阿联酋',
+  Ireland: '爱尔兰',
+  'Czech Republic': '捷克',
+  Hungary: '匈牙利',
+  Russia: '俄罗斯',
 };
 
 export const CARD_TITLES = {
   year: { en: 'Year', zh: '发表年份' },
-  perception: { en: 'Perception', zh: '感知概念' },
-  responseProtocol: { en: 'Question type', zh: '提问方式' },
-  stimulus: { en: 'What people see', zh: '看什么' },
-  scale: { en: 'Spatial scale', zh: '空间尺度' },
-  countries: { en: 'Study location', zh: '研究地点' },
+  concept: { en: 'Perception', zh: '感知概念' },
+  task: { en: 'Question type', zh: '提问方式' },
+  modality: { en: 'What people see', zh: '看什么' },
+  participants: { en: 'Participants', zh: '参与者' },
+  sample: { en: 'Sample size', zh: '样本量' },
+  country: { en: 'Study location', zh: '研究地点' },
+  city: { en: 'City', zh: '城市' },
 };
 
 export function barLabel(zh, dimension, id, fallback) {
-  if (zh && ZH[`${dimension}:${id}`]) return ZH[`${dimension}:${id}`];
-  return fallback || id;
+  if (dimension === 'country') return (zh && COUNTRY_ZH[id]) || id;
+  const label = facetLabel(dimension, id, zh);
+  return label && label !== id ? label : (fallback || id);
 }
 
 export function cardTitle(zh, dimension) {

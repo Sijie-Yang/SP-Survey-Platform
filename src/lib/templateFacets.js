@@ -25,6 +25,8 @@ export const FACET_DIMENSIONS = [
       { id: 'scene_photo', en: "Other scene photos", zh: "其他场景照片" },
       { id: 'map', en: "Map", zh: "地图" },
       { id: 'in_situ', en: "In situ", zh: "实地" },
+      { id: 'vr', en: "VR", zh: "VR" },
+      { id: 'rendered', en: "Rendered / simulated", zh: "渲染或模拟图" },
     ],
   },
   {
@@ -36,6 +38,7 @@ export const FACET_DIMENSIONS = [
       { id: 'questionnaire', en: "Questionnaire scales", zh: "问卷量表" },
       { id: 'map_annotation', en: "Map annotation", zh: "地图标点" },
       { id: 'custom_page', en: "Custom page", zh: "自定义页面" },
+      { id: 'open_ended', en: "Open answers / interview", zh: "开放回答或访谈" },
     ],
   },
   {
@@ -87,6 +90,9 @@ export const FACET_DIMENSIONS = [
       { id: 'color', en: "Colour", zh: "色彩" },
       { id: 'question_framing', en: "Question framing", zh: "提问措辞" },
       { id: 'place', en: "Place", zh: "地点" },
+      { id: 'emotion', en: "Emotion / stress", zh: "情绪或压力" },
+      { id: 'soundscape', en: "Soundscape", zh: "声景" },
+      { id: 'sense_of_place', en: "Sense of place", zh: "场所感" },
     ],
   },
   {

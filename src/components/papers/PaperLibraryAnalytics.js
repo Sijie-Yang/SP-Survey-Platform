@@ -15,11 +15,12 @@ const TONES = {
 
 const CARD_TONE = {
   year: 'ink',
-  perception: 'teal',
-  responseProtocol: 'moss',
-  stimulus: 'amber',
-  scale: 'slate',
-  countries: 'coral',
+  concept: 'teal',
+  task: 'moss',
+  modality: 'amber',
+  participants: 'slate',
+  sample: 'ink',
+  country: 'coral',
 };
 
 const toneOf = (dimension) => TONES[CARD_TONE[dimension]] || TONES.slate;
@@ -74,9 +75,9 @@ function YearCard({ view, activeId, onSelect, zh }) {
       : `${view.yearMin}–${view.yearMax} · ${Math.round(view.recentShare * 100)}% in the last 5 years`)
     : '';
   return (
-    <Box sx={cardSx}>
+    <Box sx={{ ...cardSx, gridColumn: '1 / -1' }}>
       <CardHead dimension="year" sub={sub} zh={zh} />
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.4, height: 132 }}>
+      <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.4, height: 112 }}>
         {view.years.map((row) => {
           const selected = row.id && activeId === row.id;
           const h = row.count ? Math.max(4, Math.round((row.count / max) * 96)) : 2;
@@ -126,8 +127,9 @@ function YearCard({ view, activeId, onSelect, zh }) {
 function BarCard({ card, activeId, onSelect, zh }) {
   const t = toneOf(card.dimension);
   const max = Math.max(...card.rows.map((r) => r.count), 1);
-  const sub = card.dimension === 'responseProtocol'
-    ? (zh ? `${card.tagged} 篇摘要写明了` : `${card.tagged} abstracts say so`)
+  const stated = card.dimension === 'task' || card.dimension === 'participants' || card.dimension === 'sample';
+  const sub = stated
+    ? (zh ? `${card.tagged} 篇写明了` : `${card.tagged} papers say so`)
     : (zh ? `${card.tagged} 篇能识别出` : `${card.tagged} papers tagged`);
   return (
     <Box sx={cardSx}>
@@ -198,8 +200,8 @@ function BarCard({ card, activeId, onSelect, zh }) {
           sx={{ mt: 1, px: 1, py: 0.5, borderRadius: 1, bgcolor: '#fffbeb', color: '#92400e' }}
         >
           {zh
-            ? `多数摘要不写提问方式，这里只代表写了的 ${card.tagged} 篇。`
-            : `Most abstracts do not name the question type; this covers only ${card.tagged} papers.`}
+            ? `多数摘要没写${cardTitle(true, card.dimension)}，这里只代表写了的 ${card.tagged} 篇。`
+            : `Most abstracts do not say this; this covers only ${card.tagged} papers.`}
         </Typography>
       )}
     </Box>
@@ -243,8 +245,8 @@ const PaperLibraryAnalytics = memo(function PaperLibraryAnalytics({
     >
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.25 }}>
         {zh
-          ? '标签按标题、摘要和关键词自动识别。点任意一条柱子只看这类论文，再点一次取消。'
-          : 'Tags are read automatically from titles, abstracts and keywords. Click a bar to show only those papers; click again to undo.'}
+          ? `标签和模板库用同一套分类。${view.reviewed ? `其中 ${view.reviewed} 篇已逐篇读摘要核对，其余` : ''}按标题、摘要和关键词自动识别。点任意一条柱子只看这类论文，再点一次取消。`
+          : `Tags use the same categories as the template library. ${view.reviewed ? `${view.reviewed} papers were checked by reading the abstract; the rest are ` : 'They are '}read automatically from titles, abstracts and keywords. Click a bar to show only those papers; click again to undo.`}
       </Typography>
       <Box
         sx={{

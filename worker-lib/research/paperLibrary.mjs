@@ -9,6 +9,7 @@
 
 import { supabaseRest } from '../supabaseUserClient.mjs';
 import { ensureAnalysisMeta } from '../../src/lib/researchPaperMeta.mjs';
+import { cleanPaperFacets, paperFacets } from '../../src/lib/paperFacets.js';
 import { PRESET_QUERIES, searchBothProviders } from '../researchProviders.mjs';
 
 export const PAPER_STATUSES = ['candidate', 'approved', 'rejected', 'archived'];
@@ -91,7 +92,16 @@ export function cleanPaperInput(input = {}) {
   if ('templateId' in input) {
     out.template_id = input.templateId == null || input.templateId === '' ? null : text(input.templateId, 120);
   }
-  return { fields: out, problems };
+  let facets;
+  if ('facets' in input) {
+    if (input.facets === null) facets = null;
+    else {
+      const cleaned = cleanPaperFacets(input.facets);
+      problems.push(...cleaned.problems);
+      facets = cleaned.facets;
+    }
+  }
+  return { fields: out, problems, facets };
 }
 
 async function rows(env, path, query) {
@@ -117,7 +127,7 @@ async function findExisting(env, { id, doi, title, year }) {
 
 /** Admin list: filter by text in the title, DOI, status or template. */
 export async function listPapers(env, args = {}) {
-  const parts = [`select=${LIST_COLUMNS}`];
+  const parts = [`select=${args.detail ? `${LIST_COLUMNS},abstract,analysis_meta` : LIST_COLUMNS}`];
   const doi = args.doi ? normalizeDoi(args.doi) : null;
   if (args.doi && !doi) throw fail('doi is not a DOI (10.xxxx/...).');
   if (doi) parts.push(`doi=ilike.${encodeURIComponent(doi.replace(/[%_*\\]/g, (c) => `\\${c}`))}`);
@@ -128,12 +138,18 @@ export async function listPapers(env, args = {}) {
   if (args.templateId) parts.push(`template_id=eq.${encodeURIComponent(text(args.templateId, 120))}`);
   if (args.linked === true) parts.push('template_id=not.is.null');
   if (args.linked === false) parts.push('template_id=is.null');
+  if (args.reviewed === true) parts.push('analysis_meta->facets->>reviewed_at=not.is.null');
+  if (args.reviewed === false) parts.push('analysis_meta->facets->>reviewed_at=is.null');
   const q = text(args.search, 200).replace(/[%*(),.]/g, ' ').trim();
   if (q) parts.push(`title=ilike.${encodeURIComponent(`*${q}*`)}`);
   const limit = Math.min(LIST_MAX, Math.max(1, Number(args.limit) || 50));
   const offset = Math.max(0, Number(args.offset) || 0);
   parts.push('order=year.desc.nullslast,title.asc', `limit=${limit}`, `offset=${offset}`);
-  const papers = await rows(env, '/rest/v1/research_papers', `?${parts.join('&')}`);
+  let papers = await rows(env, '/rest/v1/research_papers', `?${parts.join('&')}`);
+  if (args.detail) {
+    // The abstract plus the facets the page shows now (reviewed, or guessed by rules).
+    papers = papers.map(({ analysis_meta: meta, ...p }) => ({ ...p, facets: paperFacets({ ...p, analysis_meta: meta }) }));
+  }
   return {
     success: true,
     papers,
@@ -160,7 +176,7 @@ export async function savePapers(env, ctx, papers) {
   const knownTemplates = new Map();
   for (let i = 0; i < papers.length; i += 1) {
     const input = papers[i] || {};
-    const { fields, problems } = cleanPaperInput(input);
+    const { fields, problems, facets } = cleanPaperInput(input);
     const label = fields.doi || fields.title || input.id || `#${i + 1}`;
     if (problems.length) {
       results.push({ index: i, paper: label, result: 'error', error: problems.join('; ') });
@@ -193,8 +209,20 @@ export async function savePapers(env, ctx, papers) {
           }
         }
         const patch = { ...fields, ...(fields.status && fields.status !== existing.status ? review : {}), updated_at: now };
-        if ('title' in fields || 'abstract' in fields || 'keywords' in fields) {
-          patch.analysis_meta = ensureAnalysisMeta({ ...existing, ...patch, analysis_meta: null });
+        const textChanged = 'title' in fields || 'abstract' in fields || 'keywords' in fields;
+        if (textChanged || facets !== undefined) {
+          // Re-extract the keyword tags when the text changed; reviewed facets are kept
+          // unless this call sets (or clears, with null) them.
+          const kept = existing.analysis_meta?.facets ? { facets: existing.analysis_meta.facets } : null;
+          let meta = textChanged
+            ? ensureAnalysisMeta({ ...existing, ...patch, analysis_meta: kept })
+            : ensureAnalysisMeta(existing);
+          if (facets !== undefined) {
+            meta = { ...meta };
+            if (facets === null) delete meta.facets;
+            else meta.facets = { ...facets, reviewed_at: now, reviewed_by: ctx.userId || null };
+          }
+          patch.analysis_meta = meta;
         }
         await supabaseRest(env, {
           path: '/rest/v1/research_papers',
@@ -228,6 +256,7 @@ export async function savePapers(env, ctx, papers) {
         updated_at: now,
       };
       row.analysis_meta = ensureAnalysisMeta(row);
+      if (facets) row.analysis_meta = { ...row.analysis_meta, facets: { ...facets, reviewed_at: now, reviewed_by: ctx.userId || null } };
       const created = await supabaseRest(env, {
         path: '/rest/v1/research_papers',
         method: 'POST',

@@ -123,7 +123,7 @@ export async function upsertResearchCandidates(papers, {
     if (doi) {
       const { data } = await db
         .from('research_papers')
-        .select('id, status, sources, abstract, s2_paper_id, crossref_doi, keywords, relevance_score, template_fit')
+        .select('id, status, sources, abstract, s2_paper_id, crossref_doi, keywords, relevance_score, template_fit, analysis_meta')
         .ilike('doi', doi)
         .maybeSingle();
       existing = data;
@@ -131,7 +131,7 @@ export async function upsertResearchCandidates(papers, {
       // No DOI: dedupe by exact title + year when possible
       let q = db
         .from('research_papers')
-        .select('id, status, sources, abstract, s2_paper_id, crossref_doi, keywords, relevance_score, template_fit')
+        .select('id, status, sources, abstract, s2_paper_id, crossref_doi, keywords, relevance_score, template_fit, analysis_meta')
         .eq('title', p.title)
         .limit(1);
       if (p.year) q = q.eq('year', p.year);
@@ -178,7 +178,11 @@ export async function upsertResearchCandidates(papers, {
         keywords: (existing.keywords?.length ? existing.keywords : base.keywords),
         updated_at: base.updated_at,
       };
-      if (withMeta) patch.analysis_meta = base.analysis_meta;
+      if (withMeta) {
+        // Keep facets an admin saved after reading the paper.
+        const facets = existing.analysis_meta?.facets;
+        patch.analysis_meta = facets ? { ...base.analysis_meta, facets } : base.analysis_meta;
+      }
       return db.from('research_papers').update(patch).eq('id', existing.id);
     };
 

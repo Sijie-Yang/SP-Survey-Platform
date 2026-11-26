@@ -628,5 +628,8 @@ export function ensureAnalysisMeta(paper, opts = {}) {
   ) {
     return existing;
   }
-  return extractAnalysisMeta(paper, opts);
+  const fresh = extractAnalysisMeta(paper, opts);
+  // Facets an admin saved by reading the paper survive every re-extraction.
+  if (existing?.facets && typeof existing.facets === 'object') fresh.facets = existing.facets;
+  return fresh;
 }
