@@ -1,0 +1,734 @@
+{
+ "ai": {
+  "all": {
+   "calls": 4,
+   "own_usd": 0.072,
+   "free_usd": 0.429,
+   "free_users": 2,
+   "estimated_usd": 0.492
+  },
+  "d30": {
+   "calls": 4,
+   "tokens": 1396000,
+   "own_usd": 0.072,
+   "ai_users": 4,
+   "free_usd": 0.429,
+   "byok_users": 1,
+   "free_calls": 2,
+   "free_users": 2,
+   "prompt_tokens": 1280000,
+   "cache_read_tokens": 20000
+  },
+  "days": [
+   {
+    "day": "2026-10-28",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-10-29",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-10-30",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-10-31",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-01",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-02",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-03",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-04",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-05",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-06",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-07",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-08",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-09",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-10",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-11",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-12",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-13",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-14",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-15",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-16",
+    "calls": 1,
+    "own_usd": 0,
+    "free_usd": 0.42
+   },
+   {
+    "day": "2026-11-17",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-18",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-19",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-20",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-21",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-22",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-23",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-24",
+    "calls": 0,
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-25",
+    "calls": 2,
+    "own_usd": 0.072,
+    "free_usd": 0
+   },
+   {
+    "day": "2026-11-26",
+    "calls": 1,
+    "own_usd": 0,
+    "free_usd": 0.009
+   }
+  ],
+  "month": {
+   "own_usd": 0.072,
+   "free_usd": 0.429
+  },
+  "since": "2026-11-26T06:58:51.101436+00:00",
+  "models": [
+   {
+    "usd": 0.501,
+    "calls": 3,
+    "model": "deepseek-flash",
+    "provider": "deepseek",
+    "unpriced": false,
+    "prompt_tokens": 1230000,
+    "cache_read_tokens": 20000,
+    "completion_tokens": 115000
+   }
+  ],
+  "months": [
+   {
+    "calls": 0,
+    "month": "2025-12",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-01",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-02",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-03",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-04",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-05",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-06",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-07",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-08",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-09",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 0,
+    "month": "2026-10",
+    "own_usd": 0,
+    "free_usd": 0
+   },
+   {
+    "calls": 4,
+    "month": "2026-11",
+    "own_usd": 0.072,
+    "free_usd": 0.429
+   }
+  ],
+  "features": [
+   {
+    "usd": 0.492,
+    "calls": 3,
+    "users": 3,
+    "feature": "assistant"
+   },
+   {
+    "usd": 0.009,
+    "calls": 1,
+    "users": 1,
+    "feature": "assistant-spscheme"
+   }
+  ],
+  "free_users": [
+   {
+    "usd": 0.42,
+    "calls": 1,
+    "email": "a@x",
+    "tokens": 1100000,
+    "last_at": "2026-11-16T06:58:50.966299+00:00",
+    "projects": 1
+   },
+   {
+    "usd": 0.009,
+    "calls": 1,
+    "email": "b@x",
+    "tokens": 35000,
+    "last_at": "2026-11-26T06:58:51.101436+00:00",
+    "projects": 0
+   }
+  ],
+  "estimated_since": "2026-11-16T06:58:50.966299+00:00"
+ },
+ "days": [
+  {
+   "day": "2026-10-28",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-10-29",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-10-30",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-10-31",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-01",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-02",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-03",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-04",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-05",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-06",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-07",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-08",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-09",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-10",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-11",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-12",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-13",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-14",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-15",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-16",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-17",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-18",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-19",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-20",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-21",
+   "users": 1,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-22",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-23",
+   "users": 0,
+   "visits": 0,
+   "projects": 1,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-24",
+   "users": 1,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-25",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 1
+  },
+  {
+   "day": "2026-11-26",
+   "users": 0,
+   "visits": 10,
+   "projects": 0,
+   "visitors": 4,
+   "responses": 1
+  }
+ ],
+ "before": {
+  "users": 1,
+  "projects": 0,
+  "responses": 0
+ },
+ "funnel": {
+  "users": 4,
+  "with_50": 1,
+  "published": 1,
+  "with_project": 3,
+  "with_responses": 1
+ },
+ "months": [
+  {
+   "month": "2025-12",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-01",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-02",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-03",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-04",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-05",
+   "users": 0,
+   "visits": 0,
+   "projects": 1,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-06",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-07",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-08",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 0
+  },
+  {
+   "month": "2026-09",
+   "users": 0,
+   "visits": 0,
+   "projects": 0,
+   "visitors": 0,
+   "responses": 3
+  },
+  {
+   "month": "2026-10",
+   "users": 1,
+   "visits": 5,
+   "projects": 1,
+   "visitors": 2,
+   "responses": 31
+  },
+  {
+   "month": "2026-11",
+   "users": 2,
+   "visits": 10,
+   "projects": 1,
+   "visitors": 4,
+   "responses": 26
+  }
+ ],
+ "recent": {
+  "users": 2,
+  "visits": 10,
+  "feedback": 0,
+  "projects": 1,
+  "visitors": 4,
+  "responses": 30,
+  "users_prev": 1,
+  "visits_prev": 5,
+  "active_users": 4,
+  "forum_threads": 0,
+  "projects_prev": 1,
+  "visitors_prev": 2,
+  "responses_prev": 30,
+  "active_projects": 1
+ },
+ "totals": {
+  "users": 4,
+  "visits": 15,
+  "feedback": 0,
+  "projects": 3,
+  "visitors": 6,
+  "responses": 60,
+  "forum_posts": 0,
+  "feedback_new": 0,
+  "visits_since": "2026-10-17",
+  "forum_threads": 0
+ },
+ "subsidy": {
+  "routes": [
+   {
+    "model": "deepseek-flash",
+    "provider": "deepseek"
+   }
+  ],
+  "enabled": true,
+  "expires_at": null
+ },
+ "generated_at": "2026-11-26T07:00:59.184655+00:00",
+ "top_projects": [
+  {
+   "id": "p1",
+   "name": "Street safety",
+   "total": 60,
+   "last30": 30,
+   "sp_scheme": true,
+   "owner_email": "a@x"
+  }
+ ],
+ "project_kinds": {
+  "classic": 2,
+  "sp_scheme": 1
+ }
+}
