@@ -8,7 +8,7 @@
  * - no persisted survey_methods alias; legacy readers migrate at ensureAnalysisMeta
  */
 
-export const EXTRACTION_VERSION = 'v4';
+export const EXTRACTION_VERSION = 'v5';
 
 /** @typedef {{ id: string, label: string, pattern: RegExp, exclude?: RegExp, require?: RegExp, priority?: number, chart?: boolean }} TaxonomyTerm */
 /** @typedef {{ id: string, label: string, field: string, cardinality: 'single'|'multi', chart: boolean, terms: TaxonomyTerm[] }} TaxonomyDimension */
@@ -73,6 +73,9 @@ export const TAXONOMY_REGISTRY = {
       { id: 'restorativeness', label: 'Restorativeness', pattern: /\b(restorative|restorativeness|attention restoration)\b/i, priority: 10 },
       { id: 'complexity', label: 'Visual complexity', pattern: /\b(visual complexity|architectural diversity)\b/i, priority: 10 },
       { id: 'oppressiveness', label: 'Oppressiveness', pattern: /\b(oppressive|oppressiveness)\b/i, priority: 10 },
+      { id: 'emotion', label: 'Emotion / stress', pattern: /\b(emotion\w*|psychological stress|perceived stress|stress recovery|stress reduction|anxiety|mood)\b/i, exclude: /\b(heat stress|thermal stress)\b/i, priority: 10 },
+      { id: 'soundscape', label: 'Soundscape', pattern: /\b(soundscape\w*|audio-?visual|acoustic comfort|noise annoyance)\b/i, priority: 10 },
+      { id: 'place_identity', label: 'Place identity / imageability', pattern: /\b(sense of place|place identity|place attachment|imageability|urban image|image of the city)\b/i, priority: 10 },
     ],
   },
   visual_data_sources: {
@@ -98,6 +101,8 @@ export const TAXONOMY_REGISTRY = {
     terms: [
       { id: 'immersive_vr', label: 'Immersive VR', pattern: /\b(virtual reality|immersive virtual|\bvr\b|head-mounted|hmd\b)\b/i, exclude: /\b(svr|overview)\b/i, priority: 20 },
       { id: 'panorama_360', label: 'Panorama / 360°', pattern: /\b(panoram\w*|360[-\s]?degree|360°)\b/i, priority: 15 },
+      { id: 'video', label: 'Video', pattern: /\b(video\w*|video-based)\b/i, priority: 15 },
+      { id: 'on_site', label: 'On-site visit', pattern: /\b(on-site (?:survey|experiment|assessment|evaluation)\w*|in situ|in-situ|field experiment\w*|walking interview\w*|site visit\w*)\b/i, priority: 15 },
       { id: 'static_2d', label: 'Static 2D images', pattern: /\b(static image\w*|2d image\w*|photograph\w*|photo-based)\b/i, exclude: /\b(aerial|satellite|remote sensing)\b/i, priority: 5 },
     ],
   },
@@ -133,10 +138,10 @@ export const TAXONOMY_REGISTRY = {
     cardinality: 'multi',
     chart: true,
     terms: [
-      { id: 'rating_scale', label: 'Rating / Likert scale', pattern: /\b(likert|rating scale\w*|5[- ]?point|7[- ]?point|semantic differential|score the images)\b/i, priority: 20 },
+      { id: 'rating_scale', label: 'Rating / Likert scale', pattern: /\b(likert|rating scale\w*|5[- ]?point|7[- ]?point|semantic differential|score the images|rated (?:the |each )?(?:images?|photos?|scenes?|streets?|views?)|(?:image|photo|scene|view) ratings?)\b/i, priority: 20 },
       { id: 'pairwise', label: 'Pairwise comparison', pattern: /\b(pairwise|paired comparison\w*|forced[- ]choice)\b/i, priority: 20 },
       { id: 'ranking', label: 'Ranking', pattern: /\b(rank(?:ing|ed| the)|order(?:ed)? preference)\b/i, priority: 15 },
-      { id: 'discrete_choice', label: 'Discrete choice', pattern: /\b(choice experiment\w*|discrete choice|stated preference|maxdiff|max[- ]?diff)\b/i, priority: 20 },
+      { id: 'discrete_choice', label: 'Discrete choice', pattern: /\b(choice experiment\w*|discrete choice|stated preference|stated choice|conjoint|best[- ]worst|maxdiff|max[- ]?diff)\b/i, priority: 20 },
       { id: 'categorical_annotation', label: 'Categorical annotation', pattern: /\b(label(?:l)?ed (?:the )?image\w*|image annotation|categorical annotation|tagged (?:the )?scene)\b/i, priority: 10 },
       { id: 'open_ended', label: 'Open-ended response', pattern: /\b(open[- ]ended|free[- ]text|written response)\b/i, priority: 10 },
     ],
@@ -623,5 +628,8 @@ export function ensureAnalysisMeta(paper, opts = {}) {
   ) {
     return existing;
   }
-  return extractAnalysisMeta(paper, opts);
+  const fresh = extractAnalysisMeta(paper, opts);
+  // Facets an admin saved by reading the paper survive every re-extraction.
+  if (existing?.facets && typeof existing.facets === 'object') fresh.facets = existing.facets;
+  return fresh;
 }

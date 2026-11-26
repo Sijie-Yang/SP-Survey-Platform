@@ -89,6 +89,34 @@ describe('paper_list and paper_save', () => {
     assert.equal(db.tables.research_papers[0].reviewed_by, undefined);
   });
 
+  it('saves reviewed facets, keeps them when the abstract changes, and lists them for tagging', async () => {
+    db = fakeSupabase({ admins: ADMIN, papers: [known(), known({ id: 'p2', doi: '10.1/other', title: 'Other' })] });
+    const bad = await callTool(baseEnv(), 'paper_save', { confirm: true, papers: [{ id: 'p1', facets: { task: ['guessing'] } }] });
+    assert.match(bad.body.results[0].error, /task: "guessing"/);
+    const res = await callTool(baseEnv(), 'paper_save', {
+      confirm: true,
+      papers: [{ id: 'p1', facets: { survey: 'yes', task: ['pairwise'], modality: ['street_view'], concept: ['safety'], participants: ['crowd'], sample: ['gt1000'], country: ['USA'], city: ['Boston'] } }],
+    });
+    assert.equal(res.body.updated, 1, JSON.stringify(res.body));
+    const saved = db.tables.research_papers[0].analysis_meta.facets;
+    assert.deepEqual(saved.task, ['pairwise']);
+    assert.equal(saved.reviewed_by, 'u1');
+    assert.ok(saved.reviewed_at);
+
+    await callTool(baseEnv(), 'paper_save', { confirm: true, papers: [{ id: 'p1', abstract: 'Street view images rated in pairs by 5000 online volunteers.' }] });
+    assert.deepEqual(db.tables.research_papers[0].analysis_meta.facets.city, ['Boston']);
+
+    const todo = await callTool(baseEnv(), 'paper_list', { reviewed: false, detail: true });
+    assert.deepEqual(todo.body.papers.map((p) => p.id), ['p2']);
+    assert.equal(todo.body.papers[0].facets.reviewed, false);
+    assert.equal(typeof todo.body.papers[0].abstract, 'string');
+    const done = await callTool(baseEnv(), 'paper_list', { reviewed: true, detail: true });
+    assert.deepEqual(done.body.papers[0].facets.country, ['USA']);
+
+    await callTool(baseEnv(), 'paper_save', { confirm: true, papers: [{ id: 'p1', facets: null }] });
+    assert.equal(db.tables.research_papers[0].analysis_meta.facets, undefined);
+  });
+
   it('will not move a DOI onto another paper', async () => {
     db = fakeSupabase({ admins: ADMIN, papers: [known(), known({ id: 'p2', doi: '10.1/other', title: 'Other' })] });
     const res = await callTool(baseEnv(), 'paper_save', { confirm: true, papers: [{ id: 'p2', doi: '10.1007/978-3-319-46448-0_12' }] });

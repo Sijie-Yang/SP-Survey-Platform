@@ -60,7 +60,8 @@ function matches(row, params) {
   for (const [key, raw] of params) {
     if (RESERVED.has(key)) continue;
     const value = String(raw);
-    const field = row[key];
+    // JSON paths like analysis_meta->facets->>reviewed_at walk into the object.
+    const field = key.split(/->>?/).reduce((obj, part) => (obj == null ? obj : obj[part]), row);
     if (value.startsWith('eq.')) {
       if (field == null || String(field) !== value.slice(3)) return false;
     } else if (value === 'is.null') {

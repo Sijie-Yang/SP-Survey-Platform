@@ -9,6 +9,8 @@ import {
   REPORTING_SIGNALS,
   isHumanEvaluationMeta,
 } from './researchPaperMeta.mjs';
+import { PAPER_FACET_KEYS, paperFacets } from './paperFacets';
+import { FACET_DIMENSIONS, facetLabel } from './templateFacets';
 
 /** Canonical chart/filter dimension → analysis_meta field */
 export const DIMENSION_FIELD = {
@@ -267,128 +269,6 @@ export function buildPaperLibraryAnalytics(papers = [], opts = {}) {
   };
 }
 
-export function compareSeriesToBaseline(subsetRows = [], baselineRows = []) {
-  const baseMap = new Map((baselineRows || []).map((r) => [r.id, r]));
-  const ids = new Set([
-    ...(subsetRows || []).map((r) => r.id),
-    ...(baselineRows || []).map((r) => r.id),
-  ]);
-  return [...ids]
-    .map((id) => {
-      const sub = (subsetRows || []).find((r) => r.id === id);
-      const base = baseMap.get(id);
-      const count = sub?.count || 0;
-      const share = sub?.share || 0;
-      const baselineShare = base?.share || 0;
-      return {
-        id,
-        label: sub?.label || base?.label || id,
-        dimension: sub?.dimension || base?.dimension,
-        count,
-        share,
-        corpusShare: share,
-        taggedShare: sub?.taggedShare,
-        eligibleTotal: sub?.eligibleTotal,
-        taggedTotal: sub?.taggedTotal,
-        baselineCount: base?.count || 0,
-        baselineShare,
-        deltaPp: (share - baselineShare) * 100,
-      };
-    })
-    .filter((r) => r.count > 0 || r.baselineCount > 0)
-    .sort((a, b) => b.share - a.share || b.count - a.count || a.label.localeCompare(b.label));
-}
-
-export function buildCoOccurrenceMatrix(
-  papers = [],
-  rowField,
-  colField,
-  {
-    rowDimension,
-    colDimension,
-    maxRows = 8,
-    maxCols = 8,
-    humanOnly = false,
-  } = {},
-) {
-  const list = humanOnly ? humanEvaluationPapers(papers) : (papers || []);
-  const rowTerms = TAXONOMY[rowField] || [];
-  const colTerms = TAXONOMY[colField] || [];
-  const rowCounts = new Map(rowTerms.map((t) => [t.id, 0]));
-  const colCounts = new Map(colTerms.map((t) => [t.id, 0]));
-  const cellCounts = new Map();
-  let bothTagged = 0;
-
-  for (const paper of list) {
-    const meta = ensureAnalysisMeta(paper);
-    const rows = meta[rowField] || [];
-    const cols = meta[colField] || [];
-    if (rows.length && cols.length) bothTagged += 1;
-    for (const r of rows) rowCounts.set(r, (rowCounts.get(r) || 0) + 1);
-    for (const c of cols) colCounts.set(c, (colCounts.get(c) || 0) + 1);
-    for (const r of rows) {
-      for (const c of cols) {
-        const key = `${r}|${c}`;
-        cellCounts.set(key, (cellCounts.get(key) || 0) + 1);
-      }
-    }
-  }
-
-  const topRows = [...rowCounts.entries()]
-    .filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxRows)
-    .map(([id]) => id);
-  const topCols = [...colCounts.entries()]
-    .filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxCols)
-    .map(([id]) => id);
-
-  let max = 0;
-  const cells = [];
-  for (const r of topRows) {
-    const rowTotal = rowCounts.get(r) || 0;
-    for (const c of topCols) {
-      const count = cellCounts.get(`${r}|${c}`) || 0;
-      if (count > max) max = count;
-      cells.push({
-        rowId: r,
-        colId: c,
-        count,
-        rowShare: rowTotal ? count / rowTotal : 0,
-        rowDimension,
-        colDimension,
-        rowLabel: taxonomyLabel(rowField, r),
-        colLabel: taxonomyLabel(colField, c),
-      });
-    }
-  }
-
-  return {
-    rowField,
-    colField,
-    rowDimension,
-    colDimension,
-    humanOnly,
-    effectiveN: bothTagged,
-    cohortSize: list.length,
-    rows: topRows.map((id) => ({
-      id,
-      label: taxonomyLabel(rowField, id),
-      count: rowCounts.get(id) || 0,
-    })),
-    cols: topCols.map((id) => ({
-      id,
-      label: taxonomyLabel(colField, id),
-      count: colCounts.get(id) || 0,
-    })),
-    cells,
-    max,
-    total: list.length,
-  };
-}
-
 export function buildYearShareTrends(
   papers = [],
   field,
@@ -482,149 +362,131 @@ export function buildYearShareTrends(
   };
 }
 
-export function buildLibrarySpotlights(analytics, { scopeLabel = 'Library' } = {}) {
-  if (!analytics?.total) return [];
-  const spots = [];
-  const topPerception = analytics.perception?.[0];
-  const topSource = analytics.visualSource?.[0];
-  const topProtocol = analytics.responseProtocol?.[0];
+/**
+ * The cards on the public paper library page, in order. They use the same
+ * facet vocabulary as templates (paperFacets.js): reviewed facets when an
+ * admin has read the paper, otherwise a guess from the keyword tags.
+ */
+export const SIMPLE_CARDS = [
+  { dimension: 'concept', trend: true },
+  { dimension: 'task', trend: true, lowCoverageNote: true },
+  { dimension: 'modality', trend: true },
+  { dimension: 'participants', trend: false, lowCoverageNote: true },
+  { dimension: 'sample', trend: false, lowCoverageNote: true, fixedOrder: true },
+  { dimension: 'country', trend: false },
+];
 
-  if (topPerception) {
-    spots.push({
-      id: 'perception',
-      eyebrow: `${scopeLabel} · top construct`,
-      title: topPerception.label,
-      detail: `${topPerception.count} papers · ${Math.round(topPerception.share * 100)}%`,
-      filter: { dimension: 'perception', id: topPerception.id, label: topPerception.label },
-      tone: 'teal',
-    });
-  }
-  if (topSource) {
-    spots.push({
-      id: 'visualSource',
-      eyebrow: `${scopeLabel} · visual source`,
-      title: topSource.label,
-      detail: `${topSource.count} papers · ${Math.round(topSource.share * 100)}%`,
-      filter: { dimension: 'visualSource', id: topSource.id, label: topSource.label },
-      tone: 'amber',
-    });
-  }
-  if (topProtocol) {
-    spots.push({
-      id: 'responseProtocol',
-      eyebrow: `${scopeLabel} · response protocol`,
-      title: topProtocol.label,
-      detail: `${topProtocol.count} papers · ${Math.round(topProtocol.share * 100)}%`,
-      filter: { dimension: 'responseProtocol', id: topProtocol.id, label: topProtocol.label },
-      tone: 'moss',
-    });
-  }
+/** Years shown one by one; anything older goes into one "earlier" bar. */
+export const SIMPLE_YEAR_SPAN = 12;
 
-  const byYear = analytics.byYear || [];
-  const maxYear = analytics.maxYear ?? currentAnalyticsYear();
-  const windowStart = maxYear - 4;
-  const recent = byYear.filter((r) => {
-    const y = Number(r.id);
-    return y >= windowStart && y <= maxYear;
+const FACET_DIMS = new Set(PAPER_FACET_KEYS);
+
+export function isPaperFacetDimension(dimension) {
+  return FACET_DIMS.has(dimension);
+}
+
+/**
+ * Ids whose share of papers grew over the last years (same rule as before:
+ * later half of the window beats the earlier half by > 2 points, ≥ 5 papers).
+ */
+function risingIds(list, idsOf, maxYear, windowYears = 8, minYearN = 8) {
+  const totals = new Map();
+  const tags = new Map();
+  for (const p of list) {
+    const y = Number(p.year);
+    if (!Number.isFinite(y) || y > maxYear) continue;
+    totals.set(y, (totals.get(y) || 0) + 1);
+    if (!tags.has(y)) tags.set(y, new Map());
+    const m = tags.get(y);
+    for (const id of idsOf(p)) m.set(id, (m.get(id) || 0) + 1);
+  }
+  const years = [...totals.keys()].sort((a, b) => a - b).slice(-windowYears);
+  const stable = years.filter((y) => totals.get(y) >= minYearN);
+  const use = stable.length >= 2 ? stable : years;
+  if (use.length < 2) return new Set();
+  const ids = new Set();
+  for (const y of years) for (const id of (tags.get(y) || new Map()).keys()) ids.add(id);
+  const out = new Set();
+  const half = Math.max(1, Math.floor(use.length / 2));
+  for (const id of ids) {
+    const share = (y) => ((tags.get(y) || new Map()).get(id) || 0) / totals.get(y);
+    const avg = (arr) => arr.reduce((sum, y) => sum + share(y), 0) / arr.length;
+    const recent = years.reduce((sum, y) => sum + ((tags.get(y) || new Map()).get(id) || 0), 0);
+    if (avg(use.slice(Math.floor(use.length / 2))) - avg(use.slice(0, half)) > 0.02 && recent >= 5) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * Everything the simple library panel needs, computed on ONE paper set
+ * (whatever the reader has filtered down to). No baseline overlay, no tabs.
+ */
+export function buildSimpleLibraryView(papers = [], { maxYear = currentAnalyticsYear(), topN = 6 } = {}) {
+  const list = papers || [];
+  const total = list.length;
+
+  const yearCounts = new Map();
+  let dated = 0;
+  for (const p of list) {
+    const y = Number(p.year);
+    if (!Number.isFinite(y) || y > maxYear || y < 1900) continue;
+    dated += 1;
+    yearCounts.set(y, (yearCounts.get(y) || 0) + 1);
+  }
+  const firstShown = maxYear - SIMPLE_YEAR_SPAN + 1;
+  let earlier = 0;
+  for (const [y, n] of yearCounts) if (y < firstShown) earlier += n;
+  const years = [];
+  if (earlier) years.push({ id: null, label: `≤${firstShown - 1}`, count: earlier, earlier: true });
+  for (let y = firstShown; y <= maxYear; y += 1) {
+    years.push({ id: String(y), label: String(y), count: yearCounts.get(y) || 0 });
+  }
+  const recentFrom = maxYear - 4;
+  let recent = 0;
+  for (const [y, n] of yearCounts) if (y >= recentFrom) recent += n;
+  const allYears = [...yearCounts.keys()];
+
+  const facetsOf = new Map(list.map((p) => [p, paperFacets(p)]));
+  const reviewed = list.filter((p) => facetsOf.get(p).reviewed).length;
+
+  const cards = SIMPLE_CARDS.map((card) => {
+    const idsOf = (p) => facetsOf.get(p)[card.dimension] || [];
+    const counts = new Map();
+    let tagged = 0;
+    for (const p of list) {
+      const ids = idsOf(p);
+      if (ids.length) tagged += 1;
+      for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    const rising = card.trend ? risingIds(list, idsOf, maxYear) : new Set();
+    const order = (FACET_DIMENSIONS.find((d) => d.key === card.dimension)?.values || []).map((v) => v.id);
+    const rows = [...counts.entries()]
+      .map(([id, count]) => ({
+        id, label: facetLabel(card.dimension, id, false), count, rising: rising.has(id), dimension: card.dimension,
+      }))
+      .sort((a, b) => (card.fixedOrder
+        ? order.indexOf(a.id) - order.indexOf(b.id)
+        : b.count - a.count || a.label.localeCompare(b.label)))
+      .slice(0, topN);
+    return {
+      dimension: card.dimension,
+      tagged,
+      total,
+      lowCoverage: !!card.lowCoverageNote && total > 0 && tagged / total < 0.3,
+      rows,
+    };
   });
-  if (recent.length) {
-    const recentCount = recent.reduce((s, r) => s + r.count, 0);
-    const denom = byYear.reduce((s, r) => s + r.count, 0) || analytics.total;
-    const share = denom ? recentCount / denom : 0;
-    spots.push({
-      id: 'tempo',
-      eyebrow: `${scopeLabel} · tempo`,
-      title: `${Math.round(share * 100)}% in ${windowStart}–${maxYear}`,
-      detail: `${recentCount} of ${denom} dated papers`,
-      filter: null,
-      tone: 'ink',
-    });
-  }
-
-  return spots.slice(0, 4);
-}
-
-function buildTrendsBundle(papers) {
-  return {
-    responseProtocol: buildYearShareTrends(papers, 'response_protocols', {
-      dimension: 'responseProtocol',
-      topN: 5,
-    }),
-    perception: buildYearShareTrends(papers, 'perception_constructs', {
-      dimension: 'perception',
-      topN: 5,
-    }),
-    methods: buildYearShareTrends(papers, 'research_methods', {
-      dimension: 'researchMethods',
-      topN: 4,
-    }),
-  };
-}
-
-export function buildLibraryDashboard(allPapers = [], subsetPapers = null) {
-  const library = allPapers || [];
-  const subset = subsetPapers == null ? library : subsetPapers;
-  const baseline = buildPaperLibraryAnalytics(library);
-  const focused = buildPaperLibraryAnalytics(subset);
-  const isSubset = subset.length !== library.length;
-  const humanFocused = humanEvaluationPapers(subset);
-  const humanLibrary = humanEvaluationPapers(library);
 
   return {
-    baseline,
-    focused,
-    isSubset,
-    subsetTotal: subset.length,
-    libraryTotal: library.length,
-    humanFocusedTotal: humanFocused.length,
-    humanLibraryTotal: humanLibrary.length,
-    spotlights: buildLibrarySpotlights(
-      isSubset ? focused : baseline,
-      { scopeLabel: isSubset ? 'Focused subset' : 'Library' },
-    ),
-    compared: {
-      perception: compareSeriesToBaseline(focused.perception, baseline.perception),
-      visualSource: compareSeriesToBaseline(focused.visualSource, baseline.visualSource),
-      presentation: compareSeriesToBaseline(focused.presentation, baseline.presentation),
-      scale: compareSeriesToBaseline(focused.scale, baseline.scale),
-      responseProtocol: compareSeriesToBaseline(focused.responseProtocol, baseline.responseProtocol),
-      measurementChannel: compareSeriesToBaseline(focused.measurementChannel, baseline.measurementChannel),
-      recruitment: compareSeriesToBaseline(focused.recruitment, baseline.recruitment),
-      researchMethods: compareSeriesToBaseline(focused.researchMethods, baseline.researchMethods),
-      countries: compareSeriesToBaseline(focused.countries, baseline.countries),
-      regions: compareSeriesToBaseline(focused.regions, baseline.regions),
-    },
-    matrices: {
-      perceptionByProtocol: buildCoOccurrenceMatrix(
-        subset,
-        'perception_constructs',
-        'response_protocols',
-        {
-          rowDimension: 'perception',
-          colDimension: 'responseProtocol',
-          maxRows: 8,
-          maxCols: 6,
-          humanOnly: true,
-        },
-      ),
-      sourceByScale: buildCoOccurrenceMatrix(
-        subset,
-        'visual_data_sources',
-        'spatial_scales',
-        {
-          rowDimension: 'visualSource',
-          colDimension: 'scale',
-          maxRows: 6,
-          maxCols: 6,
-          humanOnly: false,
-        },
-      ),
-    },
-    trends: {
-      focused: buildTrendsBundle(subset),
-      baseline: buildTrendsBundle(library),
-    },
-    reporting: focused.reporting,
+    total,
+    dated,
+    reviewed,
+    yearMin: allYears.length ? Math.min(...allYears) : null,
+    yearMax: allYears.length ? Math.max(...allYears) : null,
+    recentFrom,
+    recentShare: dated ? recent / dated : 0,
+    years,
+    cards,
   };
 }
 
@@ -667,6 +529,7 @@ export function paperMatchesMetaFilters(paper, filters = []) {
     if (f.dimension === 'year') return String(paper.year) === String(f.id);
     if (f.dimension === 'venue') return String(paper.venue || '') === String(f.id);
     if (f.dimension === 'sample_size') return meta.sample_size?.bin === f.id;
+    if (isPaperFacetDimension(f.dimension)) return (paperFacets(paper)[f.dimension] || []).includes(f.id);
     const field = DIMENSION_FIELD[f.dimension] || f.dimension;
     const ids = meta[field] || [];
     return ids.includes(f.id);
@@ -677,6 +540,7 @@ export function filterLabel(filter) {
   if (!filter) return '';
   if (filter.dimension === 'year') return `Year ${filter.id}`;
   if (filter.dimension === 'venue') return filter.id;
+  if (isPaperFacetDimension(filter.dimension)) return facetLabel(filter.dimension, filter.id, false);
   if (filter.dimension === 'sample_size') {
     return `Sample ${taxonomyLabel('sample_size', filter.id) || filter.id}`;
   }
