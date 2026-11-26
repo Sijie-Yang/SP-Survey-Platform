@@ -4,6 +4,8 @@
  * If the Assistant is not configured, this throws and does not invent a translation.
  */
 
+import { usageMeter } from './usageLog.mjs';
+
 const NUMBER_RE = /\d+(?:\.\d+)?/g;
 const TOKEN_RE = /\{[^{}]+\}/g;
 const TAG_RE = /<\/?[a-zA-Z][^>]*>/g;
@@ -128,6 +130,7 @@ export async function handleSurveyTranslate(env, userId, body, deps = {}) {
     protocol: checked.route.protocol,
     compat: modelRecord?.compat,
     extra: checked.route.headers,
+    meter: usageMeter(env, { userId, binding, feature: 'translate', projectId: body?.projectId || null }),
     temperature: 0.2,
     maxTokens: Math.min(Number(modelRecord?.maxTokens) || 4096, 4096),
     messages: [

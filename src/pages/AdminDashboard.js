@@ -2456,7 +2456,7 @@ export default function AdminDashboard() {
           <Tab label="Doc / News 审核" />
         </Tabs>
       </Box>
-      {tab === 0 && <SiteGrowthSection />}
+      {tab === 0 && <SiteGrowthSection onOpenFreeModel={() => setTab(11)} onOpenFeedback={() => setTab(1)} />}
       {tab === 1 && <SiteFeedbackManagement />}
       {tab === 2 && <TemplateManagement />}
       {tab === 3 && <ProjectOverview />}

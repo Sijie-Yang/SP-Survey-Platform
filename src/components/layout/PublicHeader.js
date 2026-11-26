@@ -229,6 +229,14 @@ export function PublicFooter() {
         }}>
             {t.footerCite || 'Cite'}
           </Box>
+          {' · '}
+          <Box component={RouterLink} to="/privacy" sx={{
+          color: 'primary.main',
+          textDecoration: 'none',
+          fontWeight: 600
+        }}>
+            {t.footerPrivacy || 'Privacy'}
+          </Box>
         </Typography>
       </Container>
     </Box>;

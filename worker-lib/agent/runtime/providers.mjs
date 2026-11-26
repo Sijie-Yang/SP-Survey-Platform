@@ -3,6 +3,7 @@
  */
 
 import { modelRequest, toOpenAiTools } from './adapters.mjs';
+import { recordUsage } from '../usageLog.mjs';
 import {
   CATALOG_PROVIDERS,
   PROVIDER_ID_RE,
@@ -144,10 +145,14 @@ export async function listProviderModels(apiKey, provider, baseUrl, { protocol }
 }
 
 export async function chatCompletions(options) {
-  return modelRequest({
-    ...options,
-    protocol: options.protocol || providerMeta(options.provider).protocol || 'openai-completions',
+  const { meter, ...rest } = options || {};
+  const result = await modelRequest({
+    ...rest,
+    protocol: rest.protocol || providerMeta(rest.provider).protocol || 'openai-completions',
   });
+  // Admin dashboard: tokens and estimated cost of this call (never throws).
+  if (meter) await recordUsage(meter, rest, result?.usage);
+  return result;
 }
 
 export { toOpenAiTools };

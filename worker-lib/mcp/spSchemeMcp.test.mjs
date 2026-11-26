@@ -71,7 +71,8 @@ describe('sp_scheme_spec and survey_capabilities', () => {
     const { handleMcpRequest } = await import('./server.mjs');
     const res = await handleMcpRequest(new Request('https://sp-survey.org/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) }), {}, { kind: 'mcp', userId: 'u1', scopes: [] });
     const names = (await res.json()).result.tools.map((t) => t.name);
-    for (const name of ['sp_scheme_spec', 'sp_scheme_upload_url', 'sp_scheme_import', 'survey_download_url', 'template_publish']) assert.ok(names.includes(name), name);
+    for (const name of ['sp_scheme_spec', 'sp_scheme_upload_url', 'sp_scheme_import', 'survey_download_url']) assert.ok(names.includes(name), name);
+    assert.ok(!names.includes('template_publish'), 'admin tools are hidden when the admin check cannot run');
     assert.equal(names[1], 'sp_scheme_spec');
 
     const env = baseEnv();
@@ -992,5 +993,72 @@ describe('local server (server.js) and upload links', () => {
       Object.keys(process.env).forEach((key) => { if (!(key in saved)) delete process.env[key]; });
       Object.assign(process.env, saved);
     }
+  });
+});
+
+describe('tools/list for the Claude connector directory', () => {
+  async function listAs(userId) {
+    const { handleMcpRequest } = await import('./server.mjs');
+    const res = await handleMcpRequest(new Request('https://sp-survey.org/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) }), baseEnv(), { kind: 'mcp', userId, scopes: [] });
+    return (await res.json()).result.tools;
+  }
+
+  it('gives every tool a title and read-only / destructive hints, with short names', async () => {
+    db = fakeSupabase({ admins: [{ user_id: 'admin-1' }] });
+    const tools = await listAs('admin-1');
+    assert.ok(tools.length > 40);
+    for (const tool of tools) {
+      assert.ok(tool.name.length <= 64, tool.name);
+      assert.ok(tool.title && tool.annotations?.title === tool.title, `${tool.name} has a title`);
+      assert.equal(typeof tool.annotations.readOnlyHint, 'boolean', tool.name);
+      assert.equal(typeof tool.annotations.destructiveHint, 'boolean', tool.name);
+      assert.equal(tool.annotations.openWorldHint, false, tool.name);
+      if (tool.annotations.readOnlyHint) assert.equal(tool.annotations.destructiveHint, false, tool.name);
+    }
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t.annotations]));
+    for (const name of ['survey_delete_project', 'media_delete', 'survey_delete_response', 'survey_replace_draft', 'survey_rollback', 'sp_scheme_import']) {
+      assert.equal(byName[name].destructiveHint, true, name);
+    }
+    for (const name of ['survey_list_projects', 'survey_results_summary', 'survey_get_draft', 'sp_scheme_spec']) {
+      assert.equal(byName[name].readOnlyHint, true, name);
+    }
+  });
+
+  it('shows admin-only tools to platform admins only', async () => {
+    db = fakeSupabase({ admins: [{ user_id: 'admin-1' }] });
+    const { ADMIN_ONLY_TOOLS } = await import('./server.mjs');
+    const adminNames = (await listAs('admin-1')).map((t) => t.name);
+    const userNames = (await listAs('user-2')).map((t) => t.name);
+    for (const name of ADMIN_ONLY_TOOLS) {
+      assert.ok(adminNames.includes(name), `admin sees ${name}`);
+      assert.ok(!userNames.includes(name), `user does not see ${name}`);
+    }
+    assert.ok(userNames.includes('sp_scheme_import'));
+    const denied = await callTool(baseEnv(), 'paper_list', {}, { userId: 'user-2', scopes: ['surveys:read'] });
+    assert.equal(denied.isError, true);
+    assert.equal(denied.body.code, 'ADMIN_ONLY');
+  });
+
+  it('answers initialize with a supported protocol version', async () => {
+    const { handleMcpRequest } = await import('./server.mjs');
+    const init = async (protocolVersion) => (await (await handleMcpRequest(new Request('https://sp-survey.org/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion } }) }), {}, { kind: 'mcp', userId: 'u1', scopes: [] })).json()).result;
+    assert.equal((await init('2025-06-18')).protocolVersion, '2025-06-18');
+    assert.equal((await init('2025-11-25')).protocolVersion, '2025-11-25');
+    assert.equal((await init('1999-01-01')).protocolVersion, '2025-06-18');
+    assert.equal((await init('2025-06-18')).serverInfo.title, 'SP-Survey');
+  });
+
+  it('returns OAuth errors from the token endpoint (invalid_grant for a bad refresh token)', async () => {
+    db = fakeSupabase({ extraTables: { mcp_refresh_tokens: [] } });
+    globalThis.__env = baseEnv();
+    const res = await route('POST', 'https://sp-survey.org/oauth/token', 'grant_type=refresh_token&refresh_token=nope&client_id=c1', { 'content-type': 'application/x-www-form-urlencoded' });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.error, 'invalid_grant');
+    assert.match(body.error_description, /refresh token/i);
+    const missing = await (await route('POST', 'https://sp-survey.org/oauth/token', 'grant_type=authorization_code', { 'content-type': 'application/x-www-form-urlencoded' })).json();
+    assert.equal(missing.error, 'invalid_request');
+    const odd = await (await route('POST', 'https://sp-survey.org/oauth/token', 'grant_type=client_credentials', { 'content-type': 'application/x-www-form-urlencoded' })).json();
+    assert.equal(odd.error, 'unsupported_grant_type');
   });
 });

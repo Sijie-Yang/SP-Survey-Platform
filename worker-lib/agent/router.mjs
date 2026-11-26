@@ -216,6 +216,18 @@ function requireAgentScope(auth, scope) {
   }
 }
 
+/** Token endpoint errors in the OAuth 2.0 shape (RFC 6749 §5.2): { error, error_description }. */
+export function oauthErrorResponse(error) {
+  const code = error?.oauthError || (error?.status >= 500 ? 'server_error' : 'invalid_request');
+  return new Response(JSON.stringify({
+    error: code,
+    error_description: error?.message || code,
+  }), {
+    status: code === 'server_error' ? 500 : 400,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+  });
+}
+
 export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
   const url = new URL(request.url);
   const { pathname } = url;
@@ -346,9 +358,12 @@ export async function handleAgentAndMcpRoutes(request, env, ctx = null) {
       if (body.grant_type === 'refresh_token') {
         return jsonResponse(await refreshAccessToken(env, body, request));
       }
+      if (body.grant_type && body.grant_type !== 'authorization_code') {
+        return oauthErrorResponse(Object.assign(new Error(`Unsupported grant_type: ${String(body.grant_type).slice(0, 40)}`), { oauthError: 'unsupported_grant_type' }));
+      }
       return jsonResponse(await exchangeAuthorizationCode(env, body, request));
     } catch (error) {
-      return errorResponse(error, 400);
+      return oauthErrorResponse(error);
     }
   }
 

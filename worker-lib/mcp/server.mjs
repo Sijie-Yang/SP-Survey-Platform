@@ -808,7 +808,7 @@ const TOOLS = [
   },
   {
     name: 'survey_acquire_lease',
-    description: 'Acquire an edit lease so the browser assistant does not overwrite Codex.',
+    description: 'Acquire an edit lease so the in-browser assistant does not overwrite your edits from this AI client.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -901,6 +901,102 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
 ];
+
+/** Tools only platform admins can use: hidden from everyone else in tools/list (the server checks again on every call). */
+export const ADMIN_ONLY_TOOLS = new Set(['template_publish', 'paper_list', 'paper_save', 'news_list', 'news_save', 'wiki_list', 'wiki_submit', 'model_bench_routes', 'model_bench_start', 'model_bench_result']);
+
+// title + hints for every tool (MCP tool annotations; the Claude connector directory requires them).
+// read: only reads. destructive: may overwrite or delete what is already there. All tools act on SP-Survey only (openWorldHint false).
+const READ = { readOnlyHint: true, destructiveHint: false };
+const ADD = { readOnlyHint: false, destructiveHint: false };
+const CHANGE = { readOnlyHint: false, destructiveHint: true };
+const TOOL_ANNOTATIONS = {
+  survey_capabilities: ['Read how to use SP-Survey', READ],
+  sp_scheme_spec: ['Get the SP-Scheme page spec', READ],
+  sp_scheme_upload_url: ['Get an upload link for a study page or zip', ADD],
+  sp_scheme_import: ['Import a study page (SP-Scheme)', CHANGE],
+  survey_download_url: ['Get a download link for study data', READ],
+  template_publish: ['Publish a project as a template (admin)', CHANGE],
+  paper_list: ['List papers in the paper library (admin)', READ],
+  model_bench_routes: ['List models an admin can bench (admin)', READ],
+  model_bench_start: ['Bench a model on SP-Scheme pages (admin)', ADD],
+  model_bench_result: ['Read model bench results (admin)', READ],
+  paper_save: ['Save papers to the paper library (admin)', CHANGE],
+  news_list: ['List news posts (admin)', READ],
+  news_save: ['Save a news draft (admin)', CHANGE],
+  wiki_list: ['List SP-Wiki pages (admin)', READ],
+  wiki_submit: ['Submit an SP-Wiki page for review (admin)', ADD],
+  survey_list_projects: ['List my projects', READ],
+  survey_create_project: ['Create a survey project', ADD],
+  survey_update_project: ['Update project details', CHANGE],
+  survey_delete_project: ['Delete a project', CHANGE],
+  survey_duplicate_project: ['Duplicate a project', ADD],
+  survey_export_project: ['Export a project package', READ],
+  survey_import_project: ['Import a project package', ADD],
+  survey_import_qualtrics: ['Import a Qualtrics survey (.qsf)', ADD],
+  survey_list_templates: ['List templates', READ],
+  survey_get_template: ['Read a template', READ],
+  survey_create_from_template: ['Create a project from a template', ADD],
+  survey_save_as_template: ['Submit a project as a template', ADD],
+  survey_apply_main_page: ['Apply to list a survey on the homepage', ADD],
+  media_list: ['List project media', READ],
+  media_import_from_template: ['Copy template media into a project', ADD],
+  media_delete: ['Delete project media files', CHANGE],
+  media_upload: ['Upload a media file', ADD],
+  survey_get_media_dataset: ['Read media folder tags', READ],
+  survey_update_media_dataset: ['Update media folder tags', CHANGE],
+  skill_list: ['List custom question skills', READ],
+  skill_get: ['Read a custom question skill', READ],
+  skill_save: ['Save a custom question skill', CHANGE],
+  survey_list_responses: ['List survey responses', READ],
+  survey_export_responses: ['Export survey responses', READ],
+  survey_results_summary: ['Summarise survey results', READ],
+  survey_delete_response: ['Delete a survey response', CHANGE],
+  survey_get_draft: ['Read a project draft', READ],
+  survey_validate: ['Check a survey for problems', READ],
+  survey_apply_operations: ['Edit survey questions', CHANGE],
+  survey_replace_draft: ['Replace the whole survey draft', CHANGE],
+  survey_acquire_lease: ['Start an edit lease', ADD],
+  survey_release_lease: ['End an edit lease', ADD],
+  survey_preview_urls: ['Get project links', READ],
+  survey_publish: ['Publish the survey to the participant link', CHANGE],
+  survey_list_versions: ['List published versions', READ],
+  survey_rollback: ['Roll back to a published version', CHANGE],
+  silicon_list_runs: ['List AI-respondent pretest runs', READ],
+  silicon_run_responses: ['Read AI-respondent pretest answers', READ],
+  credentials_status: ['Check the assistant API key status', READ],
+};
+
+export function toolAnnotations(name) {
+  const entry = TOOL_ANNOTATIONS[name];
+  if (!entry) return null;
+  const [title, hints] = entry;
+  return { title, ...hints, openWorldHint: false };
+}
+
+/** The tool list a caller sees: admin tools only for platform admins. */
+export async function listToolsFor(env, auth) {
+  let admin = false;
+  try {
+    admin = await isPlatformAdmin(env, auth?.userId);
+  } catch {
+    admin = false;
+  }
+  return TOOLS
+    .filter((t) => admin || !ADMIN_ONLY_TOOLS.has(t.name))
+    .map((t) => {
+      const annotations = toolAnnotations(t.name);
+      return {
+        name: t.name,
+        ...(annotations ? { title: annotations.title } : {}),
+        description: t.description,
+        inputSchema: t.inputSchema,
+        ...(annotations ? { annotations } : {}),
+      };
+    });
+}
+
+const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 async function callTool(env, auth, request, name, args = {}) {
   // For MCP opaque tokens without a Supabase JWT, use service-role helpers
@@ -1598,22 +1694,17 @@ export async function handleMcpRequest(request, env, auth) {
   try {
     if (method === 'initialize') {
       return respond(id, {
-        protocolVersion: params?.protocolVersion || '2024-11-05',
+        protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(params?.protocolVersion) ? params.protocolVersion : '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'sp-survey-platform', version: '1.0.0' },
+        serverInfo: { name: 'sp-survey-platform', title: 'SP-Survey', version: '1.1.0' },
+        instructions: 'SP-Survey (sp-survey.org) runs image-based perception surveys. To start a new study, call sp_scheme_spec.',
       });
     }
     if (method === 'notifications/initialized' || method === 'initialized') {
       return new Response(null, { status: 202 });
     }
     if (method === 'tools/list') {
-      return respond(id, {
-        tools: TOOLS.map((t) => ({
-          name: t.name,
-          description: t.description,
-          inputSchema: t.inputSchema,
-        })),
-      });
+      return respond(id, { tools: await listToolsFor(env, auth) });
     }
     if (method === 'tools/call') {
       const name = params?.name;

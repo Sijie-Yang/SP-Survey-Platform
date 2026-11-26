@@ -1006,6 +1006,7 @@ export const adminI18n = {
     navOpenWorkspace: 'Open Studio',
     footerDevelopedBy: 'Developed by',
     footerCite: 'Cite & publications',
+    footerPrivacy: 'Privacy',
 
     newsTitle: 'News',
     newsSubtitle: 'Product updates, releases, and research notes from SP-Survey.',
@@ -2341,6 +2342,7 @@ export const adminI18n = {
     navOpenWorkspace: '进入工作台',
     footerDevelopedBy: '开发团队',
     footerCite: '引用与论文',
+    footerPrivacy: '隐私政策',
 
     newsTitle: '新闻',
     newsSubtitle: 'SP-Survey 的产品更新、发布说明与研究动态。',
