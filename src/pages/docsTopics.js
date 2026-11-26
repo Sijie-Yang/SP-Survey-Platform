@@ -397,6 +397,38 @@ export const DOC_TOPICS = [
     ], related: ['study-design', 'media-sampling', 'results-export', 'paper-templates', 'common-questions'],
   },
   {
+    id: 'connect-ai', group: 'platform', title: p('Use SP-Survey in Claude and other AI apps', '在 Claude 等 AI 应用里使用 SP-Survey'),
+    summary: p('Connect SP-Survey to Claude, Claude Code, Codex or Cursor, then build, publish and download a perception study by chatting.', '把 SP-Survey 连到 Claude、Claude Code、Codex 或 Cursor，用聊天搭建、发布感知实验并下载数据。'),
+    flow: [p('Add the connector', '添加连接器'), p('Sign in + approve', '登录并授权'), p('Ask for a study', '描述你的研究'), p('Publish + download', '发布与下载数据')],
+    sections: [
+      s('what', p('What the connector does', '连接器能做什么'), [
+        p('The SP-Survey connector lets an AI app work on your SP-Survey account. It can build a whole study as one web page (SP-Scheme), import it with its images, check it, publish the participant link, summarise results and give you a download link for the data. It can also start from a template, import a Qualtrics .qsf file, and edit questions one by one. Every tool works only on your own projects.', 'SP-Survey 连接器让 AI 应用操作你的 SP-Survey 账号：把整个研究做成一个网页（SP-Scheme）、连同图片导入、检查、发布参与者链接、汇总结果，并给出数据下载链接。也可以从模板开始、导入 Qualtrics .qsf 文件，或逐题修改。每个工具只能操作你自己的项目。'),
+      ], { table: table([p('You ask', '你说'), p('The connector', '连接器做什么')], [
+        [p('“Build a street-view safety rating study with 20 images per person.”', '“做一个街景安全感打分实验，每人看 20 张图。”'), p('Reads the SP-Scheme spec, writes the page, imports it and returns preview and participant links', '读取 SP-Scheme 规范、写好页面、导入，返回预览和参与者链接')],
+        [p('“Publish it.”', '“发布吧。”'), p('Publishes the current draft after you confirm', '经你确认后发布当前草稿')],
+        [p('“How are the results so far?”', '“现在结果怎么样？”'), p('Summarises responses per question', '按题汇总回答')],
+        [p('“Give me the data.”', '“把数据给我。”'), p('Returns a 15-minute link to one ZIP: CSV, raw JSON, stimuli list and a README', '返回一个 15 分钟有效的链接，下载一个 ZIP：CSV、原始 JSON、图片清单和说明')],
+      ]) }),
+      s('setup', p('Connect it', '如何连接'), [
+        p('Claude (web, desktop, mobile): open Settings → Connectors, find SP-Survey in the directory, or choose “Add custom connector” and enter https://sp-survey.org/mcp. Claude opens sp-survey.org: sign in (or create a free account) and approve the permissions. Then turn the connector on in a chat.', 'Claude（网页、桌面、手机）：打开 设置 → 连接器，在目录里找到 SP-Survey，或选择“添加自定义连接器”并填写 https://sp-survey.org/mcp。Claude 会打开 sp-survey.org：登录（或免费注册）并同意授权。然后在对话里打开这个连接器。'),
+        p('Claude Code: run  claude mcp add --transport http sp-survey https://sp-survey.org/mcp  and sign in when asked. Codex, Cursor and other MCP apps: add a remote (Streamable HTTP) MCP server with the same address; sign-in uses OAuth in the browser.', 'Claude Code：运行  claude mcp add --transport http sp-survey https://sp-survey.org/mcp ，按提示登录。Codex、Cursor 等其他 MCP 应用：添加一个远程（Streamable HTTP）MCP 服务器，地址相同，登录走浏览器 OAuth。'),
+        p('Apps that can run commands (Claude Code, Codex) can upload a zip of images and download data directly. In the Claude apps, paste or describe the page; the data link opens in your browser.', '能运行命令的应用（Claude Code、Codex）可以直接上传图片压缩包、下载数据。在 Claude 网页和桌面应用里，页面直接在对话中生成；数据链接在浏览器中打开下载。'),
+      ]),
+      s('permissions', p('Permissions and safety', '权限与安全'), [
+        p('You choose the permissions when you approve the connection. Deleting a project or response, publishing and rolling back need an explicit confirmation. You can disconnect at any time in the AI app. The connector does not read your chats; see the privacy policy at sp-survey.org/privacy.', '授权时由你选择权限。删除项目或回答、发布、回滚都需要明确确认。你可以随时在 AI 应用里断开连接。连接器不会读取你的聊天记录，详见隐私政策 sp-survey.org/privacy。'),
+      ], { table: table([p('Permission', '权限'), p('Allows', '允许')], [
+        ['surveys:read', p('Read your projects, drafts and templates', '读取你的项目、草稿和模板')],
+        ['surveys:write', p('Create and edit projects and pages', '创建和修改项目与页面')],
+        ['surveys:publish', p('Publish versions and submit templates', '发布版本、提交模板')],
+        ['media:write', p('Upload and delete media files', '上传和删除媒体文件')],
+        ['results:read', p('Read responses and download data', '读取回答、下载数据')],
+      ]) }),
+      s('help', p('Help', '帮助'), [
+        p('Problems or ideas: ask in the forum (Help) or open an issue at github.com/Sijie-Yang/SP-Survey-Platform/issues.', '遇到问题或有建议：在论坛“求助”版块提问，或到 github.com/Sijie-Yang/SP-Survey-Platform/issues 提交 issue。'),
+      ]),
+    ], related: ['platform-workflow', 'results-export'],
+  },
+  {
     id: 'results-export', group: 'platform', title: p('Results, exports & reproducibility', '结果、导出与可复现性'),
     summary: p('Freeze the analysis scope and carry raw answers, media identities and method settings into the export.', '明确分析范围，让原始回答、媒体身份与方法设置一起进入导出。'),
     sections: [

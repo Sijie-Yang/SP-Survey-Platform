@@ -264,7 +264,7 @@ export async function exchangeAuthorizationCode(env, body, request) {
   } = body || {};
 
   if (!code || !redirectUri || !clientId || !codeVerifier) {
-    throw Object.assign(new Error('code, redirect_uri, client_id, code_verifier required'), { status: 400 });
+    throw Object.assign(new Error('code, redirect_uri, client_id, code_verifier required'), { status: 400, oauthError: 'invalid_request' });
   }
 
   const rows = await supabaseRest(env, {
@@ -274,23 +274,23 @@ export async function exchangeAuthorizationCode(env, body, request) {
   });
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row || row.used_at || new Date(row.expires_at) < new Date()) {
-    throw Object.assign(new Error('Invalid or expired code'), { status: 400 });
+    throw Object.assign(new Error('Invalid or expired code'), { status: 400, oauthError: 'invalid_grant' });
   }
   if (row.client_id !== clientId || row.redirect_uri !== redirectUri) {
-    throw Object.assign(new Error('Code parameters mismatch'), { status: 400 });
+    throw Object.assign(new Error('Code parameters mismatch'), { status: 400, oauthError: 'invalid_grant' });
   }
 
   const expected = await sha256Base64Url(codeVerifier);
   if (expected !== row.code_challenge) {
-    throw Object.assign(new Error('PKCE verification failed'), { status: 400 });
+    throw Object.assign(new Error('PKCE verification failed'), { status: 400, oauthError: 'invalid_grant' });
   }
 
   const expectedResource = mcpResourceUrl(request, env);
   if (row.resource && resource && !resourcesEquivalent(row.resource, resource)) {
-    throw Object.assign(new Error('resource mismatch'), { status: 400 });
+    throw Object.assign(new Error('resource mismatch'), { status: 400, oauthError: 'invalid_target' });
   }
   if (resource && !resourcesEquivalent(resource, expectedResource) && !resourcesEquivalent(resource, issuerBase(request, env))) {
-    throw Object.assign(new Error('resource audience mismatch'), { status: 400 });
+    throw Object.assign(new Error('resource audience mismatch'), { status: 400, oauthError: 'invalid_target' });
   }
 
   await supabaseRest(env, {
@@ -313,7 +313,7 @@ export async function refreshAccessToken(env, body, request) {
   const refreshToken = body?.refresh_token;
   const clientId = body?.client_id;
   if (!refreshToken || !clientId) {
-    throw Object.assign(new Error('refresh_token and client_id required'), { status: 400 });
+    throw Object.assign(new Error('refresh_token and client_id required'), { status: 400, oauthError: 'invalid_request' });
   }
   const refreshHash = await hashToken(refreshToken);
   const rows = await supabaseRest(env, {
@@ -323,7 +323,7 @@ export async function refreshAccessToken(env, body, request) {
   });
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row || row.revoked_at || row.client_id !== clientId || new Date(row.expires_at) < new Date()) {
-    throw Object.assign(new Error('Invalid refresh token'), { status: 400 });
+    throw Object.assign(new Error('Invalid refresh token'), { status: 400, oauthError: 'invalid_grant' });
   }
 
   // Rotate refresh token
