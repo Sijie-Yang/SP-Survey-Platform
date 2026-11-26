@@ -1,9 +1,12 @@
 import React, { lazy, Suspense, useState, useEffect } from 'react';
 import {
   Box, Typography, Button, Card, CardContent, Chip, CircularProgress,
-  Stack, Dialog, DialogTitle, DialogContent, DialogActions, Skeleton,
+  Stack, Dialog, DialogTitle, DialogContent, DialogActions, Skeleton, IconButton, Tooltip,
 } from '@mui/material';
-import { Article, Dataset, Preview } from '@mui/icons-material';
+import {
+  Article, Dataset, Preview, MenuBook, EditNote,
+} from '@mui/icons-material';
+import TemplateChangeRequestDialog from './TemplateChangeRequestDialog';
 import { supabase } from '../../lib/supabase';
 import { stripOwnResponseSupabase } from '../../lib/ownResponseSupabase';
 import { projectTemplates } from '../../lib/projectTemplates';
@@ -53,6 +56,11 @@ export function sortNewestFirst(list) {
   return [...list].sort((a, b) =>
     ((Number(b.year) || 0) - (Number(a.year) || 0))
     || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+}
+
+/** The one public name: the paper's full title when the template has one. */
+export function templateDisplayName(tpl) {
+  return tpl?.paper?.title || tpl?.name || '';
 }
 
 /** Free-text match on name, author, description and id. */
@@ -414,7 +422,7 @@ export function TemplateCard({ template, onUse }) {
         </Box>
         <CardContent sx={{ p: 2, flex: 1, minHeight: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
           <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.35, flexShrink: 0, lineHeight: 1.35, ...CLAMP(2) }}>
-            {template.name}
+            {templateDisplayName(template)}
           </Typography>
 
           <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, flexShrink: 0, ...CLAMP(1) }}>
@@ -453,7 +461,7 @@ export function TemplateCard({ template, onUse }) {
 
       <TemplatePreviewDialog
         templateId={template.id}
-        templateName={template.name}
+        templateName={templateDisplayName(template)}
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
       />
@@ -462,24 +470,26 @@ export function TemplateCard({ template, onUse }) {
 }
 
 /**
- * One line per template for /templates, so hundreds stay scannable: small
- * cover, the paper's full title, authors · year · venue, then the actions.
+ * One compact line per template for /templates, so hundreds stay scannable:
+ * the paper's full title, then authors · year · journal · type, with small
+ * icon actions and "Use" on the right.
  */
 export function TemplateRow({ template, onUse }) {
   const { t } = useRegion();
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
   const scheme = isSpSchemeTemplate(template);
   const isAI = template.category === 'ai';
   const isUrban = template.category === 'urban';
-  const chipColor = scheme ? 'secondary' : isAI ? 'primary' : isUrban ? 'warning' : 'success';
-  const chipLabel = scheme ? 'SP-Scheme' : isAI ? t.landChipAi : isUrban ? t.landChipUrban : t.landChipAcademic;
-  const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);
+  const typeColor = scheme ? 'secondary.main' : isAI ? 'primary.main' : isUrban ? 'warning.dark' : 'success.dark';
+  const typeLabel = scheme ? 'SP-Scheme' : isAI ? t.landChipAi : isUrban ? t.landChipUrban : t.landChipAcademic;
   const paper = template.paper;
-  const title = paper?.title || template.name;
+  const title = templateDisplayName(template);
   const byline = paper
     ? [shortAuthors(paper.authors) || template.author, paper.year || template.year].filter(Boolean).join(' · ')
     : [template.author, template.year].filter(Boolean).join(' · ');
   const paperHref = paper?.paper_url || (paper?.doi ? `https://doi.org/${paper.doi}` : template.paper_url);
+  const iconSx = { color: 'text.secondary', '&:hover': { color: 'primary.main' } };
 
   return (
     <>
@@ -487,28 +497,25 @@ export function TemplateRow({ template, onUse }) {
         data-testid={`template-row-${template.id}`}
         sx={{
           display: 'flex',
-          gap: { xs: 1.5, sm: 2 },
-          alignItems: 'flex-start',
-          py: 2,
+          flexDirection: { xs: 'column', sm: 'row' },
+          alignItems: { xs: 'stretch', sm: 'center' },
+          gap: { xs: 0.5, sm: 2 },
+          py: 1.25,
           px: { xs: 0, sm: 1 },
           borderBottom: '1px solid',
           borderColor: 'divider',
+          '&:hover': { bgcolor: 'action.hover' },
         }}
       >
-        <Box
-          component="button"
-          type="button"
-          onClick={() => setPreviewOpen(true)}
-          aria-label={`${t.landPreview}: ${title}`}
-          sx={{ flexShrink: 0, width: { xs: 72, sm: 120 }, height: { xs: 54, sm: 80 }, p: 0, border: 0, borderRadius: 1, overflow: 'hidden', cursor: 'pointer', bgcolor: 'grey.100' }}
-        >
-          <Box component="img" src={thumb} alt="" onError={onThumbError} loading="lazy" sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
-        </Box>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="subtitle1" component="h2" fontWeight={700} sx={{ lineHeight: 1.35, fontSize: { xs: '0.95rem', sm: '1rem' } }}>
+          <Typography
+            component="h2"
+            onClick={() => setPreviewOpen(true)}
+            sx={{ fontWeight: 600, fontSize: '0.95rem', lineHeight: 1.35, cursor: 'pointer', ...CLAMP(2), '&:hover': { color: 'primary.main' } }}
+          >
             {title}
           </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', mt: 0.25, ...CLAMP(1) }}>
             {byline}
             {paper?.venue && (
               <>
@@ -516,44 +523,49 @@ export function TemplateRow({ template, onUse }) {
                 <Box component="span" sx={{ fontStyle: 'italic' }}>{paper.venue}</Box>
               </>
             )}
+            {(byline || paper?.venue) ? ' · ' : ''}
+            <Box component="span" sx={{ color: typeColor, fontWeight: 600 }}>{typeLabel}</Box>
           </Typography>
-          {paper && paper.title !== template.name && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25, ...CLAMP(1) }}>
-              {(t.tplTemplateLabel || 'Template')}: {template.name}
-            </Typography>
-          )}
-          <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
-            <Chip label={chipLabel} size="small" color={chipColor} variant="outlined" sx={{ fontWeight: 600, mr: 0.5 }} />
-            {paperTemplateDoc(template.id) && (
-              <Button size="small" href={`/docs/${template.id}`} sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-                {t.navDocs}
-              </Button>
-            )}
-            {paperHref && (
-              <Button size="small" startIcon={<Article />} href={paperHref} target="_blank" rel="noopener noreferrer" sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-                {t.landPaper}
-              </Button>
-            )}
-            {template.dataset && (
-              <Button size="small" startIcon={<Dataset />} href={`https://huggingface.co/datasets/${template.dataset}`} target="_blank" rel="noopener noreferrer" sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-                {t.landDataset}
-              </Button>
-            )}
-            <Button size="small" startIcon={<Preview />} onClick={() => setPreviewOpen(true)} sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-              {t.landPreview}
-            </Button>
-            <Button size="small" variant="contained" onClick={onUse} sx={{ ml: 'auto !important', fontSize: '0.75rem' }}>
-              {t.landUse}
-            </Button>
-          </Stack>
         </Box>
+        <Stack direction="row" spacing={0.25} alignItems="center" sx={{ flexShrink: 0, justifyContent: { xs: 'flex-end', sm: 'flex-start' } }}>
+          {paperTemplateDoc(template.id) && (
+            <Tooltip title={t.navDocs}>
+              <IconButton size="small" href={`/docs/${template.id}`} aria-label={t.navDocs} sx={iconSx}><MenuBook fontSize="small" /></IconButton>
+            </Tooltip>
+          )}
+          {paperHref && (
+            <Tooltip title={t.landPaper}>
+              <IconButton size="small" href={paperHref} target="_blank" rel="noopener noreferrer" aria-label={t.landPaper} sx={iconSx}><Article fontSize="small" /></IconButton>
+            </Tooltip>
+          )}
+          {template.dataset && (
+            <Tooltip title={t.landDataset}>
+              <IconButton size="small" href={`https://huggingface.co/datasets/${template.dataset}`} target="_blank" rel="noopener noreferrer" aria-label={t.landDataset} sx={iconSx}><Dataset fontSize="small" /></IconButton>
+            </Tooltip>
+          )}
+          <Tooltip title={t.landPreview}>
+            <IconButton size="small" onClick={() => setPreviewOpen(true)} aria-label={t.landPreview} sx={iconSx}><Preview fontSize="small" /></IconButton>
+          </Tooltip>
+          <Tooltip title={t.tplRequestChange || 'Request a change'}>
+            <IconButton size="small" onClick={() => setRequestOpen(true)} aria-label={t.tplRequestChange || 'Request a change'} sx={iconSx}><EditNote fontSize="small" /></IconButton>
+          </Tooltip>
+          <Button size="small" variant="contained" onClick={onUse} sx={{ ml: 1, minWidth: 56, fontSize: '0.75rem' }}>
+            {t.landUse}
+          </Button>
+        </Stack>
       </Box>
 
       <TemplatePreviewDialog
         templateId={template.id}
-        templateName={template.name}
+        templateName={title}
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
+      />
+      <TemplateChangeRequestDialog
+        template={template}
+        title={title}
+        open={requestOpen}
+        onClose={() => setRequestOpen(false)}
       />
     </>
   );

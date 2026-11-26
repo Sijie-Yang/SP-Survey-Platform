@@ -49,3 +49,16 @@ test('rows show short author lists and search also finds the paper title and jou
   expect(filterTemplates(withPaper, 'all', 'transportation research').length).toBe(1);
   expect(filterTemplates(withPaper, 'all', 'street view imagery').length).toBe(1);
 });
+
+test('one public name: the paper title when linked; change requests name the template', () => {
+  const { templateDisplayName } = require('../components/templates/TemplateLibrary');
+  const { templateChangeMessage } = require('../components/templates/TemplateChangeRequestDialog');
+  expect(templateDisplayName({ name: 'Bikeability', paper: { title: 'Assessing bikeability with street view imagery' } }))
+    .toBe('Assessing bikeability with street view imagery');
+  expect(templateDisplayName({ name: 'QA Template', paper: null })).toBe('QA Template');
+  const msg = templateChangeMessage({ template: { id: '2021-ito-assessing' }, title: 'Assessing bikeability', role: 'author', change: 'Use our images', links: 'https://osf.io/x' });
+  expect(msg).toContain('2021-ito-assessing');
+  expect(msg).toContain('作者 Author');
+  expect(msg).toContain('https://osf.io/x');
+  expect(templateChangeMessage({ template: { id: 'a' }, title: 'A', role: 'other', change: 'x', links: '' })).not.toContain('Original materials');
+});

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box, Container, Typography, Button, Chip, TextField, InputAdornment,
   CircularProgress, Stack,
@@ -16,6 +16,8 @@ import {
 
 /** The type filter: one row of buttons, kept in the URL (?type=). */
 export const TEMPLATE_TYPES = ['all', 'academic', 'urban', 'ai', 'scheme'];
+
+export const PAGE_SIZE = 50;
 
 export function filterTemplates(templates, type, query) {
   return templates.filter((tpl) => {
@@ -56,6 +58,9 @@ export default function TemplatesPage() {
   };
   const countFor = (key) => filterTemplates(templates, key, '').length;
   const shown = filterTemplates(templates, type, query);
+  // Long lists render in pages of PAGE_SIZE; a new filter starts from the top again.
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  useEffect(() => { setLimit(PAGE_SIZE); }, [type, query]);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
@@ -126,9 +131,16 @@ export default function TemplatesPage() {
           </Box>
         ) : (
           <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
-            {shown.map((tpl) => (
+            {shown.slice(0, limit).map((tpl) => (
               <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
             ))}
+            {shown.length > limit && (
+              <Box sx={{ textAlign: 'center', pt: 3 }}>
+                <Button variant="outlined" onClick={() => setLimit((n) => n + PAGE_SIZE)}>
+                  {tf(t.tplShowMore || 'Show more ({n} left)', { n: shown.length - limit })}
+                </Button>
+              </Box>
+            )}
           </Box>
         )}
       </Container>
