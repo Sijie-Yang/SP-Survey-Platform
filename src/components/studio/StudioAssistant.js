@@ -94,15 +94,15 @@ export function StudioFirstRun({ project, request, onDone }) {
 /**
  * The platform's built-in Assistant inside a Studio study: the same chat,
  * sessions, model choice and history as the classic editor's sidebar,
- * opening in SP-Scheme mode. `onSaved` reloads the study after a saved change;
+ * opening in SP-Scheme mode (Classic for classic studies). `onSaved` reloads the study after a saved change;
  * `onSaveConfig` stores a change the assistant made only locally (an undo).
  */
-export default function StudioAssistant({ project, config, onSaved, onSaveConfig }) {
+export default function StudioAssistant({ project, config, defaultMode = 'spscheme', onSaved, onSaveConfig }) {
   const L = useL();
   const assistant = useSurveyAssistant({
     currentProject: project,
     surveyConfig: config,
-    defaultMode: 'spscheme',
+    defaultMode,
     onSurveyConfigChange: (next, meta = {}) => {
       if (meta?.persisted) onSaved?.();
       else if (next) onSaveConfig?.(next);

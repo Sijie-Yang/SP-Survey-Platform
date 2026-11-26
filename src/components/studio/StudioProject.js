@@ -213,8 +213,8 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
   const releaseUnknown = Boolean(project?.releaseManaged) && release === null;
   // Read each render: the classic editor of this tab may hold edits Studio must not hide.
   const classicUnsaved = classicHasUnsavedEdits(projectId);
-  // The built-in Assistant (SP-Scheme mode) for page and empty studies; classic surveys use the classic editor.
-  const aiChat = Boolean(auth?.user?.id) && !localMode && (kind === 'page' || kind === 'empty');
+  // The built-in Assistant: one conversation per study, the same one the classic editor shows.
+  const aiChat = Boolean(auth?.user?.id) && !localMode;
 
   /** Apply one change to a fresh read and show the result. Run it inside `queue`. */
   const applyWrite = useCallback(async (change) => {
@@ -470,6 +470,7 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
               key={project.id}
               project={project}
               config={config}
+              defaultMode={kind === 'classic' ? 'agent' : 'spscheme'}
               onSaved={() => queue(async () => {
                 const next = await refresh();
                 if (next) savedRef.current(next);

@@ -83,7 +83,9 @@ jest.mock('../lib/agentApi', () => ({
   listAiRunApprovals: jest.fn(),
   steerAiSession: jest.fn(),
   answerAiRunApproval: jest.fn(),
+  switchSpSchemeEditor: (...args) => mockSwitchSpSchemeEditor(...args),
 }));
+const mockSwitchSpSchemeEditor = jest.fn();
 const mockLoadSurveyConfigForProject = jest.fn(async () => null);
 jest.mock('../lib/projectManager', () => ({
   loadSurveyConfigForProject: (...args) => mockLoadSurveyConfigForProject(...args),
@@ -315,6 +317,48 @@ describe('useSurveyAssistant', () => {
     }));
     await waitFor(() => expect(classic.result.current.messages).toHaveLength(2));
     expect(classic.result.current.assistantMode).toBe('spscheme');
+  });
+
+  test('leaving SP-Scheme on a study with a page asks first, then backs up the page and switches', async () => {
+    mockSwitchSpSchemeEditor.mockReset();
+    mockSwitchSpSchemeEditor.mockResolvedValue({ success: true, changed: true, draftUpdatedAt: 'd2' });
+    const classicConfig = { title: 'Live', pages: [{ name: 'p1', elements: [] }], spSchemeBackupAt: 'now' };
+    mockLoadSurveyConfigForProject.mockResolvedValueOnce(classicConfig);
+    const onChange = jest.fn();
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live', spSite: { html: '<html></html>' } },
+      defaultMode: 'spscheme',
+      onSurveyConfigChange: onChange,
+    }));
+    expect(result.current.assistantMode).toBe('spscheme');
+    act(() => result.current.requestAssistantModeChange('agent'));
+    expect(result.current.modeSwitch).toEqual({ to: 'agent' });
+    expect(result.current.assistantMode).toBe('spscheme');
+    act(() => { result.current.handleModeSwitchChoice('cancel'); });
+    expect(result.current.modeSwitch).toBeNull();
+    expect(mockSwitchSpSchemeEditor).not.toHaveBeenCalled();
+
+    act(() => result.current.requestAssistantModeChange('agent'));
+    await act(async () => { await result.current.handleModeSwitchChoice('switch'); });
+    expect(mockSwitchSpSchemeEditor).toHaveBeenCalledWith('p1', 'classic');
+    expect(onChange).toHaveBeenCalledWith(classicConfig, expect.objectContaining({ persisted: true, draftUpdatedAt: 'd2' }));
+    expect(result.current.assistantMode).toBe('agent');
+    expect(result.current.modeSwitch).toBeNull();
+  });
+
+  test('a study without a page switches mode at once', () => {
+    mockSwitchSpSchemeEditor.mockReset();
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      defaultMode: 'spscheme',
+      onSurveyConfigChange: jest.fn(),
+    }));
+    act(() => result.current.requestAssistantModeChange('agent'));
+    expect(result.current.modeSwitch).toBeNull();
+    expect(result.current.assistantMode).toBe('agent');
+    expect(mockSwitchSpSchemeEditor).not.toHaveBeenCalled();
   });
 
   test('streams hosted snapshots into the conversation while a run is in progress', async () => {

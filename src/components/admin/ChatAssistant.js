@@ -174,6 +174,8 @@ export default function ChatAssistant({
   isPlatformMode = false,
   assistantMode = 'agent',
   onAssistantModeChange,
+  modeSwitch = null,
+  onModeSwitchChoice,
   contextEnabled,
   multiAgentReviewEnabled = false,
   reviewMode = '1v1',
@@ -1332,6 +1334,42 @@ export default function ChatAssistant({
         chatBody
       )}
 
+      <Dialog
+        open={Boolean(modeSwitch)}
+        onClose={() => onModeSwitchChoice?.('cancel')}
+        maxWidth="xs"
+        fullWidth
+        data-testid="ai-mode-switch-dialog"
+      >
+        <DialogTitle>
+          {modeSwitch?.to === 'agent'
+            ? (t.aiModeSwitchClassicTitle || 'Switch this study to Classic?')
+            : (t.aiModeSwitchSpSchemeTitle || 'Bring back the SP-Scheme page?')}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+            {modeSwitch?.to === 'agent'
+              ? (t.aiModeSwitchClassicBody || 'The current SP-Scheme page is saved as a backup (switch back to SP-Scheme to bring it back). The study becomes a classic survey: the questions the page declared stay as classic questions, and the AI changes them question by question.')
+              : (t.aiModeSwitchSpSchemeBody || 'This study has a saved SP-Scheme page from before it became classic. Bring it back (the classic questions are replaced), or keep the classic survey and let the AI write a new page.')}
+          </Typography>
+          {modeSwitch?.error && <Alert severity="error" sx={{ mt: 1.5 }}>{modeSwitch.error}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => onModeSwitchChoice?.('cancel')} disabled={modeSwitch?.busy}>
+            {t.sidebarCancel || 'Cancel'}
+          </Button>
+          {modeSwitch?.to === 'spscheme' && (
+            <Button onClick={() => onModeSwitchChoice?.('keep')} disabled={modeSwitch?.busy}>
+              {t.aiModeSwitchKeepClassic || 'Keep classic, new page'}
+            </Button>
+          )}
+          <Button variant="contained" onClick={() => onModeSwitchChoice?.('switch')} disabled={modeSwitch?.busy}>
+            {modeSwitch?.to === 'agent'
+              ? (t.aiModeSwitchClassicConfirm || 'Back up and switch')
+              : (t.aiModeSwitchRestore || 'Bring the page back')}
+          </Button>
+        </DialogActions>
+      </Dialog>
       <AssistantSettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

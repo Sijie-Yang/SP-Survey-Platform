@@ -539,3 +539,14 @@ export async function publishProjectViaApi(projectId, summary) {
     body: JSON.stringify({ summary }),
   });
 }
+
+/**
+ * Switch a study between its SP-Scheme page and the classic editor
+ * (direction 'classic' keeps the page as a backup; 'spscheme' brings it back).
+ */
+export async function switchSpSchemeEditor(projectId, direction) {
+  return agentFetch('/api/agent/sp-scheme/switch', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, direction }),
+  });
+}

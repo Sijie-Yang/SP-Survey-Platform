@@ -217,7 +217,7 @@ test('without a model the new study opens with the description waiting in its ch
   }
 });
 
-test('a study with a page has the built-in assistant in SP-Scheme mode; a classic study does not', async () => {
+test('a study with a page has the built-in assistant in SP-Scheme mode', async () => {
   assistantMock.send.mockClear();
   openAt('/studio/p1');
   expect(await screen.findByTestId('chat-assistant')).toHaveTextContent('mode spscheme');
@@ -226,12 +226,12 @@ test('a study with a page has the built-in assistant in SP-Scheme mode; a classi
   expect(assistantMock.send).not.toHaveBeenCalled();
 });
 
-test('a classic study has no AI assistant card in Studio', async () => {
+test('a classic study keeps the same AI assistant in Studio, opening in Classic mode', async () => {
   openAt('/studio/p2');
   expect(await screen.findByTestId('studio-project-name')).toHaveTextContent('Classic one');
-  expect(screen.queryByTestId('studio-assistant')).toBeNull();
+  expect(await screen.findByTestId('chat-assistant')).toHaveTextContent('mode agent');
+  expect(assistantMock.calls.at(-1).defaultMode).toBe('agent');
 });
-
 test('copying the instructions puts SP-Scheme on the clipboard', async () => {
   const writeText = jest.fn(() => Promise.resolve());
   Object.assign(navigator, { clipboard: { writeText } });
