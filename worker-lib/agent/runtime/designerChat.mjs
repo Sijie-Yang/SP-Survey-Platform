@@ -1,6 +1,7 @@
 import { createToolRegistry } from './tools.mjs';
 import { createDesignerTools } from './designerTools.mjs';
 import { createPlatformTools } from './platformTools.mjs';
+import { createSpSchemePageTool, SP_SCHEME_WRITE_TOOL } from './spSchemePageTool.mjs';
 import { runToolLoop } from './loop.mjs';
 import { createEvent, eventsToUiMessages, redactSecrets } from './events.mjs';
 import {
@@ -37,7 +38,9 @@ import { assertRoute } from './validators.mjs';
 import {
   applyAssistantModeToTools,
   getAssistantModePolicy,
+  modeSwitchNote,
   normalizeAssistantMode,
+  previousMessageMode,
   requestsExplicitRedesign,
 } from './modes.mjs';
 import { parseGenerateGoals } from './generateGoals.mjs';
@@ -102,6 +105,15 @@ Workflow:
 
 If the current task is only a question about the existing survey, answer with read-only tools. Do not generate or submit.
 History is background. Do not execute a prior request unless the current message explicitly continues it.`;
+
+export const SP_SCHEME_DESIGNER_SYSTEM = `You are the SP-Survey in-browser Assistant in SP-Scheme mode.
+The study is one web page built with SP-Scheme: the page holds the welcome, consent, every task and question, and the end. You never write the page yourself; the sp_scheme_write_page tool does it from your request, checks it and saves it only when it passes.
+
+- To make a new study or change anything participants see, call sp_scheme_write_page once. Put everything the researcher asked for into request: topic, tasks, number of trials, questions and options, wording, language, look. For a change, say exactly what to change and that the rest stays the same.
+- If the researcher only asks something, answer briefly; read the draft with survey_get_draft when you need it. Do not call the write tool for questions.
+- Never invent image URLs or upload images. The page reads images from the study's image library; the researcher uploads them.
+- After the tool returns, say in one or two plain sentences what changed. If it was not saved, list the problems it returned and suggest what to ask for instead.
+- Reply in the researcher's language.`;
 
 export async function runDesignerChat(env, userId, body, request, ctx) {
   const projectId = body?.projectId || null;
@@ -256,6 +268,8 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
   };
 
   const priorEvents = await listEvents(env, session.id);
+  // Tell the model when the researcher switched mode since their last message.
+  const switchNote = modeSwitchNote(previousMessageMode(priorEvents, run.id), assistantMode);
   if (!body?._sessionPrepared) {
     await emit(createEvent('user.message', {
       content: message,
@@ -329,6 +343,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
   }
 
   let boundProjectId = projectId;
+  const spSchemeMode = assistantMode === 'spscheme';
   const coreTools = createDesignerTools({
       env,
       accessToken: body?.accessToken,
@@ -363,8 +378,36 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       };
     })
     : [];
+  const pageRoute = {
+    apiKey: cred.apiKey,
+    provider: cred.provider,
+    baseUrl: route.baseUrl,
+    model,
+    modelRecord,
+    protocol: route.protocol,
+    compat: resolved.catalog
+      ? (modelRecord?.compat || {})
+      : { ...resolved.compat, ...(modelRecord?.compat || {}) },
+    extra: route.headers,
+    retryPolicy: resolved.retryPolicy,
+  };
+  // SP-Scheme mode: read tools plus the one page-writing tool; no question-by-question edits.
+  const modeTools = spSchemeMode
+    ? [
+      ...coreTools.filter((tool) => ['survey_get_draft', 'survey_preview_urls'].includes(tool.name)),
+      createSpSchemePageTool({
+        env,
+        accessToken: body?.accessToken || null,
+        ownerUserId: body?._sessionPrepared ? userId : null,
+        userId,
+        getProjectId: () => boundProjectId,
+        request,
+        route: pageRoute,
+      }),
+    ]
+    : [...coreTools, ...domainTools];
   const registry = createToolRegistry(applyAssistantModeToTools(
-    [...coreTools, ...domainTools],
+    modeTools,
     modePolicy,
   ));
 
@@ -460,7 +503,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       messages: [
         {
           role: 'system',
-          content: `${assistantMode === 'generate' ? GENERATE_DESIGNER_SYSTEM : DESIGNER_SYSTEM}\n\n${modePolicy.systemPrompt}${researchBlock}${editorBlock}${resultsBlock}`,
+          content: `${spSchemeMode ? SP_SCHEME_DESIGNER_SYSTEM : (assistantMode === 'generate' ? GENERATE_DESIGNER_SYSTEM : DESIGNER_SYSTEM)}\n\n${modePolicy.systemPrompt}${researchBlock}${spSchemeMode ? '' : editorBlock}${resultsBlock}${switchNote}`,
         },
         ...history,
         { role: 'user', content: currentTaskMessage(message, intent) },
@@ -495,9 +538,13 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       maxTokens,
       onEvent: emit,
       requireDraftChange: draftRequested,
-      writeTools: assistantMode === 'generate'
-        ? ['survey_submit_generated_draft']
-        : ['survey_apply_operations'],
+      requireCapabilities: !spSchemeMode,
+      // eslint-disable-next-line no-nested-ternary
+      writeTools: spSchemeMode
+        ? [SP_SCHEME_WRITE_TOOL]
+        : assistantMode === 'generate'
+          ? ['survey_submit_generated_draft']
+          : ['survey_apply_operations'],
       checkCancelled,
       readInbox: () => claimSessionInput(env, session.id).catch(() => []),
       checkpoint: body?._checkpoint || null,

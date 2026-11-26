@@ -174,6 +174,8 @@ export default function ChatAssistant({
   isPlatformMode = false,
   assistantMode = 'agent',
   onAssistantModeChange,
+  modeSwitch = null,
+  onModeSwitchChoice,
   contextEnabled,
   multiAgentReviewEnabled = false,
   reviewMode = '1v1',
@@ -1118,6 +1120,18 @@ export default function ChatAssistant({
               },
             }}
           />
+          {isPlatformMode && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              data-testid="ai-mode-hint"
+              sx={{ display: 'block', px: 1.5, lineHeight: 1.4 }}
+            >
+              {assistantMode === 'spscheme'
+                ? (t.aiSidebarModeSpSchemeHint || 'SP-Scheme: the AI writes the whole participant page.')
+                : (t.aiSidebarModeClassicHint || 'Classic: the AI builds the survey question by question in the classic editor.')}
+            </Typography>
+          )}
           <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ px: 1, pb: 0.75 }}>
             <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0, overflow: 'hidden' }}>
               {isPlatformMode && (
@@ -1136,13 +1150,8 @@ export default function ChatAssistant({
                     '& .MuiSelect-select': { py: 0.5, pl: 0.75, pr: 2.5 },
                   }}
                 >
-                  <MenuItem value="agent">{t.aiSidebarModeAgent}</MenuItem>
-                  <MenuItem value="generate">{t.aiSidebarModeGenerate}</MenuItem>
-                  <MenuItem value="adjust">{t.aiSidebarModeAdjust}</MenuItem>
-                  <MenuItem value="question">{t.aiSidebarModeQuestion}</MenuItem>
-                  {reviewSettings?.enabled !== false || assistantMode === 'review' ? (
-                    <MenuItem value="review">{t.aiSidebarModeReview || 'Review'}</MenuItem>
-                  ) : null}
+                  <MenuItem value="spscheme">{t.aiSidebarModeSpScheme || 'SP-Scheme'}</MenuItem>
+                  <MenuItem value="agent">{t.aiSidebarModeClassic || 'Classic'}</MenuItem>
                 </Select>
               )}
               {isPlatformMode && modelOptions.length > 0 ? (
@@ -1208,8 +1217,8 @@ export default function ChatAssistant({
                 onChange={(event) => onSteerTargetChange?.(event.target.value)}
                 sx={{ maxWidth: 148, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.5, pl: 0.5, pr: 2.25 } }}
               >
-                <MenuItem value="next-step">补充当前任务</MenuItem>
-                <MenuItem value="after-run">完成后执行</MenuItem>
+                <MenuItem value="next-step">{t.aiSteerTargetNow || 'Add to current task'}</MenuItem>
+                <MenuItem value="after-run">{t.aiSteerTargetAfter || 'Run after this task'}</MenuItem>
               </Select>
             )}
             {isLoading && userMessage.trim() && (
@@ -1219,7 +1228,7 @@ export default function ChatAssistant({
                 onClick={onSteerMessage}
                 sx={{ minWidth: 0, borderRadius: 999, textTransform: 'none' }}
               >
-                {steerTarget === 'after-run' ? '完成后执行' : (t.aiSidebarSteer || 'Steer')}
+                {steerTarget === 'after-run' ? (t.aiSteerTargetAfter || 'Run after this task') : (t.aiSidebarSteer || 'Steer')}
               </Button>
             )}
             <Tooltip title={isLoading ? (t.aiSidebarStop || 'Stop') : t.aiSidebarSend}>
@@ -1325,6 +1334,42 @@ export default function ChatAssistant({
         chatBody
       )}
 
+      <Dialog
+        open={Boolean(modeSwitch)}
+        onClose={() => onModeSwitchChoice?.('cancel')}
+        maxWidth="xs"
+        fullWidth
+        data-testid="ai-mode-switch-dialog"
+      >
+        <DialogTitle>
+          {modeSwitch?.to === 'agent'
+            ? (t.aiModeSwitchClassicTitle || 'Switch this study to Classic?')
+            : (t.aiModeSwitchSpSchemeTitle || 'Bring back the SP-Scheme page?')}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
+            {modeSwitch?.to === 'agent'
+              ? (t.aiModeSwitchClassicBody || 'The current SP-Scheme page is saved as a backup (switch back to SP-Scheme to bring it back). The study becomes a classic survey: the questions the page declared stay as classic questions, and the AI changes them question by question.')
+              : (t.aiModeSwitchSpSchemeBody || 'This study has a saved SP-Scheme page from before it became classic. Bring it back (the classic questions are replaced), or keep the classic survey and let the AI write a new page.')}
+          </Typography>
+          {modeSwitch?.error && <Alert severity="error" sx={{ mt: 1.5 }}>{modeSwitch.error}</Alert>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => onModeSwitchChoice?.('cancel')} disabled={modeSwitch?.busy}>
+            {t.sidebarCancel || 'Cancel'}
+          </Button>
+          {modeSwitch?.to === 'spscheme' && (
+            <Button onClick={() => onModeSwitchChoice?.('keep')} disabled={modeSwitch?.busy}>
+              {t.aiModeSwitchKeepClassic || 'Keep classic, new page'}
+            </Button>
+          )}
+          <Button variant="contained" onClick={() => onModeSwitchChoice?.('switch')} disabled={modeSwitch?.busy}>
+            {modeSwitch?.to === 'agent'
+              ? (t.aiModeSwitchClassicConfirm || 'Back up and switch')
+              : (t.aiModeSwitchRestore || 'Bring the page back')}
+          </Button>
+        </DialogActions>
+      </Dialog>
       <AssistantSettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

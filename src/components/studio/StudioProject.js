@@ -43,6 +43,7 @@ import { studioPublishProblems } from '../../lib/studioPublish';
 import { classicHasUnsavedEdits } from '../../lib/studioState';
 import StudioImportFlow, { CopySpecButton } from './StudioImport';
 import StudioMediaCard from './StudioMediaCard';
+import StudioAssistant from './StudioAssistant';
 import StudioLinkCard from './StudioLinkCard';
 import StudioResultsCard from './StudioResultsCard';
 import StudioSettingsDialog from './StudioSettingsDialog';
@@ -212,6 +213,8 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
   const releaseUnknown = Boolean(project?.releaseManaged) && release === null;
   // Read each render: the classic editor of this tab may hold edits Studio must not hide.
   const classicUnsaved = classicHasUnsavedEdits(projectId);
+  // The built-in Assistant: one conversation per study, the same one the classic editor shows.
+  const aiChat = Boolean(auth?.user?.id) && !localMode;
 
   /** Apply one change to a fresh read and show the result. Run it inside `queue`. */
   const applyWrite = useCallback(async (change) => {
@@ -429,7 +432,7 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
                 {kind === 'page' ? (
                   <>
                     <Button variant="outlined" size="small" startIcon={<SwapHoriz />} onClick={() => setDialog('replace')} disabled={busy}>
-                      {L('Change the page', '修改页面')}
+                      {L('Use another page', '换一个页面')}
                     </Button>
                     <CopySpecButton
                       size="small"
@@ -462,6 +465,19 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
         </StudioCard>
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 2, sm: 2.25 }, minWidth: 0 }}>
+          {aiChat && (
+            <StudioAssistant
+              key={project.id}
+              project={project}
+              config={config}
+              defaultMode={kind === 'classic' ? 'agent' : 'spscheme'}
+              onSaved={() => queue(async () => {
+                const next = await refresh();
+                if (next) savedRef.current(next);
+              })}
+              onSaveConfig={(next) => write(() => ({ config: next }))}
+            />
+          )}
           <StudioMediaCard project={project} config={config} busy={busy} queue={queue} applyWrite={applyWrite} />
           <StudioLinkCard
             project={project}
@@ -492,7 +508,7 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
       />
 
       <Dialog open={dialog === 'replace'} onClose={() => { if (!busy) setDialog(''); }} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{L('Change the page', '修改页面')}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>{L('Use another page', '换一个页面')}</DialogTitle>
         <DialogContent>
           {dialog === 'replace' && (
             <StudioImportFlow

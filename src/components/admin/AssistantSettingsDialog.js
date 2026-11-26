@@ -183,11 +183,8 @@ export default function AssistantSettingsDialog({
                     inputProps={{ 'aria-label': t.aiSidebarMode }}
                   >
                     {[
-                      ['agent', t.aiSidebarModeAgent],
-                      ['generate', t.aiSidebarModeGenerate],
-                      ['adjust', t.aiSidebarModeAdjust],
-                      ['question', t.aiSidebarModeQuestion],
-                      ...(reviewSettings?.enabled !== false ? [['review', t.aiSidebarModeReview || 'Review']] : []),
+                      ['spscheme', t.aiSidebarModeSpScheme || 'SP-Scheme'],
+                      ['agent', t.aiSidebarModeClassic || 'Classic'],
                     ].map(([value, label]) => (
                       <MenuItem key={value} value={value}>{label}</MenuItem>
                     ))}

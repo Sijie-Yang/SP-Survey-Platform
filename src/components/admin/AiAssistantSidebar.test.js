@@ -124,8 +124,10 @@ describe('AiAssistantSidebar', () => {
     });
 
     fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Assistant mode' }));
-    fireEvent.click(await screen.findByRole('option', { name: 'Question' }));
-    expect(setAssistantMode).toHaveBeenCalledWith('question');
+    // Two modes only: SP-Scheme and Classic.
+    expect(await screen.findAllByRole('option')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('option', { name: 'SP-Scheme' }));
+    expect(setAssistantMode).toHaveBeenCalledWith('spscheme');
   });
 
   test('disables sending when no project is selected', () => {

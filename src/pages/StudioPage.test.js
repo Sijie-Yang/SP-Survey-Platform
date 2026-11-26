@@ -25,7 +25,23 @@ jest.mock('../lib/r2', () => ({
   r2KeyFromUrl: () => null,
 }));
 jest.mock('../lib/templateRequest', () => ({ compressImage: jest.fn() }));
-jest.mock('../lib/agentApi', () => ({ generateSpSchemePage: jest.fn() }));
+jest.mock('../components/admin/ChatAssistant', () => ({ __esModule: true, default: (props) => <div data-testid="chat-assistant">mode {props.assistantMode}</div> }));
+jest.mock('../hooks/useSurveyAssistant', () => {
+  const calls = [];
+  const send = jest.fn();
+  const setUserMessage = jest.fn();
+  const state = { apiKeyValid: true };
+  const hook = (options) => {
+    calls.push(options);
+    return { assistantMode: options.defaultMode || 'agent', apiKeyValid: state.apiKeyValid, credentialsChecked: true, isLoading: false, loadingStatus: '', handleSendMessage: send, setUserMessage };
+  };
+  return {
+    __esModule: true,
+    default: hook,
+    chatPropsFromAssistant: (a) => ({ assistantMode: a.assistantMode }),
+    __mock: { calls, send, setUserMessage, state },
+  };
+});
 jest.mock('../lib/studioData', () => ({
   isStudioLocalMode: jest.fn(),
   listStudioProjects: jest.fn(),
@@ -53,7 +69,7 @@ import { LEGACY_SURVEY_HTML } from '../lib/__fixtures__/legacySurvey';
 import { setActiveProject } from '../lib/projectManager';
 import { deleteImagesFromR2, uploadImageToR2 } from '../lib/r2';
 import { compressImage } from '../lib/templateRequest';
-import { generateSpSchemePage } from '../lib/agentApi';
+import { __mock as assistantMock } from '../hooks/useSurveyAssistant';
 import {
   countStudioResponses,
   createStudioProject,
@@ -165,43 +181,57 @@ test('the new-study screen offers the AI page and the classic editor as equal ch
   expect(screen.getByRole('link', { name: 'Start from a paper template' })).toHaveAttribute('href', '/admin');
 });
 
-test('the built-in AI writes the page from a description, and it goes through the normal check and import', async () => {
-  generateSpSchemePage.mockResolvedValueOnce({ success: true, html: buildExampleSite(), check: { ok: true, problems: [] } });
+test('describing a study creates it, waits for the first version on the new-study screen, then opens it', async () => {
+  assistantMock.send.mockReset();
+  let finishRun;
+  assistantMock.send.mockImplementation(() => new Promise((resolve) => { finishRun = resolve; }));
   const router = openAt('/studio');
   const box = screen.getByRole('textbox', { name: 'Describe your study' });
   expect(screen.getByRole('button', { name: 'Make it with AI' })).toBeDisabled();
-  fireEvent.change(box, { target: { value: 'Compare street photos for cycling safety' } });
+  fireEvent.change(box, { target: { value: 'Compare street photos for cycling safety\n20 pairs' } });
   fireEvent.click(screen.getByRole('button', { name: 'Make it with AI' }));
-  expect(generateSpSchemePage).toHaveBeenCalledWith({ request: 'Compare street photos for cycling safety' });
-  expect(await screen.findByTestId('studio-import-verdict')).toHaveTextContent('Matches SP-Scheme');
-  fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+  expect(await screen.findByTestId('studio-first-run')).toBeInTheDocument();
+  expect(createStudioProject).toHaveBeenCalledWith('Compare street photos for cycling safety');
+  await waitFor(() => expect(assistantMock.send).toHaveBeenCalledWith({ message: 'Compare street photos for cycling safety\n20 pairs', assistantMode: 'spscheme' }));
+  expect(router.state.location.pathname).toBe('/studio');
+  finishRun({ success: true });
   await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
-  expect(saveStudioProject.mock.calls[0][1].spSite.html).toContain('SPSite.onReady');
+  expect(await screen.findByTestId('studio-assistant')).toBeInTheDocument();
+  expect(assistantMock.send).toHaveBeenCalledTimes(1);
+  assistantMock.send.mockReset();
 });
 
-test('without a model the built-in AI says so and points to your own AI', async () => {
-  generateSpSchemePage.mockResolvedValueOnce({ success: false, code: 'CREDENTIALS_MISSING', error: 'none' });
-  openAt('/studio');
-  fireEvent.change(screen.getByRole('textbox', { name: 'Describe your study' }), { target: { value: 'x' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Make it with AI' }));
-  expect(await screen.findByText(/No AI model is available right now/)).toBeInTheDocument();
-  expect(screen.getByText('Drop the survey your AI built here')).toBeInTheDocument();
+test('without a model the new study opens with the description waiting in its chat box', async () => {
+  assistantMock.send.mockReset();
+  assistantMock.setUserMessage.mockClear();
+  assistantMock.state.apiKeyValid = false;
+  try {
+    const router = openAt('/studio');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Describe your study' }), { target: { value: 'Rate parks' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Make it with AI' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+    await waitFor(() => expect(assistantMock.setUserMessage).toHaveBeenCalledWith('Rate parks'));
+    expect(assistantMock.send).not.toHaveBeenCalled();
+  } finally {
+    assistantMock.state.apiKeyValid = true;
+  }
 });
 
-test('on a study with a page the built-in AI changes that page', async () => {
-  generateSpSchemePage.mockResolvedValueOnce({ success: true, html: buildExampleSite() });
+test('a study with a page has the built-in assistant in SP-Scheme mode', async () => {
+  assistantMock.send.mockClear();
   openAt('/studio/p1');
-  fireEvent.click(await screen.findByRole('button', { name: 'Change the page' }));
-  const dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByRole('textbox', { name: 'What should change' }), { target: { value: 'Add an age question' } });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Change it with AI' }));
-  await waitFor(() => expect(generateSpSchemePage).toHaveBeenCalledTimes(1));
-  const body = generateSpSchemePage.mock.calls[0][0];
-  expect(body.request).toBe('Add an age question');
-  expect(body.currentHtml).toContain('SPSite.onReady');
-  expect(await within(dialog).findByText(/Importing replaces the current survey page/)).toBeInTheDocument();
+  expect(await screen.findByTestId('chat-assistant')).toHaveTextContent('mode spscheme');
+  expect(assistantMock.calls.at(-1).defaultMode).toBe('spscheme');
+  expect(assistantMock.calls.at(-1).currentProject.id).toBe('p1');
+  expect(assistantMock.send).not.toHaveBeenCalled();
 });
 
+test('a classic study keeps the same AI assistant in Studio, opening in Classic mode', async () => {
+  openAt('/studio/p2');
+  expect(await screen.findByTestId('studio-project-name')).toHaveTextContent('Classic one');
+  expect(await screen.findByTestId('chat-assistant')).toHaveTextContent('mode agent');
+  expect(assistantMock.calls.at(-1).defaultMode).toBe('agent');
+});
 test('copying the instructions puts SP-Scheme on the clipboard', async () => {
   const writeText = jest.fn(() => Promise.resolve());
   Object.assign(navigator, { clipboard: { writeText } });
@@ -256,7 +286,7 @@ test('a study that is not release-managed is live: saves go live, publishing fix
   expect(publish).toBeEnabled();
   fireEvent.mouseOver(publish);
   expect(await screen.findByRole('tooltip')).toHaveTextContent('After you publish, participants see only this version. Later changes take effect when you publish again.');
-  expect(screen.getByRole('button', { name: 'Change the page' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Use another page' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Copy for your AI to edit' })).toBeInTheDocument();
   expect(screen.getByTestId('studio-share-url')).toHaveTextContent(`${window.location.origin}/survey?project=p1`);
   expect(screen.getByTestId('studio-link-live')).toHaveTextContent('Participants see the latest saved version.');
@@ -355,7 +385,7 @@ test('a published study whose draft differs from the release offers a new versio
 test('a classic study is edited in the classic editor', async () => {
   openAt('/studio/p2');
   expect(await screen.findByText(/^Question by question/)).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Change the page' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Use another page' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Edit in the classic editor' }));
   expect(await screen.findByTestId('classic-editor')).toHaveTextContent('?project=p2&tab=builder');
   expect(setActiveProject).toHaveBeenCalledWith('p2');
@@ -387,7 +417,7 @@ test('while a write runs, publish, settings, rename and upload wait', async () =
   await waitFor(() => expect(screen.getByRole('button', { name: 'Settings' })).toBeDisabled());
   expect(screen.getByRole('button', { name: 'Publish a fixed version' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Upload images' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Change the page' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Use another page' })).toBeDisabled();
   expect(screen.getByTestId('studio-project-name')).toHaveAttribute('aria-disabled', 'true');
   finish();
   await waitFor(() => expect(screen.getByRole('button', { name: 'Settings' })).toBeEnabled());
@@ -454,7 +484,7 @@ test('the replace dialog cannot be closed while the import runs', async () => {
   let finishSave;
   saveStudioProject.mockImplementationOnce(() => new Promise((resolve) => { finishSave = () => resolve({ success: true }); }));
   openAt('/studio/p1');
-  fireEvent.click(await screen.findByRole('button', { name: 'Change the page' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Use another page' }));
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByTestId('studio-file'), { target: { files: [new File([buildExampleSite()], 'index.html', { type: 'text/html' })] } });
   fireEvent.click(await within(dialog).findByRole('button', { name: 'Import' }));
@@ -479,7 +509,7 @@ test('dropping the same zip again says how many images were new, replaced or alr
     'study/images/c.jpg': new Uint8Array([7, 8, 9]),
   });
   openAt('/studio/p1');
-  fireEvent.click(await screen.findByRole('button', { name: 'Change the page' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Use another page' }));
   const dialog = await screen.findByRole('dialog');
   fireEvent.change(within(dialog).getByTestId('studio-file'), { target: { files: [new File([zip], 'study.zip', { type: 'application/zip' })] } });
   fireEvent.click(await within(dialog).findByRole('button', { name: 'Import' }));

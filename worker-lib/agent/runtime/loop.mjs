@@ -89,6 +89,8 @@ export async function runToolLoop({
   stopReasonOverride = '',
   writeTools = DEFAULT_WRITE_TOOLS,
   terminalTools = [],
+  // false: the run need not read survey_capabilities before writing (SP-Scheme mode).
+  requireCapabilities = true,
 }) {
   const terminalToolNames = new Set(terminalTools || []);
   const writeToolNames = new Set(writeTools?.length ? writeTools : DEFAULT_WRITE_TOOLS);
@@ -102,7 +104,7 @@ export async function runToolLoop({
   let attemptedDraftWrite = Boolean(checkpoint?.attemptedDraftWrite);
   const successfulTools = Array.isArray(checkpoint?.successfulTools) ? [...checkpoint.successfulTools] : [];
   let lastDraftWriteError = checkpoint?.lastDraftWriteError || '';
-  let loadedCapabilities = Boolean(checkpoint?.loadedCapabilities);
+  let loadedCapabilities = Boolean(checkpoint?.loadedCapabilities) || !requireCapabilities;
   let loadedDraft = Boolean(checkpoint?.loadedDraft);
   const usage = checkpoint?.usage || { prompt_tokens: 0, completion_tokens: 0 };
   let working = Array.isArray(checkpoint?.working)

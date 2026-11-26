@@ -7,7 +7,7 @@ import { sendChatMessage, validateChatApiKey, triggerMultiAgentReviewStream } fr
 import { postProcessAiConfig } from '../lib/designProtocol';
 import { withoutSiteHtml } from '../lib/spSite';
 import { runSurveyQualityChecks } from '../lib/surveyQualityChecks';
-import { answerAiRunApproval, applyAgentReview, archiveAiSession, estimateAgentReview, cancelAiRun, discardAiInbox, listAiInbox, listAiRunApprovals, steerAiSession } from '../lib/agentApi';
+import { answerAiRunApproval, applyAgentReview, archiveAiSession, estimateAgentReview, cancelAiRun, discardAiInbox, listAiInbox, listAiRunApprovals, steerAiSession, switchSpSchemeEditor } from '../lib/agentApi';
 import { loadSurveyConfigForProject } from '../lib/projectManager';
 import { buildAssistantModelOptions, clearPendingRun, clearUndoSnapshot, credentialConfigured, hasAppliedSurveyChange, isPlatformMode as detectPlatformMode, isStaleAssistantRequest, latestRunStatus, loadingStatusFromEvents, parseRoute, readPendingRun, readSessionId, readStoredRoute, shouldReplaceAssistantTranscript, readUndoSnapshot, resolveAssistantRoute, sendBlockReason, writePendingRun, writeSessionId, writeStoredRoute, writeUndoSnapshot, undoBlockedByNewerEdits, summarizeDraftDiff } from './surveyAssistantUtils';
 import { classifyUserIntent, initialLoadingStatus, shouldPrepareWrite } from './taskIntent';
@@ -28,9 +28,17 @@ function loadProjectNumber(projectId, key, fallback) {
   const stored = window.localStorage.getItem(`${key}_${projectId}`);
   return stored ? parseInt(stored, 10) : fallback;
 }
-const ASSISTANT_MODES = new Set(['agent', 'generate', 'adjust', 'question', 'review']);
-function normalizeAssistantMode(value) {
-  return ASSISTANT_MODES.has(value) ? value : 'agent';
+// Two modes: SP-Scheme (writes the study page) and Classic ('agent': question by question).
+// Older stored modes (generate / adjust / question / review) open as Classic.
+const ASSISTANT_MODES = new Set(['agent', 'spscheme']);
+function normalizeAssistantMode(value, fallback = 'agent') {
+  if (ASSISTANT_MODES.has(value)) return value;
+  return ASSISTANT_MODES.has(fallback) ? fallback : 'agent';
+}
+/** SP-Scheme studies (a page, or Studio) default to SP-Scheme; classic surveys to Classic. */
+export function defaultAssistantMode(surveyConfig, preferred = null) {
+  if (preferred && ASSISTANT_MODES.has(preferred)) return preferred;
+  return surveyConfig?.spSite?.html ? 'spscheme' : 'agent';
 }
 export default function useSurveyAssistant({
   currentProject,
@@ -41,7 +49,8 @@ export default function useSurveyAssistant({
   editorSelectionSourceRef = null,
   hasUnsavedChanges = false,
   lastSavedConfig = null,
-  onPrepareWrite = null
+  onPrepareWrite = null,
+  defaultMode = null
 } = {}) {
   const platformMode = detectPlatformMode();
   const language = useContext(RegionContext)?.language || 'en';
@@ -49,15 +58,19 @@ export default function useSurveyAssistant({
   const [openaiApiKey, setOpenaiApiKey] = useState(() => platformMode ? '' : typeof window !== 'undefined' ? window.localStorage.getItem('openaiApiKey') || '' : '');
   const [apiKeyValid, setApiKeyValid] = useState(() => platformMode ? false : typeof window !== 'undefined' && window.localStorage.getItem('apiKeyValid') === 'true');
   const [credentialHint, setCredentialHint] = useState('');
+  // True once the platform said whether a model is available (platform mode).
+  const [credentialsChecked, setCredentialsChecked] = useState(false);
   const [assistantDirectory, setAssistantDirectory] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState('');
   const [selectedEffort, setSelectedEffort] = useState('');
-  const [assistantMode, setAssistantMode] = useState(() => normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', 'agent')));
+  const [assistantMode, setAssistantMode] = useState(() => normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', ''), defaultAssistantMode(surveyConfig, defaultMode)));
   const [aiSessionId, setAiSessionId] = useState(() => readSessionId(typeof window !== 'undefined' ? window.sessionStorage : null, projectId));
   const [activeRunId, setActiveRunId] = useState(() => readPendingRun(typeof window !== 'undefined' ? window.sessionStorage : null, projectId)?.runId || '');
   const [pendingApproval, setPendingApproval] = useState(null);
   const [userMessage, setUserMessage] = useState('');
   const [steerTarget, setSteerTarget] = useState('next-step');
+  // A mode switch that changes the study (page <-> classic) waits for the researcher's answer.
+  const [modeSwitch, setModeSwitch] = useState(null);
   const [writeConflict, setWriteConflict] = useState(null);
   const [inboxItems, setInboxItems] = useState([]);
   const [runDiffs, setRunDiffs] = useState({});
@@ -90,6 +103,8 @@ export default function useSurveyAssistant({
   const projectIdRef = useRef(projectId);
   const generationRef = useRef(0);
   const surveyConfigRef = useRef(surveyConfig);
+  const defaultModeRef = useRef(defaultMode);
+  defaultModeRef.current = defaultMode;
   const onChangeRef = useRef(onSurveyConfigChange);
   const enabledRef = useRef(enabled);
   const handleAssistantModeChange = useCallback(value => {
@@ -132,6 +147,7 @@ export default function useSurveyAssistant({
   const applyCredentialStatus = useCallback(status => {
     if (!status) return;
     lastStatusRef.current = status;
+    setCredentialsChecked(true);
     if (status.settings) {
       const nextReview = normalizeReviewSettings(status.settings.review_settings);
       reviewUserIdRef.current = status.settings.user_id || null;
@@ -248,9 +264,8 @@ export default function useSurveyAssistant({
         }
         const detail = await getAiSession(sessionId);
         if (cancelled) return;
-        if (detail?.assistantMode) {
-          handleAssistantModeChange(detail.assistantMode);
-        }
+        // The mode is the researcher's own choice for this study: restoring the
+        // conversation (here or in the other editor) never switches it.
         if (sessionId !== storedSessionId) {
           writeSessionId(storage, projectId, sessionId);
           setAiSessionId(sessionId);
@@ -333,7 +348,11 @@ export default function useSurveyAssistant({
     setMultiAgentReviewEnabled(loadProjectFlag(projectId, 'multiAgentReviewEnabled', false));
     setReviewMode(loadProjectString(projectId, 'reviewMode', '1v1'));
     setMaxReviewRounds(loadProjectNumber(projectId, 'maxReviewRounds', 3));
-    setAssistantMode(normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', 'agent')));
+    const storedMode = loadProjectString(projectId, 'assistantMode', '');
+    const openingMode = normalizeAssistantMode(storedMode, defaultAssistantMode(surveyConfigRef.current, defaultModeRef.current));
+    setAssistantMode(openingMode);
+    // Remember the opening mode, so the other editor opens this study in the same mode.
+    if (!storedMode && typeof window !== 'undefined') window.localStorage.setItem(`assistantMode_${projectId}`, openingMode);
     setReviewOptionsState(reviewOptionsFromSettings(reviewSettingsRef.current));
     const timer = setTimeout(() => {
       isLoadingProjectSettings.current = false;
@@ -591,6 +610,62 @@ export default function useSurveyAssistant({
     });
     refreshConversation();
   }, [applySurveyConfig, onPrepareWrite, refreshConversation]);
+  // The researcher picked a mode. Leaving SP-Scheme on a study with a page
+  // asks first (the page is kept as a backup, the study becomes classic);
+  // coming back offers the backed-up page.
+  const requestAssistantModeChange = useCallback(value => {
+    const nextMode = normalizeAssistantMode(value);
+    const config = surveyConfigRef.current || {};
+    if (platformMode && projectIdRef.current && nextMode === 'agent' && config.spSite?.html) {
+      setModeSwitch({ to: 'agent' });
+      return;
+    }
+    if (platformMode && projectIdRef.current && nextMode === 'spscheme' && !config.spSite?.html && config.spSchemeBackupAt) {
+      setModeSwitch({ to: 'spscheme', backupAt: config.spSchemeBackupAt });
+      return;
+    }
+    handleAssistantModeChange(nextMode);
+  }, [handleAssistantModeChange, platformMode]);
+  const handleModeSwitchChoice = useCallback(async choice => {
+    const pending = modeSwitch;
+    if (!pending || pending.busy) return;
+    if (choice === 'cancel') {
+      setModeSwitch(null);
+      return;
+    }
+    if (choice === 'keep') {
+      setModeSwitch(null);
+      handleAssistantModeChange(pending.to);
+      return;
+    }
+    const note = (text, error = false) => {
+      conversationHistoryRef.current?.addMessage('assistant', text, { actionType: 'system', ...(error ? { error: true } : {}) });
+      refreshConversation();
+    };
+    if (hasUnsavedChanges) {
+      setModeSwitch({ ...pending, error: uiPair(language, 'Save the changes in the editor first.', '请先保存编辑器里的修改。') });
+      return;
+    }
+    const projectAtStart = projectIdRef.current;
+    setModeSwitch({ ...pending, busy: true, error: '' });
+    const result = await switchSpSchemeEditor(projectAtStart, pending.to === 'agent' ? 'classic' : 'spscheme').catch(error => ({ success: false, error: error?.message }));
+    if (projectIdRef.current !== projectAtStart) return;
+    if (!result?.success) {
+      setModeSwitch({ ...pending, busy: false, error: result?.error || uiPair(language, 'The switch failed.', '切换失败。') });
+      return;
+    }
+    const full = await loadSurveyConfigForProject(projectAtStart).catch(() => null);
+    if (full) {
+      surveyConfigRef.current = full;
+      // Straight to the editor: the usual path would keep the old page.
+      onChangeRef.current?.(full, { persisted: true, draftUpdatedAt: result.draftUpdatedAt, source: 'assistant' });
+    }
+    setModeSwitch(null);
+    handleAssistantModeChange(pending.to);
+    note(pending.to === 'agent'
+      ? uiPair(language, 'Switched to Classic. The SP-Scheme page is saved as a backup; the study is now a classic survey and the AI builds it question by question.', '已切换到经典。SP-Scheme 页面已存为备份，研究改为经典问卷，AI 将按经典界面逐题做。')
+      : uiPair(language, 'Switched to SP-Scheme and brought back the saved page.', '已切换到 SP-Scheme，并恢复了之前保存的页面。'));
+  }, [handleAssistantModeChange, hasUnsavedChanges, language, modeSwitch, refreshConversation]);
   const handleClearHistory = useCallback(() => {
     if (platformMode && aiSessionId) {
       archiveAiSession(aiSessionId).catch(() => null);
@@ -767,6 +842,12 @@ export default function useSurveyAssistant({
           }
         }
       });
+      // The run reports the draft without the page HTML; an SP-Scheme run changed the page,
+      // so read the whole saved survey (page included) before showing it.
+      if (sendMode === 'spscheme' && result?.draftMutated && result?.persisted && request.projectId) {
+        const full = await loadSurveyConfigForProject(request.projectId).catch(() => null);
+        if (full) result.surveyConfig = full;
+      }
       if (result.sessionId) {
         writeSessionId(typeof window !== 'undefined' ? window.sessionStorage : null, request.projectId, result.sessionId);
       }
@@ -1255,6 +1336,7 @@ export default function useSurveyAssistant({
     loadingStatus,
     pendingApproval,
     apiKeyValid,
+    credentialsChecked,
     openaiApiKey,
     credentialHint,
     modelOptions: assistantModelOptions,
@@ -1296,6 +1378,9 @@ export default function useSurveyAssistant({
     setCustomPrompts,
     setAssistantMode,
     handleAssistantModeChange,
+    requestAssistantModeChange,
+    modeSwitch,
+    handleModeSwitchChoice,
     handleSendMessage,
     handleCancelRun,
     handleApprovalDecision,
@@ -1369,7 +1454,9 @@ export function chatPropsFromAssistant(assistant) {
     effortOptions: assistant.effortOptions,
     onRouteChange: assistant.handleAssistantRouteChange,
     onEffortChange: assistant.handleAssistantEffortChange,
-    onAssistantModeChange: assistant.handleAssistantModeChange || assistant.setAssistantMode,
+    onAssistantModeChange: assistant.requestAssistantModeChange || assistant.handleAssistantModeChange || assistant.setAssistantMode,
+    modeSwitch: assistant.modeSwitch,
+    onModeSwitchChoice: assistant.handleModeSwitchChoice,
     onClearEditorFocus: assistant.onClearEditorFocus,
     routeUnavailable: assistant.routeUnavailable,
     blockReason: assistant.blockReason,

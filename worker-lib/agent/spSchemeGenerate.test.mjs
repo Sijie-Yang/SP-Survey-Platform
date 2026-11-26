@@ -4,49 +4,32 @@ import { buildExampleSite } from '../../src/lib/spScheme.js';
 import {
   checkGeneratedPage,
   extractHtml,
-  handleSpSchemeGenerate,
-  normalizeGenerateRequest,
+  extractReply,
+  writeSpSchemePage,
 } from './spSchemeGenerate.mjs';
 
 const GOOD = buildExampleSite().trim();
 const PLAIN = '<!doctype html><html><head><title>x</title></head><body><p>Hello</p></body></html>';
+const ROUTE = { apiKey: 'sk', provider: 'deepseek', baseUrl: 'https://x', model: 'deepseek-flash', modelRecord: { maxTokens: 8000 } };
 
-function deps({ answers, settings = {}, ownKey = false, subsidyRoutes = [{ provider: 'deepseek', model: 'deepseek-flash' }] }) {
+function fakeChat(answers) {
   const calls = [];
-  return {
-    calls,
-    deps: {
-      credentials: {
-        loadUserAiSettings: async () => settings,
-        listProviderProfiles: async () => [],
-        resolveAssistantBinding: async (_env, _user, provider, model) => {
-          if (ownKey && provider === settings.assistant_provider) {
-            return { source: 'user', credential: { apiKey: 'sk-own' }, profile: {} };
-          }
-          if (subsidyRoutes.some((r) => r.provider === provider && r.model === model)) {
-            return { source: 'subsidy', credential: { apiKey: 'sk-shared' }, profile: {} };
-          }
-          throw Object.assign(new Error('missing'), { code: 'CREDENTIALS_MISSING' });
-        },
-      },
-      subsidy: {
-        loadActiveSubsidy: async () => (subsidyRoutes.length ? { allowed_routes: subsidyRoutes } : null),
-        normalizeSubsidyRoutes: (routes) => routes || [],
-      },
-      chatCompletions: async (options) => {
-        calls.push(options);
-        const next = answers[Math.min(calls.length - 1, answers.length - 1)];
-        return { content: next };
-      },
-    },
+  const chat = async (options) => {
+    calls.push(options);
+    return { content: answers[Math.min(calls.length - 1, answers.length - 1)] };
   };
+  return { chat, calls };
 }
 
-describe('built-in SP-Scheme AI', () => {
-  it('pulls the page out of a fenced answer', () => {
-    assert.equal(extractHtml(`Here you go:\n\`\`\`html\n${PLAIN}\n\`\`\`\nDone.`), PLAIN);
+const fenced = (html, note = '') => `${note}\n\`\`\`html\n${html}\n\`\`\``;
+
+describe('SP-Scheme page writer', () => {
+  it('pulls the page and the note out of an answer', () => {
+    assert.equal(extractHtml(fenced(PLAIN, 'Here you go:')), PLAIN);
     assert.equal(extractHtml(`sure ${PLAIN} trailing`), PLAIN);
     assert.equal(extractHtml('no page here'), '');
+    assert.equal(extractReply(fenced(PLAIN, 'Added an age question.')), 'Added an age question.');
+    assert.equal(extractReply(PLAIN), '');
   });
 
   it('checks pages with the Studio import check', () => {
@@ -56,51 +39,36 @@ describe('built-in SP-Scheme AI', () => {
     assert.equal(checkGeneratedPage(PLAIN).asIs, true);
   });
 
-  it('rejects an empty request', () => {
-    assert.throws(() => normalizeGenerateRequest({ request: '  ' }), /Describe/);
+  it('rejects an empty request', async () => {
+    const { chat } = fakeChat(['']);
+    await assert.rejects(writeSpSchemePage({ chat, route: ROUTE, request: '  ' }), /Say what/);
   });
 
-  it('sends problems back and returns the repaired page on the shared model', async () => {
-    const { deps: d, calls } = deps({ answers: [`\`\`\`html\n${PLAIN}\n\`\`\``, `\`\`\`html\n${GOOD}\n\`\`\``] });
-    const out = await handleSpSchemeGenerate({}, 'user-1', { request: 'Rate street safety' }, d);
+  it('sends problems back and returns the repaired page', async () => {
+    const { chat, calls } = fakeChat([fenced(PLAIN, 'Made it.'), fenced(GOOD, 'Fixed.')]);
+    const out = await writeSpSchemePage({ chat, route: ROUTE, request: 'Rate street safety' });
     assert.equal(out.rounds, 2);
-    assert.equal(out.shared, true);
-    assert.equal(out.model, 'deepseek-flash');
-    assert.equal(out.check.ok, true);
-    assert.equal(out.check.asIs, false);
+    assert.equal(out.passed, true);
     assert.equal(out.html, GOOD);
-    assert.equal(calls[1].messages.at(-1).role, 'user');
-    assert.match(calls[1].messages.at(-1).content, /found these problems/);
+    assert.equal(out.reply, 'Made it.');
+    assert.equal(calls[0].model, 'deepseek-flash');
     assert.match(calls[0].messages[0].content, /SP-Scheme/);
+    assert.match(calls[1].messages.at(-1).content, /found these problems/);
   });
 
-  it('stops after the repair rounds and keeps the best page with its problems', async () => {
-    const { deps: d, calls } = deps({ answers: [`\`\`\`html\n${PLAIN}\n\`\`\``] });
-    const out = await handleSpSchemeGenerate({}, 'user-1', { request: 'x' }, d);
+  it('stops after the repair rounds and reports what is still wrong', async () => {
+    const { chat, calls } = fakeChat([fenced(PLAIN)]);
+    const out = await writeSpSchemePage({ chat, route: ROUTE, request: 'x' });
     assert.equal(calls.length, 3);
-    assert.equal(out.check.asIs, true);
+    assert.equal(out.passed, false);
     assert.ok(out.check.problems.length > 0);
   });
 
-  it('edits the current page when one is given', async () => {
-    const { deps: d, calls } = deps({ answers: [`\`\`\`html\n${GOOD}\n\`\`\``] });
-    await handleSpSchemeGenerate({}, 'user-1', { request: 'Make the button green', currentHtml: GOOD }, d);
+  it('changes the current page when one is given', async () => {
+    const { chat, calls } = fakeChat([fenced(GOOD)]);
+    await writeSpSchemePage({ chat, route: ROUTE, request: 'Make the button green', currentHtml: GOOD });
     assert.equal(calls.length, 1);
     assert.match(calls[0].messages[1].content, /current index\.html/);
     assert.match(calls[0].messages[1].content, /Make the button green/);
-  });
-
-  it('prefers the researcher\'s own model and fails plainly when no model exists', async () => {
-    const own = deps({
-      answers: [`\`\`\`html\n${GOOD}\n\`\`\``],
-      settings: { assistant_provider: 'deepseek', assistant_model: 'deepseek-v4-pro' },
-      ownKey: true,
-    });
-    const out = await handleSpSchemeGenerate({}, 'user-1', { request: 'x' }, own.deps);
-    assert.equal(out.shared, false);
-    assert.equal(own.calls[0].apiKey, 'sk-own');
-
-    const none = deps({ answers: [''], subsidyRoutes: [] });
-    await assert.rejects(handleSpSchemeGenerate({}, 'user-1', { request: 'x' }, none.deps), (e) => e.code === 'CREDENTIALS_MISSING');
   });
 });

@@ -102,14 +102,6 @@ export async function writeQuestionAnalysis(body) {
   });
 }
 
-/** Ask the built-in AI to write (or, with currentHtml, change) an SP-Scheme page. */
-export async function generateSpSchemePage(body) {
-  return agentFetch('/api/agent/sp-scheme/generate', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
-}
-
 /** Fetch a published survey page on the server (no CORS), with its same-site scripts inlined. */
 export async function fetchSurveyPage(url) {
   return agentFetch('/api/agent/sp-scheme/fetch-page', {
@@ -545,5 +537,16 @@ export async function publishProjectViaApi(projectId, summary) {
   return agentFetch(`/api/agent/projects/${encodeURIComponent(projectId)}/publish`, {
     method: 'POST',
     body: JSON.stringify({ summary }),
+  });
+}
+
+/**
+ * Switch a study between its SP-Scheme page and the classic editor
+ * (direction 'classic' keeps the page as a backup; 'spscheme' brings it back).
+ */
+export async function switchSpSchemeEditor(projectId, direction) {
+  return agentFetch('/api/agent/sp-scheme/switch', {
+    method: 'POST',
+    body: JSON.stringify({ projectId, direction }),
   });
 }

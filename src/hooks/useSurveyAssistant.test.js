@@ -83,7 +83,9 @@ jest.mock('../lib/agentApi', () => ({
   listAiRunApprovals: jest.fn(),
   steerAiSession: jest.fn(),
   answerAiRunApproval: jest.fn(),
+  switchSpSchemeEditor: (...args) => mockSwitchSpSchemeEditor(...args),
 }));
+const mockSwitchSpSchemeEditor = jest.fn();
 const mockLoadSurveyConfigForProject = jest.fn(async () => null);
 jest.mock('../lib/projectManager', () => ({
   loadSurveyConfigForProject: (...args) => mockLoadSurveyConfigForProject(...args),
@@ -286,6 +288,79 @@ describe('useSurveyAssistant', () => {
     expect(mockGetAiSession).toHaveBeenCalledWith('sess-p1');
   });
 
+  test('one conversation per study: opening it in the other editor keeps the chosen mode', async () => {
+    sessionStorage.setItem('ai_session_p1', 'sess-p1');
+    mockGetAiSession.mockResolvedValue({
+      assistantMode: 'agent',
+      events: [{ type: 'run.status', payload: { status: 'completed' } }],
+      messages: [
+        { id: 'event-1', role: 'user', content: 'Make a page' },
+        { id: 'event-2', role: 'assistant', content: 'Page saved.' },
+      ],
+    });
+    // Studio opens the study in SP-Scheme mode and remembers it.
+    const studio = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: {},
+      defaultMode: 'spscheme',
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await waitFor(() => expect(studio.result.current.messages).toHaveLength(2));
+    expect(studio.result.current.assistantMode).toBe('spscheme');
+    expect(localStorage.getItem('assistantMode_p1')).toBe('spscheme');
+    studio.unmount();
+    // The classic editor (no default, no page) shows the same conversation in the same mode.
+    const classic = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await waitFor(() => expect(classic.result.current.messages).toHaveLength(2));
+    expect(classic.result.current.assistantMode).toBe('spscheme');
+  });
+
+  test('leaving SP-Scheme on a study with a page asks first, then backs up the page and switches', async () => {
+    mockSwitchSpSchemeEditor.mockReset();
+    mockSwitchSpSchemeEditor.mockResolvedValue({ success: true, changed: true, draftUpdatedAt: 'd2' });
+    const classicConfig = { title: 'Live', pages: [{ name: 'p1', elements: [] }], spSchemeBackupAt: 'now' };
+    mockLoadSurveyConfigForProject.mockResolvedValueOnce(classicConfig);
+    const onChange = jest.fn();
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live', spSite: { html: '<html></html>' } },
+      defaultMode: 'spscheme',
+      onSurveyConfigChange: onChange,
+    }));
+    expect(result.current.assistantMode).toBe('spscheme');
+    act(() => result.current.requestAssistantModeChange('agent'));
+    expect(result.current.modeSwitch).toEqual({ to: 'agent' });
+    expect(result.current.assistantMode).toBe('spscheme');
+    act(() => { result.current.handleModeSwitchChoice('cancel'); });
+    expect(result.current.modeSwitch).toBeNull();
+    expect(mockSwitchSpSchemeEditor).not.toHaveBeenCalled();
+
+    act(() => result.current.requestAssistantModeChange('agent'));
+    await act(async () => { await result.current.handleModeSwitchChoice('switch'); });
+    expect(mockSwitchSpSchemeEditor).toHaveBeenCalledWith('p1', 'classic');
+    expect(onChange).toHaveBeenCalledWith(classicConfig, expect.objectContaining({ persisted: true, draftUpdatedAt: 'd2' }));
+    expect(result.current.assistantMode).toBe('agent');
+    expect(result.current.modeSwitch).toBeNull();
+  });
+
+  test('a study without a page switches mode at once', () => {
+    mockSwitchSpSchemeEditor.mockReset();
+    const { result } = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      defaultMode: 'spscheme',
+      onSurveyConfigChange: jest.fn(),
+    }));
+    act(() => result.current.requestAssistantModeChange('agent'));
+    expect(result.current.modeSwitch).toBeNull();
+    expect(result.current.assistantMode).toBe('agent');
+    expect(mockSwitchSpSchemeEditor).not.toHaveBeenCalled();
+  });
+
   test('streams hosted snapshots into the conversation while a run is in progress', async () => {
     let extras;
     mockSendChatMessage.mockImplementation((...args) => {
@@ -404,7 +479,8 @@ describe('useSurveyAssistant', () => {
       onSurveyConfigChange: jest.fn(),
     }));
 
-    expect(result.current.assistantMode).toBe('generate');
+    // Older stored modes open as Classic; only SP-Scheme and Classic remain.
+    expect(result.current.assistantMode).toBe('agent');
     await act(async () => {
       result.current.applyCredentialStatus({
         configuredProviders: ['openai'],
@@ -413,11 +489,11 @@ describe('useSurveyAssistant', () => {
       });
     });
     act(() => {
-      result.current.handleAssistantModeChange('question');
+      result.current.handleAssistantModeChange('spscheme');
       result.current.setUserMessage('Explain the current survey');
     });
     await waitFor(() => {
-      expect(localStorage.getItem('assistantMode_p1')).toBe('question');
+      expect(localStorage.getItem('assistantMode_p1')).toBe('spscheme');
     });
     await act(async () => {
       await result.current.handleSendMessage();
@@ -425,7 +501,7 @@ describe('useSurveyAssistant', () => {
 
     expect(mockSendChatMessage.mock.calls[0][8]).toEqual(expect.objectContaining({
       projectId: 'p1',
-      assistantMode: 'question',
+      assistantMode: 'spscheme',
     }));
   });
 
@@ -546,56 +622,6 @@ describe('useSurveyAssistant', () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(result.current.aiUndoAvailable).toBe(false);
     expect(result.current.messages.at(-1).content).toMatch(/draft changed after this review/i);
-  });
-
-  test('starts Review options from the per-user defaults and resets a one-run override after sending', async () => {
-    mockSendChatMessage.mockResolvedValue({ success: true, message: 'Reviewed', intent: 'review', sessionId: 's1' });
-    const { result } = renderHook(() => useSurveyAssistant({
-      currentProject: project('p1'),
-      surveyConfig: { title: 'Survey' },
-      onSurveyConfigChange: jest.fn(),
-    }));
-    await act(async () => {
-      result.current.applyCredentialStatus({
-        configuredProviders: ['openai'],
-        directory,
-        defaultRoute: { provider: 'openai', model: 'gpt-4o' },
-        settings: {
-          user_id: 'u1',
-          review_settings: { enabled: true, roles: ['scientist', 'analyst'], method: 'group', maxRounds: 3, threshold: 9, applyMode: 'apply', maxRoles: 4 },
-        },
-      });
-    });
-    expect(result.current.reviewOptions).toEqual({
-      roles: ['scientist', 'analyst'], method: 'group', maxRounds: 3, threshold: 9, applyMode: 'apply', maxRoles: 4,
-    });
-    expect(JSON.parse(localStorage.getItem('sp-review-settings:u1')).method).toBe('group');
-
-    act(() => result.current.handleAssistantModeChange('review'));
-    act(() => result.current.setReviewOptions({ method: 'linear', applyMode: 'review' }));
-    await act(async () => {
-      await result.current.handleSendMessage();
-    });
-    expect(mockSendChatMessage.mock.calls[0][8].review).toEqual(expect.objectContaining({ method: 'linear', applyMode: 'review' }));
-    expect(result.current.reviewOptions.method).toBe('group');
-    expect(result.current.reviewOptions.applyMode).toBe('apply');
-  });
-
-  test('switching Review off in settings leaves Review mode and saves the default per user', async () => {
-    mockSaveAiSettings.mockResolvedValue({ success: true });
-    const { result } = renderHook(() => useSurveyAssistant({
-      currentProject: project('p1'),
-      surveyConfig: { title: 'Survey' },
-      onSurveyConfigChange: jest.fn(),
-    }));
-    act(() => result.current.handleAssistantModeChange('review'));
-    expect(result.current.assistantMode).toBe('review');
-    await act(async () => {
-      await result.current.saveReviewSettings({ enabled: false });
-    });
-    expect(mockSaveAiSettings).toHaveBeenCalledWith({ review_settings: expect.objectContaining({ enabled: false }) });
-    expect(result.current.assistantMode).toBe('agent');
-    expect(result.current.reviewSettings.enabled).toBe(false);
   });
 
   test('keeps the current session route when saving the default model fails', async () => {
@@ -793,5 +819,15 @@ describe('useSurveyAssistant', () => {
     });
     expect(mockSendChatMessage).not.toHaveBeenCalled();
     expect(result.current.blockReason).toBe('no-project');
+  });
+});
+
+describe('assistant modes', () => {
+  it('opens SP-Scheme studies in SP-Scheme mode and classic surveys in Classic mode', () => {
+    const { defaultAssistantMode } = jest.requireActual('./useSurveyAssistant');
+    expect(defaultAssistantMode({ spSite: { html: '<html></html>' } })).toBe('spscheme');
+    expect(defaultAssistantMode({ pages: [] })).toBe('agent');
+    expect(defaultAssistantMode({ pages: [] }, 'spscheme')).toBe('spscheme');
+    expect(defaultAssistantMode({ spSite: { html: 'x' } }, 'review')).toBe('spscheme');
   });
 });
