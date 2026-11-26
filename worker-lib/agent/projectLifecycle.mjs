@@ -541,6 +541,9 @@ function safeRelativeKey(rel) {
  * path, keeping its name, type and folder (pages find files by folder/name).
  * Entries stored elsewhere (template-owned or external URLs) are kept as they are.
  */
+// Time for copying template media in one call; the MCP client gives up after 60 s.
+const TEMPLATE_COPY_BUDGET_MS = 35000;
+
 export function templateMediaPlan(preloadedImages, projectPrefix, templatePrefix, publicBase = '') {
   const base = String(publicBase || '').replace(/\/$/, '');
   const copies = new Map();
@@ -613,13 +616,29 @@ export async function publishTemplate(env, ctx, projectId, body = {}, request = 
     if (!isR2Ready(env)) {
       throw Object.assign(new Error('R2 is not configured on this server, so the project media cannot be copied.'), { status: 503 });
     }
-    const copied = await copyObjects(env, plan.copies);
+    // Copied in parallel; files copied by an earlier call are skipped, and no
+    // new copy starts after the deadline, so a large library is copied over a
+    // few calls that each answer well within the client's time limit.
+    const copied = await copyObjects(env, plan.copies, {
+      fromPrefix: projectMediaPrefix(ownerId, projectId),
+      toPrefix: templateMediaPrefix(templateId),
+      deadlineMs: Date.now() + TEMPLATE_COPY_BUDGET_MS,
+    });
     if (copied.error) {
-      // Undo new copies; keys the template already used stay (same files).
-      const keep = new Set((existing?.preloaded_images || []).map((e) => e?.key).filter(Boolean));
-      const undo = copied.copied.filter((key) => !keep.has(key));
-      if (undo.length) await deletePrefixMedia(env, templateMediaPrefix(templateId), undo).catch(() => {});
-      throw Object.assign(new Error(`Copying the project media to the template failed (${copied.error}). Nothing was published.`), { status: 502, code: 'TEMPLATE_MEDIA_COPY_FAILED' });
+      // Copied files stay, so calling again only copies what is missing.
+      throw Object.assign(new Error(`Copying the project media to the template failed (${copied.error}). Nothing was published; call again to retry (files already copied are kept and skipped).`), { status: 502, code: 'TEMPLATE_MEDIA_COPY_FAILED' });
+    }
+    if (copied.remaining > 0) {
+      return {
+        success: true,
+        templateId,
+        status: 'copying',
+        published: false,
+        mediaTotal: plan.copies.length,
+        mediaDone: plan.copies.length - copied.remaining,
+        remaining: copied.remaining,
+        message: `Copied ${plan.copies.length - copied.remaining} of ${plan.copies.length} media files; the template is not published yet. Call template_publish again with the same arguments: files already copied are skipped, and the template is published once all are there.`,
+      };
     }
   }
 

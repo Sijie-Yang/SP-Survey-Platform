@@ -211,7 +211,8 @@ const TOOLS = [
     description:
       'PLATFORM ADMINS ONLY (checked on the server), and only for a project the admin owns. Publish it directly as an approved template (shown in the homepage library unless showOnLanding:false), '
       + 'or, with templateId and overwrite:true, overwrite that template from the project (survey config, details and media). Templates are stored online; no repository sync is needed. '
-      + 'Everyone else uses survey_save_as_template (admin review). Needs surveys:publish and confirm:true.',
+      + 'Everyone else uses survey_save_as_template (admin review). Needs surveys:publish and confirm:true. '
+      + 'Media are copied to the template first; a large library can take more than one call: when the reply has status "copying", call again with the same arguments until it is published.',
     inputSchema: {
       type: 'object',
       properties: {
