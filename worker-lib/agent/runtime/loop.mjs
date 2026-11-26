@@ -91,6 +91,8 @@ export async function runToolLoop({
   terminalTools = [],
   // false: the run need not read survey_capabilities before writing (SP-Scheme mode).
   requireCapabilities = true,
+  // Usage meter for the admin dashboard (usageLog.mjs); optional.
+  meter = null,
 }) {
   const terminalToolNames = new Set(terminalTools || []);
   const writeToolNames = new Set(writeTools?.length ? writeTools : DEFAULT_WRITE_TOOLS);
@@ -253,6 +255,7 @@ export async function runToolLoop({
           extra,
           toolChoice: toolPolicy.toolChoice,
           signal: executionSignal,
+          meter,
           onRetry: async (info) => {
             await onEvent?.(createEvent('llm.retry', { turnId, step, ...info }));
           },

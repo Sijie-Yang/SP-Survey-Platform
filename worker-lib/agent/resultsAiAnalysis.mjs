@@ -8,6 +8,8 @@
  * network, and the numbers come from the platform's own algorithms.
  */
 
+import { usageMeter } from './usageLog.mjs';
+
 const MAX_QUESTION_CHARS = 4000;
 const MAX_SAMPLE_CHARS = 16000;
 const MAX_FIELDS_CHARS = 12000;
@@ -221,6 +223,7 @@ export async function handleResultsAiAnalysis(env, userId, body, deps = {}) {
     protocol: checked.route.protocol,
     compat: modelRecord?.compat,
     extra: checked.route.headers,
+    meter: usageMeter(env, { userId, binding, feature: 'results-analysis', projectId: body?.projectId || null }),
     temperature: 0.1,
     maxTokens: Math.min(Number(modelRecord?.maxTokens) || 8192, 8192),
     messages: [

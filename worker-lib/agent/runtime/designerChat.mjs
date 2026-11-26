@@ -49,6 +49,7 @@ import { requestRunApproval } from './approvals.mjs';
 import { verifySavedDraft } from './draftVerify.mjs';
 import { runReviewRun } from './reviewRun.mjs';
 import { normalizeReviewOptions, normalizeReviewSettings } from './review.mjs';
+import { usageMeter } from '../usageLog.mjs';
 import {
   annotateHistoryForModel,
   classifyUserIntent,
@@ -390,6 +391,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       : { ...resolved.compat, ...(modelRecord?.compat || {}) },
     extra: route.headers,
     retryPolicy: resolved.retryPolicy,
+    meter: usageMeter(env, { userId, binding, feature: 'sp-scheme-page', projectId, runId: run.id }),
   };
   // SP-Scheme mode: read tools plus the one page-writing tool; no question-by-question edits.
   const modeTools = spSchemeMode
@@ -433,6 +435,13 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
     ? `\nResults analysisScope (authoritative; do not silently change it):\n${JSON.stringify(resultsScope)}\nCall survey_results_summary with this scope. Platform computes statistics including TrueSkill. Explain numbers; never invent methods, significance, or causal claims. Results tasks are read-only: do not save, publish, or delete. survey_export_responses returns a downloadable file, not CSV text to quote.`
     : '';
   const draftRequested = modePolicy.requireDraftChange;
+  const runMeter = usageMeter(env, {
+    userId,
+    binding,
+    feature: spSchemeMode ? 'assistant-spscheme' : (assistantMode === 'review' ? 'review' : 'assistant'),
+    projectId,
+    runId: run.id,
+  });
   const loopConfig = {
     apiKey: cred.apiKey,
     provider: cred.provider,
@@ -449,6 +458,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
     efforts: modelRecord?.reasoningEfforts || false,
     temperature,
     maxTokens,
+    meter: runMeter,
   };
   const checkCancelled = createRunCancellationCheck(env, run.id, {
     signal: request?.signal,
@@ -500,6 +510,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       retryPolicy: resolved.retryPolicy,
       effort,
       efforts: modelRecord?.reasoningEfforts || false,
+      meter: runMeter,
       messages: [
         {
           role: 'system',
