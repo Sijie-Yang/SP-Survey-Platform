@@ -31,6 +31,7 @@ const ContributePage = lazy(() => import('./pages/ContributePage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
 const PublicationsPage = lazy(() => import('./pages/PublicationsPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 
 const theme = createCustomTheme(DEFAULT_THEME_KEY);
 
@@ -165,6 +166,7 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/bench" element={<SpBenchPage />} />
                 <Route path="/survey" element={<SurveyApp />} />
                 <Route path="/s/:slug" element={<SurveyApp />} />
+                <Route path="/privacy" element={<PrivacyPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/oauth/mcp" element={<McpOAuthPage />} />
                 <Route path="/studio" element={<ProtectedStudio />} />
