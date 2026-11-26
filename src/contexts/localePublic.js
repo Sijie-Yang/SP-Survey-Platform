@@ -41,6 +41,7 @@ const landing = {
     landViewAllTemplatesShort: '查看全部模板 →',
     landSchemeViewAll: '查看全部 {n} 個 SP-Scheme 範例 →',
     tplAll: '全部',
+    tplTemplateLabel: '模板',
     tplTypeFilter: '模板類型',
     tplNoneOfType: '這一類還沒有模板。',
     landTemplatesSubtitle: '從已發表研究中使用的同儕審查問卷設計開始',

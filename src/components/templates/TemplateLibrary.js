@@ -59,7 +59,8 @@ export function sortNewestFirst(list) {
 export function matchesTemplateSearch(tpl, query) {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return true;
-  return [tpl.name, tpl.author, tpl.description, tpl.id, tpl.year && String(tpl.year)]
+  return [tpl.name, tpl.author, tpl.description, tpl.id, tpl.year && String(tpl.year),
+    tpl.paper?.title, tpl.paper?.venue, ...(tpl.paper?.authors || [])]
     .some((v) => v?.toLowerCase().includes(q));
 }
 
@@ -76,7 +77,56 @@ function getStaticTemplates() {
   }));
 }
 
+/** Family name from "Ito K.", "Ito, Koichi" or "Koichi Ito". */
+function familyName(raw) {
+  const name = String(raw || '').trim();
+  if (!name) return '';
+  if (name.includes(',')) return name.split(',')[0].trim();
+  const parts = name.split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const isInitials = (w) => /^(?:[A-Z]\.?-?)+$/.test(w);
+  if (isInitials(parts[parts.length - 1])) {
+    const family = parts.filter((w) => !isInitials(w));
+    return family.join(' ') || parts[0];
+  }
+  return parts[parts.length - 1];
+}
+
+/** One-line author list: "Kang, Zhang & Ratti" or "Kang et al." for more than three. */
+export function shortAuthors(authors) {
+  const names = (authors || []).map(familyName).filter(Boolean);
+  if (names.length === 0) return '';
+  if (names.length > 3) return `${names[0]} et al.`;
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+}
+
+/**
+ * The published paper behind each template, from the paper library
+ * (approved papers linked by template_id). Missing papers just mean the row
+ * falls back to the template's own name.
+ */
+async function loadTemplatePapers() {
+  if (!supabase) return {};
+  try {
+    const { data, error } = await supabase
+      .from('research_papers')
+      .select('template_id, title, venue, year, doi, paper_url, authors')
+      .eq('status', 'approved')
+      .not('template_id', 'is', null);
+    if (error) return {};
+    const byTemplate = {};
+    for (const row of data || []) {
+      if (row.template_id && !byTemplate[row.template_id]) byTemplate[row.template_id] = row;
+    }
+    return byTemplate;
+  } catch {
+    return {};
+  }
+}
+
 async function loadTemplates() {
+  const papersPromise = loadTemplatePapers();
   const previewPoolPromise = listPreviewMedia().catch(() => []);
   const coverIndexPromise = loadCoverIndex();
   try {
@@ -93,7 +143,7 @@ async function loadTemplates() {
         const mediaPromise = missingIds.length
           ? supabase.from('templates').select('id, preloaded_images').in('id', missingIds)
           : Promise.resolve({ data: [] });
-        const [mediaResult, previewPool, coverIndex] = await Promise.all([mediaPromise, previewPoolPromise, coverIndexPromise]);
+        const [mediaResult, previewPool, coverIndex, papers] = await Promise.all([mediaPromise, previewPoolPromise, coverIndexPromise, papersPromise]);
         for (const row of mediaResult.data || []) {
           libraryById[row.id] = row.preloaded_images || [];
         }
@@ -118,6 +168,7 @@ async function loadTemplates() {
             own_thumbnail: tpl.thumbnail_url || null,
             show_on_landing: tpl.show_on_landing,
             created_at: tpl.created_at || null,
+            paper: papers[tpl.id] || null,
           };
         }));
         return sortNewestFirst(normalized);
@@ -152,7 +203,7 @@ export function useTemplateLibrary() {
   return { templates, loading };
 }
 
-function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
+export function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
   const { t } = useRegion();
   const [config, setConfig] = useState(null);
   const [preloadedImages, setPreloadedImages] = useState([]);
@@ -399,6 +450,104 @@ export function TemplateCard({ template, onUse }) {
           </Box>
         </CardContent>
       </Card>
+
+      <TemplatePreviewDialog
+        templateId={template.id}
+        templateName={template.name}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+      />
+    </>
+  );
+}
+
+/**
+ * One line per template for /templates, so hundreds stay scannable: small
+ * cover, the paper's full title, authors · year · venue, then the actions.
+ */
+export function TemplateRow({ template, onUse }) {
+  const { t } = useRegion();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const scheme = isSpSchemeTemplate(template);
+  const isAI = template.category === 'ai';
+  const isUrban = template.category === 'urban';
+  const chipColor = scheme ? 'secondary' : isAI ? 'primary' : isUrban ? 'warning' : 'success';
+  const chipLabel = scheme ? 'SP-Scheme' : isAI ? t.landChipAi : isUrban ? t.landChipUrban : t.landChipAcademic;
+  const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);
+  const paper = template.paper;
+  const title = paper?.title || template.name;
+  const byline = paper
+    ? [shortAuthors(paper.authors) || template.author, paper.year || template.year].filter(Boolean).join(' · ')
+    : [template.author, template.year].filter(Boolean).join(' · ');
+  const paperHref = paper?.paper_url || (paper?.doi ? `https://doi.org/${paper.doi}` : template.paper_url);
+
+  return (
+    <>
+      <Box
+        data-testid={`template-row-${template.id}`}
+        sx={{
+          display: 'flex',
+          gap: { xs: 1.5, sm: 2 },
+          alignItems: 'flex-start',
+          py: 2,
+          px: { xs: 0, sm: 1 },
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Box
+          component="button"
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          aria-label={`${t.landPreview}: ${title}`}
+          sx={{ flexShrink: 0, width: { xs: 72, sm: 120 }, height: { xs: 54, sm: 80 }, p: 0, border: 0, borderRadius: 1, overflow: 'hidden', cursor: 'pointer', bgcolor: 'grey.100' }}
+        >
+          <Box component="img" src={thumb} alt="" onError={onThumbError} loading="lazy" sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
+        </Box>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="subtitle1" component="h2" fontWeight={700} sx={{ lineHeight: 1.35, fontSize: { xs: '0.95rem', sm: '1rem' } }}>
+            {title}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
+            {byline}
+            {paper?.venue && (
+              <>
+                {byline ? ' · ' : ''}
+                <Box component="span" sx={{ fontStyle: 'italic' }}>{paper.venue}</Box>
+              </>
+            )}
+          </Typography>
+          {paper && paper.title !== template.name && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25, ...CLAMP(1) }}>
+              {(t.tplTemplateLabel || 'Template')}: {template.name}
+            </Typography>
+          )}
+          <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mt: 1 }}>
+            <Chip label={chipLabel} size="small" color={chipColor} variant="outlined" sx={{ fontWeight: 600, mr: 0.5 }} />
+            {paperTemplateDoc(template.id) && (
+              <Button size="small" href={`/docs/${template.id}`} sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
+                {t.navDocs}
+              </Button>
+            )}
+            {paperHref && (
+              <Button size="small" startIcon={<Article />} href={paperHref} target="_blank" rel="noopener noreferrer" sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
+                {t.landPaper}
+              </Button>
+            )}
+            {template.dataset && (
+              <Button size="small" startIcon={<Dataset />} href={`https://huggingface.co/datasets/${template.dataset}`} target="_blank" rel="noopener noreferrer" sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
+                {t.landDataset}
+              </Button>
+            )}
+            <Button size="small" startIcon={<Preview />} onClick={() => setPreviewOpen(true)} sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
+              {t.landPreview}
+            </Button>
+            <Button size="small" variant="contained" onClick={onUse} sx={{ ml: 'auto !important', fontSize: '0.75rem' }}>
+              {t.landUse}
+            </Button>
+          </Stack>
+        </Box>
+      </Box>
 
       <TemplatePreviewDialog
         templateId={template.id}

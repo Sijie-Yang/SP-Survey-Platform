@@ -11,7 +11,7 @@ import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
 import {
-  isSpSchemeTemplate, matchesTemplateSearch, SchemeExampleCard, TemplateCard, useTemplateLibrary,
+  isSpSchemeTemplate, matchesTemplateSearch, TemplateRow, useTemplateLibrary,
 } from '../components/templates/TemplateLibrary';
 
 /** The type filter: one row of buttons, kept in the URL (?type=). */
@@ -61,7 +61,7 @@ export default function TemplatesPage() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
       <PublicHeader />
 
-      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 6 }, flex: 1 }} data-testid="templates-page">
+      <Container maxWidth="md" sx={{ py: { xs: 4, md: 6 }, flex: 1 }} data-testid="templates-page">
         <Stack
           direction={{ xs: 'column', md: 'row' }}
           spacing={2}
@@ -125,10 +125,10 @@ export default function TemplatesPage() {
             </Typography>
           </Box>
         ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-            {shown.map((tpl) => (type === 'scheme'
-              ? <SchemeExampleCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
-              : <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />))}
+          <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
+            {shown.map((tpl) => (
+              <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
+            ))}
           </Box>
         )}
       </Container>

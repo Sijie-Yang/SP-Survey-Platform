@@ -37,3 +37,15 @@ test('newest first: year, then time online; admin pin does not reorder', () => {
   ]);
   expect(sorted.map((t) => t.id)).toEqual(['new-late', 'new-early', 'old', 'pinned']);
 });
+
+test('rows show short author lists and search also finds the paper title and journal', () => {
+  const { shortAuthors } = require('../components/templates/TemplateLibrary');
+  expect(shortAuthors(['Ito K.', 'Biljecki F.'])).toBe('Ito & Biljecki');
+  expect(shortAuthors(['Lurong Xu', 'Shuli Luo', 'Alexa Delbosc', "Steve O'Hern"])).toBe('Xu et al.');
+  expect(shortAuthors(['Costa M.', 'Azevedo C.L.', 'Moura F.'])).toBe('Costa, Azevedo & Moura');
+  expect(shortAuthors(['Ito, Koichi'])).toBe('Ito');
+  expect(shortAuthors([])).toBe('');
+  const withPaper = [{ id: 'x', name: 'Bikeability', category: 'urban', paper: { title: 'Assessing bikeability with street view imagery', venue: 'Transportation Research Part C', authors: ['Ito K.'] } }];
+  expect(filterTemplates(withPaper, 'all', 'transportation research').length).toBe(1);
+  expect(filterTemplates(withPaper, 'all', 'street view imagery').length).toBe(1);
+});
