@@ -1,20 +1,16 @@
-import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box, Container, Typography, Button, Card, CardContent,
-  Chip, TextField, InputAdornment, CircularProgress, Divider,
-  Avatar, Stack, Dialog, DialogTitle, DialogContent, DialogActions, Skeleton,
+  Chip, CircularProgress, Divider, Avatar, Stack,
 } from '@mui/material';
 import {
-  Search, Article, MenuBook, Dataset, DesignServices,
-  AutoAwesome, BarChart, CloudUpload, Share, Preview, Public, GitHub, EmojiEvents,
+  Article, MenuBook,
+  AutoAwesome, BarChart, CloudUpload, Share, Public, GitHub, EmojiEvents,
 } from '@mui/icons-material';
 import { listPublicLiveSurveys, computeLiveStatus } from '../lib/liveSurveyManager';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { WORKSPACE_PATH, researcherEntryPath, templateUsePath } from '../lib/researcherEntry';
-import { supabase } from '../lib/supabase';
-import { stripOwnResponseSupabase } from '../lib/ownResponseSupabase';
-import { projectTemplates } from '../lib/projectTemplates';
 import PublicHeader, { PublicFooter, GITHUB_REPO_URL } from '../components/layout/PublicHeader';
 import { useGithubStars } from '../lib/useGithubStars';
 import { useRegion } from '../contexts/RegionContext';
@@ -22,14 +18,10 @@ import { tf } from '../contexts/adminI18n';
 import { getBenchPublic } from '../lib/spBenchApi';
 import StreetscapeAtmosphere from '../components/StreetscapeAtmosphere';
 import SiteFeedbackButton from '../components/SiteFeedbackButton';
-import { filterMediaByType } from '../lib/mediaUtils';
-import { coverCandidatesForTemplate, DEFAULT_TEMPLATE_COVER, hashString, loadCoverIndex, useCoverCandidate } from '../lib/templateCover';
-import { listPreviewMedia } from '../lib/previewMediaLibrary';
-import { paperTemplateDoc } from './paperTemplateDocs';
-import SchemePageCover from '../components/SchemePageCover';
+import {
+  isSpSchemeTemplate, SchemeExampleCard, TemplateCard, useTemplateLibrary,
+} from '../components/templates/TemplateLibrary';
 
-// SurveyJS is heavy and only needed when a template preview is opened.
-const SurveyPreview = lazy(() => import('../components/admin/SurveyPreview'));
 const CLAMP = (lines) => ({
   display: '-webkit-box',
   WebkitLineClamp: lines,
@@ -37,34 +29,11 @@ const CLAMP = (lines) => ({
   overflow: 'hidden',
 });
 
-function normalizeCategory(raw) {
-  const c = raw?.toLowerCase() || '';
-  if (c.includes('ai')) return 'ai';
-  if (c.includes('urban')) return 'urban';
-  return 'academic';
-}
+// How many templates / SP-Scheme examples the homepage shows; the rest are on /templates.
+export const HOME_TEMPLATE_COUNT = 6;
+export const HOME_SCHEME_COUNT = 3;
 
-/**
- * Templates built with SP-Scheme (an LLM-designed participant page uploaded as
- * the whole survey). Recognised by name or id, so an admin features one by
- * putting "SP-Scheme" in its name; no column or SQL needed.
- */
-export function isSpSchemeTemplate(tpl) {
-  return /sp[\s_-]?scheme/i.test(`${tpl?.name || ''} ${tpl?.id || ''}`);
-}
-
-function getStaticTemplates() {
-  return projectTemplates.map((tpl) => ({
-    id: tpl.id,
-    name: tpl.name,
-    description: tpl.description,
-    author: tpl.author,
-    year: tpl.year,
-    category: normalizeCategory(tpl.category),
-    paper_url: null,
-    dataset: null,
-  }));
-}
+export { isSpSchemeTemplate };
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -74,16 +43,13 @@ export default function LandingPage() {
   const templatePath = templateUsePath(!authLoading && isAuthenticated);
   const { t } = useRegion();
   const githubStars = useGithubStars();
-  const [templates, setTemplates] = useState([]);
-  const [loadingTemplates, setLoadingTemplates] = useState(true);
-  const [search, setSearch] = useState('');
+  const { templates, loading: loadingTemplates } = useTemplateLibrary();
   const [onlineLiveCount, setOnlineLiveCount] = useState(0);
   const [benchSummary, setBenchSummary] = useState(null);
   const heroBgRef = useRef(null);
   const heroContentRef = useRef(null);
 
   useEffect(() => {
-    loadTemplates();
     listPublicLiveSurveys().then((rows) => {
       setOnlineLiveCount(rows.filter((r) => computeLiveStatus(r) === 'online').length);
     }).catch(() => setOnlineLiveCount(0));
@@ -139,92 +105,11 @@ export default function LandingPage() {
     };
   }, []);
 
-  async function loadTemplates() {
-    setLoadingTemplates(true);
-    try {
-      const previewPoolPromise = listPreviewMedia().catch(() => []);
-      const coverIndexPromise = loadCoverIndex();
-      if (supabase) {
-        // Lightweight first pass — avoid downloading every template's full media catalog.
-        const { data, error } = await supabase
-          .from('templates')
-          .select('id, name, description, author, year, category, paper_url, dataset, thumbnail_url, show_on_landing')
-          .eq('is_approved', true)
-          .order('year', { ascending: false });
-        if (!error && data?.length > 0) {
-          const missingIds = data.filter((tpl) => !tpl.thumbnail_url).map((tpl) => tpl.id);
-          const libraryById = {};
-          const mediaPromise = missingIds.length
-            ? supabase.from('templates').select('id, preloaded_images').in('id', missingIds)
-            : Promise.resolve({ data: [] });
-          const [mediaResult, previewPool, coverIndex] = await Promise.all([mediaPromise, previewPoolPromise, coverIndexPromise]);
-          for (const row of mediaResult.data || []) {
-            libraryById[row.id] = row.preloaded_images || [];
-          }
-          const previewUrls = filterMediaByType(previewPool, 'image')
-            .map((img) => img.url)
-            .filter(Boolean);
-          const normalized = await Promise.all(data.map(async (tpl) => {
-            const withLibrary = {
-              ...tpl,
-              preloaded_images: libraryById[tpl.id] || [],
-            };
-            const coverCandidates = await coverCandidatesForTemplate(withLibrary, previewUrls, coverIndex);
-            return {
-              id: tpl.id,
-              name: tpl.name,
-              description: tpl.description,
-              author: tpl.author,
-              year: tpl.year,
-              category: normalizeCategory(tpl.category),
-              paper_url: tpl.paper_url,
-              dataset: tpl.dataset,
-              thumbnail_url: coverCandidates[0],
-              coverCandidates,
-              // The cover an admin set, as opposed to one picked from the library.
-              own_thumbnail: tpl.thumbnail_url || null,
-              show_on_landing: tpl.show_on_landing,
-            };
-          }));
-          setTemplates(normalized);
-          setLoadingTemplates(false);
-          return;
-        }
-      }
-      const [previewPool, coverIndex] = await Promise.all([previewPoolPromise, coverIndexPromise]);
-      const previewUrls = filterMediaByType(previewPool, 'image').map((img) => img.url).filter(Boolean);
-      setTemplates(await Promise.all(getStaticTemplates().map(async (tpl) => {
-        const coverCandidates = await coverCandidatesForTemplate(tpl, previewUrls, coverIndex);
-        return { ...tpl, thumbnail_url: coverCandidates[0], coverCandidates };
-      })));
-    } catch {
-      const coverIndex = await loadCoverIndex().catch(() => ({}));
-      setTemplates(await Promise.all(getStaticTemplates().map(async (tpl) => {
-        const coverCandidates = await coverCandidatesForTemplate(tpl, [], coverIndex);
-        return { ...tpl, thumbnail_url: coverCandidates[0], coverCandidates };
-      })));
-    } finally {
-      setLoadingTemplates(false);
-    }
-  }
-
-  const hasSearch = search.trim().length > 0;
-  const q = search.toLowerCase();
-
-  const visible = templates.filter((tpl) => {
-    const matchesSearch = !hasSearch ||
-      [tpl.name, tpl.author, tpl.description, tpl.id].some((v) => v?.toLowerCase().includes(q));
-    const shouldShow = hasSearch ? true : (tpl.show_on_landing !== false && !isSpSchemeTemplate(tpl));
-    return matchesSearch && shouldShow;
-  });
-
-  // SP-Scheme examples get their own section, so the library lists the rest.
+  // The homepage shows only the newest few; /templates lists all of them.
   const schemeExamples = templates.filter(isSpSchemeTemplate);
-  const allByCategory = (cat) => templates.filter((tpl) => tpl.category === cat && !isSpSchemeTemplate(tpl));
-
-  const academic = visible.filter((tpl) => tpl.category === 'academic');
-  const urban = visible.filter((tpl) => tpl.category === 'urban');
-  const ai = visible.filter((tpl) => tpl.category === 'ai');
+  const libraryTemplates = templates.filter((tpl) => !isSpSchemeTemplate(tpl));
+  const homeTemplates = libraryTemplates.filter((tpl) => tpl.show_on_landing !== false).slice(0, HOME_TEMPLATE_COUNT);
+  const homeSchemes = schemeExamples.slice(0, HOME_SCHEME_COUNT);
 
   const features = [
     { icon: <CloudUpload color="primary" />, title: t.landFeatUploadTitle, desc: t.landFeatUploadDesc },
@@ -233,11 +118,6 @@ export default function LandingPage() {
     { icon: <BarChart color="warning" />, title: t.landFeatResultsTitle, desc: t.landFeatResultsDesc },
   ];
 
-  const categories = [
-    { key: 'academic', label: t.landCatAcademic, color: 'success', list: academic },
-    { key: 'urban', label: t.landCatUrban, color: 'warning', list: urban },
-    { key: 'ai', label: t.landCatAi, color: 'primary', list: ai },
-  ];
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
@@ -491,91 +371,49 @@ export default function LandingPage() {
                 {t.landSchemeSubtitle || 'Each page was designed by a language model from the SP-Scheme spec, then uploaded as the whole survey. Participants get exactly this page; the platform records and analyses the answers. Preview one, or start your own from it.'}
               </Typography>
             </Box>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: `repeat(${Math.min(schemeExamples.length, 3)}, 1fr)` }, gap: 3 }}>
-              {schemeExamples.map((tpl) => (
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: `repeat(${Math.min(homeSchemes.length, 3)}, 1fr)` }, gap: 3 }}>
+              {homeSchemes.map((tpl) => (
                 <SchemeExampleCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
               ))}
             </Box>
+            {schemeExamples.length > homeSchemes.length && (
+              <Box sx={{ textAlign: 'center', mt: 4 }}>
+                <Button variant="outlined" onClick={() => navigate('/templates?source=ai')}>
+                  {tf(t.landSchemeViewAll || 'View all {n} SP-Scheme examples →', { n: schemeExamples.length })}
+                </Button>
+              </Box>
+            )}
           </Container>
         </Box>
       )}
 
-      <Container maxWidth="lg" sx={{ py: 8 }}>
+      <Container maxWidth="lg" sx={{ py: 8 }} data-testid="home-template-library">
         <Box sx={{ textAlign: 'center', mb: 5 }}>
           <Typography variant="h4" fontWeight={700} sx={{ mb: 1 }}>
             {t.landTemplatesTitle}
           </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-            {t.landTemplatesSubtitle}
+          <Typography variant="body1" color="text.secondary">
+            {t.landLatestTemplatesSubtitle || t.landTemplatesSubtitle}
           </Typography>
-          <Stack
-            direction={{ xs: 'column', sm: 'row' }}
-            spacing={1.5}
-            justifyContent="center"
-            alignItems="center"
-          >
-            <Button
-              variant="outlined"
-              startIcon={<Article />}
-              onClick={() => navigate('/request-template')}
-            >
-              {t.landRequestTemplate}
-            </Button>
-            <Button
-              variant="outlined"
-              color="secondary"
-              startIcon={<DesignServices />}
-              onClick={() => navigate('/request-survey-design')}
-            >
-              {t.landRequestDesign}
-            </Button>
-          </Stack>
         </Box>
-
-        <TextField
-          fullWidth
-          placeholder={t.landSearchTemplates}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
-          sx={{ mb: 4, maxWidth: 560, mx: 'auto', display: 'block' }}
-          size="small"
-        />
 
         {loadingTemplates ? (
           <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>
         ) : (
-          <>
-            {categories.map(({ key, label, color, list }, idx, arr) => (
-              allByCategory(key).length > 0 && (
-                <Box key={key} sx={{ mb: idx < arr.length - 1 ? 5 : 0 }}>
-                  <Typography variant="h6" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {label}
-                    <Chip label={allByCategory(key).length} size="small" color={color} />
-                  </Typography>
-                  {list.length > 0 ? (
-                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-                      {list.map((tpl) => (
-                        <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
-                      ))}
-                    </Box>
-                  ) : (
-                    !hasSearch && (
-                      <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-                        {tf(t.landSearchCategoryHint, { n: allByCategory(key).length })}
-                      </Typography>
-                    )
-                  )}
-                </Box>
-              )
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
+            {homeTemplates.map((tpl) => (
+              <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
             ))}
-            {hasSearch && visible.length === 0 && (
-              <Box sx={{ textAlign: 'center', py: 6 }}>
-                <Typography color="text.secondary">{tf(t.landNoTemplates, { q: search })}</Typography>
-              </Box>
-            )}
-          </>
+          </Box>
         )}
+
+        <Box sx={{ textAlign: 'center', mt: 4 }}>
+          <Button variant="contained" size="large" onClick={() => navigate('/templates')} sx={{ fontWeight: 700 }}>
+            {loadingTemplates
+              ? (t.landViewAllTemplatesShort || 'View all templates →')
+              : tf(t.landViewAllTemplates || 'View all {n} templates →', { n: templates.length })}
+          </Button>
+        </Box>
       </Container>
 
       <Box sx={{ bgcolor: 'primary.main', color: 'white', py: 8, textAlign: 'center' }}>
@@ -600,263 +438,5 @@ export default function LandingPage() {
       <PublicFooter />
       <SiteFeedbackButton />
     </Box>
-  );
-}
-
-function TemplatePreviewDialog({ templateId, templateName, open, onClose }) {
-  const { t } = useRegion();
-  const [config, setConfig] = useState(null);
-  const [preloadedImages, setPreloadedImages] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!open || !templateId) return;
-    setConfig(null);
-    setPreloadedImages([]);
-    setError('');
-    setLoading(true);
-
-    const fetchConfig = async () => {
-      try {
-        if (supabase) {
-          const { data, error: err } = await supabase
-            .from('templates')
-            .select('survey_config, preloaded_images')
-            .eq('id', templateId)
-            .single();
-          if (!err && data?.survey_config) {
-            setConfig(stripOwnResponseSupabase(data.survey_config));
-            setPreloadedImages(Array.isArray(data.preloaded_images) ? data.preloaded_images : []);
-            return;
-          }
-        }
-        const res = await fetch(`/project_templates/${templateId}.json`);
-        if (res.ok) {
-          const tpl = await res.json();
-          setConfig(stripOwnResponseSupabase(tpl.config || tpl.survey_config || null));
-          setPreloadedImages(Array.isArray(tpl.preloadedImages) ? tpl.preloadedImages : []);
-        } else {
-          setError('Preview not available for this template.');
-        }
-      } catch {
-        setError('Failed to load preview.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchConfig();
-  }, [open, templateId]);
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth
-      PaperProps={{ sx: { height: '90vh' } }}>
-      <DialogTitle>
-        {tf(t.landPreviewTitle, { name: templateName })}
-        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>{t.landReadOnly}</Typography>
-      </DialogTitle>
-      <DialogContent sx={{ p: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {loading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, py: 6 }}>
-            <CircularProgress />
-          </Box>
-        )}
-        {error && (
-          <Box sx={{ p: 3 }}>
-            <Typography color="text.secondary">{error}</Typography>
-          </Box>
-        )}
-        {config && !loading && (
-          <Suspense fallback={<Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}><CircularProgress /></Box>}>
-          <SurveyPreview
-            config={config}
-            currentProject={{
-              id: `tpl-${templateId}`,
-              name: templateName,
-              preloadedImages,
-            }}
-            showMediaAssignment={false}
-          />
-          </Suspense>
-        )}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>{t.landClose}</Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-/**
- * A larger card for an SP-Scheme example: cover, what it is, preview and use.
- * The cover is the image an admin set for the template, otherwise the page
- * itself (drawn the same way on every load), never a random library picture.
- */
-function SchemeExampleCard({ template, onUse }) {
-  const { t } = useRegion();
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const title = String(template.name || '').replace(/^\s*sp[\s_-]?scheme\s*[:：·|-]?\s*/i, '') || template.name;
-
-  return (
-    <>
-      <Card data-testid={`sp-scheme-example-${template.id}`} sx={{
-        borderRadius: 2,
-        overflow: 'hidden',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.07)',
-        '&:hover': { boxShadow: '0 6px 20px rgba(0,0,0,0.12)' },
-        transition: 'box-shadow 0.2s',
-        display: 'flex',
-        flexDirection: 'column',
-      }}>
-        <Box
-          component="button"
-          type="button"
-          onClick={() => setPreviewOpen(true)}
-          aria-label={`${t.landPreview}: ${title}`}
-          sx={{ display: 'block', width: '100%', p: 0, border: 0, cursor: 'pointer', bgcolor: 'grey.100', borderBottom: '1px solid', borderColor: 'divider' }}
-        >
-          {template.own_thumbnail ? (
-            <Box component="img" src={template.own_thumbnail} alt="" sx={{ display: 'block', width: '100%', height: 190, objectFit: 'cover', objectPosition: 'top' }} />
-          ) : (
-            <SchemePageCover templateId={template.id} height={190} fallback={<Skeleton variant="rectangular" animation="wave" sx={{ width: '100%', height: '100%' }} />} />
-          )}
-        </Box>
-        <CardContent sx={{ p: 2.5, flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5, lineHeight: 1.35, ...CLAMP(2) }}>
-            {title}
-          </Typography>
-          {(template.author || template.year) && (
-            <Typography variant="caption" color="text.secondary" sx={{ mb: 1 }}>
-              {[template.author, template.year].filter(Boolean).join(' · ')}
-            </Typography>
-          )}
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, flex: 1, ...CLAMP(3) }}>
-            {template.description || ''}
-          </Typography>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Button size="small" variant="outlined" startIcon={<Preview />} onClick={() => setPreviewOpen(true)}>
-              {t.landPreview}
-            </Button>
-            <Button size="small" variant="contained" onClick={onUse} sx={{ ml: 'auto' }}>
-              {t.landUse}
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-
-      <TemplatePreviewDialog
-        templateId={template.id}
-        templateName={title}
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-      />
-    </>
-  );
-}
-
-function TemplateCard({ template, onUse }) {
-  const { t } = useRegion();
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const isAI = template.category === 'ai';
-  const isUrban = template.category === 'urban';
-  const chipColor = isAI ? 'primary' : isUrban ? 'warning' : 'success';
-  const chipLabel = isAI ? t.landChipAi : isUrban ? t.landChipUrban : t.landChipAcademic;
-  const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);
-  const coverPos = `${hashString(template.id) % 80}% ${hashString(`${template.id}-y`) % 80}%`;
-
-  return (
-    <>
-      <Card sx={{
-        height: 258,
-        borderRadius: 2,
-        overflow: 'hidden',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-        '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.12)' },
-        transition: 'box-shadow 0.2s',
-        display: 'flex',
-        flexDirection: 'column',
-      }}>
-        <Box
-          sx={{
-            height: 110,
-            flexShrink: 0,
-            bgcolor: 'grey.100',
-            backgroundImage: `url(${thumb})`,
-            backgroundSize: 'cover',
-            backgroundPosition: coverPos,
-            position: 'relative',
-          }}
-        >
-          <Box
-            component="img"
-            src={thumb}
-            alt=""
-            onError={onThumbError}
-            sx={{ display: 'none' }}
-          />
-          <Chip
-            label={chipLabel}
-            size="small"
-            color={chipColor}
-            variant="outlined"
-            sx={{
-              position: 'absolute',
-              top: 10,
-              left: 10,
-              bgcolor: 'rgba(255,255,255,0.94)',
-              fontWeight: 600,
-              // Filled chips use contrast (white) text; white bg made that invisible.
-              borderColor: `${chipColor}.main`,
-              color: `${chipColor}.dark`,
-            }}
-          />
-        </Box>
-        <CardContent sx={{ p: 2, flex: 1, minHeight: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.35, flexShrink: 0, lineHeight: 1.35, ...CLAMP(2) }}>
-            {template.name}
-          </Typography>
-
-          <Typography variant="caption" color="text.secondary" sx={{ mb: 0.75, flexShrink: 0, ...CLAMP(1) }}>
-            {[template.author, template.year].filter(Boolean).join(' · ') || '\u00A0'}
-          </Typography>
-
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25, flex: 1, fontSize: '0.8rem', lineHeight: 1.4, ...CLAMP(1) }}>
-            {template.description || ''}
-          </Typography>
-
-          <Box sx={{ display: 'flex', gap: 1, flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
-            {paperTemplateDoc(template.id) && (
-              <Button size="small" href={`/docs/${template.id}`} sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-                {t.navDocs}
-              </Button>
-            )}
-            {template.paper_url && (
-              <Button size="small" startIcon={<Article />} href={template.paper_url} target="_blank" sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-                {t.landPaper}
-              </Button>
-            )}
-            {template.dataset && (
-              <Button size="small" startIcon={<Dataset />} href={`https://huggingface.co/datasets/${template.dataset}`} target="_blank" sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-                {t.landDataset}
-              </Button>
-            )}
-            <Button size="small" startIcon={<Preview />} onClick={() => setPreviewOpen(true)} sx={{ fontSize: '0.75rem', minWidth: 0, px: 1 }}>
-              {t.landPreview}
-            </Button>
-            <Button size="small" variant="contained" onClick={onUse} sx={{ ml: 'auto', fontSize: '0.75rem' }}>
-              {t.landUse}
-            </Button>
-          </Box>
-        </CardContent>
-      </Card>
-
-      <TemplatePreviewDialog
-        templateId={template.id}
-        templateName={template.name}
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-      />
-    </>
   );
 }

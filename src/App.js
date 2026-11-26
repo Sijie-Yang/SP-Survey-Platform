@@ -16,6 +16,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const LiveSurveysPage = lazy(() => import('./pages/LiveSurveysPage'));
 const PapersLibraryPage = lazy(() => import('./pages/PapersLibraryPage'));
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
 const RequestTemplatePage = lazy(() => import('./pages/RequestTemplatePage'));
 const RequestSurveyDesignPage = lazy(() => import('./pages/RequestSurveyDesignPage'));
 const TeamPage = lazy(() => import('./pages/TeamPage'));
@@ -149,6 +150,7 @@ function ProtectedIntegrations() {
 const router = createBrowserRouter(createRoutesFromElements(
               <>
                 <Route path="/" element={<LandingPage />} />
+                <Route path="/templates" element={<TemplatesPage />} />
                 <Route path="/papers" element={<PapersLibraryPage />} />
                 <Route path="/publications" element={<PublicationsPage />} />
                 <Route path="/contribute" element={<ContributePage />} />

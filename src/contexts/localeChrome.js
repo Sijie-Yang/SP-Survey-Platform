@@ -1,6 +1,7 @@
 /** Visible navigation and workspace tabs. Not SP-Wiki article text. */
 export const localeChrome = {
   'zh-TW': {
+    navTemplates: '模板庫',
     navPaperLibrary: '論文庫',
     navNews: '新聞',
     navForum: '論壇',
@@ -22,6 +23,7 @@ export const localeChrome = {
     builderTitle: '問卷設計',
   },
   ja: {
+    navTemplates: 'テンプレート',
     navPaperLibrary: '論文ライブラリ',
     navNews: 'ニュース',
     navRequestTemplate: 'テンプレートを依頼',
@@ -42,6 +44,7 @@ export const localeChrome = {
     builderTitle: '調査の設計',
   },
   ko: {
+    navTemplates: '템플릿',
     navPaperLibrary: '논문 라이브러리',
     navNews: '뉴스',
     navRequestTemplate: '템플릿 요청',
@@ -62,6 +65,7 @@ export const localeChrome = {
     builderTitle: '설문 설계',
   },
   fi: {
+    navTemplates: 'Mallit',
     navPaperLibrary: 'Julkaisukirjasto',
     navNews: 'Uutiset',
     navRequestTemplate: 'Pyydä mallia',
@@ -82,6 +86,7 @@ export const localeChrome = {
     builderTitle: 'Kyselyn rakentaja',
   },
   es: {
+    navTemplates: 'Plantillas',
     navPaperLibrary: 'Biblioteca de artículos',
     navNews: 'Noticias',
     navRequestTemplate: 'Solicitar plantilla',
@@ -102,6 +107,7 @@ export const localeChrome = {
     builderTitle: 'Diseñador de la encuesta',
   },
   fr: {
+    navTemplates: 'Modèles',
     navPaperLibrary: 'Bibliothèque d’articles',
     navNews: 'Actualités',
     navRequestTemplate: 'Demander un modèle',
@@ -122,6 +128,7 @@ export const localeChrome = {
     builderTitle: 'Concepteur du questionnaire',
   },
   de: {
+    navTemplates: 'Vorlagen',
     navPaperLibrary: 'Publikationsbibliothek',
     navNews: 'Neuigkeiten',
     navRequestTemplate: 'Vorlage anfragen',
@@ -142,6 +149,7 @@ export const localeChrome = {
     builderTitle: 'Umfrage-Editor',
   },
   pt: {
+    navTemplates: 'Modelos',
     navPaperLibrary: 'Biblioteca de artigos',
     navNews: 'Notícias',
     navRequestTemplate: 'Pedir modelo',

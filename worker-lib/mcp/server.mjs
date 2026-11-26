@@ -74,6 +74,7 @@ import { DOWNLOAD_MAX_JSON_BYTES, DOWNLOAD_MAX_ROWS, createDownloadUrl } from '.
 import { isPlatformAdmin, loadOwned, publishTemplate } from '../agent/projectLifecycle.mjs';
 import { checkPublishMedia } from '../../src/lib/publishMediaCheck.mjs';
 import { listNews, listWiki, saveNewsDraft, submitWiki } from '../research/siteContent.mjs';
+import { listTemplateFacets, saveTemplateFacets } from '../research/templateTags.mjs';
 import { listPapers, PAPER_STATUSES, SAVE_MAX as PAPER_SAVE_MAX, savePapers } from '../research/paperLibrary.mjs';
 import { keepStoredSiteHtml, trimResultSiteHtml } from '../agent/siteDraft.mjs';
 import { sameDraftStamp } from '../agent/projectHandlers.mjs';
@@ -230,6 +231,32 @@ const TOOLS = [
         confirm: { type: 'boolean' },
       },
       required: ['projectId', 'name', 'author', 'year', 'confirm'],
+    },
+  },
+  {
+    name: 'template_tags',
+    description:
+      'PLATFORM ADMINS ONLY. Read or set the classification tags of published templates, used by the /templates filters. '
+      + 'Dimensions: source (paper | ai | demo, one), modality, task, concept, participants, sample (one), country and city (free text). '
+      + 'Without templates: lists every approved template with its tags and the allowed values. With templates: each item sets the named '
+      + 'dimensions for one template (replacing that dimension\'s values unless merge:true); other dimensions and other tags stay. Needs surveys:publish and confirm:true to write.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        templates: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              templateId: { type: 'string' },
+              facets: { type: 'object', description: 'e.g. {"task":["pairwise"],"concept":["safety","greenery"],"city":["Berlin"]}' },
+              merge: { type: 'boolean', description: 'Add values instead of replacing them.' },
+            },
+            required: ['templateId', 'facets'],
+          },
+        },
+        confirm: { type: 'boolean' },
+      },
     },
   },
   {
@@ -904,7 +931,7 @@ const TOOLS = [
 ];
 
 /** Tools only platform admins can use: hidden from everyone else in tools/list (the server checks again on every call). */
-export const ADMIN_ONLY_TOOLS = new Set(['template_publish', 'paper_list', 'paper_save', 'news_list', 'news_save', 'wiki_list', 'wiki_submit', 'model_bench_routes', 'model_bench_start', 'model_bench_result']);
+export const ADMIN_ONLY_TOOLS = new Set(['template_publish', 'template_tags', 'paper_list', 'paper_save', 'news_list', 'news_save', 'wiki_list', 'wiki_submit', 'model_bench_routes', 'model_bench_start', 'model_bench_result']);
 
 // title + hints for every tool (MCP tool annotations; the Claude connector directory requires them).
 // read: only reads. destructive: may overwrite or delete what is already there. All tools act on SP-Survey only (openWorldHint false).
@@ -918,6 +945,7 @@ const TOOL_ANNOTATIONS = {
   sp_scheme_import: ['Import a study page (SP-Scheme)', CHANGE],
   survey_download_url: ['Get a download link for study data', READ],
   template_publish: ['Publish a project as a template (admin)', CHANGE],
+  template_tags: ['Read or set template classification tags (admin)', CHANGE],
   paper_list: ['List papers in the paper library (admin)', READ],
   model_bench_routes: ['List models an admin can bench (admin)', READ],
   model_bench_start: ['Bench a model on SP-Scheme pages (admin)', ADD],
@@ -1037,6 +1065,15 @@ async function callTool(env, auth, request, name, args = {}) {
         return toolResult({ error: `This replaces the template ${String(args.templateId).slice(0, 96)} (its survey, details and media) for everyone. Set overwrite:true to do that, or leave templateId out to publish a new template.`, code: 'OVERWRITE_REQUIRED' }, true);
       }
       return toolResult(await publishTemplate(env, mcpCtx(auth), args.projectId, args, request));
+    }
+    case 'template_tags': {
+      const writes = Array.isArray(args.templates) && args.templates.length > 0;
+      requireScope(auth, writes ? 'surveys:publish' : 'surveys:read');
+      if (!(await isPlatformAdmin(env, auth.userId))) return toolResult({ error: 'Only platform admins can change template tags.', code: 'ADMIN_ONLY' }, true);
+      if (!writes) return toolResult(await listTemplateFacets(env));
+      if (!args.confirm) return toolResult({ error: 'Set confirm:true to save these tags.' }, true);
+      const saved = await saveTemplateFacets(env, args.templates);
+      return toolResult(saved, saved.updated === 0);
     }
     case 'paper_list': {
       requireScope(auth, 'surveys:read');

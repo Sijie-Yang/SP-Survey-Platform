@@ -1,4 +1,6 @@
 import SkillPreviewPanel from '../components/admin/SkillPreviewPanel';
+import FacetEditor from '../components/templates/FacetEditor';
+import { isFacetTag, parseFacets, templatesToCsv, withFacets } from '../lib/templateFacets';
 import { listPreviewMedia, pickPreviewMedia } from '../lib/previewMediaLibrary';
 import { checkAnswerAgainstResultSchema } from '../lib/skillResultTypes';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -102,7 +104,8 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
         author:              template.author            || '',
         year:                template.year              || '',
         category:            template.category          || '',
-        tags:                (template.tags || []).join(', '),
+        tags:                (template.tags || []).filter((t) => !isFacetTag(t)).join(', '),
+        facets:              parseFacets(template.tags),
         paper_url:           template.website           || '',
         huggingface_dataset: template.huggingfaceDataset || '',
       });
@@ -125,7 +128,7 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
         author:              form.author,
         year:                form.year,
         category:            form.category,
-        tags:                form.tags.split(',').map(t => t.trim()).filter(Boolean),
+        tags:                withFacets(form.tags.split(',').map(t => t.trim()).filter(Boolean), form.facets),
         paper_url:           form.paper_url,
         huggingface_dataset: form.huggingface_dataset.trim() || null,
       };
@@ -166,7 +169,7 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
             { label: '描述', key: 'description', multiline: true, rows: 3 },
             { label: '作者', key: 'author' },
             { label: '年份', key: 'year' },
-            { label: '标签 (逗号分隔)', key: 'tags' },
+            { label: '其他标签 (逗号分隔)', key: 'tags' },
             { label: '论文链接', key: 'paper_url' },
             { label: 'HuggingFace Dataset', key: 'huggingface_dataset',
               placeholder: 'username/dataset-name',
@@ -186,12 +189,14 @@ function EditTemplateDialog({ template, open, onClose, onSaved }) {
               helperText={helperText}
             />
           ))}
+          <Typography variant="subtitle2" sx={{ pt: 1 }}>分类标签（模板库页的筛选）</Typography>
+          <FacetEditor value={form.facets || {}} onChange={(facets) => setForm((f) => ({ ...f, facets }))} />
           <FormControl fullWidth size="small">
-            <InputLabel>分类</InputLabel>
+            <InputLabel>旧分类（兼容，可不填）</InputLabel>
             <Select
               value={form.category || ''}
               onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-              label="分类"
+              label="旧分类（兼容，可不填）"
             >
               <MenuItem value="">None</MenuItem>
               <MenuItem value="Academic Research">Academic Research</MenuItem>
@@ -931,6 +936,26 @@ function TemplateManagement() {
       <Stack direction="row" spacing={2} sx={{ mb: 2 }} alignItems="center" flexWrap="wrap">
         <Typography variant="h6">模板管理</Typography>
         <Box flex={1} />
+        <Tooltip title="每个模板一行，来源、模态、提问方式、感知概念等各一列（Excel 可直接打开）">
+          <span>
+            <Button
+              variant="outlined"
+              startIcon={<CloudDownload />}
+              disabled={loading || !templates.length}
+              onClick={() => {
+                const blob = new Blob([templatesToCsv(templates)], { type: 'text/csv;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `sp-survey-templates-${new Date().toISOString().slice(0, 10)}.csv`;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              }}
+            >
+              导出模板库 CSV
+            </Button>
+          </span>
+        </Tooltip>
         <Tooltip title="对所有有图片的模板依次跑 L0 + Seg（跳过已完成，写入 R2 CSV）">
           <span>
             <Button

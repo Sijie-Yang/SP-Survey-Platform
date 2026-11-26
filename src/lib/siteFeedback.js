@@ -49,7 +49,7 @@ export async function submitSiteFeedback(input) {
     contact_wechat: input?.contactWechat || '',
     contact_other: input?.contactOther || '',
     website: input?.website || '',
-    page_url: typeof window !== 'undefined' ? window.location.href.slice(0, 500) : '',
+    page_url: String(input?.pageUrl || (typeof window !== 'undefined' ? window.location.href : '')).slice(0, 500),
     language: input?.language || '',
     user_agent: typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 400) : '',
   };
