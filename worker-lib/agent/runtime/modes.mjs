@@ -140,3 +140,29 @@ export function assistantModeFromEvents(events = [], fallback = DEFAULT_ASSISTAN
 export function applyReceivedShape(args) {
   return describeApplyShape(args);
 }
+
+/**
+ * The mode the researcher used for the previous message of this conversation
+ * (events of other runs only), or '' when there is none.
+ */
+export function previousMessageMode(events = [], currentRunId = null) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type !== 'user.message' || (currentRunId && event.run_id === currentRunId)) continue;
+    const mode = String(event.payload?.assistantMode || '').trim().toLowerCase();
+    if (ASSISTANT_MODES.includes(mode)) return mode;
+  }
+  return '';
+}
+
+/** A note for the model when the researcher switched mode since their last message; '' otherwise. */
+export function modeSwitchNote(previousMode, assistantMode) {
+  if (!previousMode || previousMode === assistantMode) return '';
+  if (assistantMode === 'spscheme') {
+    return '\n\nMode switch: the researcher has just switched this conversation to SP-Scheme mode. Earlier messages in this conversation were in another mode. From now on build and change the study as one SP-Scheme page with sp_scheme_write_page; do not edit question pages one by one.';
+  }
+  if (assistantMode === 'agent') {
+    return '\n\nMode switch: the researcher has just switched this conversation to Classic mode. Earlier messages may be about the SP-Scheme page. From now on build and change the survey in the classic editor, question by question, with the survey tools; do not write or change the SP-Scheme page.';
+  }
+  return '';
+}

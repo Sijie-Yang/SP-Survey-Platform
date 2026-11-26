@@ -1118,6 +1118,18 @@ export default function ChatAssistant({
               },
             }}
           />
+          {isPlatformMode && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              data-testid="ai-mode-hint"
+              sx={{ display: 'block', px: 1.5, lineHeight: 1.4 }}
+            >
+              {assistantMode === 'spscheme'
+                ? (t.aiSidebarModeSpSchemeHint || 'SP-Scheme: the AI writes the whole participant page.')
+                : (t.aiSidebarModeClassicHint || 'Classic: the AI builds the survey question by question in the classic editor.')}
+            </Typography>
+          )}
           <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ px: 1, pb: 0.75 }}>
             <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 0, overflow: 'hidden' }}>
               {isPlatformMode && (
@@ -1203,8 +1215,8 @@ export default function ChatAssistant({
                 onChange={(event) => onSteerTargetChange?.(event.target.value)}
                 sx={{ maxWidth: 148, fontSize: '0.75rem', '& .MuiSelect-select': { py: 0.5, pl: 0.5, pr: 2.25 } }}
               >
-                <MenuItem value="next-step">补充当前任务</MenuItem>
-                <MenuItem value="after-run">完成后执行</MenuItem>
+                <MenuItem value="next-step">{t.aiSteerTargetNow || 'Add to current task'}</MenuItem>
+                <MenuItem value="after-run">{t.aiSteerTargetAfter || 'Run after this task'}</MenuItem>
               </Select>
             )}
             {isLoading && userMessage.trim() && (
@@ -1214,7 +1226,7 @@ export default function ChatAssistant({
                 onClick={onSteerMessage}
                 sx={{ minWidth: 0, borderRadius: 999, textTransform: 'none' }}
               >
-                {steerTarget === 'after-run' ? '完成后执行' : (t.aiSidebarSteer || 'Steer')}
+                {steerTarget === 'after-run' ? (t.aiSteerTargetAfter || 'Run after this task') : (t.aiSidebarSteer || 'Steer')}
               </Button>
             )}
             <Tooltip title={isLoading ? (t.aiSidebarStop || 'Stop') : t.aiSidebarSend}>

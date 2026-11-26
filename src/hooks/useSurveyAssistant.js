@@ -58,6 +58,8 @@ export default function useSurveyAssistant({
   const [openaiApiKey, setOpenaiApiKey] = useState(() => platformMode ? '' : typeof window !== 'undefined' ? window.localStorage.getItem('openaiApiKey') || '' : '');
   const [apiKeyValid, setApiKeyValid] = useState(() => platformMode ? false : typeof window !== 'undefined' && window.localStorage.getItem('apiKeyValid') === 'true');
   const [credentialHint, setCredentialHint] = useState('');
+  // True once the platform said whether a model is available (platform mode).
+  const [credentialsChecked, setCredentialsChecked] = useState(false);
   const [assistantDirectory, setAssistantDirectory] = useState([]);
   const [selectedRoute, setSelectedRoute] = useState('');
   const [selectedEffort, setSelectedEffort] = useState('');
@@ -143,6 +145,7 @@ export default function useSurveyAssistant({
   const applyCredentialStatus = useCallback(status => {
     if (!status) return;
     lastStatusRef.current = status;
+    setCredentialsChecked(true);
     if (status.settings) {
       const nextReview = normalizeReviewSettings(status.settings.review_settings);
       reviewUserIdRef.current = status.settings.user_id || null;
@@ -259,9 +262,8 @@ export default function useSurveyAssistant({
         }
         const detail = await getAiSession(sessionId);
         if (cancelled) return;
-        if (detail?.assistantMode) {
-          handleAssistantModeChange(detail.assistantMode);
-        }
+        // The mode is the researcher's own choice for this study: restoring the
+        // conversation (here or in the other editor) never switches it.
         if (sessionId !== storedSessionId) {
           writeSessionId(storage, projectId, sessionId);
           setAiSessionId(sessionId);
@@ -344,7 +346,11 @@ export default function useSurveyAssistant({
     setMultiAgentReviewEnabled(loadProjectFlag(projectId, 'multiAgentReviewEnabled', false));
     setReviewMode(loadProjectString(projectId, 'reviewMode', '1v1'));
     setMaxReviewRounds(loadProjectNumber(projectId, 'maxReviewRounds', 3));
-    setAssistantMode(normalizeAssistantMode(loadProjectString(projectId, 'assistantMode', ''), defaultAssistantMode(surveyConfigRef.current, defaultModeRef.current)));
+    const storedMode = loadProjectString(projectId, 'assistantMode', '');
+    const openingMode = normalizeAssistantMode(storedMode, defaultAssistantMode(surveyConfigRef.current, defaultModeRef.current));
+    setAssistantMode(openingMode);
+    // Remember the opening mode, so the other editor opens this study in the same mode.
+    if (!storedMode && typeof window !== 'undefined') window.localStorage.setItem(`assistantMode_${projectId}`, openingMode);
     setReviewOptionsState(reviewOptionsFromSettings(reviewSettingsRef.current));
     const timer = setTimeout(() => {
       isLoadingProjectSettings.current = false;
@@ -1272,6 +1278,7 @@ export default function useSurveyAssistant({
     loadingStatus,
     pendingApproval,
     apiKeyValid,
+    credentialsChecked,
     openaiApiKey,
     credentialHint,
     modelOptions: assistantModelOptions,

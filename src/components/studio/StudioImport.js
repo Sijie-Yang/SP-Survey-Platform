@@ -16,7 +16,7 @@ import { spSchemeProblems, spSchemeProblemsText, summarizeSpSchemeImport } from 
 import { createStudioProject, isStudioLocalMode } from '../../lib/studioData';
 import { copyOrDownload, useL } from './studioUi';
 import useStudioImport from './useStudioImport';
-import { queueStudioAssistantPrompt } from './StudioAssistant';
+import { StudioFirstRun } from './StudioAssistant';
 
 const ACCEPT = '.html,.htm,.zip,text/html,application/zip';
 
@@ -99,14 +99,16 @@ export function studyNameFromPrompt(text, fallback) {
 }
 
 /**
- * The new-study box: describe the study (or paste an existing survey); a new
- * study opens with the built-in Assistant (SP-Scheme mode) already working on it.
+ * The new-study box: describe the study (or paste an existing survey); the
+ * built-in Assistant (SP-Scheme mode) writes the first version here, then the
+ * study opens with the same conversation.
  */
 export function StudioAiWriter({ dense = false, onStarted = () => {} }) {
   const L = useL();
   const [text, setText] = useState('');
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
+  const [created, setCreated] = useState(null);
   const start = async () => {
     const request = text.trim();
     if (!request || starting) return;
@@ -118,9 +120,17 @@ export function StudioAiWriter({ dense = false, onStarted = () => {} }) {
       setError(L(`The study could not be created: ${result?.error}`, `没能新建研究：${result?.error}`));
       return;
     }
-    queueStudioAssistantPrompt(result.project.id, request);
-    onStarted({ projectId: result.project.id, created: true });
+    setCreated({ project: result.project, request });
   };
+  if (created) {
+    return (
+      <StudioFirstRun
+        project={created.project}
+        request={created.request}
+        onDone={() => onStarted({ projectId: created.project.id, created: true })}
+      />
+    );
+  }
   return (
     <Box data-testid="studio-ai-writer" sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
       <TextField
@@ -143,7 +153,7 @@ export function StudioAiWriter({ dense = false, onStarted = () => {} }) {
           {starting ? L('Creating…', '正在新建…') : L('Make it with AI', '让 AI 生成')}
         </Button>
         <Typography variant="caption" color="text.secondary">
-          {L('Opens the study with the AI assistant; keep chatting there to change it.', '会新建研究并打开 AI 助手，之后可以在那里继续对话修改。')}
+          {L('The AI writes a first version here; then the study opens and you can keep chatting to change it.', 'AI 先在这里写出第一版，然后打开研究，可以继续对话修改。')}
         </Typography>
       </Box>
       {error && <Alert severity="error">{error}</Alert>}

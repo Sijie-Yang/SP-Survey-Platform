@@ -286,6 +286,37 @@ describe('useSurveyAssistant', () => {
     expect(mockGetAiSession).toHaveBeenCalledWith('sess-p1');
   });
 
+  test('one conversation per study: opening it in the other editor keeps the chosen mode', async () => {
+    sessionStorage.setItem('ai_session_p1', 'sess-p1');
+    mockGetAiSession.mockResolvedValue({
+      assistantMode: 'agent',
+      events: [{ type: 'run.status', payload: { status: 'completed' } }],
+      messages: [
+        { id: 'event-1', role: 'user', content: 'Make a page' },
+        { id: 'event-2', role: 'assistant', content: 'Page saved.' },
+      ],
+    });
+    // Studio opens the study in SP-Scheme mode and remembers it.
+    const studio = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: {},
+      defaultMode: 'spscheme',
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await waitFor(() => expect(studio.result.current.messages).toHaveLength(2));
+    expect(studio.result.current.assistantMode).toBe('spscheme');
+    expect(localStorage.getItem('assistantMode_p1')).toBe('spscheme');
+    studio.unmount();
+    // The classic editor (no default, no page) shows the same conversation in the same mode.
+    const classic = renderHook(() => useSurveyAssistant({
+      currentProject: project('p1'),
+      surveyConfig: { title: 'Live' },
+      onSurveyConfigChange: jest.fn(),
+    }));
+    await waitFor(() => expect(classic.result.current.messages).toHaveLength(2));
+    expect(classic.result.current.assistantMode).toBe('spscheme');
+  });
+
   test('streams hosted snapshots into the conversation while a run is in progress', async () => {
     let extras;
     mockSendChatMessage.mockImplementation((...args) => {

@@ -74,3 +74,21 @@ describe('SP-Scheme assistant mode', () => {
     await assert.rejects(tool.execute({ request: ' ' }), /request is required/);
   });
 });
+
+describe('switching mode in one conversation', () => {
+  it('tells the model when the researcher switched mode since the last message', async () => {
+    const { previousMessageMode, modeSwitchNote } = await import('./modes.mjs');
+    const events = [
+      { type: 'user.message', run_id: 'r1', payload: { assistantMode: 'spscheme' } },
+      { type: 'run.status', run_id: 'r1', payload: { assistantMode: 'spscheme' } },
+      { type: 'user.message', run_id: 'r2', payload: { assistantMode: 'agent' } },
+    ];
+    assert.equal(previousMessageMode(events, 'r2'), 'spscheme');
+    assert.equal(previousMessageMode(events.slice(0, 2), 'r2'), 'spscheme');
+    assert.equal(previousMessageMode([], 'r1'), '');
+    assert.match(modeSwitchNote('spscheme', 'agent'), /switched this conversation to Classic mode/);
+    assert.match(modeSwitchNote('agent', 'spscheme'), /switched this conversation to SP-Scheme mode/);
+    assert.equal(modeSwitchNote('spscheme', 'spscheme'), '');
+    assert.equal(modeSwitchNote('', 'agent'), '');
+  });
+});

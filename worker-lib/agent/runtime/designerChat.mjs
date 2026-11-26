@@ -38,7 +38,9 @@ import { assertRoute } from './validators.mjs';
 import {
   applyAssistantModeToTools,
   getAssistantModePolicy,
+  modeSwitchNote,
   normalizeAssistantMode,
+  previousMessageMode,
   requestsExplicitRedesign,
 } from './modes.mjs';
 import { parseGenerateGoals } from './generateGoals.mjs';
@@ -266,6 +268,8 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
   };
 
   const priorEvents = await listEvents(env, session.id);
+  // Tell the model when the researcher switched mode since their last message.
+  const switchNote = modeSwitchNote(previousMessageMode(priorEvents, run.id), assistantMode);
   if (!body?._sessionPrepared) {
     await emit(createEvent('user.message', {
       content: message,
@@ -499,7 +503,7 @@ export async function runDesignerChat(env, userId, body, request, ctx) {
       messages: [
         {
           role: 'system',
-          content: `${spSchemeMode ? SP_SCHEME_DESIGNER_SYSTEM : (assistantMode === 'generate' ? GENERATE_DESIGNER_SYSTEM : DESIGNER_SYSTEM)}\n\n${modePolicy.systemPrompt}${researchBlock}${spSchemeMode ? '' : editorBlock}${resultsBlock}`,
+          content: `${spSchemeMode ? SP_SCHEME_DESIGNER_SYSTEM : (assistantMode === 'generate' ? GENERATE_DESIGNER_SYSTEM : DESIGNER_SYSTEM)}\n\n${modePolicy.systemPrompt}${researchBlock}${spSchemeMode ? '' : editorBlock}${resultsBlock}${switchNote}`,
         },
         ...history,
         { role: 'user', content: currentTaskMessage(message, intent) },

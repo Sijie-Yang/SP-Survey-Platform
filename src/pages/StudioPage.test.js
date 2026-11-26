@@ -30,15 +30,16 @@ jest.mock('../hooks/useSurveyAssistant', () => {
   const calls = [];
   const send = jest.fn();
   const setUserMessage = jest.fn();
+  const state = { apiKeyValid: true };
   const hook = (options) => {
     calls.push(options);
-    return { assistantMode: options.defaultMode || 'agent', apiKeyValid: true, isLoading: false, handleSendMessage: send, setUserMessage };
+    return { assistantMode: options.defaultMode || 'agent', apiKeyValid: state.apiKeyValid, credentialsChecked: true, isLoading: false, loadingStatus: '', handleSendMessage: send, setUserMessage };
   };
   return {
     __esModule: true,
     default: hook,
     chatPropsFromAssistant: (a) => ({ assistantMode: a.assistantMode }),
-    __mock: { calls, send, setUserMessage },
+    __mock: { calls, send, setUserMessage, state },
   };
 });
 jest.mock('../lib/studioData', () => ({
@@ -180,17 +181,40 @@ test('the new-study screen offers the AI page and the classic editor as equal ch
   expect(screen.getByRole('link', { name: 'Start from a paper template' })).toHaveAttribute('href', '/admin');
 });
 
-test('describing a study creates it and hands the description to its AI assistant', async () => {
-  assistantMock.send.mockClear();
+test('describing a study creates it, waits for the first version on the new-study screen, then opens it', async () => {
+  assistantMock.send.mockReset();
+  let finishRun;
+  assistantMock.send.mockImplementation(() => new Promise((resolve) => { finishRun = resolve; }));
   const router = openAt('/studio');
   const box = screen.getByRole('textbox', { name: 'Describe your study' });
   expect(screen.getByRole('button', { name: 'Make it with AI' })).toBeDisabled();
   fireEvent.change(box, { target: { value: 'Compare street photos for cycling safety\n20 pairs' } });
   fireEvent.click(screen.getByRole('button', { name: 'Make it with AI' }));
-  await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+  expect(await screen.findByTestId('studio-first-run')).toBeInTheDocument();
   expect(createStudioProject).toHaveBeenCalledWith('Compare street photos for cycling safety');
-  expect(await screen.findByTestId('studio-assistant')).toBeInTheDocument();
   await waitFor(() => expect(assistantMock.send).toHaveBeenCalledWith({ message: 'Compare street photos for cycling safety\n20 pairs', assistantMode: 'spscheme' }));
+  expect(router.state.location.pathname).toBe('/studio');
+  finishRun({ success: true });
+  await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+  expect(await screen.findByTestId('studio-assistant')).toBeInTheDocument();
+  expect(assistantMock.send).toHaveBeenCalledTimes(1);
+  assistantMock.send.mockReset();
+});
+
+test('without a model the new study opens with the description waiting in its chat box', async () => {
+  assistantMock.send.mockReset();
+  assistantMock.setUserMessage.mockClear();
+  assistantMock.state.apiKeyValid = false;
+  try {
+    const router = openAt('/studio');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Describe your study' }), { target: { value: 'Rate parks' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Make it with AI' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+    await waitFor(() => expect(assistantMock.setUserMessage).toHaveBeenCalledWith('Rate parks'));
+    expect(assistantMock.send).not.toHaveBeenCalled();
+  } finally {
+    assistantMock.state.apiKeyValid = true;
+  }
 });
 
 test('a study with a page has the built-in assistant in SP-Scheme mode; a classic study does not', async () => {
