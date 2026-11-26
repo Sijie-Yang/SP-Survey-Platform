@@ -477,7 +477,7 @@ export function TemplateCard({ template, onUse }) {
  * the paper's full title, then authors · year · journal · type, with small
  * icon actions and "Use" on the right.
  */
-export function TemplateRow({ template, onUse, onFacet }) {
+export function TemplateRow({ template, onUse, onFacet, activeConcept }) {
   const { t, language } = useRegion();
   const zh = String(language || '').startsWith('zh');
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -490,7 +490,10 @@ export function TemplateRow({ template, onUse, onFacet }) {
   const facetBits = [
     ...(facets.task || []).map((v) => ['task', v]),
     ...(facets.modality || []).map((v) => ['modality', v]),
-    ...(facets.concept || []).slice(0, 4).map((v) => ['concept', v]),
+    // The concept being filtered on comes first, so the row shows why it matched.
+    ...(facets.concept || [])
+      .slice().sort((a, b) => (b === activeConcept) - (a === activeConcept))
+      .slice(0, 4).map((v) => ['concept', v]),
     ...(facets.city || facets.country || []).slice(0, 2).map((v) => [facets.city ? 'city' : 'country', v]),
   ];
   const { src: thumb, onError: onThumbError } = useCoverCandidate(template.coverCandidates || [template.thumbnail_url || DEFAULT_TEMPLATE_COVER]);

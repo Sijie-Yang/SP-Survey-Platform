@@ -176,7 +176,7 @@ export default function TemplatesPage() {
         ) : (
           <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
             {shown.slice(0, limit).map((tpl) => (
-              <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} onFacet={update} />
+              <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} onFacet={update} activeConcept={filters.concept} />
             ))}
             {shown.length > limit && (
               <Box sx={{ textAlign: 'center', pt: 3 }}>
