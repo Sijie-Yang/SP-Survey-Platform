@@ -319,6 +319,38 @@ const TOOLS = [
     },
   },
   {
+    name: 'model_bench_routes',
+    description: 'PLATFORM ADMINS ONLY. Which providers and models the admin can bench for the built-in Assistant\'s SP-Scheme page writer (own keys and free-model routes), and the fixed study descriptions every model gets. Needs surveys:read.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'model_bench_start',
+    description: 'PLATFORM ADMINS ONLY. Run the fixed study descriptions through one model with the production page writer (Studio import check + repair rounds) on the server, keys never leave it. Pass the same benchId to put several models in one bench. Results arrive in a few minutes: model_bench_result. Uses the model provider\'s quota. Needs surveys:publish and confirm:true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string' },
+        model: { type: 'string' },
+        prompts: { type: 'array', items: { type: 'string' }, description: 'Description ids (default: all).' },
+        benchId: { type: 'string', description: 'Existing bench to add this model to (lowercase letters, digits, dashes).' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['provider', 'model', 'confirm'],
+    },
+  },
+  {
+    name: 'model_bench_result',
+    description: 'PLATFORM ADMINS ONLY. Results of a model bench: per model and description, passed, first try, repair rounds, question count, problems, time and token use. includeHtml {promptId, model} also returns that page. Needs surveys:read.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        benchId: { type: 'string' },
+        includeHtml: { type: 'object', properties: { promptId: { type: 'string' }, model: { type: 'string' } } },
+      },
+      required: ['benchId'],
+    },
+  },
+  {
     name: 'wiki_list',
     description: 'PLATFORM ADMINS ONLY. List SP-Wiki pages online (/docs/<page_key>), the built-in page keys, and wiki submissions with their status, to decide whether to add a page, edit one, or revise a submission. Needs surveys:read.',
     inputSchema: { type: 'object', properties: {} },
@@ -933,6 +965,21 @@ async function callTool(env, auth, request, name, args = {}) {
       if (name === 'news_save') return toolResult(await saveNewsDraft(env, mcpCtx(auth), args));
       if (name === 'wiki_list') return toolResult(await listWiki(env));
       return toolResult(await submitWiki(env, mcpCtx(auth), args));
+    }
+    case 'model_bench_routes':
+    case 'model_bench_start':
+    case 'model_bench_result': {
+      const writes = name === 'model_bench_start';
+      requireScope(auth, writes ? 'surveys:publish' : 'surveys:read');
+      if (!(await isPlatformAdmin(env, auth.userId))) return toolResult({ error: 'Only platform admins can bench models.', code: 'ADMIN_ONLY' }, true);
+      if (writes && !args.confirm) return toolResult({ error: 'Set confirm:true to run the bench (it uses the model provider\'s quota).' }, true);
+      const bench = await import('../agent/modelBench.mjs');
+      if (name === 'model_bench_routes') return toolResult(await bench.listBenchRoutes(env, auth.userId));
+      if (name === 'model_bench_result') return toolResult(await bench.readModelBench(env, args));
+      const { dispatchAgentRun } = await import('../agent/runtime/runDispatcher.mjs');
+      return toolResult(await bench.startModelBench(env, auth.userId, args, {
+        dispatch: (job) => dispatchAgentRun(env, null, job),
+      }));
     }
     case 'survey_list_projects': {
       requireScope(auth, 'surveys:read');

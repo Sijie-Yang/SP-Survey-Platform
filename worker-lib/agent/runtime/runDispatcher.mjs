@@ -1,6 +1,10 @@
 const MAX_QUEUE_ATTEMPTS = 5;
 
 async function execute(job, env, ctx) {
+  if (job?.kind === 'model-bench') {
+    const { runModelBenchJob } = await import('../modelBench.mjs');
+    return runModelBenchJob(env, job);
+  }
   if (job?.kind === 'silicon') {
     const { executeSiliconJob } = await import('../../silicon/runner.mjs');
     return executeSiliconJob(env, job, ctx);
