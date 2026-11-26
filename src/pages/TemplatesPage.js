@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Container, Typography, Button, Chip, TextField, InputAdornment,
-  CircularProgress, Stack, MenuItem,
+  Box, Container, Typography, Button, TextField, InputAdornment,
+  CircularProgress, Stack, MenuItem, Menu,
 } from '@mui/material';
-import { Search, Article, DesignServices } from '@mui/icons-material';
+import { alpha } from '@mui/material/styles';
+import {
+  Search, Article, DesignServices, KeyboardArrowDown, Close, Check,
+} from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { templateUsePath } from '../lib/researcherEntry';
@@ -37,6 +40,79 @@ export function filterTemplates(templates, filters = {}) {
     const facets = parseFacets(tpl.tags);
     return FILTER_DIMENSIONS.every((key) => !filters[key] || (facets[key] || []).includes(filters[key]));
   });
+}
+
+/**
+ * A rounded filter button. Empty: "Concept ▾". Set: "Concept: Cycling ×" in
+ * the primary tint; the × clears it. The menu lists values with counts.
+ */
+function FilterPill({ label, value, valueLabel, options, allLabel, onChange }) {
+  const [anchor, setAnchor] = useState(null);
+  const active = Boolean(value);
+  const pick = (v) => { setAnchor(null); onChange(v); };
+  return (
+    <>
+      <Box
+        component="button"
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={Boolean(anchor)}
+        onClick={(e) => setAnchor(e.currentTarget)}
+        sx={(theme) => ({
+          display: 'inline-flex', alignItems: 'center', gap: 0.5, height: 32, pl: 1.5, pr: active ? 0.5 : 1,
+          borderRadius: 999, cursor: 'pointer', font: 'inherit', fontSize: 13.5, whiteSpace: 'nowrap',
+          border: '1px solid',
+          borderColor: active ? alpha(theme.palette.primary.main, 0.5) : theme.palette.divider,
+          bgcolor: active ? alpha(theme.palette.primary.main, 0.08) : theme.palette.background.paper,
+          color: active ? theme.palette.primary.main : theme.palette.text.primary,
+          fontWeight: active ? 600 : 500,
+          transition: 'border-color .15s, background-color .15s',
+          '&:hover': { borderColor: active ? theme.palette.primary.main : theme.palette.text.secondary },
+        })}
+      >
+        {active ? (
+          <>
+            <Box component="span" sx={{ fontWeight: 500, opacity: 0.75 }}>{label}:</Box>
+            {valueLabel}
+            <Box
+              component="span"
+              role="button"
+              aria-label={`${label} ×`}
+              onClick={(e) => { e.stopPropagation(); onChange(''); }}
+              sx={{ display: 'inline-flex', ml: 0.25, p: 0.25, borderRadius: '50%', '&:hover': { bgcolor: 'action.hover' } }}
+            >
+              <Close sx={{ fontSize: 16 }} />
+            </Box>
+          </>
+        ) : (
+          <>
+            {label}
+            <KeyboardArrowDown sx={{ fontSize: 18, color: 'text.secondary' }} />
+          </>
+        )}
+      </Box>
+      <Menu
+        anchorEl={anchor}
+        open={Boolean(anchor)}
+        onClose={() => setAnchor(null)}
+        PaperProps={{ sx: { maxHeight: 380, minWidth: 220, mt: 0.75, borderRadius: 2 } }}
+        MenuListProps={{ dense: true, role: 'listbox' }}
+      >
+        <MenuItem selected={!active} onClick={() => pick('')}>
+          <Box sx={{ flex: 1 }}>{allLabel}</Box>
+          {!active && <Check sx={{ fontSize: 16, color: 'primary.main' }} />}
+        </MenuItem>
+        {options.map((o) => (
+          <MenuItem key={o.value} selected={o.value === value} onClick={() => pick(o.value)}>
+            <Box sx={{ flex: 1, pr: 2 }}>{o.label}</Box>
+            {o.value === value
+              ? <Check sx={{ fontSize: 16, color: 'primary.main' }} />
+              : <Typography component="span" variant="caption" color="text.disabled">{o.n}</Typography>}
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
 }
 
 /**
@@ -113,44 +189,58 @@ export default function TemplatesPage() {
           size="small"
         />
 
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }} role="group" aria-label={t.tplTypeFilter || 'Template type'}>
-          {SOURCES.map((key) => (
-            <Chip
-              key={key}
-              label={loading ? sourceLabel(key) : `${sourceLabel(key)} ${countFor(key)}`}
-              color={filters.source === key ? 'primary' : 'default'}
-              variant={filters.source === key ? 'filled' : 'outlined'}
-              onClick={() => update('source', key)}
-              aria-pressed={filters.source === key}
-              sx={{ fontWeight: 600 }}
-            />
-          ))}
-        </Stack>
+        <Box
+          role="tablist"
+          aria-label={t.tplTypeFilter || 'Template type'}
+          sx={{ display: 'flex', gap: { xs: 2, sm: 3 }, borderBottom: '1px solid', borderColor: 'divider', mb: 2, overflowX: 'auto' }}
+        >
+          {SOURCES.map((key) => {
+            const active = filters.source === key;
+            return (
+              <Box
+                key={key}
+                component="button"
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => update('source', key)}
+                sx={{
+                  border: 0, bgcolor: 'transparent', cursor: 'pointer', font: 'inherit', px: 0, pb: 1.25, pt: 0.5,
+                  mb: '-1px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'baseline', gap: 0.75,
+                  borderBottom: '2px solid', borderColor: active ? 'primary.main' : 'transparent',
+                  color: active ? 'text.primary' : 'text.secondary', fontWeight: active ? 700 : 500, fontSize: 15,
+                  '&:hover': { color: 'text.primary' },
+                }}
+              >
+                {sourceLabel(key)}
+                {!loading && (
+                  <Box component="span" sx={{ fontSize: 12, fontWeight: 600, color: active ? 'primary.main' : 'text.disabled' }}>
+                    {countFor(key)}
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
 
-        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mb: 3 }}>
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mb: 2.5 }}>
           {FILTER_DIMENSIONS.map((key) => {
             const options = facetCounts(inSource, key);
             if (!options.length && !filters[key]) return null;
             return (
-              <TextField
+              <FilterPill
                 key={key}
-                select
-                size="small"
                 label={dimensionLabel(key, zh)}
                 value={filters[key]}
-                onChange={(e) => update(key, e.target.value)}
-                sx={{ minWidth: 132 }}
-                SelectProps={{ MenuProps: { PaperProps: { sx: { maxHeight: 360 } } } }}
-              >
-                <MenuItem value="">{t.tplAll || 'All'}</MenuItem>
-                {options.map(([value, n]) => (
-                  <MenuItem key={value} value={value}>{facetLabel(key, value, zh)} ({n})</MenuItem>
-                ))}
-              </TextField>
+                valueLabel={filters[key] ? facetLabel(key, filters[key], zh) : ''}
+                options={options.map(([value, n]) => ({ value, n, label: facetLabel(key, value, zh) }))}
+                allLabel={t.tplAll || 'All'}
+                onChange={(v) => update(key, v)}
+              />
             );
           })}
           {anyDropdown && (
-            <Button size="small" onClick={() => {
+            <Button size="small" sx={{ borderRadius: 999, color: 'text.secondary' }} onClick={() => {
               const next = new URLSearchParams(params);
               FILTER_DIMENSIONS.forEach((k) => next.delete(k));
               setParams(next, { replace: true });
