@@ -1228,3 +1228,70 @@ describe('survey_create_from_template', () => {
     assert.match(res.body.note, /media_import_from_template/);
   });
 });
+
+describe('replies small enough for a model', () => {
+  it('pages and searches templates and projects, newest project first', async () => {
+    const templates = Array.from({ length: 45 }, (_, i) => ({
+      id: `2025-t${i}`, name: i === 7 ? 'Street safety duel' : `Template ${i}`, is_approved: true, author: 'A', year: '2025', tags: ['streets'], description: 'x'.repeat(2000),
+    }));
+    const projects = Array.from({ length: 60 }, (_, i) => projectRow({ id: `proj_${i}_abc`, name: `P${i}`, updated_at: `2026-11-${String((i % 28) + 1).padStart(2, '0')}T00:00:00Z` }));
+    db = fakeSupabase({ templates, projects });
+    const env = baseEnv();
+    const page = await callTool(env, 'survey_list_templates');
+    assert.equal(page.body.total, 45);
+    assert.equal(page.body.templates.length, 30);
+    assert.match(page.body.next, /offset 30/);
+    assert.ok(page.body.templates[0].summary.length <= 160);
+    const found = await callTool(env, 'survey_list_templates', { query: 'safety street' });
+    assert.deepEqual(found.body.templates.map((t) => t.id), ['2025-t7']);
+    const full = await callTool(env, 'survey_list_templates', { verbose: true });
+    assert.equal(full.body.templates.length, 45);
+
+    const listed = await callTool(env, 'survey_list_projects');
+    assert.equal(listed.body.total, 60);
+    assert.equal(listed.body.projects.length, 50);
+    assert.ok(listed.body.projects[0].updatedAt >= listed.body.projects[1].updatedAt);
+    assert.equal(listed.body.projects[0].description, undefined);
+    assert.equal(listed.body.projects[0].lastWriter, undefined);
+  });
+
+  const pairs = Array.from({ length: 30 }, (_, i) => ({
+    id: `r${i}`, project_id: 'proj_1_abc', participant_id: `P${i}`, created_at: '2026-11-02T00:00:00Z',
+    responses: { duel: { trials: Array.from({ length: 10 }, (_, t) => ({ answer: `https://media.example/u1/proj_1_abc/img/s${(i + t) % 40}__${'f'.repeat(36)}.jpg`, shown_images: [`https://media.example/u1/proj_1_abc/img/s${(i + t) % 40}__${'f'.repeat(36)}.jpg`, `https://media.example/u1/proj_1_abc/img/s${(i + t + 1) % 40}__${'f'.repeat(36)}.jpg`] })) } },
+    survey_metadata: { survey_revision: 'rev1', timing: { total_seconds: 300 } },
+  }));
+  const survey = { title: 'Duel', pages: [{ name: 'p1', elements: [{ type: 'imagepicker', name: 'duel', imageCount: 2, trialCount: 10 }] }] };
+
+  it('names media by file name in the results summary and leaves out the method catalogue', async () => {
+    db = fakeSupabase({ projects: [projectRow({ survey_config_draft: survey })], responses: pairs });
+    const env = baseEnv();
+    const full = await callTool(env, 'survey_results_summary', { projectId: 'proj_1_abc', view: 'question', questionName: 'duel', verbose: true });
+    const small = await callTool(env, 'survey_results_summary', { projectId: 'proj_1_abc', view: 'question', questionName: 'duel' });
+    assert.equal(small.isError, false, JSON.stringify(small.body).slice(0, 300));
+    assert.ok(JSON.stringify(small.body).length < JSON.stringify(full.body).length / 4);
+    assert.equal(small.body.availableMethods, undefined);
+    assert.doesNotMatch(JSON.stringify(small.body.question.metrics), /https:\/\//);
+    assert.ok(small.body.question.metrics.length > 0);
+  });
+
+  it('hands large exports over as a download link for the same export', async () => {
+    db = fakeSupabase({ projects: [projectRow({ survey_config_draft: survey })], responses: pairs });
+    const env = baseEnv();
+    globalThis.__env = env;
+    const res = await callTool(env, 'survey_export_responses', { projectId: 'proj_1_abc', format: 'analysis_bundle' });
+    assert.equal(res.isError, false, JSON.stringify(res.body).slice(0, 300));
+    assert.equal(res.body.analysisBundle, undefined);
+    assert.ok(JSON.stringify(res.body).length < 60000);
+    assert.ok(res.body.files.some((f) => f.path === 'README.txt'));
+    assert.match(res.body.download.curl, /^curl -L -o data\.zip/);
+    const zip = unzipSync(new Uint8Array(await (await route('GET', res.body.download.downloadUrl)).arrayBuffer()));
+    const names = Object.keys(zip).map((n) => n.split('/').slice(1).join('/')).sort();
+    assert.deepEqual(names, res.body.files.map((f) => f.path).sort());
+    assert.ok(Object.keys(zip)[0].includes('_analysis_bundle/'));
+
+    const inline = await callTool(env, 'survey_export_responses', { projectId: 'proj_1_abc', format: 'analysis_bundle', inline: true });
+    assert.ok(Array.isArray(inline.body.analysisBundle.files));
+    const bad = await callTool(env, 'survey_download_url', { projectId: 'proj_1_abc', format: 'pdf' });
+    assert.match(bad.body.error, /format must be/);
+  });
+});

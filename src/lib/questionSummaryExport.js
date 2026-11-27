@@ -131,8 +131,8 @@ const LONG_EXTRA_BY_FAMILY = {
   image_boolean: ['value', 'value_norm'],
   // Stimulus + text multi-select: one row per selected tag
   image_checkbox: ['value', 'label'],
-  // value = media key the participant chose (options are in shown_*)
-  imagepicker: ['value', 'outcome'],
+  // value = media key the participant chose (options are in shown_*); value_name = its file name
+  imagepicker: ['value', 'value_name', 'outcome'],
   // Best–Worst MaxDiff: one row per trial with both picks (media keys)
   maxdiff: ['best', 'worst'],
   // Video key moments: one row per marked segment (video in shown_*)
@@ -825,6 +825,17 @@ function responsesEligibleForQuestion(questionName, responses) {
 
 function imageKeyFromShown(entry) { return mediaIdentityKey(entry); }
 
+/** A media URL or key as its file name ("street_07.jpg"), for reading a CSV by eye. */
+function mediaFileName(value) {
+  if (typeof value !== 'string' || !value) return '';
+  const name = value.split(/[?#]/)[0].split('/').pop();
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
 function resolveImageChoiceKey(value, shownImages) {
   return resolveMediaAnswerKey(value, shownImages);
 }
@@ -1138,13 +1149,19 @@ function buildLongObjects(question, responses, surveyConfig) {
       });
     } else if (fam === 'imagepicker') {
       const outcome = choiceOutcome(answer, shownImages);
-      if (isNoPreference(answer)) {
+      // Pages stored the "no preference" button under its label before it was saved as a tie.
+      const legacyTie = question.allowTie && question.tieLabel && answer === String(question.tieLabel);
+      if (isNoPreference(answer) || legacyTie) {
         objects.push({ ...base, ...extra, value: 'tie', outcome: 'tie' });
       } else if (forcedChoice) {
-        objects.push({ ...base, ...extra, value: chosenKeyFromForcedChoice(answer, shownImages), outcome });
+        const value = chosenKeyFromForcedChoice(answer, shownImages);
+        objects.push({ ...base, ...extra, value, value_name: mediaFileName(value), outcome });
       } else {
         const vals = Array.isArray(answer) ? answer : [answer];
-        vals.forEach((v) => objects.push({ ...base, ...extra, value: resolveImageChoiceKey(v, shownImages), outcome }));
+        vals.forEach((v) => {
+          const value = resolveImageChoiceKey(v, shownImages);
+          objects.push({ ...base, ...extra, value, value_name: mediaFileName(value), outcome });
+        });
       }
     } else if (fam === 'maxdiff') {
       const { best, worst } = bestWorstKeysFromAnswer(answer, shownImages);
@@ -2480,7 +2497,7 @@ export function buildExportReadme({ project, filters, nResponses, questionCount 
     'text ranking: value, label  (pipe-ordered; label = choice text when set)',
     'image/media ranking: value only  (pipe-ordered media sources; no separate image labels)',
     'imagerating* / imageboolean*: value (and value_norm for boolean)',
-    'imagepicker*: value = chosen media key, or tie for no preference. outcome = A/B/tie for binary trials; A/B follow the recorded shown_images order. Ties count as answered and are excluded from decisive-only TrueSkill rankings.',
+    'imagepicker*: value = chosen media key, or tie for no preference; value_name = its file name. outcome = A/B/tie for binary trials; A/B follow the recorded shown_images order. Ties count as answered and are excluded from decisive-only TrueSkill rankings.',
     'Forced-Choice A/B (skill): same long/summary as imagepicker (value = chosen key; TrueSkill μ/σ/wins/…)',
     'Best–Worst MaxDiff (skill) long: best, worst (= media keys; one row per trial)',
     'Best–Worst MaxDiff summary: unit_* = image; metrics = rank/mu/… + bws/best/worst/appearances (μ-sorted)',
