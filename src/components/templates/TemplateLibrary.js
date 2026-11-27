@@ -4,9 +4,10 @@ import {
   Stack, Dialog, DialogTitle, DialogContent, DialogActions, Skeleton, IconButton, Tooltip,
 } from '@mui/material';
 import {
-  Article, Dataset, Preview, MenuBook, EditNote,
+  Article, Dataset, Preview, MenuBook, EditNote, Download,
 } from '@mui/icons-material';
 import TemplateChangeRequestDialog from './TemplateChangeRequestDialog';
+import TemplateDownloadDialog from './TemplateDownloadDialog';
 import { facetLabel, parseFacets, templateSource } from '../../lib/templateFacets';
 import { supabase } from '../../lib/supabase';
 import { stripOwnResponseSupabase } from '../../lib/ownResponseSupabase';
@@ -482,6 +483,7 @@ export function TemplateRow({ template, onUse, onFacet, activeConcept }) {
   const zh = String(language || '').startsWith('zh');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const source = templateSource(template);
   const typeColor = source === 'ai' ? 'secondary.main' : source === 'demo' ? 'text.disabled' : 'success.dark';
   const typeLabel = facetLabel('source', source, zh);
@@ -588,6 +590,9 @@ export function TemplateRow({ template, onUse, onFacet, activeConcept }) {
           <Tooltip title={t.landPreview}>
             <IconButton size="small" onClick={() => setPreviewOpen(true)} aria-label={t.landPreview} sx={iconSx}><Preview fontSize="small" /></IconButton>
           </Tooltip>
+          <Tooltip title={zh ? '下载模板和媒体库（ZIP）' : 'Download template + media (ZIP)'}>
+            <IconButton size="small" onClick={() => setDownloadOpen(true)} aria-label={zh ? '下载模板' : 'Download template'} sx={iconSx}><Download fontSize="small" /></IconButton>
+          </Tooltip>
           <Tooltip title={t.tplRequestChange || 'Request a change'}>
             <IconButton size="small" onClick={() => setRequestOpen(true)} aria-label={t.tplRequestChange || 'Request a change'} sx={iconSx}><EditNote fontSize="small" /></IconButton>
           </Tooltip>
@@ -609,6 +614,14 @@ export function TemplateRow({ template, onUse, onFacet, activeConcept }) {
         open={requestOpen}
         onClose={() => setRequestOpen(false)}
       />
+      {downloadOpen && (
+        <TemplateDownloadDialog
+          template={template}
+          title={title}
+          open={downloadOpen}
+          onClose={() => setDownloadOpen(false)}
+        />
+      )}
     </>
   );
 }
