@@ -8,7 +8,7 @@ import { Clear, OpenInNew, Search } from '@mui/icons-material';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { uiPair } from '../lib/uiLanguages';
 import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
-import { listPublicResearchPapers } from '../lib/researchPaperStore';
+import { getPublicPaperAbstract, listPublicResearchPapers } from '../lib/researchPaperStore';
 import { ensureAnalysisMeta } from '../lib/researchPaperMeta.mjs';
 import { filterLabel, normalizeMetaFilters, paperMatchesMetaFilters } from '../lib/researchPaperAnalytics';
 import { cardTitle } from '../components/papers/paperLibraryLabels';
@@ -25,6 +25,30 @@ function sourceLabel(s) {
   if (s === 'semantic_scholar') return 'S2';
   if (s === 'scopus') return 'Scopus';
   return s;
+}
+
+/**
+ * Authors · venue line. The abstract shows as its hover text; the list comes
+ * without abstracts, so it is fetched the first time the line is hovered.
+ */
+function PaperByline({ paper, children }) {
+  const [abstract, setAbstract] = useState(paper.abstract || '');
+  const loadAbstract = () => {
+    if (abstract) return;
+    getPublicPaperAbstract(paper.id).then((text) => { if (text) setAbstract(text); });
+  };
+  return (
+    <Typography
+      variant="caption"
+      color="text.secondary"
+      noWrap
+      display="block"
+      title={abstract}
+      onMouseEnter={loadAbstract}
+    >
+      {children}
+    </Typography>
+  );
 }
 
 function sortPapersStable(rows) {
@@ -142,20 +166,14 @@ const PapersList = memo(function PapersList({ rows }) {
                   <Typography variant="body2" fontWeight={600} noWrap title={paper.title}>
                     {paper.title}
                   </Typography>
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    noWrap
-                    display="block"
-                    title={paper.abstract || ''}
-                  >
+                  <PaperByline paper={paper}>
                     {(paper.authors || []).slice(0, 2).join(', ') || '—'}
                     {paper.venue ? ` · ${paper.venue}` : ''}
                     {paper.doi ? ` · ${paper.doi}` : ''}
                     {(paper.sources || []).length
                       ? ` · ${(paper.sources || []).map(sourceLabel).join(', ')}`
                       : ''}
-                  </Typography>
+                  </PaperByline>
                 </Box>
                 <Typography variant="body2" textAlign="center">{paper.year || '—'}</Typography>
                 <Box sx={{ minWidth: 0 }}>

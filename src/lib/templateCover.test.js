@@ -8,6 +8,8 @@ import {
   COVER_SOURCE_LABELS,
   DEFAULT_TEMPLATE_COVER,
   TemplateCoverStatus,
+  COVER_PROBE_COLUMNS,
+  coverProbeEntries,
 } from './templateCover';
 
 test('cover file wins over the media library and the preset library', () => {
@@ -124,4 +126,43 @@ test('the admin cover mark shows a registered cover file', () => {
   expect(mark).toHaveAttribute('data-cover-source', 'coverFile');
   expect(screen.getByRole('img')).toHaveAttribute('src', '/project_templates/cover_images/1990-nasar-evaluative.svg');
   expect(screen.getByText(COVER_SOURCE_LABELS.coverFile)).toBeInTheDocument();
+});
+
+test('the library cover is the first image, whatever comes before it', () => {
+  const library = [
+    { url: 'https://lib.example/intro.mp3', name: 'intro.mp3', type: 'audio' },
+    { url: 'https://lib.example/a.jpg', name: 'a.jpg' },
+    { url: 'https://lib.example/b.jpg', type: 'image' },
+  ];
+  expect(resolveTemplateCover({ id: 'study', preloaded_images: library })).toBe('https://lib.example/a.jpg');
+  // The first few entries alone give the same cover as the whole library.
+  expect(resolveTemplateCover({ id: 'study', preloaded_images: library.slice(0, 2) })).toBe('https://lib.example/a.jpg');
+});
+
+test('cover probe columns read the leading library entries of a row', () => {
+  expect(COVER_PROBE_COLUMNS).toBe(
+    'cover_0:preloaded_images->0, cover_1:preloaded_images->1, cover_2:preloaded_images->2, cover_3:preloaded_images->3',
+  );
+  expect(coverProbeEntries({
+    id: 'study',
+    cover_0: { url: '/a.jpg', type: 'image' },
+    cover_1: { url: '/b.jpg', type: 'image' },
+    cover_2: null,
+    cover_3: null,
+  })).toEqual([{ url: '/a.jpg', type: 'image' }, { url: '/b.jpg', type: 'image' }]);
+  expect(coverProbeEntries({ id: 'empty', cover_0: null })).toEqual([]);
+});
+
+test('list pages skip the bundled lookup when the template has its own image', async () => {
+  const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, json: async () => ({}) });
+  const own = await resolveTemplateCoverStatus({
+    id: 'own-image-study',
+    preloaded_images: [{ url: 'https://lib.example/a.jpg', type: 'image' }],
+  }, ['/preset.jpg'], {}, { ownFirst: true });
+  expect(own.source).toBe('library');
+  expect(fetchMock).not.toHaveBeenCalled();
+  const none = await resolveTemplateCoverStatus({ id: 'no-image-study' }, ['/preset.jpg'], {}, { ownFirst: true });
+  expect(none.source).toBe('preset');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fetchMock.mockRestore();
 });

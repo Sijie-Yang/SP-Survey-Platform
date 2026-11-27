@@ -2,7 +2,7 @@
  * Supabase store for research_papers / research_paper_scans (admin RLS).
  */
 import { supabase } from './supabase';
-import { ensureAnalysisMeta } from './researchPaperMeta.mjs';
+import { ensureAnalysisMeta, hasCurrentAnalysisMeta } from './researchPaperMeta.mjs';
 
 function requireSupabase() {
   if (!supabase) throw new Error('Supabase not configured');
@@ -269,15 +269,42 @@ export async function listAllResearchPapers(opts = {}) {
   return all;
 }
 
+// The public list leaves abstracts out: they are over 40% of the download and
+// the page only shows one on hover (getPublicPaperAbstract).
 const PUBLIC_PAPER_COLS_WITH_META =
-  'id, doi, title, authors, year, abstract, venue, paper_url, keywords, relevance_score, sources, analysis_meta, template_id, created_at';
+  'id, doi, title, authors, year, venue, paper_url, keywords, relevance_score, sources, analysis_meta, template_id, created_at';
 
 const PUBLIC_PAPER_COLS_BASE =
   'id, doi, title, authors, year, abstract, venue, paper_url, keywords, relevance_score, sources, template_id, created_at';
 
+const ABSTRACT_ID_CHUNK = 100;
+
+/**
+ * Fill in the abstract of rows whose stored tags are not from the current
+ * extraction version: rowToPaper rebuilds those tags from title + abstract.
+ * Normally no paper needs it (tags are saved at the current version).
+ */
+async function addAbstractsForStaleMeta(db, rows) {
+  const stale = rows.filter((row) => row?.id && !hasCurrentAnalysisMeta(row));
+  if (!stale.length) return rows;
+  const abstractById = new Map();
+  const chunks = [];
+  for (let i = 0; i < stale.length; i += ABSTRACT_ID_CHUNK) {
+    chunks.push(stale.slice(i, i + ABSTRACT_ID_CHUNK).map((row) => row.id));
+  }
+  await Promise.all(chunks.map(async (ids) => {
+    const { data, error } = await db.from('research_papers').select('id, abstract').in('id', ids);
+    if (error) throw error;
+    for (const row of data || []) abstractById.set(row.id, row.abstract || '');
+  }));
+  for (const row of stale) row.abstract = abstractById.get(row.id) || '';
+  return rows;
+}
+
 /**
  * Public browse: approved papers only (needs RLS policy
- * "Public read approved research_papers").
+ * "Public read approved research_papers"). Rows come without the abstract
+ * unless their tags have to be rebuilt from it.
  * Falls back to a select without analysis_meta if that column is not migrated yet;
  * client-side ensureAnalysisMeta still fills tags for charts.
  */
@@ -285,37 +312,65 @@ export async function listPublicResearchPapers({ pageSize = 1000 } = {}) {
   const db = requireSupabase();
   const size = Math.min(pageSize || 1000, 1000);
 
+  const fetchPage = async (cols, offset) => {
+    const { data, error } = await db
+      .from('research_papers')
+      .select(cols)
+      .eq('status', 'approved')
+      .order('year', { ascending: false, nullsFirst: false })
+      .order('relevance_score', { ascending: false })
+      .order('title', { ascending: true })
+      .order('id', { ascending: true })
+      .range(offset, offset + size - 1);
+    if (error) throw error;
+    return data || [];
+  };
+
+  // The first two pages are asked for together; more follow only while the
+  // last one came back full.
   const fetchAll = async (cols) => {
-    const all = [];
-    let offset = 0;
-    for (;;) {
-      const from = offset;
-      const to = offset + size - 1;
-      const { data, error } = await db
-        .from('research_papers')
-        .select(cols)
-        .eq('status', 'approved')
-        .order('year', { ascending: false, nullsFirst: false })
-        .order('relevance_score', { ascending: false })
-        .order('title', { ascending: true })
-        .order('id', { ascending: true })
-        .range(from, to);
-      if (error) throw error;
-      const batch = (data || []).map(rowToPaper);
-      all.push(...batch);
-      if (batch.length < size) break;
+    const [first, second] = await Promise.all([fetchPage(cols, 0), fetchPage(cols, size)]);
+    if (first.length < size) return first;
+    const all = [...first, ...second];
+    let last = second;
+    let offset = size * 2;
+    while (last.length === size && offset <= 200000) {
+      last = await fetchPage(cols, offset);
+      all.push(...last);
       offset += size;
-      if (offset > 200000) break;
     }
     return all;
   };
 
   try {
-    return await fetchAll(PUBLIC_PAPER_COLS_WITH_META);
+    const rows = await addAbstractsForStaleMeta(db, await fetchAll(PUBLIC_PAPER_COLS_WITH_META));
+    return rows.map(rowToPaper);
   } catch (err) {
     if (!isMissingAnalysisMetaColumn(err)) throw err;
-    return fetchAll(PUBLIC_PAPER_COLS_BASE);
+    return (await fetchAll(PUBLIC_PAPER_COLS_BASE)).map(rowToPaper);
   }
+}
+
+const abstractCache = new Map();
+
+/** One approved paper's abstract, fetched once per paper ('' when none). */
+export function getPublicPaperAbstract(id) {
+  if (!id || !supabase) return Promise.resolve('');
+  if (!abstractCache.has(id)) {
+    abstractCache.set(id, (async () => {
+      const { data, error } = await supabase
+        .from('research_papers')
+        .select('abstract')
+        .eq('id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.abstract || '';
+    })().catch(() => {
+      abstractCache.delete(id);
+      return '';
+    }));
+  }
+  return abstractCache.get(id);
 }
 
 /** Count rows for a status (admin RLS). */

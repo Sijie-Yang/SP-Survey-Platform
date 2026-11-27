@@ -15,7 +15,10 @@ import { projectTemplates } from '../../lib/projectTemplates';
 import { useRegion } from '../../contexts/RegionContext';
 import { tf } from '../../contexts/adminI18n';
 import { filterMediaByType } from '../../lib/mediaUtils';
-import { coverCandidatesForTemplate, DEFAULT_TEMPLATE_COVER, hashString, loadCoverIndex, useCoverCandidate } from '../../lib/templateCover';
+import {
+  collectImageUrls, COVER_PROBE_COLUMNS, coverCandidatesForTemplate, coverProbeEntries, DEFAULT_TEMPLATE_COVER, hashString,
+  loadCoverIndex, useCoverCandidate,
+} from '../../lib/templateCover';
 import { listPreviewMedia } from '../../lib/previewMediaLibrary';
 import { paperTemplateDoc } from '../../pages/paperTemplateDocs';
 import SchemePageCover from '../SchemePageCover';
@@ -135,34 +138,63 @@ async function loadTemplatePapers() {
   }
 }
 
+/**
+ * The library entries needed to pick each template's cover, by template id.
+ * Reads only the first few entries of each library (a whole library can be
+ * hundreds of entries, megabytes over all templates). A library whose first
+ * entries hold no image (audio first, say) is then read in full, so the cover
+ * is still its first image.
+ */
+async function loadCoverLibraries() {
+  const libraryById = {};
+  const probe = await supabase
+    .from('templates')
+    .select(`id, ${COVER_PROBE_COLUMNS}`)
+    .eq('is_approved', true)
+    .is('thumbnail_url', null);
+  if (probe.error) {
+    console.warn('Template covers: light query failed, reading whole libraries', probe.error);
+    const full = await supabase
+      .from('templates')
+      .select('id, preloaded_images')
+      .eq('is_approved', true)
+      .is('thumbnail_url', null);
+    for (const row of full.data || []) libraryById[row.id] = row.preloaded_images || [];
+    return libraryById;
+  }
+  const unresolved = [];
+  for (const row of probe.data || []) {
+    const entries = coverProbeEntries(row);
+    libraryById[row.id] = entries;
+    if (entries.length && !collectImageUrls(entries).length) unresolved.push(row.id);
+  }
+  if (unresolved.length) {
+    const full = await supabase.from('templates').select('id, preloaded_images').in('id', unresolved);
+    for (const row of full.data || []) libraryById[row.id] = row.preloaded_images || [];
+  }
+  return libraryById;
+}
+
 async function loadTemplates() {
   const papersPromise = loadTemplatePapers();
   const previewPoolPromise = listPreviewMedia().catch(() => []);
   const coverIndexPromise = loadCoverIndex();
   try {
     if (supabase) {
-      // Lightweight first pass — avoid downloading every template's full media catalog.
+      const librariesPromise = loadCoverLibraries().catch(() => ({}));
       const { data, error } = await supabase
         .from('templates')
         .select('id, name, description, author, year, category, paper_url, dataset, thumbnail_url, show_on_landing, created_at, tags')
         .eq('is_approved', true)
         .order('year', { ascending: false });
       if (!error && data?.length > 0) {
-        const missingIds = data.filter((tpl) => !tpl.thumbnail_url).map((tpl) => tpl.id);
-        const libraryById = {};
-        const mediaPromise = missingIds.length
-          ? supabase.from('templates').select('id, preloaded_images').in('id', missingIds)
-          : Promise.resolve({ data: [] });
-        const [mediaResult, previewPool, coverIndex, papers] = await Promise.all([mediaPromise, previewPoolPromise, coverIndexPromise, papersPromise]);
-        for (const row of mediaResult.data || []) {
-          libraryById[row.id] = row.preloaded_images || [];
-        }
+        const [libraryById, previewPool, coverIndex, papers] = await Promise.all([librariesPromise, previewPoolPromise, coverIndexPromise, papersPromise]);
         const previewUrls = filterMediaByType(previewPool, 'image')
           .map((img) => img.url)
           .filter(Boolean);
         const normalized = await Promise.all(data.map(async (tpl) => {
           const withLibrary = { ...tpl, preloaded_images: libraryById[tpl.id] || [] };
-          const coverCandidates = await coverCandidatesForTemplate(withLibrary, previewUrls, coverIndex);
+          const coverCandidates = await coverCandidatesForTemplate(withLibrary, previewUrls, coverIndex, { ownFirst: true });
           return {
             id: tpl.id,
             name: tpl.name,
