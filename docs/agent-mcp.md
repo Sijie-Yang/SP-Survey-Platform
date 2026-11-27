@@ -39,9 +39,10 @@ through short-lived signed links and `curl`.
    `replaced`, `unchanged` and `uploaded`.
 3. Read `summary`. When `imported` is `false`, the page did not pass the check
    and nothing was written: fix `fixHint.problems` and import again. When
-   `summary.asIs` is `true`, the page did not follow SP-Scheme and was imported
-   as it is: answers are recorded but not analysed; fix `summary.problems` and
-   import again for analysis. If an import fails after it started writing, it
+   `summary.asIs` is `true`, the page had no SP-Scheme block and was imported
+   as it is: answers are recorded but not analysed. A page with an SP-Scheme
+   block that fails the check (including bad JSON) is never imported as it is:
+   `imported` is `false` and `summary.declaredButBroken` is `true`. If an import fails after it started writing, it
    removes what it wrote (uploaded files, library entries, a project it created);
    if that cleanup fails too, the error says `Cleanup incomplete` and what is
    left.
@@ -213,7 +214,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 | `sp_scheme_upload_url` | `surveys:write` + `media:write` | Signed PUT link (30 min; 25 MB, unzipped 60 MB, 500 media files) for a zip or page; returns a `curl` line |
 | `sp_scheme_import` | `surveys:write` + `media:write` | `{ html }` or `{ uploadId }`, optional `projectId` (+ `expectedDraftUpdatedAt`, required once published), `name`, `allowHosts`; same check as Studio. A page that fails the check writes nothing; a later failure removes what was written, or says `Cleanup incomplete` |
 | `survey_publish` | `surveys:publish` | Release; returns `links.participant` and `links.studio` |
-| `survey_download_url` | `results:read` | Owner only. Signed GET link (15 min) to one data ZIP (at most 20,000 responses / 32 MB of response data); returns a `curl` line |
+| `survey_download_url` | `results:read` | Owner only. Signed GET link (15 min) to one data ZIP (at most 20,000 responses / 32 MB of response data); returns a `curl` line. `format` other than `data` gives the files of `survey_export_responses` in that format, with its filters |
 
 **Design**
 
@@ -226,7 +227,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 **Project lifecycle (own projects only)**
 
-- `survey_list_projects`, `survey_create_project`
+- `survey_list_projects` (newest first, short rows; `query`, `limit` default 50, `offset`; `verbose: true` for every field), `survey_create_project`
 - `survey_update_project` — name, description, metadata
 - `survey_duplicate_project` — optional `copyMedia: true`
 - `survey_export_project` / `survey_import_project`
@@ -235,7 +236,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 **Templates & Main Page**
 
-- `survey_list_templates`, `survey_get_template`, `survey_create_from_template`
+- `survey_list_templates` (short rows; `query` searches name, author, year, tags and description; `limit` default 30, `offset`; `verbose: true` for every field), `survey_get_template`, `survey_create_from_template` (copies the template media into the new project; `copyMedia: false` skips it)
 - `survey_save_as_template` — `confirm: true`; pending admin review
 - `template_publish` — **platform admins only** (checked on the server against `admins`), for a project the admin **owns** (also with a browser session); `surveys:publish` and `confirm: true`. Publishes the project as an approved template shown on the homepage (`showOnLanding`, default true), or, with `templateId` and `overwrite: true`, overwrites that template from the project (config, details, media copied to `templates/<id>/`). Templates are created online in Supabase, so no repository sync or pull request is needed. Everyone else uses `survey_save_as_template`.
 - `template_delete` — **platform admins only**; `surveys:publish` and `confirm: true`. Permanently deletes a template (row and media under `templates/<id>/`). Papers linked to it are unlinked and stay in the paper library; projects made from it keep their own copy. To replace a template and keep its id, use `template_publish` with `overwrite: true` instead.
@@ -247,7 +248,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 **Media** (`media:write` for mutate)
 
-- `media_list`, `media_import_from_template` (preferred) / `media_delete` (`confirm: true`), `media_upload` (base64, max 8MB — **real files only; never AI-generated placeholders**)
+- `media_list`, `media_import_from_template` (preferred) / `media_delete` (`keys` or a whole `folder`, `confirm: true`; deleted files also leave the media library — to replace a template's images, delete its folder, then upload or import yours), `media_upload` (base64, max 8MB — **real files only; never AI-generated placeholders**)
 - Media sources: published templates, project Media Dataset, or Admin → 预览媒体库. Agents must not synthesize images and upload them.
 - `survey_get_media_dataset` / `survey_update_media_dataset` — folder tags `set` | `category` (Admin Media Dataset)
 - Larger video/audio: Admin Media Dataset (MCP base64 cap)
@@ -262,7 +263,7 @@ documented in [`docs/agent-runtime.md`](agent-runtime.md).
 
 **Results** (`results:read`)
 
-- `survey_list_responses`, `survey_export_responses` (`json` | `wide_csv` | `both` | `long_csv` | `summary_csv` | `analysis_bundle` | `dataset_package`, optional `questionName`), `survey_results_summary`
+- `survey_list_responses`, `survey_export_responses` (`json` | `wide_csv` | `both` | `long_csv` | `summary_csv` | `analysis_bundle` | `dataset_package`, optional `questionName`; when the files are over about 60 KB the reply lists them and gives a download link for the same export, `inline: true` returns them anyway), `survey_results_summary` (media by file name, numbers to 4 significant digits, at most `limit` metric rows, default 200; `verbose: true` for the full reply)
 - `silicon_list_runs`, `silicon_run_responses` — read-only view of silicon-sample pretest runs (runs are started in the browser)
 
 `dataset_package` returns the citable package from Results → Export (README, LICENSE, CITATION.cff, datapackage.json, anonymised data, stimuli manifest) using the dataset details saved on the project. Stimulus image files are not bundled.

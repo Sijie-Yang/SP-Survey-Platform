@@ -934,20 +934,73 @@ export async function importMediaFromTemplate(env, ctx, projectId, body = {}) {
   };
 }
 
+/** The storage key of a media-library entry (its key, else read from its public URL). */
+export function mediaEntryKey(entry, env) {
+  if (typeof entry === 'string') return mediaEntryKey({ url: entry }, env);
+  if (entry?.key) return String(entry.key);
+  const url = String(entry?.url || '');
+  const bases = [env?.R2_PUBLIC_URL, ...String(env?.R2_LEGACY_PUBLIC_URLS || '').split(',')]
+    .map((base) => String(base || '').trim().replace(/\/$/, ''))
+    .filter(Boolean);
+  const base = bases.find((b) => url.startsWith(`${b}/`));
+  return base ? decodeURIComponent(url.slice(base.length + 1).split('?')[0]) : '';
+}
+
+/**
+ * Delete media of an owned project: the listed `keys`, or every file in
+ * `folder` (to replace a folder: delete it, then upload or import the new
+ * files). The deleted files also leave the project's media library, so
+ * participants are never drawn an image that no longer exists.
+ */
 export async function deleteProjectMedia(env, ctx, projectId, body = {}) {
-  await loadOwned(env, { ...ctx, projectId });
-  const keys = Array.isArray(body.keys) ? body.keys : null;
-  if (!keys?.length) {
-    throw Object.assign(new Error('keys array is required.'), { status: 400 });
+  const keys = Array.isArray(body.keys) ? body.keys.map(String).filter(Boolean) : [];
+  const folder = body.folder != null ? normalizeFolderPath(String(body.folder)) : '';
+  if (!keys.length && !folder) {
+    throw Object.assign(new Error('Pass keys (files to delete) or folder (delete every file in that folder).'), { status: 400 });
   }
+  if (folder.includes('..')) throw Object.assign(new Error('Invalid folder.'), { status: 400 });
   const row = await loadOwned(env, { ...ctx, projectId });
   const ownerId = ctx.userId || row.user_id;
   const prefix = projectMediaPrefix(ownerId, projectId);
   if (!isR2Ready(env)) {
     throw Object.assign(new Error('R2 is not configured on this server.'), { status: 503 });
   }
-  const result = await deletePrefixMedia(env, prefix, keys);
-  return { success: true, projectId, ...result };
+  const targets = new Set(keys.filter((k) => k.startsWith(prefix)));
+  if (folder) {
+    const listed = await listPrefixMedia(env, `${prefix}${folder}/`);
+    (listed.objects || []).forEach((o) => targets.add(o.key));
+  }
+  const library = Array.isArray(row.preloaded_images) ? row.preloaded_images : [];
+  const inFolder = (key) => folder && key.startsWith(`${prefix}${folder}/`);
+  const kept = library.filter((entry) => {
+    const key = mediaEntryKey(entry, env);
+    return !(key && (targets.has(key) || inFolder(key)));
+  });
+  const result = await deletePrefixMedia(env, prefix, [...targets]);
+  const removed = library.length - kept.length;
+  if (removed) {
+    const now = new Date().toISOString();
+    await supabaseRest(env, {
+      path: '/rest/v1/projects',
+      method: 'PATCH',
+      accessToken: ctx.accessToken,
+      serviceRole: Boolean(ctx.serviceRole),
+      query: ctx.serviceRole
+        ? `?id=eq.${encodeURIComponent(projectId)}&user_id=eq.${encodeURIComponent(ownerId)}`
+        : `?id=eq.${encodeURIComponent(projectId)}`,
+      body: { preloaded_images: kept, preloaded_at: now, updated_at: now },
+    });
+  }
+  return {
+    success: true,
+    projectId,
+    ...result,
+    libraryRemoved: removed,
+    libraryCount: kept.length,
+    ...(row.release_managed && removed
+      ? { next: 'The published version still lists the deleted files: publish again (survey_publish) so the participant link stops using them.' }
+      : {}),
+  };
 }
 
 /**

@@ -254,11 +254,11 @@ test('starting from the example imports it as a new study and opens it', async (
   expect(await screen.findByTestId('studio-project-name')).toHaveTextContent('Street perception study');
 });
 
-test('a page that is not SP-Scheme says it is imported as it is, with what the AI can fix and the sites it uses', async () => {
+test('a page with a broken SP-Scheme block is not imported, and lists what the AI must fix and the sites it uses', async () => {
   openAt('/studio');
   const broken = LEGACY_SURVEY_HTML.replace('<head>', '<head><script id="sp-scheme" type="application/json">{"format":"sp-scheme-package","spScheme":"2.0","survey":{"pages":[{"name":"p","elements":[{"type":"imagepicker","name":"q","choices":[{"value":"a","imageLink":"https://x.org/a.jpg"}]}]}]}}</script>');
   fireEvent.change(screen.getByTestId('studio-file'), { target: { files: [new File([broken], 'survey.html', { type: 'text/html' })] } });
-  expect(await screen.findByTestId('studio-import-verdict')).toHaveTextContent('Not fully SP-Scheme, so it is imported as it is');
+  expect(await screen.findByTestId('studio-import-verdict')).toHaveTextContent('This file cannot be imported yet');
   expect(screen.getByTestId('studio-import-problems')).toHaveTextContent(/media URLs are not allowed/);
   expect(screen.getByRole('button', { name: 'Copy the instructions and these problems for your AI' })).toBeInTheDocument();
   const hosts = screen.getByTestId('studio-import-hosts');

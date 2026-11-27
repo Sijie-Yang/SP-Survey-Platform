@@ -70,7 +70,15 @@ import {
   importSpScheme,
   spSchemeSpec,
 } from '../agent/spSchemeAgent.mjs';
-import { DOWNLOAD_MAX_JSON_BYTES, DOWNLOAD_MAX_ROWS, createDownloadUrl } from '../agent/resultsDownload.mjs';
+import { DOWNLOAD_MAX_JSON_BYTES, DOWNLOAD_MAX_ROWS, createDownloadUrl, exportResultFiles } from '../agent/resultsDownload.mjs';
+import {
+  MCP_INLINE_CHARS,
+  compactCredentialStatus,
+  compactExport,
+  compactProjectList,
+  compactResultsSummary,
+  compactTemplateList,
+} from './compactResults.mjs';
 import { deleteTemplate, isPlatformAdmin, loadOwned, publishTemplate } from '../agent/projectLifecycle.mjs';
 import { checkPublishMedia } from '../../src/lib/publishMediaCheck.mjs';
 import { listNews, listWiki, saveNewsDraft, submitWiki } from '../research/siteContent.mjs';
@@ -173,7 +181,7 @@ const TOOLS = [
       + 'The zip\'s stimulus files go to the project media library in their folders. A file is known by its exact folder and file name, as in Studio: on a re-import, a file of the same size is left as it is (not uploaded), and one of another or unrecorded size replaces the old entry, whose file is deleted unless the published version still uses it (media.new / replaced / unchanged). '
       + 'When the page does not pass the check, nothing is written: the reply has imported:false and the problems to fix. '
       + 'When an import fails after it started writing, what it wrote is removed again; if that cleanup fails too, the error says "cleanup incomplete". '
-      + 'A page that does not follow SP-Scheme is imported as it is (answers recorded, not analysed); summary says so. '
+      + 'A page with no SP-Scheme block is imported as it is (answers recorded, not analysed); summary.asIs says so. A page whose SP-Scheme block fails the check (including bad JSON) is not imported. '
       + 'allowHosts (optional) lists exactly the external hosts the page may load scripts/styles from (default: the ones it needs). '
       + 'With projectId, pass expectedDraftUpdatedAt (from survey_get_draft or the last import) so edits you have not seen are not overwritten; it is required once the project is published. '
       + `Limits: ${MAX_IMPORT_MEDIA_FILES} media files and ${MB(MAX_UNZIPPED_BYTES)} unzipped. `
@@ -203,6 +211,7 @@ const TOOLS = [
       properties: {
         projectId: { type: 'string' },
         includePractice: { type: 'boolean', description: 'Include the researcher\'s own practice runs (default false; they are always included when the survey sets includeResearcherPractice).' },
+        format: { type: 'string', enum: ['data', 'json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle', 'dataset_package'], description: 'data (default): the ZIP described above. Any other value: the files of survey_export_responses in that format, as a ZIP (its filters such as dateFrom or questionName apply too).' },
       },
       required: ['projectId'],
     },
@@ -430,8 +439,16 @@ const TOOLS = [
   },
   {
     name: 'survey_list_projects',
-    description: 'List projects owned by the authenticated user.',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'List projects owned by the authenticated user, newest first: id, name, last change, published version. Searchable (query) and paged (limit, default 50; offset).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words to search for.' },
+        limit: { type: 'number' },
+        offset: { type: 'number' },
+        verbose: { type: 'boolean', description: 'Every field of every item (large).' },
+      },
+    },
   },
   {
     name: 'survey_create_project',
@@ -527,8 +544,16 @@ const TOOLS = [
   },
   {
     name: 'survey_list_templates',
-    description: 'List approved templates plus your own pending template submissions.',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'List approved templates plus your own pending template submissions: id, name, author, year, tags and a one-line summary. Search with query (e.g. "safety street pairwise"); paged (limit, default 30; offset). survey_get_template reads one in full.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words to search for.' },
+        limit: { type: 'number' },
+        offset: { type: 'number' },
+        verbose: { type: 'boolean', description: 'Every field of every item (large).' },
+      },
+    },
   },
   {
     name: 'survey_get_template',
@@ -541,13 +566,16 @@ const TOOLS = [
   },
   {
     name: 'survey_create_from_template',
-    description: 'Create a new project from a template (does not auto-copy template media).',
+    description: 'Create a new project from a template, with a copy of the template\'s media (images) in its media library. '
+      + 'A large template may not finish copying in one call: then media.remaining > 0 and media_import_from_template copies the rest. '
+      + 'To use your own images instead, media_delete { folder } the copied folder and upload or import yours. copyMedia:false skips the copy.',
     inputSchema: {
       type: 'object',
       properties: {
         templateId: { type: 'string' },
         name: { type: 'string' },
         description: { type: 'string' },
+        copyMedia: { type: 'boolean', description: 'Default true: copy the template media into the new project.' },
       },
       required: ['templateId'],
     },
@@ -616,15 +644,18 @@ const TOOLS = [
   },
   {
     name: 'media_delete',
-    description: 'Delete specific R2 keys under an owned project prefix. Requires confirm:true.',
+    description: 'Delete media of an owned project: keys (files from media_list), or folder (every file in that folder). '
+      + 'Deleted files also leave the project media library, so participants are no longer shown them (publish again for a published project). '
+      + 'To replace a folder\'s images: media_delete { folder } first, then upload or import the new ones. Requires confirm:true.',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
-        keys: { type: 'array', items: { type: 'string' } },
+        keys: { type: 'array', items: { type: 'string' }, description: 'Storage keys to delete (from media_list).' },
+        folder: { type: 'string', description: 'Delete every file in this media folder, e.g. "streets".' },
         confirm: { type: 'boolean' },
       },
-      required: ['projectId', 'keys', 'confirm'],
+      required: ['projectId', 'confirm'],
     },
   },
   {
@@ -749,12 +780,14 @@ const TOOLS = [
   },
   {
     name: 'survey_export_responses',
-    description: 'Export owned project responses as JSON, wide/long/summary CSV, a typed per-question analysis bundle, or the citable dataset package (README, LICENSE, CITATION.cff, datapackage.json, anonymised data) (results:read).',
+    description: 'Export owned project responses as JSON, wide/long/summary CSV, a typed per-question analysis bundle, or the citable dataset package (README, LICENSE, CITATION.cff, datapackage.json, anonymised data) (results:read). '
+      + 'When the files are too large for a reply (over about 60 KB), the reply lists them and gives a 15-minute download link (curl) for the same export instead; inline:true returns them anyway.',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
         format: { type: 'string', enum: ['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle', 'dataset_package'] },
+        inline: { type: 'boolean', description: 'Return the file bodies in the reply even when they are large.' },
         questionName: { type: 'string', description: 'Optional single-question filter.' },
         dataSource: { type: 'string', enum: ['human', 'practice', 'silicon'] },
         siliconRunId: { type: 'string' },
@@ -771,7 +804,8 @@ const TOOLS = [
   },
   {
     name: 'survey_results_summary',
-    description: 'Typed results summary with per-question contract/revision, n_answered, summary rows, and fallback warnings (results:read).',
+    description: 'Typed results summary with per-question contract/revision, n_answered, summary rows, and fallback warnings (results:read). '
+      + 'Media are named by file name and numbers rounded to 4 significant digits; view=question gives at most limit metric rows (default 200). verbose:true gives the full reply.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -791,6 +825,8 @@ const TOOLS = [
         mediaKey: { type: 'string' },
         catalogOffset: { type: 'number' },
         catalogLimit: { type: 'number' },
+        limit: { type: 'number', description: 'Most metric rows for view=question (default 200).' },
+        verbose: { type: 'boolean', description: 'Full reply: full media URLs, every row, availableMethods.' },
       },
       required: ['projectId'],
     },
@@ -948,8 +984,8 @@ const TOOLS = [
   },
   {
     name: 'credentials_status',
-    description: 'Check whether a Platform Assistant API key is configured (never returns the key).',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'Check whether a Platform Assistant API key is configured (never returns the key). verbose:true adds the provider and model catalog.',
+    inputSchema: { type: 'object', properties: { verbose: { type: 'boolean' } } },
   },
 ];
 
@@ -1146,8 +1182,8 @@ async function callTool(env, auth, request, name, args = {}) {
     }
     case 'survey_list_projects': {
       requireScope(auth, 'surveys:read');
-      if (useService) return toolResult(await listOwnedViaService(env, auth.userId));
-      return toolResult(await listProjects(env, auth.accessToken));
+      const listed = useService ? await listOwnedViaService(env, auth.userId) : await listProjects(env, auth.accessToken);
+      return toolResult(compactProjectList(listed, args));
     }
     case 'survey_create_project': {
       requireScope(auth, 'surveys:write');
@@ -1211,7 +1247,7 @@ async function callTool(env, auth, request, name, args = {}) {
     }
     case 'survey_list_templates': {
       requireScope(auth, 'surveys:read');
-      return toolResult(await listTemplates(env, mcpCtx(auth)));
+      return toolResult(compactTemplateList(await listTemplates(env, mcpCtx(auth)), args));
     }
     case 'survey_get_template': {
       requireScope(auth, 'surveys:read');
@@ -1219,7 +1255,17 @@ async function callTool(env, auth, request, name, args = {}) {
     }
     case 'survey_create_from_template': {
       requireScope(auth, 'surveys:write');
-      return toolResult(await createFromTemplate(env, mcpCtx(auth), args, request));
+      const created = await createFromTemplate(env, mcpCtx(auth), args, request);
+      if (args.copyMedia === false || !auth.scopes?.includes?.('media:write')) return toolResult(created);
+      // Without its images a template study would show participants the
+      // platform's preview images, so the media comes along by default.
+      const { note, ...rest } = created;
+      try {
+        const media = await importMediaFromTemplate(env, mcpCtx(auth), created.project.id, { templateId: args.templateId });
+        return toolResult({ ...rest, media });
+      } catch (err) {
+        return toolResult({ ...rest, media: { copied: 0, error: err.message || String(err), next: 'Copy the images with media_import_from_template { projectId, confirm: true }.' } });
+      }
     }
     case 'survey_save_as_template': {
       requireScope(auth, 'surveys:write');
@@ -1293,11 +1339,19 @@ async function callTool(env, auth, request, name, args = {}) {
     }
     case 'survey_export_responses': {
       requireScope(auth, 'results:read');
-      return toolResult(await exportResponses(env, mcpCtx(auth), args.projectId, args));
+      const exported = await exportResponses(env, mcpCtx(auth), args.projectId, args);
+      if (args.inline === true || JSON.stringify(exported).length <= MCP_INLINE_CHARS) return toolResult(exported);
+      let link;
+      try {
+        link = await createDownloadUrl(env, mcpCtx(auth), { ...args, format: exported.format }, request);
+      } catch (err) {
+        link = { error: err.message || String(err) };
+      }
+      return toolResult(compactExport(exported, exportResultFiles(exported), link));
     }
     case 'survey_results_summary': {
       requireScope(auth, 'results:read');
-      return toolResult(await summarizeResponses(env, mcpCtx(auth), args.projectId, args));
+      return toolResult(compactResultsSummary(await summarizeResponses(env, mcpCtx(auth), args.projectId, args), args));
     }
     case 'survey_delete_response': {
       // Destructive — require write scope (not results:read).
@@ -1421,7 +1475,7 @@ async function callTool(env, auth, request, name, args = {}) {
       return toolResult(await rollbackProject(env, auth.accessToken, args.projectId, args));
     }
     case 'credentials_status':
-      return toolResult(await getCredentialStatus(env, auth.userId));
+      return toolResult(compactCredentialStatus(await getCredentialStatus(env, auth.userId), args));
     default:
       return toolResult({ error: `Unknown tool: ${name}` }, true);
   }

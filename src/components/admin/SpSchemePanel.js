@@ -465,14 +465,6 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                       '页面调用 SPSite.complete() 或保存 {"done": true} 时自动提交；否则参与者点页面下方的「完成并提交」。想让平台做分析，请让生成页面的模型按 SP-Scheme 重做（右侧复制）。')}
                   </Typography>
                 ) : null}
-                {upload?.asIs?.declared && upload.asIs.errors.length ? (
-                  <Box sx={{ mt: 0.5 }} data-testid="sp-scheme-asis-declared">
-                    <Typography variant="body2">
-                      {L('The page declares SP-Scheme questions with problems; an as-is import ignores that declaration. To keep it, fix these and upload again:', '页面里声明的 SP-Scheme 题目有问题，原样导入会忽略这份声明。要保留它，请修正后重新上传：')}
-                    </Typography>
-                    <IssueList items={upload.asIs.errors} />
-                  </Box>
-                ) : null}
                 {summary && !upload?.asIs ? (
                   <Typography variant="body2" sx={{ mt: 0.5 }}>
                     {summary.title ? `「${summary.title}」 · ` : ''}
@@ -530,7 +522,7 @@ export default function SpSchemePanel({ config, onChange, currentProject = null,
                   ))}
                 </Box>
               ) : null}
-              {report.errors.length && (summary || upload?.asIs) ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
+              {report.errors.length ? <Box><Typography variant="subtitle2" color="error">{L('Errors', '错误')}</Typography><IssueList items={report.errors} max={20} /></Box> : null}
               {report.warnings.length ? <Box><Typography variant="subtitle2" color="warning.main">{L('Warnings', '提醒')}</Typography><IssueList items={report.warnings} /></Box> : null}
               {summary && !upload?.asIs ? (
                 <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>

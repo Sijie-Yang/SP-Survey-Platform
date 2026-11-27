@@ -3,7 +3,7 @@
  * without putting the bytes into the model's context:
  *
  *   upload    PUT  /api/mcp/upload/<token>     a page or zip, staged for sp_scheme_import
- *   download  GET  /api/mcp/download/<token>   a project's data as one ZIP
+ *   download  GET  /api/mcp/download/<token>   a project's data (or one export format) as one ZIP
  *
  * A token is stateless: base64url(JSON payload) "." base64url(HMAC-SHA256).
  * The payload names the kind of link, the user (and the upload or project) and
@@ -70,7 +70,7 @@ export function isSafeTransferId(value) {
 
 /**
  * @param {object} env
- * @param {{ kind: 'upload'|'download', userId: string, uploadId?: string, projectId?: string, includePractice?: boolean }} claims
+ * @param {{ kind: 'upload'|'download', userId: string, uploadId?: string, projectId?: string, includePractice?: boolean, exportSpec?: { f: string, s: object } }} claims
  * @param {number} ttlSeconds
  * @param {number} [now] ms, for tests
  * @returns {Promise<{ token: string, expiresAt: string }>}
@@ -87,6 +87,8 @@ export async function signTransferToken(env, claims, ttlSeconds, now = Date.now(
     if (!isSafeTransferId(claims.projectId)) throw tokenError('Invalid project id.', 400, 'INVALID_PROJECT_ID');
     payload.p = claims.projectId;
     if (claims.includePractice) payload.x = 1;
+    // An export download names its format and filters (checked again when redeemed).
+    if (claims.exportSpec) payload.e = claims.exportSpec;
   }
   const body = b64urlEncode(encoder.encode(JSON.stringify(payload)));
   const sig = new Uint8Array(await crypto.subtle.sign('HMAC', await signingKey(env), encoder.encode(body)));
@@ -134,6 +136,7 @@ export async function verifyTransferToken(env, token, expectedKind, now = Date.n
     if (!isSafeTransferId(payload.p)) throw tokenError('This link is not valid.');
     out.projectId = payload.p;
     out.includePractice = payload.x === 1;
+    if (payload.e && typeof payload.e === 'object' && !Array.isArray(payload.e)) out.exportSpec = payload.e;
   }
   return out;
 }

@@ -24,7 +24,7 @@ import { exportDateStamp, rowsToCsv } from '../../src/lib/csvUtil.js';
 import { inferMediaType } from '../../src/lib/mediaUtils.js';
 import { isSafeProjectId, sanitizeForAgent } from '../designProtocol.mjs';
 import { loadOwned } from './projectLifecycle.mjs';
-import { fetchAllResponses } from './resultsHandlers.mjs';
+import { exportResponses, fetchAllResponses } from './resultsHandlers.mjs';
 import { countProjectResponses } from '../adminResults.mjs';
 import {
   DOWNLOAD_PATH_PREFIX,
@@ -328,6 +328,39 @@ function transferOrigin(request, env) {
  * survey_download_url: a signed link (15 minutes, this user and this project)
  * to GET the data ZIP.
  */
+/** Formats of survey_export_responses that a download link can carry. */
+export const EXPORT_LINK_FORMATS = ['json', 'wide_csv', 'both', 'long_csv', 'summary_csv', 'analysis_bundle', 'dataset_package'];
+const EXPORT_FILTER_KEYS = ['dataSource', 'siliconRunId', 'includePractice', 'excludeFlagged', 'dateFrom', 'dateTo', 'timezone', 'sessionId', 'surveyRevision', 'questionName'];
+
+/** The export filters a link keeps: known keys, plain values, short strings. */
+export function exportLinkFilters(args = {}) {
+  const out = {};
+  EXPORT_FILTER_KEYS.forEach((key) => {
+    const value = args[key];
+    if (typeof value === 'boolean') out[key] = value;
+    else if (typeof value === 'string' && value && value.length <= 200) out[key] = value;
+  });
+  return out;
+}
+
+/**
+ * The files of a survey_export_responses result, as ZIP entries
+ * ({ path, content }), for a download link or a file list.
+ */
+export function exportResultFiles(result = {}) {
+  const files = [];
+  const add = (path, content) => { if (content != null) files.push({ path, content: String(content) }); };
+  if (Array.isArray(result.responses)) add('responses.json', `${JSON.stringify(result.responses, null, 2)}\n`);
+  if (result.wideCsv != null) add(result.wideCsvFilename || 'responses_wide.csv', result.wideCsv);
+  if (result.longCsv != null) add(result.longCsvFilename || 'long.csv', result.longCsv);
+  (result.longCsvFiles || []).forEach((f) => add(f.filename, f.content));
+  if (result.summaryCsv != null) add(result.summaryCsvFilename || 'summary.csv', result.summaryCsv);
+  (result.summaryCsvFiles || []).forEach((f) => add(f.filename, f.content));
+  (result.analysisBundle?.files || []).forEach((f) => add(f.path, f.content));
+  (result.datasetPackage?.files || []).forEach((f) => add(f.path, f.content));
+  return files;
+}
+
 export async function createDownloadUrl(env, ctx, args = {}, request) {
   const projectId = String(args.projectId || '');
   if (!isSafeProjectId(projectId)) throw Object.assign(new Error('Invalid project id'), { status: 400, code: 'INVALID_PROJECT_ID' });
@@ -338,18 +371,24 @@ export async function createDownloadUrl(env, ctx, args = {}, request) {
     throw Object.assign(new Error('Only the project owner can get a download link. Others can export the data on the project\'s Results page in the site.'), { status: 403, code: 'FORBIDDEN' });
   }
   const includePractice = args.includePractice === true;
+  const format = args.format == null || args.format === '' || args.format === 'data' ? null : String(args.format).toLowerCase();
+  if (format && !EXPORT_LINK_FORMATS.includes(format)) {
+    throw Object.assign(new Error(`format must be data or one of ${EXPORT_LINK_FORMATS.join(', ')}.`), { status: 400, code: 'BAD_FORMAT' });
+  }
+  const exportSpec = format ? { f: format, s: exportLinkFilters(args) } : null;
   const { token, expiresAt } = await signTransferToken(env, {
-    kind: 'download', userId: ctx.userId, projectId, includePractice,
+    kind: 'download', userId: ctx.userId, projectId, includePractice, ...(exportSpec ? { exportSpec } : {}),
   }, DOWNLOAD_TOKEN_TTL_SECONDS);
   const downloadUrl = `${transferOrigin(request, env)}${DOWNLOAD_PATH_PREFIX}${token}`;
   return {
     success: true,
     projectId,
+    ...(format ? { format } : {}),
     downloadUrl,
     method: 'GET',
     expiresAt,
     curl: `curl -L -o data.zip '${downloadUrl}'`,
-    files: dataFileNames(row),
+    ...(format ? {} : { files: dataFileNames(row) }),
     limits: { maxRows: DOWNLOAD_MAX_ROWS, maxJsonBytes: DOWNLOAD_MAX_JSON_BYTES },
     note: 'Anyone with this link can download the data until it expires, so do not share it. Unzip and start with README.txt.',
   };
@@ -371,6 +410,24 @@ function tooManyBytes() {
  */
 export async function handleDataDownload(env, claims, { method = 'GET' } = {}) {
   const row = await loadOwned(env, { userId: claims.userId, serviceRole: true, projectId: claims.projectId });
+  const spec = claims.exportSpec;
+  if (spec) {
+    // One survey_export_responses format, with the filters it was asked with.
+    const format = String(spec.f || '');
+    if (!EXPORT_LINK_FORMATS.includes(format)) throw Object.assign(new Error('This link is not valid.'), { status: 401, code: 'BAD_LINK' });
+    const folder = `${dataZipFolder(claims.projectId)}_${format}`;
+    const headers = {
+      'content-type': 'application/zip',
+      'content-disposition': `attachment; filename="${folder}.zip"`,
+      'cache-control': 'no-store',
+    };
+    if (method === 'HEAD') return new Response(null, { status: 200, headers });
+    const result = await exportResponses(env, { userId: claims.userId, serviceRole: true }, claims.projectId, {
+      ...exportLinkFilters(spec.s || {}),
+      format,
+    });
+    return new Response(zipDataStream(folder, exportResultFiles(result)), { status: 200, headers });
+  }
   const folder = dataZipFolder(claims.projectId);
   const headers = {
     'content-type': 'application/zip',

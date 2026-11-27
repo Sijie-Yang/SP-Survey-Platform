@@ -13,6 +13,7 @@ import { applyMediaToElement } from './surveyMediaInjection';
 import { sliderScale } from './sliderScale';
 import { normalizeMediaEntry } from './mediaUtils';
 import { isTrialsAnswer, mediaSetToShownIds, mediaSetToShownImages } from './trialNavigation';
+import { NO_PREFERENCE } from './choiceTie';
 import {
   ANSWER_SHAPES,
   SP_SITE_SCRIPT_HOSTS as CDN_HOSTS,
@@ -253,6 +254,9 @@ export function validateSiteAnswer(question, value, choices = question?.choices)
     case 'choice': {
       const v = asValue(value);
       if (!allowed.includes(v)) return fail(`Expected one of ${allowed.join(', ')}`);
+      // The "no preference" button is offered to the page under its label;
+      // it is stored as the platform's tie value, so analysis counts it as a tie.
+      if ((choices || []).find((c) => c.value === v)?.tie) return { ok: true, value: NO_PREFERENCE };
       return { ok: true, value: v };
     }
     case 'multiChoice': {

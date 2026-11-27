@@ -95,9 +95,27 @@ function median(nums) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+/** Answers in a submission: one per question, one per trial of a multi-trial question. */
+export function answerUnits(response) {
+  const answers = response?.responses;
+  if (!answers || typeof answers !== 'object') return 0;
+  return Object.entries(answers).reduce((sum, [name, value]) => {
+    if (name.startsWith('__') || value == null || value === '') return sum;
+    const trials = value && typeof value === 'object' && Array.isArray(value.trials) ? value.trials.length : 0;
+    return sum + Math.max(1, trials);
+  }, 0);
+}
+
+// Nobody looks at an image and answers in under a second: a submission faster
+// than this per answer is flagged whatever the other submissions did (when
+// every submission is a bot, the median rule below flags none of them).
+export const MIN_SECONDS_PER_ANSWER = 1;
+
 export function checkTooFastFlag(response, allResponses) {
   const totalSec = response.survey_metadata?.timing?.total_seconds;
   if (totalSec == null || totalSec <= 0) return [];
+  const units = answerUnits(response);
+  if (units >= 3 && totalSec < units * MIN_SECONDS_PER_ANSWER) return ['too_fast'];
   const durations = allResponses
     .map((r) => r.survey_metadata?.timing?.total_seconds)
     .filter((d) => d != null && d > 0);

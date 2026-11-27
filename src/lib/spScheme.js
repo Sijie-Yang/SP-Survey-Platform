@@ -779,7 +779,7 @@ export function validateSpSchemePackage(pkg, { siteHtml = null, allowedHosts = [
   const empty = { ok: false, errors, warnings, survey: null, site: null, summary: null };
 
   if (pkg?.__invalid) {
-    issue(errors, 'sp-scheme', 'The <script id="sp-scheme"> block in index.html is not valid JSON.');
+    issue(errors, 'sp-scheme', `The <script id="sp-scheme"> block in index.html is not valid JSON${pkg.__line ? ` (around line ${pkg.__line} of the block)` : (pkg.__detail ? ` (${pkg.__detail})` : '')}: fix it so the platform can read the questions.`);
     return empty;
   }
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) {

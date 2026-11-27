@@ -13,6 +13,10 @@ export async function getUserFromAccessToken(accessToken, env) {
   const supabaseUrl = env.SUPABASE_URL || env.REACT_APP_SUPABASE_URL;
   const anonKey = env.SUPABASE_ANON_KEY || env.REACT_APP_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !anonKey || !accessToken) return null;
+  // A Supabase access token is a JWT (three dot-separated parts). Other bearer
+  // tokens (MCP access tokens) are not sent to Supabase Auth, which would
+  // answer 403 "token is malformed" and fill its log with warnings.
+  if (String(accessToken).split('.').length !== 3) return null;
 
   const res = await fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/user`, {
     headers: {
