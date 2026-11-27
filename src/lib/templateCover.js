@@ -28,9 +28,11 @@ export function collectImageUrls(preloadedImages) {
 }
 
 /**
- * Cover file, then the template's chosen thumbnail, then one image from its
- * own media library, then bundled extras, then the shared preview library.
- * Picks are stable per template id.
+ * Cover file, then the template's chosen thumbnail, then the first image of
+ * its own media library, then bundled extras, then the shared preview library.
+ * The library cover is the first image so a list page can read just the start
+ * of each library (see COVER_PROBE_COLUMNS) and still show the same cover as a
+ * page that holds the whole library.
  */
 export function resolveTemplateCover(template, options) {
   return describeTemplateCover(template, options).url;
@@ -74,7 +76,7 @@ export function describeTemplateCover(template, {
     url = thumbnail;
   } else if (own.length) {
     source = 'library';
-    url = stable(own);
+    url = own[0];
   } else if (bundled.length) {
     // Own library stays ahead of bundled files. One shared pool let a bundled
     // URL replace a stored library image (id "study" picks index 1).
@@ -87,7 +89,7 @@ export function describeTemplateCover(template, {
   const candidates = uniqueUrls([
     dedicated,
     thumbnail,
-    own.length ? stable(own) : '',
+    own[0] || '',
     bundled.length ? stable(bundled) : '',
     presets.length ? stable(presets) : '',
     DEFAULT_TEMPLATE_COVER,
@@ -109,7 +111,7 @@ export function coverSourceDetail(status) {
     return '落地页使用这里设置的封面。清除后会改用模板图片库，没有图片再用预览媒体库。';
   }
   if (status.source === 'library') {
-    return '没有专用封面，也没有单独设置。落地页从该模板自己的图片库取一张。';
+    return '没有专用封面，也没有单独设置。落地页使用该模板图片库里的第一张图片。';
   }
   if (status.source === 'bundled') {
     return '没有专用封面。落地页使用仓库里该模板自带的图片。';
@@ -182,10 +184,39 @@ function uniqueUrls(urls) {
   return list;
 }
 
-/** Landing cover plus the layer it came from (cover file, thumbnail, library, preset). */
-export async function resolveTemplateCoverStatus(template, presetUrls = [], coverIndex = {}) {
+/**
+ * How many leading library entries a list page reads per template to find its
+ * cover. A whole library can hold hundreds of entries; the cover is its first
+ * image, which is almost always among the first few.
+ */
+export const COVER_PROBE_SIZE = 4;
+export const COVER_PROBE_COLUMNS = Array.from(
+  { length: COVER_PROBE_SIZE },
+  (_, i) => `cover_${i}:preloaded_images->${i}`,
+).join(', ');
+
+/** The leading library entries of a row read with COVER_PROBE_COLUMNS. */
+export function coverProbeEntries(row) {
+  const entries = [];
+  for (let i = 0; i < COVER_PROBE_SIZE; i += 1) {
+    const entry = row?.[`cover_${i}`];
+    if (entry && typeof entry === 'object') entries.push(entry);
+  }
+  return entries;
+}
+
+/**
+ * Landing cover plus the layer it came from (cover file, thumbnail, library, preset).
+ * `ownFirst` skips the bundled-files lookup (one request per template) when the
+ * template already has a thumbnail or library image, as list pages want.
+ */
+export async function resolveTemplateCoverStatus(template, presetUrls = [], coverIndex = {}, { ownFirst = false } = {}) {
   const coverFile = coverIndex?.[template?.id] || '';
-  const bundledEntries = coverFile ? [] : await loadBundledMediaEntries(template?.id);
+  const hasOwn = ownFirst && Boolean(
+    template?.thumbnail_url || template?.thumbnailUrl
+    || collectImageUrls(template?.preloaded_images || template?.preloadedImages).length,
+  );
+  const bundledEntries = coverFile || hasOwn ? [] : await loadBundledMediaEntries(template?.id);
   const bundled = bundledEntries.map((entry) => entry.url);
   const described = describeTemplateCover(template, {
     coverFile,
@@ -207,8 +238,8 @@ export async function resolveCoverStatuses(templates) {
 }
 
 /** Ordered covers: dedicated file, saved thumbnail, template library, bundled files, preset. */
-export async function coverCandidatesForTemplate(template, presetUrls = [], coverIndex = {}) {
-  const status = await resolveTemplateCoverStatus(template, presetUrls, coverIndex);
+export async function coverCandidatesForTemplate(template, presetUrls = [], coverIndex = {}, options = {}) {
+  const status = await resolveTemplateCoverStatus(template, presetUrls, coverIndex, options);
   return status.candidates;
 }
 

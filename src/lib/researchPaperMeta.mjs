@@ -611,11 +611,12 @@ export function validateMetaInvariants(meta, paper = null) {
 }
 
 /**
- * Ensure paper has v4 analysis_meta (re-extract if missing / wrong version).
+ * True when the stored analysis_meta is from the current extraction version,
+ * so it can be used as is (no title/abstract needed to rebuild it).
  */
-export function ensureAnalysisMeta(paper, opts = {}) {
+export function hasCurrentAnalysisMeta(paper) {
   const existing = paper?.analysis_meta;
-  if (
+  return Boolean(
     existing
     && existing.extraction_version === EXTRACTION_VERSION
     && Array.isArray(existing.perception_constructs)
@@ -624,10 +625,16 @@ export function ensureAnalysisMeta(paper, opts = {}) {
     && Array.isArray(existing.measurement_channels)
     && Array.isArray(existing.study_countries)
     && Array.isArray(existing.reporting_signals)
-    && typeof existing.analysis_scope === 'string'
-  ) {
-    return existing;
-  }
+    && typeof existing.analysis_scope === 'string',
+  );
+}
+
+/**
+ * Ensure paper has current analysis_meta (re-extract if missing / wrong version).
+ */
+export function ensureAnalysisMeta(paper, opts = {}) {
+  const existing = paper?.analysis_meta;
+  if (hasCurrentAnalysisMeta(paper)) return existing;
   const fresh = extractAnalysisMeta(paper, opts);
   // Facets an admin saved by reading the paper survive every re-extraction.
   if (existing?.facets && typeof existing.facets === 'object') fresh.facets = existing.facets;
