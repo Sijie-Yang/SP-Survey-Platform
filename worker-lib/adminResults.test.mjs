@@ -4,7 +4,7 @@ import { handleAdminResultsRoutes } from './adminResults.mjs';
 
 const env = { SUPABASE_URL: 'https://database.example', SUPABASE_ANON_KEY: 'test-anon', SUPABASE_SERVICE_ROLE_KEY: 'test-server' };
 const request = (query = '?project=project-a', method = 'GET', authenticated = true) => new Request(`https://app.example/api/admin/project-responses${query}`, {
-  method, headers: authenticated ? { Authorization: 'Bearer test-user' } : {},
+  method, headers: authenticated ? { Authorization: 'Bearer test.user.jwt' } : {},
 });
 function mockDatabase(t, { admin = true, project = true, failAdmin = false, failResponses = false, validUser = true, slimRpc = false } = {}) {
   return t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
