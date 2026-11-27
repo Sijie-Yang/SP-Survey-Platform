@@ -252,7 +252,7 @@ const TOOLS = [
     name: 'template_tags',
     description:
       'PLATFORM ADMINS ONLY. Read or set the classification tags of published templates, used by the /templates filters. '
-      + 'Dimensions: source (paper | ai | demo, one), modality, task, concept, participants, sample (one), country and city (free text). '
+      + 'Dimensions: source (paper | ai | demo, one), modality, task, concept, participants, sample (one), country (shown as "Location": the study place, a country or region) and city (free text). '
       + 'Without templates: lists every approved template with its tags and the allowed values. With templates: each item sets the named '
       + 'dimensions for one template (replacing that dimension\'s values unless merge:true); other dimensions and other tags stay. Needs surveys:publish and confirm:true to write.',
     inputSchema: {
@@ -323,7 +323,7 @@ const TOOLS = [
               facets: {
                 type: 'object',
                 description: 'Tags from reading the paper, same vocabulary as template_tags (no source): '
-                  + '{"survey":"yes"|"no", "concept":[...], "task":[...], "modality":[...], "participants":[...], "sample":["lt100"|"100to1000"|"gt1000"], "country":["China"], "city":["Wuhan"]}. '
+                  + '{"survey":"yes"|"no", "concept":[...], "task":[...], "modality":[...], "participants":[...], "sample":["lt100"|"100to1000"|"gt1000"], "country":["China"] (study location: country or region), "city":["Wuhan"]}. '
                   + 'Leave a dimension empty when the paper does not say it. Replaces earlier facets; null removes them.',
               },
             },

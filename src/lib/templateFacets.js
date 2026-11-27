@@ -4,7 +4,7 @@
  *
  * To add a dimension, add one entry to FACET_DIMENSIONS: the /templates filters,
  * the row labels and the admin editor all read this list. "open" dimensions
- * (country, city) accept new values; the others only take listed ids.
+ * (country = location, city) accept new values; the others only take listed ids.
  */
 
 export const FACET_DIMENSIONS = [
@@ -112,7 +112,7 @@ export const FACET_DIMENSIONS = [
       { id: 'gt1000', en: "> 1,000", zh: "> 1,000" },
     ],
   },
-  { key: 'country', en: 'Country', zh: '国家', open: true, values: [] },
+  { key: 'country', en: 'Location', zh: '地点', open: true, values: [] },
   { key: 'city', en: 'City', zh: '城市', open: true, values: [] },
 ];
 
