@@ -694,6 +694,58 @@ export async function publishTemplate(env, ctx, projectId, body = {}, request = 
   };
 }
 
+/**
+ * Admin only: delete a template for good. Papers that link to it are unlinked
+ * (they stay in the paper library), its media under templates/<id>/ is removed,
+ * then the template row. Projects made from it keep their own questions and any
+ * media they imported. Templates that exist only as repository files are not touched.
+ * Order: unlink papers, delete media, delete the row, so a call cut short can be run again.
+ */
+export async function deleteTemplate(env, ctx, templateId) {
+  if (!(await isPlatformAdmin(env, ctx.userId))) {
+    throw Object.assign(new Error('Only platform admins can delete templates.'), { status: 403, code: 'ADMIN_ONLY' });
+  }
+  const id = String(templateId ?? '').trim();
+  if (!id || id.length > 96 || !TEMPLATE_ID_RE.test(id)) {
+    throw Object.assign(new Error('templateId must be lowercase letters, digits and single hyphens.'), { status: 400, code: 'INVALID_TEMPLATE_ID' });
+  }
+  const q = `?id=eq.${encodeURIComponent(id)}`;
+  const found = await supabaseRest(env, { path: '/rest/v1/templates', serviceRole: true, query: `${q}&select=id,name` });
+  const tpl = Array.isArray(found) ? found[0] : null;
+  if (!tpl) throw Object.assign(new Error(`Template not found: ${id}`), { status: 404, code: 'TEMPLATE_NOT_FOUND' });
+
+  const linked = `?template_id=eq.${encodeURIComponent(id)}`;
+  const papers = await supabaseRest(env, { path: '/rest/v1/research_papers', serviceRole: true, query: `${linked}&select=id,title` });
+  if (Array.isArray(papers) && papers.length) {
+    await supabaseRest(env, {
+      path: '/rest/v1/research_papers',
+      method: 'PATCH',
+      serviceRole: true,
+      query: linked,
+      body: { template_id: null, updated_at: new Date().toISOString() },
+    });
+  }
+  const projects = await supabaseRest(env, { path: '/rest/v1/projects', serviceRole: true, query: `${linked}&select=id` });
+
+  let media = { configured: false, deleted: 0 };
+  if (isR2Ready(env)) media = await deletePrefixMedia(env, templateMediaPrefix(id));
+
+  await supabaseRest(env, { path: '/rest/v1/templates', method: 'DELETE', serviceRole: true, query: q });
+  const projectCount = Array.isArray(projects) ? projects.length : 0;
+  return {
+    success: true,
+    templateId: id,
+    name: tpl.name || '',
+    deleted: true,
+    mediaDeleted: media.deleted,
+    papersUnlinked: (papers || []).map((p) => ({ id: p.id, title: p.title || '' })),
+    projectsFromTemplate: projectCount,
+    message: `Template ${id} deleted${media.configured ? ` with ${media.deleted} media file(s)` : ''}.`
+      + ((papers || []).length ? ` ${(papers || []).length} paper(s) were unlinked and stay in the paper library; link them to another template with paper_save if needed.` : '')
+      + (projectCount ? ` ${projectCount} project(s) made from it keep their own questions and imported media.` : ''),
+  };
+}
+
 export async function applyMainPage(env, ctx, projectId, body = {}) {
   const row = await loadOwned(env, { ...ctx, projectId });
   const meta = metadataFromRow(row);
