@@ -162,31 +162,83 @@ async function sbLoadProject(projectId) {
   return rowToProject(rpcRows[0]);
 }
 
+// The project lists (Studio, the classic sidebar, the collecting-survey count)
+// only show names, dates and status. Reading every column of every project
+// (both survey configs, the SP-Scheme page HTML, media lists, metadata with
+// saved analyses and backups) made an account with ~170 projects download tens
+// of MB on every load. List rows carry these columns only and `_summary: true`;
+// getProjectById() still returns the whole project when one is opened.
+const PROJECT_LIST_COLUMNS = [
+  'id', 'user_id', 'name', 'description', 'created_at', 'updated_at', 'template_id',
+  'public_slug', 'draft_updated_at', 'published_at', 'published_version', 'release_managed',
+  'last_writer', 'preloaded_at', 'preloaded_source',
+  'meta_author:metadata->>author', 'meta_year:metadata->>year', 'meta_category:metadata->>category',
+  'meta_tags:metadata->tags', 'meta_website:metadata->>website',
+  'meta_dataset:metadata->>huggingfaceDataset',
+  // Pages only (no page HTML): enough to tell an empty study from one with questions.
+  'draft_pages:survey_config_draft->pages', 'live_pages:survey_config->pages',
+].join(',');
+
+// Rows whose current config holds an SP-Scheme page; the filter runs in the
+// database, so the page HTML itself is never sent.
+const HAS_PAGE_FILTER = 'survey_config_draft->spSite->>html.not.is.null,'
+  + 'and(survey_config_draft.is.null,survey_config->spSite->>html.not.is.null)';
+
+/** Marks a list row's config as having an SP-Scheme page without carrying it. */
+export const SUMMARY_PAGE_HTML = '(not loaded in the project list)';
+
+export function summaryRowToProject(row, hasPage = false) {
+  const tags = Array.isArray(row.meta_tags) ? row.meta_tags : [];
+  const metadata = {};
+  [['author', row.meta_author], ['year', row.meta_year], ['category', row.meta_category],
+    ['website', row.meta_website], ['huggingfaceDataset', row.meta_dataset]]
+    .forEach(([key, value]) => { if (value != null && value !== '') metadata[key] = value; });
+  if (tags.length) metadata.tags = tags;
+  const pages = Array.isArray(row.draft_pages) ? row.draft_pages
+    : (Array.isArray(row.live_pages) ? row.live_pages : []);
+  const config = { pages };
+  if (hasPage) config.spSite = { html: SUMMARY_PAGE_HTML };
+  return {
+    ...rowToProject({ ...row, metadata, survey_config_draft: config, survey_config: null }),
+    _summary: true,
+  };
+}
+
+async function sbListProjectRows(userId, ids = null) {
+  const scope = (query) => (ids ? query.in('id', ids) : query.eq('user_id', userId));
+  const [rows, pages] = await Promise.all([
+    scope(supabase.from('projects').select(PROJECT_LIST_COLUMNS)).order('updated_at', { ascending: false }),
+    scope(supabase.from('projects').select('id')).or(HAS_PAGE_FILTER),
+  ]);
+  if (!rows.error && !pages.error) {
+    const withPage = new Set((pages.data || []).map((r) => r.id));
+    return (rows.data || []).map((row) => summaryRowToProject(row, withPage.has(row.id)));
+  }
+  // A database without one of these columns still lists projects the old way.
+  console.warn('Project list: light query failed, reading full rows.', rows.error || pages.error);
+  const full = await scope(supabase.from('projects').select('*')).order('updated_at', { ascending: false });
+  if (full.error) throw full.error;
+  return (full.data || []).map(rowToProject);
+}
+
 async function sbListProjects() {
   // Always scope the regular project list to the currently signed-in user,
   // even for admins. Admins who want to see everyone's projects use the
   // dedicated AdminDashboard → Project Overview tab (listAllProjects()).
   const userId = await getCurrentUserId();
   if (!userId) return [];
-  const { data, error } = await supabase
-    .from('projects')
-    .select('*')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
-  if (error) return [];
-  const owned = (data || []).map(rowToProject);
+  let owned;
+  try {
+    owned = await sbListProjectRows(userId);
+  } catch {
+    return [];
+  }
   // Admins can select every project. Keep the owner filter above, then add
   // only the rows this user was invited to.
   let shared = [];
   try {
     const ids = await listCollaboratorProjectIds(userId);
-    if (ids.length) {
-      const { data: sharedRows, error: sharedError } = await supabase
-        .from('projects')
-        .select('*')
-        .in('id', ids);
-      if (!sharedError) shared = (sharedRows || []).map(rowToProject);
-    }
+    if (ids.length) shared = await sbListProjectRows(userId, ids);
   } catch {
     shared = [];
   }
@@ -434,6 +486,16 @@ export const getUserProjects = async () => {
     console.error('getUserProjects:', error);
     return [];
   }
+};
+
+/**
+ * A list row (`_summary`) holds no configs or media lists; anything that copies
+ * or saves a project needs the whole row. Returns null when it cannot be read.
+ */
+export const getFullProject = async (project) => {
+  if (!project || !project._summary) return project || null;
+  const full = await getProjectById(project.id);
+  return full ? { ...full, accessRole: project.accessRole || full.accessRole } : null;
 };
 
 export const getProjectById = async (projectId) => {

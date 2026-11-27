@@ -774,6 +774,13 @@ export default function AdminApp() {
         console.warn('Could not load latest project data:', error);
       }
 
+      // A project-list row carries no configs or media list; editing (and
+      // saving) it would blank them, so stop when the whole project is not here.
+      if (fullProject?._summary) {
+        setSnackbar({ open: true, message: 'Could not load the project. Please try again.', severity: 'error' });
+        return;
+      }
+
       // 3. Set new project
       setCurrentProject(fullProject);
       

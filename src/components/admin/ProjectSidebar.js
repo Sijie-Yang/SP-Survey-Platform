@@ -58,6 +58,7 @@ import {
 } from '@mui/icons-material';
 import { 
   getUserProjects, 
+  getFullProject,
   createProject, 
   createProjectFromTemplate, 
   deleteProject, 
@@ -412,7 +413,9 @@ export default function ProjectSidebar({
 
   const handleDuplicateProject = async () => {
     try {
-      const result = await duplicateProjectInFolder(menuProject, surveyConfig, `${menuProject.name} (Copy)`);
+      const source = await getFullProject(menuProject);
+      if (!source) throw new Error('Could not load the project.');
+      const result = await duplicateProjectInFolder(source, surveyConfig, `${source.name} (Copy)`);
       if (result.success) {
         // Project is automatically saved, reload immediately
         await loadProjects();
@@ -531,14 +534,21 @@ export default function ProjectSidebar({
     }
   };
 
-  const handleExportAsTemplate = () => {
+  const handleExportAsTemplate = async () => {
     if (!menuProject) {
       console.error('No project selected for template creation');
       return;
     }
 
-    // Populate form with project metadata
-    setProjectToTemplate(menuProject);
+    // Populate form with project metadata. The list row has no media list or
+    // media settings, so the template is made from the whole project.
+    const fullProject = await getFullProject(menuProject);
+    if (!fullProject) {
+      setError('Could not load the project.');
+      handleMenuClose();
+      return;
+    }
+    setProjectToTemplate(fullProject);
     setNewProjectName(menuProject.name);
     setNewProjectDescription(menuProject.description || `Template created from project: ${menuProject.name}`);
     setNewProjectAuthor(menuProject.author || 'User');
