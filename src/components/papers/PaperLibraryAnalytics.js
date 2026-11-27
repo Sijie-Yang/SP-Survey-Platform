@@ -244,9 +244,21 @@ const PaperLibraryAnalytics = memo(function PaperLibraryAnalytics({
       }}
     >
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.25 }}>
-        {zh
-          ? `标签和模板库用同一套分类。${view.reviewed ? `其中 ${view.reviewed} 篇已逐篇读摘要核对，其余` : ''}按标题、摘要和关键词自动识别。点任意一条柱子只看这类论文，再点一次取消。`
-          : `Tags use the same categories as the template library. ${view.reviewed ? `${view.reviewed} papers were checked by reading the abstract; the rest are ` : 'They are '}read automatically from titles, abstracts and keywords. Click a bar to show only those papers; click again to undo.`}
+        {zh ? '标签和模板库用同一套分类。' : 'Tags use the same categories as the template library. '}
+        {(() => {
+          if (view.reviewed >= view.total) {
+            return zh
+              ? '每篇都是读过摘要后标的，摘要没写的就不标。'
+              : 'Each paper was tagged by reading its abstract; what the abstract does not say is left blank. ';
+          }
+          if (view.reviewed) {
+            return zh
+              ? `${view.reviewed} 篇是读过摘要后标的，其余按标题、摘要和关键词自动识别。`
+              : `${view.reviewed} papers were tagged by reading the abstract; the rest are read automatically from titles, abstracts and keywords. `;
+          }
+          return zh ? '标签按标题、摘要和关键词自动识别。' : 'Tags are read automatically from titles, abstracts and keywords. ';
+        })()}
+        {zh ? '点任意一条柱子只看这类论文，再点一次取消。' : 'Click a bar to show only those papers; click again to undo.'}
       </Typography>
       <Box
         sx={{
