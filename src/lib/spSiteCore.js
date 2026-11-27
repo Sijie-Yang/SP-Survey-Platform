@@ -134,8 +134,12 @@ export function extractEmbeddedScheme(html) {
   if (!match) return null;
   try {
     return JSON.parse(match[1]);
-  } catch {
-    return { __invalid: true };
+  } catch (err) {
+    // Where it breaks, so the model that wrote the page can fix it.
+    const message = String(err?.message || '');
+    const at = message.match(/position (\d+)/);
+    const line = at ? match[1].slice(0, Number(at[1])).split('\n').length : null;
+    return { __invalid: true, __line: line, __detail: line ? '' : message.replace(/\s+/g, ' ').slice(0, 160) };
   }
 }
 

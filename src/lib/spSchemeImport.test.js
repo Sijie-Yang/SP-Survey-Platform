@@ -73,7 +73,7 @@ describe('a page that follows SP-Scheme', () => {
 describe('a page that does not follow SP-Scheme', () => {
   test('is imported as it is, with script hosts allowed and request hosts listed', () => {
     const prepared = prepareBytes(strToU8(LEGACY_SURVEY_HTML), { name: 'survey.html' });
-    expect(prepared.upload.asIs).toEqual({ declared: false, errors: expect.any(Array), problems: [] });
+    expect(prepared.upload.asIs).toEqual({ errors: expect.any(Array), problems: [] });
     expect(prepared.upload.originalHtml).toBe(LEGACY_SURVEY_HTML);
     expect(extractEmbeddedScheme(prepared.upload.siteHtml).survey.pages).toEqual([]);
     const byHost = Object.fromEntries(prepared.hosts.map((h) => [h.host, h]));
@@ -103,17 +103,25 @@ describe('a page that does not follow SP-Scheme', () => {
     expect(finalizeSpSchemeImport(report, prepared.upload, {}).spSite.allowedHosts).toBeUndefined();
   });
 
-  test('a broken SP-Scheme block is listed as problems to hand back to the model', () => {
+  test('a broken SP-Scheme block is not imported: its problems go back to the model', () => {
     const html = '<!doctype html><html><head><script type="application/json" id="sp-scheme">{"format":"sp-scheme","spScheme":"0.1","survey":{"pages":[{"elements":[{"type":"nosuchtype","name":"q1"}]}]}}</script></head><body>hi</body></html>';
     const prepared = prepareBytes(strToU8(html), { name: 'index.html' });
+    expect(prepared.upload.asIs).toBeUndefined();
     const summary = summarizeSpSchemeImport(prepared);
-    expect(summary).toMatchObject({ ok: true, asIs: true, declaredButBroken: true });
+    expect(summary).toMatchObject({ ok: false, asIs: false, declaredButBroken: true });
     expect(summary.problems.length).toBeGreaterThan(0);
     expect(summary.problems.map((p) => p.message).join(' ')).toMatch(/SP-Scheme 0\.1/);
     const text = spSchemeProblemsText(summary.problems);
     expect(text).toMatch(/^\n\n## Problems to fix in my index\.html\n- /);
     expect(spSchemeProblemsText([])).toBe('');
-    expect(finalizeSpSchemeImport(prepared.report, prepared.upload, {}).pages).toEqual([]);
+  });
+
+  test('an SP-Scheme block that is not valid JSON is not imported and says where it breaks', () => {
+    const html = '<!doctype html><html><head><script type="application/json" id="sp-scheme">{\n"format": "sp-scheme",\n"survey": {"pages": []},\n}</script></head><body>hi</body></html>';
+    const prepared = prepareBytes(strToU8(html), { name: 'index.html' });
+    const summary = summarizeSpSchemeImport(prepared);
+    expect(summary).toMatchObject({ ok: false, asIs: false, declaredButBroken: true });
+    expect(summary.problems.map((p) => p.message).join(' ')).toMatch(/not valid JSON \(around line 4 of the block\)/);
   });
 });
 

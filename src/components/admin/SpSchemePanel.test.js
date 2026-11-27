@@ -122,16 +122,26 @@ test('a page that does not match SP-Scheme says so, with a copy button next to i
   expect(await within(verdict).findByRole('button', { name: /Copied|已复制/ })).toBeInTheDocument();
 });
 
-test('a page with a broken SP-Scheme block lists its problems and is still imported as it is', async () => {
+test('a page with a broken SP-Scheme block lists its problems and is not imported', async () => {
   const html = '<!doctype html><html><head><script type="application/json" id="sp-scheme">{"format":"sp-scheme","spScheme":"0.1","survey":{"pages":[{"elements":[{"type":"nosuchtype","name":"q1"}]}]}}</script></head><body>hi</body></html>';
-  const { onChange } = renderPanel();
+  renderPanel();
   const file = new File([html], 'index.html', { type: 'text/html' });
   fireEvent.change(screen.getByTestId('sp-scheme-file'), { target: { files: [file] } });
-  expect(await screen.findByTestId('sp-scheme-verdict')).toHaveTextContent(/imported as it is|原样导入/);
-  expect(screen.getByTestId('sp-scheme-asis-declared')).toBeInTheDocument();
-  fireEvent.click(importButton());
-  await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
-  expect(onChange.mock.calls[0][0].pages).toEqual([]);
+  const verdict = await screen.findByTestId('sp-scheme-verdict');
+  expect(verdict).toHaveTextContent(/problem\(s\) to fix|个问题需要修正/);
+  expect(verdict).not.toHaveTextContent(/imported as it is|原样导入/);
+  expect(screen.getByText(/SP-Scheme 0\.1/)).toBeInTheDocument();
+  expect(importButton()).toBeDisabled();
+});
+
+test('a page whose SP-Scheme block is not valid JSON says where it breaks', async () => {
+  const html = '<!doctype html><html><head><script type="application/json" id="sp-scheme">{\n"format": "sp-scheme",\n"survey": {"pages": []},\n}</script></head><body>hi</body></html>';
+  renderPanel();
+  const file = new File([html], 'index.html', { type: 'text/html' });
+  fireEvent.change(screen.getByTestId('sp-scheme-file'), { target: { files: [file] } });
+  await screen.findByTestId('sp-scheme-verdict');
+  expect(screen.getByText(/not valid JSON \(around line 4/)).toBeInTheDocument();
+  expect(importButton()).toBeDisabled();
 });
 
 test('dropping the page with its config embeds the config for the page to read', async () => {

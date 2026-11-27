@@ -173,7 +173,7 @@ const TOOLS = [
       + 'The zip\'s stimulus files go to the project media library in their folders. A file is known by its exact folder and file name, as in Studio: on a re-import, a file of the same size is left as it is (not uploaded), and one of another or unrecorded size replaces the old entry, whose file is deleted unless the published version still uses it (media.new / replaced / unchanged). '
       + 'When the page does not pass the check, nothing is written: the reply has imported:false and the problems to fix. '
       + 'When an import fails after it started writing, what it wrote is removed again; if that cleanup fails too, the error says "cleanup incomplete". '
-      + 'A page that does not follow SP-Scheme is imported as it is (answers recorded, not analysed); summary says so. '
+      + 'A page with no SP-Scheme block is imported as it is (answers recorded, not analysed); summary.asIs says so. A page whose SP-Scheme block fails the check (including bad JSON) is not imported. '
       + 'allowHosts (optional) lists exactly the external hosts the page may load scripts/styles from (default: the ones it needs). '
       + 'With projectId, pass expectedDraftUpdatedAt (from survey_get_draft or the last import) so edits you have not seen are not overwritten; it is required once the project is published. '
       + `Limits: ${MAX_IMPORT_MEDIA_FILES} media files and ${MB(MAX_UNZIPPED_BYTES)} unzipped. `
@@ -541,13 +541,16 @@ const TOOLS = [
   },
   {
     name: 'survey_create_from_template',
-    description: 'Create a new project from a template (does not auto-copy template media).',
+    description: 'Create a new project from a template, with a copy of the template\'s media (images) in its media library. '
+      + 'A large template may not finish copying in one call: then media.remaining > 0 and media_import_from_template copies the rest. '
+      + 'To use your own images instead, media_delete { folder } the copied folder and upload or import yours. copyMedia:false skips the copy.',
     inputSchema: {
       type: 'object',
       properties: {
         templateId: { type: 'string' },
         name: { type: 'string' },
         description: { type: 'string' },
+        copyMedia: { type: 'boolean', description: 'Default true: copy the template media into the new project.' },
       },
       required: ['templateId'],
     },
@@ -616,15 +619,18 @@ const TOOLS = [
   },
   {
     name: 'media_delete',
-    description: 'Delete specific R2 keys under an owned project prefix. Requires confirm:true.',
+    description: 'Delete media of an owned project: keys (files from media_list), or folder (every file in that folder). '
+      + 'Deleted files also leave the project media library, so participants are no longer shown them (publish again for a published project). '
+      + 'To replace a folder\'s images: media_delete { folder } first, then upload or import the new ones. Requires confirm:true.',
     inputSchema: {
       type: 'object',
       properties: {
         projectId: { type: 'string' },
-        keys: { type: 'array', items: { type: 'string' } },
+        keys: { type: 'array', items: { type: 'string' }, description: 'Storage keys to delete (from media_list).' },
+        folder: { type: 'string', description: 'Delete every file in this media folder, e.g. "streets".' },
         confirm: { type: 'boolean' },
       },
-      required: ['projectId', 'keys', 'confirm'],
+      required: ['projectId', 'confirm'],
     },
   },
   {
@@ -1219,7 +1225,17 @@ async function callTool(env, auth, request, name, args = {}) {
     }
     case 'survey_create_from_template': {
       requireScope(auth, 'surveys:write');
-      return toolResult(await createFromTemplate(env, mcpCtx(auth), args, request));
+      const created = await createFromTemplate(env, mcpCtx(auth), args, request);
+      if (args.copyMedia === false || !auth.scopes?.includes?.('media:write')) return toolResult(created);
+      // Without its images a template study would show participants the
+      // platform's preview images, so the media comes along by default.
+      const { note, ...rest } = created;
+      try {
+        const media = await importMediaFromTemplate(env, mcpCtx(auth), created.project.id, { templateId: args.templateId });
+        return toolResult({ ...rest, media });
+      } catch (err) {
+        return toolResult({ ...rest, media: { copied: 0, error: err.message || String(err), next: 'Copy the images with media_import_from_template { projectId, confirm: true }.' } });
+      }
     }
     case 'survey_save_as_template': {
       requireScope(auth, 'surveys:write');

@@ -39,9 +39,10 @@ through short-lived signed links and `curl`.
    `replaced`, `unchanged` and `uploaded`.
 3. Read `summary`. When `imported` is `false`, the page did not pass the check
    and nothing was written: fix `fixHint.problems` and import again. When
-   `summary.asIs` is `true`, the page did not follow SP-Scheme and was imported
-   as it is: answers are recorded but not analysed; fix `summary.problems` and
-   import again for analysis. If an import fails after it started writing, it
+   `summary.asIs` is `true`, the page had no SP-Scheme block and was imported
+   as it is: answers are recorded but not analysed. A page with an SP-Scheme
+   block that fails the check (including bad JSON) is never imported as it is:
+   `imported` is `false` and `summary.declaredButBroken` is `true`. If an import fails after it started writing, it
    removes what it wrote (uploaded files, library entries, a project it created);
    if that cleanup fails too, the error says `Cleanup incomplete` and what is
    left.

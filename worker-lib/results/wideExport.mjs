@@ -1,7 +1,9 @@
 /**
  * Wide CSV builder for Agent/MCP (ported from src/lib/responsesWideExport.js).
- * Self-contained — no CRA / download helpers.
+ * No CRA / download helpers; quality flags come from src/lib/quality.js.
  */
+
+import { evaluateResponseQuality } from '../../src/lib/quality.js';
 
 const CSV_BOM = '\uFEFF';
 
@@ -101,32 +103,9 @@ function flattenQuestions(surveyConfig) {
   return (surveyConfig?.pages || []).flatMap((p) => p.elements || []);
 }
 
-/** Minimal quality flags for CSV column (attention + duplicate browser). */
+/** The same quality flags as the Results page and the download ZIP. */
 function qualityFlags(row, surveyConfig, allResponses) {
-  const flags = [];
-  const questions = flattenQuestions(surveyConfig);
-  for (const q of questions) {
-    if (!q.isAttentionCheck || q.expectedAnswer == null) continue;
-    const qData = row.responses?.[q.name];
-    let raw = qData;
-    if (qData && typeof qData === 'object' && !Array.isArray(qData) && 'answer' in qData) {
-      raw = qData.answer;
-    }
-    if (raw == null || raw === '') continue;
-    const exp = String(q.expectedAnswer).trim().toLowerCase();
-    const act = Array.isArray(raw)
-      ? raw.map((v) => String(v).trim().toLowerCase())
-      : [String(raw).trim().toLowerCase()];
-    if (!act.includes(exp)) {
-      flags.push('failed_attention');
-      break;
-    }
-  }
-  const browserId = row.survey_metadata?.browser_id;
-  if (browserId && allResponses.filter((r) => r.survey_metadata?.browser_id === browserId).length > 1) {
-    flags.push('duplicate_browser');
-  }
-  return flags;
+  return evaluateResponseQuality(row, surveyConfig, allResponses);
 }
 
 /**

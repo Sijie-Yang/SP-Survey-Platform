@@ -121,6 +121,8 @@ export default function SurveyApp() {
   const siteMediaPoolRef = useRef([]);
   // True when an SP-Scheme page's empty library was replaced by the platform preview library.
   const sitePreviewLibraryRef = useRef(false);
+  // Classic surveys drawn from the platform preview library (empty project library).
+  const previewLibraryRef = useRef(false);
   const questionLanguageRef = useRef({});
   const repeatSessionRef = useRef(null);
   const repeatParticipantRef = useRef(null);
@@ -470,6 +472,7 @@ export default function SurveyApp() {
       // An SP-Scheme page with an empty media library gets the platform preview
       // library, as other surveys do (never for a published, release-managed version).
       sitePreviewLibraryRef.current = false;
+      previewLibraryRef.current = false;
       if (adminConfig?.spSite?.html && !siteMediaPoolRef.current.length && !adminConfig._spPublishedVersion) {
         try {
           const { listPreviewMedia } = await import('./lib/previewMediaLibrary');
@@ -624,6 +627,7 @@ export default function SurveyApp() {
             if (Array.isArray(preview) && preview.length) {
               mediaPool = preview;
               fromPreviewLibrary = true;
+              previewLibraryRef.current = true;
               finalSurveyJson = adaptSurveyForPreviewLibrary(finalSurveyJson, mediaPool);
               console.log(`📦 Live survey: using platform preview media library (${mediaPool.length} files)`);
             }
@@ -1255,6 +1259,11 @@ export default function SurveyApp() {
             survey_response_contract: revision.contract,
             published_version: finalSurveyJson._spPublishedVersion || null,
             ...(finalSurveyJson.spSite ? { sp_site: { id: finalSurveyJson.spSite.id || null, version: finalSurveyJson.spSite.version || null, allowed_hosts: finalSurveyJson.spSite.allowedHosts || [], match: siteMatchLevel(finalSurveyJson).level, captured_requests: Array.isArray(responses?.[SP_SITE_REQUESTS_KEY]) ? responses[SP_SITE_REQUESTS_KEY].length : 0, preview_media_library: sitePreviewLibraryRef.current } } : {}),
+            // Answers given on the platform's preview images are not study data: they
+            // count as practice, which Results and every export leave out by default.
+            ...(sitePreviewLibraryRef.current || previewLibraryRef.current
+              ? { practice_mode: true, practice_reason: 'preview_media_library', preview_media_library: true }
+              : {}),
             survey_draft_updated_at: resumeDraft?.finalSurveyJson ? null : projectData?.draftUpdatedAt || null,
             timing: {
               total_seconds: totalSeconds,

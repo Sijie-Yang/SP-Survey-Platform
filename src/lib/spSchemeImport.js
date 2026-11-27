@@ -68,7 +68,8 @@ export function revalidateSpSchemeUpload(upload, allowedHosts = []) {
 /**
  * What an upload becomes: an SP-Scheme page as uploaded, or any other page as
  * it is (no questions declared; the platform only records what it saves and
- * sends). Nothing here involves a model.
+ * sends). A page with an SP-Scheme block that fails the check is neither: its
+ * report is not ok, so it is not imported until fixed. Nothing here involves a model.
  *
  * The first check allows every host the page names, so a script host alone
  * never pushes an SP-Scheme page into an as-is import. The returned report is
@@ -84,7 +85,12 @@ export function prepareSpSchemeUpload(read, { name = '', sourceHost = null } = {
   if (read?.siteHtml) {
     const found = spSchemeHostList(read.siteHtml);
     const first = validateSpSchemePackage(read.pkg, { siteHtml: read.siteHtml, allowedHosts: found.map((h) => h.host) });
-    if (first.ok) {
+    // A page that carries an SP-Scheme block (even one that is not valid JSON)
+    // means to be analysed: when the block fails the check it is not imported
+    // as it is, or participants would answer and nothing would be recorded
+    // against the declared questions. Its errors go back to be fixed.
+    const declared = Boolean(read.pkg);
+    if (first.ok || declared) {
       upload = { ...upload, mediaPlan: planUploadMedia(read.mediaFiles) };
       hosts = found;
     } else {
@@ -95,8 +101,7 @@ export function prepareSpSchemeUpload(read, { name = '', sourceHost = null } = {
         siteHtml: prepared.html,
         pkg: prepared.pkg,
         mediaPlan: prepared.mediaPlan,
-        // declared: the page carries an SP-Scheme block with problems, listed so they can be fixed.
-        asIs: { declared: Boolean(first.summary), errors: first.errors, problems: prepared.problems },
+        asIs: { errors: first.errors, problems: prepared.problems },
       };
       hosts = spSchemeHostList(prepared.html);
     }
@@ -161,13 +166,12 @@ function plainText(value) {
 
 /**
  * What the model that built the page should fix: for a page imported as it is,
- * the problems of the SP-Scheme block it declared and anything that blocks the
- * import; otherwise every error of the check.
+ * anything that blocks the import; otherwise every error of the check.
  * @returns {{ path: string, message: string }[]}
  */
 export function spSchemeProblems(report, upload) {
   const list = upload?.asIs
-    ? [...(upload.asIs.declared ? issueList(upload.asIs.errors) : []), ...issueList(upload.asIs.problems), ...issueList(report?.errors)]
+    ? [...issueList(upload.asIs.problems), ...issueList(report?.errors)]
     : issueList(report?.errors);
   const seen = new Set();
   return list.filter((item) => {
@@ -198,7 +202,8 @@ export function summarizeSpSchemeImport({ report = null, upload = null, hosts = 
   return {
     ok: Boolean(report?.ok),
     asIs: Boolean(upload?.asIs),
-    declaredButBroken: Boolean(upload?.asIs?.declared && upload.asIs.errors?.length),
+    // The page declares SP-Scheme questions but fails the check: not importable until fixed.
+    declaredButBroken: Boolean(upload?.siteHtml && upload?.pkg && !upload?.asIs && !report?.ok),
     name: String(upload?.name || ''),
     title: plainText(summary?.title),
     hasSite: Boolean(summary?.hasSite),

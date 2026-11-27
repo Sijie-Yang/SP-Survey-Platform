@@ -48,6 +48,25 @@ export function normalizeOperationsArg(raw) {
   return values.length ? values : null;
 }
 
+// A study built as one SP-Scheme page draws every question itself, from the
+// question list in its own HTML. Changing the questions here would leave the
+// page and the survey out of step (a required question the page never shows
+// stops every participant at submit), so those edits go through the page.
+const PAGE_LOCKED_OPS = new Set([
+  'addPage', 'removePage', 'addQuestion', 'updateQuestion', 'removeQuestion',
+  'setAllRatingScales', 'restoreRatingScales', 'replaceConfig', 'updatePage',
+  'reorderPages', 'reorderQuestions',
+]);
+
+export const SP_SITE_LOCKED_MESSAGE = 'This study is one SP-Scheme page that draws its own questions, so its questions cannot be changed with operations. '
+  + 'Edit the page (its sp-scheme block and the code that shows the questions) and import it again with sp_scheme_import; '
+  + 'only updateSurvey and setTheme work here.';
+
+export function hasSpSitePage(config) {
+  const site = config?.spSite;
+  return Boolean(site && typeof site === 'object' && (site.html || site.id));
+}
+
 export function applyOperations(surveyConfig, operations = []) {
   const list = normalizeOperationsArg(operations);
   if (!Array.isArray(list)) {
@@ -61,9 +80,18 @@ export function applyOperations(surveyConfig, operations = []) {
   const applied = [];
   const inverse = [];
 
+  const locked = hasSpSitePage(config);
   operations.forEach((op, opIndex) => {
     if (!op || typeof op !== 'object' || !op.op) {
       throw new Error(`operations[${opIndex}] is missing op`);
+    }
+    if (locked && PAGE_LOCKED_OPS.has(op.op)) {
+      throw Object.assign(new Error(SP_SITE_LOCKED_MESSAGE), { code: 'SP_SITE_PAGE' });
+    }
+    // Question names are unique, so a question edit may leave out its page.
+    if ((op.op === 'updateQuestion' || op.op === 'removeQuestion') && !op.pageName && op.questionName) {
+      const home = config.pages.find((p) => (p.elements || []).some((el) => el.name === op.questionName));
+      if (home) op = { ...op, pageName: home.name };
     }
 
     switch (op.op) {

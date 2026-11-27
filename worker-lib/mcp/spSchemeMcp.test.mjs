@@ -161,6 +161,17 @@ describe('sp_scheme_import', () => {
     assert.equal(res.body.media.uploaded, 0);
   });
 
+  it('does not import a page whose SP-Scheme block is broken', async () => {
+    db = fakeSupabase();
+    const html = '<!doctype html><html><head><script type="application/json" id="sp-scheme">{\n"format": "sp-scheme",\n"survey": {"pages": []},\n}</script></head><body>hi</body></html>';
+    const res = await callTool(baseEnv(), 'sp_scheme_import', { html, name: 'Broken page' });
+    assert.equal(res.body.imported, false);
+    assert.equal(res.body.summary.asIs, false);
+    assert.equal(res.body.summary.declaredButBroken, true);
+    assert.match(res.body.fixHint.text, /not valid JSON \(around line 4 of the block\)/);
+    assert.equal(db.tables.projects?.length || 0, 0);
+  });
+
   it('imports any other page as it is, recorded but not analysed', async () => {
     db = fakeSupabase();
     const res = await callTool(baseEnv(), 'sp_scheme_import', { html: AS_IS_PAGE, name: 'Walkability pilot' });
@@ -1120,5 +1131,100 @@ describe('tools/list for the Claude connector directory', () => {
     assert.equal(missing.error, 'invalid_request');
     const odd = await (await route('POST', 'https://sp-survey.org/oauth/token', 'grant_type=client_credentials', { 'content-type': 'application/x-www-form-urlencoded' })).json();
     assert.equal(odd.error, 'unsupported_grant_type');
+  });
+});
+
+describe('media_delete', () => {
+  const entry = (key) => ({ key, url: `https://media.example/${key}`, name: key.split('/').pop(), folder: key.split('/').slice(2, -1).join('/') });
+  const seed = (env, keys) => keys.forEach((k) => env.R2_BUCKET.objects.set(k, { bytes: new Uint8Array([1]), uploaded: new Date() }));
+
+  it('removes deleted files from the media library too, so participants are not shown them', async () => {
+    const keys = ['u1/proj_1_abc/streets/a.jpg', 'u1/proj_1_abc/streets/b.jpg', 'u1/proj_1_abc/parks/c.jpg'];
+    db = fakeSupabase({ projects: [projectRow({ preloaded_images: keys.map(entry), release_managed: true })] });
+    const env = baseEnv();
+    seed(env, keys);
+    const res = await callTool(env, 'media_delete', { projectId: 'proj_1_abc', keys: [keys[0]], confirm: true });
+    assert.equal(res.isError, false, JSON.stringify(res.body));
+    assert.equal(res.body.deleted, 1);
+    assert.equal(res.body.libraryRemoved, 1);
+    assert.match(res.body.next, /publish again/);
+    assert.deepEqual(db.tables.projects[0].preloaded_images.map((e) => e.key), keys.slice(1));
+    assert.deepEqual(projectKeys(env), [keys[2], keys[1]].sort());
+  });
+
+  it('deletes a whole folder, matching library entries that only carry a URL', async () => {
+    const keys = ['u1/proj_1_abc/streets/a.jpg', 'u1/proj_1_abc/streets/b.jpg', 'u1/proj_1_abc/parks/c.jpg'];
+    const library = keys.map(entry);
+    delete library[1].key;
+    db = fakeSupabase({ projects: [projectRow({ preloaded_images: library })] });
+    const env = baseEnv();
+    seed(env, keys);
+    const res = await callTool(env, 'media_delete', { projectId: 'proj_1_abc', folder: 'streets', confirm: true });
+    assert.equal(res.isError, false, JSON.stringify(res.body));
+    assert.equal(res.body.deleted, 2);
+    assert.equal(res.body.libraryRemoved, 2);
+    assert.equal(res.body.next, undefined);
+    assert.deepEqual(db.tables.projects[0].preloaded_images.map((e) => e.key), [keys[2]]);
+    assert.deepEqual(projectKeys(env), [keys[2]]);
+    const none = await callTool(env, 'media_delete', { projectId: 'proj_1_abc', confirm: true });
+    assert.match(none.body.error, /keys .* or folder/);
+  });
+});
+
+describe('survey_apply_operations on an SP-Scheme page', () => {
+  const draft = {
+    title: 'Street study',
+    pages: [{ name: 'p1', elements: [{ type: 'imagepicker', name: 'safer', imageCount: 2 }] }],
+    spSite: { id: 'site-0123456789abcdef', html: '<!doctype html><html><body>page</body></html>' },
+  };
+
+  it('refuses question edits the page would never show, and keeps title and theme edits', async () => {
+    db = fakeSupabase({ projects: [projectRow({ survey_config_draft: draft })] });
+    const env = baseEnv();
+    const stamp = db.tables.projects[0].draft_updated_at;
+    const add = await callTool(env, 'survey_apply_operations', {
+      projectId: 'proj_1_abc',
+      expectedDraftUpdatedAt: stamp,
+      operations: [{ op: 'addQuestion', pageName: 'p1', question: { type: 'radiogroup', name: 'age', isRequired: true, choices: ['a', 'b'] } }],
+    });
+    assert.equal(add.isError, true);
+    assert.match(add.body.error, /sp_scheme_import/);
+    assert.equal(db.tables.projects[0].survey_config_draft.pages[0].elements.length, 1);
+
+    const title = await callTool(env, 'survey_apply_operations', {
+      projectId: 'proj_1_abc',
+      expectedDraftUpdatedAt: stamp,
+      operations: [{ op: 'updateSurvey', patch: { title: 'Street study v2' } }],
+    });
+    assert.equal(title.isError, false, JSON.stringify(title.body));
+  });
+});
+
+describe('survey_create_from_template', () => {
+  const tpl = { id: '2025-kang-which', name: 'Which place looks safer?', is_approved: true, survey_config: { title: 'T', pages: [{ name: 'p1', elements: [{ type: 'text', name: 'q1' }] }] }, preloaded_images: [] };
+
+  it('copies the template images into the new project', async () => {
+    db = fakeSupabase({ templates: [tpl] });
+    const env = baseEnv();
+    env.R2_BUCKET.objects.set('templates/2025-kang-which/helsingborg/a.jpg', { bytes: new Uint8Array([1]), uploaded: new Date() });
+    env.R2_BUCKET.objects.set('templates/2025-kang-which/helsingborg/b.jpg', { bytes: new Uint8Array([2]), uploaded: new Date() });
+    const res = await callTool(env, 'survey_create_from_template', { templateId: tpl.id, name: 'My copy' });
+    assert.equal(res.isError, false, JSON.stringify(res.body));
+    assert.equal(res.body.note, undefined);
+    assert.equal(res.body.media.copied, 2);
+    assert.equal(res.body.media.done, true);
+    const [project] = db.tables.projects;
+    assert.deepEqual(project.preloaded_images.map((e) => e.folder), ['helsingborg', 'helsingborg']);
+    assert.ok(project.preloaded_images.every((e) => e.key.startsWith(`u1/${project.id}/helsingborg/`)));
+  });
+
+  it('skips the copy when asked', async () => {
+    db = fakeSupabase({ templates: [tpl] });
+    const env = baseEnv();
+    env.R2_BUCKET.objects.set('templates/2025-kang-which/helsingborg/a.jpg', { bytes: new Uint8Array([1]), uploaded: new Date() });
+    const res = await callTool(env, 'survey_create_from_template', { templateId: tpl.id, copyMedia: false });
+    assert.equal(res.isError, false, JSON.stringify(res.body));
+    assert.equal(res.body.media, undefined);
+    assert.match(res.body.note, /media_import_from_template/);
   });
 });
