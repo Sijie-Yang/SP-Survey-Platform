@@ -20,6 +20,7 @@ export const FACET_DIMENSIONS = [
       { id: 'street_view', en: "Street view", zh: "街景" },
       { id: 'panorama', en: "Panorama", zh: "全景" },
       { id: 'video', en: "Video", zh: "视频" },
+      { id: 'audio', en: "Audio / sound", zh: "音频" },
       { id: 'window_view', en: "Window view", zh: "窗景" },
       { id: 'indoor', en: "Indoor", zh: "室内" },
       { id: 'scene_photo', en: "Other scene photos", zh: "其他场景照片" },
