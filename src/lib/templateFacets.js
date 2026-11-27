@@ -4,7 +4,7 @@
  *
  * To add a dimension, add one entry to FACET_DIMENSIONS: the /templates filters,
  * the row labels and the admin editor all read this list. "open" dimensions
- * (country, city) accept new values; the others only take listed ids.
+ * (country = location, city) accept new values; the others only take listed ids.
  */
 
 export const FACET_DIMENSIONS = [
@@ -112,7 +112,7 @@ export const FACET_DIMENSIONS = [
       { id: 'gt1000', en: "> 1,000", zh: "> 1,000" },
     ],
   },
-  { key: 'country', en: 'Country', zh: '国家', open: true, values: [] },
+  { key: 'country', en: 'Location', zh: '地点', open: true, values: [] },
   { key: 'city', en: 'City', zh: '城市', open: true, values: [] },
 ];
 
@@ -156,7 +156,65 @@ export function withFacets(tags, facets) {
 }
 
 /** Label for a value in the current language (open dimensions show the value itself). */
+/**
+ * Display names for the open "country" (shown as Location / 地点) values,
+ * which are stored in English. China means mainland China; Hong Kong,
+ * Macau and Taiwan are separate places.
+ */
+const LOCATION_EN = { China: 'Mainland China' };
+const LOCATION_ZH = {
+  China: '中国内地',
+  USA: '美国',
+  UK: '英国',
+  Japan: '日本',
+  'South Korea': '韩国',
+  Singapore: '新加坡',
+  Australia: '澳大利亚',
+  Netherlands: '荷兰',
+  Germany: '德国',
+  France: '法国',
+  Spain: '西班牙',
+  Italy: '意大利',
+  Sweden: '瑞典',
+  Austria: '奥地利',
+  Canada: '加拿大',
+  Chile: '智利',
+  Portugal: '葡萄牙',
+  Finland: '芬兰',
+  Israel: '以色列',
+  Malaysia: '马来西亚',
+  'Sri Lanka': '斯里兰卡',
+  'Hong Kong': '香港',
+  Macau: '澳门',
+  Taiwan: '台湾',
+  Brazil: '巴西',
+  India: '印度',
+  Iran: '伊朗',
+  Turkey: '土耳其',
+  Switzerland: '瑞士',
+  Denmark: '丹麦',
+  Norway: '挪威',
+  Belgium: '比利时',
+  Poland: '波兰',
+  Greece: '希腊',
+  'New Zealand': '新西兰',
+  Mexico: '墨西哥',
+  Colombia: '哥伦比亚',
+  Vietnam: '越南',
+  Thailand: '泰国',
+  Indonesia: '印度尼西亚',
+  Egypt: '埃及',
+  'South Africa': '南非',
+  'Saudi Arabia': '沙特阿拉伯',
+  'United Arab Emirates': '阿联酋',
+  Ireland: '爱尔兰',
+  'Czech Republic': '捷克',
+  Hungary: '匈牙利',
+  Russia: '俄罗斯',
+};
+
 export function facetLabel(key, value, zh) {
+  if (key === 'country') return (zh ? LOCATION_ZH[value] : LOCATION_EN[value]) || value;
   const v = BY_KEY[key]?.values.find((x) => x.id === value);
   return v ? (zh ? v.zh : v.en) : value;
 }

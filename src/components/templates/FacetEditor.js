@@ -4,7 +4,7 @@ import { FACET_DIMENSIONS } from '../../lib/templateFacets';
 
 /**
  * Admin editor for template facets: one field per dimension, options from the
- * fixed vocabulary. Open dimensions (country, city) also take new values.
+ * fixed vocabulary. Open dimensions (country = location, city) also take new values.
  * value / onChange use { dimension: [ids] }.
  */
 export default function FacetEditor({ value, onChange }) {
