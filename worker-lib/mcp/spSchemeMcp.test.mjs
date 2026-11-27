@@ -529,6 +529,66 @@ describe('template_publish', () => {
   });
 });
 
+describe('template_delete', () => {
+  const tpl = { id: '2025-kang-which', name: 'Which place looks safer?', is_approved: true, preloaded_images: [] };
+  const seedMedia = (env) => {
+    env.R2_BUCKET.objects.set('templates/2025-kang-which/helsingborg/a.jpg', { bytes: new Uint8Array([1]), uploaded: new Date() });
+    env.R2_BUCKET.objects.set('templates/2025-kang-which/helsingborg/b.jpg', { bytes: new Uint8Array([2]), uploaded: new Date() });
+    // Another template whose id starts the same way keeps its media.
+    env.R2_BUCKET.objects.set('templates/2025-kang-which-2/helsingborg/a.jpg', { bytes: new Uint8Array([3]), uploaded: new Date() });
+  };
+
+  it('is for platform admins only and needs confirm:true', async () => {
+    db = fakeSupabase({ templates: [tpl] });
+    const env = baseEnv();
+    seedMedia(env);
+    const notAdmin = await callTool(env, 'template_delete', { templateId: tpl.id, confirm: true });
+    assert.equal(notAdmin.isError, true);
+    assert.equal(notAdmin.body.code, 'ADMIN_ONLY');
+    const unconfirmed = await callTool(env, 'template_delete', { templateId: tpl.id });
+    assert.equal(unconfirmed.body.code, 'CONFIRM_REQUIRED');
+    assert.match(unconfirmed.body.error, /confirm:true/);
+    const noScope = await callTool(env, 'template_delete', { templateId: tpl.id, confirm: true }, { scopes: ['surveys:read', 'surveys:write'] });
+    assert.match(noScope.body.error, /surveys:publish/);
+    assert.equal(db.tables.templates.length, 1);
+    assert.equal(env.R2_BUCKET.objects.size, 3);
+  });
+
+  it('deletes the template and its media, and unlinks its papers', async () => {
+    db = fakeSupabase({
+      templates: [tpl, { id: '2025-kang-which-2', name: 'Other', is_approved: true }],
+      admins: [{ user_id: 'u1' }],
+      papers: [
+        { id: 'p1', title: 'Human vs. AI safety perception', status: 'approved', template_id: '2025-kang-which' },
+        { id: 'p2', title: 'Other paper', status: 'approved', template_id: '2025-kang-which-2' },
+      ],
+      projects: [projectRow({ template_id: '2025-kang-which' })],
+    });
+    const env = baseEnv();
+    seedMedia(env);
+    const res = await callTool(env, 'template_delete', { templateId: tpl.id, confirm: true });
+    assert.equal(res.isError, false, JSON.stringify(res.body));
+    assert.equal(res.body.deleted, true);
+    assert.equal(res.body.mediaDeleted, 2);
+    assert.deepEqual(res.body.papersUnlinked, [{ id: 'p1', title: 'Human vs. AI safety perception' }]);
+    assert.equal(res.body.projectsFromTemplate, 1);
+    assert.deepEqual(db.tables.templates.map((t) => t.id), ['2025-kang-which-2']);
+    assert.equal(db.tables.research_papers.find((p) => p.id === 'p1').template_id, null);
+    assert.equal(db.tables.research_papers.find((p) => p.id === 'p1').status, 'approved');
+    assert.equal(db.tables.research_papers.find((p) => p.id === 'p2').template_id, '2025-kang-which-2');
+    assert.deepEqual([...env.R2_BUCKET.objects.keys()], ['templates/2025-kang-which-2/helsingborg/a.jpg']);
+    // The project made from it is left alone.
+    assert.equal(db.tables.projects[0].template_id, '2025-kang-which');
+
+    const again = await callTool(env, 'template_delete', { templateId: tpl.id, confirm: true });
+    assert.equal(again.body.code, 'TEMPLATE_NOT_FOUND');
+    const badId = await callTool(env, 'template_delete', { templateId: '../x', confirm: true });
+    assert.equal(badId.body.code, 'INVALID_TEMPLATE_ID');
+    const empty = await callTool(env, 'template_delete', { templateId: '', confirm: true });
+    assert.equal(empty.body.code, 'INVALID_TEMPLATE_ID');
+  });
+});
+
 describe('survey_get_draft and survey_replace_draft with a page', () => {
   const html = `${AS_IS_PAGE}<!-- ${'x'.repeat(5000)} -->`;
   const draft = { title: 'Walk', pages: [], spSite: { id: 'site-abc', version: '1.0', html, convertedFrom: 'index.html' } };

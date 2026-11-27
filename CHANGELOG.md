@@ -13,6 +13,7 @@ Notable changes for researchers using SP-Survey. Versions follow [docs/RELEASING
 - Licence: source code is now under MIT; documentation, survey templates and research data stay under CC BY 4.0.
 
 ### Added
+- MCP for platform admins: `template_delete` permanently deletes a template and its media (needs `confirm: true`); papers linked to it are unlinked and stay in the paper library. No SQL.
 - **工作台 / Studio** (`/studio`): a simple workspace beside the classic editor. One screen per study: drop the page an AI built (`.html` or `.zip` with images, checked the same way as SP-Scheme upload), see what participants see, upload images, publish, copy the link and QR code, see the response count and download data. New studies start from "让 AI 做问卷" or "自己逐题搭建" (classic editor). Signed-in researchers land here; the classic editor (`/admin`) is one click away and opens the same study (`/admin?project=<id>&tab=…`).
 - Classic editor: white top bar in the homepage style, with a 工作台 button that saves first.
 - MCP follows SP-Scheme end to end: `sp_scheme_spec`, `sp_scheme_upload_url` + `sp_scheme_import` (upload a page or zip, images go to the library), publish returns the participant link, `survey_download_url` gives a short-lived ZIP of the data (CSV + raw JSON + README) for the agent to analyse. Platform admins can publish a project as a public template with `template_publish`. Limits: 25 MB zip, 60 MB unzipped, 500 images per import, 20,000 rows per download.

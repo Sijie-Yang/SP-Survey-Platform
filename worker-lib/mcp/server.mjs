@@ -71,7 +71,7 @@ import {
   spSchemeSpec,
 } from '../agent/spSchemeAgent.mjs';
 import { DOWNLOAD_MAX_JSON_BYTES, DOWNLOAD_MAX_ROWS, createDownloadUrl } from '../agent/resultsDownload.mjs';
-import { isPlatformAdmin, loadOwned, publishTemplate } from '../agent/projectLifecycle.mjs';
+import { deleteTemplate, isPlatformAdmin, loadOwned, publishTemplate } from '../agent/projectLifecycle.mjs';
 import { checkPublishMedia } from '../../src/lib/publishMediaCheck.mjs';
 import { listNews, listWiki, saveNewsDraft, submitWiki } from '../research/siteContent.mjs';
 import { listTemplateFacets, saveTemplateFacets } from '../research/templateTags.mjs';
@@ -231,6 +231,21 @@ const TOOLS = [
         confirm: { type: 'boolean' },
       },
       required: ['projectId', 'name', 'author', 'year', 'confirm'],
+    },
+  },
+  {
+    name: 'template_delete',
+    description:
+      'PLATFORM ADMINS ONLY (checked on the server). Permanently delete a published or pending template: its row and its media under templates/<id>/. '
+      + 'Papers linked to it are unlinked and stay in the paper library; projects made from it keep their own copy. Cannot be undone. '
+      + 'To replace a template keep its id and use template_publish with templateId and overwrite:true instead. Needs surveys:publish and confirm:true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        templateId: { type: 'string' },
+        confirm: { type: 'boolean' },
+      },
+      required: ['templateId', 'confirm'],
     },
   },
   {
@@ -939,7 +954,7 @@ const TOOLS = [
 ];
 
 /** Tools only platform admins can use: hidden from everyone else in tools/list (the server checks again on every call). */
-export const ADMIN_ONLY_TOOLS = new Set(['template_publish', 'template_tags', 'paper_list', 'paper_save', 'news_list', 'news_save', 'wiki_list', 'wiki_submit', 'model_bench_routes', 'model_bench_start', 'model_bench_result']);
+export const ADMIN_ONLY_TOOLS = new Set(['template_publish', 'template_delete', 'template_tags', 'paper_list', 'paper_save', 'news_list', 'news_save', 'wiki_list', 'wiki_submit', 'model_bench_routes', 'model_bench_start', 'model_bench_result']);
 
 // title + hints for every tool (MCP tool annotations; the Claude connector directory requires them).
 // read: only reads. destructive: may overwrite or delete what is already there. All tools act on SP-Survey only (openWorldHint false).
@@ -953,6 +968,7 @@ const TOOL_ANNOTATIONS = {
   sp_scheme_import: ['Import a study page (SP-Scheme)', CHANGE],
   survey_download_url: ['Get a download link for study data', READ],
   template_publish: ['Publish a project as a template (admin)', CHANGE],
+  template_delete: ['Delete a template (admin)', CHANGE],
   template_tags: ['Read or set template classification tags (admin)', CHANGE],
   paper_list: ['List papers in the paper library (admin)', READ],
   model_bench_routes: ['List models an admin can bench (admin)', READ],
@@ -1073,6 +1089,11 @@ async function callTool(env, auth, request, name, args = {}) {
         return toolResult({ error: `This replaces the template ${String(args.templateId).slice(0, 96)} (its survey, details and media) for everyone. Set overwrite:true to do that, or leave templateId out to publish a new template.`, code: 'OVERWRITE_REQUIRED' }, true);
       }
       return toolResult(await publishTemplate(env, mcpCtx(auth), args.projectId, args, request));
+    }
+    case 'template_delete': {
+      requireScope(auth, 'surveys:publish');
+      if (!args.confirm) return toolResult({ error: `This permanently deletes the template ${String(args.templateId ?? '').slice(0, 96)} and its media for everyone. Set confirm:true to do that.`, code: 'CONFIRM_REQUIRED' }, true);
+      return toolResult(await deleteTemplate(env, mcpCtx(auth), args.templateId));
     }
     case 'template_tags': {
       const writes = Array.isArray(args.templates) && args.templates.length > 0;
