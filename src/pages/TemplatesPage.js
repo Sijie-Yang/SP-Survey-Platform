@@ -120,6 +120,28 @@ export function linkedPreview(templates, id) {
   return (id && (templates || []).find((tpl) => tpl.id === id)) || null;
 }
 
+/** How many rows must be on screen for the row at `index` to be one of them: whole pages; 0 when there is no such row. */
+export function limitToShow(index) {
+  return index < 0 ? 0 : Math.ceil((index + 1) / PAGE_SIZE) * PAGE_SIZE;
+}
+
+/**
+ * The address that shows a linked template in the list: its preview and, for
+ * a demo, the Demo tab (the other tabs leave demos out). Any other filter is
+ * dropped, because it could hide the row.
+ */
+export function addressShowing(template) {
+  const next = new URLSearchParams();
+  next.set('preview', template.id);
+  if (templateSource(template) === 'demo') next.set('source', 'demo');
+  return next;
+}
+
+const scrollToRow = (id) => {
+  const row = document.getElementById(`template-row-${id}`);
+  if (row && row.scrollIntoView) row.scrollIntoView({ block: 'center' });
+};
+
 /**
  * /templates — every published template, newest first: one search box, a
  * row of source buttons and a few dropdowns (see src/lib/templateFacets.js).
@@ -136,7 +158,14 @@ export default function TemplatesPage() {
   const filters = Object.fromEntries(['source', 'q', ...FILTER_DIMENSIONS].map((k) => [k, params.get(k) || '']));
   if (!SOURCES.includes(filters.source)) filters.source = 'all';
 
+  // The row to point out: the template a link opened, or the one last previewed
+  // from the list. It stays marked after the preview closes, until a filter changes.
+  const previewId = params.get('preview') || '';
+  const [focusId, setFocusId] = useState(previewId);
+  useEffect(() => { if (previewId) setFocusId(previewId); }, [previewId]);
+
   const update = (key, value) => {
+    setFocusId('');
     const next = new URLSearchParams(params);
     if (!value || value === 'all') next.delete(key); else next.set(key, value);
     setParams(next, { replace: true });
@@ -164,11 +193,26 @@ export default function TemplatesPage() {
   const anyDropdown = FILTER_DIMENSIONS.some((k) => filters[k]);
 
   // A link can open one template's preview directly: /templates?preview=<template id>.
-  const linked = linkedPreview(templates, params.get('preview'));
+  // The list behind the preview moves to that template's row, so closing the
+  // preview leaves the reader at the template they came for.
+  const linked = linkedPreview(templates, previewId);
+  const focusIndex = focusId ? shown.findIndex((tpl) => tpl.id === focusId) : -1;
+  const shownLimit = Math.max(limit, limitToShow(focusIndex));
+  const linkedId = linked ? linked.id : '';
+  const linkedInList = Boolean(linked) && focusId === linkedId && focusIndex >= 0;
+  useEffect(() => {
+    if (!linked || focusId !== linked.id) return;
+    if (focusIndex >= 0) { scrollToRow(linked.id); return; }
+    // The filters in the address hide this template: show it without them.
+    const next = addressShowing(linked);
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the linked template or its place in the list changes
+  }, [linkedId, linkedInList, focusId]);
   const closeLinked = () => {
     const next = new URLSearchParams(params);
     next.delete('preview');
     setParams(next, { replace: true });
+    if (linkedId) setTimeout(() => scrollToRow(linkedId), 0);
   };
 
   return (
@@ -267,6 +311,7 @@ export default function TemplatesPage() {
             <Button size="small" sx={{ borderRadius: 999, color: 'text.secondary' }} onClick={() => {
               const next = new URLSearchParams(params);
               FILTER_DIMENSIONS.forEach((k) => next.delete(k));
+              setFocusId('');
               setParams(next, { replace: true });
             }}>
               {t.tplClearFilters || 'Clear filters'}
@@ -289,13 +334,21 @@ export default function TemplatesPage() {
           </Box>
         ) : (
           <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
-            {shown.slice(0, limit).map((tpl) => (
-              <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} onFacet={update} activeConcept={filters.concept} />
+            {shown.slice(0, shownLimit).map((tpl) => (
+              <TemplateRow
+                key={tpl.id}
+                template={tpl}
+                onUse={() => navigate(templatePath)}
+                onFacet={update}
+                activeConcept={filters.concept}
+                highlighted={tpl.id === focusId}
+                onPreview={() => setFocusId(tpl.id)}
+              />
             ))}
-            {shown.length > limit && (
+            {shown.length > shownLimit && (
               <Box sx={{ textAlign: 'center', pt: 3 }}>
-                <Button variant="outlined" onClick={() => setLimit((n) => n + PAGE_SIZE)}>
-                  {tf(t.tplShowMore || 'Show more ({n} left)', { n: shown.length - limit })}
+                <Button variant="outlined" onClick={() => setLimit(shownLimit + PAGE_SIZE)}>
+                  {tf(t.tplShowMore || 'Show more ({n} left)', { n: shown.length - shownLimit })}
                 </Button>
               </Box>
             )}
