@@ -7,6 +7,7 @@ import {
   validateSiteAnswer,
   withoutSiteHtml,
 } from './spSite';
+import { SP_SITE_PREVIEW_TOOLS_SOURCE } from './spSitePreviewTools';
 
 const media = (n, prefix = 'a') => Array.from({ length: n }, (_, i) => ({ url: `https://media.sp-survey.org/${prefix}${i}.jpg`, name: `${prefix}${i}.jpg`, type: 'image' }));
 
@@ -100,6 +101,16 @@ describe('site document', () => {
     expect(doc).toContain("connect-src 'none'");
     expect(doc).toContain('window.SPSite');
     expect(doc).not.toContain('shim()');
+  });
+
+  test('only previews get the "next screen" helper', () => {
+    const html = '<html><head></head><body></body></html>';
+    expect(prepareSiteDocument(html)).not.toContain('__SP_PREVIEW_TOOLS__');
+    const doc = prepareSiteDocument(html, { previewScript: SP_SITE_PREVIEW_TOOLS_SOURCE });
+    expect(doc).toContain('__SP_PREVIEW_TOOLS__');
+    // It runs after the SDK and before the page's own code.
+    expect(doc.indexOf('window.SPSite')).toBeLessThan(doc.indexOf('__SP_PREVIEW_TOOLS__'));
+    expect(doc.indexOf('__SP_PREVIEW_TOOLS__')).toBeLessThan(doc.indexOf('<body>'));
   });
 
   test('static checks catch pages that cannot record answers', () => {

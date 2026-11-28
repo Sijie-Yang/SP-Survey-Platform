@@ -1,10 +1,12 @@
-import React, { useContext, useMemo, useState } from 'react';
+import React, { useContext, useMemo, useRef, useState } from 'react';
 import { Alert, Box, Button, Typography } from '@mui/material';
+import { SkipNext } from '@mui/icons-material';
 import SpSiteFrame from '../SpSiteFrame';
 import { buildSiteQuestions, siteMatchLevel, siteMediaFolders, sitePreviewMediaFolders } from '../../lib/spSite';
 import { applyPageState, captureRecord, pageSaysFinished } from '../SpSiteSurvey';
 import { RegionContext } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
+import { SP_SITE_PREVIEW_TOOLS_SOURCE } from '../../lib/spSitePreviewTools';
 
 const VIEWPORT_WIDTH = { mobile: 390, tablet: 820 };
 
@@ -31,6 +33,34 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
   const match = useMemo(() => siteMatchLevel(config), [config]);
   const converted = Boolean(config?.spSite?.convertedFrom);
   const width = VIEWPORT_WIDTH[viewport] || '100%';
+  const control = useRef(null);
+  const [skipping, setSkipping] = useState(false);
+  const [skipNote, setSkipNote] = useState('');
+  // Required answers are checked as on the survey link until the viewer skips
+  // a screen; from then on the page may finish with questions left empty.
+  const [usedSkip, setUsedSkip] = useState(false);
+  const completedRef = useRef(false);
+  completedRef.current = completed;
+  const runRef = useRef(0);
+  runRef.current = run;
+
+  // One press = the next screen: the helper inside the page fills what is
+  // empty, presses its forward button and fast-forwards timers.
+  const skip = async () => {
+    if (!control.current || skipping) return;
+    const startedIn = runRef.current;
+    setSkipping(true);
+    setUsedSkip(true);
+    setSkipNote('');
+    const result = await control.current.skip();
+    if (runRef.current !== startedIn) return; // restarted meanwhile
+    setSkipping(false);
+    if (!result?.moved) {
+      setSkipNote(completedRef.current
+        ? L('This is the last screen.', '已经是最后一屏了。')
+        : L('This screen could not be skipped automatically. Answer it by hand, then press again.', '这一屏没法自动跳过，请手动作答一下再点。'));
+    }
+  };
 
   const restart = () => {
     setAnswers({});
@@ -38,6 +68,9 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
     setProblems([]);
     setCaptured([]);
     setPageState({});
+    setSkipNote('');
+    setSkipping(false);
+    setUsedSkip(false);
     setRun((n) => n + 1);
   };
 
@@ -83,9 +116,21 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
           </Box>
         </Alert>
       )}
+      <Box sx={{ width, maxWidth: '100%', mx: 'auto', mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }} data-testid="sp-site-preview-skipbar">
+        <Button size="small" variant="contained" startIcon={<SkipNext />} onClick={skip} disabled={skipping} data-testid="sp-site-preview-skip">
+          {L('Next screen', '下一页')}
+        </Button>
+        <Button size="small" onClick={restart}>{L('Restart', '重新开始')}</Button>
+        <Typography variant="caption" color={skipNote ? 'warning.main' : 'text.secondary'} sx={{ flex: 1, minWidth: 200 }} data-testid="sp-site-preview-skipnote">
+          {skipNote || L('Preview only: skips this screen without answering or waiting. The survey link runs as a real survey.', '仅预览：不用作答、不用等计时，直接跳到下一屏。调查链接仍按正式调查运行。')}
+        </Typography>
+      </Box>
       <Box sx={{ width, maxWidth: '100%', height, mx: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
         <SpSiteFrame
           key={run}
+          previewScript={SP_SITE_PREVIEW_TOOLS_SOURCE}
+          requireAnswers={!usedSkip}
+          controlRef={control}
           html={config.spSite.html}
           allowedHosts={config.spSite.allowedHosts || []}
           questions={questions}
@@ -114,7 +159,6 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
               ? L('Preview finished: the participant would now submit these answers, and the page stays on screen.', '预览完成：参与者此时会自动提交这些数据，页面保持显示。')
               : L('Recorded so far', '目前记录的数据')}
           </Typography>
-          <Button size="small" onClick={restart}>{L('Restart', '重新开始')}</Button>
         </Box>
         {questions.length > 0 ? (
           <Box
