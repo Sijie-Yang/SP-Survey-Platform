@@ -125,6 +125,8 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
     // Colour swatches and pictures drawn as backgrounds.
     all('[style*="background"]').forEach(function (el) { parts.push(el.getAttribute('style')); });
     all('.prog,.progress,[class*=prog],[class*=step],[class*=counter]').forEach(function (el) { parts.push(label(el)); });
+    // The words on screen (a new stimulus word, a new statement).
+    parts.push(document.body ? String(document.body.innerText || '').slice(0, 3000) : '');
     return parts.join('|').replace(/[0-9]+/g, '') + '#' + counters();
   }
 
@@ -178,11 +180,17 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
       if (!pick.checked) { pick.checked = true; pick.dispatchEvent(new Event('input', { bubbles: true })); pick.dispatchEvent(new Event('change', { bubbles: true })); }
       changed = true;
     });
+    // Lists with the same options (rank 1-6 with one list per item) get
+    // different values, so a "use each rank once" check passes.
+    var used = {};
     all('select').forEach(function (el) {
       if (el.disabled || (el.value && el.selectedIndex > 0) || (el.value && el.options[0] && el.options[0].value)) return;
-      for (var i = 0; i < el.options.length; i += 1) {
-        if (el.options[i].value && !el.options[i].disabled) { setValue(el, el.options[i].value); changed = true; return; }
-      }
+      var opts = Array.prototype.filter.call(el.options, function (o) { return o.value && !o.disabled; });
+      if (!opts.length) return;
+      var key = opts.map(function (o) { return o.value; }).join('|');
+      var n = used[key] = (used[key] || 0) + 1;
+      setValue(el, opts[(n - 1) % opts.length].value);
+      changed = true;
     });
     all('input[type=range]').forEach(function (el) {
       if (el.disabled || el.dataset.spPreviewFilled) return;
@@ -205,6 +213,13 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
       else if (el.type === 'date') v = new RealDate(realNow()).toISOString().slice(0, 10);
       else if (el.inputMode === 'numeric' || el.inputMode === 'decimal' || /\d|0-9/.test(el.pattern || '')) v = '30';
       else if (el.maxLength > 0 && el.maxLength < 7) v = 'p';
+      else if (el.tagName === 'TEXTAREA') {
+        // Long enough for pages that ask for "at least five lines".
+        v = 'Preview answer, written by the preview so the page can go on.';
+        v = [v, v, v, v, v, v].join('\n');
+      }
+      if (el.minLength > v.length) v = new Array(Math.ceil(el.minLength / v.length) + 1).join(v + ' ');
+      if (el.maxLength > 0) v = v.slice(0, el.maxLength);
       setValue(el, v);
       changed = true;
     });
@@ -214,8 +229,9 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
   // Clickable choices the page drew itself: rating buttons, images to pick.
   function optionGroups() {
     var forward = forwardButton();
-    var cands = all('button,[role=button],[role=radio],[role=option],[data-v],[data-value],img,figure,.opt,.option,.choice,.card').filter(function (el) {
+    var cands = all('button,[role=button],[role=radio],[role=option],[role=slider],[data-v],[data-value],img,figure,.opt,.option,.choice,.card,div,span,li,td').filter(function (el) {
       if (el === forward || el.disabled || BACK_RE.test(label(el))) return false;
+      if (el.querySelector('input,select,textarea') || el.closest('label')) return false;
       if (el.closest('a[href]:not([href="#"])')) return false;
       var s = window.getComputedStyle(el);
       return el.tagName === 'BUTTON' || el.getAttribute('role') || s.cursor === 'pointer';
@@ -286,6 +302,7 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
       } catch (e) { /* ignore */ }
     });
   }
+  var fired = 0;
   async function fastForward(before, limitMs, ready) {
     var target = now() + limitMs;
     endMedia();
@@ -299,6 +316,7 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
       if (next.due > now()) offset += next.due - now();
       if (next.repeat) next.due = now() + next.repeat;
       else { delete timers[nextId]; realClearTimeout(Number(nextId)); }
+      fired += 1;
       try { invoke(next.fn, next.args); } catch (e) { console.error(e); }
       if (round % 4 === 3) await wait(0);
       if (signature() !== before) return true;
@@ -362,7 +380,10 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
     var groups = optionGroups();
     for (var g = 0; g < groups.length; g += 1) {
       var items = groups[g].items;
-      var order = items.slice(Math.floor(items.length / 2)).concat(items.slice(0, Math.floor(items.length / 2)));
+      // Start in the middle, one further along for each row, so rows like
+      // "most" and "least" do not get the same answer.
+      var from = (Math.floor(items.length / 2) + g) % items.length;
+      var order = items.slice(from).concat(items.slice(0, from));
       for (var k = 0; k < order.length && k < 40; k += 1) {
         if (!visible(order[k]) || order[k].disabled) continue;
         var before = forwardButton();
@@ -401,9 +422,11 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
         // Nothing to press yet: run the clock until the screen changes or
         // something becomes pressable (buttons that unlock after a few seconds).
         var ready = controls();
+        var firedBefore = fired;
         if (await fastForward(base, 15 * 60 * 1000, ready)) {
           if (signature() !== base) return { moved: true, step: 'time' };
-        } else if (controls() === ready) break;
+        } else if (controls() === ready && fired === firedBefore) break;
+        // Timers ran (a choice that unlocks after a few seconds): try again.
       }
       return { moved: false };
     } catch (e) {
