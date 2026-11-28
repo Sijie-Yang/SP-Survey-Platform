@@ -192,7 +192,7 @@ export default function TemplatesPage() {
             </Typography>
           </Box>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ flexShrink: 0 }}>
-            <Button variant="outlined" size="small" startIcon={<Article />} onClick={() => navigate('/request-template')}>
+            <Button variant="outlined" size="small" startIcon={<Article />} onClick={() => navigate('/add-template')}>
               {t.landRequestTemplate}
             </Button>
             <Button variant="outlined" size="small" color="secondary" startIcon={<DesignServices />} onClick={() => navigate('/request-survey-design')}>

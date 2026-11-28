@@ -188,7 +188,7 @@ export default function RequestSurveyDesignPage() {
             {t.reqDesIntro}{' '}
             <Box
               component={RouterLink}
-              to="/request-template"
+              to="/add-template"
               sx={{ color: 'primary.main', fontWeight: 600, textDecoration: 'none' }}
             >
               {t.reqDesLinkTpl}

@@ -1,5 +1,5 @@
 /**
- * Client helpers for public "Request a Template for Your Paper".
+ * Client helpers for public "Add a Template for Your Paper".
  */
 
 import { isR2Configured, uploadImageToR2, getR2ServerUrl } from './r2';
