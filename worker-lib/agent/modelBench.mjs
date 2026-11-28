@@ -9,6 +9,7 @@
  * writes one result JSON (with the page) to R2 under a random bench id.
  */
 
+import { buildExampleSite } from '../../src/lib/spScheme.js';
 import { writeSpSchemePage, MAX_REPAIR_ROUNDS } from './spSchemeGenerate.mjs';
 import { listProviderCredentials, listProviderProfiles, resolveAssistantBinding } from './credentials.mjs';
 import { loadActiveSubsidy } from './subsidy.mjs';
@@ -18,6 +19,29 @@ import { assertRoute } from './runtime/validators.mjs';
 import { getPrefixObject, listPrefixObjects, putPrefixObject } from './r2AgentMedia.mjs';
 
 export const BENCH_PREFIX = '_admin-model-bench/';
+
+/**
+ * A page that only runs with four named pictures in a folder "photos", and a
+ * library that holds the researcher's own twelve pictures in "streets": the
+ * case of a template used with other images.
+ */
+function pageTiedToFileNames() {
+  const guard = `<script>
+SPSite.onReady(function () {
+  var NEED = ['pair1_left.jpg', 'pair1_right.jpg', 'pair2_left.jpg', 'pair2_right.jpg'];
+  var got = SPSite.getMedia('photos').map(function (m) { return m.name; });
+  var missing = NEED.filter(function (n) { return got.indexOf(n) < 0; });
+  if (missing.length) document.body.innerHTML = '<h1>Pictures missing</h1><p>Media folder photos must hold: ' + missing.join(', ') + '</p>';
+});
+</script>`;
+  return buildExampleSite().trim().replace('</body>', `${guard}\n</body>`);
+}
+
+const OWN_STREET_PHOTOS = Object.freeze(Array.from({ length: 12 }, (_, i) => Object.freeze({
+  url: `https://media.invalid/bench/streets/IMG_${4101 + i}.jpg`,
+  name: `IMG_${4101 + i}.jpg`,
+  folder: 'streets',
+})));
 
 /** The same descriptions for every model: typical requests in both languages. */
 export const BENCH_PROMPTS = Object.freeze([
@@ -40,6 +64,13 @@ export const BENCH_PROMPTS = Object.freeze([
   {
     id: 'before-after-zh',
     text: '比较街道改造前后：每次给参与者看同一条街的改造前和改造后两张照片，一共 8 对，用滑条（-50 到 50）表示更喜欢哪一张，并勾选改造后变好的方面（绿化、步行空间、座椅、安全感）。最后是简单的个人信息。',
+  },
+  {
+    // An existing page plus the study's media library: the page must end up reading the library.
+    id: 'fit-library-zh',
+    text: '我把图片换成了自己上传的街景照片。请把页面改成用我上传的这些图，其他内容不变。',
+    currentHtml: pageTiedToFileNames,
+    mediaLibrary: OWN_STREET_PHOTOS,
   },
 ]);
 
@@ -138,7 +169,13 @@ export async function runModelBenchJob(env, job, { chat, write, resolveRoute = b
         throw error;
       }
     };
-    const written = await writeSpSchemePage({ chat: timedChat, route, request: prompt.text });
+    const written = await writeSpSchemePage({
+      chat: timedChat,
+      route,
+      request: prompt.text,
+      currentHtml: prompt.currentHtml ? prompt.currentHtml() : '',
+      mediaLibrary: prompt.mediaLibrary ? [...prompt.mediaLibrary] : null,
+    });
     await save({
       ...base,
       status: 'done',
@@ -150,6 +187,7 @@ export async function runModelBenchJob(env, job, { chat, write, resolveRoute = b
       questionCount: written.check.questionCount,
       matchLevel: written.check.matchLevel,
       problems: written.check.problems.slice(0, 15),
+      mediaNotes: written.check.mediaNotes || [],
       note: written.reply,
       ms: Date.now() - started,
       calls,

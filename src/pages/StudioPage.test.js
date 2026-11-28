@@ -25,6 +25,7 @@ jest.mock('../lib/r2', () => ({
   r2KeyFromUrl: () => null,
 }));
 jest.mock('../lib/templateRequest', () => ({ compressImage: jest.fn() }));
+jest.mock('../lib/templateManager', () => ({ getTemplateById: jest.fn(), checkIsAdmin: jest.fn(async () => false) }));
 jest.mock('../components/admin/ChatAssistant', () => ({ __esModule: true, default: (props) => <div data-testid="chat-assistant">mode {props.assistantMode}</div> }));
 jest.mock('../hooks/useSurveyAssistant', () => {
   const calls = [];
@@ -50,6 +51,8 @@ jest.mock('../lib/studioData', () => ({
   saveStudioProject: jest.fn(),
   writeStudioProject: jest.fn(),
   createStudioProject: jest.fn(),
+  createStudioProjectFromTemplate: jest.fn(),
+  importStudioTemplateMedia: jest.fn(),
   removeStudioProject: jest.fn(),
   countStudioResponses: jest.fn(),
   publishStudioProject: jest.fn(),
@@ -70,9 +73,12 @@ import { setActiveProject } from '../lib/projectManager';
 import { deleteImagesFromR2, uploadImageToR2 } from '../lib/r2';
 import { compressImage } from '../lib/templateRequest';
 import { __mock as assistantMock } from '../hooks/useSurveyAssistant';
+import { getTemplateById } from '../lib/templateManager';
 import {
   countStudioResponses,
   createStudioProject,
+  createStudioProjectFromTemplate,
+  importStudioTemplateMedia,
   isStudioLocalMode,
   listStudioProjects,
   loadStudioProject,
@@ -177,8 +183,112 @@ test('the new-study screen offers the AI page and the classic editor as equal ch
   // Not release-managed, with a page or questions: participants already get the latest save.
   expect(within(list).getAllByText('Live')).toHaveLength(2);
   expect(screen.getByRole('link', { name: /Classic editor/ })).toHaveAttribute('href', '/admin');
-  // Templates are listed in the classic editor, so the link goes there (not back to the home page).
-  expect(screen.getByRole('link', { name: 'Start from a paper template' })).toHaveAttribute('href', '/admin');
+  // "Use" on a template in the library comes back to this screen with the template chosen.
+  expect(screen.getByRole('link', { name: 'Start from a paper template' })).toHaveAttribute('href', '/templates');
+});
+
+const paperTemplate = {
+  id: '2023-shen-design',
+  name: 'Lawn design preferences',
+  author: 'Shen et al.',
+  year: '2023',
+  config: { pages: [], spSite: { html: buildExampleSite(), id: 'site-t', mediaFolders: ['photos'] } },
+  preloadedImages: Array.from({ length: 24 }, (_, i) => ({ url: `https://media.test/templates/t/photos/${i}.jpg`, name: `${i}.jpg` })),
+};
+
+function templateStartMocks() {
+  getTemplateById.mockResolvedValue(paperTemplate);
+  createStudioProjectFromTemplate.mockResolvedValue({ success: true, project: { id: 'p1', name: paperTemplate.name, templateId: paperTemplate.id }, surveyConfig: paperTemplate.config });
+  importStudioTemplateMedia.mockImplementation(async (_id, _tpl, { onProgress }) => {
+    onProgress({ copied: 24, remaining: 0 });
+    return { success: true, copied: 24 };
+  });
+  assistantMock.send.mockReset();
+  assistantMock.send.mockResolvedValue({ success: true });
+}
+
+test('"Use" on a template starts on the new-study screen: say what to change, keep its images, and the AI changes it', async () => {
+  templateStartMocks();
+  const router = openAt('/studio?template=2023-shen-design');
+  expect(screen.getByRole('heading', { name: 'Start from a template' })).toBeInTheDocument();
+  expect(await screen.findByTestId('studio-template-name')).toHaveTextContent('Lawn design preferences');
+  expect(getTemplateById).toHaveBeenCalledWith('2023-shen-design');
+  expect(screen.getByRole('radio', { name: "Start with the template's images (24)" })).toBeChecked();
+  fireEvent.change(screen.getByRole('textbox', { name: 'What should be different in your study' }), { target: { value: 'Translate the page to Chinese' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Start from this template' }));
+  await waitFor(() => expect(createStudioProjectFromTemplate).toHaveBeenCalledWith(paperTemplate, 'Lawn design preferences'));
+  await waitFor(() => expect(importStudioTemplateMedia).toHaveBeenCalledWith('p1', '2023-shen-design', expect.any(Object)));
+  await waitFor(() => expect(assistantMock.send).toHaveBeenCalledWith({ message: 'Translate the page to Chinese', assistantMode: 'spscheme' }));
+  await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+  expect(assistantMock.send).toHaveBeenCalledTimes(1);
+  assistantMock.send.mockReset();
+});
+
+test('a template with my own images copies nothing and tells the AI the page must work with any file names', async () => {
+  templateStartMocks();
+  const router = openAt('/studio?template=2023-shen-design');
+  await screen.findByTestId('studio-template-name');
+  fireEvent.click(screen.getByRole('radio', { name: 'Use my own images (upload them after the study opens)' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'What should be different in your study' }), { target: { value: 'Use my street photos' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Start from this template' }));
+  await waitFor(() => expect(assistantMock.send).toHaveBeenCalledTimes(1));
+  expect(assistantMock.send.mock.calls[0][0].message).toMatch(/^Use my street photos\n\nI will upload my own images instead of the template's/);
+  expect(importStudioTemplateMedia).not.toHaveBeenCalled();
+  await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+  assistantMock.send.mockReset();
+});
+
+test('a template used as it is opens the study at once, without an AI run', async () => {
+  templateStartMocks();
+  const router = openAt('/studio?template=2023-shen-design');
+  await screen.findByTestId('studio-template-name');
+  fireEvent.click(screen.getByRole('button', { name: 'Start from this template' }));
+  await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+  expect(importStudioTemplateMedia).toHaveBeenCalled();
+  expect(assistantMock.send).not.toHaveBeenCalled();
+});
+
+test('when the template images are not all copied, the study still opens and says where to copy the rest', async () => {
+  templateStartMocks();
+  importStudioTemplateMedia.mockResolvedValue({ success: false, copied: 10, error: 'network' });
+  const router = openAt('/studio?template=2023-shen-design');
+  await screen.findByTestId('studio-template-name');
+  fireEvent.click(screen.getByRole('button', { name: 'Start from this template' }));
+  expect(await screen.findByTestId('studio-template-copy-error')).toHaveTextContent("Use the template's images");
+  fireEvent.click(screen.getByRole('button', { name: 'Open the study' }));
+  await waitFor(() => expect(router.state.location.pathname).toBe('/studio/p1'));
+});
+
+test('a template that is not found offers to start without one', async () => {
+  getTemplateById.mockResolvedValue(null);
+  const router = openAt('/studio?template=nope');
+  expect(await screen.findByTestId('studio-template-missing')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Start without a template' }));
+  expect(await screen.findByRole('heading', { name: 'Let AI make the survey' })).toBeInTheDocument();
+  expect(router.state.location.search).toBe('');
+});
+
+test('the image library asks the AI to fit the page when the page names files the library does not have', async () => {
+  assistantMock.send.mockReset();
+  const html = buildExampleSite().replace('</body>', "<script>var need = ['lawnA_1slight.jpg'];</script></body>");
+  loadStudioProject.mockImplementation(async () => project({ preloadedImages: twelveImages, _surveyConfig: { pages: [], spSite: { html, id: 'site-1', mediaFolders: ['images'] } } }));
+  openAt('/studio/p1');
+  const gaps = await screen.findByTestId('studio-media-gaps');
+  expect(gaps).toHaveTextContent('The page asks for 1 file(s) by name that are not in the image library (for example lawnA_1slight.jpg).');
+  fireEvent.click(within(gaps).getByRole('button', { name: 'Let AI fit the page' }));
+  await waitFor(() => expect(assistantMock.send).toHaveBeenCalledTimes(1));
+  expect(assistantMock.send.mock.calls[0][0]).toEqual({ message: expect.stringMatching(/^Fit the page to the images that are in the image library now/), assistantMode: 'spscheme' });
+  assistantMock.send.mockReset();
+});
+
+test('a study from a template with an empty library can take the template images in one click', async () => {
+  importStudioTemplateMedia.mockReset();
+  importStudioTemplateMedia.mockResolvedValue({ success: true, copied: 24 });
+  loadStudioProject.mockImplementation(async () => project({ templateId: '2023-shen-design' }));
+  openAt('/studio/p1');
+  fireEvent.click(await screen.findByRole('button', { name: "Use the template's images" }));
+  await waitFor(() => expect(importStudioTemplateMedia).toHaveBeenCalledWith('p1', '2023-shen-design', expect.any(Object)));
+  await waitFor(() => expect(loadStudioProject.mock.calls.length).toBeGreaterThan(1));
 });
 
 test('describing a study creates it, waits for the first version on the new-study screen, then opens it', async () => {

@@ -15,9 +15,21 @@ export function safeInAppPath(next, fallback = WORKSPACE_PATH) {
 /** The classic editor, whose sidebar lists the paper templates. */
 export const TEMPLATES_PATH = '/admin';
 
-/** Where "Use" on a template goes: the classic editor, after signing in when needed. */
-export function templateUsePath(isAuthenticated) {
-  return isAuthenticated ? TEMPLATES_PATH : `/login?next=${encodeURIComponent(TEMPLATES_PATH)}`;
+/** The public template library (browse, try a template with ?preview=<id>). */
+export const TEMPLATE_LIBRARY_PATH = '/templates';
+
+/** The simple workspace's new-study screen, starting from this template. */
+export function studioTemplatePath(templateId) {
+  return `${WORKSPACE_PATH}?template=${encodeURIComponent(templateId)}`;
+}
+
+/**
+ * Where "Use" on a template goes, after signing in when needed: the new-study
+ * screen with that template chosen (the classic editor when no template is named).
+ */
+export function templateUsePath(isAuthenticated, templateId = '') {
+  const target = templateId ? studioTemplatePath(templateId) : TEMPLATES_PATH;
+  return isAuthenticated ? target : `/login?next=${encodeURIComponent(target)}`;
 }
 
 /** The sign-in page, coming back to this address (path and query) afterwards. */

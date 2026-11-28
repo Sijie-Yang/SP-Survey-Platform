@@ -168,7 +168,7 @@ const scrollToRow = (id) => {
 export default function TemplatesPage() {
   const navigate = useNavigate();
   const { isAuthenticated, loading: authLoading } = useAuth();
-  const templatePath = templateUsePath(!authLoading && isAuthenticated);
+  const signedIn = !authLoading && isAuthenticated;
   const { t, language } = useRegion();
   const zh = String(language || '').startsWith('zh');
   const { templates, loading } = useTemplateLibrary();
@@ -361,7 +361,7 @@ export default function TemplatesPage() {
               <TemplateRow
                 key={tpl.id}
                 template={tpl}
-                onUse={() => navigate(templatePath)}
+                onUse={() => navigate(templateUsePath(signedIn, tpl.id))}
                 onFacet={update}
                 activeConcept={filters.concept}
                 highlighted={tpl.id === focusId}

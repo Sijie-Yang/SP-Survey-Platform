@@ -6,6 +6,10 @@
  * (spSchemeGenerate.mjs: Studio's import check plus repair rounds), and saves
  * it with the same import path as MCP sp_scheme_import only when the check
  * passes. A page that does not pass is not saved; the problems come back.
+ *
+ * The page writer is told what the study's media library holds, so a request
+ * like "fit the page to the images I uploaded" works as it is; what the page
+ * still asks for that the library lacks comes back as mediaNotes.
  */
 
 import { writeSpSchemePage } from '../spSchemeGenerate.mjs';
@@ -47,7 +51,7 @@ export function createSpSchemePageTool({
 
   return {
     name: SP_SCHEME_WRITE_TOOL,
-    description: 'Write or change the study\'s SP-Scheme page (the whole participant page). Pass request: what the page should be (for a new study) or exactly what to change, with every detail the researcher gave (topic, tasks, number of trials, questions, wording, language). The platform writes the page, checks it and saves it only when it passes. Returns saved, a short note on what changed, and any problems.',
+    description: 'Write or change the study\'s SP-Scheme page (the whole participant page). Pass request: what the page should be (for a new study) or exactly what to change, with every detail the researcher gave (topic, tasks, number of trials, questions, wording, language). The page writer already sees the study\'s media library (folders, file names, counts), so to fit the page to the uploaded images just say so; never ask the researcher to list files. The platform writes the page, checks it and saves it only when it passes. Returns saved, a short note on what changed, any problems, and mediaNotes: folders or files the page asks for that the media library does not hold (tell the researcher).',
     minPermission: 'edit_draft',
     parameters: {
       type: 'object',
@@ -72,7 +76,14 @@ export function createSpSchemePageTool({
       const row = await load(env, { ...ctx, projectId });
       const currentHtml = draftConfig(row)?.spSite?.html || '';
       const chatFn = chat || (await import('./providers.mjs')).chatCompletions;
-      const written = await writeSpSchemePage({ chat: chatFn, route, request: text, currentHtml });
+      const written = await writeSpSchemePage({
+        chat: chatFn,
+        route,
+        request: text,
+        currentHtml,
+        mediaLibrary: Array.isArray(row?.preloaded_images) ? row.preloaded_images : [],
+        mediaPrefix: row?.user_id ? `${row.user_id}/${projectId}/` : null,
+      });
       if (!written.passed) {
         return {
           saved: false,
@@ -104,6 +115,7 @@ export function createSpSchemePageTool({
         changed: currentHtml ? 'page_changed' : 'page_created',
         questionCount: written.check.questionCount,
         matchLevel: written.check.matchLevel,
+        ...(written.check.mediaNotes?.length ? { mediaNotes: written.check.mediaNotes } : {}),
         draftUpdatedAt: draft?.draftUpdatedAt || imported.draftUpdatedAt,
         surveyConfig: draft?.surveyConfig,
         spSchemePageChanged: true,

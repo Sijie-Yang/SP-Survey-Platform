@@ -13,7 +13,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { CloudUploadOutlined, FolderOutlined } from '@mui/icons-material';
+import { AutoAwesome, CloudUploadOutlined, FolderOutlined } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { useOptionalAuth } from '../../contexts/AuthContext';
 import { IMAGE_COMPRESS_TARGET_BYTES, MEDIA_ACCEPT } from '../../lib/mediaUtils';
@@ -22,7 +22,8 @@ import { setActiveProject } from '../../lib/projectManager';
 import { uploadImageToR2 } from '../../lib/r2';
 import { compressImage } from '../../lib/templateRequest';
 import { adminProjectPath } from '../../lib/adminDeepLink';
-import { isStudioLocalMode } from '../../lib/studioData';
+import { importStudioTemplateMedia, isStudioLocalMode } from '../../lib/studioData';
+import { pageMediaGaps } from '../../lib/spSchemeMediaBrief';
 import {
   appendUploadedMedia,
   cleanFolderName,
@@ -212,19 +213,60 @@ function missingText({ folder, reason }, L) {
   return L(`The page uses the folder ${folder}, but it has no images yet.`, `页面要用 ${folder} 文件夹，但里面还没有图片。`);
 }
 
+/** The message the image library sends to the AI assistant for the researcher. */
+export function fitLibraryRequest(L) {
+  return L(
+    'Fit the page to the images that are in the image library now: read its folders, use its file names where the page needs particular files, and set the number of images and trials to what it holds. Keep everything else as it is.',
+    '请按图片库里现在的图片调整页面：读取图片库里的文件夹；页面需要指定文件时用图片库里的文件名；图片数量和题数按图片库里有的来。其他内容保持不变。',
+  );
+}
+
+function gapText(gap, L) {
+  const first = gap.items[0];
+  if (gap.kind === 'folders') {
+    return L(`The page reads the folder ${gap.items.join(', ')}, which the image library does not have.`, `页面要读取 ${gap.items.join('、')} 文件夹，但图片库里没有。`);
+  }
+  return L(
+    `The page asks for ${gap.items.length} file(s) by name that are not in the image library (for example ${first}).`,
+    `页面按文件名要 ${gap.items.length} 个文件，图片库里没有（例如 ${first}）。`,
+  );
+}
+
 /**
  * Image library: thumbnails, folders with counts, and what the survey still
- * needs. `busy` while another write of the study runs.
+ * needs. `busy` while another write of the study runs. `onAskAi(text)` sends
+ * a message to the study's AI assistant (absent when there is no assistant);
+ * `onReload` reads the study again after the server changed its library.
  */
-export default function StudioMediaCard({ project, config, busy = false, queue, applyWrite }) {
+export default function StudioMediaCard({ project, config, busy = false, queue, applyWrite, onAskAi = null, onReload = null }) {
   const L = useL();
+  const auth = useOptionalAuth();
   const [upload, setUpload] = useState(null);
+  const [copying, setCopying] = useState(null);
+  const [copyError, setCopyError] = useState('');
   const folders = useMemo(() => libraryFolders(project), [project]);
   const thumbs = useMemo(() => libraryThumbnails(project, 4), [project]);
   const loose = useMemo(() => looseFileCount(project), [project]);
   const missing = useMemo(() => missingPageFolders(project, config), [project, config]);
   const need = useMemo(() => surveyImageNeed(config), [config]);
   const total = (project?.preloadedImages || []).length;
+  const pageHtml = config?.spSite?.html || '';
+  const gaps = useMemo(
+    () => (pageHtml ? pageMediaGaps(pageHtml, project?.preloadedImages || [], project?.userId ? `${project.userId}/${project.id}/` : null) : []),
+    [pageHtml, project],
+  );
+  const canAskAi = Boolean(onAskAi && pageHtml && total > 0);
+  const askAi = () => onAskAi(fitLibraryRequest(L));
+  // A study made from a template, with nothing in its library yet: take the template's images in one click.
+  const canUseTemplateImages = Boolean(project?.templateId && total === 0 && onReload && auth?.user?.id && !isStudioLocalMode());
+  const useTemplateImages = async () => {
+    setCopyError('');
+    setCopying({ copied: 0 });
+    const result = await queue(() => importStudioTemplateMedia(project.id, project.templateId, { onProgress: (p) => setCopying({ copied: p.copied }) }));
+    setCopying(null);
+    if (!result?.success) setCopyError(result?.error || 'copy failed');
+    await onReload();
+  };
 
   const link = (folder) => queue(() => applyWrite((_, current) => ({ config: linkUploadFolder(current, folder) })));
 
@@ -257,6 +299,22 @@ export default function StudioMediaCard({ project, config, busy = false, queue, 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           {L('No images yet.', '还没有图片。')}
         </Typography>
+      )}
+
+      {(canUseTemplateImages || copying) && (
+        <Box sx={{ mb: 1 }} data-testid="studio-template-images">
+          <Button size="small" variant="outlined" onClick={useTemplateImages} disabled={busy || Boolean(copying)}>
+            {copying
+              ? L(`Copying the template's images… ${copying.copied}`, `正在复制模板的图片… ${copying.copied}`)
+              : L("Use the template's images", '用模板自带的图片')}
+          </Button>
+          {copying && <LinearProgress sx={{ mt: 1 }} />}
+        </Box>
+      )}
+      {copyError && (
+        <Alert severity="warning" sx={{ mb: 1 }}>
+          {L(`The template's images were not all copied (${copyError}). Click the button again to copy the rest.`, `模板的图片没有全部复制过来（${copyError}）。再点一次按钮可以接着复制。`)}
+        </Alert>
       )}
 
       {folders.slice(0, MAX_FOLDERS_SHOWN).map(({ folder, count }) => (
@@ -304,6 +362,26 @@ export default function StudioMediaCard({ project, config, busy = false, queue, 
           {missingText(item, L)}
         </Alert>
       ))}
+
+      {gaps.length > 0 && (
+        <Alert
+          severity="warning"
+          sx={{ mt: 1, alignItems: 'center' }}
+          data-testid="studio-media-gaps"
+          action={canAskAi ? (
+            <Button color="inherit" size="small" startIcon={<AutoAwesome />} onClick={askAi} disabled={busy}>{L('Let AI fit the page', '让 AI 调整页面')}</Button>
+          ) : null}
+        >
+          {gaps.map((gap) => gapText(gap, L)).join(' ')}
+        </Alert>
+      )}
+      {canAskAi && gaps.length === 0 && (
+        <Box sx={{ mt: 1 }}>
+          <Button size="small" startIcon={<AutoAwesome />} onClick={askAi} disabled={busy} data-testid="studio-media-fit">
+            {L('Let AI fit the page to these images', '让 AI 按这些图片调整页面')}
+          </Button>
+        </Box>
+      )}
 
       <Link
         component={RouterLink}

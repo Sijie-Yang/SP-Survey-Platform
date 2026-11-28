@@ -3,6 +3,7 @@
  */
 
 import { supabaseRest } from '../supabaseUserClient.mjs';
+import { siteMediaName } from '../../src/lib/spSiteCore.js';
 import {
   createDefaultSurveyConfig,
   findSecretFields,
@@ -875,6 +876,28 @@ export async function listProjectMedia(env, ctx, projectId) {
 
 const IMPORT_COPY_BUDGET_MS = 35000;
 
+/**
+ * Media-library entries for files copied from a template. Each file keeps the
+ * name the template lists it under (the name it was uploaded with, which the
+ * template's page asks for), not its stored object name
+ * ("<name with unsafe characters replaced>__<id>.<ext>").
+ */
+export function copiedMediaEntries(files, templateImages, projectPrefix) {
+  const names = new Map();
+  (Array.isArray(templateImages) ? templateImages : []).forEach((entry) => {
+    if (entry?.key && entry?.name) names.set(String(entry.key), String(entry.name));
+  });
+  return (Array.isArray(files) ? files : []).map((f) => {
+    const rel = String(f.to || '').startsWith(projectPrefix)
+      ? String(f.to).slice(projectPrefix.length)
+      : String(f.name || '');
+    const parts = rel.split('/').filter(Boolean);
+    const stored = parts.pop() || f.name;
+    const folder = parts.join('/');
+    return { url: f.url, name: siteMediaName(names.get(String(f.from)) || stored), key: f.to, folder };
+  });
+}
+
 export async function importMediaFromTemplate(env, ctx, projectId, body = {}) {
   const row = await loadOwned(env, { ...ctx, projectId });
   const templateId = body.templateId || row.template_id;
@@ -895,15 +918,13 @@ export async function importMediaFromTemplate(env, ctx, projectId, body = {}) {
     { deadlineMs: Date.now() + IMPORT_COPY_BUDGET_MS },
   );
   const now = new Date().toISOString();
-  const preloaded = (copy.files || []).map((f) => {
-    const rel = String(f.to || '').startsWith(projectMediaPrefix(ownerId, projectId))
-      ? String(f.to).slice(projectMediaPrefix(ownerId, projectId).length)
-      : String(f.name || '');
-    const parts = rel.split('/').filter(Boolean);
-    const name = parts.pop() || f.name;
-    const folder = parts.join('/');
-    return { url: f.url, name, key: f.to, folder };
-  });
+  const templateRows = await supabaseRest(env, {
+    path: '/rest/v1/templates',
+    accessToken: ctx.accessToken,
+    serviceRole: ctx.serviceRole,
+    query: `?id=eq.${encodeURIComponent(templateId)}&select=preloaded_images`,
+  }).catch(() => []);
+  const preloaded = copiedMediaEntries(copy.files, templateRows?.[0]?.preloaded_images, projectMediaPrefix(ownerId, projectId));
   await supabaseRest(env, {
     path: '/rest/v1/projects',
     method: 'PATCH',

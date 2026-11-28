@@ -23,6 +23,8 @@ import {
 } from './projectManager';
 import { countOwnerResponses } from './adminResults';
 import { deleteImagesFromR2, isR2Configured, listImagesFromR2 } from './r2';
+import { importTemplateMediaViaApi } from './agentApi';
+import { sanitizeMediaFolderConfig } from './mediaUtils';
 import { loadSurveyConfig } from './surveyStorage';
 import { checkIsAdmin } from './templateManager';
 import { sameReleaseValue } from './releaseComparison';
@@ -151,6 +153,57 @@ export async function createStudioProject(name) {
   const result = await createProject({ name });
   if (result.success) forgetClassicEditingState(result.project.id);
   return result;
+}
+
+/**
+ * A new study that starts as a copy of a template's survey (its page or its
+ * questions, and its folder tags). The template's images are not copied here:
+ * the researcher takes them with importStudioTemplateMedia or uploads their own.
+ */
+export async function createStudioProjectFromTemplate(template, name) {
+  if (!template?.id || !template.config) return { success: false, error: 'Template not found' };
+  const result = await createProject({
+    name,
+    description: `Based on ${template.name}`,
+    templateId: template.id,
+    surveyConfig: template.config,
+    preloadedImages: [],
+    preloadedAt: null,
+    preloadedSource: null,
+    imageDatasetConfig: {
+      enabled: true,
+      huggingFaceToken: '',
+      datasetName: template.huggingfaceDataset || '',
+      ...sanitizeMediaFolderConfig(template.imageDatasetConfig || {}),
+    },
+  });
+  if (result.success) forgetClassicEditingState(result.project.id);
+  return result;
+}
+
+const TEMPLATE_MEDIA_MAX_CALLS = 60;
+
+/**
+ * Copy the template's images into the study's library (on the server, so
+ * nothing is downloaded). A large template takes several calls; `onProgress`
+ * gets `{ copied, remaining }` after each. Only for a study whose library is
+ * still empty: the copy becomes the study's media list.
+ */
+export async function importStudioTemplateMedia(projectId, templateId, { onProgress = () => {} } = {}) {
+  let copied = 0;
+  for (let call = 0; call < TEMPLATE_MEDIA_MAX_CALLS; call += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await importTemplateMediaViaApi(projectId, templateId);
+    if (!result?.success) return { success: false, copied, error: result?.error || 'Copy failed' };
+    copied = Number(result.registered) || copied;
+    const remaining = Number(result.remaining) || 0;
+    onProgress({ copied, remaining });
+    if (result.done || !remaining) {
+      forgetClassicEditingState(projectId);
+      return { success: !result.errors?.length, copied, error: result.errors?.length ? `${result.errors.length} file(s) could not be copied` : undefined };
+    }
+  }
+  return { success: false, copied, error: 'The copy did not finish; try again to copy the rest.' };
 }
 
 // The project's own images (only under its prefix; template media is never touched).
