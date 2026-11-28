@@ -19,17 +19,20 @@ function localizeRole(t, role) {
 
 /**
  * Team roster from the SP-Survey paper author list.
- * Affiliation numbers match \affilnum{}. Texts follow UAL / known co-appointments.
+ * Affiliation numbers and texts follow the author block of the manuscript
+ * (\affilnum{}); every number a member carries must be in this list.
  */
-const AFFILIATIONS = [
+export const AFFILIATIONS = [
   { num: 1, text: 'Department of Architecture, National University of Singapore, Singapore' },
-  { num: 2, text: 'Future Cities Lab Global, Singapore-ETH Centre, Singapore' },
-  { num: 4, text: 'School of Architecture, Tsinghua University, Beijing, China' },
-  { num: 5, text: 'Department of Geosciences and Geography, University of Helsinki, Finland' },
-  { num: 6, text: 'Department of Real Estate, National University of Singapore, Singapore' },
+  { num: 2, text: 'School of Geography, University of Leeds, Leeds, UK' },
+  { num: 3, text: 'Future Cities Lab Global, Singapore-ETH Centre, Singapore' },
+  { num: 4, text: 'Senseable City Lab, Massachusetts Institute of Technology, Cambridge, MA, USA' },
+  { num: 5, text: 'School of Architecture, Tsinghua University, Beijing, China' },
+  { num: 6, text: 'Digital Geography Lab, Department of Geosciences and Geography, University of Helsinki, Helsinki, Finland' },
+  { num: 7, text: 'Department of Real Estate, National University of Singapore, Singapore' },
 ];
 
-const LEAD = {
+export const LEAD = {
   name: 'Sijie Yang',
   role: 'PhD Researcher',
   projectRole: 'Project Lead',
@@ -40,7 +43,7 @@ const LEAD = {
   photo: '/team/sijie-yang.jpg',
 };
 
-const COLLABORATORS = [
+export const COLLABORATORS = [
   {
     name: 'Xiucheng Liang',
     role: 'PhD Researcher',
@@ -51,35 +54,35 @@ const COLLABORATORS = [
   {
     name: 'Youlong Gu',
     role: 'Research Engineer',
-    affils: [1],
+    affils: [1, 2],
     url: 'https://ual.sg/author/youlong-gu/',
     photo: '/team/youlong-gu.jpg',
   },
   {
     name: 'Matias Quintana',
     role: 'Research Fellow',
-    affils: [2],
+    affils: [3],
     url: 'https://ual.sg/author/matias-quintana/',
     photo: '/team/matias-quintana.jpeg',
   },
   {
     name: 'Koichi Ito',
     role: 'PhD Researcher',
-    affils: [1, 3],
+    affils: [1, 4],
     url: 'https://ual.sg/author/koichi-ito/',
     photo: '/team/koichi-ito.jpg',
   },
   {
     name: 'Jiatong Li',
     role: 'Visiting Scholar',
-    affils: [1, 4],
+    affils: [1, 5],
     url: 'https://ual.sg/author/jiatong-li/',
     photo: '/team/jiatong-li.jpg',
   },
   {
     name: 'Jussi Torkko',
     role: 'Visiting Scholar',
-    affils: [1, 5],
+    affils: [1, 6],
     url: 'https://ual.sg/author/jussi-torkko/',
     photo: '/team/jussi-torkko.jpg',
   },
@@ -92,13 +95,13 @@ const COLLABORATORS = [
   },
 ];
 
-const PI = {
+export const PI = {
   name: 'Filip Biljecki',
   role: 'Associate Professor',
   projectRole: 'Principal Investigator',
   blurb:
     'Founder of the Urban Analytics Lab; provides academic supervision and research direction for SP-Survey.',
-  affils: [1, 6],
+  affils: [1, 7],
   url: 'https://ual.sg/author/filip-biljecki/',
   photo: '/team/filip-biljecki.jpg',
 };
