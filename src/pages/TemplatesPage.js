@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Box, Container, Typography, Button, TextField, InputAdornment,
   CircularProgress, Stack, MenuItem, Menu,
@@ -137,6 +137,16 @@ export default function TemplatesPage() {
     setParams(next, { replace: true });
   };
 
+  // The search text lives in the URL, but the router applies URL changes with
+  // a delay; an input bound straight to the URL loses characters typed in
+  // between. So the box keeps its own text, and follows the URL only when the
+  // change came from somewhere else (Clear filters, a link).
+  const [query, setQuery] = useState(filters.q);
+  const searchRef = useRef(null);
+  useEffect(() => {
+    if (document.activeElement !== searchRef.current) setQuery(filters.q);
+  }, [filters.q]);
+
   const sourceLabel = (key) => (key === 'all' ? (t.tplAll || 'All') : facetLabel('source', key, zh));
   const countFor = (source) => filterTemplates(templates, { ...filters, source, q: filters.q }).length;
   const shown = filterTemplates(templates, filters);
@@ -181,8 +191,9 @@ export default function TemplatesPage() {
         <TextField
           fullWidth
           placeholder={t.landSearchTemplates}
-          value={filters.q}
-          onChange={(e) => update('q', e.target.value)}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); update('q', e.target.value); }}
+          inputRef={searchRef}
           InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
           inputProps={{ 'aria-label': t.landSearchTemplates }}
           sx={{ mb: 2, maxWidth: 560 }}

@@ -32,6 +32,7 @@ import { resolveMcpAccessToken } from './worker-lib/oauth/mcpOAuth.mjs';
 import { runWeeklyPaperScan } from './worker-lib/research/paperLibrary.mjs';
 import { handleBenchRoutes, handleBenchQueueBatch } from './worker-lib/bench/handlers.mjs';
 import { supabaseRest } from './worker-lib/supabaseUserClient.mjs';
+import { publicTemplates } from './worker-lib/publicTemplates.mjs';
 import { handleAdminResultsRoutes } from './worker-lib/adminResults.mjs';
 import { handleAssistantSubsidyRoutes } from './worker-lib/admin/subsidyHandlers.mjs';
 import { handleStreetLevelRoutes } from './worker-lib/streetLevel.mjs';
@@ -963,6 +964,10 @@ export default {
       }
       if (pathname === '/api/research/draft-template' && request.method === 'POST') {
         return await handleResearchDraftTemplate(request, env);
+      }
+      if (pathname === '/api/public/templates' && request.method === 'GET') {
+        const result = await publicTemplates(url, env);
+        return json(result.body, { status: result.status, headers: { 'cache-control': 'public, max-age=300' } });
       }
       if (pathname === '/api/template-request' && request.method === 'POST') {
         const body = await request.json();
