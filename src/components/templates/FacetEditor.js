@@ -1,16 +1,17 @@
 import React from 'react';
 import { Autocomplete, Stack, TextField } from '@mui/material';
-import { FACET_DIMENSIONS } from '../../lib/templateFacets';
+import { CONCEPT_GROUPS, TEMPLATE_DIMENSIONS } from '../../lib/templateFacets';
 
 /**
  * Admin editor for template facets: one field per dimension, options from the
- * fixed vocabulary. Open dimensions (country = location, city) also take new values.
+ * fixed vocabulary (Perception options are grouped). Open dimensions (country or
+ * region, city: where the experiment was run) also take new values.
  * value / onChange use { dimension: [ids] }.
  */
 export default function FacetEditor({ value, onChange }) {
   return (
     <Stack spacing={1.5}>
-      {FACET_DIMENSIONS.map((dim) => {
+      {TEMPLATE_DIMENSIONS.map((dim) => {
         const ids = value?.[dim.key] || [];
         const set = (next) => onChange({ ...value, [dim.key]: dim.single ? next.slice(-1) : next });
         const label = `${dim.zh} / ${dim.en}${dim.single ? '（单选）' : ''}`;
@@ -38,6 +39,10 @@ export default function FacetEditor({ value, onChange }) {
             options={options}
             value={ids.filter((id) => byId[id])}
             onChange={(_, next) => set(next)}
+            groupBy={dim.key === 'concept' ? (id) => {
+              const g = CONCEPT_GROUPS.find((x) => x.id === byId[id]?.group);
+              return g ? `${g.zh} · ${g.en}` : '';
+            } : undefined}
             getOptionLabel={(id) => (byId[id] ? `${byId[id].zh} · ${byId[id].en}` : id)}
             renderInput={(params) => <TextField {...params} label={label} />}
           />

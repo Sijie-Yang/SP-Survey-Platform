@@ -6,7 +6,7 @@ jest.mock('react-router-dom', () => {
 }, { virtual: true });
 
 import {
-  addressShowing, filterTemplates, limitToShow, linkedPreview, PAGE_SIZE,
+  addressShowing, currentFilterValue, filterTemplates, limitToShow, linkedPreview, PAGE_SIZE,
 } from './TemplatesPage';
 import { sortNewestFirst } from '../components/templates/TemplateLibrary';
 
@@ -34,6 +34,11 @@ test('source buttons and dropdowns filter the library; demos only under Demo', (
   expect(ids({ source: 'demo', task: 'pairwise' })).toEqual(['e']);
   expect(ids({ concept: 'greenery', task: 'pairwise' })).toEqual([]);
   expect(ids({ country: 'USA' })).toEqual(['a']);
+  // a template still tagged with an old id is found under today's id, and old links keep working
+  expect(ids({ source: 'ai', task: 'rating' })).toEqual(['d']);
+  expect(currentFilterValue('task', 'multi_rating')).toBe('rating');
+  expect(currentFilterValue('task', 'custom_page')).toBe('');
+  expect(currentFilterValue('concept', 'safety')).toBe('safety');
 });
 
 test('search matches name, author and year', () => {

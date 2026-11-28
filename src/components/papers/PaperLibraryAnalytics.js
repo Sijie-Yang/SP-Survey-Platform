@@ -1,7 +1,7 @@
 import React, { memo, useMemo } from 'react';
 import { Box, Stack, Typography } from '@mui/material';
 import { buildSimpleLibraryView } from '../../lib/researchPaperAnalytics';
-import { barLabel, cardTitle } from './paperLibraryLabels';
+import { barLabel, cardQuestion, cardTitle } from './paperLibraryLabels';
 
 /** Same palette as before: one colour family per card. */
 const TONES = {
@@ -16,11 +16,16 @@ const TONES = {
 const CARD_TONE = {
   year: 'ink',
   concept: 'teal',
-  task: 'moss',
+  scene: 'moss',
   modality: 'amber',
+  task: 'moss',
+  setting: 'amber',
   participants: 'slate',
   sample: 'ink',
   country: 'coral',
+  city: 'coral',
+  team_org: 'ink',
+  team_country: 'slate',
 };
 
 const toneOf = (dimension) => TONES[CARD_TONE[dimension]] || TONES.slate;
@@ -124,74 +129,92 @@ function YearCard({ view, activeId, onSelect, zh }) {
   );
 }
 
-function BarCard({ card, activeId, onSelect, zh }) {
-  const t = toneOf(card.dimension);
-  const max = Math.max(...card.rows.map((r) => r.count), 1);
-  const stated = card.dimension === 'task' || card.dimension === 'participants' || card.dimension === 'sample';
-  const sub = stated
-    ? (zh ? `${card.tagged} 篇写明了` : `${card.tagged} papers say so`)
-    : (zh ? `${card.tagged} 篇能识别出` : `${card.tagged} papers tagged`);
+/** One clickable bar: label, bar, count. A label longer than `labelWidth` wraps; it is never cut. */
+function BarRow({ row, dimension, max, selected, onSelect, zh, labelWidth }) {
+  const t = toneOf(dimension);
+  const label = barLabel(zh, dimension, row.id, row.label);
   return (
-    <Box sx={cardSx}>
-      <CardHead dimension={card.dimension} sub={sub} zh={zh} />
+    <Box
+      {...clickProps(() => onSelect({ dimension, id: row.id, label }))}
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: `${labelWidth}px 1fr 34px`,
+        alignItems: 'center',
+        gap: 1,
+        cursor: 'pointer',
+        borderRadius: 1.25,
+        px: 0.6,
+        py: 0.35,
+        bgcolor: selected ? t.soft : 'transparent',
+        outline: selected ? `1px solid ${t.bar}55` : '1px solid transparent',
+        '&:hover': { bgcolor: t.soft },
+      }}
+    >
+      <Typography
+        variant="caption"
+        title={label}
+        sx={{ fontWeight: selected ? 800 : 600, color: t.ink, lineHeight: 1.25, overflowWrap: 'anywhere' }}
+      >
+        {label}
+        {row.rising && (
+          <Box
+            component="span"
+            title={zh ? '近几年占比在上升' : 'Share rising in recent years'}
+            sx={{ ml: 0.4, color: '#b45309', fontWeight: 800 }}
+          >
+            ↑
+          </Box>
+        )}
+      </Typography>
+      <Box sx={{ height: 8, borderRadius: 99, bgcolor: 'rgba(15,39,68,0.06)', overflow: 'hidden' }}>
+        <Box
+          sx={{
+            height: '100%',
+            width: `${(row.count / max) * 100}%`,
+            borderRadius: 99,
+            background: `linear-gradient(90deg, ${t.bar}, ${t.solid})`,
+          }}
+        />
+      </Box>
+      <Typography
+        variant="caption"
+        sx={{ textAlign: 'right', fontWeight: 700, color: t.solid, fontVariantNumeric: 'tabular-nums' }}
+      >
+        {row.count}
+      </Typography>
+    </Box>
+  );
+}
+
+function cardSub(card, zh) {
+  const q = cardQuestion(zh, card.dimension);
+  const n = zh ? `${card.tagged} 篇写明了` : `${card.tagged} papers say so`;
+  return q ? `${q} · ${n}` : n;
+}
+
+function BarCard({ card, activeId, onSelect, zh }) {
+  const max = Math.max(...card.rows.map((r) => r.count), 1);
+  return (
+    <Box sx={{ ...cardSx, gridColumn: card.wide ? { xs: 'auto', sm: 'span 2' } : 'auto' }}>
+      <CardHead dimension={card.dimension} sub={cardSub(card, zh)} zh={zh} />
       {!card.rows.length && (
         <Typography variant="caption" color="text.secondary" sx={{ pl: 2 }}>
           {zh ? '没有可识别的论文' : 'Nothing tagged'}
         </Typography>
       )}
       <Stack spacing={0.4}>
-        {card.rows.map((row) => {
-          const selected = activeId === row.id;
-          const label = barLabel(zh, card.dimension, row.id, row.label);
-          return (
-            <Box
-              key={row.id}
-              {...clickProps(() => onSelect({ dimension: card.dimension, id: row.id, label }))}
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: '92px 1fr 34px',
-                alignItems: 'center',
-                gap: 1,
-                cursor: 'pointer',
-                borderRadius: 1.25,
-                px: 0.6,
-                py: 0.35,
-                bgcolor: selected ? t.soft : 'transparent',
-                outline: selected ? `1px solid ${t.bar}55` : '1px solid transparent',
-                '&:hover': { bgcolor: t.soft },
-              }}
-            >
-              <Typography variant="caption" noWrap title={label} sx={{ fontWeight: selected ? 800 : 600, color: t.ink }}>
-                {label}
-                {row.rising && (
-                  <Box
-                    component="span"
-                    title={zh ? '近几年占比在上升' : 'Share rising in recent years'}
-                    sx={{ ml: 0.4, color: '#b45309', fontWeight: 800 }}
-                  >
-                    ↑
-                  </Box>
-                )}
-              </Typography>
-              <Box sx={{ height: 8, borderRadius: 99, bgcolor: 'rgba(15,39,68,0.06)', overflow: 'hidden' }}>
-                <Box
-                  sx={{
-                    height: '100%',
-                    width: `${(row.count / max) * 100}%`,
-                    borderRadius: 99,
-                    background: `linear-gradient(90deg, ${t.bar}, ${t.solid})`,
-                  }}
-                />
-              </Box>
-              <Typography
-                variant="caption"
-                sx={{ textAlign: 'right', fontWeight: 700, color: t.solid, fontVariantNumeric: 'tabular-nums' }}
-              >
-                {row.count}
-              </Typography>
-            </Box>
-          );
-        })}
+        {card.rows.map((row) => (
+          <BarRow
+            key={row.id}
+            row={row}
+            dimension={card.dimension}
+            max={max}
+            selected={activeId === row.id}
+            onSelect={onSelect}
+            zh={zh}
+            labelWidth={card.wide ? 210 : 118}
+          />
+        ))}
       </Stack>
       {card.lowCoverage && card.tagged > 0 && (
         <Typography
@@ -200,16 +223,61 @@ function BarCard({ card, activeId, onSelect, zh }) {
           sx={{ mt: 1, px: 1, py: 0.5, borderRadius: 1, bgcolor: '#fffbeb', color: '#92400e' }}
         >
           {zh
-            ? `多数摘要没写${cardTitle(true, card.dimension)}，这里只代表写了的 ${card.tagged} 篇。`
-            : `Most abstracts do not say this; this covers only ${card.tagged} papers.`}
+            ? `多数论文没写明这一项，这里只代表写了的 ${card.tagged} 篇。`
+            : `Most papers do not say this; this covers only ${card.tagged} papers.`}
         </Typography>
       )}
     </Box>
   );
 }
 
+/** Perception: every tag, in one column per group (overall, emotion, microclimate, …). */
+function GroupedCard({ card, activeId, onSelect, zh }) {
+  const max = Math.max(...card.rows.map((r) => r.count), 1);
+  const t = toneOf(card.dimension);
+  return (
+    <Box sx={{ ...cardSx, gridColumn: '1 / -1' }}>
+      <CardHead dimension={card.dimension} sub={cardSub(card, zh)} zh={zh} />
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' },
+          columnGap: 2.5,
+          rowGap: 1.25,
+        }}
+      >
+        {card.groups.map((group) => (
+          <Box key={group.id} data-testid={`concept-group-${group.id}`}>
+            <Typography
+              variant="caption"
+              display="block"
+              sx={{ px: 0.6, mb: 0.25, fontWeight: 800, letterSpacing: 0.2, color: t.solid }}
+            >
+              {zh ? group.zh : group.en}
+            </Typography>
+            <Stack spacing={0.2}>
+              {group.rows.map((row) => (
+                <BarRow
+                  key={row.id}
+                  row={row}
+                  dimension={card.dimension}
+                  max={max}
+                  selected={activeId === row.id}
+                  onSelect={onSelect}
+                  zh={zh}
+                  labelWidth={132}
+                />
+              ))}
+            </Stack>
+          </Box>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
 /**
- * One panel, six cards, computed on whatever the reader has filtered to.
+ * One panel of cards, one per category, computed on whatever the reader has filtered to.
  * Clicking a bar adds (or removes) that filter; the list below follows.
  */
 const PaperLibraryAnalytics = memo(function PaperLibraryAnalytics({
@@ -248,13 +316,13 @@ const PaperLibraryAnalytics = memo(function PaperLibraryAnalytics({
         {(() => {
           if (view.reviewed >= view.total) {
             return zh
-              ? '每篇都是读过摘要后标的，摘要没写的就不标。'
-              : 'Each paper was tagged by reading its abstract; what the abstract does not say is left blank. ';
+              ? '每篇都是读过全文或摘要后标的，论文没写的就不标。'
+              : 'Each paper was tagged by reading its full text or abstract; what the paper does not say is left blank. ';
           }
           if (view.reviewed) {
             return zh
-              ? `${view.reviewed} 篇是读过摘要后标的，其余按标题、摘要和关键词自动识别。`
-              : `${view.reviewed} papers were tagged by reading the abstract; the rest are read automatically from titles, abstracts and keywords. `;
+              ? `${view.reviewed} 篇是读过全文或摘要后标的，其余按标题、摘要和关键词自动识别。`
+              : `${view.reviewed} papers were tagged by reading the full text or abstract; the rest are read automatically from titles, abstracts and keywords. `;
           }
           return zh ? '标签按标题、摘要和关键词自动识别。' : 'Tags are read automatically from titles, abstracts and keywords. ';
         })()}
@@ -263,20 +331,23 @@ const PaperLibraryAnalytics = memo(function PaperLibraryAnalytics({
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' },
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' },
           gap: 1.25,
         }}
       >
         <YearCard view={view} activeId={activeByDim.year} onSelect={select} zh={zh} />
-        {view.cards.map((card) => (
-          <BarCard
-            key={card.dimension}
-            card={card}
-            activeId={activeByDim[card.dimension]}
-            onSelect={select}
-            zh={zh}
-          />
-        ))}
+        {view.cards.map((card) => {
+          const Card = card.groups ? GroupedCard : BarCard;
+          return (
+            <Card
+              key={card.dimension}
+              card={card}
+              activeId={activeByDim[card.dimension]}
+              onSelect={select}
+              zh={zh}
+            />
+          );
+        })}
       </Box>
     </Box>
   );
