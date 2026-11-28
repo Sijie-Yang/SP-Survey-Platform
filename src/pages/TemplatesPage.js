@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Box, Container, Typography, Button, TextField, InputAdornment,
-  CircularProgress, Stack, MenuItem, Menu,
+  CircularProgress, Stack, MenuItem, ListSubheader, Menu,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
@@ -17,7 +17,7 @@ import {
   matchesTemplateSearch, TemplatePreviewDialog, TemplateRow, templateDisplayName, useTemplateLibrary,
 } from '../components/templates/TemplateLibrary';
 import {
-  dimensionLabel, facetCounts, facetLabel, parseFacets, templateSource,
+  CONCEPT_GROUPS, conceptGroup, dimensionLabel, facetCounts, facetLabel, parseFacets, templateSource, upgradeFacetTag,
 } from '../lib/templateFacets';
 
 export const PAGE_SIZE = 50;
@@ -25,10 +25,17 @@ export const PAGE_SIZE = 50;
 /** Source buttons; "all" leaves out demos, which have their own button. */
 export const SOURCES = ['all', 'paper', 'ai', 'demo'];
 /** Dimensions offered as dropdown filters, in this order. */
-export const FILTER_DIMENSIONS = ['task', 'modality', 'concept', 'participants', 'country'];
+export const FILTER_DIMENSIONS = ['concept', 'scene', 'modality', 'task', 'setting', 'participants', 'country'];
+
+/** A filter value from an old link (?task=multi_rating) as today's id; '' when the tag no longer exists. */
+export function currentFilterValue(key, value) {
+  if (!value) return '';
+  const now = upgradeFacetTag(`${key}:${value}`).find((tag) => tag.startsWith(`${key}:`));
+  return now ? now.slice(key.length + 1) : '';
+}
 
 /**
- * filters: { source, q, task, modality, concept, participants, country };
+ * filters: { source, q, concept, scene, modality, task, setting, participants, country };
  * every dropdown that is set must match one of the template's values.
  */
 export function filterTemplates(templates, filters = {}) {
@@ -46,7 +53,7 @@ export function filterTemplates(templates, filters = {}) {
  * A rounded filter button. Empty: "Concept ▾". Set: "Concept: Cycling ×" in
  * the primary tint; the × clears it. The menu lists values with counts.
  */
-function FilterPill({ label, value, valueLabel, options, allLabel, onChange }) {
+function FilterPill({ label, value, valueLabel, options, groups, allLabel, onChange }) {
   const [anchor, setAnchor] = useState(null);
   const active = Boolean(value);
   const pick = (v) => { setAnchor(null); onChange(v); };
@@ -102,14 +109,25 @@ function FilterPill({ label, value, valueLabel, options, allLabel, onChange }) {
           <Box sx={{ flex: 1 }}>{allLabel}</Box>
           {!active && <Check sx={{ fontSize: 16, color: 'primary.main' }} />}
         </MenuItem>
-        {options.map((o) => (
-          <MenuItem key={o.value} selected={o.value === value} onClick={() => pick(o.value)}>
-            <Box sx={{ flex: 1, pr: 2 }}>{o.label}</Box>
-            {o.value === value
-              ? <Check sx={{ fontSize: 16, color: 'primary.main' }} />
-              : <Typography component="span" variant="caption" color="text.disabled">{o.n}</Typography>}
-          </MenuItem>
-        ))}
+        {(groups || [{ id: null }]).flatMap((group) => {
+          const inGroup = group.id ? options.filter((o) => o.group === group.id) : options;
+          if (!inGroup.length) return [];
+          return [
+            group.id && (
+              <ListSubheader key={`group-${group.id}`} disableSticky sx={{ lineHeight: '28px', fontSize: 12, fontWeight: 700, color: 'text.secondary', bgcolor: 'transparent' }}>
+                {group.label}
+              </ListSubheader>
+            ),
+            ...inGroup.map((o) => (
+              <MenuItem key={o.value} selected={o.value === value} onClick={() => pick(o.value)}>
+                <Box sx={{ flex: 1, pr: 2 }}>{o.label}</Box>
+                {o.value === value
+                  ? <Check sx={{ fontSize: 16, color: 'primary.main' }} />
+                  : <Typography component="span" variant="caption" color="text.disabled">{o.n}</Typography>}
+              </MenuItem>
+            )),
+          ].filter(Boolean);
+        })}
       </Menu>
     </>
   );
@@ -155,7 +173,9 @@ export default function TemplatesPage() {
   const zh = String(language || '').startsWith('zh');
   const { templates, loading } = useTemplateLibrary();
   const [params, setParams] = useSearchParams();
-  const filters = Object.fromEntries(['source', 'q', ...FILTER_DIMENSIONS].map((k) => [k, params.get(k) || '']));
+  const filters = Object.fromEntries(['source', 'q', ...FILTER_DIMENSIONS].map((k) => [
+    k, FILTER_DIMENSIONS.includes(k) ? currentFilterValue(k, params.get(k)) : (params.get(k) || ''),
+  ]));
   if (!SOURCES.includes(filters.source)) filters.source = 'all';
 
   // The row to point out: the template a link opened, or the one last previewed
@@ -301,7 +321,10 @@ export default function TemplatesPage() {
                 label={dimensionLabel(key, zh)}
                 value={filters[key]}
                 valueLabel={filters[key] ? facetLabel(key, filters[key], zh) : ''}
-                options={options.map(([value, n]) => ({ value, n, label: facetLabel(key, value, zh) }))}
+                options={options.map(([value, n]) => ({
+                  value, n, label: facetLabel(key, value, zh), group: key === 'concept' ? conceptGroup(value) : null,
+                }))}
+                groups={key === 'concept' ? CONCEPT_GROUPS.map((g) => ({ id: g.id, label: zh ? g.zh : g.en })) : null}
                 allLabel={t.tplAll || 'All'}
                 onChange={(v) => update(key, v)}
               />

@@ -10,7 +10,7 @@ import {
   isHumanEvaluationMeta,
 } from './researchPaperMeta.mjs';
 import { PAPER_FACET_KEYS, paperFacets } from './paperFacets';
-import { FACET_DIMENSIONS, facetLabel } from './templateFacets';
+import { CONCEPT_GROUPS, FACET_DIMENSIONS, conceptGroup, facetLabel } from './templateFacets';
 
 /** Canonical chart/filter dimension → analysis_meta field */
 export const DIMENSION_FIELD = {
@@ -368,12 +368,18 @@ export function buildYearShareTrends(
  * admin has read the paper, otherwise a guess from the keyword tags.
  */
 export const SIMPLE_CARDS = [
-  { dimension: 'concept', trend: true },
-  { dimension: 'task', trend: true, lowCoverageNote: true },
+  // Perception shows every tag, laid out by its six groups.
+  { dimension: 'concept', trend: true, grouped: true },
+  { dimension: 'scene', trend: true },
   { dimension: 'modality', trend: true },
+  { dimension: 'task', trend: true, lowCoverageNote: true },
+  { dimension: 'setting', trend: true, lowCoverageNote: true },
   { dimension: 'participants', trend: false, lowCoverageNote: true },
   { dimension: 'sample', trend: false, lowCoverageNote: true, fixedOrder: true },
-  { dimension: 'country', trend: false },
+  { dimension: 'country', trend: false, lowCoverageNote: true },
+  { dimension: 'city', trend: false, lowCoverageNote: true },
+  { dimension: 'team_org', trend: false, wide: true, topN: 10 },
+  { dimension: 'team_country', trend: false, wide: true, topN: 10 },
 ];
 
 /** Years shown one by one; anything older goes into one "earlier" bar. */
@@ -460,20 +466,26 @@ export function buildSimpleLibraryView(papers = [], { maxYear = currentAnalytics
     }
     const rising = card.trend ? risingIds(list, idsOf, maxYear) : new Set();
     const order = (FACET_DIMENSIONS.find((d) => d.key === card.dimension)?.values || []).map((v) => v.id);
-    const rows = [...counts.entries()]
+    const sorted = [...counts.entries()]
       .map(([id, count]) => ({
         id, label: facetLabel(card.dimension, id, false), count, rising: rising.has(id), dimension: card.dimension,
       }))
       .sort((a, b) => (card.fixedOrder
         ? order.indexOf(a.id) - order.indexOf(b.id)
-        : b.count - a.count || a.label.localeCompare(b.label)))
-      .slice(0, topN);
+        : b.count - a.count || a.label.localeCompare(b.label)));
+    const rows = card.grouped ? sorted : sorted.slice(0, card.topN || topN);
     return {
       dimension: card.dimension,
       tagged,
       total,
       lowCoverage: !!card.lowCoverageNote && total > 0 && tagged / total < 0.3,
+      wide: !!card.wide,
       rows,
+      // Perception: the same rows split into the six groups, most used first inside each.
+      groups: card.grouped
+        ? CONCEPT_GROUPS.map((g) => ({ id: g.id, en: g.en, zh: g.zh, rows: sorted.filter((r) => conceptGroup(r.id) === g.id) }))
+          .filter((g) => g.rows.length)
+        : null,
     };
   });
 

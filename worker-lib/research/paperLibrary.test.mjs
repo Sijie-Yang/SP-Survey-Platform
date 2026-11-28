@@ -100,6 +100,9 @@ describe('paper_list and paper_save', () => {
     assert.equal(res.body.updated, 1, JSON.stringify(res.body));
     const saved = db.tables.research_papers[0].analysis_meta.facets;
     assert.deepEqual(saved.task, ['pairwise']);
+    // an id of the earlier vocabulary ("crowd") is saved as today's tags
+    assert.deepEqual(saved.participants, ['public']);
+    assert.deepEqual(saved.setting, ['online']);
     assert.equal(saved.reviewed_by, 'u1');
     assert.ok(saved.reviewed_at);
 
@@ -112,6 +115,19 @@ describe('paper_list and paper_save', () => {
     assert.equal(typeof todo.body.papers[0].abstract, 'string');
     const done = await callTool(baseEnv(), 'paper_list', { reviewed: true, detail: true });
     assert.deepEqual(done.body.papers[0].facets.country, ['USA']);
+
+    // the head count gives the bucket; the team's institutions stay when a later save does not name them
+    await callTool(baseEnv(), 'paper_save', {
+      confirm: true,
+      papers: [{ id: 'p1', facets: { survey: 'yes', sample_n: 250, team_org: ['MIT'], team_country: ['USA'] } }],
+    });
+    assert.deepEqual(db.tables.research_papers[0].analysis_meta.facets.sample, ['100to300']);
+    await callTool(baseEnv(), 'paper_save', { confirm: true, papers: [{ id: 'p1', facets: { survey: 'yes', scene: ['street'] } }] });
+    const later = db.tables.research_papers[0].analysis_meta.facets;
+    assert.deepEqual(later.scene, ['street']);
+    assert.equal(later.sample, undefined);
+    assert.deepEqual(later.team_org, ['MIT']);
+    assert.deepEqual(later.team_country, ['USA']);
 
     await callTool(baseEnv(), 'paper_save', { confirm: true, papers: [{ id: 'p1', facets: null }] });
     assert.equal(db.tables.research_papers[0].analysis_meta.facets, undefined);

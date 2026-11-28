@@ -7,4 +7,7 @@ test('location names keep Taiwan, Hong Kong and mainland China apart', () => {
   expect(facetLabel('country', 'Hong Kong', true)).toBe('香港');
   expect(facetLabel('country', 'Taiwan', false)).toBe('Taiwan');
   expect(facetLabel('country', 'Atlantis', true)).toBe('Atlantis');
+  // the research team's country or region uses the same names
+  expect(facetLabel('team_country', 'China', true)).toBe('中国内地');
+  expect(facetLabel('team_country', 'Hong Kong', false)).toBe('Hong Kong');
 });

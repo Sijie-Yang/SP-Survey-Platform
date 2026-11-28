@@ -3,7 +3,7 @@
 // src/lib/templateFacets.js). Other tags on a template are kept as they are.
 
 import { supabaseRest } from '../supabaseUserClient.mjs';
-import { FACET_DIMENSIONS, parseFacets, withFacets } from '../../src/lib/templateFacets.js';
+import { TEMPLATE_DIMENSIONS, parseFacets, upgradeFacets, withFacets } from '../../src/lib/templateFacets.js';
 
 export const TAGS_SAVE_MAX = 60;
 
@@ -11,15 +11,23 @@ function fail(message, status = 400, code = 'BAD_REQUEST') {
   return Object.assign(new Error(message), { status, code });
 }
 
-/** Check one { dimension: [values] } object against the vocabulary. */
+/**
+ * Check one { dimension: [values] } object against the vocabulary. Ids of the
+ * earlier vocabulary are accepted and turned into today's ids; `added` holds
+ * what such an id adds to another dimension (old "crowd" → setting "online").
+ */
 export function checkFacets(facets) {
   const problems = [];
   const clean = {};
-  if (!facets || typeof facets !== 'object' || Array.isArray(facets)) return { clean, problems: ['facets must be an object'] };
+  if (!facets || typeof facets !== 'object' || Array.isArray(facets)) return { clean, added: {}, problems: ['facets must be an object'] };
+  const known = {};
   for (const [key, raw] of Object.entries(facets)) {
-    const dim = FACET_DIMENSIONS.find((d) => d.key === key);
-    if (!dim) { problems.push(`unknown dimension "${key}"`); continue; }
-    const values = (Array.isArray(raw) ? raw : [raw]).map((v) => String(v ?? '').trim()).filter(Boolean);
+    if (!TEMPLATE_DIMENSIONS.some((d) => d.key === key)) { problems.push(`unknown dimension "${key}"`); continue; }
+    known[key] = raw;
+  }
+  const { facets: upgraded, added } = upgradeFacets(known);
+  for (const [key, values] of Object.entries(upgraded)) {
+    const dim = TEMPLATE_DIMENSIONS.find((d) => d.key === key);
     if (dim.single && values.length > 1) problems.push(`${key} takes one value`);
     if (!dim.open) {
       const bad = values.filter((v) => !dim.values.some((x) => x.id === v));
@@ -27,7 +35,7 @@ export function checkFacets(facets) {
     }
     clean[key] = values.map((v) => v.slice(0, 80));
   }
-  return { clean, problems };
+  return { clean, added, problems };
 }
 
 /** Every approved template with its facets (no templates → empty list). */
@@ -38,7 +46,7 @@ export async function listTemplateFacets(env) {
     query: '?select=id,name,category,tags&is_approved=eq.true&order=year.desc',
   });
   return {
-    dimensions: FACET_DIMENSIONS.map((d) => ({ key: d.key, single: !!d.single, open: !!d.open, values: d.values.map((v) => v.id) })),
+    dimensions: TEMPLATE_DIMENSIONS.map((d) => ({ key: d.key, single: !!d.single, open: !!d.open, values: d.values.map((v) => v.id) })),
     templates: (Array.isArray(data) ? data : []).map((row) => ({ id: row.id, name: row.name, category: row.category, facets: parseFacets(row.tags) })),
   };
 }
@@ -56,7 +64,7 @@ export async function saveTemplateFacets(env, items) {
     const item = items[i] || {};
     const id = String(item.templateId || '').trim().slice(0, 120);
     if (!id) { results.push({ index: i, result: 'error', error: 'templateId is required.' }); continue; }
-    const { clean, problems } = checkFacets(item.facets);
+    const { clean, added, problems } = checkFacets(item.facets);
     if (problems.length) { results.push({ index: i, templateId: id, result: 'error', error: problems.join('; ') }); continue; }
     try {
       const found = await supabaseRest(env, { path: '/rest/v1/templates', serviceRole: true, query: `?id=eq.${encodeURIComponent(id)}&select=id,tags` });
@@ -66,6 +74,9 @@ export async function saveTemplateFacets(env, items) {
       const next = { ...current };
       for (const [key, values] of Object.entries(clean)) {
         next[key] = item.merge ? [...new Set([...(current[key] || []), ...values])] : values;
+      }
+      for (const [key, values] of Object.entries(added)) {
+        next[key] = [...new Set([...(next[key] || []), ...values])];
       }
       const tags = withFacets(row.tags || [], next);
       await supabaseRest(env, {

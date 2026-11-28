@@ -12,8 +12,21 @@ describe('template facets', () => {
   });
   it('replaces facet tags and keeps other tags', () => {
     const tags = withFacets(['official', 'task:rating'], { task: ['pairwise'], concept: ['safety', 'safety'], source: ['paper'] });
-    assert.deepEqual(tags, ['official', 'source:paper', 'task:pairwise', 'concept:safety']);
-    assert.deepEqual(parseFacets([...tags, 'task:nonsense', 'city:Paris']), { source: ['paper'], task: ['pairwise'], concept: ['safety'], city: ['Paris'] });
+    assert.deepEqual(tags, ['official', 'source:paper', 'concept:safety', 'task:pairwise']);
+    assert.deepEqual(parseFacets([...tags, 'task:nonsense', 'city:Paris']), { source: ['paper'], concept: ['safety'], task: ['pairwise'], city: ['Paris'] });
+  });
+  it('reads and accepts tags of the earlier vocabulary as today\'s tags', () => {
+    assert.deepEqual(
+      parseFacets(['task:multi_rating', 'task:rating', 'participants:crowd', 'modality:vr', 'concept:aesthetics', 'concept:building_facade', 'task:custom_page', 'sample:100to1000']),
+      { task: ['rating'], participants: ['public'], setting: ['online', 'vr'], concept: ['beauty'], scene: ['building'] },
+    );
+    const { clean, added, problems } = checkFacets({ participants: ['crowd'], task: ['map_annotation'], sample: ['300to500'] });
+    assert.deepEqual(problems, []);
+    assert.deepEqual(clean, { participants: ['public'], task: ['annotation'], sample: ['300to500'] });
+    assert.deepEqual(added, { setting: ['online'] });
+    // templates do not carry the papers-only dimensions
+    assert.match(checkFacets({ team_org: ['MIT'] }).problems.join(), /unknown dimension/);
+    assert.deepEqual(withFacets([], { team_org: ['MIT'], scene: ['street'] }), ['scene:street']);
   });
   it('falls back to the old category for the source', () => {
     assert.equal(templateSource({ category: 'AI Template' }), 'ai');
