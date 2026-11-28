@@ -34,6 +34,7 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
     return new (Function.prototype.bind.apply(RealDate, [null].concat(Array.prototype.slice.call(a))))();
   }
   PreviewDate.prototype = RealDate.prototype;
+  try { RealDate.prototype.constructor = PreviewDate; } catch (e) { /* keep the original */ }
   PreviewDate.now = now;
   PreviewDate.parse = RealDate.parse;
   PreviewDate.UTC = RealDate.UTC;
@@ -77,6 +78,26 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
 
   function wait(ms) { return new Promise(function (resolve) { realSetTimeout(resolve, ms); }); }
 
+  // Pictures a page loads ahead of showing them (new Image()): many pages
+  // start a trial only when its picture has arrived.
+  var RealImage = window.Image;
+  var preloading = [];
+  window.Image = function (w, h) {
+    var im = arguments.length > 1 ? new RealImage(w, h) : arguments.length ? new RealImage(w) : new RealImage();
+    preloading.push(im);
+    return im;
+  };
+  window.Image.prototype = RealImage.prototype;
+  function imagesLoading() {
+    preloading = preloading.filter(function (im) { return im.src && !im.complete; });
+    return preloading.length > 0 || Array.prototype.some.call(document.images, function (im) { return im.src && !im.complete && visible(im); });
+  }
+  async function imagesReady(tries) {
+    var waited = false;
+    for (var w = 0; w < tries && imagesLoading(); w += 1) { waited = true; await wait(100); }
+    if (waited) await wait(30); // their load handlers run just after
+  }
+
   // Answers travel to the platform and back; a page usually moves on only
   // after that reply, so count the ones still on their way.
   var inflight = 0;
@@ -84,9 +105,10 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
     var original = window.SPSite && window.SPSite[name];
     if (typeof original !== 'function') return;
     window.SPSite[name] = function () {
-      inflight += 1;
-      var p = original.apply(window.SPSite, arguments);
       var done = function () { inflight = Math.max(0, inflight - 1); };
+      inflight += 1;
+      var p;
+      try { p = original.apply(window.SPSite, arguments); } catch (e) { done(); throw e; }
       if (p && typeof p.then === 'function') p.then(done, done); else done();
       return p;
     };
@@ -143,6 +165,15 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
     var forward = buttons.filter(function (b) { return FORWARD_RE.test(label(b)); });
     if (forward.length) return forward[forward.length - 1];
     return buttons.length === 1 ? buttons[0] : null;
+  }
+
+  // A forward button that is there but switched off: the page wants every
+  // row answered first.
+  function lockedForward() {
+    return all('button,input[type=submit],input[type=button],[role=button]').some(function (el) {
+      var t = label(el);
+      return (el.disabled || el.getAttribute('aria-disabled') === 'true') && FORWARD_RE.test(t) && !BACK_RE.test(t);
+    });
   }
 
   // ---- Answering what is empty -----------------------------------------------
@@ -314,17 +345,15 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
       });
       if (!next) break;
       if (next.due > now()) offset += next.due - now();
-      var oneShot = !next.repeat;
       if (next.repeat) next.due = now() + next.repeat;
       else { delete timers[nextId]; realClearTimeout(Number(nextId)); }
       fired += 1;
       try { invoke(next.fn, next.args); } catch (e) { console.error(e); }
-      // Reading the screen is the slow part: do it after a one-off timer, or
-      // every few ticks of a repeating one (a clock ticking every 100 ms).
-      if (!oneShot && round % 8 !== 7) continue;
-      await wait(0);
+      // Let promises and replies run now and then; look at the screen after
+      // every timer, so one tick of a slideshow is one screen.
+      if (round % 4 === 3) await wait(0);
       if (signature() !== before) return true;
-      if (ready != null && controls() !== ready) return true;
+      if (ready != null && round % 4 === 3 && controls() !== ready) return true;
     }
     await wait(20);
     return signature() !== before || (ready != null && controls() !== ready);
@@ -349,6 +378,7 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
   async function pastShortPause() {
     for (var i = 0; i < 5; i += 1) {
       if (forwardButton() || all('input,select,textarea,img,video,canvas,svg').length) return;
+      await imagesReady(20);
       var soon = Object.keys(timers).some(function (id) { return timers[id].due - now() <= 1500; });
       if (!soon) return;
       var sig = signature();
@@ -376,27 +406,41 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
   }
 
   // Try what a participant would do on this screen. Returns how it moved on, or ''.
-  async function act(base) {
+  async function act(base, tapAll) {
     var b = forwardButton();
     if (b) { press(b); if (await settle(base)) return 'button'; }
-    // Clickable choices: try them one by one until the page moves on or
-    // its forward button becomes usable (a tap-to-rank page needs them all).
+    // Clickable choices. First one per group (a rating row, a pair of
+    // pictures); the page often moves on at once, or unlocks its forward
+    // button when every row has an answer.
     var groups = optionGroups();
+    var rest = [];
+    // With a locked forward button the rows are answered in one go; without
+    // one each press may itself be the step forward, so wait after each.
+    var quick = !b && lockedForward();
     for (var g = 0; g < groups.length; g += 1) {
-      var items = groups[g].items;
+      var items = groups[g].items.filter(function (el) { return visible(el) && !el.disabled; });
+      if (!items.length) continue;
       // Start in the middle, one further along for each row, so rows like
       // "most" and "least" do not get the same answer.
       var from = (Math.floor(items.length / 2) + g) % items.length;
-      var order = items.slice(from).concat(items.slice(0, from));
-      for (var k = 0; k < order.length && k < 40; k += 1) {
-        if (!visible(order[k]) || order[k].disabled) continue;
-        var before = forwardButton();
-        press(order[k]);
-        if (await settle(base)) return 'option';
-        // One choice per row when the page already has its forward button
-        // (a form); keep tapping only while it has none (tap-to-rank).
-        if (before || forwardButton()) break;
-      }
+      press(items[from]);
+      if (quick) {
+        await wait(0);
+        if (signature() !== base) { await wait(30); return 'option'; }
+        if (forwardButton()) break;
+      } else if (await settle(base)) return 'option';
+      rest = rest.concat(items.slice(from + 1), items.slice(0, from));
+    }
+    if (quick && !forwardButton() && await settle(base)) return 'option';
+    b = forwardButton();
+    if (b) { press(b); if (await settle(base)) return 'button'; }
+    // Still here with nothing to press, and waiting did not help either:
+    // a tap-to-rank page wants every item tapped.
+    for (var k = 0; tapAll && !b && k < rest.length && k < 60; k += 1) {
+      if (!document.contains(rest[k]) || !visible(rest[k]) || rest[k].disabled) continue;
+      press(rest[k]);
+      if (await settle(base)) return 'option';
+      if (forwardButton()) break;
     }
     if (await dragAll(base)) return 'drag';
     fillInputs();
@@ -415,13 +459,13 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
     window.confirm = function () { return true; };
     try {
       // Many pages keep their buttons off until the picture has loaded.
-      for (var w = 0; w < 15 && all('img').some(function (im) { return !im.complete; }); w += 1) await wait(100);
+      await imagesReady(40);
       var start = signature();
       for (var pass = 0; pass < 3; pass += 1) {
         for (var i = 0; i < 3 && fillInputs(); i += 1) await wait(30);
         var base = signature();
         if (pass === 0 && base !== start && !forwardButton()) return { moved: true };
-        var step = await act(base);
+        var step = await act(base, pass > 0);
         if (step) return { moved: true, step: step };
         // Nothing to press yet: run the clock until the screen changes or
         // something becomes pressable (buttons that unlock after a few seconds).
@@ -429,8 +473,9 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
         var firedBefore = fired;
         if (await fastForward(base, 15 * 60 * 1000, ready)) {
           if (signature() !== base) return { moved: true, step: 'time' };
-        } else if (controls() === ready && fired === firedBefore) break;
-        // Timers ran (a choice that unlocks after a few seconds): try again.
+        } else if (pass > 0 && controls() === ready && fired === firedBefore) break;
+        // Try again: timers ran (a choice that unlocks after a few seconds),
+        // or the screen wants more than one tap.
       }
       return { moved: false };
     } catch (e) {

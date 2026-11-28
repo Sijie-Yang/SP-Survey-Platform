@@ -6,6 +6,7 @@ import { buildSiteQuestions, siteMatchLevel, siteMediaFolders, sitePreviewMediaF
 import { applyPageState, captureRecord, pageSaysFinished } from '../SpSiteSurvey';
 import { RegionContext } from '../../contexts/RegionContext';
 import { uiPair } from '../../lib/uiLanguages';
+import { SP_SITE_PREVIEW_TOOLS_SOURCE } from '../../lib/spSitePreviewTools';
 
 const VIEWPORT_WIDTH = { mobile: 390, tablet: 820 };
 
@@ -35,17 +36,27 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
   const control = useRef(null);
   const [skipping, setSkipping] = useState(false);
   const [skipNote, setSkipNote] = useState('');
+  // Required answers are checked as on the survey link until the viewer skips
+  // a screen; from then on the page may finish with questions left empty.
+  const [usedSkip, setUsedSkip] = useState(false);
+  const completedRef = useRef(false);
+  completedRef.current = completed;
+  const runRef = useRef(0);
+  runRef.current = run;
 
   // One press = the next screen: the helper inside the page fills what is
   // empty, presses its forward button and fast-forwards timers.
   const skip = async () => {
     if (!control.current || skipping) return;
+    const startedIn = runRef.current;
     setSkipping(true);
+    setUsedSkip(true);
     setSkipNote('');
     const result = await control.current.skip();
+    if (runRef.current !== startedIn) return; // restarted meanwhile
     setSkipping(false);
     if (!result?.moved) {
-      setSkipNote(completed
+      setSkipNote(completedRef.current
         ? L('This is the last screen.', '已经是最后一屏了。')
         : L('This screen could not be skipped automatically. Answer it by hand, then press again.', '这一屏没法自动跳过，请手动作答一下再点。'));
     }
@@ -58,6 +69,8 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
     setCaptured([]);
     setPageState({});
     setSkipNote('');
+    setSkipping(false);
+    setUsedSkip(false);
     setRun((n) => n + 1);
   };
 
@@ -115,8 +128,8 @@ export default function SpSitePreview({ config: baseConfig, spSite, mediaPool = 
       <Box sx={{ width, maxWidth: '100%', height, mx: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }}>
         <SpSiteFrame
           key={run}
-          previewTools
-          requireAnswers={false}
+          previewScript={SP_SITE_PREVIEW_TOOLS_SOURCE}
+          requireAnswers={!usedSkip}
           controlRef={control}
           html={config.spSite.html}
           allowedHosts={config.spSite.allowedHosts || []}

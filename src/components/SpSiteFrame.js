@@ -6,9 +6,10 @@ import { applySiteAnswer, missingRequired, prepareSiteDocument } from '../lib/sp
  * The site gets the questions and drawn media; every answer it sends is
  * validated here before `onAnswer` records it.
  *
- * Previews pass `previewTools` (a "next screen" helper is injected, see
- * spSitePreviewTools.js; `controlRef.current.skip()` asks for one skip) and
- * `requireAnswers={false}` (the page may finish with questions left empty).
+ * Previews pass `previewScript` (the "next screen" helper of
+ * spSitePreviewTools.js; `controlRef.current.skip()` asks for one skip) and,
+ * once a screen was skipped, `requireAnswers={false}` (the page may finish
+ * with questions left empty).
  */
 export default function SpSiteFrame({
   html,
@@ -27,7 +28,7 @@ export default function SpSiteFrame({
   sandbox = 'allow-scripts allow-forms allow-modals allow-popups',
   onLoad,
   randomSeed = null,
-  previewTools = false,
+  previewScript = '',
   requireAnswers = true,
   controlRef = null,
 }) {
@@ -45,9 +46,9 @@ export default function SpSiteFrame({
       boot: { questions: boot.questions || [], survey: boot.survey || {}, answers: boot.answers || {}, media: boot.media || {} },
       allowedHosts: boot.allowedHosts,
       randomSeed,
-      previewTools,
+      previewScript,
     });
-  }, [html, bootKey, randomSeed, previewTools]);
+  }, [html, bootKey, randomSeed, previewScript]);
 
   useEffect(() => {
     if (!controlRef) return undefined;

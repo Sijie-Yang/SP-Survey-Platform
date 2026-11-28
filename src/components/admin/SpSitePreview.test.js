@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import SpSitePreview from './SpSitePreview';
 
 const frameProps = {};
@@ -26,13 +26,16 @@ test('Studio drops that notice and says in one line when sample images are shown
 
 test('the preview has a "next screen" button that asks the page to skip one screen', async () => {
   render(<SpSitePreview config={config} />);
-  expect(frameProps.previewTools).toBe(true);
-  expect(frameProps.requireAnswers).toBe(false);
+  expect(frameProps.previewScript).toContain('__SP_PREVIEW_TOOLS__');
+  // Until a screen is skipped, required answers are checked as on the survey link.
+  expect(frameProps.requireAnswers).toBe(true);
   const skip = jest.fn().mockResolvedValueOnce({ moved: true }).mockResolvedValueOnce({ moved: false });
   frameProps.controlRef.current = { skip };
-  await act(async () => { fireEvent.click(screen.getByTestId('sp-site-preview-skip')); });
+  fireEvent.click(screen.getByTestId('sp-site-preview-skip'));
+  await waitFor(() => expect(screen.getByTestId('sp-site-preview-skip')).toBeEnabled());
   expect(skip).toHaveBeenCalledTimes(1);
+  expect(frameProps.requireAnswers).toBe(false);
   expect(screen.getByTestId('sp-site-preview-skipnote')).toHaveTextContent('The survey link runs as a real survey.');
-  await act(async () => { fireEvent.click(screen.getByTestId('sp-site-preview-skip')); });
-  expect(screen.getByTestId('sp-site-preview-skipnote')).toHaveTextContent('could not be skipped automatically');
+  fireEvent.click(screen.getByTestId('sp-site-preview-skip'));
+  expect(await screen.findByText(/could not be skipped automatically/)).toBeInTheDocument();
 });
