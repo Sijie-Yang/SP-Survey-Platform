@@ -14,7 +14,7 @@ import PublicHeader, { PublicFooter } from '../components/layout/PublicHeader';
 import { useRegion } from '../contexts/RegionContext';
 import { tf } from '../contexts/adminI18n';
 import {
-  matchesTemplateSearch, TemplateRow, useTemplateLibrary,
+  matchesTemplateSearch, TemplatePreviewDialog, TemplateRow, templateDisplayName, useTemplateLibrary,
 } from '../components/templates/TemplateLibrary';
 import {
   dimensionLabel, facetCounts, facetLabel, parseFacets, templateSource,
@@ -115,6 +115,11 @@ function FilterPill({ label, value, valueLabel, options, allLabel, onChange }) {
   );
 }
 
+/** The template a `?preview=<id>` link points at; nothing for an id the library does not list. */
+export function linkedPreview(templates, id) {
+  return (id && (templates || []).find((tpl) => tpl.id === id)) || null;
+}
+
 /**
  * /templates — every published template, newest first: one search box, a
  * row of source buttons and a few dropdowns (see src/lib/templateFacets.js).
@@ -157,6 +162,14 @@ export default function TemplatesPage() {
   const filterKey = JSON.stringify(filters);
   useEffect(() => { setLimit(PAGE_SIZE); }, [filterKey]);
   const anyDropdown = FILTER_DIMENSIONS.some((k) => filters[k]);
+
+  // A link can open one template's preview directly: /templates?preview=<template id>.
+  const linked = linkedPreview(templates, params.get('preview'));
+  const closeLinked = () => {
+    const next = new URLSearchParams(params);
+    next.delete('preview');
+    setParams(next, { replace: true });
+  };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
@@ -289,6 +302,10 @@ export default function TemplatesPage() {
           </Box>
         )}
       </Container>
+
+      {linked && (
+        <TemplatePreviewDialog templateId={linked.id} templateName={templateDisplayName(linked)} open onClose={closeLinked} />
+      )}
 
       <PublicFooter />
     </Box>
