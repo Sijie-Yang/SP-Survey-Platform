@@ -14,6 +14,7 @@ import { sliderScale } from './sliderScale';
 import { normalizeMediaEntry } from './mediaUtils';
 import { isTrialsAnswer, mediaSetToShownIds, mediaSetToShownImages } from './trialNavigation';
 import { NO_PREFERENCE } from './choiceTie';
+import { SP_SITE_PREVIEW_TOOLS_SOURCE } from './spSitePreviewTools';
 import {
   ANSWER_SHAPES,
   SP_SITE_SCRIPT_HOSTS as CDN_HOSTS,
@@ -1099,7 +1100,7 @@ export function seededRandomScript(seed) {
   return `<script>(function(){var a=${s};Math.random=function(){a=(a+0x6D2B79F5)|0;var t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};})();</script>`;
 }
 
-export function prepareSiteDocument(html, { boot = null, allowedHosts = [], randomSeed = null } = {}) {
+export function prepareSiteDocument(html, { boot = null, allowedHosts = [], randomSeed = null, previewTools = false } = {}) {
   const hasMedia = Boolean(boot?.media && Object.values(boot.media).some((list) => list?.length));
   const source = hasMedia ? linkImageSlots(stripSitePreviewShim(html)) : stripSitePreviewShim(html);
   const hosts = normalizeAllowedHosts(allowedHosts);
@@ -1107,7 +1108,8 @@ export function prepareSiteDocument(html, { boot = null, allowedHosts = [], rand
   const inject = `<meta http-equiv="Content-Security-Policy" content="${buildSiteCsp(hosts)}">`
     + (randomSeed != null ? seededRandomScript(randomSeed) : '')
     + (bootData ? `<script>window.__SP_SITE_BOOT__=${JSON.stringify(bootData).replace(/</g, '\\u003c')};</script>` : '')
-    + `<script>${escapeScript(SP_SITE_SDK_SOURCE)}</script>`;
+    + `<script>${escapeScript(SP_SITE_SDK_SOURCE)}</script>`
+    + (previewTools ? `<script>${escapeScript(SP_SITE_PREVIEW_TOOLS_SOURCE)}</script>` : '');
   const head = source.match(/<head\b[^>]*>/i);
   if (head) return source.slice(0, head.index + head[0].length) + inject + source.slice(head.index + head[0].length);
   const htmlTag = source.match(/<html\b[^>]*>/i);

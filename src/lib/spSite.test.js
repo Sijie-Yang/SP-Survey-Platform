@@ -102,6 +102,16 @@ describe('site document', () => {
     expect(doc).not.toContain('shim()');
   });
 
+  test('only previews get the "next screen" helper', () => {
+    const html = '<html><head></head><body></body></html>';
+    expect(prepareSiteDocument(html)).not.toContain('__SP_PREVIEW_TOOLS__');
+    const doc = prepareSiteDocument(html, { previewTools: true });
+    expect(doc).toContain('__SP_PREVIEW_TOOLS__');
+    // It runs after the SDK and before the page's own code.
+    expect(doc.indexOf('window.SPSite')).toBeLessThan(doc.indexOf('__SP_PREVIEW_TOOLS__'));
+    expect(doc.indexOf('__SP_PREVIEW_TOOLS__')).toBeLessThan(doc.indexOf('<body>'));
+  });
+
   test('static checks catch pages that cannot record answers', () => {
     const { errors } = checkSiteHtml('<html><body><script src="https://evil.example/x.js"></script><script>fetch("/x")</script></body></html>', ['q1']);
     expect(errors.join('\n')).toMatch(/SPSite\.answer/);

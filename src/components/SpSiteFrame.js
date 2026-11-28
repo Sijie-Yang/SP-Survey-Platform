@@ -5,6 +5,10 @@ import { applySiteAnswer, missingRequired, prepareSiteDocument } from '../lib/sp
  * Hosts an LLM-designed survey site (SP-Scheme) in a sandboxed iframe.
  * The site gets the questions and drawn media; every answer it sends is
  * validated here before `onAnswer` records it.
+ *
+ * Previews pass `previewTools` (a "next screen" helper is injected, see
+ * spSitePreviewTools.js; `controlRef.current.skip()` asks for one skip) and
+ * `requireAnswers={false}` (the page may finish with questions left empty).
  */
 export default function SpSiteFrame({
   html,
@@ -23,11 +27,15 @@ export default function SpSiteFrame({
   sandbox = 'allow-scripts allow-forms allow-modals allow-popups',
   onLoad,
   randomSeed = null,
+  previewTools = false,
+  requireAnswers = true,
+  controlRef = null,
 }) {
   const frameRef = useRef(null);
   const answersRef = useRef({ ...initialAnswers });
   const latest = useRef({});
-  latest.current = { questions, survey, onAnswer, onComplete, onProblem, onCapture, onState, media };
+  latest.current = { questions, survey, onAnswer, onComplete, onProblem, onCapture, onState, media, requireAnswers };
+  const skips = useRef({ seq: 0, pending: {} });
   // Questions and answers are embedded as boot data so the page can read them
   // synchronously; the key keeps the iframe from reloading on equal props.
   const bootKey = JSON.stringify({ questions, survey, answers: initialAnswers, allowedHosts, media });
@@ -37,8 +45,24 @@ export default function SpSiteFrame({
       boot: { questions: boot.questions || [], survey: boot.survey || {}, answers: boot.answers || {}, media: boot.media || {} },
       allowedHosts: boot.allowedHosts,
       randomSeed,
+      previewTools,
     });
-  }, [html, bootKey, randomSeed]);
+  }, [html, bootKey, randomSeed, previewTools]);
+
+  useEffect(() => {
+    if (!controlRef) return undefined;
+    controlRef.current = {
+      skip: () => new Promise((resolve) => {
+        const frame = frameRef.current?.contentWindow;
+        if (!frame) { resolve({ moved: false }); return; }
+        const requestId = ++skips.current.seq;
+        const timer = setTimeout(() => { delete skips.current.pending[requestId]; resolve({ moved: false, timeout: true }); }, 60000);
+        skips.current.pending[requestId] = (result) => { clearTimeout(timer); resolve(result); };
+        frame.postMessage({ source: 'sp-site-host', type: 'preview-skip', requestId }, '*');
+      }),
+    };
+    return () => { controlRef.current = null; };
+  }, [controlRef]);
 
   useEffect(() => {
     const byName = () => new Map((latest.current.questions || []).map((q) => [q.name, q]));
@@ -55,6 +79,12 @@ export default function SpSiteFrame({
           answers: answersRef.current,
           media: latest.current.media || {},
         });
+        return;
+      }
+      if (data.type === 'preview-skip-done') {
+        const done = skips.current.pending[data.requestId];
+        delete skips.current.pending[data.requestId];
+        done?.({ moved: Boolean(data.moved), step: data.step || null });
         return;
       }
       if (data.type === 'capture') {
@@ -89,7 +119,7 @@ export default function SpSiteFrame({
         return;
       }
       if (data.type === 'complete') {
-        const missing = missingRequired(latest.current.questions, answersRef.current);
+        const missing = latest.current.requireAnswers === false ? [] : missingRequired(latest.current.questions, answersRef.current);
         if (missing.length) {
           reply(frame, {
             type: 'result',
