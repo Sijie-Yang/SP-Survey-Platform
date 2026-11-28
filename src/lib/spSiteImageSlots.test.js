@@ -86,3 +86,23 @@ test('files the page names by relative path come from the library as if it were 
   const own = siteMediaFolders(pool, { spSite: { html, mediaFolders: [] } })[SITE_PAGE_FILES];
   expect(own.map((m) => m.url).sort()).toEqual(['https://m/images/a.jpg', 'https://m/x/b.png']);
 });
+
+test('media copied from a template keeps the file names the page asks for', () => {
+  const { siteMediaFolders, siteMediaName } = require('./spSite');
+  // A project made from a template lists each file under its stored name.
+  const id = '9bb22680-0113-4092-8cd9-93692632f319';
+  const pool = [
+    { url: `https://media.sp-survey.org/u/proj_1/photos/BL2__${id}.jpg`, name: `BL2__${id}.jpg`, key: `u/proj_1/photos/BL2__${id}.jpg`, folder: 'photos' },
+    { url: `https://media.sp-survey.org/u/proj_1/photos/a__b__${id}.png`, key: `u/proj_1/photos/a__b__${id}.png`, folder: 'photos' },
+    { url: 'https://media.sp-survey.org/u/proj_1/photos/C2.jpg', name: 'C2.jpg', folder: 'photos' },
+  ];
+  const out = siteMediaFolders(pool, { spSite: { mediaFolders: ['photos'] } });
+  expect(out.photos.map((m) => m.name)).toEqual(['BL2.jpg', 'a__b.png', 'C2.jpg']);
+  expect(out.photos[0].url).toContain(`BL2__${id}.jpg`);
+  // A page that names the file itself ("photos/BL2.jpg") finds it too.
+  const own = siteMediaFolders(pool, { spSite: { html: '<img src="photos/BL2.jpg">', mediaFolders: [] } });
+  expect(Object.values(own).flat().map((m) => m.name)).toEqual(['BL2.jpg']);
+  // Only the platform's own id is dropped.
+  expect(siteMediaName('eiffel_tower__false__FoTdx.jpg')).toBe('eiffel_tower__false__FoTdx.jpg');
+  expect(siteMediaName(`clip__${id}`)).toBe('clip');
+});
