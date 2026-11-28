@@ -40,7 +40,7 @@ export default function LandingPage() {
   const { isAuthenticated, loading: authLoading } = useAuth();
   const workspacePath = researcherEntryPath(!authLoading && isAuthenticated);
   // Templates are listed in the classic editor's sidebar.
-  const templatePath = templateUsePath(!authLoading && isAuthenticated);
+  const signedIn = !authLoading && isAuthenticated;
   const { t } = useRegion();
   const githubStars = useGithubStars();
   const { templates, loading: loadingTemplates } = useTemplateLibrary();
@@ -373,7 +373,7 @@ export default function LandingPage() {
             </Box>
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: `repeat(${Math.min(homeSchemes.length, 3)}, 1fr)` }, gap: 3 }}>
               {homeSchemes.map((tpl) => (
-                <SchemeExampleCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
+                <SchemeExampleCard key={tpl.id} template={tpl} onUse={() => navigate(templateUsePath(signedIn, tpl.id))} />
               ))}
             </Box>
             {schemeExamples.length > homeSchemes.length && (
@@ -402,7 +402,7 @@ export default function LandingPage() {
         ) : (
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
             {homeTemplates.map((tpl) => (
-              <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} />
+              <TemplateCard key={tpl.id} template={tpl} onUse={() => navigate(templateUsePath(signedIn, tpl.id))} />
             ))}
           </Box>
         )}

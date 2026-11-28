@@ -187,6 +187,8 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
   const [dialog, setDialog] = useState('');
   const [publishing, setPublishing] = useState(false);
   const [publishIssue, setPublishIssue] = useState(null);
+  // A message another card sends to the AI assistant for the researcher.
+  const [assistantAsk, setAssistantAsk] = useState(null);
   const savedRef = useRef(onProjectSaved);
   savedRef.current = onProjectSaved;
 
@@ -476,9 +478,21 @@ export default function StudioProject({ projectId, onProjectsChanged = () => {},
                 if (next) savedRef.current(next);
               })}
               onSaveConfig={(next) => write(() => ({ config: next }))}
+              ask={assistantAsk}
             />
           )}
-          <StudioMediaCard project={project} config={config} busy={busy} queue={queue} applyWrite={applyWrite} />
+          <StudioMediaCard
+            project={project}
+            config={config}
+            busy={busy}
+            queue={queue}
+            applyWrite={applyWrite}
+            onAskAi={aiChat && kind === 'page' ? (text) => setAssistantAsk({ id: Date.now(), text }) : null}
+            onReload={async () => {
+              const next = await refresh();
+              if (next) savedRef.current(next);
+            }}
+          />
           <StudioLinkCard
             project={project}
             config={config}

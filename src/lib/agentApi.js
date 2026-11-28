@@ -544,6 +544,14 @@ export async function publishProjectViaApi(projectId, summary) {
  * Switch a study between its SP-Scheme page and the classic editor
  * (direction 'classic' keeps the page as a backup; 'spscheme' brings it back).
  */
+/** Copy a template's media into an owned project on the server; call again while `remaining` > 0. */
+export async function importTemplateMediaViaApi(projectId, templateId) {
+  return agentFetch(`/api/agent/projects/${encodeURIComponent(projectId)}/media/import-template`, {
+    method: 'POST',
+    body: JSON.stringify({ templateId, confirm: true }),
+  });
+}
+
 export async function switchSpSchemeEditor(projectId, direction) {
   return agentFetch('/api/agent/sp-scheme/switch', {
     method: 'POST',

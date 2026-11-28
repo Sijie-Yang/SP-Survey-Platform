@@ -9,8 +9,9 @@ const GOOD = buildExampleSite().trim();
 const PLAIN = '<!doctype html><html><body><p>Hello</p></body></html>';
 const ROUTE = { apiKey: 'sk', provider: 'deepseek', baseUrl: 'https://x', model: 'deepseek-flash', modelRecord: {} };
 
-function setup({ answers, html = '' }) {
+function setup({ answers, html = '', media = [] }) {
   const saved = [];
+  const asked = [];
   const tool = createSpSchemePageTool({
     env: {},
     accessToken: 'token',
@@ -18,9 +19,12 @@ function setup({ answers, html = '' }) {
     getProjectId: () => 'proj_1',
     request: null,
     route: ROUTE,
-    chat: async () => ({ content: answers.shift() ?? answers.at(-1) }),
+    chat: async (options) => {
+      asked.push(options);
+      return { content: answers.length > 1 ? answers.shift() : answers[0] };
+    },
     io: {
-      loadOwned: async () => ({ draft_updated_at: '2026-11-25T00:00:00Z', survey_config_draft: html ? { spSite: { html } } : {} }),
+      loadOwned: async () => ({ user_id: 'u1', draft_updated_at: '2026-11-25T00:00:00Z', survey_config_draft: html ? { spSite: { html } } : {}, preloaded_images: media }),
       importSpScheme: async (_env, ctx, args) => {
         saved.push({ ctx, args });
         return { imported: true, draftUpdatedAt: '2026-11-25T00:01:00Z', summary: {} };
@@ -28,7 +32,7 @@ function setup({ answers, html = '' }) {
       getDraft: async () => ({ draftUpdatedAt: '2026-11-25T00:01:00Z', surveyConfig: { title: 'x', spSite: { note: 'page' } } }),
     },
   });
-  return { tool, saved };
+  return { tool, saved, asked };
 }
 
 describe('SP-Scheme assistant mode', () => {
@@ -67,6 +71,18 @@ describe('SP-Scheme assistant mode', () => {
     assert.ok(out.problems.length > 0);
     assert.equal(out.surveyConfig, undefined);
     assert.equal(saved.length, 0);
+  });
+
+  it('shows the page writer the study media library and passes on what the page still lacks', async () => {
+    const media = [{ url: 'https://media.test/u1/proj_1/streets/a__236a3465-ef58-4c35-9ee7-7e1a3a4fc833.jpg', key: 'u1/proj_1/streets/a__236a3465-ef58-4c35-9ee7-7e1a3a4fc833.jpg', name: 'a__236a3465-ef58-4c35-9ee7-7e1a3a4fc833.jpg' }];
+    const misfit = GOOD.replace('</body>', "<script>var extra = SPSite.getMedia('photos');</script></body>");
+    const { tool, saved, asked } = setup({ answers: [`Done.\n\`\`\`html\n${misfit}\n\`\`\``], html: GOOD, media });
+    const out = await tool.execute({ request: 'Fit the page to my images' });
+    assert.match(asked[0].messages[1].content, /folder "streets", 1 image: a\.jpg/);
+    assert.equal(out.saved, true);
+    assert.equal(saved.length, 1);
+    assert.equal(out.mediaNotes.length, 1);
+    assert.match(out.mediaNotes[0], /"photos"/);
   });
 
   it('asks for a request', async () => {

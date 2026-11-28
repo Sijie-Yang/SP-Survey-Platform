@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Alert, Box, Button, Link, Paper, Typography } from '@mui/material';
-import { AutoAwesome, ViewListOutlined } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { ArticleOutlined, AutoAwesome, ViewListOutlined } from '@mui/icons-material';
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom';
 import StreetscapeAtmosphere from '../StreetscapeAtmosphere';
 import { setActiveProject } from '../../lib/projectManager';
 import { createStudioProject } from '../../lib/studioData';
 import { adminProjectPath, studioPathForProject } from '../../lib/adminDeepLink';
 import StudioImportFlow from './StudioImport';
+import StudioTemplateStart from './StudioTemplateStart';
+import { TEMPLATE_LIBRARY_PATH } from '../../lib/researcherEntry';
 import { useL } from './studioUi';
 
 const HERO_HEIGHT = { xs: 260, md: 300 };
@@ -14,10 +16,14 @@ const HERO_HEIGHT = { xs: 260, md: 300 };
 /**
  * "What are we researching today?": drop the page an AI built, or build the
  * survey question by question in the classic editor. Two equal choices.
+ * Coming from "Use" on a template (/studio?template=<id>), the first choice
+ * starts from that template instead.
  */
 export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
   const L = useL();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const templateId = searchParams.get('template') || '';
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
@@ -95,15 +101,26 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
             sx={{ minWidth: 0, p: { xs: 2, sm: 2.5 }, borderRadius: '14px', border: '1px solid', borderColor: 'divider' }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-              <AutoAwesome color="primary" />
+              {templateId ? <ArticleOutlined color="primary" /> : <AutoAwesome color="primary" />}
               <Typography id="studio-choice-ai" component="h2" variant="h6" sx={{ fontWeight: 700, fontSize: '1.15rem', lineHeight: 1.3 }}>
-                {L('Let AI make the survey', '让 AI 做问卷')}
+                {templateId ? L('Start from a template', '从模板开始') : L('Let AI make the survey', '让 AI 做问卷')}
               </Typography>
             </Box>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              {L('Design a new survey, or bring one you already have (Qualtrics, Google Forms, a lab website, a past study): the AI fits it to SP-Scheme.', '可以做新调查，也可以把已有的调查（Qualtrics、Google 表单、实验室网站、以前的研究）交给 AI 改成 SP-Scheme。')}
-            </Typography>
-            <StudioImportFlow showSteps onImported={onImported} />
+            {templateId ? (
+              <StudioTemplateStart
+                key={templateId}
+                templateId={templateId}
+                onStarted={onImported}
+                onLeave={() => setSearchParams({}, { replace: true })}
+              />
+            ) : (
+              <>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  {L('Design a new survey, or bring one you already have (Qualtrics, Google Forms, a lab website, a past study): the AI fits it to SP-Scheme.', '可以做新调查，也可以把已有的调查（Qualtrics、Google 表单、实验室网站、以前的研究）交给 AI 改成 SP-Scheme。')}
+                </Typography>
+                <StudioImportFlow showSteps onImported={onImported} />
+              </>
+            )}
           </Box>
 
           <Box
@@ -134,7 +151,7 @@ export default function StudioNewStudy({ onProjectsChanged = () => {} }) {
             <Button variant="outlined" onClick={openClassic} disabled={creating} sx={{ bgcolor: 'background.paper' }}>
               {creating ? L('Creating…', '正在新建…') : L('Create and open the classic editor', '新建并打开经典编辑器')}
             </Button>
-            <Link component={RouterLink} to="/admin" variant="body2" underline="hover" data-testid="studio-template-link">
+            <Link component={RouterLink} to={TEMPLATE_LIBRARY_PATH} variant="body2" underline="hover" data-testid="studio-template-link">
               {L('Start from a paper template', '从论文模板开始')}
             </Link>
             {error && <Alert severity="error" sx={{ alignSelf: 'stretch' }}>{error}</Alert>}

@@ -21,6 +21,8 @@ import {
   answerKindOf,
   flatElements,
   normalizeAllowedHosts,
+  pageReferencedFiles,
+  siteMediaName,
   stripSitePreviewShim,
   utf8Bytes,
 } from './spSiteCore.js';
@@ -39,7 +41,9 @@ export {
   externalHostsIn,
   extractEmbeddedScheme,
   normalizeAllowedHosts,
+  pageReferencedFiles,
   siteMatchLevel,
+  siteMediaName,
   stripSitePreviewShim,
   utf8Bytes,
 } from './spSiteCore.js';
@@ -74,15 +78,6 @@ function itemList(items, lang) {
   }).filter(Boolean);
 }
 
-/**
- * The name a page knows a library file by. An upload is stored as
- * "<name>__<uuid>.<ext>", and media copied from a template into a project is
- * listed under that stored name; the page still asks for "<name>.<ext>".
- */
-const STORED_NAME_ID_RE = /__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.[^./]+$|$)/i;
-export function siteMediaName(name) {
-  return String(name || '').replace(STORED_NAME_ID_RE, '');
-}
 
 function mediaItem(entry) {
   if (!entry) return null;
@@ -381,26 +376,6 @@ export const SITE_MEDIA_MAX_ITEMS = 2000;
  */
 /** Media-folder key for the library files a page names by relative path (not a real folder). */
 export const SITE_PAGE_FILES = '__page_files__';
-
-const PAGE_FILE_RE = /["'(=]\s*((?:\.\/)?[^"'()<>\s:?#]*?([^"'()<>\s:?#/]+\.(?:jpe?g|png|webp|gif|avif|bmp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)))(?:[?#][^"'()\s]*)?\s*["')]/gi;
-
-/**
- * Files the page itself names by relative path ("images/a.jpg", "a.jpg"). The
- * media library counts as the folder the page sits in, so those names are the
- * library's files: same folder path, else the same file name.
- */
-export function pageReferencedFiles(html) {
-  const refs = new Map();
-  const text = String(html || '');
-  let m;
-  PAGE_FILE_RE.lastIndex = 0;
-  while ((m = PAGE_FILE_RE.exec(text))) {
-    const path = m[1].replace(/^\.\//, '').replace(/^\/+/, '');
-    if (/^(data|blob|https?):/i.test(path) || path.startsWith('//')) continue;
-    refs.set(path.toLowerCase(), m[2].toLowerCase());
-  }
-  return refs;
-}
 
 function pageFilesFromPool(pool, html) {
   const refs = pageReferencedFiles(html);

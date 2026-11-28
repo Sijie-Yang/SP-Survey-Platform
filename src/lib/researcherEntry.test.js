@@ -1,4 +1,4 @@
-import { WORKSPACE_PATH, loginRedirectPath, researcherEntryPath, safeInAppPath, templateUsePath } from './researcherEntry';
+import { WORKSPACE_PATH, loginRedirectPath, researcherEntryPath, safeInAppPath, studioTemplatePath, templateUsePath } from './researcherEntry';
 
 test('a signed-in researcher opens Studio instead of the login form', () => {
   expect(WORKSPACE_PATH).toBe('/studio');
@@ -14,10 +14,14 @@ test('return paths stay inside the site and fall back to Studio', () => {
   expect(safeInAppPath('')).toBe('/studio');
 });
 
-test('"Use" on a template opens the classic editor, signing in first when needed', () => {
+test('"Use" on a template opens the new-study screen with that template, signing in first when needed', () => {
+  expect(templateUsePath(true, '2023-shen-design')).toBe('/studio?template=2023-shen-design');
+  expect(templateUsePath(false, '2023-shen-design')).toBe('/login?next=%2Fstudio%3Ftemplate%3D2023-shen-design');
+  expect(safeInAppPath(decodeURIComponent(templateUsePath(false, '2023-shen-design').split('next=')[1]))).toBe('/studio?template=2023-shen-design');
+  expect(studioTemplatePath('a b')).toBe('/studio?template=a%20b');
+  // Without a template: the classic editor, whose sidebar lists the templates.
   expect(templateUsePath(true)).toBe('/admin');
   expect(templateUsePath(false)).toBe('/login?next=%2Fadmin');
-  expect(safeInAppPath(decodeURIComponent(templateUsePath(false).split('next=')[1]))).toBe('/admin');
 });
 
 test('signing in comes back to the address that asked for it', () => {
