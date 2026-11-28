@@ -5,7 +5,7 @@ jest.mock('react-router-dom', () => {
   return jest.requireActual('react-router');
 }, { virtual: true });
 
-import { filterTemplates } from './TemplatesPage';
+import { filterTemplates, linkedPreview } from './TemplatesPage';
 import { sortNewestFirst } from '../components/templates/TemplateLibrary';
 
 const list = [
@@ -72,4 +72,11 @@ test('one public name: the paper title when linked; change requests name the tem
   expect(msg).toContain('作者 Author');
   expect(msg).toContain('https://osf.io/x');
   expect(templateChangeMessage({ template: { id: 'a' }, title: 'A', role: 'other', change: 'x', links: '' })).not.toContain('Original materials');
+});
+
+test('a ?preview=<id> link opens only a template the library lists', () => {
+  expect(linkedPreview(list, 'b')).toBe(list[1]);
+  expect(linkedPreview(list, 'not-in-library')).toBeNull();
+  expect(linkedPreview(list, '')).toBeNull();
+  expect(linkedPreview([], 'b')).toBeNull();
 });
