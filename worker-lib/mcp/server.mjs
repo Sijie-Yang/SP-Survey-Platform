@@ -261,7 +261,10 @@ const TOOLS = [
     name: 'template_tags',
     description:
       'PLATFORM ADMINS ONLY. Read or set the classification tags of published templates, used by the /templates filters. '
-      + 'Dimensions: source (paper | ai | demo, one), modality, task, concept, participants, sample (one), country (shown as "Location": the study place, a country or region) and city (free text). '
+      + 'Dimensions (each answers one question): source (paper | ai | demo, one); concept = what participants judge or feel; scene = the kind of place; '
+      + 'modality = the material shown or played; task = how they answer; setting = online | lab | vr | in_situ; participants = who they are; '
+      + 'sample (one of lt100 | 100to300 | 300to500 | 500to1000 | gt1000, people not images); country and city (free text) = where the experiment was run, '
+      + 'that is where participants took part, not where the images are from. Call it without templates to get the allowed ids of every dimension. Ids of the earlier vocabulary are still accepted and saved as the new ones. '
       + 'Without templates: lists every approved template with its tags and the allowed values. With templates: each item sets the named '
       + 'dimensions for one template (replacing that dimension\'s values unless merge:true); other dimensions and other tags stay. Needs surveys:publish and confirm:true to write.',
     inputSchema: {
@@ -273,7 +276,7 @@ const TOOLS = [
             type: 'object',
             properties: {
               templateId: { type: 'string' },
-              facets: { type: 'object', description: 'e.g. {"task":["pairwise"],"concept":["safety","greenery"],"city":["Berlin"]}' },
+              facets: { type: 'object', description: 'e.g. {"concept":["safety","greenery"],"scene":["street"],"modality":["street_view"],"task":["pairwise"],"setting":["online"],"city":["Berlin"]}' },
               merge: { type: 'boolean', description: 'Add values instead of replacing them.' },
             },
             required: ['templateId', 'facets'],
@@ -331,9 +334,12 @@ const TOOLS = [
               templateId: { type: 'string' },
               facets: {
                 type: 'object',
-                description: 'Tags from reading the paper, same vocabulary as template_tags (no source): '
-                  + '{"survey":"yes"|"no", "concept":[...], "task":[...], "modality":[...], "participants":[...], "sample":["lt100"|"100to1000"|"gt1000"], "country":["China"] (study location: country or region), "city":["Wuhan"]}. '
-                  + 'Leave a dimension empty when the paper does not say it. Replaces earlier facets; null removes them.',
+                description: 'Tags from reading the paper, same vocabulary as template_tags (no source; call template_tags without templates for the allowed ids): '
+                  + '{"survey":"yes"|"no", "concept":[...], "scene":[...], "modality":[...], "task":[...], "setting":[...], "participants":[...], '
+                  + '"sample_n":412 (number of people who answered; the sample bucket is computed from it), '
+                  + '"country":["China"], "city":["Wuhan"] (where the experiment was run, i.e. where participants took part; never the image location or the authors\' address), '
+                  + '"team_org":["National University of Singapore"], "team_country":["Singapore"] (the authors\' institutions and their countries or regions)}. '
+                  + 'China means mainland China; Hong Kong, Macau and Taiwan are separate. Leave a dimension empty when the paper does not say it. Replaces earlier facets; null removes them.',
               },
             },
           },

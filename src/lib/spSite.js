@@ -75,12 +75,22 @@ function itemList(items, lang) {
   }).filter(Boolean);
 }
 
+/**
+ * The name a page knows a library file by. An upload is stored as
+ * "<name>__<uuid>.<ext>", and media copied from a template into a project is
+ * listed under that stored name; the page still asks for "<name>.<ext>".
+ */
+const STORED_NAME_ID_RE = /__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.[^./]+$|$)/i;
+export function siteMediaName(name) {
+  return String(name || '').replace(STORED_NAME_ID_RE, '');
+}
+
 function mediaItem(entry) {
   if (!entry) return null;
-  if (typeof entry === 'string') return { url: entry, name: entry.split('?')[0].split('/').pop(), type: 'image' };
+  if (typeof entry === 'string') return { url: entry, name: siteMediaName(entry.split('?')[0].split('/').pop()), type: 'image' };
   const url = entry.url || entry.imageLink || entry.src;
   if (!url) return null;
-  return { url, name: entry.name || entry.imageName || String(url).split('?')[0].split('/').pop(), type: entry.type || 'image' };
+  return { url, name: siteMediaName(entry.name || entry.imageName || String(url).split('?')[0].split('/').pop()), type: entry.type || 'image' };
 }
 
 /** Media the platform drew for a (non-trial) question, in display order. */
@@ -401,7 +411,7 @@ function pageFilesFromPool(pool, html) {
   (Array.isArray(pool) ? pool : []).forEach((item) => {
     if (!item?.url) return;
     const folder = String(normalizeMediaEntry(item)?.folder || '').replace(/^\/+|\/+$/g, '');
-    const name = item.name || String(item.url).split('?')[0].split('/').pop();
+    const name = siteMediaName(item.name || String(item.url).split('?')[0].split('/').pop());
     const entry = { url: item.url, name, type: item.type || 'image', folder };
     const path = `${folder ? `${folder}/` : ''}${name}`.toLowerCase();
     if (!byPath.has(path)) byPath.set(path, entry);
@@ -435,7 +445,7 @@ export function siteMediaFolders(pool = [], config = {}) {
       ?? (!folder && wanted.includes(SITE_MEDIA_ROOT) ? '' : undefined);
     if (hit === undefined || count >= SITE_MEDIA_MAX_ITEMS) return;
     count += 1;
-    (out[hit] = out[hit] || []).push({ url: item.url, name: item.name || String(item.url).split('?')[0].split('/').pop(), type: item.type || 'image', folder });
+    (out[hit] = out[hit] || []).push({ url: item.url, name: siteMediaName(item.name || String(item.url).split('?')[0].split('/').pop()), type: item.type || 'image', folder });
   });
   return out;
 }
@@ -460,7 +470,7 @@ export function sitePreviewMediaFolders(pool = [], config = {}) {
   const items = (Array.isArray(pool) ? pool : [])
     .filter((item) => item?.url && !/video|audio/i.test(String(item.type || '')))
     .slice(0, SITE_MEDIA_MAX_ITEMS)
-    .map((item) => ({ url: item.url, name: item.name || String(item.url).split('?')[0].split('/').pop(), type: item.type || 'image', folder: '' }));
+    .map((item) => ({ url: item.url, name: siteMediaName(item.name || String(item.url).split('?')[0].split('/').pop()), type: item.type || 'image', folder: '' }));
   if (!items.length) return {};
   if (!pageReadsMedia(html)) return { '': items };
   const names = new Set([...pageMediaFolderNames(html), ...siteMediaFolderNames(config).map((f) => (f === SITE_MEDIA_ROOT ? '' : f))]);

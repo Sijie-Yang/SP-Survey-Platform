@@ -352,7 +352,7 @@ export default function PapersLibraryPage() {
             variant="outlined"
             size="small"
             sx={{ fontWeight: 700 }}
-            onClick={() => navigate('/request-template')}
+            onClick={() => navigate('/add-template')}
           >
             {t.landRequestTemplate}
           </Button>

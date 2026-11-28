@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Box, Container, Typography, Button, TextField, InputAdornment,
-  CircularProgress, Stack, MenuItem, Menu,
+  CircularProgress, Stack, MenuItem, ListSubheader, Menu,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
@@ -17,7 +17,7 @@ import {
   matchesTemplateSearch, TemplatePreviewDialog, TemplateRow, templateDisplayName, useTemplateLibrary,
 } from '../components/templates/TemplateLibrary';
 import {
-  dimensionLabel, facetCounts, facetLabel, parseFacets, templateSource,
+  CONCEPT_GROUPS, conceptGroup, dimensionLabel, facetCounts, facetLabel, parseFacets, templateSource, upgradeFacetTag,
 } from '../lib/templateFacets';
 
 export const PAGE_SIZE = 50;
@@ -25,10 +25,17 @@ export const PAGE_SIZE = 50;
 /** Source buttons; "all" leaves out demos, which have their own button. */
 export const SOURCES = ['all', 'paper', 'ai', 'demo'];
 /** Dimensions offered as dropdown filters, in this order. */
-export const FILTER_DIMENSIONS = ['task', 'modality', 'concept', 'participants', 'country'];
+export const FILTER_DIMENSIONS = ['concept', 'scene', 'modality', 'task', 'setting', 'participants', 'country'];
+
+/** A filter value from an old link (?task=multi_rating) as today's id; '' when the tag no longer exists. */
+export function currentFilterValue(key, value) {
+  if (!value) return '';
+  const now = upgradeFacetTag(`${key}:${value}`).find((tag) => tag.startsWith(`${key}:`));
+  return now ? now.slice(key.length + 1) : '';
+}
 
 /**
- * filters: { source, q, task, modality, concept, participants, country };
+ * filters: { source, q, concept, scene, modality, task, setting, participants, country };
  * every dropdown that is set must match one of the template's values.
  */
 export function filterTemplates(templates, filters = {}) {
@@ -46,7 +53,7 @@ export function filterTemplates(templates, filters = {}) {
  * A rounded filter button. Empty: "Concept ▾". Set: "Concept: Cycling ×" in
  * the primary tint; the × clears it. The menu lists values with counts.
  */
-function FilterPill({ label, value, valueLabel, options, allLabel, onChange }) {
+function FilterPill({ label, value, valueLabel, options, groups, allLabel, onChange }) {
   const [anchor, setAnchor] = useState(null);
   const active = Boolean(value);
   const pick = (v) => { setAnchor(null); onChange(v); };
@@ -102,14 +109,25 @@ function FilterPill({ label, value, valueLabel, options, allLabel, onChange }) {
           <Box sx={{ flex: 1 }}>{allLabel}</Box>
           {!active && <Check sx={{ fontSize: 16, color: 'primary.main' }} />}
         </MenuItem>
-        {options.map((o) => (
-          <MenuItem key={o.value} selected={o.value === value} onClick={() => pick(o.value)}>
-            <Box sx={{ flex: 1, pr: 2 }}>{o.label}</Box>
-            {o.value === value
-              ? <Check sx={{ fontSize: 16, color: 'primary.main' }} />
-              : <Typography component="span" variant="caption" color="text.disabled">{o.n}</Typography>}
-          </MenuItem>
-        ))}
+        {(groups || [{ id: null }]).flatMap((group) => {
+          const inGroup = group.id ? options.filter((o) => o.group === group.id) : options;
+          if (!inGroup.length) return [];
+          return [
+            group.id && (
+              <ListSubheader key={`group-${group.id}`} disableSticky sx={{ lineHeight: '28px', fontSize: 12, fontWeight: 700, color: 'text.secondary', bgcolor: 'transparent' }}>
+                {group.label}
+              </ListSubheader>
+            ),
+            ...inGroup.map((o) => (
+              <MenuItem key={o.value} selected={o.value === value} onClick={() => pick(o.value)}>
+                <Box sx={{ flex: 1, pr: 2 }}>{o.label}</Box>
+                {o.value === value
+                  ? <Check sx={{ fontSize: 16, color: 'primary.main' }} />
+                  : <Typography component="span" variant="caption" color="text.disabled">{o.n}</Typography>}
+              </MenuItem>
+            )),
+          ].filter(Boolean);
+        })}
       </Menu>
     </>
   );
@@ -119,6 +137,28 @@ function FilterPill({ label, value, valueLabel, options, allLabel, onChange }) {
 export function linkedPreview(templates, id) {
   return (id && (templates || []).find((tpl) => tpl.id === id)) || null;
 }
+
+/** How many rows must be on screen for the row at `index` to be one of them: whole pages; 0 when there is no such row. */
+export function limitToShow(index) {
+  return index < 0 ? 0 : Math.ceil((index + 1) / PAGE_SIZE) * PAGE_SIZE;
+}
+
+/**
+ * The address that shows a linked template in the list: its preview and, for
+ * a demo, the Demo tab (the other tabs leave demos out). Any other filter is
+ * dropped, because it could hide the row.
+ */
+export function addressShowing(template) {
+  const next = new URLSearchParams();
+  next.set('preview', template.id);
+  if (templateSource(template) === 'demo') next.set('source', 'demo');
+  return next;
+}
+
+const scrollToRow = (id) => {
+  const row = document.getElementById(`template-row-${id}`);
+  if (row && row.scrollIntoView) row.scrollIntoView({ block: 'center' });
+};
 
 /**
  * /templates — every published template, newest first: one search box, a
@@ -133,10 +173,19 @@ export default function TemplatesPage() {
   const zh = String(language || '').startsWith('zh');
   const { templates, loading } = useTemplateLibrary();
   const [params, setParams] = useSearchParams();
-  const filters = Object.fromEntries(['source', 'q', ...FILTER_DIMENSIONS].map((k) => [k, params.get(k) || '']));
+  const filters = Object.fromEntries(['source', 'q', ...FILTER_DIMENSIONS].map((k) => [
+    k, FILTER_DIMENSIONS.includes(k) ? currentFilterValue(k, params.get(k)) : (params.get(k) || ''),
+  ]));
   if (!SOURCES.includes(filters.source)) filters.source = 'all';
 
+  // The row to point out: the template a link opened, or the one last previewed
+  // from the list. It stays marked after the preview closes, until a filter changes.
+  const previewId = params.get('preview') || '';
+  const [focusId, setFocusId] = useState(previewId);
+  useEffect(() => { if (previewId) setFocusId(previewId); }, [previewId]);
+
   const update = (key, value) => {
+    setFocusId('');
     const next = new URLSearchParams(params);
     if (!value || value === 'all') next.delete(key); else next.set(key, value);
     setParams(next, { replace: true });
@@ -164,11 +213,26 @@ export default function TemplatesPage() {
   const anyDropdown = FILTER_DIMENSIONS.some((k) => filters[k]);
 
   // A link can open one template's preview directly: /templates?preview=<template id>.
-  const linked = linkedPreview(templates, params.get('preview'));
+  // The list behind the preview moves to that template's row, so closing the
+  // preview leaves the reader at the template they came for.
+  const linked = linkedPreview(templates, previewId);
+  const focusIndex = focusId ? shown.findIndex((tpl) => tpl.id === focusId) : -1;
+  const shownLimit = Math.max(limit, limitToShow(focusIndex));
+  const linkedId = linked ? linked.id : '';
+  const linkedInList = Boolean(linked) && focusId === linkedId && focusIndex >= 0;
+  useEffect(() => {
+    if (!linked || focusId !== linked.id) return;
+    if (focusIndex >= 0) { scrollToRow(linked.id); return; }
+    // The filters in the address hide this template: show it without them.
+    const next = addressShowing(linked);
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the linked template or its place in the list changes
+  }, [linkedId, linkedInList, focusId]);
   const closeLinked = () => {
     const next = new URLSearchParams(params);
     next.delete('preview');
     setParams(next, { replace: true });
+    if (linkedId) setTimeout(() => scrollToRow(linkedId), 0);
   };
 
   return (
@@ -192,7 +256,7 @@ export default function TemplatesPage() {
             </Typography>
           </Box>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ flexShrink: 0 }}>
-            <Button variant="outlined" size="small" startIcon={<Article />} onClick={() => navigate('/request-template')}>
+            <Button variant="outlined" size="small" startIcon={<Article />} onClick={() => navigate('/add-template')}>
               {t.landRequestTemplate}
             </Button>
             <Button variant="outlined" size="small" color="secondary" startIcon={<DesignServices />} onClick={() => navigate('/request-survey-design')}>
@@ -257,7 +321,10 @@ export default function TemplatesPage() {
                 label={dimensionLabel(key, zh)}
                 value={filters[key]}
                 valueLabel={filters[key] ? facetLabel(key, filters[key], zh) : ''}
-                options={options.map(([value, n]) => ({ value, n, label: facetLabel(key, value, zh) }))}
+                options={options.map(([value, n]) => ({
+                  value, n, label: facetLabel(key, value, zh), group: key === 'concept' ? conceptGroup(value) : null,
+                }))}
+                groups={key === 'concept' ? CONCEPT_GROUPS.map((g) => ({ id: g.id, label: zh ? g.zh : g.en })) : null}
                 allLabel={t.tplAll || 'All'}
                 onChange={(v) => update(key, v)}
               />
@@ -267,6 +334,7 @@ export default function TemplatesPage() {
             <Button size="small" sx={{ borderRadius: 999, color: 'text.secondary' }} onClick={() => {
               const next = new URLSearchParams(params);
               FILTER_DIMENSIONS.forEach((k) => next.delete(k));
+              setFocusId('');
               setParams(next, { replace: true });
             }}>
               {t.tplClearFilters || 'Clear filters'}
@@ -289,13 +357,21 @@ export default function TemplatesPage() {
           </Box>
         ) : (
           <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
-            {shown.slice(0, limit).map((tpl) => (
-              <TemplateRow key={tpl.id} template={tpl} onUse={() => navigate(templatePath)} onFacet={update} activeConcept={filters.concept} />
+            {shown.slice(0, shownLimit).map((tpl) => (
+              <TemplateRow
+                key={tpl.id}
+                template={tpl}
+                onUse={() => navigate(templatePath)}
+                onFacet={update}
+                activeConcept={filters.concept}
+                highlighted={tpl.id === focusId}
+                onPreview={() => setFocusId(tpl.id)}
+              />
             ))}
-            {shown.length > limit && (
+            {shown.length > shownLimit && (
               <Box sx={{ textAlign: 'center', pt: 3 }}>
-                <Button variant="outlined" onClick={() => setLimit((n) => n + PAGE_SIZE)}>
-                  {tf(t.tplShowMore || 'Show more ({n} left)', { n: shown.length - limit })}
+                <Button variant="outlined" onClick={() => setLimit(shownLimit + PAGE_SIZE)}>
+                  {tf(t.tplShowMore || 'Show more ({n} left)', { n: shown.length - shownLimit })}
                 </Button>
               </Box>
             )}

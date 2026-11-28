@@ -104,6 +104,19 @@ export function cleanPaperInput(input = {}) {
   return { fields: out, problems, facets };
 }
 
+/**
+ * New facets replace the earlier ones, except the research team's institutions
+ * and countries: those describe the authors, not what a reader judged, so they
+ * stay unless the call gives them again.
+ */
+function keepTeam(earlier, facets) {
+  const out = { ...facets };
+  for (const key of ['team_org', 'team_country']) {
+    if (!(key in out) && Array.isArray(earlier?.[key]) && earlier[key].length) out[key] = earlier[key];
+  }
+  return out;
+}
+
 async function rows(env, path, query) {
   const result = await supabaseRest(env, { path, serviceRole: true, query });
   return Array.isArray(result) ? result : [];
@@ -220,7 +233,7 @@ export async function savePapers(env, ctx, papers) {
           if (facets !== undefined) {
             meta = { ...meta };
             if (facets === null) delete meta.facets;
-            else meta.facets = { ...facets, reviewed_at: now, reviewed_by: ctx.userId || null };
+            else meta.facets = { ...keepTeam(existing.analysis_meta?.facets, facets), reviewed_at: now, reviewed_by: ctx.userId || null };
           }
           patch.analysis_meta = meta;
         }
