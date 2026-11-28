@@ -5,7 +5,9 @@ jest.mock('react-router-dom', () => {
   return jest.requireActual('react-router');
 }, { virtual: true });
 
-import { filterTemplates, linkedPreview } from './TemplatesPage';
+import {
+  addressShowing, filterTemplates, limitToShow, linkedPreview, PAGE_SIZE,
+} from './TemplatesPage';
 import { sortNewestFirst } from '../components/templates/TemplateLibrary';
 
 const list = [
@@ -79,4 +81,22 @@ test('a ?preview=<id> link opens only a template the library lists', () => {
   expect(linkedPreview(list, 'not-in-library')).toBeNull();
   expect(linkedPreview(list, '')).toBeNull();
   expect(linkedPreview([], 'b')).toBeNull();
+});
+
+test('the list shows enough pages to include the linked template', () => {
+  expect(limitToShow(-1)).toBe(0);
+  expect(limitToShow(0)).toBe(PAGE_SIZE);
+  expect(limitToShow(PAGE_SIZE - 1)).toBe(PAGE_SIZE);
+  expect(limitToShow(PAGE_SIZE)).toBe(2 * PAGE_SIZE);
+  expect(limitToShow(3 * PAGE_SIZE + 7)).toBe(4 * PAGE_SIZE);
+});
+
+test('a linked template is shown without filters that could hide it; a demo on the Demo tab', () => {
+  const paper = { id: 'a', name: 'Place Pulse', rawCategory: 'Academic Research', tags: [] };
+  const demo = { id: 'e', name: 'Cats', rawCategory: 'Demo', tags: [] };
+  expect(addressShowing(paper).toString()).toBe('preview=a');
+  expect(addressShowing(demo).toString()).toBe('preview=e&source=demo');
+  const filtersOf = (tpl) => Object.fromEntries([...addressShowing(tpl)].filter(([k]) => k !== 'preview'));
+  expect(filterTemplates([paper, demo], filtersOf(paper)).map((t) => t.id)).toContain('a');
+  expect(filterTemplates([paper, demo], filtersOf(demo)).map((t) => t.id)).toContain('e');
 });

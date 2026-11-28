@@ -3,6 +3,7 @@ import {
   Box, Typography, Button, Card, CardContent, Chip, CircularProgress,
   Stack, Dialog, DialogTitle, DialogContent, DialogActions, Skeleton, IconButton, Tooltip,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Article, Dataset, Preview, MenuBook, EditNote, Download,
 } from '@mui/icons-material';
@@ -510,10 +511,12 @@ export function TemplateCard({ template, onUse }) {
  * the paper's full title, then authors · year · journal · type, with small
  * icon actions and "Use" on the right.
  */
-export function TemplateRow({ template, onUse, onFacet, activeConcept }) {
+export function TemplateRow({ template, onUse, onFacet, activeConcept, highlighted = false, onPreview }) {
   const { t, language } = useRegion();
   const zh = String(language || '').startsWith('zh');
-  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewOpen, setPreviewOpenState] = useState(false);
+  // Opening a preview also tells the list, which keeps this row marked afterwards.
+  const setPreviewOpen = (open) => { if (open && onPreview) onPreview(); setPreviewOpenState(open); };
   const [requestOpen, setRequestOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const source = templateSource(template);
@@ -542,8 +545,10 @@ export function TemplateRow({ template, onUse, onFacet, activeConcept }) {
   return (
     <>
       <Box
+        id={`template-row-${template.id}`}
         data-testid={`template-row-${template.id}`}
-        sx={{
+        aria-current={highlighted ? 'true' : undefined}
+        sx={(theme) => ({
           display: 'flex',
           flexDirection: { xs: 'column', sm: 'row' },
           alignItems: { xs: 'stretch', sm: 'center' },
@@ -553,7 +558,14 @@ export function TemplateRow({ template, onUse, onFacet, activeConcept }) {
           borderBottom: '1px solid',
           borderColor: 'divider',
           '&:hover': { bgcolor: 'action.hover' },
-        }}
+          // The template a link opened, or the one last previewed: tinted, with a bar on the left.
+          ...(highlighted && {
+            bgcolor: alpha(theme.palette.primary.main, 0.08),
+            boxShadow: `inset 3px 0 0 ${theme.palette.primary.main}`,
+            pl: { xs: 1, sm: 1.5 },
+            '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.12) },
+          }),
+        })}
       >
         <Box sx={{ flex: 1, minWidth: 0, display: 'flex', gap: 1.5, alignItems: 'flex-start' }}>
         <Box
