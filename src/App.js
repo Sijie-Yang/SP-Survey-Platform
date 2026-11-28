@@ -161,6 +161,7 @@ const router = createBrowserRouter(createRoutesFromElements(
                 <Route path="/news/:slug" element={<NewsPage />} />
                 <Route path="/forum" element={<ForumPage />} />
                 <Route path="/forum/:id" element={<ForumPage />} />
+                <Route path="/add-template" element={<RequestTemplatePage />} />
                 <Route path="/request-template" element={<RequestTemplatePage />} />
                 <Route path="/request-survey-design" element={<RequestSurveyDesignPage />} />
                 <Route path="/team" element={<TeamPage />} />

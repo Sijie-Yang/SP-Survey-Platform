@@ -1,5 +1,5 @@
 /**
- * Shared helpers for public "Request a Template for Your Paper" submissions.
+ * Shared helpers for public "Add a Template for Your Paper" submissions.
  * Uses Supabase REST + service role so guests can insert pending templates
  * without auth (RLS on templates typically blocks anon inserts).
  */

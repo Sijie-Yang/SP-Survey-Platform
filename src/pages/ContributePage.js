@@ -187,7 +187,7 @@ function ContributionEditor({
     }}>{uiPair(language, 'Help build SP-Wiki: edit documentation, share template tutorials or introduce your research. Any signed-in user can submit; administrators review before publication.', '一起建设 SP-Wiki：修改文档、分享模板教程或介绍研究成果。任何登录用户都可以投稿，管理员审核后公开发布。')}</Typography>
     <Stack direction="row" gap={1} flexWrap="wrap" sx={{
       mb: 3
-    }}><Button component={RouterLink} to="/docs/doc-news-submission">{uiPair(language, 'Read submission guidelines', '阅读投稿指南')}</Button><Button component={RouterLink} to="/docs">SP-Wiki</Button><Button component={RouterLink} to="/request-template">{uiPair(language, 'Request a survey template', '申请新增问卷模板')}</Button></Stack>
+    }}><Button component={RouterLink} to="/docs/doc-news-submission">{uiPair(language, 'Read submission guidelines', '阅读投稿指南')}</Button><Button component={RouterLink} to="/docs">SP-Wiki</Button><Button component={RouterLink} to="/add-template">{uiPair(language, 'Add a survey template', '添加问卷模板')}</Button></Stack>
     {loading ? <CircularProgress /> : !user ? <Alert severity="info" action={<Button component={RouterLink} to={`/login?next=${encodeURIComponent('/contribute' + (params.toString() ? '?' + params.toString() : ''))}`}>{uiPair(language, 'Sign in / register', '登录 / 注册')}</Button>}>{uiPair(language, 'Sign in to submit and track your contributions.', '请登录后提交和查看自己的申请。')}</Alert> : <>
       <Stack direction="row" gap={1} sx={{
         mb: 2
