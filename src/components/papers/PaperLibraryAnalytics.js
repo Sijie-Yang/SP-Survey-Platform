@@ -129,7 +129,7 @@ function YearCard({ view, activeId, onSelect, zh }) {
   );
 }
 
-/** One clickable bar: label, bar, count. `labelWidth` fits the longest labels of the card. */
+/** One clickable bar: label, bar, count. A label longer than `labelWidth` wraps; it is never cut. */
 function BarRow({ row, dimension, max, selected, onSelect, zh, labelWidth }) {
   const t = toneOf(dimension);
   const label = barLabel(zh, dimension, row.id, row.label);
@@ -150,7 +150,11 @@ function BarRow({ row, dimension, max, selected, onSelect, zh, labelWidth }) {
         '&:hover': { bgcolor: t.soft },
       }}
     >
-      <Typography variant="caption" noWrap title={label} sx={{ fontWeight: selected ? 800 : 600, color: t.ink }}>
+      <Typography
+        variant="caption"
+        title={label}
+        sx={{ fontWeight: selected ? 800 : 600, color: t.ink, lineHeight: 1.25, overflowWrap: 'anywhere' }}
+      >
         {label}
         {row.rising && (
           <Box
@@ -208,7 +212,7 @@ function BarCard({ card, activeId, onSelect, zh }) {
             selected={activeId === row.id}
             onSelect={onSelect}
             zh={zh}
-            labelWidth={card.wide ? 210 : 112}
+            labelWidth={card.wide ? 210 : 118}
           />
         ))}
       </Stack>
