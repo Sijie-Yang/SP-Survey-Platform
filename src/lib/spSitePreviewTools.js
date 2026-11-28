@@ -314,13 +314,17 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
       });
       if (!next) break;
       if (next.due > now()) offset += next.due - now();
+      var oneShot = !next.repeat;
       if (next.repeat) next.due = now() + next.repeat;
       else { delete timers[nextId]; realClearTimeout(Number(nextId)); }
       fired += 1;
       try { invoke(next.fn, next.args); } catch (e) { console.error(e); }
-      if (round % 4 === 3) await wait(0);
+      // Reading the screen is the slow part: do it after a one-off timer, or
+      // every few ticks of a repeating one (a clock ticking every 100 ms).
+      if (!oneShot && round % 8 !== 7) continue;
+      await wait(0);
       if (signature() !== before) return true;
-      if (ready != null && round % 4 === 3 && controls() !== ready) return true;
+      if (ready != null && controls() !== ready) return true;
     }
     await wait(20);
     return signature() !== before || (ready != null && controls() !== ready);
@@ -411,7 +415,7 @@ export const SP_SITE_PREVIEW_TOOLS_SOURCE = String.raw`
     window.confirm = function () { return true; };
     try {
       // Many pages keep their buttons off until the picture has loaded.
-      for (var w = 0; w < 40 && all('img').some(function (im) { return !im.complete; }); w += 1) await wait(100);
+      for (var w = 0; w < 15 && all('img').some(function (im) { return !im.complete; }); w += 1) await wait(100);
       var start = signature();
       for (var pass = 0; pass < 3; pass += 1) {
         for (var i = 0; i < 3 && fillInputs(); i += 1) await wait(30);
